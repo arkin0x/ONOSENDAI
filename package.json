@@ -1,0 +1,24 @@
+{
+  "name": "onosendai",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Cyberspace deck.",
+  "main": "index.html",
+  "repository": "git@github.com-arkin0x:arkin0x/ONOSENDAI.git",
+  "author": "arkin0x <arkinox@pm.me>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "augmented-ui": "^2.0.0",
+    "nostr-tools": "^1.6.0",
+    "three": "^0.150.0"
+  },
+  "devDependencies": {
+    "sass": "^1.58.3",
+    "vite": "^4.1.0"
+  }
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "desc": "try out TextGeometry https://threejs.org/docs/#examples/en/geometries/TextGeometry",
+    "status": "done",
+    "modified": "2023-03-02 08:26:43.8458415 -0600 CST"
+  },
+  {
+    "id": 2,
+    "desc": "Add hud for text and other stuff https://threejs.org/examples/webgl_sprites",
+    "status": "done",
+    "modified": "2023-03-02 17:24:23.750336 -0600 CST"
+  },
+  {
+    "id": 3,
+    "desc": "get text from canvas. try this func to divide the text into lines: https://stackoverflow.com/a/72600108",
+    "status": "done",
+    "modified": "2023-03-02 17:48:11.3881026 -0600 CST"
+  },
+  {
+    "id": 4,
+    "desc": "try three-text2d. it had a bug in it that prevented it from working at all.",
+    "status": "done",
+    "modified": "2023-03-02 17:24:15.180335 -0600 CST"
+  },
+  {
+    "id": 5,
+    "desc": "try https://github.com/vasturiano/three-spritetext. tried it. it doesn't allow for alignment, but it is a nice module",
+    "status": "done",
+    "modified": "2023-03-02 17:24:16.9630441 -0600 CST"
+  },
+  {
+    "id": 6,
+    "desc": "canvas text is performant but the word breaks are ugly. maybe try a 3d sprite and see if it's much worse.",
+    "status": "pending",
+    "modified": "2023-03-02 17:53:00.2898148 -0600 CST"
+  }
+]

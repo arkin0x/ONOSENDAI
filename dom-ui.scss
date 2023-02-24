@@ -1,0 +1,143 @@
+// dom-ui
+
+* {
+  box-sizing: border-box;
+}
+
+#app {
+  position: relative;
+  height: 100vh;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  // transform: perspective(-10cm)
+}
+
+canvas[data-engine] {
+  position: absolute;
+}
+
+@keyframes dom-ui-slide-in-mobile {
+  from {
+    opacity: 0;
+    transform: perspective(15cm) rotateY(15deg)
+      translate(-2rem, calc(50vh - 35vh));
+  }
+  to {
+    transform: perspective(20cm) rotateY(25deg)
+      translate(10vw, calc(50vh - 35vh));
+  }
+}
+@keyframes dom-ui-slide-in-desktop {
+  from {
+    opacity: 0;
+    transform: perspective(15cm) rotateY(15deg)
+      translate(-2rem, calc(50vh - 35vh));
+  }
+  to {
+    transform: perspective(20cm) rotateY(25deg)
+      translate(2vw, calc(50vh - 35vh));
+  }
+}
+
+.dom-ui {
+  cursor: pointer;
+  position: absolute;
+  // transform: perspective(20cm) rotateY(25deg) translate(10vw, calc(50vh - 5vh));
+  animation-name: dom-ui-slide-in-mobile;
+  animation-duration: 0.25s;
+  animation-timing-function: cubic-bezier(0.19, 1, 0.22, 1);
+  animation-fill-mode: forwards;
+}
+
+#aug-modal {
+  --aug-b-extend1: 20%;
+  --aug-border-bg: #78004eaa;
+  --aug-border: initial;
+  --aug-clip-b1: initial;
+  --aug-clip-b2: initial;
+  --aug-inlay-bg: #160621cc;
+  --aug-inlay: initial;
+  color: #b593f5;
+  display: flex;
+  font-size: 20px;
+  height: 66vh;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  width: 90vw;
+}
+#modal-message-wrapper {
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+.message {
+  overflow: hidden;
+  width: 100%;
+  position: relative;
+  font-size: max(2vw, 20px);
+  height: min-content;
+  padding: 1rem;
+  transform: translateY(0px);
+  user-select: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+#modal-close {
+  --aug-inlay-bg: #0062cd; //83220ccc;
+  --aug-inlay: initial;
+  bottom: 10px;
+  color: #c6bed6;
+  font-size: 20px;//min(5vw, 20px);
+  padding: 1rem;
+  position: absolute;
+  right: 0.5rem;
+  text-align: center;
+  user-select: none;
+  width: 32vw;
+}
+
+#bookmark {
+  background-image: url(/bookmark-unset.png);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center center;
+  position: absolute;
+  margin-left: 0.5rem;
+  display: block;
+  top: 53vh;
+  width: 14vw;
+  height: 14vh;
+  // filter: brightness(50%) sepia(1) saturate(10000%) hue-rotate(90deg);
+  // transition: filter 500ms ease;
+  &:hover, &.set {
+    background-image: url(/bookmark-set.png);
+  }
+}
+.button {
+  transition: transform 150ms ease-out;
+  &:hover, &:active {
+    // transform: perspective(20cm) translateZ(-1cm);
+    transform: translateY(0.5vh)
+  }
+}
+
+// desktop and up
+@media screen and (min-width: 768px) {
+  .dom-ui {
+    animation-name: dom-ui-slide-in-desktop;
+  }
+  #aug-modal {
+    width: 33vw;
+  }
+  #bookmark {
+    top: 59vh;
+    width: 4vw;
+    height: 6vh;
+  }
+  #modal-close {
+    font-size: min(2vw, 20px);
+    width: 12vw;
+  }
+}

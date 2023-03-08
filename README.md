@@ -1,7 +1,7 @@
 # ONOSENDAI オノセンダイ
 A cyberspace client for the one true metaverse: [nostr](https://github.com/nostr-protocol/nostr)
 
-![onosendai](https://user-images.githubusercontent.com/99223753/222729991-068aa52c-977a-4d74-bd2b-f643070db4eb.png)
+![onosendai-pano](https://user-images.githubusercontent.com/99223753/223734919-ee5fc4d0-ee89-409c-a7c8-1848310bb92d.png)
 
 ONOSENDAI visualizes objects on the nostr protocol in an interactive 3D world referred to as 'cyberspace'.
 

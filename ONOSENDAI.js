@@ -83,6 +83,8 @@ let nodeConnectors, connectedNodes, cycling
 
 let starttimestamp
 
+let lilgrid
+
 init()
 animate()
 
@@ -204,6 +206,28 @@ function init(){
     grid.position.set(0,-(WORLD_SCALE)/4,0)
     scene.add(grid)
 
+    lilgrid = new THREE.Group()
+    let a = new THREE.GridHelper(1,5,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
+    let b = new THREE.GridHelper(1,5,colors.LOGO_BLUE,colors.LOGO_BLUE)
+    let p = new THREE.PlaneGeometry(1.05,1.05)
+    let pm = new THREE.MeshBasicMaterial({color: 0x000000, side: THREE.DoubleSide})
+    let pl = new THREE.Mesh(p,pm)
+    const lilsunGeometry = new THREE.CircleGeometry( 0.25, 32);
+    const lilsun = new THREE.Mesh(lilsunGeometry, sunMaterial)
+    lilsun.position.z -= 0.75
+    pl.rotateX(-Math.PI/2)
+    pl.position.y -= 0.01
+    b.position.y -= 0.015
+    // b.alpha = 0.5
+    lilgrid.add(a)
+    lilgrid.add(pl)
+    lilgrid.add(b)
+    lilgrid.add(lilsun)
+    camera.add(lilgrid)
+    lilgrid.position.set(-5,-3,-10)
+    lilgrid.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
+    // lilgrid.rotation.setFromQuaternion(camera.getWorldQuaternion())
+
     //sun
     const sunGeometry = new THREE.CircleGeometry( 2000000, 64 );
     const sun = new THREE.Mesh(sunGeometry, sunMaterial)
@@ -267,6 +291,9 @@ function render() {
     animateSelectedNote()
 
     controls.postUpdate()
+
+    // minimap
+    lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
 
     // must manually clear to do multiple cameras
     renderer.clear()

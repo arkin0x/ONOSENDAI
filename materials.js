@@ -84,6 +84,15 @@ export const expandedCubeMaterial = new MeshPhongMaterial({
  side: DoubleSide,
 })
 
+export const expandedBookmarkedCubeMaterial = new MeshPhongMaterial({
+ color: 0xff3b3b,
+ shininess: 30,
+ specular: 0xffffff,
+ transparent: true,
+ opacity: 0.75,
+ side: DoubleSide,
+})
+
 export const relatedCubeMaterial = new MeshPhongMaterial({
  color: LOGO_TEAL,
  shininess: 30,

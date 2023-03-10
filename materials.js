@@ -3,6 +3,7 @@ import {
  MeshBasicMaterial, 
  DoubleSide,
  LineBasicMaterial,
+ AlwaysDepth
 } from "three"
 
 // colors
@@ -37,6 +38,7 @@ export const sunMaterial = new MeshBasicMaterial({
  // color: 0xff0000
  color: LOGO_PURPLE
 })
+sunMaterial.depthFunc = AlwaysDepth
 
 export const whiteMaterial = new MeshPhongMaterial({
  color: 0xffffff,

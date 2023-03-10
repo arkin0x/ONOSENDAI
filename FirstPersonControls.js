@@ -23,7 +23,14 @@ class FirstPersonControls {
 
 		this.enabled = true;
 
-		this.movementSpeed = 1.0;
+		this.accel = 1.0
+		this.decel = 0.90
+		this.minx = 0.1
+		this.dx = 0
+		this.dy = 0
+		this.dz = 0
+
+		this.movementSpeed = 0;
 		this.lookSpeed = 0.005;
 
 		this.lookVertical = true;
@@ -332,16 +339,43 @@ class FirstPersonControls {
 
 				}
 
-				const actualMoveSpeed = delta * this.movementSpeed;
+				if( this.moveRight ){
+					this.dx += this.accel
+				} else if( this.moveLeft ){
+					this.dx -= this.accel
+				}
+				else this.dx *= this.decel
+				if(Math.abs(this.dx) < this.minx) this.dx = 0
+				this.object.translateX( this.dx )
 
-				if ( this.moveForward || ( this.autoForward && ! this.moveBackward ) ) this.object.translateZ( - ( actualMoveSpeed + this.autoSpeedFactor ) );
-				if ( this.moveBackward ) this.object.translateZ( actualMoveSpeed );
+				if( this.moveUp ){
+					this.dy += this.accel
+				} else if( this.moveDown ){
+					this.dy -= this.accel
+				}
+				else this.dy *= this.decel
+				if(Math.abs(this.dy) < this.minx) this.dy = 0
+				this.object.translateY( this.dy )
 
-				if ( this.moveLeft ) this.object.translateX( - actualMoveSpeed );
-				if ( this.moveRight ) this.object.translateX( actualMoveSpeed );
+				if( this.moveForward){
+					this.dz -= this.accel
+				} else if( this.moveBackward ){
+					this.dz += this.accel
+				}
+				else this.dz *= this.decel
+				if(Math.abs(this.dz) < this.minx) this.dz = 0
+				this.object.translateZ( this.dz )
 
-				if ( this.moveUp ) this.object.translateY( actualMoveSpeed );
-				if ( this.moveDown ) this.object.translateY( - actualMoveSpeed );
+				// console.log('accel',this.dz, this.dy, this.dx)
+
+				// if ( this.moveForward || ( this.autoForward && ! this.moveBackward ) ) this.object.translateZ( - ( actualMoveSpeed + this.autoSpeedFactor ) );
+				// if ( this.moveBackward ) this.object.translateZ( actualMoveSpeed );
+
+				// if ( this.moveLeft ) this.object.translateX( - actualMoveSpeed );
+				// if ( this.moveRight ) this.object.translateX( actualMoveSpeed );
+
+				// if ( this.moveUp ) this.object.translateY( actualMoveSpeed );
+				// if ( this.moveDown ) this.object.translateY( - actualMoveSpeed );
 
 				let actualLookSpeed = delta * this.lookSpeed;
 

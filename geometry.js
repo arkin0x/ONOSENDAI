@@ -2,4 +2,8 @@ import {
  BoxGeometry 
 } from "three"
 
-export const noteGeometry = new BoxGeometry(5,5,5)
+export const noteGeometry = new BoxGeometry(
+ 100,
+ 100,
+ 100
+ )

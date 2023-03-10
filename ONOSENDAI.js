@@ -5,7 +5,6 @@ import { FirstPersonControls } from './FirstPersonControls'
 import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, relatedCubeMaterial, connectToRoot, visitedMaterial, selectedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial } from './materials'
 import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
-import bookmarkImage from './bookmark.png'
 import logoImage from './logo-cropped.png'
 
 import { wrapText } from './wraptext'
@@ -13,7 +12,8 @@ import { wrapText } from './wraptext'
 // we downscale the coordinates:
 // 2^85 - 2^71 = 2^14 (16384)
 // because otherwise there is too much empty space
-export const WORLD_DOWNSCALE = 2n**71n
+export const WORLD_DOWNSCALE = 2n**65n
+export const WORLD_SCALE = Number((2n**85n) / WORLD_DOWNSCALE)
 export const MOBILE_WIDTH = 576 
 
 let w, h
@@ -111,7 +111,7 @@ function init(){
         camera.rotation.set(-Math.PI/180*30,0,0)
     scene = new THREE.Scene()
     // scene.fog = new THREE.Fog( 0xbb2323, 4000, 6000)
-    scene.fog = new THREE.Fog( 0x160621, 4000, 8000)
+    scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
     // scene.fog = new THREE.Fog( 0x160621, 1000, 5000)
     scene.add(camera)
 
@@ -200,8 +200,8 @@ function init(){
     scene.add( environmentLightRight );
 
     // gridhelper
-    const grid = new THREE.GridHelper(10000,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
-    grid.position.set(0,-(2**12),0)
+    const grid = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
+    grid.position.set(0,-(WORLD_SCALE)/4,0)
     scene.add(grid)
 
     //sun
@@ -252,12 +252,16 @@ function render() {
 
     delta = clock.getDelta() 
 
+    // console.log(delta)
+
     controls.update(delta)
     pointer.x = controls.pointer.x
     pointer.y = controls.pointer.y
 
     updateRaycast(controls)
     updateSelectedNote(controls)
+
+    // updateUniverse(controls)
 
     animateReticle(delta)
     animateSelectedNote()
@@ -400,6 +404,27 @@ function updateSelectedNote(controls){
         // connect root notes to replies, or reply to the root note
         showThread(event)
 
+    }
+}
+
+function updateUniverse(controls){
+    const scaleFactor = 0.1
+    const scaleMin = 0.05
+    const scaleMax = 10
+    let scalar = null
+    if(controls.cycle<0){
+        scalar = 1 - scaleFactor
+    }
+    if(controls.cycle>0){
+        scalar = 1 + scaleFactor
+    }
+    if(scalar){
+        let oldScale = universe.scale.x
+        let newScale = oldScale * scalar
+        if(newScale < scaleMin || newScale > scaleMax) return
+        universe.scale.set(newScale,newScale,newScale)
+        universe.children.forEach(c => c.scale.set(1/newScale,1/newScale,1/newScale))
+        console.log('scale',newScale)
     }
 }
 

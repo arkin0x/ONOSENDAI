@@ -242,6 +242,10 @@ function init(){
     grid.position.set(0,-(WORLD_SCALE)/4,0)
     scene.add(grid)
 
+    const gridtop = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_BLUE,colors.LOGO_BLUE)
+    gridtop.position.set(0,(WORLD_SCALE)/4,0)
+    scene.add(gridtop)
+
     //sun
     const sunGeometry = new THREE.CircleGeometry( 2000000, 64 );
     const sun = new THREE.Mesh(sunGeometry, sunMaterial)

@@ -40,7 +40,7 @@ let logo
 
 let frame
 
-let modal, modalMessage
+let app, modal, modalMessage, ccs
 
 let intersected
 let selected
@@ -221,6 +221,15 @@ function init(){
         lilgrid.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
     }
 
+    // setup cyberspace coordinate system readout
+    ccs = document.createElement('div')
+    ccs.classList.add('dom-ui')
+    ccs.id = 'aug-ccs'
+    ccs.setAttribute('data-augmented-ui','')
+    app = document.querySelector('#app')
+    app.appendChild(ccs)
+
+
     // scene objects
     universe = new THREE.Group()
     scene.add(universe)
@@ -313,6 +322,8 @@ function render() {
 
     // minimap
     lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
+
+    ccs.textContent = `[${Math.floor(camera.position.x)}x][${Math.floor(camera.position.y)}y][${Math.floor(camera.position.z)}z]`
 
     // must manually clear to do multiple cameras
     renderer.clear()

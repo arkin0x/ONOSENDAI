@@ -18,6 +18,7 @@ const ENVIRONMENT_RIGHT_COLOR = 0xff07ac
 const LEFT_LAMP_COLOR = 0xf747bc
 const RIGHT_LAMP_COLOR = 0x7029f4
 const CENTER_LAMP_COLOR = 0xffffff
+const COORDS = 0xff9123
 
 export const colors = {
  LOGO_PURPLE,

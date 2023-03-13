@@ -50,6 +50,24 @@ canvas[data-engine] {
   animation-fill-mode: forwards;
 }
 
+#aug-ccs {
+  --aug-inlay: initial;
+  --aug-inlay-bg: #210f06cc;
+  --aug-border: initial;
+  --aug-border-bg: #9e1b1baa;
+  --aug-border-bg: #78004eaa;
+  --aug-inlay-bg: #160621cc;
+  --aug-clip-tl1: initial;
+  --aug-clip-br1: initial;
+  // --aug-clip-b1: initial;
+  // --aug-clip-b2: initial;
+  // --aug-b-extend1: 60%;
+  font-size: 20px;
+  color: #ff9123aa;
+  top: 75vh;
+  padding: 1rem 1rem 1rem 1rem;
+}
+
 #aug-modal {
   --aug-b-extend1: 20%;
   --aug-border-bg: #78004eaa;

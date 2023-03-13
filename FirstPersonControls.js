@@ -24,6 +24,8 @@ class FirstPersonControls {
 		this.enabled = true;
 
 		this.accel = 1.0
+		this.accelMultiplier = 0
+		this.accel = 1.0001
 		this.decel = 0.90
 		this.minx = 0.1
 		this.dx = 0
@@ -339,28 +341,37 @@ class FirstPersonControls {
 
 				}
 
+				// increase accel if key continues to be held down.
+				if( this.moveForward || this.moveBackward || this.moveLeft || this.moveRight || this.moveUp || this.moveDown ){
+					this.accelMultiplier++
+				} else {
+					this.accelMultiplier = 0
+				}
+
+				let acc = this.accel + this.accelMultiplier/100
+
 				if( this.moveRight ){
-					this.dx += this.accel
+					this.dx += acc
 				} else if( this.moveLeft ){
-					this.dx -= this.accel
+					this.dx -= acc
 				}
 				else this.dx *= this.decel
 				if(Math.abs(this.dx) < this.minx) this.dx = 0
 				this.object.translateX( this.dx )
 
 				if( this.moveUp ){
-					this.dy += this.accel
+					this.dy += acc
 				} else if( this.moveDown ){
-					this.dy -= this.accel
+					this.dy -= acc
 				}
 				else this.dy *= this.decel
 				if(Math.abs(this.dy) < this.minx) this.dy = 0
 				this.object.translateY( this.dy )
 
 				if( this.moveForward){
-					this.dz -= this.accel
+					this.dz -= acc
 				} else if( this.moveBackward ){
-					this.dz += this.accel
+					this.dz += acc
 				}
 				else this.dz *= this.decel
 				if(Math.abs(this.dz) < this.minx) this.dz = 0

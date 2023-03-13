@@ -38,7 +38,8 @@ export const sunMaterial = new MeshBasicMaterial({
  // color: 0xff0000
  // color: LOGO_PURPLE,
  color: 0x160621,
- side: DoubleSide
+ side: DoubleSide,
+ fog: false,
 })
 // sunMaterial.depthFunc = AlwaysDepth
 
@@ -48,7 +49,6 @@ export const whiteMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.90,
- // side: DoubleSide,
 })
 
 export const bookmarkedMaterial = new MeshPhongMaterial({
@@ -58,7 +58,6 @@ export const bookmarkedMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.90,
- // side: DoubleSide,
  fog: false,
 })
 
@@ -68,7 +67,6 @@ export const placeholderMaterial = new MeshPhongMaterial({
  specular: 0x333333,
  transparent: true,
  opacity: 0.20,
- // side: DoubleSide,
 })
 
 export const placeholderVisitedMaterial = new MeshPhongMaterial({
@@ -77,7 +75,6 @@ export const placeholderVisitedMaterial = new MeshPhongMaterial({
  specular: 0x111111,
  // transparent: true,
  // opacity: 0.90,
- // side: DoubleSide,
 })
 
 export const expandedCubeMaterial = new MeshPhongMaterial({
@@ -86,7 +83,6 @@ export const expandedCubeMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.75,
- // side: DoubleSide,
  fog: false,
 })
 
@@ -96,7 +92,6 @@ export const expandedBookmarkedCubeMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.75,
- // side: DoubleSide,
  fog: false,
 })
 
@@ -106,7 +101,6 @@ export const relatedCubeMaterial = new MeshPhongMaterial({
  specular: 0x999999,
  transparent: true,
  opacity: 0.90,
- // side: DoubleSide,
 })
 
 // for a note thas was selected but not read
@@ -116,7 +110,6 @@ export const selectedMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  // transparent: true,
  // opacity: 0.90,
- // side: DoubleSide,
 })
 
 export const visitedMaterial = new MeshPhongMaterial({
@@ -125,7 +118,6 @@ export const visitedMaterial = new MeshPhongMaterial({
  specular: 0x111111,
  // transparent: true,
  // opacity: 0.90,
- // side: DoubleSide,
 })
 
 export const connectToRoot = new LineBasicMaterial({color: LOGO_BLUE})

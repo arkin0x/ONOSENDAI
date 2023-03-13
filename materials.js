@@ -59,6 +59,7 @@ export const bookmarkedMaterial = new MeshPhongMaterial({
  transparent: true,
  opacity: 0.90,
  // side: DoubleSide,
+ fog: false,
 })
 
 export const placeholderMaterial = new MeshPhongMaterial({
@@ -85,7 +86,8 @@ export const expandedCubeMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.75,
- side: DoubleSide,
+ // side: DoubleSide,
+ fog: false,
 })
 
 export const expandedBookmarkedCubeMaterial = new MeshPhongMaterial({
@@ -94,7 +96,8 @@ export const expandedBookmarkedCubeMaterial = new MeshPhongMaterial({
  specular: 0xffffff,
  transparent: true,
  opacity: 0.75,
- side: DoubleSide,
+ // side: DoubleSide,
+ fog: false,
 })
 
 export const relatedCubeMaterial = new MeshPhongMaterial({
@@ -103,7 +106,7 @@ export const relatedCubeMaterial = new MeshPhongMaterial({
  specular: 0x999999,
  transparent: true,
  opacity: 0.90,
- side: DoubleSide,
+ // side: DoubleSide,
 })
 
 // for a note thas was selected but not read

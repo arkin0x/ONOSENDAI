@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 import threeFont from 'three/examples/fonts/helvetiker_regular.typeface.json?url'
 import { FirstPersonControls } from './FirstPersonControls'
-import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, relatedCubeMaterial, connectToRoot, visitedMaterial, selectedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial } from './materials'
+import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial } from './materials'
 import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
@@ -417,7 +417,7 @@ function updateSelectedNote(controls){
         if(selected){
             // teardown
             let mesh = selected.intersected.object
-            mesh.scale.set(1,1,1)
+            // mesh.scale.set(1,1,1)
             mesh.rotation.y = 0
             mesh.rotation.x = 0
             mesh.material = bookmarkedEvents.hasOwnProperty(mesh.userData.event.id) ? bookmarkedMaterial : visitedMaterial
@@ -482,11 +482,17 @@ function scaleNotes(){
         }
     })
 
+    let rescaleThresh = 1000
+
     // scale
     visibleObjects.forEach( mesh => {
         let dist = camera.position.distanceTo(mesh.position)
-        let scale = 1 + dist**2/1000000000 // TODO there is a more elegant equation for this and I will find it someday.
+        if(!mesh.userData.scaledAt || (mesh.userData.scaledAt && Math.abs(dist-mesh.userData.scaledAt) > rescaleThresh)){
         mesh.scale.set(scale,scale,scale)
+            // store what distance we scaled the mesh at and then only scale it again if the distance changes significantly.
+            mesh.userData.scaledAt = dist
+            console.log('scale',Math.random())
+        }
     })
 
 }
@@ -528,7 +534,7 @@ function animateSelectedNote(){
 
     let mesh = selected.intersected.object
 
-    mesh.scale.set(2,2,2)
+    // mesh.scale.set(2,2,2)
     mesh.rotation.y += 2 * delta
     mesh.rotation.x += 1 * delta
     mesh.material = bookmarkedEvents.hasOwnProperty(mesh.userData.event.id) ? expandedBookmarkedCubeMaterial : expandedCubeMaterial  

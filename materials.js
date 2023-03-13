@@ -36,7 +36,8 @@ export const colors = {
 export const sunMaterial = new MeshBasicMaterial({
  // color: 0xff2323,
  // color: 0xff0000
- color: LOGO_PURPLE,
+ // color: LOGO_PURPLE,
+ color: 0x160621,
  side: DoubleSide
 })
 // sunMaterial.depthFunc = AlwaysDepth

@@ -466,7 +466,7 @@ function updateUniverse(controls){
         if(newScale < scaleMin || newScale > scaleMax) return
         universe.scale.set(newScale,newScale,newScale)
         universe.children.forEach(c => c.scale.set(1/newScale,1/newScale,1/newScale))
-        console.log('scale',newScale)
+        // console.log('scale',newScale)
     }
 }
 
@@ -478,7 +478,7 @@ function animateReticle(delta) {
     // console.log(pointer.x-w/2, h/2-pointer.y)
 
     if(intersected){
-        console.log(intersected)
+        // console.log(intersected)
         if( controls.pointerXdelta == 0 && controls.pointerYdelta == 0){
             // spin
             reticle.material.rotation += 5 * delta
@@ -530,18 +530,18 @@ function connectNotes(a,b,mat = connectToRoot){
 
 function showThread(event){
     if(event){
-        console.log(event.id,event.tags)
+        // console.log(event.id,event.tags)
         let rootEvent = event.tags[0] && event.tags[0][0] === "e" && event.tags[0][1] ? event.tags[0][1] : false
         if(rootEvent && isLoaded(rootEvent)){
             // connect activated event cube to root event
             connectNotes(selected.intersected.object.position,loadedEvents[rootEvent].noteMesh.position)
         }
         if(!rootEvent && ( event.tags?.length==0 || (event.tags[0] && event.tags[0][0] !== "e"))){
-            console.log('checking for replies to',event.id)
+            // console.log('checking for replies to',event.id)
             // see if there are replies
             let replies = Object.keys(loadedEvents).map(e => loadedEvents[e]).filter(e => e.tags[0] && e.tags[0][1] && e.tags[0][1] === event.id)
             replies.forEach(r => connectNotes(selected.intersected.object.position, r.noteMesh.position,connectToReplies))
-            console.log('replies',replies)
+            // console.log('replies',replies)
         }
     }
 }
@@ -597,9 +597,9 @@ function augUIModal(event,mesh) {
     if(isBookmarked(event.id)) bookmarkButton.classList.add('set')
     bookmarkButton.setAttribute('data-augmented-ui','')
     bookmarkButton.addEventListener('click',function(){
-        console.log('bmclick')
+        // console.log('bmclick')
         if (isBookmarked(event.id)){
-            console.log('removing')
+            // console.log('removing')
             removeBookmark(event.id)
             bookmarkButton.classList.remove('set')
         } else {

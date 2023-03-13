@@ -482,17 +482,11 @@ function scaleNotes(){
         }
     })
 
-    let rescaleThresh = 1000
-
     // scale
     visibleObjects.forEach( mesh => {
         let dist = camera.position.distanceTo(mesh.position)
-        if(!mesh.userData.scaledAt || (mesh.userData.scaledAt && Math.abs(dist-mesh.userData.scaledAt) > rescaleThresh)){
+        let scale = 1 + dist**2/1000000000 // TODO there is a more elegant equation for this and I will find it someday.
         mesh.scale.set(scale,scale,scale)
-            // store what distance we scaled the mesh at and then only scale it again if the distance changes significantly.
-            mesh.userData.scaledAt = dist
-            console.log('scale',Math.random())
-        }
     })
 
 }

@@ -117,7 +117,7 @@ function init(){
     // scene.fog = new THREE.Fog( 0x160621, 1000, 5000)
     scene.add(camera)
 
-    hudcamera = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2,1,10)
+    hudcamera = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2,0.001,1000)
     hudscene = new THREE.Scene()
     hudscene.add(hudcamera)
 
@@ -143,9 +143,17 @@ function init(){
     textureloader = new THREE.TextureLoader()
     textureloader.load( reticleImage, setupReticle )
     // textureloader.load( bookmarkImage, setupBookmark )
-    textureloader.load( logoImage, setupLogo)
+    textureloader.load( logoImage, setupOrtho)
+
 
     function setupReticle( tex ){
+    // test screen coordinate proxy sprite
+    // let spr = new THREE.Sprite(new THREE.SpriteMaterial({map: tex}))
+    // spr.scale.set( 50, 50, 1)
+    // spr.center.set(0.5,0.5)
+    // spr.position.set(-w/2*.9,-h/2*.9,-20)
+    // hudcamera.add(spr)
+    // console.log(spr.getWorldPosition(new THREE.Vector3()))
         let material = new THREE.SpriteMaterial({map: tex})
         material.color.set('yellow')
         let width = material.map.image.width
@@ -174,15 +182,44 @@ function init(){
         hudcamera.add(bookmarkButton)
         bookmarkButton.position.set(bookmarkButtonPosition.x,bookmarkButtonPosition.y,-3)
     }
-    function setupLogo( tex ){
+    function setupOrtho( tex ){
+        // logo
         let material = new THREE.SpriteMaterial({map: tex})
         let width = material.map.image.width
         let height = material.map.image.height
-        logo = new THREE.Sprite( material )
-        logo.center.set(0.5,0.5)
-        logo.scale.set( width/8, height/8, 1)
+        let ratio = height/width
+        let logoSize = Math.min(w/3,250) //screen width/4
+        logo = new THREE.Sprite(material)
+        logo.center.set(1,1)
+        logo.scale.set( logoSize, logoSize*ratio, 1)
         hudcamera.add(logo)
-        logo.position.set((w/2)-140,-(h/2)+45,-1)
+        logo.position.set(w/2-16,-h/2+logoSize*ratio+16,-1)
+
+        // hud compass
+        let compassSize = Math.min(w/6,logoSize*(1/2))
+        lilgrid = new THREE.Group()
+        // top pink grid
+        let a = new THREE.GridHelper(1,5,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
+        // bottom blue grid
+        let b = new THREE.GridHelper(1,5,colors.LOGO_BLUE,colors.LOGO_BLUE)
+        // middle black plane
+        let p = new THREE.PlaneGeometry(1.05,1.05)
+        let pm = new THREE.MeshBasicMaterial({color: 0x000000, side: THREE.DoubleSide})
+        let pl = new THREE.Mesh(p,pm)
+        const lilsunGeometry = new THREE.CircleGeometry( 0.25, 32);
+        const lilsun = new THREE.Mesh(lilsunGeometry, sunMaterial)
+        lilsun.position.z -= 0.65
+        pl.rotateX(-Math.PI/2)
+        pl.position.y -= 0.01
+        b.position.y -= 0.02
+        lilgrid.add(a)
+        lilgrid.add(pl)
+        lilgrid.add(b)
+        lilgrid.add(lilsun)
+        lilgrid.position.set(w/2-logoSize/2,h/2-compassSize*(3/4),-compassSize*2)
+        lilgrid.scale.set(compassSize,compassSize,compassSize)
+        hudcamera.add(lilgrid)
+        lilgrid.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
     }
 
     // scene objects
@@ -205,28 +242,6 @@ function init(){
     const grid = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
     grid.position.set(0,-(WORLD_SCALE)/4,0)
     scene.add(grid)
-
-    lilgrid = new THREE.Group()
-    let a = new THREE.GridHelper(1,5,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
-    let b = new THREE.GridHelper(1,5,colors.LOGO_BLUE,colors.LOGO_BLUE)
-    let p = new THREE.PlaneGeometry(1.05,1.05)
-    let pm = new THREE.MeshBasicMaterial({color: 0x000000, side: THREE.DoubleSide})
-    let pl = new THREE.Mesh(p,pm)
-    const lilsunGeometry = new THREE.CircleGeometry( 0.25, 32);
-    const lilsun = new THREE.Mesh(lilsunGeometry, sunMaterial)
-    lilsun.position.z -= 0.75
-    pl.rotateX(-Math.PI/2)
-    pl.position.y -= 0.01
-    b.position.y -= 0.015
-    // b.alpha = 0.5
-    lilgrid.add(a)
-    lilgrid.add(pl)
-    lilgrid.add(b)
-    lilgrid.add(lilsun)
-    camera.add(lilgrid)
-    lilgrid.position.set(-5,-3,-10)
-    lilgrid.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
-    // lilgrid.rotation.setFromQuaternion(camera.getWorldQuaternion())
 
     //sun
     const sunGeometry = new THREE.CircleGeometry( 2000000, 64 );
@@ -459,6 +474,8 @@ function animateReticle(delta) {
     if(!reticle) return
 
     reticle.position.set(pointer.x-w/2,h/2-pointer.y)
+
+    // console.log(pointer.x-w/2, h/2-pointer.y)
 
     if(intersected){
         console.log(intersected)

@@ -112,9 +112,8 @@ function init(){
         camera.position.set(0,0,0)
         camera.rotation.set(-Math.PI/180*30,0,0)
     scene = new THREE.Scene()
-    // scene.fog = new THREE.Fog( 0xbb2323, 4000, 6000)
-    scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
-    // scene.fog = new THREE.Fog( 0x160621, 1000, 5000)
+    // scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
+    scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.33)
     scene.add(camera)
 
     hudcamera = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2,0.001,1000)
@@ -302,6 +301,7 @@ function render() {
 
     // updateUniverse(controls)
 
+    scaleNotes()
     animateReticle(delta)
     animateSelectedNote()
 
@@ -468,6 +468,27 @@ function updateUniverse(controls){
         universe.children.forEach(c => c.scale.set(1/newScale,1/newScale,1/newScale))
         // console.log('scale',newScale)
     }
+}
+
+function scaleNotes(){
+
+    const frustum = new THREE.Frustum().setFromProjectionMatrix( new THREE.Matrix4().multiplyMatrices( camera.projectionMatrix, camera.matrixWorldInverse ) );
+
+    const visibleObjects = []
+    scene.traverse( node => {
+        // console.log(node)
+        if( node.isMesh && node.parent === universe && ( frustum.containsPoint( node.position ) || frustum.intersectsObject( node ) )){
+            visibleObjects.push( node )
+        }
+    })
+
+    // scale
+    visibleObjects.forEach( mesh => {
+        let dist = camera.position.distanceTo(mesh.position)
+        let scale = 1 + dist**2/1000000000 // TODO there is a more elegant equation for this and I will find it someday.
+        mesh.scale.set(scale,scale,scale)
+    })
+
 }
 
 function animateReticle(delta) {

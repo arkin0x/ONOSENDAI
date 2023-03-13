@@ -62,9 +62,10 @@ canvas[data-engine] {
   // --aug-clip-b1: initial;
   // --aug-clip-b2: initial;
   // --aug-b-extend1: 60%;
-  font-size: 20px;
+  font-size: 14px;
   color: #ff9123aa;
   top: 75vh;
+  left: -2rem;
   padding: 1rem 1rem 1rem 1rem;
 }
 
@@ -148,6 +149,10 @@ canvas[data-engine] {
   }
   #aug-modal {
     width: 33vw;
+  }
+  #aug-ccs {
+    font-size: 20px;
+    left: 0rem;
   }
   #bookmark {
     top: 59vh;

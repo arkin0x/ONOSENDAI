@@ -123,5 +123,10 @@ export const visitedMaterial = new MeshPhongMaterial({
 
 export const connectToRoot = new LineBasicMaterial({color: LOGO_BLUE})
 export const connectToReplies = new LineBasicMaterial({color: LOGO_PURPLE})
+export const speedLineMaterial = new LineBasicMaterial({
+ color: BITCOIN,
+ transparent: true,
+ opacity: 0,
+})
 
 export const textMaterial = new MeshBasicMaterial({color: BITCOIN})

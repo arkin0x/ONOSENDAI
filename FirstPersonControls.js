@@ -25,7 +25,6 @@ class FirstPersonControls {
 
 		this.accel = 1.0
 		this.accelMultiplier = 0
-		this.accel = 1.0001
 		this.decel = 0.90
 		this.minx = 0.1
 		this.dx = 0
@@ -348,7 +347,7 @@ class FirstPersonControls {
 					this.accelMultiplier = 0
 				}
 
-				let acc = this.accel + this.accelMultiplier/100
+				let acc = this.accel //+ this.accelMultiplier/1000
 
 				if( this.moveRight ){
 					this.dx += acc

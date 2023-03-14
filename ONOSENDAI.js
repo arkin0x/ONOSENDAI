@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 import threeFont from 'three/examples/fonts/helvetiker_regular.typeface.json?url'
 import { FirstPersonControls } from './FirstPersonControls'
-import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial } from './materials'
+import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial } from './materials'
 import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
@@ -37,6 +37,7 @@ let controls
 let reticle
 let bookmarkButton, bookmarkButtonPosition, bookmarkLerp
 let logo
+let speedLines, speedUI, speedLineCount, speedLinesNearDist, speedLinesFarDist
 
 let frame
 
@@ -109,8 +110,8 @@ function init(){
     clock = new THREE.Clock()
 
     camera = new THREE.PerspectiveCamera(45, w/h,0.1,10000000)
-        camera.position.set(0,0,0)
-        camera.rotation.set(-Math.PI/180*30,0,0)
+    camera.position.set(0,0,0)
+        // camera.rotation.set(-Math.PI/180*30,0,0)
     scene = new THREE.Scene()
     // scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
     scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.33)
@@ -229,6 +230,45 @@ function init(){
     app = document.querySelector('#app')
     app.appendChild(ccs)
 
+    // setup speed lines
+    speedLines = []
+    speedLinesNearDist = 8, 
+    speedLinesFarDist = -10
+    speedLineCount = 2
+    let speedUIScale = 0.33 // 33% of screen
+    let speedUISize = Math.min(w,h) * speedUIScale // width and height, it's square
+    speedUI = new THREE.Group()
+    let topVec = new THREE.Vector3()
+    topVec.copy(camera.position)
+    topVec.y += 0.2
+    topVec.z = speedLinesFarDist
+    let botVec = new THREE.Vector3()
+    botVec.copy(camera.position)
+    botVec.y -= 0.2
+    botVec.z = speedLinesFarDist
+    let speedLineHalf = speedLineCount/2
+    let speedLineOffsetStart = 0 - speedLineHalf
+    let speedLineOffsetEnd = speedLineCount - speedLineHalf
+    console.log(speedLineOffsetStart, speedLineOffsetEnd)
+    for (let i = speedLineOffsetStart; i <= speedLineOffsetEnd; i++) {
+        let xoffset = -1
+        if( i < 0 ) xoffset = -1
+        if( i == 0 ) continue
+        if( i > 0 ) xoffset = 1
+        let t = new THREE.Vector3()
+        t.copy(topVec)
+        // t.x += i/10 + xoffset
+        t.x = xoffset
+        t.z += Math.abs(i/1)
+        let b = new THREE.Vector3()
+        b.copy(botVec)
+        // b.x += i/10 + xoffset
+        b.x = xoffset
+        b.z += Math.abs(i/1)
+        createLine(t,b)
+    }
+    camera.add(speedUI)
+
 
     // scene objects
     universe = new THREE.Group()
@@ -317,6 +357,7 @@ function render() {
     scaleNotes()
     animateReticle(delta)
     animateSelectedNote()
+    animateSpeedLines(controls)
 
     controls.postUpdate()
 
@@ -550,6 +591,24 @@ function animateSelectedNote(){
 
 }
 
+function animateSpeedLines(controls){
+    let { dx, dy, dz } = controls
+    let speed = (dx + dy + dz) / 3
+    console.log(dz)
+    speedLines.slice(0,2).forEach( l => {
+        l.material.opacity = Math.min(Math.max(0.25+Math.abs(speed/10),0.25),1)
+        l.position.z += -dz/100
+        if(l.position.z > speedLinesNearDist){
+            let rem = speedLinesNearDist - l.position.z
+            l.position.z = speedLinesFarDist - rem
+        }
+        if(l.position.z < speedLinesFarDist){
+            let rem = speedLinesFarDist - l.position.z
+            l.position.z = speedLinesNearDist - rem
+        }
+    })
+}
+
 /**
  * @param {THREE.Vector3} a - mesh 1 position
  * @param {THREE.Vector3} b - mesh 2 position
@@ -563,6 +622,22 @@ function connectNotes(a,b,mat = connectToRoot){
     scene.add(line)
     nodeConnectors.push(line)
 }
+
+
+/**
+ * @param {THREE.Vector3} a - mesh 1 position
+ * @param {THREE.Vector3} b - mesh 2 position
+ */
+function createLine(a,b,mat = speedLineMaterial){
+    let points = []
+    points.push(a)
+    points.push(b)
+    let lineGeom = new THREE.BufferGeometry().setFromPoints(points)
+    let line = new THREE.Line(lineGeom, mat)
+    speedUI.add(line) 
+    speedLines.push(line)
+}
+
 
 function showThread(event){
     if(event){

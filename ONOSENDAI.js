@@ -593,10 +593,10 @@ function animateSelectedNote(){
 
 function animateSpeedLines(controls){
     let { dx, dy, dz } = controls
-    let speed = (dx + dy + dz) / 3
+    let speed = dz//(dx + dy + dz) / 3
     console.log(dz)
     speedLines.slice(0,2).forEach( l => {
-        l.material.opacity = Math.min(Math.max(0.25+Math.abs(speed/10),0.25),1)
+        l.material.opacity = Math.abs(speed) < 200 ? Math.min(Math.max(0.25+Math.abs(speed/10),0.25),1) : Math.min(1,Math.max(200/Math.abs(speed),0.15))
         l.position.z += -dz/100
         if(l.position.z > speedLinesNearDist){
             let rem = speedLinesNearDist - l.position.z

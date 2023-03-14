@@ -99,20 +99,31 @@ Text-to-Speech APIs built into modern browsers could be used to turn nostr event
 - [x] `kind 1` new state
 - [x] `kind 1` selected state
 - [x] `kind 1` read state
-- [ ] `kind 1` bookmarked state
+- [x] `kind 1` bookmarked state
 - [x] Bookmark events (stored locally)
-- [x] Persist bookmarked events (localStorage)
+- [x] Acceleration-based controls to handle large distances
+- [x] Visualize speed
+- [x] Show current coordinates
+- [ ] Cross-browser testing and fixes
+- [ ] Mobile: scroll event content by touch
+- [ ] Mobile: gyroscope controls to look (but keep drag-to-look controls)
+- [ ] Mobile: 2x touch to accelerate
+- [ ] Mobile: 3x touch to reverse
+- [ ] Note access history panel
+- [ ] Persist bookmarked events (localStorage)
 - [ ] Persist read events (simhash + id only) so you can skip over them
 - [ ] Address `pubkeys` directly
 - [ ] Zap visualization for `kind 1`
 - [ ] Persist recently traveled routes and visualize them
 - [ ] Presence event changes pubkey's location
-- [ ] Scale universe controls
 - [ ] Address `kind 10333` events by event id
 - [ ] Load `kind 10333` geometry
+- [ ] Add a marker to nearby notes so they are easier to track; marker should hug edge of screen if the note is nearby but not in frustum
 - [ ] NIP-26 for sign-in
 - [ ] Publish kind 1 notes from ONOSENDAI
 - [ ] Search/filter notes by string
+- [ ] Locate note by entering Event ID
+- [ ] Locate user by entering pubkey
 - [ ] Filter POW for notes
 - [ ] Filter POW for constructs
 - [ ] VR support

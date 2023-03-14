@@ -10,33 +10,43 @@
   top: 0;
   left: 0;
   width: 100vw;
-  // transform: perspective(-10cm)
+  transform: translateZ(0);
 }
 
 canvas[data-engine] {
   position: absolute;
+  transform: translateZ(-1000px);
 }
 
-@keyframes dom-ui-slide-in-mobile {
-  from {
-    opacity: 0;
-    transform: perspective(15cm) rotateY(15deg)
-      translate(-2rem, calc(50vh - 35vh));
+$z-mobile: -100px;
+$z-desktop: 0px;
+
+@mixin dom-ui-slide-in-animation-factory($keyframes-name, $top: 0px, $left: 0px){
+  @keyframes dom-ui-slide-in-mobile-#{$keyframes-name} {
+    from {
+      opacity: 0;
+      transform: perspective(15cm) rotateY(15deg)
+        translate3d(calc($left - 2rem), calc($top + 15vh), $z-mobile);
+    }
+    to {
+      transform: perspective(20cm) rotateY(25deg)
+        translate3d(calc($left + 10vw), calc($top + 15vh), $z-mobile);
+    }
   }
-  to {
-    transform: perspective(20cm) rotateY(25deg)
-      translate(10vw, calc(50vh - 35vh));
+  @keyframes dom-ui-slide-in-desktop-#{$keyframes-name} {
+    from {
+      opacity: 0;
+      transform: perspective(15cm) rotateY(15deg)
+        translate3d(calc($left - 2rem), calc($top + 20vh), $z-desktop);
+    }
+    to {
+      transform: perspective(20cm) rotateY(25deg)
+        translate3d(calc($left + 3vw), calc($top + 20vh), $z-desktop);
+    }
   }
-}
-@keyframes dom-ui-slide-in-desktop {
-  from {
-    opacity: 0;
-    transform: perspective(15cm) rotateY(15deg)
-      translate(-2rem, calc(50vh - 35vh));
-  }
-  to {
-    transform: perspective(20cm) rotateY(25deg)
-      translate(2vw, calc(50vh - 35vh));
+  animation-name: dom-ui-slide-in-mobile-#{$keyframes-name};
+  @media screen and (min-width: 768px) {
+    animation-name: dom-ui-slide-in-desktop-#{$keyframes-name};
   }
 }
 
@@ -44,29 +54,9 @@ canvas[data-engine] {
   cursor: pointer;
   position: absolute;
   // transform: perspective(20cm) rotateY(25deg) translate(10vw, calc(50vh - 5vh));
-  animation-name: dom-ui-slide-in-mobile;
   animation-duration: 0.25s;
   animation-timing-function: cubic-bezier(0.19, 1, 0.22, 1);
   animation-fill-mode: forwards;
-}
-
-#aug-ccs {
-  --aug-inlay: initial;
-  --aug-inlay-bg: #210f06cc;
-  --aug-border: initial;
-  --aug-border-bg: #9e1b1baa;
-  --aug-border-bg: #78004eaa;
-  --aug-inlay-bg: #160621cc;
-  --aug-clip-tl1: initial;
-  --aug-clip-br1: initial;
-  // --aug-clip-b1: initial;
-  // --aug-clip-b2: initial;
-  // --aug-b-extend1: 60%;
-  font-size: 14px;
-  color: #ff9123aa;
-  top: 75vh;
-  left: -2rem;
-  padding: 1rem 1rem 1rem 1rem;
 }
 
 #aug-modal {
@@ -84,6 +74,7 @@ canvas[data-engine] {
   overflow-x: hidden;
   overflow-y: hidden;
   width: 90vw;
+  @include dom-ui-slide-in-animation-factory(modal, -8vh, -1vw);
 }
 #modal-message-wrapper {
   overflow: hidden;
@@ -142,17 +133,36 @@ canvas[data-engine] {
   }
 }
 
+#aug-ccs {
+  --aug-inlay: initial;
+  --aug-inlay-bg: #210f06cc;
+  --aug-border: initial;
+  --aug-border-bg: #9e1b1baa;
+  --aug-border-bg: #78004eaa;
+  --aug-inlay-bg: #160621cc;
+  --aug-clip-tl1: initial;
+  --aug-clip-br1: initial;
+  // --aug-clip-b1: initial;
+  // --aug-clip-b2: initial;
+  // --aug-b-extend1: 60%;
+  font-size: 14px;
+  color: #ff9123aa;
+  // top: 75vh;
+  // left: -2rem;
+  position: absolute;
+  bottom: 28vh;
+  padding: 1rem 1rem 1rem 1rem;
+  @include dom-ui-slide-in-animation-factory(ccs, 0vh, 0rem);
+}
+
 // desktop and up
 @media screen and (min-width: 768px) {
-  .dom-ui {
-    animation-name: dom-ui-slide-in-desktop;
-  }
   #aug-modal {
     width: 33vw;
   }
   #aug-ccs {
     font-size: 20px;
-    left: 0rem;
+    // left: 0rem;
   }
   #bookmark {
     top: 59vh;

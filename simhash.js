@@ -68,11 +68,24 @@ function computeFeatureVector(input) {
 }
 
 export function embed_number_3d(bits) {
-  const mask84 = (1n << 84n) - 1n;
-  const x = ((bits.slice(0, 85).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
-  const y = ((bits.slice(85, 170).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
-  const z = ((bits.slice(170).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
-  return [BigInt(x), BigInt(y), BigInt(z)];
+  const x = bits.slice(0,84)
+  const y = bits.slice(84,168)
+  const z = bits.slice(168,252)
+
+
+  const xparts = [0,0,0].map( i => Number( '0b' + x.splice(0,28).join('') ) )
+  const xsum = xparts.reduce((acc, curr) => acc + curr, 0)
+  const xavg = Math.floor(xsum / xparts.length)
+
+  const yparts = [0,0,0].map( i => Number( '0b' + y.splice(0,28).join('') ) )
+  const ysum = yparts.reduce((acc, curr) => acc + curr, 0)
+  const yavg = Math.floor(ysum / yparts.length)
+
+  const zparts = [0,0,0].map( i => Number( '0b' + z.splice(0,28).join('') ) )
+  const zsum = zparts.reduce((acc, curr) => acc + curr, 0)
+  const zavg = Math.floor(zsum / zparts.length)
+
+  return [BigInt(xavg), BigInt(yavg), BigInt(zavg)]
 }
 
 // export function simhash_gpt(input) {
@@ -167,5 +180,7 @@ function binaryArrayToHex(bits) {
 export const DOWNSCALE = (2n**32n)
 
 export const downscale = (arrayOfBigInts, scale = DOWNSCALE) => {
-  return arrayOfBigInts.map(BN => Number(BN / scale))
+  return arrayOfBigInts.map(BN => {
+    return Number(BN / scale)
+  })
 }

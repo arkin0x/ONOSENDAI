@@ -12,8 +12,8 @@ import { wrapText } from './wraptext'
 // we downscale the coordinates:
 // 2^85 - 2^71 = 2^14 (16384)
 // because otherwise there is too much empty space
-export const WORLD_DOWNSCALE = 2n**65n
-export const WORLD_SCALE = Number((2n**85n) / WORLD_DOWNSCALE)
+export const WORLD_DOWNSCALE = 1n//2n**65n
+export const WORLD_SCALE = Number(2n**28n/WORLD_DOWNSCALE)//Number((2n**85n) / WORLD_DOWNSCALE)
 export const MOBILE_WIDTH = 576 
 
 let w, h

@@ -23,7 +23,7 @@ class FirstPersonControls {
 
 		this.enabled = true;
 
-		this.accel = 1.0
+		this.accel = 10000.0
 		this.accelMultiplier = 0
 		this.decel = 0.90
 		this.minx = 0.1

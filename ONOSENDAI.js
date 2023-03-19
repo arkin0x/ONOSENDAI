@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
-import threeFont from 'three/examples/fonts/helvetiker_regular.typeface.json?url'
+// import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
+// import threeFont from 'three/examples/fonts/helvetiker_regular.typeface.json?url'
 import { FirstPersonControls } from './FirstPersonControls'
 import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial } from './materials'
 import { noteGeometry } from './geometry'
@@ -26,10 +26,11 @@ let camera, scene, renderer
 let hudcamera, hudscene
 let universe
 let raycaster, pointer, normalizedPointer
-let fontloader, font, textureloader
+// let fontloader, font
+let textureloader
 let controls
 let reticle
-let bookmarkButton, bookmarkButtonPosition, bookmarkLerp
+let bookmarkButton
 let logo
 let speedLines, speedUI, speedLineCount, speedLinesNearDist, speedLinesFarDist
 
@@ -95,20 +96,13 @@ function init(){
 
     layout = w > MOBILE_WIDTH ? "desktop" : "mobile"
 
-    // noteSpriteDisplayWidth = w < 680 ? w-40 : w/4
-    bookmarkButtonPosition = new THREE.Vector2( 
-        layout == "desktop" ? -noteSpriteDisplayWidth + 20 : -(w/2),
-        layout == "desktop" ? (h/2) - 20 : -(h/2)
-    )
-
     clock = new THREE.Clock()
 
-    camera = new THREE.PerspectiveCamera(45, w/h,0.1,10000000)
+    camera = new THREE.PerspectiveCamera(45, w/h,0.1,WORLD_SCALE * 2)
     camera.position.set(0,0,0)
         // camera.rotation.set(-Math.PI/180*30,0,0)
     scene = new THREE.Scene()
-    // scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
-    scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.33)
+    // scene.fog = new THREE.Fog( "#160621", WORLD_SCALE*0.2, WORLD_SCALE*0.4)
     scene.add(camera)
 
     hudcamera = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2,0.001,1000)
@@ -129,29 +123,18 @@ function init(){
     window.addEventListener( 'resize', onWindowResize )
 
     // font loader
-    fontloader = new FontLoader();
-    fontloader.load( threeFont, function ( loadedFont ) {
-        font = loadedFont
-    })
+    // fontloader = new FontLoader();
+    // fontloader.load( threeFont, function ( loadedFont ) {
+    //     font = loadedFont
+    // })
 
     textureloader = new THREE.TextureLoader()
     textureloader.load( reticleImage, setupReticle )
-    // textureloader.load( bookmarkImage, setupBookmark )
     textureloader.load( logoImage, setupOrtho)
 
-
     function setupReticle( tex ){
-    // test screen coordinate proxy sprite
-    // let spr = new THREE.Sprite(new THREE.SpriteMaterial({map: tex}))
-    // spr.scale.set( 50, 50, 1)
-    // spr.center.set(0.5,0.5)
-    // spr.position.set(-w/2*.9,-h/2*.9,-20)
-    // hudcamera.add(spr)
-    // console.log(spr.getWorldPosition(new THREE.Vector3()))
         let material = new THREE.SpriteMaterial({map: tex})
         material.color.set('yellow')
-        let width = material.map.image.width
-        let height = material.map.image.height
         reticle = new THREE.Sprite( material )
         reticle.center.set(0.5,0.5)
         reticle.scale.set( 50, 50, 1)
@@ -163,18 +146,6 @@ function init(){
         renderer.domElement.addEventListener('mouseenter',function(){
             reticle.visible = true
         })
-    }
-    function setupBookmark( tex ){
-        let material = new THREE.SpriteMaterial({map: tex})
-        material.color.set(colors.LOGO_PURPLE)
-        let width = material.map.image.width
-        let height = material.map.image.height
-        bookmarkButton = new THREE.Sprite( material )
-        bookmarkButton.visible=false
-        bookmarkButton.center.set(0,1)
-        bookmarkButton.scale.set( width/8, height/8, 1)
-        hudcamera.add(bookmarkButton)
-        bookmarkButton.position.set(bookmarkButtonPosition.x,bookmarkButtonPosition.y,-3)
     }
     function setupOrtho( tex ){
         // logo
@@ -229,8 +200,6 @@ function init(){
     speedLinesNearDist = 8, 
     speedLinesFarDist = -10
     speedLineCount = 2
-    let speedUIScale = 0.33 // 33% of screen
-    let speedUISize = Math.min(w,h) * speedUIScale // width and height, it's square
     speedUI = new THREE.Group()
     let topVec = new THREE.Vector3()
     topVec.copy(camera.position)
@@ -243,7 +212,6 @@ function init(){
     let speedLineHalf = speedLineCount/2
     let speedLineOffsetStart = 0 - speedLineHalf
     let speedLineOffsetEnd = speedLineCount - speedLineHalf
-    console.log(speedLineOffsetStart, speedLineOffsetEnd)
     for (let i = speedLineOffsetStart; i <= speedLineOffsetEnd; i++) {
         let xoffset = -1
         if( i < 0 ) xoffset = -1
@@ -281,18 +249,19 @@ function init(){
     scene.add( environmentLightRight );
 
     // gridhelper
-    const grid = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
-    grid.position.set(0,-(WORLD_SCALE)/4,0)
+    const grid = new THREE.GridHelper(WORLD_SCALE,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
+    grid.position.set(0,-(WORLD_SCALE)/2,0)
     scene.add(grid)
 
-    const gridtop = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_BLUE,colors.LOGO_BLUE)
-    gridtop.position.set(0,(WORLD_SCALE)/4,0)
+    const gridtop = new THREE.GridHelper(WORLD_SCALE,100,colors.LOGO_BLUE,colors.LOGO_BLUE)
+    gridtop.position.set(0,(WORLD_SCALE)/2,0)
+    
     scene.add(gridtop)
 
     //sun
-    const sunGeometry = new THREE.CircleGeometry( 2000000, 64 );
+    const sunGeometry = new THREE.CircleGeometry( WORLD_SCALE/4, 64 );
     const sun = new THREE.Mesh(sunGeometry, sunMaterial)
-    sun.position.set(0,-1000,-10000000)
+    sun.position.set(0,0,-WORLD_SCALE)
     scene.add(sun)
 
     // camera objects
@@ -534,13 +503,16 @@ function scaleNotes(){
 
     // scale
     visibleObjects.forEach( mesh => {
+        // console.log(mesh)
         let dist = camera.position.distanceTo(mesh.position)
-        let scale = 1 + dist**2/(1) // TODO there is a more elegant equation for this and I will find it someday.
+        let scale = 1 + Math.sqrt(dist*10)//**3/(1) // TODO there is a more elegant equation for this and I will find it someday.
 
-        // mesh.scale.set(scale,scale,scale)
+        mesh.scale.set(scale,scale,scale)
     })
 
 }
+
+window.camera = camera
 
 function animateReticle(delta) {
     if(!reticle) return

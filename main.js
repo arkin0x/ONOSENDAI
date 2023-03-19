@@ -16,7 +16,7 @@ const sub_notes = pool.sub(relays,[{kinds:[1]}])
 sub_notes.on('event', event => {
  let semanticHash = simhash(event.content)
  let semanticCoordinate = embed_number_3d(semanticHash.hash)//.map(n => Number(n))
- let downscaledSemanticCoordinate = downscale(semanticCoordinate,4194304/15625) 
+ let downscaledSemanticCoordinate = downscale(semanticCoordinate) 
  event.simhash = semanticHash.hash
  visualizeNote(event,downscaledSemanticCoordinate)
 

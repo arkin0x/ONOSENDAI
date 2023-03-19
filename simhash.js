@@ -176,10 +176,7 @@ function binaryArrayToHex(bits) {
   return hex;
 }
 
-
-export const DOWNSCALE = (2n**32n)
-
-export const downscale = (arrayOfBigInts, scale = DOWNSCALE) => {
+export const downscale = (arrayOfBigInts, scale = 1) => {
   return arrayOfBigInts.map(BN => {
     return Number(BN / scale)
   })

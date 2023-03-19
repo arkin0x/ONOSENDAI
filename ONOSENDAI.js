@@ -7,13 +7,7 @@ import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
 
-import { wrapText } from './wraptext'
-
-// we downscale the coordinates:
-// 2^85 - 2^71 = 2^14 (16384)
-// because otherwise there is too much empty space
-export const WORLD_DOWNSCALE = 1n//2n**65n
-export const WORLD_SCALE = Number(2n**28n/WORLD_DOWNSCALE)//Number((2n**85n) / WORLD_DOWNSCALE)
+export const WORLD_SCALE = Number(2n**28n)
 export const MOBILE_WIDTH = 576 
 
 let w, h
@@ -541,8 +535,9 @@ function scaleNotes(){
     // scale
     visibleObjects.forEach( mesh => {
         let dist = camera.position.distanceTo(mesh.position)
-        let scale = 1 + dist**2/1000000000 // TODO there is a more elegant equation for this and I will find it someday.
-        mesh.scale.set(scale,scale,scale)
+        let scale = 1 + dist**2/(1) // TODO there is a more elegant equation for this and I will find it someday.
+
+        // mesh.scale.set(scale,scale,scale)
     })
 
 }
@@ -788,6 +783,7 @@ export const visualizeNote = (event,coords) => {
         coords[1],
         coords[2],
     )
+    console.log(noteMesh.position)
     event.noteMesh = noteMesh
     universe.add(noteMesh)
 }

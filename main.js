@@ -2,7 +2,7 @@ import './global.scss'
 import './ONOSENDAI'
 import { NIC } from './NIC'
 import { simhash, embed_number_3d, downscale } from './simhash'
-import { WORLD_DOWNSCALE , getEventsList, visualizeNote } from './ONOSENDAI'
+import { getEventsList, visualizeNote } from './ONOSENDAI'
 import scrollLock from './scroll-lock.mjs'
 
 document.body.classList.add('no-warn')
@@ -15,8 +15,8 @@ const sub_notes = pool.sub(relays,[{kinds:[1]}])
 
 sub_notes.on('event', event => {
  let semanticHash = simhash(event.content)
- let semanticCoordinate = embed_number_3d(semanticHash.hash)
- let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE) 
+ let semanticCoordinate = embed_number_3d(semanticHash.hash)//.map(n => Number(n))
+ let downscaledSemanticCoordinate = downscale(semanticCoordinate,4194304/15625) 
  event.simhash = semanticHash.hash
  visualizeNote(event,downscaledSemanticCoordinate)
 

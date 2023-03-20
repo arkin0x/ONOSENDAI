@@ -46,8 +46,6 @@ class FirstPersonControls {
 		this.verticalMin = 0;
 		this.verticalMax = Math.PI;
 
-		this.dragging = false;
-
 		// internals
 
 		this.autoSpeedFactor = 0.0;
@@ -59,6 +57,8 @@ class FirstPersonControls {
 		this.mouse = new Vector2(0,0)
 
 		this.mouseDownThisFrame = false
+		this.mouseDown = false
+		this.dragging = false;
 		this.mouseUpThisFrame = false
 
 		this.mouseX = 0;
@@ -108,46 +108,63 @@ class FirstPersonControls {
 				this.domElement.focus();
 			}
 
-			this.dragging = true;
-			this.mouseDownThisFrame = true
+			let ccs = document.getElementById('aug-ccs')
+			ccs.textContent = 'mousedown'
 
-   this.mouseXlast = this.mouseX = event.pageX
-   this.mouseYlast = this.mouseY = event.pageY
-   this.mouseXdelta = this.mouseYdelta = 0
+			this.mouseDownThisFrame = true
+			this.mouseDown = true
+
+			this.startDrag(event.pageX, event.pageY)
+
 		};
+
+		this.startDrag = function(x,y){
+   this.mouseXlast = this.mouseX = x
+   this.mouseYlast = this.mouseY = y
+   this.mouseXdelta = this.mouseYdelta = 0
+		}
 
 		this.onMouseUp = function ( event ) {
 
-		// if(Math.abs(this.mouseXdelta) < NON_DRAG_DISTANCE && Math.abs(this.mouseYdelta) < NON_DRAG_DISTANCE){
 			this.mouseUpThisFrame = true
-		// }
+			this.mouseDown = false
 
+			this.endDrag()
 
-			this.dragging = false;
+		};
 
+		this.endDrag = function(){
    this.mouseXlast = this.mouseX = 0
    this.mouseYlast = this.mouseY = 0
    this.mouseXdelta = this.mouseYdelta = 0
 
-		};
+			this.dragging = false
+		}
 
 		this.onMouseMove = function ( event ) {
 
 			this.mouse.x = event.pageX
 			this.mouse.y = event.pageY
 
-   if (!this.dragging) return
-
-   this.mouseX = event.pageX
-   this.mouseY = event.pageY
-   this.mouseXdelta = this.mouseX - this.mouseXlast
-   this.mouseYdelta = this.mouseY - this.mouseYlast
+			this.drag(event.pageX,event.pageY)
 
 		};
+
+		this.drag = function(x,y){
+			if(Math.abs(this.mouseXlast - x) < NON_DRAG_DISTANCE && Math.abs(this.mouseYlast - y) < NON_DRAG_DISTANCE){
+				return
+			}
+			this.dragging = true
+   this.mouseX = x
+   this.mouseY = y
+   this.mouseXdelta = this.mouseX - this.mouseXlast
+   this.mouseYdelta = this.mouseY - this.mouseYlast
+		}
 
 		this.onFingerDown = function ( event ) {
 
 			touchPoints++
+			this.startDrag()
 
 		};
 
@@ -168,6 +185,15 @@ class FirstPersonControls {
 			}
 			avgx /= touches.length
 			avgy /= touches.length
+
+			// TODO refactor the next 6 lines with new startDrag/drag/endDrag paradigm.
+			this.mouse.x = avgx
+			this.mouse.y = avgy
+
+   this.mouseX = avgx
+   this.mouseY = avgy
+   this.mouseXdelta = this.mouseX - this.mouseXlast
+   this.mouseYdelta = this.mouseY - this.mouseYlast
 
 		};
 
@@ -281,8 +307,6 @@ class FirstPersonControls {
 				}
 
 				// handle touch controls
-			let ccs = document.getElementById('aug-ccs')
-			ccs.textContent = touchPoints
 				if(touchPoints === 2){
 					this.moveForward = true
 					this.moveBackward = false

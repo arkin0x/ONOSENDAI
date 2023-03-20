@@ -108,9 +108,6 @@ class FirstPersonControls {
 				this.domElement.focus();
 			}
 
-			let ccs = document.getElementById('aug-ccs')
-			ccs.textContent = 'mousedown'
-
 			this.mouseDownThisFrame = true
 			this.mouseDown = true
 
@@ -143,8 +140,12 @@ class FirstPersonControls {
 
 		this.onMouseMove = function ( event ) {
 
+			// report mouse for external use
 			this.mouse.x = event.pageX
 			this.mouse.y = event.pageY
+
+			// touches override so we don't conflict on devices that treat touches as mouse
+			if( touchPoints ) return
 
 			this.drag(event.pageX,event.pageY)
 
@@ -163,14 +164,18 @@ class FirstPersonControls {
 
 		this.onFingerDown = function ( event ) {
 
-			touchPoints++
-			this.startDrag()
+			touchPoints = event.changedTouches.length
+
+			let tx = event.touches[0].pageX
+			let ty = event.touches[0].pageY
+			this.startDrag(tx,ty)
 
 		};
 
 		this.onFingerUp = function ( event ) {
 
 			touchPoints--
+			this.endDrag()
 
 		};
 
@@ -305,6 +310,9 @@ class FirstPersonControls {
 					this.autoSpeedFactor = 0.0;
 
 				}
+
+			let ccs = document.getElementById('aug-ccs')
+			ccs.textContent = touchPoints
 
 				// handle touch controls
 				if(touchPoints === 2){

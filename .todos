@@ -34,5 +34,17 @@
     "desc": "canvas text is performant but the word breaks are ugly. maybe try a 3d sprite and see if it's much worse.",
     "status": "pending",
     "modified": "2023-03-02 17:53:00.2898148 -0600 CST"
+  },
+  {
+    "id": 7,
+    "desc": "bug: holding/right clicking will cause touchend to not fire",
+    "status": "pending",
+    "modified": "2023-03-19 23:54:30.8099132 -0500 CDT"
+  },
+  {
+    "id": 8,
+    "desc": "prevent right click - this may fix mobile touchend not firing if you hold down",
+    "status": "pending",
+    "modified": "2023-03-19 23:57:35.0102962 -0500 CDT"
   }
 ]

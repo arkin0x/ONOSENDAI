@@ -164,7 +164,7 @@ class FirstPersonControls {
 
 		this.onFingerDown = function ( event ) {
 
-			touchPoints = event.changedTouches.length
+			touchPoints++
 
 			let tx = event.touches[0].pageX
 			let ty = event.touches[0].pageY

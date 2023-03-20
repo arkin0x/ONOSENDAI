@@ -23,7 +23,9 @@ class FirstPersonControls {
 
 		this.enabled = true;
 
-		this.accel = 1.0
+		// base acceleration
+		this.accel = 1
+		// increases while a button is held down
 		this.accelMultiplier = 0
 		this.decel = 0.90
 		this.minx = 0.1
@@ -31,13 +33,9 @@ class FirstPersonControls {
 		this.dy = 0
 		this.dz = 0
 
-		this.movementSpeed = 0;
 		this.lookSpeed = 0.005;
 
 		this.lookVertical = true;
-		this.autoForward = false;
-
-		this.activeLook = false;
 
 		this.heightSpeed = false;
 		this.heightCoef = 1.0;
@@ -48,24 +46,27 @@ class FirstPersonControls {
 		this.verticalMin = 0;
 		this.verticalMax = Math.PI;
 
-		this.mouseDragOn = false;
+		this.dragging = false;
 
 		// internals
 
 		this.autoSpeedFactor = 0.0;
 
-		// this.pointer is used to provide mouse coords outside this object
-		this.pointer = new Vector2(0,0)
+		// touches
+		let touchPoints = 0 // incremented or decremented on touchstart/touchend
 
-		this.pointerDownThisFrame = false
-		this.pointerUpThisFrame = false
+		// this.mouse is used to provide mouse coords outside this object
+		this.mouse = new Vector2(0,0)
 
-		this.pointerX = 0;
-		this.pointerY = 0;
-  this.pointerXlast = 0
-  this.pointerYlast = 0
-  this.pointerXdelta = 0
-  this.pointerYdelta = 0
+		this.mouseDownThisFrame = false
+		this.mouseUpThisFrame = false
+
+		this.mouseX = 0;
+		this.mouseY = 0;
+  this.mouseXlast = 0
+  this.mouseYlast = 0
+  this.mouseXdelta = 0
+  this.mouseYdelta = 0
   this.deltaScalar = 1
 
 		this.moveForward = false;
@@ -102,133 +103,72 @@ class FirstPersonControls {
 
 		};
 
-		this.onPointerDown = function ( event ) {
-
-			this.pointerDownThisFrame = true
-
+		this.onMouseDown = function ( event ) {
 			if ( this.domElement !== document ) {
-
 				this.domElement.focus();
-
 			}
 
-			if ( this.activeLook ) {
+			this.dragging = true;
+			this.mouseDownThisFrame = true
 
-				switch ( event.button ) {
+   this.mouseXlast = this.mouseX = event.pageX
+   this.mouseYlast = this.mouseY = event.pageY
+   this.mouseXdelta = this.mouseYdelta = 0
+		};
 
-					case 0: this.moveForward = true; break;
-					case 2: this.moveBackward = true; break;
+		this.onMouseUp = function ( event ) {
 
-				}
+		// if(Math.abs(this.mouseXdelta) < NON_DRAG_DISTANCE && Math.abs(this.mouseYdelta) < NON_DRAG_DISTANCE){
+			this.mouseUpThisFrame = true
+		// }
 
-			}
 
-			this.mouseDragOn = true;
+			this.dragging = false;
 
-   this.pointerXlast = this.pointerX = event.pageX
-   this.pointerYlast = this.pointerY = event.pageY
-   this.pointerXdelta = this.pointerYdelta = 0
-			this.activeLook = true
-
+   this.mouseXlast = this.mouseX = 0
+   this.mouseYlast = this.mouseY = 0
+   this.mouseXdelta = this.mouseYdelta = 0
 
 		};
 
-		this.onPointerUp = function ( event ) {
+		this.onMouseMove = function ( event ) {
 
-		if(Math.abs(this.pointerXdelta) < NON_DRAG_DISTANCE && Math.abs(this.pointerYdelta) < NON_DRAG_DISTANCE){
-			this.pointerUpThisFrame = true
-		}
+			this.mouse.x = event.pageX
+			this.mouse.y = event.pageY
 
-			if ( this.activeLook ) {
+   if (!this.dragging) return
 
-				switch ( event.button ) {
-
-					case 0: this.moveForward = false; break;
-					case 2: this.moveBackward = false; break;
-
-				}
-
-			}
-
-			this.mouseDragOn = false;
-
-   this.pointerXlast = this.pointerX = 0
-   this.pointerYlast = this.pointerY = 0
-   this.pointerXdelta = this.pointerYdelta = 0
-
-			this.activeLook = false
-		};
-
-		this.onPointerMove = function ( event ) {
-
-			this.pointer.x = event.pageX
-			this.pointer.y = event.pageY
-
-   if (!this.mouseDragOn) return
-
-   this.pointerX = event.pageX
-   this.pointerY = event.pageY
-   this.pointerXdelta = this.pointerX - this.pointerXlast
-   this.pointerYdelta = this.pointerY - this.pointerYlast
+   this.mouseX = event.pageX
+   this.mouseY = event.pageY
+   this.mouseXdelta = this.mouseX - this.mouseXlast
+   this.mouseYdelta = this.mouseY - this.mouseYlast
 
 		};
 
 		this.onFingerDown = function ( event ) {
 
-			if ( this.domElement !== document ) {
-
-				this.domElement.focus();
-
-			}
-
-			if ( this.activeLook ) {
-
-				switch ( event.button ) {
-
-					case 0: this.moveForward = true; break;
-					case 2: this.moveBackward = true; break;
-
-				}
-
-			}
-
-			this.mouseDragOn = true;
-
-   this.pointerXlast = this.pointerX = event.changedTouches[0].pageX
-   this.pointerYlast = this.pointerY = event.changedTouches[0].pageY
-   this.pointerXdelta = this.pointerYdelta = 0
+			touchPoints++
 
 		};
 
 		this.onFingerUp = function ( event ) {
 
-			if ( this.activeLook ) {
-
-				switch ( event.button ) {
-
-					case 0: this.moveForward = false; break;
-					case 2: this.moveBackward = false; break;
-
-				}
-
-			}
-
-			this.mouseDragOn = false;
-
-   this.pointerXlast = this.pointerX = 0
-   this.pointerYlast = this.pointerY = 0
-   this.pointerXdelta = this.pointerYdelta = 0
+			touchPoints--
 
 		};
 
 		this.onFingerMove = function ( event ) {
 
-   this.pointerX = event.changedTouches[0].pageX
-   this.pointerY = event.changedTouches[0].pageY
-   this.pointerXdelta = this.pointerX - this.pointerXlast
-   this.pointerYdelta = this.pointerY - this.pointerYlast
+			let touches = event.changedTouches
+			let avgx = 0
+			let avgy = 0
+			for(let i = 0; i < touches.length; i++){
+				avgx += touches[i].pageX
+				avgy += touches[i].pageY
+			}
+			avgx /= touches.length
+			avgy /= touches.length
 
-   // console.log('touch',this.pointerXdelta)
 		};
 
 		this.onKeyDown = function ( event ) {
@@ -310,8 +250,8 @@ class FirstPersonControls {
 				this.resetCycle = false
 			}
 
-			this.pointerDownThisFrame = false
-			this.pointerUpThisFrame = false
+			this.mouseDownThisFrame = false
+			this.mouseUpThisFrame = false
 
 			if (this.cycle !== 0){
 				this.resetCycle = true
@@ -340,14 +280,31 @@ class FirstPersonControls {
 
 				}
 
+				// handle touch controls
+			let ccs = document.getElementById('aug-ccs')
+			ccs.textContent = touchPoints
+				if(touchPoints === 2){
+					this.moveForward = true
+					this.moveBackward = false
+					console.log('👆')
+				} else if(touchPoints === 3){
+					this.moveBackward = true
+					this.moveForward = false
+				} else if(touchPoints === 0){
+					this.moveBackward = false
+					this.moveForward = false
+				}
+
+
 				// increase accel if key continues to be held down.
 				if( this.moveForward || this.moveBackward || this.moveLeft || this.moveRight || this.moveUp || this.moveDown ){
 					this.accelMultiplier++
 				} else {
-					this.accelMultiplier = 0
+					this.accelMultiplier--
+					if(this.accelMultiplier < 0) this.accelMultiplier = 0
 				}
 
-				let acc = this.accel //+ this.accelMultiplier/1000
+				let acc = this.accel// + this.accelMultiplier / 100
 
 				if( this.moveRight ){
 					this.dx += acc
@@ -397,8 +354,8 @@ class FirstPersonControls {
 
 				}
 
-					lon -= this.pointerXdelta * this.deltaScalar * actualLookSpeed;
-					if ( this.lookVertical ) lat -= this.pointerYdelta * this.deltaScalar * actualLookSpeed * verticalLookRatio;
+					lon -= this.mouseXdelta * this.deltaScalar * actualLookSpeed;
+					if ( this.lookVertical ) lat -= this.mouseYdelta * this.deltaScalar * actualLookSpeed * verticalLookRatio;
 
 					lat = Math.max( - 85, Math.min( 85, lat ) );
 
@@ -424,9 +381,9 @@ class FirstPersonControls {
 		this.dispose = function () {
 
 		this.domElement.removeEventListener( 'contextmenu', contextmenu );
-		this.domElement.removeEventListener( 'pointerdown', _onPointerDown );
-		this.domElement.removeEventListener( 'pointermove', _onPointerMove );
-		this.domElement.removeEventListener( 'pointerup', _onPointerUp );
+		this.domElement.removeEventListener( 'mousedown', _onMouseDown );
+		this.domElement.removeEventListener( 'mousemove', _onMouseMove );
+		this.domElement.removeEventListener( 'mouseup', _onMouseUp );
 
 		this.domElement.removeEventListener( 'touchstart', _onFingerDown );
 		this.domElement.removeEventListener( 'touchmove', _onFingerMove );
@@ -437,9 +394,9 @@ class FirstPersonControls {
 
 		};
 
-		const _onPointerMove = this.onPointerMove.bind( this );
-		const _onPointerDown = this.onPointerDown.bind( this );
-		const _onPointerUp = this.onPointerUp.bind( this );
+		const _onMouseMove = this.onMouseMove.bind( this );
+		const _onMouseDown = this.onMouseDown.bind( this );
+		const _onMouseUp = this.onMouseUp.bind( this );
 		const _onFingerMove = this.onFingerMove.bind( this );
 		const _onFingerDown = this.onFingerDown.bind( this );
 		const _onFingerUp = this.onFingerUp.bind( this );
@@ -447,9 +404,9 @@ class FirstPersonControls {
 		const _onKeyUp = this.onKeyUp.bind( this );
 
 		this.domElement.addEventListener( 'contextmenu', contextmenu );
-		this.domElement.addEventListener( 'pointerdown', _onPointerDown );
-		this.domElement.addEventListener( 'pointermove', _onPointerMove );
-		this.domElement.addEventListener( 'pointerup', _onPointerUp );
+		this.domElement.addEventListener( 'mousedown', _onMouseDown );
+		this.domElement.addEventListener( 'mousemove', _onMouseMove );
+		this.domElement.addEventListener( 'mouseup', _onMouseUp );
 
 		this.domElement.addEventListener( 'touchstart', _onFingerDown );
 		this.domElement.addEventListener( 'touchmove', _onFingerMove );

@@ -14,7 +14,7 @@ import { wrapText } from './wraptext'
 // because otherwise there is too much empty space
 export const WORLD_DOWNSCALE = 2n**65n
 export const WORLD_SCALE = Number((2n**85n) / WORLD_DOWNSCALE)
-export const MOBILE_WIDTH = 576 
+export const MOBILE_WIDTH = 576
 
 let w, h
 
@@ -316,7 +316,7 @@ function init(){
 
     // camera controls
     controls = new FirstPersonControls( camera, renderer.domElement )
-    controls.movementSpeed = 500;
+    controls.accel = 1
     controls.lookSpeed = 0.25;
     controls.rotateSpeed = 1.0;
     controls.zoomSpeed = 1.2;
@@ -346,8 +346,8 @@ function render() {
     // console.log(delta)
 
     controls.update(delta)
-    pointer.x = controls.pointer.x
-    pointer.y = controls.pointer.y
+    pointer.x = controls.mouse.x
+    pointer.y = controls.mouse.y
 
     updateRaycast(controls)
     updateSelectedNote(controls)
@@ -364,7 +364,8 @@ function render() {
     // minimap
     lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
 
-    ccs.textContent = `[${Math.floor(camera.position.x)}x][${Math.floor(camera.position.y)}y][${Math.floor(camera.position.z)}z]`
+    // TODO uncomment this after debugging
+    // ccs.textContent = `[${Math.floor(camera.position.x)}x][${Math.floor(camera.position.y)}y][${Math.floor(camera.position.z)}z]`
 
     // must manually clear to do multiple cameras
     renderer.clear()
@@ -468,7 +469,7 @@ function updateRaycast(controls){
 }
 
 function updateSelectedNote(controls){
-    if (controls.pointerUpThisFrame && intersected && selected?.intersected !== intersected){
+    if (controls.mouseUpThisFrame && intersected && selected?.intersected !== intersected){
         // teardown current selection
         if(selected){
             // teardown
@@ -556,11 +557,11 @@ function animateReticle(delta) {
 
     if(intersected){
         // console.log(intersected)
-        if( controls.pointerXdelta == 0 && controls.pointerYdelta == 0){
+        if( controls.mouseXdelta == 0 && controls.mouseYdelta == 0){
             // spin
             reticle.material.rotation += 5 * delta
         }
-        if( controls.mouseDragOn ){
+        if( controls.dragging ){
             // scale reticle to indicate click
             // let scalenum = Math.min(1.5,reticle.scale.x * 1.01)
             // console.log(reticle.scale)
@@ -593,8 +594,7 @@ function animateSelectedNote(){
 
 function animateSpeedLines(controls){
     let { dx, dy, dz } = controls
-    let speed = dz//(dx + dy + dz) / 3
-    console.log(dz)
+    let speed = dz
     speedLines.slice(0,2).forEach( l => {
         l.material.opacity = Math.abs(speed) < 200 ? Math.min(Math.max(0.25+Math.abs(speed/10),0.25),1) : Math.min(1,Math.max(200/Math.abs(speed),0.15))
         l.position.z += -dz/100

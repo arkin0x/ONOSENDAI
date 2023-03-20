@@ -22,7 +22,7 @@ sub_notes.on('event', event => {
 
  // shutoff after 6000 events downloaded
  // TODO this is not actually our solution to performance but for now it works.
- if( getEventsList().length >= 4000 ) sub_notes.unsub()
+ if( getEventsList().length >= 2000 ) sub_notes.unsub()
 })
 
 // Listen for zaps

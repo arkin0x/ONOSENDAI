@@ -37,8 +37,8 @@ export const colors = {
 export const sunMaterial = new MeshBasicMaterial({
  // color: 0xff2323,
  // color: 0xff0000
- color: LOGO_PURPLE,
- // color: 0x160621,
+ // color: LOGO_PURPLE,
+ color: 0x2b0c40,
  side: DoubleSide,
  // fog: false,
 })

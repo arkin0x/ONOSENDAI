@@ -61,10 +61,8 @@ class FirstPersonControls {
 		this.dragging = false;
 		this.mouseUpThisFrame = false
 
-		this.mouseX = 0;
-		this.mouseY = 0;
-  this.mouseXlast = 0
-  this.mouseYlast = 0
+  this.mouseXinitial = 0
+  this.mouseYinitial = 0
   this.mouseXdelta = 0
   this.mouseYdelta = 0
   this.deltaScalar = 1
@@ -87,6 +85,12 @@ class FirstPersonControls {
 
 		//
 
+		function logToPanel(data){
+			let ccs = document.getElementById('aug-ccs')
+			ccs.textContent = data
+		}
+
+
 		this.handleResize = function () {
 
 			if ( this.domElement === document ) {
@@ -103,6 +107,15 @@ class FirstPersonControls {
 
 		};
 
+		this.relativeCenter = function (x,y){
+			let xy = {
+				x: x - this.viewHalfX,
+				y: y - this.viewHalfY,
+			}
+			logToPanel(`${xy.x}, ${xy.y}`)
+			return xy
+		}
+
 		this.onMouseDown = function ( event ) {
 			if ( this.domElement !== document ) {
 				this.domElement.focus();
@@ -111,13 +124,15 @@ class FirstPersonControls {
 			this.mouseDownThisFrame = true
 			this.mouseDown = true
 
-			this.startDrag(event.pageX, event.pageY)
+			let {x,y} = this.relativeCenter(event.pageX, event.pageY)
+
+			this.startDrag(x,y)
 
 		};
 
 		this.startDrag = function(x,y){
-   this.mouseXlast = this.mouseX = x
-   this.mouseYlast = this.mouseY = y
+   this.mouseXinitial = x
+   this.mouseYinitial = y
    this.mouseXdelta = this.mouseYdelta = 0
 		}
 
@@ -131,8 +146,8 @@ class FirstPersonControls {
 		};
 
 		this.endDrag = function(){
-   this.mouseXlast = this.mouseX = 0
-   this.mouseYlast = this.mouseY = 0
+   this.mouseXinitial = 0
+   this.mouseYinitial = 0
    this.mouseXdelta = this.mouseYdelta = 0
 
 			this.dragging = false
@@ -140,26 +155,28 @@ class FirstPersonControls {
 
 		this.onMouseMove = function ( event ) {
 
+			// touches override so we don't conflict on devices that treat touches as mouse
+			if( touchPoints ) return
+
 			// report mouse for external use
 			this.mouse.x = event.pageX
 			this.mouse.y = event.pageY
 
-			// touches override so we don't conflict on devices that treat touches as mouse
-			if( touchPoints ) return
+			if( this.mouseDown ){
+				let {x,y} = this.relativeCenter(event.pageX, event.pageY)
 
-			this.drag(event.pageX,event.pageY)
+				this.drag(x,y)
+			}
 
 		};
 
 		this.drag = function(x,y){
-			if(Math.abs(this.mouseXlast - x) < NON_DRAG_DISTANCE && Math.abs(this.mouseYlast - y) < NON_DRAG_DISTANCE){
+			if(Math.abs(this.mouseXinitial - x) < NON_DRAG_DISTANCE && Math.abs(this.mouseYinitial - y) < NON_DRAG_DISTANCE){
 				return
 			}
 			this.dragging = true
-   this.mouseX = x
-   this.mouseY = y
-   this.mouseXdelta = this.mouseX - this.mouseXlast
-   this.mouseYdelta = this.mouseY - this.mouseYlast
+   this.mouseXdelta = x - this.mouseXinitial
+   this.mouseYdelta = y - this.mouseYinitial
 		}
 
 		this.onFingerDown = function ( event ) {
@@ -168,7 +185,16 @@ class FirstPersonControls {
 
 			let tx = event.touches[0].pageX
 			let ty = event.touches[0].pageY
-			this.startDrag(tx,ty)
+
+			// report mouse for external use
+			this.mouse.x = tx
+			this.mouse.y = ty
+
+			let {x,y} = this.relativeCenter(tx,ty)
+
+			if( touchPoints === 1 ){
+				this.startDrag(x,y)
+			}
 
 		};
 
@@ -195,10 +221,9 @@ class FirstPersonControls {
 			this.mouse.x = avgx
 			this.mouse.y = avgy
 
-   this.mouseX = avgx
-   this.mouseY = avgy
-   this.mouseXdelta = this.mouseX - this.mouseXlast
-   this.mouseYdelta = this.mouseY - this.mouseYlast
+			let {x,y} = this.relativeCenter(avgx,avgy)
+
+			this.drag(x,y)
 
 		};
 
@@ -310,9 +335,6 @@ class FirstPersonControls {
 					this.autoSpeedFactor = 0.0;
 
 				}
-
-			let ccs = document.getElementById('aug-ccs')
-			ccs.textContent = touchPoints
 
 				// handle touch controls
 				if(touchPoints === 2){

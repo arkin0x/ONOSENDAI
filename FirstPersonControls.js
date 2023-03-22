@@ -200,7 +200,8 @@ class FirstPersonControls {
 		this.onFingerUp = function ( event ) {
 
 			touchPoints--
-			this.endDrag()
+
+			if( touchPoints === 0 ) this.endDrag()
 
 		};
 

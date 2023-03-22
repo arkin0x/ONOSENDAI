@@ -364,8 +364,7 @@ function render() {
     // minimap
     lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
 
-    // TODO uncomment this after debugging
-    // ccs.textContent = `[${Math.floor(camera.position.x)}x][${Math.floor(camera.position.y)}y][${Math.floor(camera.position.z)}z]`
+    ccs.innerHTML= `<span>[</span>${Math.floor(camera.position.x)}x<span>][</span>${Math.floor(camera.position.y)}y<span>][</span>${Math.floor(camera.position.z)}z<span>]</span>`
 
     // must manually clear to do multiple cameras
     renderer.clear()

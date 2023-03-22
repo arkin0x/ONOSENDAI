@@ -153,6 +153,10 @@ $z-desktop: 0px;
   bottom: 28vh;
   padding: 1rem 1rem 1rem 1rem;
   @include dom-ui-slide-in-animation-factory(ccs, 0vh, 0rem);
+  span {
+    // color: #ff9123aa;
+    color: #6a4a4a;
+  }
 }
 
 // desktop and up

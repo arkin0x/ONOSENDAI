@@ -340,7 +340,7 @@ class FirstPersonControls {
 
 				}
 
-				logToPanel(touchPoints)
+				// logToPanel(touchPoints)
 
 				// handle touch controls
 				if(touchPoints === 2){

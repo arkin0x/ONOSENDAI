@@ -210,17 +210,7 @@ class FirstPersonControls {
 
 		this.onFingerMove = function ( event ) {
 
-			console.log(event)
-
 			let touches = event.touches
-			// let avgx = 0
-			// let avgy = 0
-			// for(let i = 0; i < touches.length; i++){
-			// 	avgx += touches[i].pageX
-			// 	avgy += touches[i].pageY
-			// }
-			// avgx /= touches.length
-			// avgy /= touches.length
 
 			let tx = touches[0].pageX
 			let ty = touches[0].pageY

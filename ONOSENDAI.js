@@ -316,11 +316,12 @@ function init(){
 
     // camera controls
     controls = new FirstPersonControls( camera, renderer.domElement )
+    controls.mobile = layout == "mobile" ? true : false
     controls.accel = 1
-    controls.lookSpeed = 0.25;
-    controls.rotateSpeed = 1.0;
-    controls.zoomSpeed = 1.2;
-    controls.panSpeed = 1.8;
+    controls.lookSpeed = 0.25
+    controls.rotateSpeed = 1.0
+    controls.zoomSpeed = 1.2
+    controls.panSpeed = 1.8
 
     loadedEvents = {}
     bookmarkedEvents = JSON.parse(localStorage.getItem('bookmarks')) || {}

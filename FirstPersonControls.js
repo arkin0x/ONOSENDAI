@@ -22,12 +22,13 @@ class FirstPersonControls {
 		// API
 
 		this.enabled = true;
+		this.mobile = false;
 
 		// base acceleration
 		this.accel = 1
 		// increases while a button is held down
 		this.accelMultiplier = 0
-		this.decel = 0.90
+		this.decel = this.mobile ? 0.999 : 0.90
 		this.minx = 0.1
 		this.dx = 0
 		this.dy = 0
@@ -179,6 +180,8 @@ class FirstPersonControls {
 		}
 
 		this.onFingerDown = function ( event ) {
+			// if we weren't mobile already, we are now
+			this.mobile = true
 
 			touchPoints++
 
@@ -343,16 +346,20 @@ class FirstPersonControls {
 				// logToPanel(touchPoints)
 
 				// handle touch controls
-				if(touchPoints === 2){
-					this.moveForward = true
-					this.moveBackward = false
-					console.log('👆')
-				} else if(touchPoints === 3){
-					this.moveBackward = true
-					this.moveForward = false
-				} else if(touchPoints === 0){
-					this.moveBackward = false
-					this.moveForward = false
+				if( this.mobile ){
+
+					if(touchPoints === 2){
+						this.moveForward = true
+						this.moveBackward = false
+						console.log('👆')
+					} else if(touchPoints === 3){
+						this.moveBackward = true
+						this.moveForward = false
+					} else if(touchPoints === 0){
+						this.moveBackward = false
+						this.moveForward = false
+					}
+
 				}
 
 

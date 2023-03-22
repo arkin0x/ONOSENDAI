@@ -14,7 +14,7 @@ const NON_DRAG_DISTANCE = 5
 
 class FirstPersonControls {
 
-	constructor( object, domElement ) {
+	constructor(object, domElement) {
 
 		this.object = object;
 		this.domElement = domElement;
@@ -55,18 +55,18 @@ class FirstPersonControls {
 		let touchPoints = 0 // incremented or decremented on touchstart/touchend
 
 		// this.mouse is used to provide mouse coords outside this object
-		this.mouse = new Vector2(0,0)
+		this.mouse = new Vector2(0, 0)
 
 		this.mouseDownThisFrame = false
 		this.mouseDown = false
 		this.dragging = false;
 		this.mouseUpThisFrame = false
 
-  this.mouseXinitial = 0
-  this.mouseYinitial = 0
-  this.mouseXdelta = 0
-  this.mouseYdelta = 0
-  this.deltaScalar = 1
+		this.mouseXinitial = 0
+		this.mouseYinitial = 0
+		this.mouseXdelta = 0
+		this.mouseYdelta = 0
+		this.deltaScalar = 1
 
 		this.moveForward = false;
 		this.moveBackward = false;
@@ -86,7 +86,7 @@ class FirstPersonControls {
 
 		//
 
-		function logToPanel(data){
+		function logToPanel(data) {
 			let ccs = document.getElementById('aug-ccs')
 			ccs.textContent = data
 		}
@@ -94,7 +94,7 @@ class FirstPersonControls {
 
 		this.handleResize = function () {
 
-			if ( this.domElement === document ) {
+			if (this.domElement === document) {
 
 				this.viewHalfX = window.innerWidth / 2;
 				this.viewHalfY = window.innerHeight / 2;
@@ -108,7 +108,7 @@ class FirstPersonControls {
 
 		};
 
-		this.relativeCenter = function (x,y){
+		this.relativeCenter = function (x, y) {
 			let xy = {
 				x: x - this.viewHalfX,
 				y: y - this.viewHalfY,
@@ -116,27 +116,27 @@ class FirstPersonControls {
 			return xy
 		}
 
-		this.onMouseDown = function ( event ) {
-			if ( this.domElement !== document ) {
+		this.onMouseDown = function (event) {
+			if (this.domElement !== document) {
 				this.domElement.focus();
 			}
 
 			this.mouseDownThisFrame = true
 			this.mouseDown = true
 
-			let {x,y} = this.relativeCenter(event.pageX, event.pageY)
+			let { x, y } = this.relativeCenter(event.pageX, event.pageY)
 
-			this.startDrag(x,y)
+			this.startDrag(x, y)
 
 		};
 
-		this.startDrag = function(x,y){
-   this.mouseXinitial = x
-   this.mouseYinitial = y
-   this.mouseXdelta = this.mouseYdelta = 0
+		this.startDrag = function (x, y) {
+			this.mouseXinitial = x
+			this.mouseYinitial = y
+			this.mouseXdelta = this.mouseYdelta = 0
 		}
 
-		this.onMouseUp = function ( event ) {
+		this.onMouseUp = function (event) {
 
 			this.mouseUpThisFrame = true
 			this.mouseDown = false
@@ -145,47 +145,47 @@ class FirstPersonControls {
 
 		};
 
-		this.endDrag = function(){
-   this.mouseXinitial = 0
-   this.mouseYinitial = 0
-   this.mouseXdelta = this.mouseYdelta = 0
+		this.endDrag = function () {
+			this.mouseXinitial = 0
+			this.mouseYinitial = 0
+			this.mouseXdelta = this.mouseYdelta = 0
 
 			this.dragging = false
 		}
 
-		this.onMouseMove = function ( event ) {
+		this.onMouseMove = function (event) {
 
 			// touches override so we don't conflict on devices that treat touches as mouse
-			if( touchPoints ) return
+			if (touchPoints) return
 
 			// report mouse for external use
 			this.mouse.x = event.pageX
 			this.mouse.y = event.pageY
 
-			if( this.mouseDown ){
-				let {x,y} = this.relativeCenter(event.pageX, event.pageY)
+			if (this.mouseDown) {
+				let { x, y } = this.relativeCenter(event.pageX, event.pageY)
 
-				this.drag(x,y)
+				this.drag(x, y)
 			}
 
 		};
 
-		this.drag = function(x,y){
-			if(Math.abs(this.mouseXinitial - x) < NON_DRAG_DISTANCE && Math.abs(this.mouseYinitial - y) < NON_DRAG_DISTANCE){
+		this.drag = function (x, y) {
+			if (Math.abs(this.mouseXinitial - x) < NON_DRAG_DISTANCE && Math.abs(this.mouseYinitial - y) < NON_DRAG_DISTANCE) {
 				return
 			}
 			this.dragging = true
-   this.mouseXdelta = x - this.mouseXinitial
-   this.mouseYdelta = y - this.mouseYinitial
+			this.mouseXdelta = x - this.mouseXinitial
+			this.mouseYdelta = y - this.mouseYinitial
 		}
 
-		this.onFingerDown = function ( event ) {
+		this.onFingerDown = function (event) {
 			// if we weren't mobile already, we are now
 			this.mobile = true
 
 			touchPoints++
 
-			if( touchPoints === 1 ){
+			if (touchPoints === 1) {
 				let tx = event.touches[0].pageX
 				let ty = event.touches[0].pageY
 
@@ -193,40 +193,40 @@ class FirstPersonControls {
 				this.mouse.x = tx
 				this.mouse.y = ty
 
-				let {x,y} = this.relativeCenter(tx,ty)
+				let { x, y } = this.relativeCenter(tx, ty)
 
-				this.startDrag(x,y)
+				this.startDrag(x, y)
 			}
 
 		};
 
-		this.onFingerUp = function ( event ) {
+		this.onFingerUp = function (event) {
 
 			touchPoints--
 
-			if( touchPoints === 0 ) this.endDrag()
+			if (touchPoints === 0) this.endDrag()
 
 		};
 
-		this.onFingerMove = function ( event ) {
+		this.onFingerMove = function (event) {
 
 			let touches = event.touches
 
 			let tx = touches[0].pageX
 			let ty = touches[0].pageY
 
-			this.mouse.x = tx 
+			this.mouse.x = tx
 			this.mouse.y = ty
 
-			let {x,y} = this.relativeCenter(tx,ty)
+			let { x, y } = this.relativeCenter(tx, ty)
 
-			this.drag(x,y)
+			this.drag(x, y)
 
 		};
 
-		this.onKeyDown = function ( event ) {
+		this.onKeyDown = function (event) {
 
-			switch ( event.code ) {
+			switch (event.code) {
 
 				case 'ArrowUp':
 				case 'KeyW': this.moveForward = true; break;
@@ -252,9 +252,9 @@ class FirstPersonControls {
 
 		};
 
-		this.onKeyUp = function ( event ) {
+		this.onKeyUp = function (event) {
 
-			switch ( event.code ) {
+			switch (event.code) {
 
 				case 'ArrowUp':
 				case 'KeyW': this.moveForward = false; break;
@@ -276,21 +276,21 @@ class FirstPersonControls {
 
 		};
 
-		this.lookAt = function ( x, y, z ) {
+		this.lookAt = function (x, y, z) {
 
-			if ( x.isVector3 ) {
+			if (x.isVector3) {
 
-				_target.copy( x );
+				_target.copy(x);
 
 			} else {
 
-				_target.set( x, y, z );
+				_target.set(x, y, z);
 
 			}
 
-			this.object.lookAt( _target );
+			this.object.lookAt(_target);
 
-			setOrientation( this );
+			setOrientation(this);
 
 			return this;
 
@@ -298,7 +298,7 @@ class FirstPersonControls {
 
 		this.postUpdate = function () {
 
-			if(this.resetCycle) {
+			if (this.resetCycle) {
 				this.cycle = 0
 				this.resetCycle = false
 			}
@@ -306,7 +306,7 @@ class FirstPersonControls {
 			this.mouseDownThisFrame = false
 			this.mouseUpThisFrame = false
 
-			if (this.cycle !== 0){
+			if (this.cycle !== 0) {
 				this.resetCycle = true
 			}
 
@@ -316,16 +316,16 @@ class FirstPersonControls {
 
 			const targetPosition = new Vector3();
 
-			return function update( delta ) {
+			return function update(delta) {
 
-				if ( this.enabled === false ) return;
+				if (this.enabled === false) return;
 
-				if ( this.heightSpeed ) {
+				if (this.heightSpeed) {
 
-					const y = MathUtils.clamp( this.object.position.y, this.heightMin, this.heightMax );
+					const y = MathUtils.clamp(this.object.position.y, this.heightMin, this.heightMax);
 					const heightDelta = y - this.heightMin;
 
-					this.autoSpeedFactor = delta * ( heightDelta * this.heightCoef );
+					this.autoSpeedFactor = delta * (heightDelta * this.heightCoef);
 
 				} else {
 
@@ -336,16 +336,15 @@ class FirstPersonControls {
 				// logToPanel(touchPoints)
 
 				// handle touch controls
-				if( this.mobile ){
+				if (this.mobile) {
 
-					if(touchPoints === 2){
+					if (touchPoints === 2) {
 						this.moveForward = true
 						this.moveBackward = false
-						console.log('👆')
-					} else if(touchPoints === 3){
+					} else if (touchPoints === 3) {
 						this.moveBackward = true
 						this.moveForward = false
-					} else if(touchPoints === 0){
+					} else if (touchPoints === 0) {
 						this.moveBackward = false
 						this.moveForward = false
 					}
@@ -354,82 +353,71 @@ class FirstPersonControls {
 
 
 				// increase accel if key continues to be held down.
-				if( this.moveForward || this.moveBackward || this.moveLeft || this.moveRight || this.moveUp || this.moveDown ){
+				if (this.moveForward || this.moveBackward || this.moveLeft || this.moveRight || this.moveUp || this.moveDown) {
 					this.accelMultiplier++
 				} else {
 					this.accelMultiplier--
-					if(this.accelMultiplier < 0) this.accelMultiplier = 0
+					if (this.accelMultiplier < 0) this.accelMultiplier = 0
 				}
 
 				let acc = this.accel// + this.accelMultiplier / 100
 
-				if( this.moveRight ){
+				if (this.moveRight) {
 					this.dx += acc
-				} else if( this.moveLeft ){
+				} else if (this.moveLeft) {
 					this.dx -= acc
 				}
 				else this.dx *= this.decel
-				if(Math.abs(this.dx) < this.minx) this.dx = 0
-				this.object.translateX( this.dx )
+				if (Math.abs(this.dx) < this.minx) this.dx = 0
+				this.object.translateX(this.dx)
 
-				if( this.moveUp ){
+				if (this.moveUp) {
 					this.dy += acc
-				} else if( this.moveDown ){
+				} else if (this.moveDown) {
 					this.dy -= acc
 				}
 				else this.dy *= this.decel
-				if(Math.abs(this.dy) < this.minx) this.dy = 0
-				this.object.translateY( this.dy )
+				if (Math.abs(this.dy) < this.minx) this.dy = 0
+				this.object.translateY(this.dy)
 
-				if( this.moveForward){
+				if (this.moveForward) {
 					this.dz -= acc
-				} else if( this.moveBackward ){
+				} else if (this.moveBackward) {
 					this.dz += acc
 				}
 				else this.dz *= this.decel
-				if(Math.abs(this.dz) < this.minx) this.dz = 0
-				this.object.translateZ( this.dz )
-
-				// console.log('accel',this.dz, this.dy, this.dx)
-
-				// if ( this.moveForward || ( this.autoForward && ! this.moveBackward ) ) this.object.translateZ( - ( actualMoveSpeed + this.autoSpeedFactor ) );
-				// if ( this.moveBackward ) this.object.translateZ( actualMoveSpeed );
-
-				// if ( this.moveLeft ) this.object.translateX( - actualMoveSpeed );
-				// if ( this.moveRight ) this.object.translateX( actualMoveSpeed );
-
-				// if ( this.moveUp ) this.object.translateY( actualMoveSpeed );
-				// if ( this.moveDown ) this.object.translateY( - actualMoveSpeed );
+				if (Math.abs(this.dz) < this.minx) this.dz = 0
+				this.object.translateZ(this.dz)
 
 				let actualLookSpeed = delta * this.lookSpeed;
 
 				let verticalLookRatio = 1;
 
-				if ( this.constrainVertical ) {
+				if (this.constrainVertical) {
 
-					verticalLookRatio = Math.PI / ( this.verticalMax - this.verticalMin );
+					verticalLookRatio = Math.PI / (this.verticalMax - this.verticalMin);
 
 				}
 
-					lon -= this.mouseXdelta * this.deltaScalar * actualLookSpeed;
-					if ( this.lookVertical ) lat -= this.mouseYdelta * this.deltaScalar * actualLookSpeed * verticalLookRatio;
+				lon -= this.mouseXdelta * this.deltaScalar * actualLookSpeed;
+				if (this.lookVertical) lat -= this.mouseYdelta * this.deltaScalar * actualLookSpeed * verticalLookRatio;
 
-					lat = Math.max( - 85, Math.min( 85, lat ) );
+				lat = Math.max(- 85, Math.min(85, lat));
 
-					let phi = MathUtils.degToRad( 90 - lat );
-					const theta = MathUtils.degToRad( lon );
+				let phi = MathUtils.degToRad(90 - lat);
+				const theta = MathUtils.degToRad(lon);
 
-					if ( this.constrainVertical ) {
+				if (this.constrainVertical) {
 
-						phi = MathUtils.mapLinear( phi, 0, Math.PI, this.verticalMin, this.verticalMax );
+					phi = MathUtils.mapLinear(phi, 0, Math.PI, this.verticalMin, this.verticalMax);
 
-					}
+				}
 
-					const position = this.object.position;
+				const position = this.object.position;
 
-					targetPosition.setFromSphericalCoords( 1, phi, theta ).add( position );
+				targetPosition.setFromSphericalCoords(1, phi, theta).add(position);
 
-					this.object.lookAt( targetPosition );
+				this.object.lookAt(targetPosition);
 
 			};
 
@@ -437,62 +425,62 @@ class FirstPersonControls {
 
 		this.dispose = function () {
 
-		this.domElement.removeEventListener( 'contextmenu', contextmenu );
-		this.domElement.removeEventListener( 'mousedown', _onMouseDown );
-		this.domElement.removeEventListener( 'mousemove', _onMouseMove );
-		this.domElement.removeEventListener( 'mouseup', _onMouseUp );
+			this.domElement.removeEventListener('contextmenu', contextmenu);
+			this.domElement.removeEventListener('mousedown', _onMouseDown);
+			this.domElement.removeEventListener('mousemove', _onMouseMove);
+			this.domElement.removeEventListener('mouseup', _onMouseUp);
 
-		this.domElement.removeEventListener( 'touchstart', _onFingerDown );
-		this.domElement.removeEventListener( 'touchmove', _onFingerMove );
-		this.domElement.removeEventListener( 'touchend', _onFingerUp );
+			this.domElement.removeEventListener('touchstart', _onFingerDown);
+			this.domElement.removeEventListener('touchmove', _onFingerMove);
+			this.domElement.removeEventListener('touchend', _onFingerUp);
 
-			window.removeEventListener( 'keydown', _onKeyDown );
-			window.removeEventListener( 'keyup', _onKeyUp );
+			window.removeEventListener('keydown', _onKeyDown);
+			window.removeEventListener('keyup', _onKeyUp);
 
 		};
 
-		const _onMouseMove = this.onMouseMove.bind( this );
-		const _onMouseDown = this.onMouseDown.bind( this );
-		const _onMouseUp = this.onMouseUp.bind( this );
-		const _onFingerMove = this.onFingerMove.bind( this );
-		const _onFingerDown = this.onFingerDown.bind( this );
-		const _onFingerUp = this.onFingerUp.bind( this );
-		const _onKeyDown = this.onKeyDown.bind( this );
-		const _onKeyUp = this.onKeyUp.bind( this );
+		const _onMouseMove = this.onMouseMove.bind(this);
+		const _onMouseDown = this.onMouseDown.bind(this);
+		const _onMouseUp = this.onMouseUp.bind(this);
+		const _onFingerMove = this.onFingerMove.bind(this);
+		const _onFingerDown = this.onFingerDown.bind(this);
+		const _onFingerUp = this.onFingerUp.bind(this);
+		const _onKeyDown = this.onKeyDown.bind(this);
+		const _onKeyUp = this.onKeyUp.bind(this);
 
-		this.domElement.addEventListener( 'contextmenu', contextmenu );
-		this.domElement.addEventListener( 'mousedown', _onMouseDown );
-		this.domElement.addEventListener( 'mousemove', _onMouseMove );
-		this.domElement.addEventListener( 'mouseup', _onMouseUp );
+		this.domElement.addEventListener('contextmenu', contextmenu);
+		this.domElement.addEventListener('mousedown', _onMouseDown);
+		this.domElement.addEventListener('mousemove', _onMouseMove);
+		this.domElement.addEventListener('mouseup', _onMouseUp);
 
-		this.domElement.addEventListener( 'touchstart', _onFingerDown );
-		this.domElement.addEventListener( 'touchmove', _onFingerMove );
-		this.domElement.addEventListener( 'touchend', _onFingerUp );
+		this.domElement.addEventListener('touchstart', _onFingerDown);
+		this.domElement.addEventListener('touchmove', _onFingerMove);
+		this.domElement.addEventListener('touchend', _onFingerUp);
 
-		window.addEventListener( 'keydown', _onKeyDown );
-		window.addEventListener( 'keyup', _onKeyUp );
+		window.addEventListener('keydown', _onKeyDown);
+		window.addEventListener('keyup', _onKeyUp);
 
-		function setOrientation( controls ) {
+		function setOrientation(controls) {
 
 			const quaternion = controls.object.quaternion;
 
-			_lookDirection.set( 0, 0, - 1 ).applyQuaternion( quaternion );
-			_spherical.setFromVector3( _lookDirection );
+			_lookDirection.set(0, 0, - 1).applyQuaternion(quaternion);
+			_spherical.setFromVector3(_lookDirection);
 
-			lat = 90 - MathUtils.radToDeg( _spherical.phi );
-			lon = MathUtils.radToDeg( _spherical.theta );
+			lat = 90 - MathUtils.radToDeg(_spherical.phi);
+			lon = MathUtils.radToDeg(_spherical.theta);
 
 		}
 
 		this.handleResize();
 
-		setOrientation( this );
+		setOrientation(this);
 
 	}
 
 }
 
-function contextmenu( event ) {
+function contextmenu(event) {
 
 	event.preventDefault();
 

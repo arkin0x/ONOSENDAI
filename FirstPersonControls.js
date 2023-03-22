@@ -112,7 +112,6 @@ class FirstPersonControls {
 				x: x - this.viewHalfX,
 				y: y - this.viewHalfY,
 			}
-			logToPanel(`${xy.x}, ${xy.y}`)
 			return xy
 		}
 
@@ -183,16 +182,16 @@ class FirstPersonControls {
 
 			touchPoints++
 
-			let tx = event.touches[0].pageX
-			let ty = event.touches[0].pageY
-
-			// report mouse for external use
-			this.mouse.x = tx
-			this.mouse.y = ty
-
-			let {x,y} = this.relativeCenter(tx,ty)
-
 			if( touchPoints === 1 ){
+				let tx = event.touches[0].pageX
+				let ty = event.touches[0].pageY
+
+				// report mouse for external use
+				this.mouse.x = tx
+				this.mouse.y = ty
+
+				let {x,y} = this.relativeCenter(tx,ty)
+
 				this.startDrag(x,y)
 			}
 
@@ -207,21 +206,25 @@ class FirstPersonControls {
 
 		this.onFingerMove = function ( event ) {
 
-			let touches = event.changedTouches
-			let avgx = 0
-			let avgy = 0
-			for(let i = 0; i < touches.length; i++){
-				avgx += touches[i].pageX
-				avgy += touches[i].pageY
-			}
-			avgx /= touches.length
-			avgy /= touches.length
+			console.log(event)
 
-			// TODO refactor the next 6 lines with new startDrag/drag/endDrag paradigm.
-			this.mouse.x = avgx
-			this.mouse.y = avgy
+			let touches = event.touches
+			// let avgx = 0
+			// let avgy = 0
+			// for(let i = 0; i < touches.length; i++){
+			// 	avgx += touches[i].pageX
+			// 	avgy += touches[i].pageY
+			// }
+			// avgx /= touches.length
+			// avgy /= touches.length
 
-			let {x,y} = this.relativeCenter(avgx,avgy)
+			let tx = touches[0].pageX
+			let ty = touches[0].pageY
+
+			this.mouse.x = tx 
+			this.mouse.y = ty
+
+			let {x,y} = this.relativeCenter(tx,ty)
 
 			this.drag(x,y)
 
@@ -335,6 +338,8 @@ class FirstPersonControls {
 					this.autoSpeedFactor = 0.0;
 
 				}
+
+				logToPanel(touchPoints)
 
 				// handle touch controls
 				if(touchPoints === 2){

@@ -104,13 +104,13 @@ Text-to-Speech APIs built into modern browsers could be used to turn nostr event
 - [x] Acceleration-based controls to handle large distances
 - [x] Visualize speed
 - [x] Show current coordinates
+- [x] Mobile: 2x touch to accelerate
+- [x] Mobile: 3x touch to reverse
+- [x] Persist bookmarked events (localStorage)
 - [ ] Cross-browser testing and fixes
 - [ ] Mobile: scroll event content by touch
 - [ ] Mobile: gyroscope controls to look (but keep drag-to-look controls)
-- [ ] Mobile: 2x touch to accelerate
-- [ ] Mobile: 3x touch to reverse
 - [ ] Note access history panel
-- [ ] Persist bookmarked events (localStorage)
 - [ ] Persist read events (simhash + id only) so you can skip over them
 - [ ] Address `pubkeys` directly
 - [ ] Zap visualization for `kind 1`
@@ -120,6 +120,7 @@ Text-to-Speech APIs built into modern browsers could be used to turn nostr event
 - [ ] Load `kind 10333` geometry
 - [ ] Add a marker to nearby notes so they are easier to track; marker should hug edge of screen if the note is nearby but not in frustum
 - [ ] NIP-26 for sign-in
+- [ ] speech-to-text-to-speech communication
 - [ ] Publish kind 1 notes from ONOSENDAI
 - [ ] Search/filter notes by string
 - [ ] Locate note by entering Event ID
@@ -130,7 +131,7 @@ Text-to-Speech APIs built into modern browsers could be used to turn nostr event
 
 ## Support FOSS You Believe In ⚡
 
-If you'd like to support ONOSENDAI development, you can zap me at arkinox@getalby.com or become a sponsor. Get in touch with me on [nostr](https://snort.social/p/npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w), npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
+If you'd like to support ONOSENDAI development, you can contribute at our [geyser.fund](https://geyser.fund/project/onosendai) zap me at arkinox@getalby.com or become a sponsor. Get in touch with me on [nostr](https://snort.social/p/npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w), npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
 
 Join the official ONOSENDAI Telegram: [https://t.me/ONOSENDAITECH](https://t.me/ONOSENDAITECH)
 

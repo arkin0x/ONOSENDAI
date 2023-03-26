@@ -6,8 +6,9 @@ import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMate
 import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
-
 import purify from 'dompurify'
+import urlRegex from 'url-regex'
+const urlRegx = urlRegex()
 
 // we downscale the coordinates:
 // 2^85 - 2^71 = 2^14 (16384)
@@ -659,12 +660,10 @@ function showThread(event){
 
 function augUIModal(event,mesh) {
     let content = event.content
-    const urlMatcher = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g
-    if (urlMatcher.test(content)) {
-        const urls = content.match(urlMatcher)
+    if (urlRegx.test(content)) {
+        const urls = content.match(urlRegx)
         for (let u of urls) if (u && u.startsWith('https')) content = content.replace(u, `<a target="_blank" href="${u}" rel="noopener noreferrer">${u}</a>`);
     }
-    console.log(purify)
     const safeContent = purify.sanitize(content,{
         ADD_ATTR: ['target'],
     })

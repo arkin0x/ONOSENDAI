@@ -7,7 +7,7 @@ import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
 
-import { wrapText } from './wraptext'
+import purify from 'dompurify'
 
 // we downscale the coordinates:
 // 2^85 - 2^71 = 2^14 (16384)
@@ -662,11 +662,15 @@ function augUIModal(event,mesh) {
     const urlMatcher = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g
     if (urlMatcher.test(content)) {
         const urls = content.match(urlMatcher)
-        var temp = content;
-        for (let u of urls) if (u && u.startsWith('https')) temp = temp.replace(u, "<a target='_blank' href='" + u + "'>" + u + "</a>");
-        content = temp
+        for (let u of urls) if (u && u.startsWith('https')) content = content.replace(u, `<a target="_blank" href="${u}" rel="noopener noreferrer">${u}</a>`);
     }
-    let message = `event:${event.id}\n\n${content}\n\npubkey:${event.pubkey.trim()}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
+    console.log(purify)
+    const safeContent = purify.sanitize(content,{
+        ADD_ATTR: ['target'],
+    })
+    const safeId = purify.sanitize(event.id)
+    const safePubkey = purify.sanitize(event.pubkey.trim())
+    const message = `event:${safeId}\n\n${safeContent}\n\npubkey:${safePubkey}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
     teardownAugUIModal()
     modal = document.createElement('div')
     modal.classList.add('dom-ui')
@@ -680,7 +684,7 @@ function augUIModal(event,mesh) {
     modalMessage.addEventListener('wheel',function(e){
         // mousewheel scrolling without a scrollbar for modal
         let scrollSpeed = 30
-        let currentScroll = parseInt(e.target.dataset.scroll) || 0
+        let currentScroll = parseInt(modalMessage.dataset.scroll) || 0
         let scrollDirection = Math.sign(e.deltaY) * scrollSpeed
         let newScroll = currentScroll-scrollDirection
         let buffer = 100 //pixel buffer so we can see the whole message
@@ -690,13 +694,13 @@ function augUIModal(event,mesh) {
         
         // don't allow us to completely past the content (too far)
         let parent = document.getElementById('aug-modal')
-        if (parent.clientHeight - newScroll > e.target.clientHeight + buffer ) return;
+        if (parent.clientHeight - newScroll > modalMessage.clientHeight + buffer ) return;
 
         // update
-        e.target.setAttribute('data-scroll',newScroll)
-        e.target.style.transform = `translateY(${newScroll}px)`
+        modalMessage.setAttribute('data-scroll',newScroll)
+        modalMessage.style.transform = `translateY(${newScroll}px)`
         return false;
-    })
+    },{capture: true})
     modal.appendChild(modalMessage)
     let modalClose = document.createElement('div')
     modalClose.id = 'modal-close'

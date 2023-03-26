@@ -658,14 +658,15 @@ function showThread(event){
 }
 
 function augUIModal(event,mesh) {
+    let content = event.content
     const urlMatcher = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g
-    if (urlMatcher.test(event.content)) {
-        const urls = event.content.match(urlMatcher)
-        var temp = event.content;
+    if (urlMatcher.test(content)) {
+        const urls = content.match(urlMatcher)
+        var temp = content;
         for (let u of urls) if (u && u.startsWith('https')) temp = temp.replace(u, "<a target='_blank' href='" + u + "'>" + u + "</a>");
-        event.content = temp
+        content = temp
     }
-    let message = `event:${event.id}\n\n${event.content}\n\npubkey:${event.pubkey.trim()}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
+    let message = `event:${event.id}\n\n${content}\n\npubkey:${event.pubkey.trim()}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
     teardownAugUIModal()
     modal = document.createElement('div')
     modal.classList.add('dom-ui')

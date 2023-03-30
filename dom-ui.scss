@@ -178,3 +178,10 @@ $z-desktop: 0px;
     width: 12vw;
   }
 }
+
+a {
+  color: #06a4a4;
+  &:visited, &:hover, &:active {
+    color: #06a4a4aa;
+  }
+}

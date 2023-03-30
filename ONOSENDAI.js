@@ -659,10 +659,15 @@ function showThread(event){
 }
 
 function augUIModal(event,mesh) {
-    let content = event.content
+    let content = event.content;
     if (urlRegx.test(content)) {
-        const urls = content.match(urlRegx)
-        for (let u of urls) if (u && u.startsWith('https')) content = content.replace(u, `<a target="_blank" href="${u}" rel="noopener noreferrer">${u}</a>`);
+        content = content.replace(urlRegx, (matchedUrl) => {
+            if (matchedUrl && matchedUrl.startsWith('https')) {
+                return `<a target="_blank" href="${matchedUrl}" rel="noopener noreferrer">${matchedUrl}</a>`;
+            } else {
+                return matchedUrl;
+            }
+        });
     }
     const id = event.id
     const pub = event.pubkey.trim()

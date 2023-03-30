@@ -14,8 +14,10 @@
   },
   "dependencies": {
     "augmented-ui": "^2.0.0",
+    "dompurify": "^3.0.1",
     "nostr-tools": "^1.6.0",
-    "three": "^0.150.0"
+    "three": "^0.150.0",
+    "url-regex": "^5.0.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",

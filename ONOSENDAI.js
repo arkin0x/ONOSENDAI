@@ -664,12 +664,9 @@ function augUIModal(event,mesh) {
         const urls = content.match(urlRegx)
         for (let u of urls) if (u && u.startsWith('https')) content = content.replace(u, `<a target="_blank" href="${u}" rel="noopener noreferrer">${u}</a>`);
     }
-    const safeContent = purify.sanitize(content,{
-        ADD_ATTR: ['target'],
-    })
-    const safeId = purify.sanitize(event.id)
-    const safePubkey = purify.sanitize(event.pubkey.trim())
-    const message = `event:${safeId}\n\n${safeContent}\n\npubkey:${safePubkey}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
+    const id = event.id
+    const pub = event.pubkey.trim()
+    const unsafeMessage = `event:${id}\n\n${content}\n\npubkey:${pub}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
     teardownAugUIModal()
     modal = document.createElement('div')
     modal.classList.add('dom-ui')
@@ -679,7 +676,9 @@ function augUIModal(event,mesh) {
     app.appendChild(modal)
     modalMessage = document.createElement('div')
     modalMessage.classList.add('message')
-    modalMessage.innerHTML = message
+    modalMessage.innerHTML = purify.sanitize(unsafeMessage,{
+        ADD_ATTR: ['target'],
+    })
     modalMessage.addEventListener('wheel',function(e){
         // mousewheel scrolling without a scrollbar for modal
         let scrollSpeed = 30

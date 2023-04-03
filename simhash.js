@@ -169,3 +169,50 @@ export const DOWNSCALE = (2n**32n)
 export const downscale = (arrayOfBigInts, scale = DOWNSCALE) => {
   return arrayOfBigInts.map(BN => Number(BN / scale))
 }
+
+function hashToHex(byteArray){
+    let hexString = [...byteArray].reduce((acc, val) => acc + val.toString(16).padStart(2, '0'), '');
+    return hexString
+}
+
+export function pow(difficulty) {
+  let startTime = +new Date
+  let nonce = 0;
+  let hash = '';
+  let callstack = 0
+  function newHash() {
+    hash = hashToHex(sha256('' + (nonce + (+new Date))),16);
+    nonce++;
+    return hash;
+  }
+  let target = '0'.repeat(difficulty);
+
+  function computeHash() {
+    let hashResult = newHash();
+    // console.log(`Current Hash: ${hashResult}`);
+
+    if (hashResult.startsWith(target)) {
+      console.log(`Target Difficulty of ${difficulty} Reached: ${hashResult}\nTook ${nonce-1} tries over ${((+new Date)-startTime)} msec\n`);
+      return;
+    }
+
+    if( callstack > 50 ){
+      callstack = 0
+      setTimeout(computeHash, 0);
+    } else {
+      callstack++
+      computeHash()
+    }
+  }
+
+  computeHash();
+}
+
+// window.pow = pow
+
+// pow(1); // Example usage: target difficulty of 5
+
+
+// window.sha256 = sha256
+// window.binaryArrayToHex = binaryArrayToHex
+// window.Uint8ArrayToRadix = Uint8ArrayToRadix

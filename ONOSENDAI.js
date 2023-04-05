@@ -47,6 +47,9 @@ let app, modal, modalMessage, ccs
 let intersected
 let selected
 
+// indexeddb
+let db
+
 /**
  * pubkeys = {<pubkey>: [<event id>, ...], ...}
  * * not persisted
@@ -810,3 +813,84 @@ export const visualizeNote = (event,coords) => {
 export function getEventsList() {
     return Object.keys(loadedEvents).length
 }
+
+function getSector(x, y, z) {
+  const sectorSize = 4096
+  const halfSpaceSize = 2 ** 19 - 1
+  const numSectors = 256
+
+  const xSector = Math.floor((x + halfSpaceSize) / sectorSize)
+  const ySector = Math.floor((y + halfSpaceSize) / sectorSize)
+  const zSector = Math.floor((z + halfSpaceSize) / sectorSize)
+
+  // Clamp the values to the range [0, 255]
+  const clampedX = Math.max(0, Math.min(xSector, numSectors - 1))
+  const clampedY = Math.max(0, Math.min(ySector, numSectors - 1))
+  const clampedZ = Math.max(0, Math.min(zSector, numSectors - 1))
+
+  return {
+    address:`${clampedX}-${clampedY}-${clampedZ}`,
+    x: clampedX,
+    y: clampedY,
+    z: clampedZ
+  }
+}
+
+export async function storeEventBySectorAddress(event) {
+  if (!db) {
+    await initializeDB();
+  }
+
+  const [x, y, z] = event.coords;
+  const sectorAddress = getSector(x, y, z);
+  const storeEvent = { ...event, sectorAddress };
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["events"], "readwrite");
+    const objectStore = transaction.objectStore("events");
+    const request = objectStore.put(storeEvent);
+
+    request.onsuccess = () => {
+      console.log(event.id, sectorAddress.address)
+      resolve();
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
+function initializeDB() {
+  return new Promise((resolve, reject) => {
+    const openRequest = indexedDB.open("NostrEventsDB", 2);
+
+    openRequest.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains("events")) {
+        const objectStore = db.createObjectStore("events", { keyPath: "id" });
+        objectStore.createIndex("sectorAddress", "sectorAddress", { unique: false });
+      }
+    };
+
+    openRequest.onsuccess = (event) => {
+      db = event.target.result;
+      resolve(db);
+    };
+
+    openRequest.onerror = (event) => {
+      reject(event.target.error);
+    };
+  });
+}
+
+
+// // Example usage:
+// const exampleEvent = {
+//   coords: [-100000, 0, 100000],
+//   // other event properties...
+// };
+
+// storeEventBySectorAddress(exampleEvent)
+//   .then(() => console.log("Event stored successfully"))
+//   .catch((error) => console.error("Error storing event:", error));

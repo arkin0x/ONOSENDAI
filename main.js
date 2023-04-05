@@ -1,8 +1,8 @@
 import './global.scss'
 import './ONOSENDAI'
 import { NIC } from './NIC'
-import { simhash, embed_number_3d, downscale } from './simhash'
-import { WORLD_DOWNSCALE , getEventsList, visualizeNote } from './ONOSENDAI'
+import { simhash, embedNumber3D, downscale } from './simhash'
+import { WORLD_DOWNSCALE , getEventsList, storeEventBySectorAddress, visualizeNote } from './ONOSENDAI'
 import scrollLock from './scroll-lock.mjs'
 
 document.body.classList.add('no-warn')
@@ -15,14 +15,16 @@ const sub_notes = pool.sub(relays,[{kinds:[1]}])
 
 sub_notes.on('event', event => {
  let semanticHash = simhash(event.content)
- let semanticCoordinate = embed_number_3d(semanticHash.hash)
+ let semanticCoordinate = embedNumber3D(semanticHash.hash)
  let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE) 
- event.simhash = semanticHash.hash
- visualizeNote(event,downscaledSemanticCoordinate)
+ event.simhash = semanticHash.hex
+ event.coords = downscaledSemanticCoordinate
+ // visualizeNote(event,downscaledSemanticCoordinate)
+ storeEventBySectorAddress(event)
 
  // shutoff after 6000 events downloaded
  // TODO this is not actually our solution to performance but for now it works.
- if( getEventsList().length >= 2000 ) sub_notes.unsub()
+ // if( getEventsList().length >= 2000 ) sub_notes.unsub()
 })
 
 // Listen for zaps

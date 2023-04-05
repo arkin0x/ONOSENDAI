@@ -291,12 +291,12 @@ function init(){
     scene.add( environmentLightRight );
 
     // gridhelper
-    const grid = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
-    grid.position.set(0,-(WORLD_SCALE)/4,0)
+    const grid = new THREE.GridHelper(WORLD_SCALE,100,colors.LOGO_PURPLE,colors.LOGO_PURPLE)
+    grid.position.set(0,-(WORLD_SCALE)/2,0)
     scene.add(grid)
 
-    const gridtop = new THREE.GridHelper(WORLD_SCALE/2,100,colors.LOGO_BLUE,colors.LOGO_BLUE)
-    gridtop.position.set(0,(WORLD_SCALE)/4,0)
+    const gridtop = new THREE.GridHelper(WORLD_SCALE,100,colors.LOGO_BLUE,colors.LOGO_BLUE)
+    gridtop.position.set(0,(WORLD_SCALE)/2,0)
     scene.add(gridtop)
 
     //sun
@@ -369,7 +369,9 @@ function render() {
     // minimap
     lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
 
-    ccs.innerHTML= `<span>[</span>${Math.floor(camera.position.x)}x<span>][</span>${Math.floor(camera.position.y)}y<span>][</span>${Math.floor(camera.position.z)}z<span>]</span>`
+    let sector = getSector(camera.position.x,camera.position.y,camera.position.z)
+
+    ccs.innerHTML= `<span>[</span>${Math.floor(camera.position.x)}x<span>][</span>${Math.floor(camera.position.y)}y<span>][</span>${Math.floor(camera.position.z)}z<span>]</span><br/><span>Sector ${sector.address}</span>`
 
     // must manually clear to do multiple cameras
     renderer.clear()
@@ -851,11 +853,12 @@ export async function storeEventBySectorAddress(event) {
     const request = objectStore.put(storeEvent);
 
     request.onsuccess = () => {
-      console.log(event.id, sectorAddress.address)
+      console.log('event cached')
       resolve();
     };
 
     request.onerror = () => {
+      console.log('event hit cache')
       reject(request.error);
     };
   });

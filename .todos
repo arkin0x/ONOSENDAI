@@ -32,8 +32,8 @@
   {
     "id": 6,
     "desc": "canvas text is performant but the word breaks are ugly. maybe try a 3d sprite and see if it's much worse.",
-    "status": "pending",
-    "modified": "2023-03-02 17:53:00.2898148 -0600 CST"
+    "status": "done",
+    "modified": "2023-04-04 21:37:26.9631993 -0500 CDT"
   },
   {
     "id": 7,
@@ -46,5 +46,23 @@
     "desc": "prevent right click - this may fix mobile touchend not firing if you hold down",
     "status": "pending",
     "modified": "2023-03-19 23:57:35.0102962 -0500 CDT"
+  },
+  {
+    "id": 9,
+    "desc": "need to review embedNumber3D as it is likely not providing the correct output (something about 84 might be wrong). The coordinates end up being smaller than expected.",
+    "status": "pending",
+    "modified": "2023-04-04 21:38:44.7262469 -0500 CDT"
+  },
+  {
+    "id": 10,
+    "desc": "if I change how onosendai calculates coordinates, I should invalidate the indexeddb cache somehow. One idea is hashing events before they get written (including simhash and coords/sector) and hashing before writing; if the hashes are different then I should replace the event. However, there are probably better ways to do this, like simply adding a database migration.",
+    "status": "pending",
+    "modified": "2023-04-04 21:58:37.7030762 -0500 CDT"
+  },
+  {
+    "id": 11,
+    "desc": "draw sector boundaries and adjacent sector boundaries",
+    "status": "pending",
+    "modified": "2023-04-04 22:01:21.9289189 -0500 CDT"
   }
 ]

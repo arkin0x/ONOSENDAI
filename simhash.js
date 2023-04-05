@@ -65,10 +65,10 @@ function computeFeatureVector(input) {
  * @returns 
  */
 export function embedNumber3D(bits) {
-  const mask84 = (1n << 84n) - 1n;
-  const x = ((bits.slice(0, 85).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
-  const y = ((bits.slice(85, 170).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
-  const z = ((bits.slice(170, 255).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask84) - (1n << 83n));
+  const mask85 = (1n << 85n) - 1n;
+  const x = ((bits.slice(0, 85).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask85) - (1n << 84n));
+  const y = ((bits.slice(85, 170).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask85) - (1n << 84n));
+  const z = ((bits.slice(170, 255).reduce((acc, bit, i) => acc + BigInt(bit) * (1n << (84n - BigInt(i))), 0n) & mask85) - (1n << 84n));
   return [BigInt(x), BigInt(y), BigInt(z)];
 }
 

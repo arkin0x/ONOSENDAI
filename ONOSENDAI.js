@@ -2,12 +2,13 @@ import * as THREE from 'three'
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 import threeFont from 'three/examples/fonts/helvetiker_regular.typeface.json?url'
 import { FirstPersonControls } from './FirstPersonControls'
-import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial } from './materials'
+import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial, sectorLineMaterial } from './materials'
 import { noteGeometry } from './geometry'
 import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
 import purify from 'dompurify'
 import urlRegex from 'url-regex'
+import { sectorLineData } from './sectorLineData'
 const urlRegx = urlRegex()
 
 // we downscale the coordinates:
@@ -39,6 +40,8 @@ let reticle
 let bookmarkButton, bookmarkButtonPosition, bookmarkLerp
 let logo
 let speedLines, speedUI, speedLineCount, speedLinesNearDist, speedLinesFarDist
+
+let sectorLines, sectorUI, lastSector
 
 let frame
 
@@ -100,6 +103,8 @@ function init(){
 
     frame = 0n
 
+    lastSector = {address:false} // compared in animate()
+
     w = window.innerWidth
     h = window.innerHeight
 
@@ -115,7 +120,6 @@ function init(){
 
     camera = new THREE.PerspectiveCamera(45, w/h,0.1,10000000)
     camera.position.set(0,0,0)
-        // camera.rotation.set(-Math.PI/180*30,0,0)
     scene = new THREE.Scene()
     // scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.75)
     scene.fog = new THREE.Fog( "#160621", 1, WORLD_SCALE*0.33)
@@ -234,6 +238,16 @@ function init(){
     app = document.querySelector('#app')
     app.appendChild(ccs)
 
+    // setup sector lines
+    sectorLines = []
+    sectorUI = new THREE.Group()
+    for (const l in sectorLineData) {
+       let a = new THREE.Vector3().fromArray(sectorLineData[l][0])
+       let b = new THREE.Vector3().fromArray(sectorLineData[l][1])
+       sectorLines.push( createLine(a,b,sectorUI,sectorLineMaterial) )
+    }
+    scene.add(sectorUI)
+
     // setup speed lines
     speedLines = []
     speedLinesNearDist = 8, 
@@ -269,7 +283,7 @@ function init(){
         // b.x += i/10 + xoffset
         b.x = xoffset
         b.z += Math.abs(i/1)
-        createLine(t,b)
+        speedLines.push(createLine(t,b,speedUI))
     }
     camera.add(speedUI)
 
@@ -364,20 +378,81 @@ function render() {
     animateSelectedNote()
     animateSpeedLines(controls)
 
-    controls.postUpdate()
-
     // minimap
     lilgrid?.setRotationFromQuaternion( camera.getWorldQuaternion( new THREE.Quaternion() ).invert() )
 
     let sector = getSector(camera.position.x,camera.position.y,camera.position.z)
+    if(sector.address !== lastSector.address){
+        updateSector(sector)
+    }
+    lastSector = sector
 
     ccs.innerHTML= `<span>[</span>${Math.floor(camera.position.x)}x<span>][</span>${Math.floor(camera.position.y)}y<span>][</span>${Math.floor(camera.position.z)}z<span>]</span><br/><span>Sector ${sector.address}</span>`
+
+    animateSector(sector,controls)
+
+    controls.postUpdate()
 
     // must manually clear to do multiple cameras
     renderer.clear()
     renderer.render(scene, camera)
     renderer.clearDepth()
     renderer.render(hudscene, hudcamera)
+}
+
+/**
+ * Draw the box around the current sector you are in.
+ * @param {object} sector 
+ */
+function animateSector(sector, controls){
+    let { dx, dy, dz } = controls
+    let speed = (Math.abs(dx) + Math.abs(dy) + Math.abs(dz))/3
+    sectorLines.forEach( c => {
+        console.log(c.material.opacity)
+        c.material.opacity =  Math.max(0, Math.min(1, 1- (speed - 30) / 10)) 
+    })
+    let center = getSectorCenter(sector)
+    let centerVec3 = new THREE.Vector3().fromArray(center)
+    sectorUI.position.copy(centerVec3)
+}
+
+function getSectorCenter(sector){
+    const sectorSize = 4096
+    let x = sector.x * sectorSize - 2**19
+    let y = sector.y * sectorSize - 2**19
+    let z = sector.z * sectorSize - 2**19
+    return [x,y,z]
+}
+
+function getAdjacentSectors(x, y, z) {
+  const adjacentSectors = [];
+
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue; // skip the current sector
+
+        const newX = x + dx;
+        const newY = y + dy;
+        const newZ = z + dz;
+
+        if (newX >= 0 && newX <= 255 && newY >= 0 && newY <= 255 && newZ >= 0 && newZ <= 255) {
+          adjacentSectors.push(`${newX}-${newY}-${newZ}`);
+        }
+      }
+    }
+  }
+  return adjacentSectors;
+}
+
+/**
+ * Update which sectors events should be loaded from. The current sector and the 26 adjacent sectors are valid; the rest should begin unloading events. This should be done gradually to avoid CPU spikes.
+ * @param {object} sector 
+ */
+function updateSector(sector){
+    let loadSectors = [sector.address, ...getAdjacentSectors(sector.x,sector.y,sector.z)]
+
+    // console.log(loadSectors)
 }
 
 function onWindowResize() {
@@ -634,14 +709,14 @@ function connectNotes(a,b,mat = connectToRoot){
  * @param {THREE.Vector3} a - mesh 1 position
  * @param {THREE.Vector3} b - mesh 2 position
  */
-function createLine(a,b,mat = speedLineMaterial){
+function createLine(a,b,group,mat = speedLineMaterial){
     let points = []
     points.push(a)
     points.push(b)
     let lineGeom = new THREE.BufferGeometry().setFromPoints(points)
     let line = new THREE.Line(lineGeom, mat)
-    speedUI.add(line) 
-    speedLines.push(line)
+    if(group) group.add(line) 
+    return line
 }
 
 
@@ -818,7 +893,7 @@ export function getEventsList() {
 
 function getSector(x, y, z) {
   const sectorSize = 4096
-  const halfSpaceSize = 2 ** 19 - 1
+  const halfSpaceSize = 2 ** 19
   const numSectors = 256
 
   const xSector = Math.floor((x + halfSpaceSize) / sectorSize)

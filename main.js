@@ -13,6 +13,8 @@ const { pool, relays } = NIC()
 // listen for notes
 const sub_notes = pool.sub(relays,[{kinds:[1]}])
 
+let count = 0
+
 sub_notes.on('event', event => {
  let semanticHash = simhash(event.content)
  let semanticCoordinate = embedNumber3D(semanticHash.hash)
@@ -24,7 +26,7 @@ sub_notes.on('event', event => {
 
  // shutoff after 6000 events downloaded
  // TODO this is not actually our solution to performance but for now it works.
- // if( getEventsList().length >= 2000 ) sub_notes.unsub()
+ if( count >= 100 ) sub_notes.unsub()
 })
 
 // Listen for zaps

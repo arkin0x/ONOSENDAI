@@ -408,7 +408,6 @@ function animateSector(sector, controls){
     let { dx, dy, dz } = controls
     let speed = (Math.abs(dx) + Math.abs(dy) + Math.abs(dz))/3
     sectorLines.forEach( c => {
-        console.log(c.material.opacity)
         c.material.opacity =  Math.max(0, Math.min(1, 1- (speed - 30) / 10)) 
     })
     let center = getSectorCenter(sector)
@@ -445,14 +444,33 @@ function getAdjacentSectors(x, y, z) {
   return adjacentSectors;
 }
 
+let promises = 0
 /**
- * Update which sectors events should be loaded from. The current sector and the 26 adjacent sectors are valid; the rest should begin unloading events. This should be done gradually to avoid CPU spikes.
+ * Update which sectors events should be loaded from. The current sector and the 26 adjacent sectors are valid (9 * 3); the rest should begin unloading events. This should be done gradually to avoid CPU spikes.
  * @param {object} sector 
  */
 function updateSector(sector){
     let loadSectors = [sector.address, ...getAdjacentSectors(sector.x,sector.y,sector.z)]
 
-    // console.log(loadSectors)
+    loadSectors.forEach( s => {
+        (async () => {
+            const sectorAddress = s
+            let lastEventId;
+
+            while (true) {
+                const { events, lastEventId: newLastEventId } = await getEventsBySectorAddress(sectorAddress, lastEventId);
+                promises++
+                if (events.length === 0) {
+                    // console.log("No more events");
+                    break;
+                }
+
+                events.forEach( e => visualizeNote(e,e.coords))
+
+                lastEventId = newLastEventId;
+            }
+        })();
+    })
 }
 
 function onWindowResize() {
@@ -919,7 +937,8 @@ export async function storeEventBySectorAddress(event) {
   }
 
   const [x, y, z] = event.coords;
-  const sectorAddress = getSector(x, y, z);
+  const sector = getSector(x, y, z);
+  const sectorAddress = sector.address
   const storeEvent = { ...event, sectorAddress };
 
   return new Promise((resolve, reject) => {
@@ -939,9 +958,62 @@ export async function storeEventBySectorAddress(event) {
   });
 }
 
+async function getEventsBySectorAddress(sectorAddress, lastEventId, count = 10) {
+  if (!db) {
+    await initializeDB();
+  }
+
+  console.log(sectorAddress)
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["events"], "readonly");
+    const objectStore = transaction.objectStore("events");
+    const index = objectStore.index("sectorAddress");
+
+    // Use a key range to filter events by sectorAddress
+    const keyRange = IDBKeyRange.only(sectorAddress);
+
+    const request = index.openCursor(keyRange, "next");
+    const events = [];
+    let lastSeenId;
+
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        // If we have already seen the lastEventId, start collecting events
+        if (lastSeenId === lastEventId || lastEventId === undefined) {
+          events.push(cursor.value);
+
+          // If we have collected the desired number of events, resolve the promise
+          if (events.length >= count) {
+            resolve({ events, lastEventId: cursor.primaryKey });
+            console.log(events)
+            return;
+          }
+        } else if (cursor.primaryKey === lastEventId) {
+          // We have found the lastEventId, set the flag
+          lastSeenId = lastEventId;
+        }
+
+        // Move to the next event in the index
+        cursor.continue();
+      } else {
+        // No more events in the index, resolve with the events found
+        resolve({ events, lastEventId: lastSeenId });
+      }
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
+window.gebsa = getEventsBySectorAddress
+
 function initializeDB() {
   return new Promise((resolve, reject) => {
-    const openRequest = indexedDB.open("NostrEventsDB", 2);
+    const openRequest = indexedDB.open("NostrEventsDB", 3);
 
     openRequest.onupgradeneeded = (event) => {
       const db = event.target.result;

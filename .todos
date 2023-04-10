@@ -3,7 +3,7 @@
     "id": 1,
     "desc": "try out TextGeometry https://threejs.org/docs/#examples/en/geometries/TextGeometry",
     "status": "done",
-    "modified": "2023-03-02 08:26:43.8458415 -0600 CST"
+    "modified": "2023-04-09 19:34:07.0046873 -0500 CDT"
   },
   {
     "id": 2,
@@ -44,14 +44,14 @@
   {
     "id": 8,
     "desc": "prevent right click - this may fix mobile touchend not firing if you hold down",
-    "status": "pending",
-    "modified": "2023-03-19 23:57:35.0102962 -0500 CDT"
+    "status": "done",
+    "modified": "2023-04-09 19:34:18.7941938 -0500 CDT"
   },
   {
     "id": 9,
     "desc": "need to review embedNumber3D as it is likely not providing the correct output (something about 84 might be wrong). The coordinates end up being smaller than expected.",
-    "status": "pending",
-    "modified": "2023-04-04 21:38:44.7262469 -0500 CDT"
+    "status": "done",
+    "modified": "2023-04-09 23:23:34.5571782 -0500 CDT"
   },
   {
     "id": 10,
@@ -62,7 +62,13 @@
   {
     "id": 11,
     "desc": "draw sector boundaries and adjacent sector boundaries",
+    "status": "done",
+    "modified": "2023-04-09 19:34:05.5910105 -0500 CDT"
+  },
+  {
+    "id": 12,
+    "desc": "add explicit check for duplicate in indexeddb PUT. The amount of duplicates must be extremely high because I am getting about 30 events per minute with the new CPU throttling system which is very slow.",
     "status": "pending",
-    "modified": "2023-04-04 22:01:21.9289189 -0500 CDT"
+    "modified": "2023-04-09 23:52:23.823063 -0500 CDT"
   }
 ]

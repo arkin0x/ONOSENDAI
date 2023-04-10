@@ -1,35 +1,11 @@
 import './global.scss'
 import './ONOSENDAI'
-import { NIC } from './NIC'
-import { simhash, embedNumber3D, downscale } from './simhash'
-import { WORLD_DOWNSCALE , getEventsList, storeEventBySectorAddress, visualizeNote } from './ONOSENDAI'
 import scrollLock from './scroll-lock.mjs'
 
 document.body.classList.add('no-warn')
 
-// Initialize network interface controller
-const { pool, relays } = NIC()
 
-// listen for notes
-const sub_notes = pool.sub(relays,[{kinds:[1]}])
-
-let count = 0
-
-sub_notes.on('event', event => {
- let semanticHash = simhash(event.content)
- let semanticCoordinate = embedNumber3D(semanticHash.hash)
- let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE) 
- event.simhash = semanticHash.hex
- event.coords = downscaledSemanticCoordinate
- // visualizeNote(event,downscaledSemanticCoordinate)
- storeEventBySectorAddress(event)
-
- // shutoff after 6000 events downloaded
- // TODO this is not actually our solution to performance but for now it works.
- if( count >= 100 ) sub_notes.unsub()
-})
-
-// Listen for zaps
+// ten for zaps
 // const sub_zaps = pool.sub(relays,[{kinds:[9735]}])
 
 // populate cyberspace

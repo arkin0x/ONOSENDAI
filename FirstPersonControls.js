@@ -316,9 +316,12 @@ class FirstPersonControls {
 
 			const targetPosition = new Vector3();
 
-			return function update(delta) {
+			return function update(delta, pointer) {
 
 				if (this.enabled === false) return;
+
+    pointer.x = this.mouse.x
+    pointer.y = this.mouse.y
 
 				if (this.heightSpeed) {
 

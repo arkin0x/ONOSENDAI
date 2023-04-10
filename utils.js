@@ -9,3 +9,16 @@ export function sha256ToBitArray(hash) {
   }
   return bitArray;
 }
+
+/**
+ * Call timer() at the beginning of a function and save the return value;
+ * Call the return value() at the end of a function to get the elapsed time
+ * that the function took.
+ * @returns elapsed time in milliseconds (float)
+ */
+export function timer() {
+  let start = performance.now()
+  return function(){
+    return performance.now() - start
+  }
+}

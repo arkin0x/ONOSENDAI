@@ -68,7 +68,19 @@
   {
     "id": 12,
     "desc": "add explicit check for duplicate in indexeddb PUT. The amount of duplicates must be extremely high because I am getting about 30 events per minute with the new CPU throttling system which is very slow.",
+    "status": "done",
+    "modified": "2023-04-12 21:36:20.2777682 -0500 CDT"
+  },
+  {
+    "id": 13,
+    "desc": "explore possibly using background fetch/sync/service workers to get events instead",
+    "status": "done",
+    "modified": "2023-04-12 21:36:18.7990521 -0500 CDT"
+  },
+  {
+    "id": 14,
+    "desc": "new processInterval() seems to work but it went back 5 years instead of 1 month. check into that. 1531107128 timestamp after 674 empty intervals/hours",
     "status": "pending",
-    "modified": "2023-04-09 23:52:23.823063 -0500 CDT"
+    "modified": "2023-04-12 21:37:20.2030843 -0500 CDT"
   }
 ]

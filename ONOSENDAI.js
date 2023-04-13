@@ -1,6 +1,5 @@
+import { performScanTasks } from './ENGINE'
 import * as THREE from 'three'
-import { NIC } from './NIC'
-import { simhash, embedNumber3D, downscale } from './simhash'
 import { FirstPersonControls } from './FirstPersonControls'
 import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial, sectorLineMaterial } from './materials'
 import { noteGeometry } from './geometry'
@@ -8,44 +7,8 @@ import reticleImage from './reticle-mouse.png'
 import logoImage from './logo-cropped.png'
 import purify from 'dompurify'
 import urlRegex from 'url-regex'
-import { timer } from './utils'
 import { sectorLineData } from './sectorLineData'
 const urlRegx = urlRegex()
-
-// Initialize network interface controller
-const { pool, relays } = NIC()
-
-let subs = 0
-
-// listen for notes
-function requestKind1Events(quantity=Infinity){
-    if(subs > 0) return
-    let sub = pool.sub(relays, [{ kinds: [1] }])
-    subs++
-    let received = 0
-    sub.on('event',function (event) {
-        let stopTimer = timer()
-        received++
-        let semanticHash = simhash(event.content)
-        let semanticCoordinate = embedNumber3D(semanticHash.hash)
-        let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE)
-        event.simhash = semanticHash.hex
-        event.coords = downscaledSemanticCoordinate
-        // visualizeNote(event,downscaledSemanticCoordinate)
-        storeEventBySectorAddress(event)
-
-        if (received >= quantity){
-            sub.unsub()
-            subs--
-        }
-        asyncTime += stopTimer()
-    })
-    // return function to unlisten
-    return function(){
-        sub.unsub()
-        subs--
-    }
-}
 
 // we downscale the coordinates:
 // 2^85 - 2^71 = 2^14 (16384)
@@ -87,9 +50,6 @@ let app, modal, modalMessage, ccs
 let intersected
 let selected
 
-// indexeddb
-let db
-
 /**
  * pubkeys = {<pubkey>: [<event id>, ...], ...}
  * * not persisted
@@ -130,11 +90,8 @@ let lilgrid
 
 let sector, loadZone
 
-let scanTasks, taskTimings, timeBudget, asyncTime
-
-const TASK_TIMING_REDUCE = 1
-
 let startTimeStamp
+let timeBudget 
 
 init()
 animate()
@@ -385,34 +342,6 @@ function init() {
 
     sector = getSector(camera.position.x, camera.position.y, camera.position.z)
     loadZone = [sector.address, ...getAdjacentSectors(sector.x, sector.y, sector.z)]
-
-    /**
-        prioritize synchronous tasks first because we have budget for them this frame
-        'visualizeNote', // sync
-        'visualizePresence', // sync
-        'requestNote',// async cost
-        'loadNote', // async cost
-        'requestPresence', // async cost
-        'loadPresence', // async cost
-    */
-    scanTasks = 'visualizeNote,visualizePresence,requestPresence,loadPresence,requestNote,loadNote'
-
-    taskTimings = {
-        scan: {},
-        burst: {
-            castVortex: 0,
-            castBubble: 0,
-            castDerezz: 0,
-            generateArmor: 0,
-            generateStealth: 0,
-            respondPOWChallenge: 0,
-        },
-        drive: {
-            generatePOW: [0, 0, 0], // Array for different leading zeroes, 0 index is 1 leading zero.
-        },
-    }
-
-    scanTasks.split(',').forEach(t => taskTimings.scan[t] = 0 )
 }
 
 function animate() {
@@ -424,7 +353,6 @@ function render() {
     frame++
 
     delta = clock.getDelta()
-    // console.log(asyncTime)
     // console.log('requestNote',taskTimings.scan.requestNote)
 
     // set baseline for frame time used by necessary functions
@@ -450,7 +378,7 @@ function render() {
     let elapsed = performance.now()
 
     // process optional funtions
-    timeBudget = MAX_FRAME_TIME - (elapsed - time) - asyncTime
+    timeBudget = MAX_FRAME_TIME - (elapsed - time)
 
     // need UI to manage these values
     const SCAN_BUDGET = 0.40
@@ -470,81 +398,8 @@ function render() {
     renderer.render(scene, camera)
     renderer.clearDepth()
     renderer.render(hudscene, hudcamera)
-
-    asyncTime = 0
 }
 
-
-/**
- * requestNote - set up subscription to relays, request kind1 events. Async callback will store the received note in IndexedDB.
- * loadNote - query IndexedDB for a note within the current loadZone (current sector and 26 adjacent sectors). Async callback will load that note into a loaded array in memory.
- * visualizeNote - convert notes loaded into memory array into meshes in the scene.
- */
-
-/**
- * Cycle through and perform each scan task until the scan task time budget is expended.
- * @param {Number} budget milliseconds (can be decimal)
- */
-function performScanTasks(budget) {
-    console.log('scan budget',budget)
-    // redeclare this each iteration so that we start with the same prioritized tasks each frame.
-    let tasks = scanTasks.split(',')
-
-    // we detect if a task did not get its time recorded; this indicates
-    // that the task was not run. This may have been for 2 reasons:
-    // we simply ran out of time, or the previous time the task was run
-    // it took an unusually long amount of time and now the estimate is too
-    // high! If a task time is not recorded by the end of this function, we
-    // reduce the task time slightly so that anomalous task timings don't stay
-    // permanent and stop running altogether.
-    let taskTimeRecorded = {}
-    tasks.forEach(t => taskTimeRecorded[t] = false )
-
-    // take current time
-    let start = performance.now()
-
-    // loop through tasks as long as this function stays under our time budget;
-    // previous timings on tasks inform as to whether we can fit it into what is left of our time budget each iteration.
-    while (performance.now() - start + taskTimings.scan[tasks[0]] < budget) {
-        const task = tasks[0]
-        switch (task) {
-            case 'requestNote':
-                requestKind1Events(200)
-                break;
-            case 'loadNote':
-                // TODO
-                break;
-            case 'visualizeNote':
-                // TODO
-                break;
-            case 'requestPresence':
-                // TODO
-                break;
-            case 'loadPresence':
-                // TODO
-                break;
-            case 'visualizePresence':
-                // TODO
-                break;
-            default:
-                break;
-        }
-
-        // record timing
-        taskTimings.scan[task] = performance.now() - start
-        taskTimeRecorded[task] = true
-
-        // loop to next task
-        tasks.push(tasks.shift())
-    }
-
-    // adjust downward any task timings of tasks that did not get run
-    for(const t in taskTimeRecorded){
-        if (taskTimeRecorded[t]) continue
-        taskTimings.scan[t] = Math.max(0, taskTimings.scan[t] - TASK_TIMING_REDUCE)
-        // if(t === 'requestNote') console.log('requestNote 👇')
-    }
-}
 
 function drawUI() {
     updateRaycast(controls)
@@ -1003,7 +858,7 @@ export function getEventsList() {
     return Object.keys(loadedEvents).length
 }
 
-function getSector(x, y, z) {
+export function getSector(x, y, z) {
     const sectorSize = 4096
     const halfSpaceSize = 2 ** 19
     const numSectors = 256
@@ -1024,107 +879,6 @@ function getSector(x, y, z) {
         z: clampedZ
     }
 }
-
-export async function storeEventBySectorAddress(event) {
-    if (!db) {
-        await initializeDB();
-    }
-
-    const [x, y, z] = event.coords;
-    const sector = getSector(x, y, z);
-    const sectorAddress = sector.address
-    const storeEvent = { ...event, sectorAddress };
-
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(["events"], "readwrite");
-        const objectStore = transaction.objectStore("events");
-        const request = objectStore.put(storeEvent);
-
-        request.onsuccess = () => {
-            console.log('event cached')
-            resolve();
-        };
-
-        request.onerror = () => {
-            reject(request.error);
-        };
-    });
-}
-
-async function getEventsBySectorAddress(sectorAddress, lastEventId, count = 10) {
-    if (!db) {
-        await initializeDB();
-    }
-
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(["events"], "readonly");
-        const objectStore = transaction.objectStore("events");
-        const index = objectStore.index("sectorAddress");
-
-        // Use a key range to filter events by sectorAddress
-        const keyRange = IDBKeyRange.only(sectorAddress);
-
-        const request = index.openCursor(keyRange, "next");
-        const events = [];
-        let lastSeenId;
-
-        request.onsuccess = (event) => {
-            const cursor = event.target.result;
-            if (cursor) {
-                // If we have already seen the lastEventId, start collecting events
-                if (lastSeenId === lastEventId || lastEventId === undefined) {
-                    events.push(cursor.value);
-
-                    // If we have collected the desired number of events, resolve the promise
-                    if (events.length >= count) {
-                        resolve({ events, lastEventId: cursor.primaryKey });
-                        return;
-                    }
-                } else if (cursor.primaryKey === lastEventId) {
-                    // We have found the lastEventId, set the flag
-                    lastSeenId = lastEventId;
-                }
-
-                // Move to the next event in the index
-                cursor.continue();
-            } else {
-                // No more events in the index, resolve with the events found
-                resolve({ events, lastEventId: lastSeenId });
-            }
-        };
-
-        request.onerror = () => {
-            reject(request.error);
-        };
-    });
-}
-
-window.gebsa = getEventsBySectorAddress
-window.db = db
-
-function initializeDB() {
-    return new Promise((resolve, reject) => {
-        const openRequest = indexedDB.open("NostrEventsDB", 3);
-
-        openRequest.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains("events")) {
-                const objectStore = db.createObjectStore("events", { keyPath: "id" });
-                objectStore.createIndex("sectorAddress", "sectorAddress", { unique: false });
-            }
-        };
-
-        openRequest.onsuccess = (event) => {
-            db = event.target.result;
-            resolve(db);
-        };
-
-        openRequest.onerror = (event) => {
-            reject(event.target.error);
-        };
-    });
-}
-
 
 // // Example usage:
 // const exampleEvent = {

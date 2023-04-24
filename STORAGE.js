@@ -3,52 +3,72 @@ import { getSector } from "./ONOSENDAI";
 // storage
 let db
 
-export async function getEventsBySectorAddress(sectorAddress, lastEventId, count = 10) {
- if (!db) {
-  await initializeDB();
- }
+// getEventsBySectorAddress now takes an extra parameter 'offset'
+export async function getEventsBySectorAddress(sectorAddress, offset = 0, count = 10) {
+  if (!db) {
+    await initializeDB();
+  }
 
- return new Promise((resolve, reject) => {
-  const transaction = db.transaction(["events","kind0Events"], "readonly");
-  const objectStore = transaction.objectStore("events");
-  const index = objectStore.index("sectorAddress");
+  return new Promise(async (resolve, reject) => {
+    const kind1Transaction = db.transaction(["events"], "readonly");
+    const kind1ObjectStore = kind1Transaction.objectStore("events");
+    const kind1Index = kind1ObjectStore.index("sectorAddress");
 
-  // Use a key range to filter events by sectorAddress
-  const keyRange = IDBKeyRange.only(sectorAddress);
+    const kind0Transaction = db.transaction(["kind0Events"], "readonly");
+    const kind0ObjectStore = kind0Transaction.objectStore("kind0Events");
+    const kind0Index = kind0ObjectStore.index("sectorAddress");
 
-  const request = index.openCursor(keyRange, "next");
-  const events = [];
-  let lastSeenId;
+    // Use a key range to filter events by sectorAddress
+    const keyRange = IDBKeyRange.only(sectorAddress);
 
-  request.onsuccess = (event) => {
-   const cursor = event.target.result;
-   if (cursor) {
-    // If we have already seen the lastEventId, start collecting events
-    if (lastSeenId === lastEventId || lastEventId === undefined) {
-     events.push(cursor.value);
+    const kind1Events = await getAllEventsFromIndex(kind1Index, keyRange, offset, count);
+    const kind0Events = await getAllEventsFromIndex(kind0Index, keyRange, offset, count);
 
-     // If we have collected the desired number of events, resolve the promise
-     if (events.length >= count) {
-      resolve({ events, lastEventId: cursor.primaryKey });
-      return;
-     }
-    } else if (cursor.primaryKey === lastEventId) {
-     // We have found the lastEventId, set the flag
-     lastSeenId = lastEventId;
-    }
+    const events = kind1Events.events.concat(kind0Events.events);
 
-    // Move to the next event in the index
-    cursor.continue();
-   } else {
-    // No more events in the index, resolve with the events found
-    resolve({ events, lastEventId: lastSeenId });
-   }
-  };
+    const hasMoreEvents = kind1Events.hasMoreEvents || kind0Events.hasMoreEvents;
 
-  request.onerror = () => {
-   reject(request.error);
-  };
- });
+    resolve({ events, hasMoreEvents });
+  });
+}
+
+async function getAllEventsFromIndex(index, keyRange, offset, count) {
+  return new Promise((resolve, reject) => {
+    const request = index.openCursor(keyRange, "next");
+    const events = [];
+    let skipped = 0;
+    let hasMoreEvents = false;
+
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        if (skipped < offset) {
+          // Skip events until we reach the desired offset
+          skipped++;
+        } else {
+          // Start collecting events
+          events.push(cursor.value);
+
+          // If we have collected the desired number of events, resolve the promise
+          if (events.length >= count) {
+            hasMoreEvents = true;
+            resolve({ events, hasMoreEvents });
+            return;
+          }
+        }
+
+        // Move to the next event in the index
+        cursor.continue();
+      } else {
+        // No more events in the index, resolve with the events found
+        resolve({ events, hasMoreEvents });
+      }
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
 }
 
 function initializeDB() {

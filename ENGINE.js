@@ -3,7 +3,7 @@
 import { kind0, kind1 } from './NIC'
 import { storeEventBySectorAddress } from './STORAGE'
 import { simhash, embedNumber3D, downscale } from './simhash'
-import { WORLD_DOWNSCALE } from './ONOSENDAI'
+import { scanFunction, pulseFunction, driftFunction, sector, WORLD_DOWNSCALE } from './ONOSENDAI'
 
 let taskTimings
 
@@ -16,11 +16,11 @@ const validNIP05Regex = /^([a-zA-Z0-9\-_.]+)@([a-zA-Z0-9\-_.]+)$/
  * process: calculate, gather additional data, fetch requests, store in DB
  * visualize: load into world if contained within current sector/adjacent 
  */
-const scanTasks = 'process0,process1,visualize0,visualize1'
+const scanTasks = 'process0,process1,visualize'
 
 taskTimings = {
  scan: {},
- burst: {
+ pulse: {
   castVortex: 0,
   castBubble: 0,
   castDerezz: 0,
@@ -28,7 +28,7 @@ taskTimings = {
   generateStealth: 0,
   respondPOWChallenge: 0,
  },
- drive: {
+ drift: {
   generatePOW: [0, 0, 0], // Array for different leading zeroes, 0 index is 1 leading zero.
  },
 }
@@ -39,7 +39,7 @@ scanTasks.split(',').forEach(t => taskTimings.scan[t] = 0)
  * Cycle through and perform each scan task until the scan task time budget is expended.
  * @param {Number} budget milliseconds (can be decimal)
  */
-export function performScanTasks(budget) {
+function performScanTasks(budget) {
  // console.log('scan budget',budget)
  // redeclare this each iteration so that we start with the same prioritized tasks each frame.
  let tasks = scanTasks.split(',')
@@ -63,17 +63,14 @@ export function performScanTasks(budget) {
   const task = tasks[0]
   switch (task) {
    case 'process0':
-    // TODO
     process0()
     break
    case 'process1':
     process1()
     break
-   case 'visualize0':
+   case 'visualize':
     // TODO
-    break
-   case 'visualize1':
-    // TODO
+    visualizeEvents()
     break
    default:
     break
@@ -94,6 +91,9 @@ export function performScanTasks(budget) {
   // if(t === 'requestNote') console.log('requestNote 👇')
  }
 }
+
+// expose performScanTasks to ONOSENDAI.js without circular dependency (importing in ONOSENDAI.js while import from ONOSENDAI.js here)
+scanFunction = performScanTasks
 
 /**
  * calculate simhash/sector and store in database
@@ -158,4 +158,31 @@ function getSimhashAndCoordinatesForEvent(event,contentToSimhash){
  let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE)
  event.simhash = semanticHash.hex
  event.coords = downscaledSemanticCoordinate
+}
+
+/**
+ * Update which sectors events should be loaded from. The current sector and the 26 adjacent sectors are valid (9 * 3); the rest should begin unloading events. This should be done gradually to avoid CPU spikes.
+ * @param {object} sector 
+ */
+function visualizeEvents() {
+  let loadSectors = [sector.address, ...getAdjacentSectors(sector.x, sector.y, sector.z)];
+
+  loadSectors.forEach((s) => {
+    (async () => {
+      const sectorAddress = s;
+      let offset = 0;
+
+      while (true) {
+        const { events, hasMoreEvents } = await getEventsBySectorAddress(sectorAddress, offset);
+        if (!hasMoreEvents) {
+          // console.log("No more events");
+          break;
+        }
+
+        events.forEach((e) => visualizeNote(e, e.coords));
+
+        offset += events.length;
+      }
+    })();
+  });
 }

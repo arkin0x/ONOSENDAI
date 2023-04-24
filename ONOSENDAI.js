@@ -1,4 +1,3 @@
-import { performScanTasks } from './ENGINE'
 import * as THREE from 'three'
 import { FirstPersonControls } from './FirstPersonControls'
 import { colors, whiteMaterial, expandedCubeMaterial, expandedBookmarkedCubeMaterial, connectToRoot, visitedMaterial, sunMaterial, connectToReplies, bookmarkedMaterial, speedLineMaterial, sectorLineMaterial } from './materials'
@@ -41,7 +40,7 @@ let bookmarkButton, bookmarkButtonPosition, bookmarkLerp
 let logo
 let speedLines, speedUI, speedLineCount, speedLinesNearDist, speedLinesFarDist
 
-let sectorLines, sectorUI, lastSector
+let sectorLines, sectorUI
 
 let frame
 
@@ -88,10 +87,14 @@ let nodeConnectors
 
 let lilgrid
 
-let sector, loadZone
+export let sector, lastSector
 
 let startTimeStamp
 let timeBudget 
+
+export let scanFunction
+export let pulseFunction
+export let driftFunction
 
 init()
 animate()
@@ -382,13 +385,23 @@ function render() {
 
     // need UI to manage these values
     const SCAN_BUDGET = 0.40
-    const BURST_BUDGET = 0.30
-    const DRIVE_BUDGET = 0.30
+    const PULSE_BUDGET = 0.30
+    const DRIFT_BUDGET = 0.30
 
-    if (SCAN_BUDGET * timeBudget > 0){
-         performScanTasks(SCAN_BUDGET * timeBudget)
+    if (scanFunction && SCAN_BUDGET * timeBudget > 0){
+         scanFunction(SCAN_BUDGET * timeBudget)
     } else {
         console.log('noscan budget')
+    }
+    if (pulseFunction && PULSE_BUDGET * timeBudget > 0){
+         pulseFunction(PULSE_BUDGET * timeBudget)
+    } else {
+        console.log('nopulse budget')
+    }
+    if (driftFunction && DRIFT_BUDGET * timeBudget > 0){
+         driftFunction(DRIFT_BUDGET * timeBudget)
+    } else {
+        console.log('nodrift budget')
     }
 
     // if (updateSectorNow) updateSector(SCAN_BUDGET * time_budget)
@@ -462,32 +475,6 @@ function getAdjacentSectors(x, y, z) {
     return adjacentSectors;
 }
 
-/**
- * Update which sectors events should be loaded from. The current sector and the 26 adjacent sectors are valid (9 * 3); the rest should begin unloading events. This should be done gradually to avoid CPU spikes.
- * @param {object} sector 
- */
-function updateSector() {
-    let loadSectors = [sector.address, ...getAdjacentSectors(sector.x, sector.y, sector.z)]
-
-    loadSectors.forEach(s => {
-        (async () => {
-            const sectorAddress = s
-            let lastEventId;
-
-            while (true) {
-                const { events, lastEventId: newLastEventId } = await getEventsBySectorAddress(sectorAddress, lastEventId);
-                if (events.length === 0) {
-                    // console.log("No more events");
-                    break;
-                }
-
-                events.forEach(e => visualizeNote(e, e.coords))
-
-                lastEventId = newLastEventId;
-            }
-        })();
-    })
-}
 
 function onWindowResize() {
 

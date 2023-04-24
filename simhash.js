@@ -176,22 +176,26 @@ function hashToHex(byteArray){
 }
 
 export function pow(difficulty) {
+  let rand = Math.random()
   let startTime = +new Date
   let nonce = 0;
   let hash = '';
   let callstack = 0
   function newHash() {
-    hash = hashToHex(sha256('' + (nonce + (+new Date))),16);
+    hash = hashToHex(sha256('' + rand + nonce ),16);
     nonce++;
     return hash;
   }
-  let target = '0'.repeat(difficulty);
+  let target = '0'.repeat(difficulty) + '1'; // the ending 1 forces us to get an exact match.
+
+  // console.log(target)
 
   function computeHash() {
     let hashResult = newHash();
     // console.log(`Current Hash: ${hashResult}`);
+    let binaryResult = hashResult.split('').map(hex => parseInt(hex, 16).toString(2).padStart(4, '0')).join('');
 
-    if (hashResult.startsWith(target)) {
+    if (binaryResult.startsWith(target)) {
       console.log(`Target Difficulty of ${difficulty} Reached: ${hashResult}\nTook ${nonce-1} tries over ${((+new Date)-startTime)} msec\n`);
       return;
     }

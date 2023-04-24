@@ -82,5 +82,17 @@
     "desc": "new processInterval() seems to work but it went back 5 years instead of 1 month. check into that. 1531107128 timestamp after 674 empty intervals/hours",
     "status": "pending",
     "modified": "2023-04-12 21:37:20.2030843 -0500 CDT"
+  },
+  {
+    "id": 15,
+    "desc": "update getEventsBySectorAddress to handle both object stores",
+    "status": "pending",
+    "modified": "2023-04-13 07:06:53.0207922 -0500 CDT"
+  },
+  {
+    "id": 16,
+    "desc": "reimplement updateSector() in ONOSENDAI.js. visualize kind0",
+    "status": "pending",
+    "modified": "2023-04-13 07:07:18.8520024 -0500 CDT"
   }
 ]

@@ -8,6 +8,8 @@ import { WORLD_DOWNSCALE } from './ONOSENDAI'
 let taskTimings
 
 const TASK_TIMING_REDUCE = 1
+const validNIP05Regex = /^([a-zA-Z0-9\-_.]+)@([a-zA-Z0-9\-_.]+)$/
+
 
 /**
  * <verb><kind>
@@ -67,6 +69,12 @@ export function performScanTasks(budget) {
    case 'process1':
     process1()
     break
+   case 'visualize0':
+    // TODO
+    break
+   case 'visualize1':
+    // TODO
+    break
    default:
     break
   }
@@ -90,25 +98,64 @@ export function performScanTasks(budget) {
 /**
  * calculate simhash/sector and store in database
  */
-async function process0(){
+async function process0() {
  if (!kind0.length) return
  let event = kind0.shift()
- console.log(event)
- // let semanticHash = simhash(event.content)
- // let semanticCoordinate = embedNumber3D(semanticHash.hash)
- // let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE)
- // event.simhash = semanticHash.hex
- // event.coords = downscaledSemanticCoordinate
- // storeEventBySectorAddress(event)
+ verifyNIP05(event) // this handles simhashing & storing the event too, async
 }
 
-async function process1(){
+async function verifyNIP05(event){
+ const pubkey = event.pubkey
+ let profile, localPart, domain
+ try {
+  profile = JSON.parse(event.content)
+  // validate nip05
+  const match = profile?.nip05.match(validNIP05Regex);
+  if (!match) {
+    throw new Error('Invalid nip05 identifier');
+  }
+  localPart = match[1];
+  domain = match[2];
+
+  const response = await fetch(`https://${domain}/.well-known/nostr.json?name=${localPart}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch nostr.json: ${response.statusText}`);
+  }
+
+  const json = await response.json();
+  if (!json.hasOwnProperty('names')) {
+    throw new Error('nostr.json does not have the "names" property');
+  }
+
+  const names = json.names;
+  if (!names.hasOwnProperty(localPart) || names[localPart].toLowerCase() !== pubkey.toLowerCase()) {
+    throw new Error('Public key mismatch');
+  }
+
+  console.log(`Valid NIP-05 identifier for public key: ${pubkey}`);
+ } 
+ catch (e) {
+  // malformed profile, skip it.
+  return
+ }
+
+ // now we have a validated nip05
+ getSimhashAndCoordinatesForEvent(event,`${localPart}@${domain}`)
+ storeEventBySectorAddress(event)
+
+}
+
+async function process1() {
  if (!kind1.length) return
  let event = kind1.shift()
- let semanticHash = simhash(event.content)
+ getSimhashAndCoordinatesForEvent(event,event.content)
+ storeEventBySectorAddress(event)
+}
+
+function getSimhashAndCoordinatesForEvent(event,contentToSimhash){
+ let semanticHash = simhash(contentToSimhash)
  let semanticCoordinate = embedNumber3D(semanticHash.hash)
  let downscaledSemanticCoordinate = downscale(semanticCoordinate, WORLD_DOWNSCALE)
  event.simhash = semanticHash.hex
  event.coords = downscaledSemanticCoordinate
- storeEventBySectorAddress(event)
 }

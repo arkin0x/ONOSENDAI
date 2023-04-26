@@ -1,9 +1,9 @@
 # ONOSENDAI オノセンダイ
-A cyberspace client for the one true metaverse: [nostr](https://github.com/nostr-protocol/nostr)
+The reference metaverse client for the permissionless, decentralized, thermodynamic [cyberspace meta-protocol built on nostr](https://github.com/arkin0x/cyberspace)
 
 ![onosendai-pano](https://user-images.githubusercontent.com/99223753/223734919-ee5fc4d0-ee89-409c-a7c8-1848310bb92d.png)
 
-ONOSENDAI visualizes objects on the nostr protocol in an interactive 3D world referred to as 'cyberspace'.
+ONOSENDAI enables human agents to interact with the 3D extension of reality known as 'cyberspace'.
 
 Try it out at [https://onosendai.tech](https://onosendai.tech)
 
@@ -30,69 +30,34 @@ https://user-images.githubusercontent.com/99223753/223145715-31174a68-9bc5-4c06-
  - drag - look
  - tap - read
 
-*The ideal experience is currently desktop. There are fairly large bugs on iOS Safari.*
+*The ideal experience is currently desktop. There are bugs on iOS Safari.*
 
-# Concept: Semantic Coordinate System
+## Concepts and Explanations
 
-Each nostr note (`kind 1`) is assigned a 3D point in cyberspace based on the _meaning_ of its content.
+In our universe all actions require energy expenditure as entropy and all actions are permissionless; the only way to oppose an action in reality is to expend energy. Cyberspace is a meta-protocol on the permissionless nostr protocol, and all actions in cyberspace have a thermodynamic cost via proof-of-work. Therefore, cyberspace is a digital extension of reality because cyberspace shares those 2 fundamental properties with reality: it is permissionless and thermodynamic.
 
-This is done by simhashing the content. Simhash is different from normal hashing because small variations in the preimage yield small variations in the resulting hash. Two very similar preimages will yield two very similar hashes. Likewise, two very similar statements will yield two very similar coordinates.
+Short explanation of cyberspace as an extension of reality: [https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17](https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17)
 
-First, we create a 256-bit [simhash](http://matpalm.com/resemblance/simhash/) of the content: `simhash(content)`. The 256-bit simhash is embedded into 3 coordinates of 85 bits each with 1 bit unused. The coordinates are scaled down to fit within a coordinates system of `-2^53 + 1 <= x <= +2^53 - 1` so that it is compatible with JavaScript's Number primitive (and Three.js).
+In-depth explanation of cyberspace: [https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13](https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13)
 
-Other `kinds` may have their coordinates derived in other ways that are better suited to convey their meaning, such as simhashing event tags, pubkeys, timestamp, or using event ids and proof of work (see below).
-
-### Conclusion 🧠💭
-
-The Semantic Coordinate System is a 3D space where the vector of human ideas can be explored and quantified.
-
-Clusters of notes are like clusters of similar ideas, which is a great place to explore if you want a steady feed of interesting content about a topic.
-
-Lone notes in the distant void of cyberspace may represent entirely unique ideas that could be very valuable and rare.
-
-Addressing notes by _meaning_ in a _public_, _decentralized_, _visual_ space is a new way of exploring the wealth of human knowledge, and I hope that this leads to the discovery and generation of even more ideas for the benefit of mankind.
-
-> When I say the notes are addressed by meaning, I am referring to the loose relationship between the meaning > words > bytes > simhash > coordinates. There are potentially better algorithms for addressing similar content into tighter groups. Simhash, while much less entropic than a pure SHA256 address, still introduces a lot of randomness in how notes are distributed across cyberspace. However, keeping the algorithm simple and abstract prevents addressing problems, prevents bias, and prevents addressing from becoming essentially an opinionated search engine. The simhash algorithm is well worn, deterministic, and unbiased. There are other tools like keyword filters and web-of-trust to help users find related and relevant content as they explore. If you know of a simple, unbiased algorithm that would work better than simhash, please get in touch. I'm not an expert at this stuff. I'm just building.
-
-# Concept: Proof of Work for Localization of Constructs
-
-Perhaps moreso than any other digital medium in history, Cyberspace is well-suited for 3D interactive experiences. As such, placing 3D objects in Cyberspace is a self-evident necessity. Luckily, it can be done in a permissionless way.
-
-`Constructs` are nostr events of `kind 10333` that contain 3D geometry in a [common 3D format](https://github.com/mrdoob/three.js/tree/dev/examples/jsm/loaders) to be rendered by a cyberspace client (planned ONOSENDAI feature).
-
-Rather than placing 3D geometry in cyberspace by simhash (as raw geometry code is not very meaningful) the 3D coordinates of the `Construct` can be derived from the event id instead.
-
-Although different from [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md), proof of work can be utilized to mine the event ID hash so that the desired (approximate) coordinates can be achieved when the ID is embedded into 3D coordinates. This kind of mining will be more expensive as it requires more bits of the hash to match and each resulting hash to be transformed into coordinates to check the result.
-
-The precision of 3 85-bit coordinates is much more than necessary to display an object's position, especially when downscaling the coordinate space, so the least significant bits can be ignored when mining construct locations. However, a new NIP could treat least-significant-bit zeroes in each 85-bit coordinate as POW so that content filters can treat mined locations as more legitimate.
-
-Limiting the scale of Constructs is necessary so that they do not span (and spam) the entire metaverse, but rather take up a more reasonable amount of real estate. One idea is that a client could clip each construct to a bounding cube of a fixed size, or, POW size could increase the size of the bounding box as well.
-
-A Turing-incomplete language could be repurposed or developed to enable basic cyberspace-context scripting for `Constructs` to take them beyond decorations and give them more utility.
-
-### Conclusion 🧠💭
-
-This proof of work system for claiming real-estate in cyberspace provides similar benefits to Bitcoin's proof of work system. As long as there is consensus for construct location addressing in cyberspace, the proof of work directed toward mining a location for a construct has value, and therefore the real estate in cyberspace has value. This approach is superior to all other virtual real estate schemes that unnecessarily utilize blockchains, have arbitrary costs unduly influenced by market conditions, or are beholden to centralized brokers. In cyberspace, land is acquired by work, property is secured like bitcoin, and it all runs on nostr.
-
-# Concept: Planes & Extensibility
-
-Many types of data can be visualized in cyberspace. The goal with ONOSENDAI is to think outside the box for what a nostr client can do and maximize the usefulness of visualizing the nostr protocol, but other protocols such as bitcoin, IPV4/6, etc. could be visualized or incorporated in additional layers or `planes` that could be toggled on or off as the user desires.
-
-I am interested in applying all of the above concepts to meatspace as well, creating a cyberspace plane that can be experienced through augmented reality. I've already built the augmented reality client (nostr not integrated yet): https://yondar.me
-
-# Concept: Presence
-
-The idea of using [ephemeral events to publish one's presence](https://nips.be/p/160) could be used to **optionally** share your current position in cyberspace so that other users can visualize your movement and interact with you.
-
-Each pubkey can be embedded into a coordinate address (no simhash). This would be the `default` location for a pubkey in cyberspace. But if the pubkey publishes a presence event of their current cyberspace coordinate, then other users will see them at that place too.
-
-The presence event could contain vector information (speed + direction) so their movement could be approximated.
-
-Once ONOSENDAI implements DMs and Zaps, this foundation for representing a pubkey's movement and position in cyberspace can make cyberspace into a public commons where all manner of human activity can take place.
-
-Text-to-Speech APIs built into modern browsers could be used to turn nostr events into audible dialog. Public notes could be heard at a volume relative to their distance. This type of note may be a different `kind` or have some special indicator.
+arkinox video talk about ONOSENDAI and cyberspace: [https://youtu.be/6POq0eaW1J0](https://youtu.be/6POq0eaW1J0) (ignore the weird video spam at 3:20)
 
 ## Implementation 😅🛠
+
+### cyberspace meta-protocol [https://github.com/arkin0x/cyberspace](https://github.com/arkin0x/cyberspace)
+
+- [ ] Construct
+- [ ] Shards
+- [ ] Operators
+- [ ] Drift
+- [ ] Derezz
+- [ ] Armor
+- [ ] Vortex
+- [ ] Bubble
+- [ ] Stealth
+- [ ] Shout
+
+### client features
 
 - [x] Address `kind 1` events by simhash
 - [x] Flight/navigation controls
@@ -112,12 +77,8 @@ Text-to-Speech APIs built into modern browsers could be used to turn nostr event
 - [ ] Mobile: gyroscope controls to look (but keep drag-to-look controls)
 - [ ] Note access history panel
 - [ ] Persist read events (simhash + id only) so you can skip over them
-- [ ] Address `pubkeys` directly
 - [ ] Zap visualization for `kind 1`
-- [ ] Persist recently traveled routes and visualize them
-- [ ] Presence event changes pubkey's location
-- [ ] Address `kind 10333` events by event id
-- [ ] Load `kind 10333` geometry
+- [ ] Visualize traveled routes
 - [ ] Add a marker to nearby notes so they are easier to track; marker should hug edge of screen if the note is nearby but not in frustum
 - [ ] NIP-26 for sign-in
 - [ ] speech-to-text-to-speech communication
@@ -140,16 +101,16 @@ Other great ways to contribute:
 - pull requests
 - sharing ideas & expertise
 - bug reports
-- reading scifi
+- reading sci-fi
 - and telling your friends!
 
-## IYKYK 📖
+## Name
 
-If you don't know where the name ONOSENDAI comes from, then I beg you to please read "Neuromancer" by William Gibson.
+"ONOSENDAI" is the name of the device of Japanese manufacture that allows one to connect their mind to cyberspace in the foundational sci-fi book "Neuromancer" by William Gibson.
 
 # FAQ
 
-### Q: Cyberspace? Seriously? What is this all about?
+### Q: Cyberspace? Metaverse? Seriously? What is this all about?
 
 ### A: 
 

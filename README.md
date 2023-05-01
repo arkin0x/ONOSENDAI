@@ -104,6 +104,12 @@ Other great ways to contribute:
 - reading sci-fi
 - and telling your friends!
 
+Check out the cyberspace spec and contribute: https://github.com/arkin0x/cyberspace
+
+npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
+
+NIP-05 arkinox@arkinox.tech
+
 ## Name
 
 "ONOSENDAI" is the name of the device of Japanese manufacture that allows one to connect their mind to cyberspace in the foundational sci-fi book "Neuromancer" by William Gibson.

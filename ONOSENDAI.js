@@ -334,54 +334,23 @@ function init(){
     cycling = false
     
 
-  const welcomeMessage = `
-
-    Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work.
-
-ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at thr GitHub repo.
-
-
-
-Join the official telegram and follow development: https://t.me/ONOSENDAITECH
-
-
-
-Read more about cyberspace:
-
-https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17
-
-https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13
-
-https://telegra.ph/Movement-Chains-05-01
-
-
-
-Check out the cyberspace spec and contribute: https://github.com/arkin0x/cyberspace
-
-ONOSENDAI codebase on Github: https://github.com/arkin0x/ONOSENDAI
-
-
-
-Support the project:
-
-By looking awesome 😎 https://onosendai.gumroad.com/
-
-By donating at Geyser https://geyser.fund/project/onosendai
-
-
-
-Follow me on nostr:
-
-npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
-
-
-
-NIP-05 arkinox@arkinox.tech
-
-LN arkinox@getalby.com
-
-   
-
+  const welcomeMessage = `Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work. ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at thr GitHub repo.
+  Github: https://github.com/arkin0x/ONOSENDAI
+  Join the official telegram and follow development: https://t.me/ONOSENDAITECH
+  Read more about cyberspace:
+  https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17
+  https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13
+  https://telegra.ph/Movement-Chains-05-01
+  
+  Check out the cyberspace spec and contribute: https://github.com/arkin0x/cyberspace
+  Support the project:
+  By looking awesome 😎 https://onosendai.gumroad.com/
+  By donating at Geyser https://geyser.fund/project/onosendai
+  
+  Follow me on nostr:
+  npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
+  NIP-05 arkinox@arkinox.tech
+  LN arkinox@getalby.com
   `;
 
   openAugUIPanel(welcomeMessage);

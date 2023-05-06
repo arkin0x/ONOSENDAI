@@ -332,6 +332,53 @@ function init(){
     nodeConnectors = []
     connectedNodes = []
     cycling = false
+    
+
+  const welcomeMessage = `
+
+    <p>Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work.</p>
+
+    <p>ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at the GitHub repo.</p>
+
+    <p><strong>Join the official telegram and follow development:</strong> <a href="https://t.me/ONOSENDAITECH" target="_blank" rel="noopener noreferrer">https://t.me/ONOSENDAITECH</a></p>
+
+    <p><strong>Read more about cyberspace:</strong></p>
+
+    <ul>
+
+      <li><a href="https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17</a></li>
+
+      <li><a href="https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13</a></li>
+
+      <li><a href="https://telegra.ph/Movement-Chains-05-01" target="_blank" rel="noopener noreferrer">https://telegra.ph/Movement-Chains-05-01</a></li>
+
+    </ul>
+
+    <p><strong>Check out the cyberspace spec and contribute:</strong> <a href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noopener noreferrer">https://github.com/arkin0x/cyberspace</a></p>
+
+    <p><strong>ONOSENDAI codebase on Github:</strong> <a href="https://github.com/arkin0x/ONOSENDAI" target="_blank" rel="noopener noreferrer">https://github.com/arkin0x/ONOSENDAI</a></p>
+
+    <p><strong>Support the project:</strong></p>
+
+    <ul>
+
+      <li>By looking awesome 😎 <a href="https://onosendai.gumroad.com/" target="_blank" rel="noopener noreferrer">https://onosendai.gumroad.com/</a></li>
+
+      <li>By donating at Geyser <a href="https://geyser.fund/project/onosendai" target="_blank" rel="noopener noreferrer">https://geyser.fund/project/onosendai</a></li>
+
+    </ul>
+
+    <p><strong>Follow me on nostr:</strong></p>
+
+    <p>npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w</p>
+
+    <p><strong>NIP-05</strong> arkinox@arkinox.tech</p>
+
+    <p><strong>LN</strong> arkinox@getalby.com</p>
+
+  `;
+
+  openAugUIPanel(welcomeMessage);
 
 }
 

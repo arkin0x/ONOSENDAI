@@ -332,6 +332,12 @@ function init(){
     nodeConnectors = []
     connectedNodes = []
     cycling = false
+    
+const welcomeMessage = `Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work. ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at the GitHub repo.\n<a href="https://github.com/arkin0x/ONOSENDAI" target="_blank" rel="noopener noreferrer">Github: https://github.com/arkin0x/ONOSENDAI</a>\nJoin the official telegram and follow development: <a href="https://t.me/ONOSENDAITECH" target="_blank" rel="noopener noreferrer">https://t.me/ONOSENDAITECH</a>\nRead more about cyberspace:\n<a href="https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17</a>\n<a href="https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13</a>\n<a href="https://telegra.ph/Movement-Chains-05-01" target="_blank" rel="noopener noreferrer">https://telegra.ph/Movement-Chains-05-01</a>\n\nCheck out the cyberspace spec and contribute: <a href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noopener noreferrer">https://github.com/arkin0x/cyberspace</a>\nSupport the project:\nBy looking awesome 😎 <a href="https://onosendai.gumroad.com/" target="_blank" rel="noopener noreferrer">https://onosendai.gumroad.com/</a>\nBy donating at Geyser <a href="https://geyser.fund/project/onosendai" target="_blank" rel="noopener noreferrer">https://geyser.fund/project/onosendai</a>\n\nFollow me on nostr:\nnpub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w\nNIP-05 arkinox@arkinox.tech\nLN arkinox@getalby.com`;
+
+
+
+  openAugUIPanel(welcomeMessage);
 
 }
 
@@ -658,87 +664,105 @@ function showThread(event){
     }
 }
 
-function augUIModal(event,mesh) {
-    let content = event.content;
-    if (urlRegx.test(content)) {
-        content = content.replace(urlRegx, (matchedUrl) => {
-            if (matchedUrl && matchedUrl.startsWith('https')) {
-                return `<a target="_blank" href="${matchedUrl}" rel="noopener noreferrer">${matchedUrl}</a>`;
-            } else {
-                return matchedUrl;
-            }
-        });
-    }
-    const id = event.id
-    const pub = event.pubkey.trim()
-    const unsafeMessage = `event:${id}\n\n${content}\n\npubkey:${pub}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`
-    teardownAugUIModal()
-    modal = document.createElement('div')
-    modal.classList.add('dom-ui')
-    modal.id = 'aug-modal'
-    modal.setAttribute('data-augmented-ui','')
-    let app = document.querySelector('#app')
-    app.appendChild(modal)
-    modalMessage = document.createElement('div')
-    modalMessage.classList.add('message')
-    modalMessage.innerHTML = purify.sanitize(unsafeMessage,{
-        ADD_ATTR: ['target'],
-    })
-    modalMessage.addEventListener('wheel',function(e){
-        // mousewheel scrolling without a scrollbar for modal
-        let scrollSpeed = 30
-        let currentScroll = parseInt(modalMessage.dataset.scroll) || 0
-        let scrollDirection = Math.sign(e.deltaY) * scrollSpeed
-        let newScroll = currentScroll-scrollDirection
-        let buffer = 100 //pixel buffer so we can see the whole message
+function openAugUIPanel(htmlContent) {
+  teardownAugUIModal();
+  modal = document.createElement("div");
+  modal.classList.add("dom-ui");
+  modal.id = "aug-modal";
+  modal.setAttribute("data-augmented-ui", "");
+  let app = document.querySelector("#app");
+  app.appendChild(modal);
 
-        // don't allow us to scroll up farther than the content (backwards)
-        if (newScroll > 0) return;
-        
-        // don't allow us to completely past the content (too far)
-        let parent = document.getElementById('aug-modal')
-        if (parent.clientHeight - newScroll > modalMessage.clientHeight + buffer ) return;
+  modalMessage = document.createElement("div");
+  modalMessage.classList.add("message");
+  modalMessage.innerHTML = purify.sanitize(htmlContent, {
+    ADD_ATTR: ["target"],
+  });
+  setupModalMessageScroll(modalMessage);
+  modal.appendChild(modalMessage);
 
-        // update
-        modalMessage.setAttribute('data-scroll',newScroll)
-        modalMessage.style.transform = `translateY(${newScroll}px)`
-        return false;
-    },{capture: true})
-    modal.appendChild(modalMessage)
-    let modalClose = document.createElement('div')
-    modalClose.id = 'modal-close'
-    modalClose.classList.add('button')
-    modalClose.setAttribute('data-augmented-ui','tl-clip tr-clip br-clip bl-clip')
-    modalClose.textContent = 'dismiss'
-    modalClose.addEventListener('click',function(){
-        teardownAugUIModal()
-    })
-    modal.appendChild(modalClose)
-
-    // bookmark button
-    bookmarkButton = document.createElement('div')
-    // bookmarkButton.classList.add('dom-ui')
-    bookmarkButton.id = 'bookmark'
-    bookmarkButton.classList.add('button')
-    if(isBookmarked(event.id)) bookmarkButton.classList.add('set')
-    bookmarkButton.setAttribute('data-augmented-ui','')
-    bookmarkButton.addEventListener('click',function(){
-        // console.log('bmclick')
-        if (isBookmarked(event.id)){
-            // console.log('removing')
-            removeBookmark(event.id)
-            bookmarkButton.classList.remove('set')
-        } else {
-            addBookmark(event)
-            bookmarkButton.classList.add('set')
-        }
-    })
-    modal.appendChild(bookmarkButton)
-
+  let modalClose = createModalCloseButton();
+  modal.appendChild(modalClose);
 }
-function teardownAugUIModal(){
-    let modal = document.querySelector('#aug-modal')
-    if(modal) document.querySelector('#app').removeChild(modal)
+
+function augUIModal(event, mesh) {
+  let content = event.content;
+  if (urlRegx.test(content)) {
+    content = content.replace(urlRegx, (matchedUrl) => {
+      if (matchedUrl && matchedUrl.startsWith("https")) {
+        return `<a target="_blank" href="${matchedUrl}" rel="noopener noreferrer">${matchedUrl}</a>`;
+      } else {
+        return matchedUrl;
+      }
+    });
+  }
+  const id = event.id;
+  const pub = event.pubkey.trim();
+  const unsafeMessage = `event:${id}\n\n${content}\n\npubkey:${pub}\n\n[${mesh.position.x}x]\n[${mesh.position.y}y]\n[${mesh.position.z}z]`;
+
+  openAugUIPanel(unsafeMessage);
+
+  // bookmark button
+  bookmarkButton = document.createElement("div");
+  bookmarkButton.id = "bookmark";
+  bookmarkButton.classList.add("button");
+  if (isBookmarked(event.id)) bookmarkButton.classList.add("set");
+  bookmarkButton.setAttribute("data-augmented-ui", "");
+  bookmarkButton.addEventListener("click", function () {
+    if (isBookmarked(event.id)) {
+      removeBookmark(event.id);
+      bookmarkButton.classList.remove("set");
+    } else {
+      addBookmark(event);
+      bookmarkButton.classList.add("set");
+    }
+  });
+  modal.appendChild(bookmarkButton);
+}
+
+function teardownAugUIModal() {
+  let modal = document.querySelector("#aug-modal");
+  if (modal) document.querySelector("#app").removeChild(modal);
+}
+
+function setupModalMessageScroll(modalMessage) {
+  modalMessage.addEventListener(
+    "wheel",
+    function (e) {
+      // mousewheel scrolling without a scrollbar for modal
+      let scrollSpeed = 30;
+      let currentScroll = parseInt(modalMessage.dataset.scroll) || 0;
+      let scrollDirection = Math.sign(e.deltaY) * scrollSpeed;
+      let newScroll = currentScroll - scrollDirection;
+      let buffer = 100; // pixel buffer so we can see the whole message
+
+      // don't allow us to scroll up farther than the content (backwards)
+      if (newScroll > 0) return;
+
+      // don't allow us to completely past the content (too far)
+      let parent = document.getElementById("aug-modal");
+      if (parent.clientHeight - newScroll > modalMessage.clientHeight + buffer)
+        return;
+
+      // update
+      modalMessage.setAttribute("data-scroll", newScroll);
+      modalMessage.style.transform = `translateY(${newScroll}px)`;
+      return false;
+    },
+    { capture: true }
+  );
+}
+
+function createModalCloseButton() {
+  let modalClose = document.createElement("div");
+  modalClose.id = "modal-close";
+  modalClose.classList.add("button");
+  modalClose.setAttribute("data-augmented-ui", "tl-clip tr-clip br-clip bl-clip");
+  modalClose.textContent = "dismiss";
+  modalClose.addEventListener("click", function () {
+    teardownAugUIModal();
+  });
+  return modalClose;
 }
 
 function isLoaded(eventID){

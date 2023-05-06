@@ -333,25 +333,9 @@ function init(){
     connectedNodes = []
     cycling = false
     
+const welcomeMessage = `Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work. ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at the GitHub repo.\n<a href="https://github.com/arkin0x/ONOSENDAI" target="_blank" rel="noopener noreferrer">Github: https://github.com/arkin0x/ONOSENDAI</a>\nJoin the official telegram and follow development: <a href="https://t.me/ONOSENDAITECH" target="_blank" rel="noopener noreferrer">https://t.me/ONOSENDAITECH</a>\nRead more about cyberspace:\n<a href="https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17</a>\n<a href="https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13" target="_blank" rel="noopener noreferrer">https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13</a>\n<a href="https://telegra.ph/Movement-Chains-05-01" target="_blank" rel="noopener noreferrer">https://telegra.ph/Movement-Chains-05-01</a>\n\nCheck out the cyberspace spec and contribute: <a href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noopener noreferrer">https://github.com/arkin0x/cyberspace</a>\nSupport the project:\nBy looking awesome 😎 <a href="https://onosendai.gumroad.com/" target="_blank" rel="noopener noreferrer">https://onosendai.gumroad.com/</a>\nBy donating at Geyser <a href="https://geyser.fund/project/onosendai" target="_blank" rel="noopener noreferrer">https://geyser.fund/project/onosendai</a>\n\nFollow me on nostr:\nnpub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w\nNIP-05 arkinox@arkinox.tech\nLN arkinox@getalby.com`;
 
-  const welcomeMessage = `Welcome to cyberspace, a finite digital metaverse built on the nostr protocol where every action has a real world cost via proof-of-work. ONOSENDAI is the first cyberspace client. As of this version, proof-of-work is not yet complete but work is in progress at thr GitHub repo.
-  Github: https://github.com/arkin0x/ONOSENDAI
-  Join the official telegram and follow development: https://t.me/ONOSENDAITECH
-  Read more about cyberspace:
-  https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17
-  https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13
-  https://telegra.ph/Movement-Chains-05-01
-  
-  Check out the cyberspace spec and contribute: https://github.com/arkin0x/cyberspace
-  Support the project:
-  By looking awesome 😎 https://onosendai.gumroad.com/
-  By donating at Geyser https://geyser.fund/project/onosendai
-  
-  Follow me on nostr:
-  npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w
-  NIP-05 arkinox@arkinox.tech
-  LN arkinox@getalby.com
-  `;
+
 
   openAugUIPanel(welcomeMessage);
 

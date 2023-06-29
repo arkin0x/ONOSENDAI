@@ -72,7 +72,8 @@ $z-desktop: 0px;
   font-size: 20px;
   height: 66vh;
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: auto; // changed from hidden to auto
+  -webkit-overflow-scrolling: touch; // add this for smooth scrolling on iOS
   width: 90vw;
   @include dom-ui-slide-in-animation-factory(modal, -8vh, -1vw);
 }

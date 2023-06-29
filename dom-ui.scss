@@ -72,11 +72,17 @@ $z-desktop: 0px;
   font-size: 20px;
   height: 66vh;
   overflow-x: hidden;
-  overflow-y: auto; // changed from hidden to auto
-  -webkit-overflow-scrolling: touch; // add this for smooth scrolling on iOS
+  overflow-y: hidden;
   width: 90vw;
   @include dom-ui-slide-in-animation-factory(modal, -8vh, -1vw);
+
+  // Phones in portrait mode
+  @media only screen and (max-width: 767px) {
+    overflow-y: auto; // changed from hidden to auto
+    -webkit-overflow-scrolling: touch; // add this for smooth scrolling on iOS
+  }
 }
+
 #modal-message-wrapper {
   overflow: hidden;
   width: 100%;

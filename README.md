@@ -42,6 +42,28 @@ In-depth explanation of cyberspace: [https://telegra.ph/Cyberspace-A-Real-Digita
 
 arkinox video talk about ONOSENDAI and cyberspace: [https://youtu.be/6POq0eaW1J0](https://youtu.be/6POq0eaW1J0) (ignore the weird video spam at 3:20)
 
+### How does proof-of-work enable movement and other actions in cyberspace?
+
+Here is a concrete example of how movement will work soon with POW.
+
+First, you will choose a speed with your throttle — a UI element that controls how fast you wish to go, which will probably default to 1. When you press the ⬆️ arrow on your keyboard, ONOSENDAI will begin mining a Drift event with proof-of-work equal to your throttle speed. Once an event with the desired amount of proof-of-work is found, it is published as an event to nostr relays to broadcast your location, and you will move forward in cyberspace on your screen.
+
+Your machine doing the proof-of-work will have an upper bound to how much proof-of-work it can complete per second. The throttle is how many units of proof-of-work you are requiring your machine to mine per Drift event; remember also that the proof-of-work is the amount of acceleration you gain per event. Let's say, for example, that your machine can very easily mine a 5 proof-of-work (POW) event every second. If you keep your throttle at 5, you will gain 5 acceleration roughly every second; I say roughly as POW can obviously vary in how long it takes to complete.
+
+Now let's say for example that you move your throttle up to 10. ONOSENDAI now requires that your machine mine 10 units of POW before it publishes a Drift event allowing you to move. Let's also say that your machine cannot do a 10 POW every second, but only once every 3 seconds. Now, your movement through cyberspace will be more choppy, because you will get a burst of speed roughly every 3 seconds instead of a smaller burst of speed every 1 second with a 5 throttle.
+
+This creates a dynamic where you must find the sweet spot for your hardware that allows you to move quickly and consistently. If you set your throttle to 20, you may only mine a 20 POW event every minute. This will cause your movement to be very stunted and inconsistent, and you will spend a lot of time not moving at all; when you do mine the POW 20 event, you will blast off like a rocket. But if you set your throttle to 1, you will smoothly and consistently mine a Drift event every second (or quicker, depending on your hardware).
+
+All actions in cyberspace require POW, and all actions are represented by nostr events. To put POW into a nostr event, one must simply define the target POW (throttle) inside the event, and then determine the event's ID which is a SHA256 hash of the serialized event. If the resulting event ID has leading binary zeroes equal to the POW defined in the event, the POW is valid; otherwise, the POW is invalid and hashing continues. This hashing is the thermodynamic expenditure of energy, just like bitcoin. This is described in detail in NIP-13 in the nostr protocol.
+
+There are other resource-intensive actions that ONOSENDAI will be performing besides mining events for POW. Therefore, I am building a user interface system where the user can control how ONOSENDAI focuses your machine's resources. There are 3 categories of task that require processing power: movement, actions, and observation. ONOSENDAI will give the user 10 "points" and allow them to assign these points to the three categories at any moment. Each point represents 10% of your machine's total processing power. If you assign 5 points to movement, 3 to actions, and 2 to observation, then 50% of your machine's processing power will be used to mine Drift events, 30% will be used to mine other action events like vortex, bubble, derezz, armor, etc., and 20% of your machine's power will be use for validating other operator's movement chains, attempting to detect the location of cloaked operators, and processing environmental information. At any moment the user can reassign these points with simple keystrokes, taps, macros, or button presses to change the thermodynamic posture of their cyberspace operator. If you've played the game Elite Dangerous you will be familiar with this kind of realtime resource management. If one needs to move somewhere fast, they may temporarily assign 10 points to movement. If one is in a crowd of other operators, one may assign 2 points to movement and 8 points to observation to process the other operators' information quickly.
+
+On very powerful machines, balancing their CPU resources may not be challenging or necessary. But since I want people on any device to have the opportunity to utilize cyberspace effectively, I think that having UI to control how their thermodynamic resources are applied to cyberspace is important.
+
+Likewise with other cyberspace actions such as Derezz, one will need to choose the right throttle/POW amount so that they balance power and speed based on their current situation, taking into account where other operators are and how powerful or fast they appear to be.
+
+There is an inverse relationship between the power one has in cyberspace and the speed at which one can use their power, and this is scaled by your hardware's capacity for hashing. One can cast powerful events slowly or weak events quickly. This tradeoff is controlled simply by proof-of-work, which is the thermodynamic aspect of cyberspace.
+
 ## Implementation 😅🛠
 
 ### cyberspace meta-protocol [https://github.com/arkin0x/cyberspace](https://github.com/arkin0x/cyberspace)

@@ -38,7 +38,9 @@ In our universe all actions require energy expenditure as entropy and all action
 
 Short explanation of cyberspace as an extension of reality: [https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17](https://telegra.ph/Cyberspace-and-Proof-of-Work-04-17)
 
-In-depth explanation of cyberspace: [https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13](https://telegra.ph/Cyberspace-A-Real-Digital-Place-04-13)
+In-depth explanation of cyberspace: [Nostr: The Dawn of Cyberspace](https://yakihonne.com/article/naddr1qq25ce6ff3ny7mm40ff42hmgfue52mn4244ngq3qarkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqxpqqqp65wackq8r)
+
+Nostrovia podcast all about cyberspace: [Nostrovia Web Player](https://podcasters.spotify.com/pod/show/nostrovia/episodes/A-Metaverse-on-Nostr---Arkinox-e23moeq)
 
 arkinox video talk about ONOSENDAI and cyberspace: [https://youtu.be/6POq0eaW1J0](https://youtu.be/6POq0eaW1J0) (ignore the weird video spam at 3:20)
 

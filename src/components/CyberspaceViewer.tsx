@@ -53,7 +53,7 @@ const Avatar = () => {
   const [stateTimestamp, setStateTimestamp] = useState<number>(0)
   const [lerpPosition, setLerpPosition] = useState<[number, number, number]>([0,0,0])
   const [lerpVelocity, setLerpVelocity] = useState<[number, number, number]>([0,0,0])
-  const [currentRotation, setCurrentRotation] = useState<[number, number, number]>([0,0,0])
+  const [currentRotation, setCurrentRotation] = useState<[number, number, number]>([0,0,0]) // rotation is based on last state + pointer drag
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(0)
   const [throttle, setThrottle] = useState(1)
 

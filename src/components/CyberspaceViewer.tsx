@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from "@react-three/drei"
+import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import { Cyberspace } from './ThreeCyberspace'
 import { UNIVERSE_DOWNSCALE, UNIVERSE_SIZE, CENTERCOORD } from "../libraries/Cyberspace"
 import { Construct } from '../../building-blocks/ThreeConstruct'
@@ -22,31 +21,108 @@ const CyberspaceViewer = ({constructSize = 1, hexLocation = CENTERCOORD, style =
   const viewerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // const urlParams = new URLSearchParams(window.location.search)
-    // const coordParam = urlParams.get('coord') || CENTERCOORD
     setCoord(decodeHexToCoordinates(hexLocation))
-    // const sizeParam = urlParams.get('constructSize') || ""
     setSize(constructSize)
   }, [constructSize, hexLocation])
 
   const downscaled = downscaleCoords(coord, UNIVERSE_DOWNSCALE)
-  const orbitTarget = new THREE.Vector3(downscaled.x, downscaled.y, downscaled.z)
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
-      <Canvas style={style} camera={{
-        near: 0.001, 
-        far: scale*2*2*2*2*2*2*2*2,
-        position: [0, 0, scale]
-      }}>
+      <Canvas style={style}>
         <ambientLight intensity={0.8} />
         <Cyberspace targetCoord={coord} targetSize={size} parentRef={viewerRef}>
+          <Avatar/>
           <Construct coord={coord} size={size}/>
         </Cyberspace>
-        <OrbitControls target={orbitTarget} zoomSpeed={5}/>
       </Canvas>
     </div>
   )
 }
 
 export default CyberspaceViewer
+
+const FRAME = 1000/60
+const DRAG = 0.999
+
+const Avatar = () => {
+  const [position, velocity, rotation, timestamp, mineDrift] = useCyberspaceStateReconciler()
+  const [statePosition, setStatePosition] = useState<[number, number, number]>([0,0,0])
+  const [stateVelocity, setStateVelocity] = useState<[number, number, number]>([0,0,0])
+  const [stateRotation, setStateRotation] = useState<[number, number, number]>([0,0,0])
+  const [stateTimestamp, setStateTimestamp] = useState<number>(0)
+  const [lerpPosition, setLerpPosition] = useState<[number, number, number]>([0,0,0])
+  const [lerpVelocity, setLerpVelocity] = useState<[number, number, number]>([0,0,0])
+  const [currentRotation, setCurrentRotation] = useState<[number, number, number]>([0,0,0])
+  const [processedTimestamp, setProcessedTimestamp] = useState<number>(0)
+  const [throttle, setThrottle] = useState(1)
+
+  useEffect(() => {
+    // on mount, set up listener for W key to go forward. On unmount, remove listener.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "w") {
+        // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
+        mineDrift(throttle, currentRotation)
+      }
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "w") {
+        // stop mining drift events immediately when W is released
+        mineDrift(0)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+    }
+  }, [])
+
+  useEffect(() => {
+    // set the avatar's position, based on the most recent state of cyberspace reconciler (action chain vs other avatar's actions)
+
+    setStatePosition(position)
+    setStateVelocity(velocity)
+    setStateRotation(rotation)
+    setStateTimestamp(timestamp)
+
+    setLerpPosition(position)
+    setLerpVelocity(velocity)
+    setCurrentRotation(rotation)
+    setProcessedTimestamp(timestamp)
+
+  }, [position, velocity, rotation])
+
+  useFrame(({ clock }) => {
+    // apply physics to the avatar based on state to LERP animation until next state. If last state was a while ago, LERP to current position.
+
+    // start at the timestamp of the state, and calculate the position 60 times per second until the timestamp matches the current Date.now()
+
+    // calculate the 3D position of the avatar based on the statePosition, elapsed time since timestamp, and stateVelocity, and update the lerpPosition
+
+    const elapsed = (Date.now() - processedTimestamp) // milliseconds since last processed frame or last state change
+    let frames = Math.floor( elapsed / FRAME ) // the physics runs at 60 frames per second
+    while (frames > 0) {
+      const x = lerpPosition[0] + lerpVelocity[0]
+      const y = lerpPosition[1] + lerpVelocity[1]
+      const z = lerpPosition[2] + lerpVelocity[2]
+      setLerpPosition([x,y,z])
+      // multiply velocity by 0.999 to simulate friction every frame
+      setLerpVelocity([lerpVelocity[0] * DRAG, lerpVelocity[1] * DRAG, lerpVelocity[2] * DRAG])
+      setProcessedTimestamp(processedTimestamp + FRAME)
+      frames--
+    }
+
+
+
+
+
+  })
+
+  return (
+    <camera position={lerpPosition} rotation={currentRotation}/>
+  )
+}

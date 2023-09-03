@@ -1,0 +1,66 @@
+#publish {
+  padding: 1rem;
+}
+
+pre {
+  background-color: #111;
+  width: 100%;
+  height: 200px;
+  overflow-x: scroll;
+  overflow-y: hidden;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+
+#button-publish {
+  display: block;
+  margin: 1rem auto;
+  // width: 90%;
+}
+
+.copied-true {
+  position: relative;
+}
+.copied-true::after {
+  content: 'Copied!';
+  color: green;
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0.5rem;
+  background-color: #111;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: bold;
+  animation: fadeOut 2s ease-in-out forwards;
+}
+
+.beacon {
+  font-size: 2rem;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media screen and (min-width: 480px) {
+  pre{
+    overflow-y: hidden;
+    height: 200px;
+  }
+  #button-publish {
+    margin: 1rem 0;
+  }
+}

@@ -1,0 +1,80 @@
+@use 'globals';
+
+/*
+    FancyButton is the gradient primary action button.
+*/
+
+.fancybutton {
+    // background: rgb(2,171,236);
+    background: linear-gradient(90deg, rgba(2,171,236,1) 0%, rgba(189,38,121,1) 100%);
+    border-radius: globals.$tightCorners;
+    border: globals.$fancyBorders;
+    box-shadow: 0px 3px 5px -1px globals.$buttonShadow;
+    color: #ffffff;
+    font-size: 3.5vw;
+    @media screen and (min-width: 769px){
+        font-size: 26px;
+    }
+    font-weight: 200;
+    text-align: center;
+    text-transform: uppercase;
+    transition: globals.$fastAnim;
+    padding: 1px 6px;
+    
+    &:focus, &:active {
+      outline: none;
+    }
+
+    &.success {
+        background: linear-gradient(125deg, rgba(2,171,236,1) 0%, rgb(38, 189, 71) 100%);
+    }
+
+    &.neutral {
+        background: linear-gradient(125deg, rgba(100,150,200,1) 0%, rgb(235,201,216) 100%);
+    }
+
+    &.warning {
+        background: linear-gradient(125deg, rgba(189,38,121,1) 0%, rgb(236, 2, 2) 100%);
+    }
+
+    &.plain {
+      background: white;
+      color: globals.$yondarBlue;
+      border-color: globals.$yondarBlue !important;
+      &:hover {
+        color: globals.$yondarBlueSelected;
+      }
+    }
+
+    &:active {
+        transform: translateY(5px);
+    }
+
+    &.sm {
+        padding: 0.5rem;
+    }
+
+    &.md {
+        padding: 1rem;
+    }
+
+    &.lg {
+        padding: globals.$mdSpacing;
+    }
+
+    &.block {
+        width: 100%;
+    }
+
+    @media (pointer: fine) {
+        &:hover {
+            text-decoration: none;
+            color: #ffffff;
+        }
+    }
+
+}
+
+a.fancybutton {
+    font-size: inherit;
+}

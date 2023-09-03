@@ -1,0 +1,107 @@
+#dashboard {
+  text-align: left;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.messagebox {
+  display: flex;
+  flex-direction: column;
+  background-color: #111;
+  border-radius: 2rem;
+  margin: 2rem 0;
+  padding: 1rem;
+  position: relative;
+  .flexcol {
+    margin: 0.6rem 0;
+  }
+  label {
+    margin: 0 0 0.6rem 0;
+  }
+  input {
+    font-family: monospace;
+    border: 1px solid transparent;
+    transition: border-color 0.25s;
+    display: block;
+    padding: 0.6em 1.2em;
+    flex-grow: 1;
+  }
+}
+
+.profile {
+  border-radius: 1rem;
+  padding: 1rem;
+  min-height: 30vh;
+  $profile-size: max(10vw, 4rem);
+
+  .profile-picture {
+    min-width: $profile-size;
+    max-height: $profile-size;
+    border-radius: $profile-size;
+    margin-right: 1rem;
+  }
+  // .display-name {
+  // }
+  .about {
+    background-color: #000c;
+    border-radius: 1rem;
+    padding: 1rem;
+    white-space: break-spaces;
+  }
+}
+
+// .mapboxgl-map {
+// }
+.mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact {
+  background-color: transparent;
+  padding: 0.25rem;
+  button.mapboxgl-ctrl-attrib-button:not(:disabled):hover {
+    background-color: hsla(0,0%,100%,.5);
+  }
+}
+.mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact-show {
+  background-color: hsla(0,0%,100%,.5);
+  padding: 0.25rem;
+  font-size: 10px;
+  .mapboxgl-ctrl-attrib-button {
+    // position: static;
+    // float: right;
+    top: -2rem;
+  }
+}
+
+.mapboxgl-ctrl-attrib-button {
+  padding: 0;
+  margin: 0;
+  width: initial;
+  height: initial;
+}
+
+.mapboxgl-ctrl {
+  button:focus, button:focus-visible {
+    // background-color: hsla(0,0%,100%,.5);
+    outline: transparent;
+    box-shadow: none;
+  }
+}
+
+.mapboxgl-ctrl.mapboxgl-compact-show {
+  button.mapboxgl-ctrl-attrib-button {
+    // display: none;
+  }
+}
+
+.float-button-menu {
+  display: flex;
+  flex-direction: column-reverse;
+  position: absolute;
+  right: 0rem;
+  bottom: 2rem;
+}
+.circle-float-button {
+  display: block;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 2rem;
+}

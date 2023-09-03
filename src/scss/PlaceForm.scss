@@ -1,0 +1,71 @@
+// placeform.scss
+
+#component-placeform {
+  background-color: #121212;
+  border-color: #fff;
+  border-radius: 1rem;
+  box-shadow: 0px 0px 10px #4a5968;
+  box-sizing: border-box;
+  height: 74vh;
+  left: 5vw;
+  margin-bottom: 10rem;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  padding: 1rem;
+  position: absolute;
+  top: 20vh;
+  width: 90vw;
+  z-index: 2;
+
+  &.edit {
+    height: 50vh;
+    top: 44vh;
+  }
+
+  h1 {
+    font-size: 2rem;
+    margin: 0;
+  }
+
+  label {
+    cursor: pointer;
+  }
+
+  label, input, select, textarea {
+    display: block;
+    padding: 0.5rem;
+    width: 100%;
+  }
+  label + input, label + textarea, label + select {
+    padding: 0.5rem;
+    border-radius: 1rem;
+    margin-bottom: 0.5rem;
+  }
+  select {
+    margin-right: 1rem;
+  }
+  fieldset {
+    border: none;
+  }
+
+  animation: placeform-fade-in 150ms ease-out forwards, modal-swoop-up 150ms ease-out forwards;
+
+  @keyframes placeform-fade-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes modal-swoop-up {
+    0% {
+      transform: translateY(20vh);
+    }
+    100% {
+      transform: translateY(0vh);
+    }
+  }
+
+
+}

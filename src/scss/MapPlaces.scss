@@ -1,0 +1,44 @@
+.beacon {
+  position: absolute;
+  &__marker {
+    position: absolute;
+    font-size: 20px;
+    // width: 20px;
+    // height: 20px;
+    z-index: 1001;
+    text-align: center;
+  }
+  &__info {
+    background: #141414cc;
+    border-radius: 1rem;
+    padding: 1rem;
+    font-size: 14px;
+    position: relative;
+    left: 40px;
+    width: 75vw;
+    max-width: 300px;
+    z-index: 10000;
+    animation: beacon-info-fade-in 500ms ease-out forwards;
+    @keyframes beacon-info-fade-in {
+      0% {
+        opacity: 0;
+        top: 2rem;
+      }
+      100% {
+        opacity: 1;
+        top: 4px;
+      }
+    }
+    .hours small {
+      // make color half transparent
+      color: #fff6;
+      padding-left: 1.5rem;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    p {
+      margin-bottom: 0;
+    }
+  }
+}

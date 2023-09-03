@@ -1,0 +1,111 @@
+// This is just to center the spinner
+
+// Here is where the magic happens
+
+$offset: 187;
+// $duration: 5.4s;
+$duration: 5s;
+
+.spinner {
+  // animation: rotator $duration linear infinite;
+  animation: none;
+  border: 0;
+}
+
+@keyframes rotator {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(270deg); }
+}
+
+.path {
+  stroke-dasharray: 12;
+  stroke-dashoffset: 90;
+  transform-origin: center;
+  animation:
+    dash $duration ease-in-out infinite, 
+    colors ($duration*4) ease-in-out infinite;
+}
+
+@keyframes colors {
+	0% { stroke: #4285F4; }
+	25% { stroke: #DE3E35; }
+	50% { stroke: #F7C223; }
+	75% { stroke: #1B9A59; }
+  100% { stroke: #4285F4; }
+}
+
+@keyframes dash {
+ 0% {
+  // stroke-dashoffset: 0; 
+  transform:rotate(0deg) scale(1);
+ }
+ 50% {
+  //  stroke-dashoffset: calc($offset/4);
+  transform:rotate(-180deg) scale(.7);
+ }
+ 100% {
+  //  stroke-dashoffset: 360;
+   transform:rotate(-360deg) scale(1);
+ }
+}
+
+#cursor {
+  position: relative;
+}
+
+.cursor-menu {
+  font-family: "sofia-pro-soft", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
+  font-size: 1.5rem;
+  left: -1px;
+  position:absolute;
+  line-height: 2rem;;
+  text-align: center;
+  transform: translateX(calc(-20vw + 26px));
+  width: 40vw;
+  // create a fade in and swoop up effect animation on load
+  animation: cursor-fade-in 500ms ease-out forwards, swoop-up 500ms ease-out forwards;
+
+
+  @keyframes cursor-fade-in {
+    0% {
+      opacity: 0;
+      text-shadow: 0px 0px 10px #000,0px 0px 10px #000;
+    }
+    100% {
+      opacity: 1;
+      text-shadow: 0px 40px 10px #000,0px 40px 10px #000;
+    }
+  }
+
+  @keyframes swoop-up {
+    0% {
+      transform: translateX(calc(-20vw + 26px)) translateY(0);
+    }
+    100% {
+      transform: translateX(calc(-20vw + 26px)) translateY(-6rem);
+    }
+  }
+
+  &.no-shadow {
+    // text-shadow: none;
+    animation: none;
+  }
+
+}
+
+.dropped-pin {
+  animation: drop-pin 200ms ease-in forwards;
+  transform: translateY(0rem);
+
+  @keyframes drop-pin {
+    0% {
+      text-shadow: 0px 40px 10px #000,0px 40px 10px #000;
+      transform: translateY(-4.5rem);
+    }
+    100% {
+      text-shadow: 0px 0px 3px #000,0px 0px 0px #000;
+      transform: translateY(0rem);
+    }
+  }
+  position: relative;
+}

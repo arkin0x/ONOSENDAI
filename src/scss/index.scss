@@ -1,0 +1,133 @@
+@import url('https://use.typekit.net/mkx6hza.css');
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  touch-action: pan-x pan-y;
+}
+
+html,
+body,
+#root {
+  font-family: "sofia-pro-soft", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
+  font-weight: 400;
+  color-scheme: dark light;
+  color: rgba(255, 255, 255, 0.87);
+  // background-color: #242424;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+.mapboxgl-map * {
+  font-family: "sofia-pro-soft", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  overflow-x: hidden;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+  margin-top: 1rem;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+  margin: 0.25rem 0.5rem;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+button.danger {
+  color: red;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+.flexcol {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  position: relative;
+  .full {
+    flex-basis: 100%;
+  }
+  &.align-center {
+    align-items: center;
+  }
+  &.align-end {
+    align-items: flex-end;
+  }
+}
+
+
+.crush {
+  margin: 0;
+}
+
+
+$close-width: 3rem;
+.close {
+  align-items: center;
+  border-width: 2px;
+  border-radius: $close-width;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font-size: 1.5rem;
+  height: $close-width;
+  line-height: 2.5rem;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  right: calc($close-width / -2);
+  top: calc($close-width / -2);
+  width: $close-width;
+}

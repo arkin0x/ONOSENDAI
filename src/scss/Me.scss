@@ -1,0 +1,38 @@
+#me {
+  font-size: 2rem;
+  /* create an animation where the color ring pulses on load */
+}
+#me .color-ring {
+  border-radius: 100%;
+  // border: 1px solid #fff;
+  box-shadow: 0px 1px 3px 0 #00000080;
+  display: flex;
+  font-family: sans-serif;
+  font-size: 3rem;
+  font-weight: 300;
+  height: 32px;
+  justify-content: center;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  animation: pulse 1s ease-in-out 0s 1 normal forwards;
+  /* create a keyframe animation that pulses the color ring once */
+  @keyframes pulse {
+    0% {
+      opacity: 0;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(2);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+}
+
+#me .color-ring span {
+  font-size: 1.4rem;
+  line-height: 2rem;
+}

@@ -1,0 +1,84 @@
+// These variables ought to be used wherever applicable in order to keep
+// the same look and feel throughout the application.
+
+// Layout
+// Margins
+$xsSpacing: 4px;
+$smSpacing: 8px;
+$mdSpacing: 16px;
+$lgSpacing: 32px;
+$xlSpacing: 64px;
+
+// Fonts
+//Weights
+$fontLight: 300;
+$fontMedium: 400;
+$fontHeavy: 500;
+
+//Sizes
+$fontSizeSm: .5rem; //8px
+$fontSizeMSm: .7rem; //12.8px
+$fontSizeM: 1rem; //16px
+$fontSizeXM: 1.3rem; //20.8px
+$fontSizeL: 2rem; //32px
+$fontSizeXL: 2.5rem; //40px
+$fontSizeXXL: 3rem; //48px
+
+// Borders
+$mdCorners: 4px;// border-radius
+$lgCorners: 10px;// border-radius
+$fancyBorders: 4px solid #ffffff;// border
+
+// Buttons
+$btnShadow: 0 1px 4px -1px rgba(0,0,0,.5);// box-shadow
+
+$tightCorners: 0.25rem;
+$fancyBorders: 0.25rem solid #ffffff;
+
+$fastAnim: all 150ms ease;
+$normalAnimation: all .35s ease;
+
+// Animations
+$fastAnim: all 150ms ease-in-out;// transition
+$normalAnim: all 250ms ease-in-out;// transition
+$slowAnim: all 1000ms ease-in-out;// transition
+
+// Colors
+$beaconBlue: #005ACF;
+$beaconDarkGreen: #05ac7f;
+$beaconDefault: #404040;
+$beaconGreen: #09C995;
+$beaconHighlight: #1cc90d;
+$beaconPurple: #8C00BE;
+$beaconRed: #EE3452;
+$buttonShadow: #00000080;
+$darkBlueGradient: linear-gradient(to top, #000000, #274B6C);// background
+$inactiveColor: #787878;
+$linkBlue: #00AEEF;
+$menuDividerBlue: #274b6c;
+$modalTitleBackground: #14102A;
+$darkModeBgColor: #111824;
+$modalVeil: #000000A0;
+$selectedBackground: #0099ff30;
+$selectedBorder: #0099ff80;
+$transparentDefault: #40404020;
+$transparentHighlight: #ff450020;
+$yondarBlue: #00AEEF;
+$yondarBlueSelected: #00AEEF80;
+
+// Layout
+$mobileWidth: 686px;
+$maxModalWidth: 500px;
+$mobileShortHeight: 580px;
+
+@mixin darkTheme {
+  .theme-1 {
+    @content;
+  }
+}
+
+@mixin centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

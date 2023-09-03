@@ -1,0 +1,31 @@
+#home {
+  display: flex;
+  place-items: center;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.wrapper {
+  padding: 2rem;
+  max-width: 100%;
+}
+
+.logo {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.button-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+}
+
+.column {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  margin-top: 1rem;
+}

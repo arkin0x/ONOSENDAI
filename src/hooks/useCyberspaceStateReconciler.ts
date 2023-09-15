@@ -21,9 +21,10 @@ type ActionsReducer = {
 }
 
 const actionChainIsValid = (actions: ActionsState): boolean => {
+  const tests = []
   // check the p tags for valid references. Every subsequent action must reference the previous one
   let testHashState = [...actions]
-  return testHashState.reverse().every((action, index) => {
+  tests.push(testHashState.reverse().every((action, index) => {
     // the first action in the chain is always valid because it has no predicate to reference
     if (index === testHashState.length - 1) {
       return true
@@ -34,7 +35,13 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
       return true
     }
     return false
-  })
+  }))
+
+  // check the velocity and make sure it is within tolerances
+  // TODO
+
+  // return true if all tests pass
+  return tests.every(test => test === true)
 }
 
 const actionsReducer = (state: ActionsState, action: ActionsReducer) => {

@@ -100,7 +100,6 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
     }))
   }
 
-
   // return true if all tests pass
   return tests.every(test => test === true)
 }
@@ -131,13 +130,29 @@ const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
 export const useCyberspaceStateReconciler = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
   const [actions, actionDispatch] = useReducer<ActionsReducer, ActionsState>(actionsReducer, initialState)
+
+  // action state vars
+  const [position, setPosition] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
+  const [velocity, setVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
+  const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
+  const [timestamp, setTimestamp] = useState<number>(0)
+
+
+
   useEffect(() => {
     const filter: Filter<333> = {kinds: [333], authors: [identity.pubkey]}
     const relayList: RelayList = getRelayList(relays, ['read'])
     const sub = pool.sub(relayList, [filter])
     // get actions from your relays
     sub.on('event', (event) => {
-
+      actionDispatch({type: 'add', payload: event})
     })
-
+    sub.on('eose', () => {
+      // TODO: does this get triggered multiple times?
+      // distill and set [position, velocity, rotation, timestamp] to return
+      // TODO: need functions to determine position, velocity, rotation, timestamp from action chain
+      // if action chain is valid, the latest action has the valid position, velocity, rotation, timestamp and we can just return that.
+    })
+  }, [identity, relays])
+  return [position, velocity, rotation, timestamp]
 }

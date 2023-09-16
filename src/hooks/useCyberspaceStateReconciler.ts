@@ -5,10 +5,13 @@
 
 import { Event, Filter } from "nostr-tools"
 import { useContext, useEffect, useState } from "react"
+import * as THREE from "three"
 import { getRelayList, pool } from "../libraries/Nostr"
 import { IdentityContext } from "../providers/IdentityProvider"
 import { IdentityContextType } from "../types/IdentityType"
 import { RelayList } from "../types/NostrRelay"
+import { countLeadingZeroes } from "../libraries/Hash"
+import almostEqual from "almost-equal"
 
 type Action = Event<333> & {
   kind: 333,
@@ -18,6 +21,10 @@ type ActionsState = Action[]
 type ActionsReducer = {
   type: 'add',
   payload: Action
+}
+
+const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
+  return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)
 }
 
 const actionChainIsValid = (actions: ActionsState): boolean => {
@@ -39,6 +46,60 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
 
   // check the velocity and make sure it is within tolerances
   // TODO
+  // velocity is multiplied by 0.999 every frame (1000ms/60)
+  // get the velocity from the first action in the chain
+  // calculate the velocity for each frame from the first action to the last action
+  // check if the velocity is within tolerances
+  // if the velocity is within tolerances, return true
+  // if the velocity is not within tolerances, return false
+  // if there is only one action in the chain, return true
+  // if there are no actions in the chain, return false
+  let testVelocityState = [...actions]
+  if (testVelocityState.length > 1) {
+    // running simulated velocity
+    let velocity: THREE.Vector3 = new THREE.Vector3(0,0,0)
+    tests.push(testVelocityState.every((action, index) => {
+      // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
+      try {
+        // this action's velocity should match the velocity simulation
+        const v = new THREE.Vector3().fromArray(action.tags.find(tag => tag[0] === 'velocity')!.slice(1).map(parseFloat))
+        if (!vector3Equal(v, velocity)) {
+          return false
+          // dump action chain
+        }
+        // simulate velocity until next action
+        // 1. add POW as velocity on quaternion
+        if (action.tags.find(tag => tag[0] === 'A' && tag[1] === 'drift')) {
+          // quaternion from the action
+          const q = new THREE.Quaternion().fromArray(action.tags.find(tag => tag[0] === 'quaternion')!.slice(1).map(parseFloat))
+          // add POW to velocity for drift event
+          const POW = countLeadingZeroes(action.id)
+          const bodyVelocity = new THREE.Vector3(0,0,POW)
+          const addedVelocity = bodyVelocity.applyQuaternion(q)
+          velocity.add(addedVelocity)
+        }
+
+        // 2. simulate velocity for each frame up to and not including the next action.
+        // drag is not applied to the last frame because the next action will calculate starting at its own timestamp.
+        // timestamp with ms
+        const start_ts = parseInt(action.tags.find(tag => tag[0] === 'ms')![1]) + action.created_at
+        // get next action so we can simulate velocity changes between this action and next action.
+        const nextAction = testVelocityState[index+1]
+        // next action timestamp with ms
+        const end_ts = parseInt(nextAction.tags.find(tag => tag[0] === 'ms')![1]) + nextAction.created_at
+
+        let iterations = Math.floor((end_ts - start_ts) / (1000/60))
+        while ( iterations--) {
+          velocity.multiplyScalar(0.999)
+        }
+        // done simulating velocity. we'll see if it matches the next action in the next iteration of the loop.
+      } catch (error) {
+        console.error(error)
+        return false
+      }
+    }))
+  }
+
 
   // return true if all tests pass
   return tests.every(test => test === true)

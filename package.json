@@ -15,6 +15,7 @@
   "dependencies": {
     "@react-three/drei": "^9.80.9",
     "@react-three/fiber": "^8.13.7",
+    "almost-equal": "^1.1.0",
     "augmented-ui": "^2.0.0",
     "dompurify": "^3.0.5",
     "nostr-tools": "^1.14.2",

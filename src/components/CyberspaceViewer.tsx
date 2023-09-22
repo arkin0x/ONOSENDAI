@@ -5,7 +5,7 @@ import { UNIVERSE_DOWNSCALE, UNIVERSE_SIZE, CENTERCOORD, FRAME, DRAG } from "../
 import { Construct } from '../../building-blocks/ThreeConstruct'
 import { BigCoords, decodeHexToCoordinates, downscaleCoords } from '../libraries/Constructs'
 import * as THREE from 'three'
-import { useCyberspaceStateReconciler } from '../hooks/useCyberspaceStateReconciler.ts'
+import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
 import "../scss/CyberspaceViewer.scss"
 
 export type CyberspaceViewerProps = {

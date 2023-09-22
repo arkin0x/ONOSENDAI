@@ -3,19 +3,17 @@
 // 2. Query for nearby aggressive events
 // 3. Reconcile the avatars state from a chronological timeline of both drift and aggressive events
 
-import { Event, Filter } from "nostr-tools"
-import { useContext, useEffect, useState } from "react"
+import { useContext, useEffect, useState, useReducer } from "react"
 import * as THREE from "three"
+import { Filter } from "nostr-tools"
 import { getRelayList, pool } from "../libraries/Nostr"
 import { IdentityContext } from "../providers/IdentityProvider"
 import { IdentityContextType } from "../types/IdentityType"
 import { RelayList } from "../types/NostrRelay"
 import { countLeadingZeroes } from "../libraries/Hash"
-import almostEqual from "almost-equal"
-
-type Action = Event<333> & {
-  kind: 333,
-}
+import { FRAME, UNIVERSE_DOWNSCALE, getPlaneFromAction, vector3Equal } from "../libraries/Cyberspace"
+import { decodeHexToCoordinates, downscaleCoords } from "../libraries/Constructs"
+import { Action } from "../types/Cyberspace"
 
 type ActionsState = Action[]
 type ActionsReducer = {
@@ -23,14 +21,11 @@ type ActionsReducer = {
   payload: Action
 }
 
-const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
-  return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)
-}
-
 const actionChainIsValid = (actions: ActionsState): boolean => {
   const tests = []
+
   // check the p tags for valid references. Every subsequent action must reference the previous one
-  let testHashState = [...actions]
+  const testHashState = [...actions]
   tests.push(testHashState.reverse().every((action, index) => {
     // the first action in the chain is always valid because it has no predicate to reference
     if (index === testHashState.length - 1) {
@@ -44,20 +39,28 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
     return false
   }))
 
+  // check the plane and make sure it is valid
+  // TODO: implement portals to switch planes; currently stuck on the starting plane
+  if (actions.length > 1) {
+    const testPlaneState = [...actions]
+    const startPlane = getPlaneFromAction(testPlaneState[0])
+    const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'c-space'>((plane, action) => {
+      // get the plane from the action
+      const currPlane = getPlaneFromAction(action)
+      if (plane === currPlane) {
+        return plane
+      } else {
+        return false
+      }
+    }, startPlane)
+    tests.push(!!planeIsValid)
+  }
+
   // check the velocity and make sure it is within tolerances
-  // TODO
-  // velocity is multiplied by 0.999 every frame (1000ms/60)
-  // get the velocity from the first action in the chain
-  // calculate the velocity for each frame from the first action to the last action
-  // check if the velocity is within tolerances
-  // if the velocity is within tolerances, return true
-  // if the velocity is not within tolerances, return false
-  // if there is only one action in the chain, return true
-  // if there are no actions in the chain, return false
-  let testVelocityState = [...actions]
+  const testVelocityState = [...actions]
   if (testVelocityState.length > 1) {
     // running simulated velocity
-    let velocity: THREE.Vector3 = new THREE.Vector3(0,0,0)
+    const velocity: THREE.Vector3 = new THREE.Vector3(0,0,0)
     tests.push(testVelocityState.every((action, index) => {
       // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
       try {
@@ -88,7 +91,7 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
         // next action timestamp with ms
         const end_ts = parseInt(nextAction.tags.find(tag => tag[0] === 'ms')![1]) + nextAction.created_at
 
-        let iterations = Math.floor((end_ts - start_ts) / (1000/60))
+        let iterations = Math.floor((end_ts - start_ts) / FRAME)
         while ( iterations--) {
           velocity.multiplyScalar(0.999)
         }
@@ -106,16 +109,14 @@ const actionChainIsValid = (actions: ActionsState): boolean => {
 
 const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
   // add new action to state
-  let newState = [...state, action.payload] as ActionsState
-  // sort actions by created_at, ms tag from oldest to newest
+  const newState = [...state, action.payload] as ActionsState
+  // sort actions by created_at+ms tag from oldest to newest
   newState.sort((a, b) => {
     const aMs = a.tags.find(tag => tag[0] === 'ms')
     const bMs = b.tags.find(tag => tag[0] === 'ms')
-    if (aMs && bMs) {
-      return parseInt(aMs[1]) - parseInt(bMs[1])
-    } else {
-      return 0
-    }
+    const aTs = a.created_at * 1000 + (aMs ? parseInt(aMs[1]) : 0)
+    const bTs = b.created_at * 1000 + (bMs ? parseInt(bMs[1]) : 0)
+    return aTs - bTs
   })
   // validate action chain
   // if action chain is valid, return the new state
@@ -129,15 +130,13 @@ const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
 
 export const useCyberspaceStateReconciler = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
-  const [actions, actionDispatch] = useReducer<ActionsReducer, ActionsState>(actionsReducer, initialState)
+  const [actions, actionDispatch] = useReducer(actionsReducer, [])
 
   // action state vars
   const [position, setPosition] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
   const [velocity, setVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
   const [timestamp, setTimestamp] = useState<number>(0)
-
-
 
   useEffect(() => {
     const filter: Filter<333> = {kinds: [333], authors: [identity.pubkey]}
@@ -154,5 +153,23 @@ export const useCyberspaceStateReconciler = () => {
       // if action chain is valid, the latest action has the valid position, velocity, rotation, timestamp and we can just return that.
     })
   }, [identity, relays])
+
+  useEffect(() => {
+    // get most recent action in chain
+    const mostRecentAction = actions[actions.length - 1]
+    if (!mostRecentAction) {
+      return
+    }
+    // set position
+    let position = getVector3FromCyberspaceCoordinate(mostRecentAction.tags.find(tag => tag[0] === 'C')![1])
+
+  }, [actions])
+
   return [position, velocity, rotation, timestamp]
+}
+
+const getVector3FromCyberspaceCoordinate = (coordinate: string): THREE.Vector3 => {
+  const big = decodeHexToCoordinates(coordinate)
+  const small = downscaleCoords(big, UNIVERSE_DOWNSCALE)
+  return new THREE.Vector3(small.x, small.y, small.z)
 }

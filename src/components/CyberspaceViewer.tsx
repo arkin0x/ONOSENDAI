@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Canvas, useThree, useFrame, Quaternion } from "@react-three/fiber"
 import { Cyberspace } from './ThreeCyberspace'
-import { UNIVERSE_DOWNSCALE, UNIVERSE_SIZE, CENTERCOORD } from "../libraries/Cyberspace"
+import { UNIVERSE_DOWNSCALE, UNIVERSE_SIZE, CENTERCOORD, FRAME, DRAG } from "../libraries/Cyberspace"
 import { Construct } from '../../building-blocks/ThreeConstruct'
 import { BigCoords, decodeHexToCoordinates, downscaleCoords } from '../libraries/Constructs'
 import * as THREE from 'three'
@@ -43,16 +43,8 @@ const CyberspaceViewer = ({constructSize = 1, hexLocation = CENTERCOORD, style =
 
 export default CyberspaceViewer
 
-const FRAME = 1000/60
-const DRAG = 0.999
-const IDENTITY_QUATERNION: Quaternion = [0,0,0,1]
-
 const Avatar = () => {
   const [position, velocity, rotation, timestamp, mineDrift] = useCyberspaceStateReconciler()
-  const [statePosition, setStatePosition] = useState<THREE.Vector3Tuple>([0,0,0])
-  const [stateVelocity, setStateVelocity] = useState<THREE.Vector3Tuple>([0,0,0])
-  const [stateRotation, setStateRotation] = useState<Quaternion>(IDENTITY_QUATERNION) // unit quaternion (x,y,z,w)
-  const [stateTimestamp, setStateTimestamp] = useState<number>(0)
   const [lerpPosition, setLerpPosition] = useState<THREE.Vector3Tuple>([0,0,0])
   const [lerpVelocity, setLerpVelocity] = useState<THREE.Vector3Tuple>([0,0,0])
   const [currentRotation, setCurrentRotation] = useState<THREE.Vector3Tuple>([0,0,0]) // rotation is based on last state + pointer drag

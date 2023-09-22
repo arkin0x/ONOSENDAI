@@ -1,51 +1,77 @@
 import * as THREE from "three"
 import { countLeadingZeroes } from "../../libraries/Hash"
-import { FRAME, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
+import { FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
 import { ActionsState } from "./actionReducerTypes"
 
 export const actionChainIsValid = (actions: ActionsState): boolean => {
   const tests = []
 
-  // check the p tags for valid references. Every subsequent action must reference the previous one
-  const testHashState = [...actions]
-  tests.push(testHashState.reverse().every((action, index) => {
-    // the first action in the chain is always valid because it has no predicate to reference
-    if (index === testHashState.length - 1) {
-      return true
-    }
-    // check if the next action is referenced in the current action
-    const nextAction = testHashState[index + 1]
-    if (action.tags.find(tag => tag[0] === 'p' && tag[1] === nextAction.id)) {
-      return true
-    }
-    return false
-  }))
-
-  // the following validations only apply if we have more than 1 acton in the chain
-  if (actions.length > 1) {
-
-    // check the plane and make sure it is valid
-    // TODO: implement portals to switch planes; currently stuck on the starting plane
-    const testPlaneState = [...actions]
-    const startPlane = getPlaneFromAction(testPlaneState[0])
-    const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'c-space'>((plane, action) => {
-      // get the plane from the action
-      const currPlane = getPlaneFromAction(action)
-      if (plane === currPlane) {
-        return plane
-      } else {
-        return false
+  // wrap the whole thing in a try; any errors will invalidate the chain, although this could lead to false invalidations if the code is wrong but the chain is right... 🤔 #TODO
+  try {
+    // check the p tags for valid references. Every subsequent action must reference the previous one
+    const testHashState = [...actions]
+    tests.push(testHashState.reverse().every((action, index) => {
+      // the first action in the chain is always valid because it has no predicate to reference
+      if (index === testHashState.length - 1) {
+        return true
       }
-    }, startPlane)
-    tests.push(!!planeIsValid)
+      // check if the next action is referenced in the current action
+      const nextAction = testHashState[index + 1]
+      if (action.tags.find(tag => tag[0] === 'p' && tag[1] === nextAction.id)) {
+        return true
+      }
+      return false
+    }))
 
-    // check the velocity and make sure it is within tolerances
-    const testVelocityState = [...actions]
-    // running simulated velocity
-    const velocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
-    tests.push(testVelocityState.every((action, index) => {
-      // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
-      try {
+    // most recent timestamp must be now or in past
+    const testTimestampState = actions[actions.length - 1]
+    const latest_ts = getMillisecondsTimestampFromAction(testTimestampState)
+    const current_ts = Date.now()
+    tests.push(latest_ts <= current_ts)
+
+    // check signature on each action
+    // TODO
+
+    // the following validations only apply if we have more than 1 acton in the chain
+    if (actions.length > 1) {
+
+      // each timestamp must increment sequentially
+      const testTimestampSequenceState = [...actions]
+      tests.push(testTimestampSequenceState.reduce<false | number>((timestamp, action) => {
+        // get the timestamp from the action
+        const latest_ts = getMillisecondsTimestampFromAction(action)
+        if (timestamp === false) {
+          return false
+        }
+        if (timestamp < latest_ts) {
+          return latest_ts
+        } else {
+          return false
+        }
+      }, getMillisecondsTimestampFromAction(testTimestampSequenceState[0])))
+
+      // check the plane and make sure it is valid
+      // TODO: implement portals to switch planes; currently stuck on the starting plane
+      const testPlaneState = [...actions]
+      const startPlane = getPlaneFromAction(testPlaneState[0])
+      const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'c-space'>((plane, action) => {
+        // get the plane from the action
+        const currPlane = getPlaneFromAction(action)
+        if (plane === currPlane) {
+          return plane
+        } else {
+          return false
+        }
+      }, startPlane)
+      tests.push(!!planeIsValid)
+
+      // check the velocity and make sure it is within tolerances
+      // TODO: also check position!!! probably makes sense to do that here too.
+      const testVelocityState = [...actions]
+      // running simulated velocity
+      const velocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
+      tests.push(testVelocityState.every((action, index) => {
+        // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
         // this action's velocity should match the velocity simulation
         const v = new THREE.Vector3().fromArray(action.tags.find(tag => tag[0] === 'velocity')!.slice(1).map(parseFloat))
         if (!vector3Equal(v, velocity)) {
@@ -87,11 +113,11 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         }
         // done simulating velocity. we'll see if it matches the next action in the next iteration of the loop.
         return true
-      } catch (error) {
-        console.error(error)
-        return false
-      }
-    }))
+      }))
+    }
+  } catch (error) {
+    console.error(error)
+    return false
   }
 
   // return true if all tests pass

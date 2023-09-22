@@ -14,6 +14,10 @@ export const FRAME = 1000 / 60
 export const DRAG = 0.999
 export const IDENTITY_QUATERNION: Quaternion = [0, 0, 0, 1]
 
+export const getMillisecondsTimestampFromAction = (action: Action): number => {
+  return action.created_at * 1000 + parseInt(action.tags.find(tag => tag[0] === 'ms')![1])
+}
+
 export function decodeHexToCoordinates(hexString: string): BigCoords {
     // Checking if the input string is a valid 64 character hexadecimal string
     if (!/^([0-9A-Fa-f]{64})$/.test(hexString)) {

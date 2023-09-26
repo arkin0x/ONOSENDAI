@@ -66,6 +66,12 @@ Likewise with other cyberspace actions such as Derezz, one will need to choose t
 
 There is an inverse relationship between the power one has in cyberspace and the speed at which one can use their power, and this is scaled by your hardware's capacity for hashing. One can cast powerful events slowly or weak events quickly. This tradeoff is controlled simply by proof-of-work, which is the thermodynamic aspect of cyberspace.
 
+## Ideaspace
+
+ONOSENDAI is an [i-space](https://github.com/arkin0x/cyberspace#cyberspace-meta-protocol) client.
+
+![ideaspace-alpha-white](https://github.com/arkin0x/ONOSENDAI/assets/99223753/eabe3b48-0bce-4377-b6ae-f1406dba66bd)
+
 ## Implementation 😅🛠
 
 ### cyberspace meta-protocol [https://github.com/arkin0x/cyberspace](https://github.com/arkin0x/cyberspace)

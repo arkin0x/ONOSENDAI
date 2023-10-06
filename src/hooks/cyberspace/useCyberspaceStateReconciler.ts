@@ -7,7 +7,7 @@ import { useContext, useEffect, useState, useReducer } from "react"
 import * as THREE from "three"
 import { useFrame } from "@react-three/fiber"
 import { Filter } from "nostr-tools"
-import { getRelayList, pool } from "../../libraries/Nostr"
+import { getRelayList, getTag, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
@@ -23,24 +23,23 @@ export const useCyberspaceStateReconciler = () => {
   const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
 
   // action state vars
-  const [lastActionsState, setLastActionsState] = useState<ActionsState>([])
   const [simulationHeight, setSimulationHeight] = useState<number>(0) // the most recent timestamp (ms) that the simulation has been updated to
   const [position, setPosition] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
   const [velocity, setVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
 
-  // retrieve action events, store and validate chain: actions
+  // retrieve action events, store and validate action chain
   useEffect(() => {
     const filter: Filter<333> = {kinds: [333], authors: [identity.pubkey]}
     const relayList: RelayList = getRelayList(relays, ['read'])
     const sub = pool.sub(relayList, [filter])
     // get actions from your relays
     sub.on('event', (event) => {
+      // save every action
       saveAction({type: 'add', payload: event})
+      // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.
       const chainStatus = validateActionChain(actions)
       setValidChain(chainStatus)
-      // TODO: we need a way to determine if the chain is invalid and will never be valid so, we need to reset the chain and start over.
-      // Right now, the chain can be invalid but it most likely means we just haven't received all the actions yet.
     })
     sub.on('eose', () => {
       setLoadedWholeChain(true)
@@ -48,11 +47,43 @@ export const useCyberspaceStateReconciler = () => {
       // distill and set [position, velocity, rotation, timestamp] to return
       // TODO: need functions to determine position, velocity, rotation, timestamp from action chain
       // if action chain is valid, the latest action has the valid position, velocity, rotation, timestamp and we can just return that.
+      // TODO: we need a way to determine if the chain is invalid and will never be valid so, we need to reset the chain and start over.
     })
     return () => {
       sub.unsub()
     }
   }, [identity, relays])
+
+
+  // If the action chain is valid, we can just return the latest action's position/velocity/etc. If it's not valid, we return the home coordinates and zero velocity.
+
+  useEffect(() => {
+    if (validChain) {
+      // get most recent action
+      const latest = actions[actions.length - 1]
+      // get position
+      const position = getVector3FromCyberspaceCoordinate(latest.tags.find(getTag('C'))![1])
+      // get velocity
+      const velocity = new THREE.Vector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
+      // get rotation
+      const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
+      // get timestamp
+      const timestamp = getMillisecondsTimestampFromAction(latest)
+      // set state
+      setPosition(position)
+      setVelocity(velocity)
+      setRotation(rotation)
+      setSimulationHeight(timestamp)
+
+      // TODO: simulate frames from last action to NOW.
+    } else {
+      // set state to home coordinates and zero velocity
+      // setPosition( translate pubkey into cyberspace coordinates )
+      setVelocity(new THREE.Vector3(0,0,0))
+      setRotation(new THREE.Quaternion(0,0,0,1))
+      setSimulationHeight(0)
+    }
+  })
 
   // when the actions state updates, check the root event to make sure it's the same as the last state. If valid, copy the new state to the last state. If invalid, trigger a recalculation of position/velocity/etc from the new root.
   useEffect(() => {

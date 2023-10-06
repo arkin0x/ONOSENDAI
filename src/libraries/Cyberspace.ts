@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { Quaternion } from "@react-three/fiber"
 import almostEqual from "almost-equal"
 import { Action, BigCoords, Coords } from "../types/Cyberspace"
+import { getTag } from "./Nostr"
 
 export const CYBERSPACE_SIZE = BigInt(2 ** 85)
 export const UNIVERSE_DOWNSCALE = BigInt(2 ** 35)
@@ -15,7 +16,7 @@ export const DRAG = 0.999
 export const IDENTITY_QUATERNION: Quaternion = [0, 0, 0, 1]
 
 export const getMillisecondsTimestampFromAction = (action: Action): number => {
-  return action.created_at * 1000 + parseInt(action.tags.find(tag => tag[0] === 'ms')![1])
+  return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1])
 }
 
 export function decodeHexToCoordinates(hexString: string): BigCoords {

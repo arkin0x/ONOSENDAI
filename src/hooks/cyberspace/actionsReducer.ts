@@ -1,4 +1,3 @@
-import { actionChainIsValid } from "./actionChainIsValid"
 import { ActionsState, ActionsReducer } from "./actionReducerTypes"
 
 export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {

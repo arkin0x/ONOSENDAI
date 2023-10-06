@@ -124,6 +124,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
 
         // 2. simulate velocity for each frame up to and not including the next action.
         // timestamp with ms
+        // NOTE: we have the getMillisecondsTimestampFromActions function but we aren't using it here because we want to validate that the millisecond tags are within valid ranges.
         const start_ms = parseInt(action.tags.find(getTag('ms'))![1])
         // ms must only be within 0-999
         if (start_ms < 0 || start_ms > 999) return false

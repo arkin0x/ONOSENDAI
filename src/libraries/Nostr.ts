@@ -5,7 +5,7 @@ import { RelayList, RelayObject, RelayReadWrite, FilterReadWrite } from "../type
 const readWrite: RelayReadWrite = {read: true, write: true}
 
 export const defaultRelays: RelayObject = {
-  'wss://yondar.nostr1.com': readWrite,
+  'wss://cyberspace.nostr1.com': readWrite,
   'wss://relay.primal.net': readWrite,
 }
 
@@ -25,10 +25,15 @@ type EventsByKind = {
 }
 
 // write a properly typed getTag function to pass into the find method that takes a tag string and returns the value for that key
-type FindTag = (tag: string[], i: number, o: string[][]) => boolean;
+type FindTag = (tag: string[]) => boolean;
 export const getTag = (key: string): FindTag => {
   return (tag): boolean => {
     return tag && Array.isArray(tag) && tag[0] === key
+  }
+}
+export const getTagValue = (key: string, value: string): FindTag => {
+  return (tag): boolean => {
+    return tag && Array.isArray(tag) && tag[0] === key && tag[1] === value
   }
 }
 

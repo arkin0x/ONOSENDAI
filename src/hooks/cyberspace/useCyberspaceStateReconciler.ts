@@ -14,10 +14,13 @@ import { RelayList } from "../../types/NostrRelay"
 import { DRAG, FRAME, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { ActionsState } from "./actionReducerTypes"
+import { validateActionChain } from "./validateActionChain"
 
 export const useCyberspaceStateReconciler = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
-  const [actions, actionDispatch] = useReducer(actionsReducer, [])
+  const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions in whatever order they came from the relay pool
+  const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
+  const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
 
   // action state vars
   const [lastActionsState, setLastActionsState] = useState<ActionsState>([])
@@ -26,20 +29,29 @@ export const useCyberspaceStateReconciler = () => {
   const [velocity, setVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
 
+  // retrieve action events, store and validate chain: actions
   useEffect(() => {
     const filter: Filter<333> = {kinds: [333], authors: [identity.pubkey]}
     const relayList: RelayList = getRelayList(relays, ['read'])
     const sub = pool.sub(relayList, [filter])
     // get actions from your relays
     sub.on('event', (event) => {
-      actionDispatch({type: 'add', payload: event})
+      saveAction({type: 'add', payload: event})
+      const chainStatus = validateActionChain(actions)
+      setValidChain(chainStatus)
+      // TODO: we need a way to determine if the chain is invalid and will never be valid so, we need to reset the chain and start over.
+      // Right now, the chain can be invalid but it most likely means we just haven't received all the actions yet.
     })
     sub.on('eose', () => {
-      // TODO: does this get triggered multiple times?
+      setLoadedWholeChain(true)
+      // this is only triggered once for a connection (pool)
       // distill and set [position, velocity, rotation, timestamp] to return
       // TODO: need functions to determine position, velocity, rotation, timestamp from action chain
       // if action chain is valid, the latest action has the valid position, velocity, rotation, timestamp and we can just return that.
     })
+    return () => {
+      sub.unsub()
+    }
   }, [identity, relays])
 
   // when the actions state updates, check the root event to make sure it's the same as the last state. If valid, copy the new state to the last state. If invalid, trigger a recalculation of position/velocity/etc from the new root.

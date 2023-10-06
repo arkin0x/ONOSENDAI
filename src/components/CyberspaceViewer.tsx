@@ -44,10 +44,10 @@ const CyberspaceViewer = ({constructSize = 1, hexLocation = CENTERCOORD, style =
 export default CyberspaceViewer
 
 const Avatar = () => {
-  const [position, velocity, rotation, timestamp, mineDrift] = useCyberspaceStateReconciler()
+  const [position, velocity, rotation, timestamp] = useCyberspaceStateReconciler()
   const [lerpPosition, setLerpPosition] = useState<THREE.Vector3Tuple>([0,0,0])
   const [lerpVelocity, setLerpVelocity] = useState<THREE.Vector3Tuple>([0,0,0])
-  const [currentRotation, setCurrentRotation] = useState<THREE.Vector3Tuple>([0,0,0]) // rotation is based on last state + pointer drag
+  const [currentRotation, setCurrentRotation] = useState<Quaternion>(new THREE.Quaternion(0,0,0,1)) // rotation is based on last state + pointer drag
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(0)
   const [throttle, setThrottle] = useState(1)
 
@@ -62,7 +62,7 @@ const Avatar = () => {
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === "w") {
         // stop mining drift events immediately when W is released
-        mineDrift(0)
+        // mineDrift(0)
       }
     }
 
@@ -117,6 +117,6 @@ const Avatar = () => {
   })
 
   return (
-    <camera position={lerpPosition} rotation={currentRotation} quaternion={}/>
+    <camera position={lerpPosition} rotation={currentRotation} quaternion={currentRotation}/>
   )
 }

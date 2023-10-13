@@ -13,7 +13,7 @@ import { countLeadingZeroes } from "../../libraries/Hash"
 
 export const useCyberspaceStateReconciler = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
-  const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions in whatever order they came from the relay pool
+  const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions; they may come from the relay pool unordered but the reducer will sort them by timestamp AND purge old actions if a new action chain begins (new genesis event.)
   const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
   const [, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
 
@@ -50,7 +50,6 @@ export const useCyberspaceStateReconciler = () => {
 
 
   // If the action chain is valid, we can just return the latest action's position/velocity/etc. If it's not valid, we return the home coordinates and zero velocity.
-
   useEffect(() => {
     if (validChain) {
       // action chain is valid

@@ -3,6 +3,29 @@ import { sha256 } from '@noble/hashes/sha256'
 import { incrementNonceBuffer } from "../libraries/Miner"
 // import { constructSize } from "../assets/pow-table";
 
+
+/**
+ * we've got to mine an event like this:
+ * 
+ * event = {
+ *  pubkey: ...,
+ *  kind: 333,
+ *  created_at: Date.now(),
+ *  content: '',
+ *  tags: [
+ *    ['nonce', '<current nonce>', '<target nonce>'],
+ *    ['ms', '<milliseconds>'],
+ *    ['C', '<cyberspace coordinate>'],
+ *    ['quaternion', '<quaternion>'],
+ *    ['velocity', '<velocity>'],
+ *    ['A', 'drift'],
+ *    ['version','1'],
+ *    ['e', '<event id>', '<relay hint>', 'genesis'],
+ *    ['e', '<event id>', '<relay hint>', 'previous'],
+ *  ]
+ * }
+ */
+
 /**
  * ConstructMiner.worker.js
  * 1. receive message from main thread

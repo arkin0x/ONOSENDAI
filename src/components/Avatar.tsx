@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber"
 import { FRAME, DRAG } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
+import { move, stopMove } from '../libraries/Engine.ts'
 
 export const Avatar = () => {
   const [position, velocity, rotation, timestamp] = useCyberspaceStateReconciler()
@@ -18,17 +19,21 @@ export const Avatar = () => {
     const handleForward = (e: KeyboardEvent) => {
       if (e.key === "w" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-        mineDrift(throttle, quat)
+        move(throttle, quat)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.key === "s" || e.key === "ArrowDown") {
         // mine drift events in reverse
-        mineDrift(throttle, quat.clone().invert())
+        move(throttle, quat.clone().invert())
       }
+    }
+    const handleInactive = () => {
+      stopMove()
     }
     window.addEventListener("keydown", handleForward)
     window.addEventListener("keydown", handleReverse)
+    window.addEventListener("keyup", handleInactive)
     
     // set handler for throttle change via scroll wheel
     const handleWheel = (e: WheelEvent) => {
@@ -45,6 +50,7 @@ export const Avatar = () => {
     return () => {
       window.removeEventListener("keydown", handleForward)
       window.removeEventListener("keydown", handleReverse)
+      window.removeEventListener("keyup", handleInactive)
       window.removeEventListener("wheel", handleWheel)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

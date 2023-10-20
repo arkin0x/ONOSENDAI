@@ -11,7 +11,7 @@ import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroes } from "../../libraries/Hash"
 
-export const useCyberspaceStateReconciler = () => {
+export const useCyberspaceStateReconciler = (): [THREE.Vector3, THREE.Vector3, THREE.Quaternion, number] => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
   const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions; they may come from the relay pool unordered but the reducer will sort them by timestamp AND purge old actions if a new action chain begins (new genesis event.)
   const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
@@ -46,7 +46,8 @@ export const useCyberspaceStateReconciler = () => {
     return () => {
       sub.unsub()
     }
-  }, [identity, relays])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
 
   // If the action chain is valid, we can just return the latest action's position/velocity/etc. If it's not valid, we return the home coordinates and zero velocity.

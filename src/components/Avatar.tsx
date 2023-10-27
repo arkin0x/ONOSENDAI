@@ -6,7 +6,7 @@ import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceS
 import { move, stopMove } from '../libraries/Engine.ts'
 
 export const Avatar = () => {
-  const [position, velocity, rotation, timestamp] = useCyberspaceStateReconciler()
+  const {position, velocity, rotation, genesisAction, latestAction} = useCyberspaceStateReconciler()
   const [lerpPosition, setLerpPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, 0))
   const [lerpVelocity, setLerpVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, 0))
   const [currentRotation, setCurrentRotation] = useState<null|THREE.Quaternion>(null) // rotation is based on last state + pointer drag
@@ -19,13 +19,13 @@ export const Avatar = () => {
     const handleForward = (e: KeyboardEvent) => {
       if (e.key === "w" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-        move(throttle, quat)
+        move(throttle, quat, genesisAction, latestAction)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.key === "s" || e.key === "ArrowDown") {
         // mine drift events in reverse
-        move(throttle, quat.clone().invert())
+        move(throttle, quat.clone().invert(), genesisAction, latestAction)
       }
     }
     const handleInactive = () => {

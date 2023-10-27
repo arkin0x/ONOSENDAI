@@ -2,6 +2,9 @@ import * as THREE from 'three'
 import ObservationWorker from '../workers/MovementMiner.worker?worker'
 import ActionWorker from '../workers/MovementMiner.worker?worker'
 import MovementWorker from '../workers/MovementMiner.worker?worker'
+import { Event } from 'nostr-tools'
+import { Action, GenesisAction, LatestAction, genesisAction } from '../types/Cyberspace'
+import { isGenesisAction } from './Cyberspace'
 
 type HashpowerAllocationTarget = 'observation' | 'movement' | 'action'
 
@@ -40,6 +43,36 @@ const workzone: Workzone = {
   'observation': [],
   'movement': [],
   'action': [],
+}
+
+// keep a list of all actions produced by the Engine
+// The most recent action is the last in the array; it needs to be
+// referenced by any new actions.
+let genesisAction: GenesisAction = false
+let latestAction: LatestAction = false
+
+const updateGenesisAction = (action: GenesisAction, initialize?: true) => {
+  // if initialize is set and genesisAction is false, update it only this time
+  if (initialize && genesisAction === false) {
+    genesisAction = action
+    return
+  }
+  // always update the genesisAction if initialize is not set
+  if (!initialize){
+    genesisAction = action
+  }
+}
+
+const updateLatestAction = (action: LatestAction, initialize?: true) => {
+  // if initialize is set and latestAction is false, update it only this time
+  if (initialize && latestAction === false) {
+    latestAction = action
+    return
+  }
+  // always update the latestAction if initialize is not set
+  if (!initialize){
+    latestAction = action
+  }
 }
 
 export const updateHashpowerAllocation = (newAllocation?: HashpowerAllocation) => {
@@ -95,7 +128,7 @@ const adjustLabor = () => {
       workersToDispose.forEach((worker) => {
         worker.terminate()
       })
-      workzone[target] = workers.slice(numWorkersToDispose)
+      workzone[target].splice(0, numWorkersToDispose) // delete the terminated workers but keep the array
     }
   })
   // spawn workers
@@ -108,6 +141,8 @@ const adjustLabor = () => {
       const numWorkersToSpawn = targetAllocation - numWorkers
       for (let i = 0; i < numWorkersToSpawn; i++) {
         const worker = new workerTypes[target]()
+        // set up worker.onmessage here to listen for messages from the worker
+        worker.onmessage = workerMessage
         workers.push(worker)
       }
     }
@@ -115,23 +150,68 @@ const adjustLabor = () => {
 }
 
 
-export const move = (throttle: number, quaternion: THREE.Quaternion) => {
-  issueWorkerCommand('movement', 'start', { throttle, quaternion })
+export const move = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
+  issueWorkerCommand('movement', 'start', { throttle, quaternion, genesisAction, latestAction })
 }
 
 export const stopMove = () => {
   issueWorkerCommand('movement', 'stop')
 }
 
+type WorkerCommandOptions = {
+  throttle?: number
+  quaternion?: THREE.Quaternion
+  genesisAction: GenesisAction // NOT optional if options are defined
+  latestAction: LatestAction // NOT optional if options are defined
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options: any = {}) => {
+const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
+  if (options) {
+    // save the genesis action
+    updateGenesisAction(options.genesisAction)
+    // save the latest actions IFF it is false. If it has already been defined, then it can only be updated by receiving a workerMessage with a newly created action. This is to prevent the latest action from being overwritten by an older action by a move() call, as the cyberspaceStateReconciler may not have received the new action yet. So basically we only trust the first value we receive as the application starts, and then we only trust what we publish after that.
+    updateLatestAction(options.latestAction, true)
+  }
   // get all movement workers
   const workers = workzone[target]
   // post a command to start mining drift events to all movement workers
   workers.forEach((worker) => {
     worker.postMessage({
       command,
-      ...options
+      ...(options ?? {}),
     })
   })
+}
+
+const workerMessage = (event: MessageEvent) => {
+  // TODO: we must be receiving a fully formed Event from the worker, or do we need to parse the action binary into an Event? How should this work be split up?
+  if (event.data.action) {
+    // make sure the completed unit references the most recent action
+    if (latestAction) {
+      // there is a previous action, which also means that the newly created action is not a genesis action
+      const latestActionID = latestAction.id
+      const referenceToLatest = event.data.action.tags.find((tag: string[]) => tag[0] === 'e' && tag[3] === 'genesis')![1]
+      if (latestActionID !== referenceToLatest) {
+        console.warn('The completed action does not reference the most recent action. The state is not properly managed!')
+        // So which is wrong: the worker thread or the latestActionID? Most likely the worker thread since it receives information last.
+        // hopefully this warning just never happens because we manage state properly.
+        return // dump the action
+      }
+      // 
+    } else {
+      // there is no previous action, which means that the newly created action is a genesis action
+      // make sure it is a genesis action
+      if (!isGenesisAction(event.data.action)) {
+        console.warn('The completed action should be a genesis event but it is not! The state is not properly managed!')
+        return // dump the action
+      }
+    }
+    // OK, the action is valid.
+    // LEFTOFF
+    // TODO: publish the action
+    // TODO: update the latestAction action with this action
+    updateLatestAction(event.data.action)
+    // TODO: trigger workers to use new latestAction and genesisAction values
+  }
 }

@@ -7,15 +7,26 @@ import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
 import { DRAG, FRAME, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { Action } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroes } from "../../libraries/Hash"
 
-export const useCyberspaceStateReconciler = (): [THREE.Vector3, THREE.Vector3, THREE.Quaternion, number] => {
+type CyberspaceStateReconciler = {
+  actions: Action[]
+  position: THREE.Vector3
+  velocity: THREE.Vector3
+  rotation: THREE.Quaternion
+  simulationHeight: number
+  genesisAction: Action | boolean
+  latestAction: Action | false 
+}
+
+export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
   const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions; they may come from the relay pool unordered but the reducer will sort them by timestamp AND purge old actions if a new action chain begins (new genesis event.)
   const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
-  const [, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
+  const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
 
   // action state vars
   const [simulationHeight, setSimulationHeight] = useState<number>(0) // the most recent timestamp (ms) that the simulation has been updated to
@@ -40,8 +51,8 @@ export const useCyberspaceStateReconciler = (): [THREE.Vector3, THREE.Vector3, T
     sub.on('eose', () => {
       setLoadedWholeChain(true)
       // this is only triggered once for a connection (pool)
-      // distill and set [position, velocity, rotation, timestamp] to return
       // TODO: we need a way to determine if the chain is invalid and will never be valid so, we need to reset the chain and start over.
+      // if loadedWholeChain is true and validChain is false, we need to start over with a new genesis event.
     })
     return () => {
       sub.unsub()
@@ -112,5 +123,17 @@ export const useCyberspaceStateReconciler = (): [THREE.Vector3, THREE.Vector3, T
     
   })
 
-  return [position, velocity, rotation, simulationHeight]
+  // genesisAction can be one of the following values:
+  // - false: we have not loaded the whole chain yet, so please wait
+  // - true: we have loaded the whole chain and it is invalid, so we need to start over with a new genesis event. TRUE MEANS THE CHAIN IS INVALID! AND WE NEED TO START OVER.
+  // - Action: we have loaded the whole chain and it is valid, so this is the genesis event
+  const genesisAction = loadedWholeChain ? validChain ? actions[0] : true : false
+
+  // latestAction wil be one of the following values:
+  // - false: we don't have any actions yet
+  // - Action: the most recent action in the chain
+  // - it won't ever be true.
+  const latestAction = actions.length > 0 ? actions[actions.length - 1] : false
+
+  return {actions, position, velocity, rotation, simulationHeight, genesisAction, latestAction}
 }

@@ -50,7 +50,7 @@ export function decodeHexToCoordinates(hexString: string): BigCoords {
 
     const lastBit = Number(binaryString[255])
 
-    const plane = lastBit === 0 ? "d-space" : "c-space"
+    const plane = lastBit === 0 ? "d-space" : "i-space"
 
     return {x: X, y: Y, z: Z, plane }
 }
@@ -68,14 +68,21 @@ export const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
   return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)
 }
 
-export const getPlaneFromAction = (action: Action): 'c-space' | 'd-space' => {
+export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
   // 0 = d-space (reality, first)
-  // 1 = c-space (cyberreality, second)
-  return parseInt(action.tags.find((tag: string[]) => tag[0] === 'C')![1].substring(63), 16) & 1 ? 'c-space' : 'd-space'
+  // 1 = i-space (cyberreality, second)
+  return parseInt(action.tags.find((tag: string[]) => tag[0] === 'C')![1].substring(63), 16) & 1 ? 'i-space' : 'd-space'
 }
 
 export const getVector3FromCyberspaceCoordinate = (coordinate: string): THREE.Vector3 => {
   const big = decodeHexToCoordinates(coordinate)
   const small = downscaleCoords(big, UNIVERSE_DOWNSCALE)
   return new THREE.Vector3(small.x, small.y, small.z)
+}
+
+export const isGenesisAction = (action: Action): boolean => {
+  const hasPubkeyCoordinate = action.pubkey === action.tags.find(tag => tag[0] === 'C')![1] 
+  const hasNoETags = !action.tags.find(tag => tag[0] === 'e')
+  const hasZeroVelocity = action.tags.find(tag => tag[0] === 'velocity')!.slice(1).join('') === "000"
+  return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }

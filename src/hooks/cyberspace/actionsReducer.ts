@@ -1,3 +1,4 @@
+import { isGenesisAction } from "../../libraries/Cyberspace"
 import { ActionsState, ActionsReducer } from "./actionReducerTypes"
 
 // actions are not necessarily received in order by timestamp!
@@ -18,11 +19,7 @@ export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
   // if so, dump all previous actions
   // genesis should have zero velocity, a C tag matching the pubkey and no e tags.
   const latest = newState[newState.length - 1]
-  const hasPubkeyCoordinate = latest.pubkey === latest.tags.find(tag => tag[0] === 'C')![1] 
-  const hasNoETags = !latest.tags.find(tag => tag[0] === 'e')
-  const hasZeroVelocity = latest.tags.find(tag => tag[0] === 'velocity')!.slice(1).join('') === "000"
-  const isGenesisEvent = hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
-  if (isGenesisEvent) {
+  if (isGenesisAction(latest)) {
     // dump all actions that aren't part of this genesis event's action chain
     return [latest]
   }

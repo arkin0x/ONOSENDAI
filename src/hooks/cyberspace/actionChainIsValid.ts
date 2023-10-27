@@ -11,7 +11,6 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
   // things that are most likely to invalidate the chain are missing tags
 
   const GENESIS_ACTION = actions[0]
-  const GENESIS_ID = GENESIS_ACTION.id
   const LAST_INDEX = actions.length - 1
 
   try {
@@ -77,7 +76,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       // TODO: implement portals to switch planes; currently stuck on the starting plane
       const testPlaneState = [...actions]
       const startPlane = getPlaneFromAction(GENESIS_ACTION)
-      const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'c-space'>((plane, action) => {
+      const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'i-space'>((plane, action) => {
         // get the plane from the action
         const currPlane = getPlaneFromAction(action)
         if (plane === currPlane) {

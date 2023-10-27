@@ -46,6 +46,7 @@ export const updateHashpowerAllocation = (newAllocation?: HashpowerAllocation) =
 
   // call with no args to get the current allocation
   if (!newAllocation) {
+    adjustLabor()
     return hashpowerAllocation
   }
 
@@ -115,25 +116,22 @@ const adjustLabor = () => {
 
 
 export const move = (throttle: number, quaternion: THREE.Quaternion) => {
-  // get all movement workers
-  const movementWorkers = workzone['movement']
-  // post a command to start mining drift events to all movement workers
-  movementWorkers.forEach((worker) => {
-    worker.postMessage({
-      command: 'start',
-      throttle,
-      quaternion,
-    })
-  })
+  issueWorkerCommand('movement', 'start', { throttle, quaternion })
 }
 
 export const stopMove = () => {
+  issueWorkerCommand('movement', 'stop')
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options: any = {}) => {
   // get all movement workers
-  const movementWorkers = workzone['movement']
-  // post a command to stop mining
-  movementWorkers.forEach((worker) => {
+  const workers = workzone[target]
+  // post a command to start mining drift events to all movement workers
+  workers.forEach((worker) => {
     worker.postMessage({
-      command: 'stop',
+      command,
+      ...options
     })
   })
 }

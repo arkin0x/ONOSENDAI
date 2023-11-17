@@ -92,7 +92,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       // TODO: also check position!!! probably makes sense to do that here too.
       const testVelocityState = [...actions]
       // running simulated velocity
-      const simulatedVelocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
+      let simulatedVelocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
       tests.push(testVelocityState.every((action, index) => {
         // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
         // this action's velocity should match the velocity simulation
@@ -118,7 +118,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
           const newVelocity = Math.pow(2, POW)
           const bodyVelocity = new THREE.Vector3(0, 0, newVelocity)
           const addedVelocity = bodyVelocity.applyQuaternion(q)
-          simulatedVelocity.add(addedVelocity)
+          simulatedVelocity = simulatedVelocity.add(addedVelocity)
         }
 
         // 2. simulate velocity for each frame up to and not including the next action.
@@ -139,7 +139,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         // Using Math.floor() because drag is not applied to the last frame. The next action will calculate drag starting at its own timestamp. The time between the last frame and the next action is variable and will be less than a frame. Technically, operators are penalized with more drag over time if this duration is shorter, and optimizing the length of time between actions is a strategy for maximizing velocity. This is not a bug; to keep things simple we restart the frame clock with each new action, which has the side effect of making this overlap possible.
         let iterations = Math.floor((end_ts - start_ts) / FRAME)
         while (iterations--) {
-          simulatedVelocity.multiplyScalar(DRAG)
+          simulatedVelocity = simulatedVelocity.multiplyScalar(DRAG)
         }
         // done simulating velocity. we'll see if it matches the next action in the next iteration of the loop.
         return true

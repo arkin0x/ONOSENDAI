@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { useFrame } from "@react-three/fiber"
 import { FRAME, DRAG } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
 import { move, stopMove } from '../libraries/Engine.ts'
+import { IdentityContext } from '../providers/IdentityProvider.tsx'
+import { IdentityContextType } from '../types/IdentityType.tsx'
+import { GenesisAction, LatestAction } from '../types/Cyberspace.ts'
 
 export const Avatar = () => {
   const {position, velocity, rotation, genesisAction, latestAction} = useCyberspaceStateReconciler()
@@ -12,6 +15,12 @@ export const Avatar = () => {
   const [currentRotation, setCurrentRotation] = useState<null|THREE.Quaternion>(null) // rotation is based on last state + pointer drag
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(0)
   const [throttle, setThrottle] = useState(1)
+  const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
+
+  // abstract the passing of identity and relays to move().
+  const moveProxy = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
+    move(throttle, quaternion, genesisAction, latestAction, identity, relays)
+  }
 
   useEffect(() => {
     const quat = currentRotation || new THREE.Quaternion(0, 0, 0, 1)
@@ -19,13 +28,13 @@ export const Avatar = () => {
     const handleForward = (e: KeyboardEvent) => {
       if (e.key === "w" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-        move(throttle, quat, genesisAction, latestAction)
+        moveProxy(throttle, quat, genesisAction, latestAction)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.key === "s" || e.key === "ArrowDown") {
         // mine drift events in reverse
-        move(throttle, quat.clone().invert(), genesisAction, latestAction)
+        moveProxy(throttle, quat.clone().invert(), genesisAction, latestAction)
       }
     }
     const handleInactive = () => {

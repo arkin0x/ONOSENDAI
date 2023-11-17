@@ -5,6 +5,8 @@ import MovementWorker from '../workers/MovementMiner.worker?worker'
 import { Event } from 'nostr-tools'
 import { Action, GenesisAction, LatestAction, genesisAction } from '../types/Cyberspace'
 import { isGenesisAction } from './Cyberspace'
+import { IdentityType } from '../types/IdentityType'
+import { RelayObject } from '../types/NostrRelay'
 
 type HashpowerAllocationTarget = 'observation' | 'movement' | 'action'
 
@@ -45,34 +47,43 @@ const workzone: Workzone = {
   'action': [],
 }
 
-// keep a list of all actions produced by the Engine
-// The most recent action is the last in the array; it needs to be
-// referenced by any new actions.
+// The Engine must know the genesis action and latest action to add new actions to the chain. This state is tracked here. It is updated initially from what events are received by the cyberspaceStateReconciler, but after that it is only updated by the workerMessage() function to reflect the most up-to-date state from mining, unless a new genesis action is received, in which case the latest action is reset to false so it can start a new chain.
 let genesisAction: GenesisAction = false
 let latestAction: LatestAction = false
+let identity: IdentityType = false
+let relays: RelayObject = false
 
-const updateGenesisAction = (action: GenesisAction, initialize?: true) => {
-  // if initialize is set and genesisAction is false, update it only this time
-  if (initialize && genesisAction === false) {
-    genesisAction = action
-    return
-  }
-  // always update the genesisAction if initialize is not set
-  if (!initialize){
+const updateGenesisAction = (action: GenesisAction) => {
+  if (typeof action !== 'object') return
+
+  if (typeof genesisAction === 'object') {
+    // we have an existing genesis action.
+    if (genesisAction.id !== action.id) {
+      // we received a new genesis action, meaning we are starting our action chain over. Save the new genesis action and reset the latest action.
+      genesisAction = action
+      latestAction = false
+    }
+  } else {
+    // we did not have an existing genesis action, so save whatever we were given.
     genesisAction = action
   }
 }
 
 const updateLatestAction = (action: LatestAction, initialize?: true) => {
-  // if initialize is set and latestAction is false, update it only this time
-  if (initialize && latestAction === false) {
+  // this probably won't happen, but don't let latestAction be set to a non action value (false) via this function; it's ok if it is done manually elsewhere.
+  if (typeof action !== 'object') return latestAction
+  if (initialize === true && latestAction === false) {
+    // save the latest action IFF latestAction is false. If it has already been defined, then it can only be updated by receiving a workerMessage with a newly created action; see the call to updateLatestAction in workerMessage(). This is to prevent the latest action from being overwritten by an older action in a move() call, as the cyberspaceStateReconciler may not have received the new action yet. So basically we only trust the first value we receive from our subscription as the application starts, and then we only trust what we mine after that.
     latestAction = action
-    return
   }
-  // always update the latestAction if initialize is not set
+  if (initialize === true && latestAction !== false) {
+    // do nothing
+  }
+  // always update the latestAction IFF initialize is not set
   if (!initialize){
     latestAction = action
   }
+  return latestAction
 }
 
 export const updateHashpowerAllocation = (newAllocation?: HashpowerAllocation) => {
@@ -150,8 +161,10 @@ const adjustLabor = () => {
 }
 
 
-export const move = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
-  issueWorkerCommand('movement', 'start', { throttle, quaternion, genesisAction, latestAction })
+export const move = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction, id: IdentityType, rel: RelayObject) => {
+  identity = id
+  relays = rel
+  issueWorkerCommand('movement', 'start', { throttle, quaternion, genesisAction, latestAction, pubkey: identity.pubkey })
 }
 
 export const stopMove = () => {
@@ -163,6 +176,7 @@ type WorkerCommandOptions = {
   quaternion?: THREE.Quaternion
   genesisAction: GenesisAction // NOT optional if options are defined
   latestAction: LatestAction // NOT optional if options are defined
+  pubkey: string
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -170,8 +184,8 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
   if (options) {
     // save the genesis action
     updateGenesisAction(options.genesisAction)
-    // save the latest actions IFF it is false. If it has already been defined, then it can only be updated by receiving a workerMessage with a newly created action. This is to prevent the latest action from being overwritten by an older action by a move() call, as the cyberspaceStateReconciler may not have received the new action yet. So basically we only trust the first value we receive as the application starts, and then we only trust what we publish after that.
-    updateLatestAction(options.latestAction, true)
+    // this call to updateLatestAction is only successful in updating the latestAction the first time it runs -- when the application starts -- so we can initialize the latest action. After that, updateLatestAction is only successfully updated from workerMessage() when a new action is created by a worker. The latest action is set by this function's return value so that the next worker can use the latest action to create a new action.
+    options.latestAction = updateLatestAction(options.latestAction, true)
   }
   // get all movement workers
   const workers = workzone[target]
@@ -185,6 +199,7 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
 }
 
 const workerMessage = (event: MessageEvent) => {
+  // Each worker will be calling this same function with completed actions. We need to make sure that the action is valid and that it references the most recent action; then we must update it synchronously so that the next worker can use the updated value.
   // TODO: we must be receiving a fully formed Event from the worker, or do we need to parse the action binary into an Event? How should this work be split up?
   if (event.data.action) {
     // make sure the completed unit references the most recent action
@@ -210,7 +225,7 @@ const workerMessage = (event: MessageEvent) => {
     // OK, the action is valid.
     // LEFTOFF
     // TODO: publish the action
-    // TODO: update the latestAction action with this action
+    // update the latestAction action with this action
     updateLatestAction(event.data.action)
     // TODO: trigger workers to use new latestAction and genesisAction values
   }

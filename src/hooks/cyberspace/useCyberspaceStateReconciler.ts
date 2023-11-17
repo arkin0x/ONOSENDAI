@@ -131,7 +131,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
   // latestAction wil be one of the following values:
   // - false: we don't have any actions yet
-  // - Action: the most recent action in the chain
+  // - Action: the most recent action in the chain; if the chain is only 1 action long, this is the genesis action
   // - it won't ever be true.
   const latestAction = actions.length > 0 ? actions[actions.length - 1] : false
 

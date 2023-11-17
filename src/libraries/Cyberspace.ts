@@ -2,7 +2,10 @@ import * as THREE from "three"
 import { Quaternion } from "@react-three/fiber"
 import almostEqual from "almost-equal"
 import { Action, BigCoords, Coords } from "../types/Cyberspace"
-import { getTag } from "./Nostr"
+import { getTag, getTagValue } from "./Nostr"
+import { EventTemplate, UnsignedEvent } from "nostr-tools"
+import { countLeadingZeroes } from "./Hash"
+import { func } from "three/examples/jsm/nodes/Nodes.js"
 
 export const CYBERSPACE_SIZE = BigInt(2 ** 85)
 export const UNIVERSE_DOWNSCALE = BigInt(2 ** 35)
@@ -89,7 +92,7 @@ export function decodeHexToCoordinates(hexString: string): BigCoords {
     return {x: X, y: Y, z: Z, plane }
 }
 
-export function downscaleCoords(coords: BigCoords, downscale: bigint): Coords {
+export function downscaleCoords(coords: BigCoords, downscale: bigint = UNIVERSE_DOWNSCALE): Coords {
   return {
     x: Number(coords.x / downscale),
     y: Number(coords.y / downscale),
@@ -120,3 +123,53 @@ export const isGenesisAction = (action: Action): boolean => {
   const hasZeroVelocity = action.tags.find(tag => tag[0] === 'velocity')!.slice(1).join('') === "000"
   return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }
+
+export const simulate = (startEvent: Action, toTime: number): EventTemplate|undefined => {
+  const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
+  if (startTimestamp >= toTime) {
+    console.warn("Cannot simulate to a time before the start event.")
+    return
+  }
+  // calculate simulation from startEvent to toTime
+  let frames = Math.floor((toTime - startTimestamp) / FRAME)
+
+  // initialize simulation state from startEvent
+  let position = getVector3FromCyberspaceCoordinate(startEvent.tags.find(getTag('C'))![1])
+  let velocity = new THREE.Vector3().fromArray(startEvent.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
+  const rotation = new THREE.Quaternion().fromArray(startEvent.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
+  
+  // add POW to velocity if the startEvent was a drift action.
+  if (startEvent.tags.find(getTagValue('A','drift'))) {
+    const POW = countLeadingZeroes(startEvent.id)
+    const newVelocity = Math.pow(2, POW)
+    const bodyVelocity = new THREE.Vector3(0, 0, newVelocity)
+    const addedVelocity = bodyVelocity.applyQuaternion(rotation)
+    velocity = velocity.add(addedVelocity)
+  }
+
+  // simulate frames
+  while (frames--) {
+    // update position from velocity
+    position = position.add(velocity)
+    // update velocity with drag
+    velocity = velocity.multiplyScalar(DRAG)
+  }  
+
+  // simulation is complete. Construct a new action with the simulated state.
+
+  const event: EventTemplate = {
+    kind: 333,
+    created_at: Math.floor(toTime / 1000),
+    content: '',
+    tags: [
+      ['C', encodeCoordinatesToHex(position.x, position.y, position.z, startEvent.tags.find(getTag('C'))![1].substring(63))],
+      ['velocity', '000'],
+      ['quaternion', rotation.toArray().join(' ')],
+      ['ms', (toTime % 1000).toString().padStart(3, '0')]
+    ]
+  }
+}
+
+// TODO: problem: since the coordinates are downscaled and simulated, we can't really upscale them again to get the real non-scaled coordinates.
+
+function encodeCoordinatesToHex(x: number, y: number, z: number, plane: string): string {

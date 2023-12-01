@@ -14,12 +14,57 @@ import { countLeadingZeroes } from "../../libraries/Hash"
 
 type CyberspaceStateReconciler = {
   actions: Action[]
-  position: THREE.Vector3
-  velocity: THREE.Vector3
+  position: BigVector3
+  velocity: BigVector3
   rotation: THREE.Quaternion
   simulationHeight: number
   genesisAction: Action | boolean
   latestAction: Action | false 
+}
+
+class BigVector3 {
+  x: bigint
+  y: bigint
+  z: bigint
+  precision: bigint = 1_000_000n // store 6 decimal places in the bigint
+
+  constructor(x: number|bigint = 0, y: number|bigint = 0, z: number|bigint = 0) {
+    this.x = BigInt(x) * this.precision
+    this.y = BigInt(y) * this.precision
+    this.z = BigInt(z) * this.precision
+  }
+
+  fromArray(arr: (number|bigint)[]): BigVector3 {
+    if (arr.length !== 3) {
+      throw new Error('Array must contain exactly three elements')
+    }
+    this.x = BigInt(arr[0])
+    this.y = BigInt(arr[1])
+    this.z = BigInt(arr[2])
+    return this
+  }
+  
+	applyQuaternion( q: THREE.Quaternion ) {
+
+		const x = this.x, y = this.y, z = this.z
+		const qx = q.x, qy = q.y, qz = q.z, qw = q.w
+
+		// calculate quat * vector
+
+		const ix = qw * x + qy * z - qz * y
+		const iy = qw * y + qz * x - qx * z
+		const iz = qw * z + qx * y - qy * x
+		const iw = - qx * x - qy * y - qz * z
+
+		// calculate result * inverse quat
+
+		this.x = ix * qw + iw * - qx + iy * - qz - iz * - qy
+		this.y = iy * qw + iw * - qy + iz * - qx - ix * - qz
+		this.z = iz * qw + iw * - qz + ix * - qy - iy * - qx
+
+		return this
+
+	}
 }
 
 export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
@@ -30,8 +75,8 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
   // action state vars
   const [simulationHeight, setSimulationHeight] = useState<number>(0) // the most recent timestamp (ms) that the simulation has been updated to
-  const [position, setPosition] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
-  const [velocity, setVelocity] = useState<THREE.Vector3>(new THREE.Vector3(0,0,0))
+  const [position, setPosition] = useState<BigVector3>(new BigVector3(0,0,0))
+  const [velocity, setVelocity] = useState<BigVector3>(new BigVector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
 
   // retrieve action events, store and validate action chain
@@ -70,7 +115,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // get position
       const position = getVector3FromCyberspaceCoordinate(latest.tags.find(getTag('C'))![1])
       // get velocity
-      const velocity = new THREE.Vector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
+      const velocity = new BigVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
       // get rotation
       const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
       // add POW to velocity if the most recent was a drift event
@@ -79,7 +124,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
         // add POW to velocity for drift event
         const POW = countLeadingZeroes(latest.id)
         const newVelocity = Math.pow(2, POW)
-        const bodyVelocity = new THREE.Vector3(0, 0, newVelocity)
+        const bodyVelocity = new BigVector3(0, 0, newVelocity)
         const addedVelocity = bodyVelocity.applyQuaternion(rotation)
         velocity.add(addedVelocity)
       }
@@ -93,7 +138,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     } else {
       // set state to home coordinates and zero velocity
       // setPosition( translate pubkey into cyberspace coordinates )
-      setVelocity(new THREE.Vector3(0,0,0))
+      setVelocity(new BigVector3(0,0,0))
       setRotation(new THREE.Quaternion(0,0,0,1))
       setSimulationHeight(0)
     }

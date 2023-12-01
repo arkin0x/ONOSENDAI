@@ -53,11 +53,18 @@ export const FRAME = 1000 / 60 // each frame is 1/60th of a second
 export const DRAG = 0.999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
 export const IDENTITY_QUATERNION: Quaternion = [0, 0, 0, 1] // mostly so I don't forget
 
+export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
+  return parseInt(bin.toString()) > 0 ? 'i-space' : 'd-space'
+}
+
+export const planeToBin = (plane: 'i-space' | 'd-space'): number => {
+  return plane === 'i-space' ? 1 : 0
+}
+
 export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
     const X = coords.x
     const Y = coords.y
     const Z = coords.z
-    const plane = coords.plane === 'i-space' ? '1' : '0'
     // Convert X, Y, and Z to BigInt and then to binary strings
     const binaryX = BigInt(X.toFixed()).toString(2).padStart(85, '0')
     const binaryY = BigInt(Y.toFixed()).toString(2).padStart(85, '0')
@@ -72,7 +79,7 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
     }
 
     // Add the plane bit to the end of the string
-    binaryString += plane
+    binaryString += planeToBin(coords.plane) 
 
     // Convert the binary string to a hexadecimal string
     const hexString = BigInt('0b' + binaryString).toString(16).padStart(64, '0')
@@ -110,9 +117,7 @@ export function decodeHexToCoordinates(hexString: string): CyberspaceCoordinates
         }
     }
 
-    const lastBit = Number(binaryString[255])
-
-    const plane = lastBit === 0 ? "d-space" : "i-space"
+    const plane = binToPlane(binaryString)
 
     // convert bigints to decimal objects
     const decimalX = new Decimal(X.toString())
@@ -165,14 +170,6 @@ export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
   const binary = parseInt(lastNibble, 16).toString(2).padStart(4, '0')
   const lastBit = parseInt(binary[3])
   return binToPlane(lastBit)
-}
-
-export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
-  return parseInt(bin.toString()) > 0 ? 'i-space' : 'd-space'
-}
-
-export const planeToBin = (plane: 'i-space' | 'd-space'): number => {
-  return plane === 'i-space' ? 1 : 0
 }
 
 export const isGenesisAction = (action: Action): boolean => {

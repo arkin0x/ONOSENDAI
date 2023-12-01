@@ -1,20 +1,23 @@
-import { Event } from "nostr-tools"
+import { Event } from 'nostr-tools'
+import { Decimal } from 'decimal.js'
 
 export type Action = Event<333> & {
   kind: 333,
 }
-
-export type BigCoords = {
-  x: bigint
-  y: bigint
-  z: bigint
+ 
+// Cyberspace X/Y/Z coordinates must be reprersented by Decimal objects that can represent the truly huge values.
+export type CyberspaceCoordinates = {
+  x: Decimal
+  y: Decimal
+  z: Decimal 
   plane: "i-space" | "d-space"
 }
 
-export type Coords = {
-  x: number
-  y: number
-  z: number
+// MiniatureCyberspaceCoordinates are the same as CyberspaceCoordinates but with an x/y/z that is scaled down to be smaller than Number.MAX_SAFE_INTEGER. Useful for ThreeJS, as ThreeJS can only operate on number primitives.
+export type MiniatureCyberspaceCoordinates = {
+  x: number,
+  y: number,
+  z: number,
   plane: "i-space" | "d-space"
 }
 

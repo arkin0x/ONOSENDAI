@@ -17,6 +17,7 @@
     "@react-three/fiber": "^8.13.7",
     "almost-equal": "^1.1.0",
     "augmented-ui": "^2.0.0",
+    "decimal.js": "^10.4.3",
     "dompurify": "^3.0.5",
     "nostr-tools": "^1.17.0",
     "react": "^18.2.0",

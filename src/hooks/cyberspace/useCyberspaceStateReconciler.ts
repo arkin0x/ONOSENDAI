@@ -74,6 +74,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // get velocity
       const velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1))
       // get rotation
+      // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
       const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {

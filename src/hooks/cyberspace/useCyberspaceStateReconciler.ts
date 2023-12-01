@@ -72,7 +72,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // get position
       const position = getVector3FromCyberspaceCoordinate(latest.tags.find(getTag('C'))![1])
       // get velocity
-      const velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
+      const velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1))
       // get rotation
       const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
       // add POW to velocity if the most recent was a drift event
@@ -80,7 +80,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
         // quaternion from the action
         // add POW to velocity for drift event
         const POW = countLeadingZeroes(latest.id)
-        const newVelocity = Math.pow(2, POW)
+        const newVelocity = new Decimal(2).pow(POW)
         const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
         const addedVelocity = bodyVelocity.applyQuaternion(rotation)
         velocity.add(addedVelocity)

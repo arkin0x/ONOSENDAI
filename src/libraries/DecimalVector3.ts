@@ -12,7 +12,7 @@ export class DecimalVector3 {
     this.z = new Decimal(z)
   }
 
-  fromArray(arr: (number|Decimal)[]): DecimalVector3 {
+  fromArray(arr: (string|number|Decimal)[]): DecimalVector3 {
     if (arr.length !== 3) {
       throw new Error('Array must contain exactly three elements')
     }
@@ -54,5 +54,12 @@ export class DecimalVector3 {
 
     return this
 
+  }
+
+  add (v: DecimalVector3) {
+    this.x = this.x.plus(v.x)
+    this.y = this.y.plus(v.y)
+    this.z = this.z.plus(v.z)
+    return this
   }
 }

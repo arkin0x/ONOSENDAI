@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { Decimal } from 'decimal.js'
+import { decimalAlmostEqual } from "./Cyberspace"
 
 export class DecimalVector3 {
   x: Decimal 
@@ -75,6 +76,10 @@ export class DecimalVector3 {
     this.y = this.y.div(scalar)
     this.z = this.z.div(scalar)
     return this
+  }
+
+  almostEqual (v: DecimalVector3): boolean {
+    return decimalAlmostEqual(this.x, v.x) && decimalAlmostEqual(this.y, v.y) && decimalAlmostEqual(this.z, v.z)
   }
 
   toVector3(): THREE.Vector3 {

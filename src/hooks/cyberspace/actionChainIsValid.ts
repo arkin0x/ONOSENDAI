@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { countLeadingZeroes } from "../../libraries/Hash"
-import { DRAG, FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
+import { DRAG, FRAME, decimalAlmostEqual, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
 import { ActionsState } from "./actionReducerTypes"
 import { getTag, getTagValue } from "../../libraries/Nostr"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
@@ -100,7 +100,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         // this action's velocity should match the velocity simulation
         // get velocity from action and parse values into a vector3
         const v = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
-        if (!vector3Equal(v, simulatedVelocity)) {
+        if (!v.almostEqual(simulatedVelocity)) {
           return false
         }
 

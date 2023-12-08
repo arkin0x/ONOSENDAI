@@ -144,12 +144,12 @@ export function downscaleCoordinates(coords: CyberspaceCoordinates, downscale: D
   }
 }
 
+const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
+const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
 /**
  * Decimal Almost Equal
  * almost-equal implemented with decimal.js
  */
-const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
-const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
 export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
   const difference = a.minus(b).abs()
   if (difference.lessThanOrEqualTo(decimalFLT_EPSILON)) {
@@ -163,9 +163,6 @@ export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
 
 /**
  * @NOTE This function is NOT compatible wiith DecimalVector3
- * @param a 
- * @param b 
- * @returns 
  */
 export const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
   return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)

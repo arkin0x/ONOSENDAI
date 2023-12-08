@@ -98,7 +98,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       tests.push(testVelocityState.every((action, index) => {
         // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
         // this action's velocity should match the velocity simulation
-        // get velocity from action and parse values into a vector3
+        // get velocity from action and parse values into a DecimalVector3
         const v = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
         if (!v.almostEqual(simulatedVelocity)) {
           return false

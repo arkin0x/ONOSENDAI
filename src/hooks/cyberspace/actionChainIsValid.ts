@@ -3,6 +3,8 @@ import { countLeadingZeroes } from "../../libraries/Hash"
 import { DRAG, FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
 import { ActionsState } from "./actionReducerTypes"
 import { getTag, getTagValue } from "../../libraries/Nostr"
+import { DecimalVector3 } from "../../libraries/DecimalVector3"
+import Decimal from "decimal.js"
 
 export const actionChainIsValid = (actions: ActionsState): boolean => {
   const tests = []
@@ -92,12 +94,12 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       // TODO: also check position!!! probably makes sense to do that here too.
       const testVelocityState = [...actions]
       // running simulated velocity
-      let simulatedVelocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
+      let simulatedVelocity: DecimalVector3 = new DecimalVector3(0, 0, 0)
       tests.push(testVelocityState.every((action, index) => {
         // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
         // this action's velocity should match the velocity simulation
         // get velocity from action and parse values into a vector3
-        const v = new THREE.Vector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
+        const v = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
         if (!vector3Equal(v, simulatedVelocity)) {
           return false
         }
@@ -115,8 +117,8 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
           const q = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
           // add POW to velocity for drift event
           const POW = countLeadingZeroes(action.id)
-          const newVelocity = Math.pow(2, POW)
-          const bodyVelocity = new THREE.Vector3(0, 0, newVelocity)
+          const newVelocity = new Decimal(2).pow(POW)
+          const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
           const addedVelocity = bodyVelocity.applyQuaternion(q)
           simulatedVelocity = simulatedVelocity.add(addedVelocity)
         }

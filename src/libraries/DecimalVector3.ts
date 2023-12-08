@@ -62,4 +62,22 @@ export class DecimalVector3 {
     this.z = this.z.plus(v.z)
     return this
   }
+
+  multiplyScalar (scalar: number|Decimal) {
+    this.x = this.x.times(scalar)
+    this.y = this.y.times(scalar)
+    this.z = this.z.times(scalar)
+    return this
+  }
+
+  divideScalar (scalar: number|Decimal) {
+    this.x = this.x.div(scalar)
+    this.y = this.y.div(scalar)
+    this.z = this.z.div(scalar)
+    return this
+  }
+
+  toVector3(): THREE.Vector3 {
+    return new THREE.Vector3(parseFloat(this.x.toString()), parseFloat(this.y.toString()), parseFloat(this.z.toString()))
+  }
 }

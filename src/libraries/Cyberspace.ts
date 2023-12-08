@@ -145,7 +145,24 @@ export function downscaleCoordinates(coords: CyberspaceCoordinates, downscale: D
 }
 
 /**
- * @TODO this function is not yet compatible with Decimal.js
+ * Decimal Almost Equal
+ * almost-equal implemented with decimal.js
+ */
+const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
+const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
+export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
+  const difference = a.minus(b).abs()
+  if (difference.lessThanOrEqualTo(decimalFLT_EPSILON)) {
+    return true
+  }
+  if (difference.lessThanOrEqualTo(decimalDBL_EPSILON.times(Decimal.min(a.abs(), b.abs())))) {
+    return true
+  }
+  return a.equals(b)
+}
+
+/**
+ * @NOTE This function is NOT compatible wiith DecimalVector3
  * @param a 
  * @param b 
  * @returns 

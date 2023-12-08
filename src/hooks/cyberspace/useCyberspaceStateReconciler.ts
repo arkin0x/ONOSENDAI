@@ -7,7 +7,7 @@ import { getRelayList, getTag, getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
-import { DRAG, FRAME, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { DRAG, FRAME, decodeHexToCoordinates, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { Action } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
@@ -72,7 +72,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // get position
       const position = getVector3FromCyberspaceCoordinate(latest.tags.find(getTag('C'))![1])
       // get velocity
-      const velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1))
+      let velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1))
       // get rotation
       // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
       const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
@@ -84,7 +84,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
         const newVelocity = new Decimal(2).pow(POW)
         const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
         const addedVelocity = bodyVelocity.applyQuaternion(rotation)
-        velocity.add(addedVelocity)
+        velocity = velocity.add(addedVelocity)
       }
       // get timestamp
       const timestamp = getMillisecondsTimestampFromAction(latest)
@@ -95,36 +95,13 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setSimulationHeight(timestamp)
     } else {
       // set state to home coordinates and zero velocity
-      // setPosition( translate pubkey into cyberspace coordinates )
+      const homeCoord = getVector3FromCyberspaceCoordinate(identity.pubkey)
+      setPosition(homeCoord)
       setVelocity(new DecimalVector3(0,0,0))
       setRotation(new THREE.Quaternion(0,0,0,1))
       setSimulationHeight(0)
     }
   }, [validChain, actions])
-
-  useFrame(() => {
-    if (actions.length === 0) {
-      return
-    }
-
-    const current_ts = Date.now()
-
-    if (current_ts < simulationHeight) {
-      return
-    }
-
-    // simuate frames since last action
-    let frames = Math.floor((current_ts - simulationHeight) / FRAME)
-    if (frames > 0) setSimulationHeight(Math.floor(frames * FRAME) + simulationHeight)
-
-    while (frames--) {
-      // update velocity with drag
-      setVelocity(velocity => velocity.multiplyScalar(DRAG))
-      // update position from velocity
-      setPosition(position => position.add(velocity))
-    }
-    
-  })
 
   // genesisAction can be one of the following values:
   // - false: we have not loaded the whole chain yet, so please wait

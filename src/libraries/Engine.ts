@@ -144,6 +144,7 @@ const adjustLabor = () => {
   })
   // spawn workers
   Object.keys(workzone).forEach((key) => {
+    console.log('spawningworker')
     const target = key as HashpowerAllocationTarget
     const workers = workzone[target]
     const numWorkers = workers.length
@@ -181,6 +182,7 @@ type WorkerCommandOptions = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
+  console.log('issueworkercommand', options, workzone) // LEFTOFF
   if (options) {
     // save the genesis action
     updateGenesisAction(options.genesisAction)

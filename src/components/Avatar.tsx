@@ -3,11 +3,12 @@ import { useFrame, useThree } from "@react-three/fiber"
 import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
-import { move, stopMove } from '../libraries/Engine.ts'
+import { move, stopMove, updateHashpowerAllocation } from '../libraries/Engine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { GenesisAction, LatestAction } from '../types/Cyberspace.ts'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
+import { update } from 'three/examples/jsm/libs/tween.module.js'
 
 /**
  * Avatar component
@@ -72,7 +73,7 @@ export const Avatar = () => {
 
   // abstract the passing of identity and relays to move().
   const moveProxy = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
-    console.log('moving')
+    // console.log('moving')
     move(throttle, quaternion, genesisAction, latestAction, identity, relays)
   }
 
@@ -80,7 +81,7 @@ export const Avatar = () => {
   useEffect(() => {
     // on mount, set up listener for W key to go forward. On unmount, remove listener.
     const handleForward = (e: KeyboardEvent) => {
-      console.log(e)
+      // console.log(e)
       if (e.code === "KeyW" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
         moveProxy(throttle, currentRotation, genesisAction, latestAction)
@@ -112,6 +113,8 @@ export const Avatar = () => {
     window.addEventListener("wheel", handleWheel)
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
+
+    updateHashpowerAllocation()
 
     return () => {
       window.removeEventListener("keydown", handleForward)

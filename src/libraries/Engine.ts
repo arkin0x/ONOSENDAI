@@ -216,6 +216,8 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
           // create an armor event
         } else if (command === 'stealth') {
           //
+        } else if (command === 'portal') {
+          // 
         } else if (command === 'shout') {
           // this one doesn't go in the action chain
         } else if (command === 'noop') {

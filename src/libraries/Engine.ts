@@ -181,9 +181,10 @@ type WorkerCommandOptions = {
   pubkey: string
 }
 
+// @TODO I could split issueWorkerCommand into multiple different functions and parts: update the latest action/genesis, issue an Movement command or Action command, etc.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
-  console.log('issueworkercommand', target, options, command, workzone) // LEFTOFF
+  console.log('issueworkercommand', target, options, command, workzone)
   let eventToMine: UnsignedAction | undefined
   if (options) {
     // save the genesis action
@@ -200,15 +201,26 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
       eventToMine = createUnsignedGenesisAction(options.pubkey)
     } else {
       if (target === 'movement') {
-        // create a new drift event
         // LEFTOFF
-        // create a drift event
-        // It doesn't matter which hashpower/worker target we have here. The drift event will be generic to any worker.
-        eventToMine = createUnsignedDriftAction(options.pubkey)
+        // create this function
+        // eventToMine = createUnsignedDriftAction(options.pubkey)
       } else if (target === 'action') {
         // use command to create a new action
         if (command === 'derezz') {
-          eventToMine = createUnsignedDerezzAction(options.pubkey, command, )
+          // eventToMine = createUnsignedDerezzAction(options.pubkey, command, )
+        } else if (command === 'vortex') {
+          //
+        } else if (command === 'bubble') {
+          //
+        } else if (command === 'armor') {
+          // create an armor event
+        } else if (command === 'stealth') {
+          //
+        } else if (command === 'shout') {
+          // this one doesn't go in the action chain
+        } else if (command === 'noop') {
+          // this should be an easy one - no mining required.
+        }
       }
     }
   } else return

@@ -46,6 +46,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     sub.on('event', (event) => {
       // save every action
       saveAction({type: 'add', payload: event})
+      console.log('action chain',actions)
       // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.
       const chainStatus = validateActionChain(actions)
       setValidChain(chainStatus)

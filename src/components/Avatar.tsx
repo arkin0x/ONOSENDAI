@@ -55,7 +55,7 @@ export const Avatar = () => {
     const elapsed = (timestamp - processedTimestamp) // milliseconds since last processed frame or last state change
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
     let frames = Math.floor(elapsed / FRAME) // the physics runs at 60 frames per second
-    console.log(frames, 'frames to process')
+    // console.log(frames, 'frames to process')
     while (frames--) {
       setLerpPosition(lerpPosition.add(lerpVelocity))
       setLerpVelocity(lerpVelocity.multiplyScalar(DRAG)) // multiply velocity by 0.999 to simulate friction every frame
@@ -72,6 +72,7 @@ export const Avatar = () => {
 
   // abstract the passing of identity and relays to move().
   const moveProxy = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
+    console.log('moving')
     move(throttle, quaternion, genesisAction, latestAction, identity, relays)
   }
 
@@ -79,13 +80,14 @@ export const Avatar = () => {
   useEffect(() => {
     // on mount, set up listener for W key to go forward. On unmount, remove listener.
     const handleForward = (e: KeyboardEvent) => {
-      if (e.key === "w" || e.key === "ArrowUp") {
+      console.log(e)
+      if (e.code === "KeyW" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
         moveProxy(throttle, currentRotation, genesisAction, latestAction)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
-      if (e.key === "s" || e.key === "ArrowDown") {
+      if (e.code === "KeyS" || e.key === "ArrowDown") {
         // mine drift events in reverse
         moveProxy(throttle, currentRotation.clone().invert(), genesisAction, latestAction)
       }

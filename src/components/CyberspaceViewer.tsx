@@ -4,7 +4,7 @@ import { Canvas, useFrame } from "@react-three/fiber"
 import { Cyberspace } from './ThreeCyberspace'
 import "../scss/CyberspaceViewer.scss"
 import { Euler, PerspectiveCamera, Vector3 } from 'three'
-import { DOWNSCALED_CYBERSPACE_AXIS } from '../libraries/Cyberspace'
+import { DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from '../libraries/Cyberspace'
 // import { Avatar } from './Avatar.tsx'
 
 export type CyberspaceViewerProps = {
@@ -19,10 +19,10 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
     <div className="cyberspace-viewer" ref={viewerRef}>
       <Canvas style={style}>
         <CyberspaceCamera />
-        <ambientLight intensity={0.8} />
+        <ambientLight intensity={2.0} />
         <mesh position={new Vector3(0, 0, -5)}>
           <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color={'orange'}/>
+          <meshStandardMaterial color={'#ffff00'}/>
         </mesh>
         <Cyberspace>
         </Cyberspace>
@@ -35,11 +35,13 @@ export default CyberspaceViewer
 
 const CyberspaceCamera = () => {
   // define camera position and rotation
-  const [pos, setPos] = useState<Vector3>(new Vector3(0, 0, 0))
+  const [pos, setPos] = useState<Vector3>(new Vector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS))
   const [rot, setRot] = useState<Euler>(new Euler(0, 0, 0))
 
   // Get the camera and gl object from useThree
   const { camera } = useThree()
+
+  camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
 
   useEffect(() => {
     // Set the camera's position and rotation
@@ -50,10 +52,11 @@ const CyberspaceCamera = () => {
     // Force the renderer to render the scene with the updated camera
   }, [pos, rot, camera])
 
-  useFrame( () => {
+  useFrame(({clock}) => {
     // rotate the camera slowly each frame
-    // setRot(new Euler(0, rot.y + 0.001, 0))
-    setPos(new Vector3(0, 0, pos.z + 0.01))
+    // setRot(new Euler(rot.x + 0.01, 0, 0)) // rotate X
+    // setRot(new Euler(0, rot.y + 0.01, 0)) // rotate y
+    // setPos(new Vector3(0, 0, Math.sin(clock.elapsedTime) * 10 + 8))
   })
 
   return null

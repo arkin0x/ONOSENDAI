@@ -52,6 +52,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setValidChain(chainStatus)
     })
     sub.on('eose', () => {
+      console.log('eose')
       setLoadedWholeChain(true)
       // this is only triggered once for a connection (pool)
       // TODO: we need a way to determine if the chain is invalid and will never be valid so, we need to reset the chain and start over.

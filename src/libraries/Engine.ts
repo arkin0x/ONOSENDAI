@@ -3,8 +3,8 @@ import ObservationWorker from '../workers/MovementMiner.worker?worker'
 import ActionWorker from '../workers/MovementMiner.worker?worker'
 import MovementWorker from '../workers/MovementMiner.worker?worker'
 import { Event } from 'nostr-tools'
-import { Action, GenesisAction, LatestAction, genesisAction } from '../types/Cyberspace'
-import { isGenesisAction } from './Cyberspace'
+import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cyberspace'
+import { createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
 import { IdentityType } from '../types/IdentityType'
 import { RelayObject } from '../types/NostrRelay'
 
@@ -173,6 +173,7 @@ export const stopMove = () => {
 }
 
 type WorkerCommandOptions = {
+  attackTarget?: string, // hex pubkey
   throttle?: number
   quaternion?: THREE.Quaternion
   genesisAction: GenesisAction // NOT optional if options are defined
@@ -182,13 +183,35 @@ type WorkerCommandOptions = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
-  console.log('issueworkercommand', options, workzone) // LEFTOFF
+  console.log('issueworkercommand', target, options, command, workzone) // LEFTOFF
+  let eventToMine: UnsignedAction | undefined
   if (options) {
     // save the genesis action
     updateGenesisAction(options.genesisAction)
     // this call to updateLatestAction is only successful in updating the latestAction the first time it runs -- when the application starts -- so we can initialize the latest action. After that, updateLatestAction is only successfully updated from workerMessage() when a new action is created by a worker. The latest action is set by this function's return value so that the next worker can use the latest action to create a new action.
     options.latestAction = updateLatestAction(options.latestAction, true)
-  }
+
+    // Prepare the event to be sent to the workers for mining.
+    // if genesis is true and latest is false, then we need to create a new genesis action.
+    if (options.genesisAction === true && options.latestAction === false) {
+      // LEFTOFF
+      // send a fresh genesis action to be mined
+      // It doesn't matter which hashpower/worker target we have here. The genesis action will be generic to any worker.
+      eventToMine = createUnsignedGenesisAction(options.pubkey)
+    } else {
+      if (target === 'movement') {
+        // create a new drift event
+        // LEFTOFF
+        // create a drift event
+        // It doesn't matter which hashpower/worker target we have here. The drift event will be generic to any worker.
+        eventToMine = createUnsignedDriftAction(options.pubkey)
+      } else if (target === 'action') {
+        // use command to create a new action
+        if (command === 'derezz') {
+          eventToMine = createUnsignedDerezzAction(options.pubkey, command, )
+      }
+    }
+  } else return
   // get all movement workers
   const workers = workzone[target]
   // post a command to start mining drift events to all movement workers
@@ -196,6 +219,7 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
     worker.postMessage({
       command,
       ...(options ?? {}),
+      eventToMine
     })
   })
 }

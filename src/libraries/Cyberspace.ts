@@ -2,7 +2,7 @@ import * as THREE from "three"
 import { Quaternion } from "@react-three/fiber"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { Action, CyberspaceCoordinates, MiniatureCyberspaceCoordinates } from "../types/Cyberspace"
+import { Action, CyberspaceCoordinates, MiniatureCyberspaceCoordinates, UnsignedAction } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
 import { EventTemplate } from "nostr-tools"
 import { countLeadingZeroes } from "./Hash"
@@ -184,6 +184,31 @@ export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
   const binary = parseInt(lastNibble, 16).toString(2).padStart(4, '0')
   const lastBit = parseInt(binary[3])
   return binToPlane(lastBit)
+}
+
+export const getCreatedAtAndPaddedMS = (): {created_at: number, ms: string} => {
+  const now = new Date()
+  const created_at = Math.floor( (+now) / 1000)
+  const ms = now.getMilliseconds().toString().padStart(3, '0')
+  return {created_at, ms}
+}
+
+export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
+  const {created_at, ms} = getCreatedAtAndPaddedMS()
+  return {
+    pubkey, 
+    kind: 333,
+    created_at,
+    content: '',
+    tags: [
+      ['C', pubkey],
+      ['velocity', '0', '0', '0'],
+      ['quaternion', ...IDENTITY_QUATERNION],
+      ['ms', ms],
+      ['version', '1'],
+      ['A', 'noop']
+    ]
+  } as UnsignedAction
 }
 
 export const isGenesisAction = (action: Action): boolean => {

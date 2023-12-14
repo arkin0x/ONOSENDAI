@@ -1,5 +1,9 @@
-import { Event } from 'nostr-tools'
+import { Event, UnsignedEvent } from 'nostr-tools'
 import { Decimal } from 'decimal.js'
+
+export type UnsignedAction = UnsignedEvent<333> & {
+  kind: 333,
+}
 
 export type Action = Event<333> & {
   kind: 333,

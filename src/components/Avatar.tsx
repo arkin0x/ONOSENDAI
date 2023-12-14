@@ -27,6 +27,8 @@ export const Avatar = () => {
   const [throttle, setThrottle] = useState(1)
   const {position, velocity, rotation, simulationHeight, genesisAction, latestAction} = useCyberspaceStateReconciler()
 
+  console.log('genesis', genesisAction, 'latest', latestAction)
+
   // const position = new DecimalVector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS)
   // const velocity = new DecimalVector3(0, 0, 0)
   // const rotation = new THREE.Quaternion(0,0,0,1)

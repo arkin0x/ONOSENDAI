@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from "react"
 import * as THREE from "three"
-import { UNIVERSE_SIZE_HALF, UNIVERSE_SIZE } from "../libraries/Cyberspace.js"
+import { HALF_DOWNSCALED_CYBERSPACE_AXIS, DOWNSCALED_CYBERSPACE_AXIS} from "../libraries/Cyberspace.js"
 
 // const LOGO_TEAL = 0x06a4a4
 const LOGO_PURPLE = 0x78004e
@@ -23,7 +23,7 @@ const SunMaterial = new THREE.MeshBasicMaterial({
 })
 
 interface CyberspaceProps {
-  children: React.ReactNode,
+  children?: React.ReactNode,
 }
 
 /**
@@ -39,22 +39,22 @@ export const Cyberspace: React.FC<CyberspaceProps> = ({ children }) => {
     const grids = [
       <gridHelper
         key="y+"
-        args={[UNIVERSE_SIZE, 32]}
-        position={[UNIVERSE_SIZE_HALF, UNIVERSE_SIZE, UNIVERSE_SIZE_HALF]}
+        args={[DOWNSCALED_CYBERSPACE_AXIS, 32]}
+        position={[HALF_DOWNSCALED_CYBERSPACE_AXIS, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS]}
         material={BlueLineMaterial}
         renderOrder={1}
       />,
       <gridHelper
         key="y-"
-        args={[UNIVERSE_SIZE, 32]}
-        position={[UNIVERSE_SIZE_HALF, 0, UNIVERSE_SIZE_HALF]}
+        args={[DOWNSCALED_CYBERSPACE_AXIS, 32]}
+        position={[HALF_DOWNSCALED_CYBERSPACE_AXIS, 0, HALF_DOWNSCALED_CYBERSPACE_AXIS]}
         material={PurpleLineMaterial}
         renderOrder={1}
       />,
     ]
 
     const blacksun = (
-      <mesh geometry={new THREE.CircleGeometry(UNIVERSE_SIZE_HALF/2, 64)} material={SunMaterial} position={[UNIVERSE_SIZE_HALF,UNIVERSE_SIZE_HALF,-UNIVERSE_SIZE_HALF]} renderOrder={-1}/>
+      <mesh geometry={new THREE.CircleGeometry(HALF_DOWNSCALED_CYBERSPACE_AXIS/2, 64)} material={SunMaterial} position={[HALF_DOWNSCALED_CYBERSPACE_AXIS,HALF_DOWNSCALED_CYBERSPACE_AXIS,-HALF_DOWNSCALED_CYBERSPACE_AXIS]} renderOrder={-1}/>
     )
 
     return { grids, blacksun }

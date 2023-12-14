@@ -1,8 +1,8 @@
 import { Routes, Route } from 'react-router-dom'
 import { IdentityProvider } from './providers/IdentityProvider.tsx'
-import CyberspaceViewer from './components/CyberspaceViewer.tsx'
 import { Login } from './components/Login'
 import { ModalProvider } from './providers/ModalProvider.tsx'
+import { Home } from './components/Home.tsx'
 import './scss/App.scss'
 
 function App() {
@@ -12,7 +12,7 @@ function App() {
       <IdentityProvider>
         <ModalProvider>
           <Routes>
-            <Route path="/" element={<CyberspaceViewer/>}/>
+            <Route path="/" element={<Home/>}/>
             <Route path="/login" element={<Login/>}/>
           </Routes>
         </ModalProvider>

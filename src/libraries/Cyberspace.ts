@@ -4,14 +4,14 @@ import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
 import { Action, CyberspaceCoordinates, MiniatureCyberspaceCoordinates } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
-import { EventTemplate, UnsignedEvent } from "nostr-tools"
+import { EventTemplate } from "nostr-tools"
 import { countLeadingZeroes } from "./Hash"
 import { DecimalVector3 } from "./DecimalVector3"
 
 export const CYBERSPACE_AXIS = new Decimal(2).pow(85)
 export const CYBERSPACE_DOWNSCALE = new Decimal(2).pow(35) // this is the size of a cyberspace axis reduced by 2**35 so that it fits into a number primitive in JavaScript (< Number.MAX_SAFE_INTEGER)
-export const DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE)
-export const HALF_DOWNSCALED_CYBERSPACE_AXIS = DOWNSCALED_CYBERSPACE_AXIS.div(2)
+export const DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).toNumber()
+export const HALF_DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).div(2).toNumber()
 
 /*
 Deriving the center coordinate of cyberspace:

@@ -34,7 +34,7 @@ export const Login = () => {
       navigate('/')
     } else if (isIdentityFresh()) {
       // profile is still fresh. redirect to dashboard
-      navigate('/dashboard')
+      navigate('/')
     } else {
       // proceed with loading profile
       setLoading(true)

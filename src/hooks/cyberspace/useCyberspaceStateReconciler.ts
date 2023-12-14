@@ -99,7 +99,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setPosition(homeCoord)
       setVelocity(new DecimalVector3(0,0,0))
       setRotation(new THREE.Quaternion(0,0,0,1))
-      setSimulationHeight(0)
+      setSimulationHeight(Date.now())
     }
   }, [validChain, actions])
 

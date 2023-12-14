@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react'
-import { useFrame } from "@react-three/fiber"
-import { FRAME, DRAG, CYBERSPACE_DOWNSCALE } from "../libraries/Cyberspace"
+import { useFrame, useThree } from "@react-three/fiber"
+import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
 import { move, stopMove } from '../libraries/Engine.ts'
@@ -11,7 +11,7 @@ import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
 
 /**
  * Avatar component
- * @property {striing} pubkey - the public key of the operator - @TODO - this should be used to initiate a cyberspaceStateReconciler for this pubkey's avatar.
+ * @property {string} pubkey - the public key of the operator - @TODO - this should be used to initiate a cyberspaceStateReconciler for this pubkey's avatar.
  * 
  * @description - The Avatar component is a camera + geometry that represents the user's avatar in cyberspace. The position, velocity, and rotation of the avatar is the LERP projection of the latest valid state of the cyberspaceStateReconciler.
  * 
@@ -19,12 +19,24 @@ import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
 
 export const Avatar = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
-  const {position, velocity, rotation, simulationHeight, genesisAction, latestAction} = useCyberspaceStateReconciler()
-  const [lerpPosition, setLerpPosition] = useState<DecimalVector3>(new DecimalVector3(0, 0, 0))
+  const [lerpPosition, setLerpPosition] = useState<DecimalVector3>(new DecimalVector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS))
   const [lerpVelocity, setLerpVelocity] = useState<DecimalVector3>(new DecimalVector3(0, 0, 0))
   const [currentRotation, setCurrentRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1)) // rotation is based on last state + pointer drag
-  const [processedTimestamp, setProcessedTimestamp] = useState<number>(0)
+  const [processedTimestamp, setProcessedTimestamp] = useState<number>(Date.now())
   const [throttle, setThrottle] = useState(1)
+  const {position, velocity, rotation, simulationHeight, genesisAction, latestAction} = useCyberspaceStateReconciler()
+
+  // const position = new DecimalVector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS)
+  // const velocity = new DecimalVector3(0, 0, 0)
+  // const rotation = new THREE.Quaternion(0,0,0,1)
+  // const simulationHeight = Date.now()
+  // const genesisAction = null
+  // const latestAction = null
+
+  // handle camera
+  const { camera } = useThree()
+
+  camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
 
   // when the position, velocity, or rotation changes, use this as the basis for a newly calculated LERP position/velocity/rotation
   useEffect(() => {
@@ -43,12 +55,20 @@ export const Avatar = () => {
     const elapsed = (timestamp - processedTimestamp) // milliseconds since last processed frame or last state change
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
     let frames = Math.floor(elapsed / FRAME) // the physics runs at 60 frames per second
+    console.log(frames, 'frames to process')
     while (frames--) {
       setLerpPosition(lerpPosition.add(lerpVelocity))
       setLerpVelocity(lerpVelocity.multiplyScalar(DRAG)) // multiply velocity by 0.999 to simulate friction every frame
       setProcessedTimestamp(processedTimestamp + FRAME)
     }
   })
+
+  // when the lerp position changes, update the camera's position
+  useEffect(() => {
+    camera.position.copy(lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
+    camera.quaternion.copy(currentRotation)
+    camera.updateProjectionMatrix()
+  }, [camera, lerpPosition, currentRotation])
 
   // abstract the passing of identity and relays to move().
   const moveProxy = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
@@ -100,10 +120,7 @@ export const Avatar = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // convert position to downscaled space for display
-  const lerpPositionScaled = lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3()
-
   return (
-    <camera position={lerpPositionScaled} quaternion={currentRotation} />
+    null
   )
 }

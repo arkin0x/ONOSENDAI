@@ -1,8 +1,7 @@
 import * as THREE from "three"
-import { Quaternion } from "@react-three/fiber"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { Action, CyberspaceCoordinates, MiniatureCyberspaceCoordinates, UnsignedAction } from "../types/Cyberspace"
+import { Action, CyberspaceCoordinates, LatestAction, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time, UnsignedAction } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
 import { EventTemplate } from "nostr-tools"
 import { countLeadingZeroes } from "./Hash"
@@ -51,7 +50,7 @@ export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 export const FRAME = 1000 / 60 // each frame is 1/60th of a second
 export const DRAG = 0.999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
-export const IDENTITY_QUATERNION: Quaternion = [0, 0, 0, 1] // mostly so I don't forget
+export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
 export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
   return parseInt(bin.toString()) > 0 ? 'i-space' : 'd-space'
@@ -59,6 +58,15 @@ export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
 
 export const planeToBin = (plane: 'i-space' | 'd-space'): number => {
   return plane === 'i-space' ? 1 : 0
+}
+
+export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
+  return {
+    x: position.x,
+    y: position.y,
+    z: position.z,
+    plane
+  }
 }
 
 export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
@@ -186,15 +194,30 @@ export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
   return binToPlane(lastBit)
 }
 
-export const getCreatedAtAndPaddedMS = (): {created_at: number, ms: string} => {
-  const now = new Date()
-  const created_at = Math.floor( (+now) / 1000)
-  const ms = now.getMilliseconds().toString().padStart(3, '0')
-  return {created_at, ms}
+export const getTime = (action?: Action): Time => {
+  let now
+  if (action) {
+    now = new Date(getMillisecondsTimestampFromAction(action))
+  } else {
+    now = new Date()
+  }
+  const created_at = Math.floor( (+now) / 1000) as SecondsTimestamp
+  const ms_timestamp = +now as MillisecondsTimestamp
+  const ms_only = now.getMilliseconds() as Milliseconds
+  const ms_padded = now.getMilliseconds().toString().padStart(3, '0') as MillisecondsPadded
+  return {created_at, ms_timestamp, ms_only, ms_padded}
+}
+
+export const getMillisecondsTimestamp = (): MillisecondsTimestamp => {
+  return +new Date as MillisecondsTimestamp
+}
+
+export const getSecondsTimestamp = (): SecondsTimestamp => {
+  return Math.floor(getMillisecondsTimestamp() / 1000)
 }
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
-  const {created_at, ms} = getCreatedAtAndPaddedMS()
+  const {created_at, ms_timestamp, ms_only, ms_padded} = getTime()
   return {
     pubkey, 
     kind: 333,
@@ -204,9 +227,31 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
       ['C', pubkey],
       ['velocity', '0', '0', '0'],
       ['quaternion', ...IDENTITY_QUATERNION],
-      ['ms', ms],
+      ['ms', ms_padded],
       ['version', '1'],
       ['A', 'noop']
+    ]
+  } as UnsignedAction
+}
+
+export const createUnsignedDriftAction(pubkey: string, latestAction: Action): UnsignedAction|undefined => {
+  const time = getTime()
+  const newAction = simulate(latestAction, time) as UnsignedAction
+  if (newAction === undefined) {
+    // @TODO handle this error. Dump action chain?
+    // This shouldn't happen either, because the action chain needs to be valid.
+    throw new Error("Simulation failed for latest event.")
+  }
+  newAction.pubkey = pubkey
+  newAction.tags.push(['A', 'drift'])
+  return {
+    tags: [
+      ['C', pubkey],
+      ['velocity', '0', '0', '0'],
+      ['quaternion', ...IDENTITY_QUATERNION],
+      ['ms', ms],
+      ['version', '1'],
+      ['A', 'drift']
     ]
   } as UnsignedAction
 }
@@ -218,48 +263,73 @@ export const isGenesisAction = (action: Action): boolean => {
   return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }
 
-export const simulate = (startEvent: Action, toTime: number): EventTemplate|undefined => {
+export const extractActionState = (action: Action): {position: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
+  // get position
+  const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
+  // get plane
+  const plane = getPlaneFromAction(action)
+  // get velocity
+  let velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
+  // get rotation
+  // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
+  const rotation = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
+  const time = getTime(action)
+  return {position, plane, velocity, rotation, time}
+}
+
+// @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles.
+export const simulate = (startEvent: Action, toTime: Time): EventTemplate => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
-  if (startTimestamp >= toTime) {
-    console.warn("Cannot simulate to a time before the start event.")
-    return
+  if (startTimestamp >= toTime.ms_timestamp) {
+    // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
+    throw new Error ("Cannot simulate to a time before the start event.")
   }
   // calculate simulation from startEvent to toTime
-  let frames = Math.floor((toTime - startTimestamp) / FRAME)
+  let frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
 
-  // initialize simulation state from startEvent
-  let position = getVector3FromCyberspaceCoordinate(startEvent.tags.find(getTag('C'))![1])
-  let velocity = new THREE.Vector3().fromArray(startEvent.tags.find(getTag('velocity'))!.slice(1).map(parseFloat))
-  const rotation = new THREE.Quaternion().fromArray(startEvent.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
-  
+  const { position, plane, velocity, rotation, time } = extractActionState(startEvent)
+
+  let updatedPosition = position
+  let updatedVelocity = velocity
+
   // add POW to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroes(startEvent.id)
-    const newVelocity = Math.pow(2, POW)
-    const bodyVelocity = new THREE.Vector3(0, 0, newVelocity)
+    const velocityPOW = Math.pow(2, POW)
+    const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation)
-    velocity = velocity.add(addedVelocity)
+    updatedVelocity = updatedVelocity.add(addedVelocity)
   }
 
   // simulate frames
   while (frames--) {
     // update position from velocity
-    position = position.add(velocity)
+    updatedPosition = updatedPosition.add(velocity)
     // update velocity with drag
-    velocity = velocity.multiplyScalar(DRAG)
+    updatedVelocity = updatedVelocity.multiplyScalar(DRAG)
   }  
 
-  // simulation is complete. Construct a new action with the simulated state.
+  // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 
+  const cyberspaceCoord = getCoordinatesObj(position, plane)
+  const hexCoord = encodeCoordinatesToHex(cyberspaceCoord)
+
+  const velocityArray = updatedVelocity.toArray()
+
+  const rotationArray = rotation.toArray().map(n => n.toString())
+
+  // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event: EventTemplate = {
     kind: 333,
-    created_at: Math.floor(toTime / 1000),
+    created_at: toTime.created_at,
     content: '',
     tags: [
-      ['C', encodeCoordinatesToHex(position.x, position.y, position.z, startEvent.tags.find(getTag('C'))![1].substring(63))],
-      ['velocity', '000'],
-      ['quaternion', rotation.toArray().join(' ')],
-      ['ms', (toTime % 1000).toString().padStart(3, '0')]
+      ['C', hexCoord],
+      ['velocity', ...velocityArray],
+      ['quaternion', ...rotationArray],
+      ['ms', time.ms_padded],
+      ['version', '1'],
     ]
   }
+  return event
 }

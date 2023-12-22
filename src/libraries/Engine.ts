@@ -4,7 +4,7 @@ import ActionWorker from '../workers/MovementMiner.worker?worker'
 import MovementWorker from '../workers/MovementMiner.worker?worker'
 import { Event } from 'nostr-tools'
 import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cyberspace'
-import { createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
+import { createUnsignedDriftAction, createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
 import { IdentityType } from '../types/IdentityType'
 import { RelayObject } from '../types/NostrRelay'
 
@@ -183,6 +183,7 @@ type WorkerCommandOptions = {
 
 // @TODO I could split issueWorkerCommand into multiple different functions and parts: update the latest action/genesis, issue an Movement command or Action command, etc.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// @TODO Options is muddy -- not required but also kinda required. Solidify this.
 const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
   console.log('issueworkercommand', target, options, command, workzone)
   let eventToMine: UnsignedAction | undefined
@@ -199,11 +200,11 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
       // send a fresh genesis action to be mined
       // It doesn't matter which hashpower/worker target we have here. The genesis action will be generic to any worker.
       eventToMine = createUnsignedGenesisAction(options.pubkey)
-    } else {
+    } else if (options.latestAction) {
       if (target === 'movement') {
         // LEFTOFF
         // create this function
-        // eventToMine = createUnsignedDriftAction(options.pubkey)
+        eventToMine = createUnsignedDriftAction(options.pubkey, options.latestAction as Action)
       } else if (target === 'action') {
         // use command to create a new action
         if (command === 'derezz') {

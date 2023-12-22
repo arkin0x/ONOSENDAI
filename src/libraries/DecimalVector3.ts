@@ -23,6 +23,10 @@ export class DecimalVector3 {
     return this
   }
 
+  toArray(): [string, string, string] {
+    return [this.x.toString(), this.y.toString(), this.z.toString()]
+  }
+
   applyQuaternion(q: THREE.Quaternion) {
 
     const x = this.x

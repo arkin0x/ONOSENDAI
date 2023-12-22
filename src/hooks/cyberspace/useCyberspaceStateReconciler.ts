@@ -7,7 +7,7 @@ import { getRelayList, getTag, getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
-import { DRAG, FRAME, decodeHexToCoordinates, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { DRAG, FRAME, decodeHexToCoordinates, extractActionState, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { Action } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
@@ -71,13 +71,8 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // action chain is valid
       // get most recent action
       const latest = actions[actions.length - 1]
-      // get position
-      const position = getVector3FromCyberspaceCoordinate(latest.tags.find(getTag('C'))![1])
-      // get velocity
-      let velocity = new DecimalVector3().fromArray(latest.tags.find(getTag('velocity'))!.slice(1))
-      // get rotation
-      // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
-      const rotation = new THREE.Quaternion().fromArray(latest.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
+
+      const { position, plane, velocity, rotation, time } = extractActionState(latest)
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {
         // quaternion from the action

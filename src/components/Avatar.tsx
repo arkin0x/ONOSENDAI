@@ -8,7 +8,6 @@ import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { GenesisAction, LatestAction } from '../types/Cyberspace.ts'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
-import { update } from 'three/examples/jsm/libs/tween.module.js'
 
 /**
  * Avatar component

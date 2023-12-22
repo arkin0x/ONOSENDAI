@@ -162,6 +162,7 @@ const adjustLabor = () => {
 }
 
 
+// LEFTOFF @TODO this should not be called multiple times in a row, but it is. Need a way to check if the worker is already busy with this. Or, program the worker to ignore duplicate requests, although we may need to update the latestAction with a newer timestamp at some point.
 export const move = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction, id: IdentityType, rel: RelayObject) => {
   identity = id
   relays = rel
@@ -183,13 +184,16 @@ type WorkerCommandOptions = {
 
 // @TODO I could split issueWorkerCommand into multiple different functions and parts: update the latest action/genesis, issue an Movement command or Action command, etc.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-// @TODO Options is muddy -- not required but also kinda required. Solidify this.
+// if options is omitted, we are sending a STOP command of some kind.
 const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
   console.log('issueworkercommand', target, options, command, workzone)
   let eventToMine: UnsignedAction | undefined
+  // if options is defined, we are sending a START command of some kind and need to produce an event to be mined.
   if (options) {
-    // save the genesis action
+    // we are issuing a command to begin some hashpower action
+    // save the genesis action received
     updateGenesisAction(options.genesisAction)
+    // save the latest action received only the first time; otherwise, use the latest action produced by the Engine.
     // this call to updateLatestAction is only successful in updating the latestAction the first time it runs -- when the application starts -- so we can initialize the latest action. After that, updateLatestAction is only successfully updated from workerMessage() when a new action is created by a worker. The latest action is set by this function's return value so that the next worker can use the latest action to create a new action.
     options.latestAction = updateLatestAction(options.latestAction, true)
 
@@ -204,7 +208,7 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
       if (target === 'movement') {
         // LEFTOFF
         // create this function
-        eventToMine = createUnsignedDriftAction(options.pubkey, options.latestAction as Action)
+        eventToMine = createUnsignedDriftAction(options.pubkey, options.genesisAction as Action, options.latestAction as Action)
       } else if (target === 'action') {
         // use command to create a new action
         if (command === 'derezz') {
@@ -226,15 +230,35 @@ const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, 
         }
       }
     }
-  } else return
-  // get all movement workers
+  } else {
+    // we are issuing an action to end some hashpower action
+    // no action needed here because we have no event to send for hashing
+  }
+
+  // LEFTOFF
+  // 
+  if (eventToMine) {
+    // begin nonce offset at 0
+    // add nonce tag to eventToMine
+    // serialize eventToMine
+    // convert serialized eventToMine to binary
+    // determine the offset of the nonce tag contents in the binary (length is known - 16)
+  }
+
+  // increment the nonce offset by 1_000_000 and send to each worker
+
+  // @TODO this logic can mark the worker as "busy" and the worker can mark itself as "not busy" in a response message. Then this worker busyness state can be ready by Engine to prevent duplicate requests.
+
+
+  // send data to workers
   const workers = workzone[target]
-  // post a command to start mining drift events to all movement workers
+  // post a command to all applicable workers
   workers.forEach((worker) => {
     worker.postMessage({
       command,
-      ...(options ?? {}),
-      eventToMine
+      data: {
+        ...(options ?? {}),
+      }
     })
   })
 }

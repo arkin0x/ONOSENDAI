@@ -217,7 +217,7 @@ export const getSecondsTimestamp = (): SecondsTimestamp => {
 }
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
-  const {created_at, ms_timestamp, ms_only, ms_padded} = getTime()
+  const {created_at, ms_padded} = getTime()
   return {
     pubkey, 
     kind: 333,
@@ -226,7 +226,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
     tags: [
       ['C', pubkey],
       ['velocity', '0', '0', '0'],
-      ['quaternion', ...IDENTITY_QUATERNION],
+      ['quaternion', ...IDENTITY_QUATERNION.map(n => n.toString())],
       ['ms', ms_padded],
       ['version', '1'],
       ['A', 'noop']
@@ -234,26 +234,18 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
   } as UnsignedAction
 }
 
-export const createUnsignedDriftAction(pubkey: string, latestAction: Action): UnsignedAction|undefined => {
+export const createUnsignedDriftAction = (pubkey: string, genesisAction: Action , latestAction: Action): UnsignedAction|undefined => {
   const time = getTime()
-  const newAction = simulate(latestAction, time) as UnsignedAction
+  const newAction = simulateNextEvent(latestAction, time) as UnsignedAction
   if (newAction === undefined) {
-    // @TODO handle this error. Dump action chain?
-    // This shouldn't happen either, because the action chain needs to be valid.
+    // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
   }
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
-  return {
-    tags: [
-      ['C', pubkey],
-      ['velocity', '0', '0', '0'],
-      ['quaternion', ...IDENTITY_QUATERNION],
-      ['ms', ms],
-      ['version', '1'],
-      ['A', 'drift']
-    ]
-  } as UnsignedAction
+  newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
+  newAction.tags.push(['e', latestAction.id, '', 'previous'])
+  return newAction as UnsignedAction
 }
 
 export const isGenesisAction = (action: Action): boolean => {
@@ -263,13 +255,14 @@ export const isGenesisAction = (action: Action): boolean => {
   return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }
 
+// get the state from a cyberspace action
 export const extractActionState = (action: Action): {position: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
   // get position
   const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
   // get plane
   const plane = getPlaneFromAction(action)
   // get velocity
-  let velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
+  const velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
   // get rotation
   // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
   const rotation = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
@@ -277,8 +270,8 @@ export const extractActionState = (action: Action): {position: DecimalVector3, p
   return {position, plane, velocity, rotation, time}
 }
 
-// @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles.
-export const simulate = (startEvent: Action, toTime: Time): EventTemplate => {
+// @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
+export const simulateNextEvent = (startEvent: Action, toTime: Time): EventTemplate => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.

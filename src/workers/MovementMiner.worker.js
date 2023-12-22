@@ -1,8 +1,7 @@
 import { getConstructProofOfWork } from "../libraries/Hash"
 import { sha256 } from '@noble/hashes/sha256'
 import { incrementNonceBuffer } from "../libraries/Miner"
-import { getMillisecondsTimestampFromAction } from "../libraries/Cyberspace"
-// import { constructSize } from "../assets/pow-table";
+import { getTime } from "../libraries/Cyberspace"
 
 
 /**
@@ -40,9 +39,6 @@ self.onmessage = function(message) {
       active = false
       stopMining()
       break
-    case 'continue':
-      if (active) initiateMining(data)
-      break
   }
 }
 
@@ -53,40 +49,11 @@ function initiateMining(data) {
     quaternion,
     genesisAction,
     latestAction,
-    pubkey
+    pubkey,
+    eventToMine,
   } = data
 
-  // get current timestamp and ms
-
-  const timestamp = Date.now()
-  const nostr_created_at = Math.floor(timestamp/1000)
-  const ms = timestamp % 1000
-
-  const latestActionTimestamp = getMillisecondsTimestampFromAction(latestAction)
-
-  // take last action quaternion and velocity
-
-  // construct partial action event
-
-  const event = {
-    pubkey,
-    kind: 333,
-    created_at: nostr_created_at,
-    content: '',
-    tags: [
-      ['nonce', '0', throttle.toString()],
-      ['ms', ms],
-      ['C', '0'],
-      ['quaternion', quaternion],
-      ['velocity', '0'],
-      ['A', '0'],
-      ['version','1'],
-      ['e', genesisAction, '0', 'genesis'],
-      ['e', latestAction, '0', 'previous'],
-    ]
-  }
-}
-
+  // LEFTOFF put new mining logic here
 
 /**
  * ConstructMiner.worker.js
@@ -106,18 +73,6 @@ let work = null
 let start = null
 let hashDurationBegin = null
   
-self.onmessage = function(message) {
-  const { command, data } = message.data
-  switch (command) {
-    case 'startmining':
-      active = true
-      initiateMining(data)
-      break
-    case 'stopmining':
-      active = false
-      break
-  }
-}
 
 function initiateMining(data){
   // let { serializedEvent, targetWork, targetHexBytes, nonce, createdAt, batch } = data

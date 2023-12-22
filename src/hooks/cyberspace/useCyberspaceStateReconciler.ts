@@ -1,14 +1,13 @@
 import { useContext, useEffect, useState, useReducer } from "react"
 import { Decimal } from 'decimal.js'
 import * as THREE from "three"
-import { useFrame } from "@react-three/fiber"
 import { Filter } from "nostr-tools"
-import { getRelayList, getTag, getTagValue, pool } from "../../libraries/Nostr"
+import { getRelayList, getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
-import { DRAG, FRAME, decodeHexToCoordinates, extractActionState, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
-import { Action } from "../../types/Cyberspace"
+import { extractActionState, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { Action, MillisecondsTimestamp } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroes } from "../../libraries/Hash"
@@ -31,7 +30,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
 
   // action state vars
-  const [simulationHeight, setSimulationHeight] = useState<number>(0) // the most recent timestamp (ms) that the simulation has been updated to
+  const [simulationHeight, setSimulationHeight] = useState<MillisecondsTimestamp>(0) // the most recent timestamp (ms) that the simulation has been updated to
   const [position, setPosition] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [velocity, setVelocity] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
@@ -72,7 +71,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // get most recent action
       const latest = actions[actions.length - 1]
 
-      const { position, plane, velocity, rotation, time } = extractActionState(latest)
+      const { position, velocity, rotation, time } = extractActionState(latest)
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {
         // quaternion from the action
@@ -89,7 +88,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setPosition(position)
       setVelocity(velocity)
       setRotation(rotation)
-      setSimulationHeight(timestamp)
+      setSimulationHeight(time.ms_only)
     } else {
       // set state to home coordinates and zero velocity
       const homeCoord = getVector3FromCyberspaceCoordinate(identity.pubkey)

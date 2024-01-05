@@ -12,6 +12,7 @@ import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroes } from "../../libraries/Hash"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
+import { ActionChainState } from "../../types/Cyberspace"
 
 type CyberspaceStateReconciler = {
   actions: Action[]
@@ -19,8 +20,7 @@ type CyberspaceStateReconciler = {
   velocity: DecimalVector3
   rotation: THREE.Quaternion
   simulationHeight: number
-  genesisAction: Action | boolean
-  latestAction: Action | false 
+  actionChainState: ActionChainState
 }
 
 export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
@@ -70,6 +70,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       // action chain is valid
       // get most recent action
       const latest = actions[actions.length - 1]
+      let driftVelocity = new DecimalVector3(0,0,0)
 
       const { position, velocity, rotation, time } = extractActionState(latest)
       // add POW to velocity if the most recent was a drift event
@@ -80,13 +81,11 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
         const newVelocity = new Decimal(2).pow(POW)
         const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
         const addedVelocity = bodyVelocity.applyQuaternion(rotation)
-        velocity = velocity.add(addedVelocity)
+        driftVelocity = velocity.add(addedVelocity)
       }
-      // get timestamp
-      const timestamp = getMillisecondsTimestampFromAction(latest)
       // set state
       setPosition(position)
-      setVelocity(velocity)
+      setVelocity(driftVelocity)
       setRotation(rotation)
       setSimulationHeight(time.ms_only)
     } else {
@@ -99,17 +98,18 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     }
   }, [validChain, actions])
 
-  // genesisAction can be one of the following values:
-  // - false: we have not loaded the whole chain yet, so please wait
-  // - true: we have loaded the whole chain and it is invalid, so we need to start over with a new genesis event. TRUE MEANS THE CHAIN IS INVALID! AND WE NEED TO START OVER.
-  // - Action: we have loaded the whole chain and it is valid, so this is the genesis event
-  const genesisAction = loadedWholeChain ? validChain ? actions[0] : true : false
+  let actionChainState: ActionChainState
 
-  // latestAction wil be one of the following values:
-  // - false: we don't have any actions yet
-  // - Action: the most recent action in the chain; if the chain is only 1 action long, this is the genesis action
-  // - it won't ever be true.
-  const latestAction = actions.length > 0 ? actions[actions.length - 1] : false
+  if (!loadedWholeChain) {
+    actionChainState = { status: 'loading' }
+  } else if (!validChain) {
+    actionChainState = { status: 'invalid' }
+  } else {
+    const genesisAction = actions[0]
+    const latestAction = actions[actions.length - 1]
+    actionChainState = { status: 'valid', genesisAction, latestAction }
+  }
 
-  return {actions, position, velocity, rotation, simulationHeight, genesisAction, latestAction}
+  return {actions, position, velocity, rotation, simulationHeight, actionChainState}
+
 }

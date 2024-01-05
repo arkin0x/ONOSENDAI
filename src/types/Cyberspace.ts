@@ -27,17 +27,13 @@ export type MiniatureCyberspaceCoordinates = {
   plane: Plane
 }
 
-// GenesisAction can be one of the following values:
-// - false: we have not loaded the whole chain yet, so please wait
-// - true: we have loaded the whole chain and it is invalid, so we need to start over with a new genesis event. TRUE MEANS THE CHAIN IS INVALID! AND WE NEED TO START OVER.
-// - Action: we have loaded the whole chain and it is valid, so this is the genesis event
-export type GenesisAction = Action | boolean
+export type GenesisAction = Action
+export type LatestAction = Action
 
-// LatestAction wil be one of the following values:
-// - false: we don't have any actions yet
-// - Action: the most recent action in the chain
-// - it won't ever be true.
-export type LatestAction = Action | false
+export type ActionChainState = 
+  | { status: 'loading' }
+  | { status: 'invalid' }
+  | { status: 'valid', genesisAction: GenesisAction, latestAction: LatestAction};
 
 export type MillisecondsTimestamp = number // typical JS timestamp
 export type SecondsTimestamp = number // created_at seconds timestamp with no milliseconds

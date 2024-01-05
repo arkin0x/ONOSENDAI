@@ -1,249 +1,89 @@
 import * as THREE from 'three'
-import ObservationWorker from '../workers/MovementMiner.worker?worker'
-import ActionWorker from '../workers/MovementMiner.worker?worker'
-import MovementWorker from '../workers/MovementMiner.worker?worker'
-import { Event } from 'nostr-tools'
 import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cyberspace'
 import { createUnsignedDriftAction, createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
 import { IdentityType } from '../types/IdentityType'
 import { RelayObject } from '../types/NostrRelay'
+import { getGenesisAction, getLatestAction, initializeGenesisAction, updateLatestAction } from './ActionTracker'
 
-type HashpowerAllocationTarget = 'observation' | 'movement' | 'action'
+// New version of Engine.ts
 
-type HashpowerAllocation = {
-  [key in HashpowerAllocationTarget]: number
+// Define the state variables.
+let _pubkey: string | null = null
+let _relays: RelayObject[] | null = null
+let _throttle: number | null = null
+let _quaternion: THREE.Quaternion | null = null
+let _movement: boolean = false
+let _genesis: boolean = false // do we have a genesis action? If not, this is the first thing that will be created.
+let _movementAction: UnsignedAction | null = null
+
+// Define the setters for the state variables.
+function setPubkey(value: string) {
+  _pubkey = value;
+  updateMovementAction();
 }
 
-const hashpowerAllocation: HashpowerAllocation = {
-  'observation': 4,
-  'movement': 5,
-  'action': 1,
+function setRelays(value: RelayObject[]) {
+  _relays = value;
+  updateMovementAction();
 }
 
-// This defines the worker types
-type WorkerTypes = {
-  'observation': typeof ObservationWorker
-  'movement': typeof MovementWorker
-  'action': typeof ActionWorker
+function setThrottle(value: number) {
+  if (value < 1) {
+    stopDrift()
+  }
+  _throttle = value;
+  updateMovementAction();
 }
 
-// This defines where the workers live
-type Workzone = {
-  'observation': Worker[]
-  'movement': Worker[]
-  'action': Worker[]
+function setQuaternion(value: THREE.Quaternion) {
+  _quaternion = value;
+  updateMovementAction();
 }
 
-const workerTypes: WorkerTypes = {
-  'observation': ObservationWorker,
-  'movement': MovementWorker,
-  'action': ActionWorker,
+function toggleMovement(value: boolean) {
+  _movement = value;
+  updateMovementAction();
 }
 
-// This is where the spawned workers live
-const workzone: Workzone = {
-  'observation': [],
-  'movement': [],
-  'action': [],
+function setActions(latest: LatestAction, genesis: GenesisAction) {
+  updateLatestAction(latest)
+  initializeGenesisAction(genesis)
+  _genesis = true
 }
 
-// The Engine must know the genesis action and latest action to add new actions to the chain. This state is tracked here. It is updated initially from what events are received by the cyberspaceStateReconciler, but after that it is only updated by the workerMessage() function to reflect the most up-to-date state from mining, unless a new genesis action is received, in which case the latest action is reset to false so it can start a new chain.
-let genesisAction: GenesisAction = false
-let latestAction: LatestAction = false
-let identity: IdentityType = false
-let relays: RelayObject = false
+export function Engine(pubkey: string, relays: RelayObject[]) {
+  setPubkey(pubkey);
+  setRelays(relays);
 
-const updateGenesisAction = (action: GenesisAction) => {
-  if (typeof action !== 'object') return
+  return {setActions, drift, stopDrift}
+}
 
-  if (typeof genesisAction === 'object') {
-    // we have an existing genesis action.
-    if (genesisAction.id !== action.id) {
-      // we received a new genesis action, meaning we are starting our action chain over. Save the new genesis action and reset the latest action.
-      genesisAction = action
-      latestAction = false
-    }
-  } else {
-    // we did not have an existing genesis action, so save whatever we were given.
-    genesisAction = action
+function drift(throttle: number, quaternion: THREE.Quaternion): void {
+  setThrottle(throttle);
+  setQuaternion(quaternion);
+  if (!_movement) {
+    toggleMovement(true);
   }
 }
 
-const updateLatestAction = (action: LatestAction, initialize?: true) => {
-  // this probably won't happen, but don't let latestAction be set to a non action value (false) via this function; it's ok if it is done manually elsewhere.
-  if (typeof action !== 'object') return latestAction
-  if (initialize === true && latestAction === false) {
-    // save the latest action IFF latestAction is false. If it has already been defined, then it can only be updated by receiving a workerMessage with a newly created action; see the call to updateLatestAction in workerMessage(). This is to prevent the latest action from being overwritten by an older action in a move() call, as the cyberspaceStateReconciler may not have received the new action yet. So basically we only trust the first value we receive from our subscription as the application starts, and then we only trust what we mine after that.
-    latestAction = action
-  }
-  if (initialize === true && latestAction !== false) {
-    // do nothing
-  }
-  // always update the latestAction IFF initialize is not set
-  if (!initialize){
-    latestAction = action
-  }
-  return latestAction
+function stopDrift(): void {
+  toggleMovement(false);
 }
 
-export const updateHashpowerAllocation = (newAllocation?: HashpowerAllocation) => {
-
-  // call with no args to get the current allocation
-  if (!newAllocation) {
-    adjustLabor()
-    return hashpowerAllocation
-  }
-
-  // ensure that the new allocation is valid
-  // test that the correct keys are being used
-  const validKeys = ['observation', 'movement', 'action']
-  const newAllocationKeys = Object.keys(newAllocation)
-  const keysAreValid = newAllocationKeys.every((key) => validKeys.includes(key))
-  // test that every value is a number
-  const valuesAreValid = Object.values(newAllocation).every((value) => typeof value === 'number' && isNaN(value) === false)
-  if (!keysAreValid || !valuesAreValid) {
-    console.warn('Invalid hashpower allocation key received.')
-    return hashpowerAllocation // just return the previous allocation
-  }
-
-  // validate that the sum of the new allocation is 10
-  const sum = Object.values(newAllocation).reduce((a, b) => a + b, 0)
-  if (sum !== 10) {
-    console.warn('Invalid hashpower allocation sum received.')
-    return hashpowerAllocation // just return the previous allocation
-  }
-
-  // copy new values into hashpowerAllocation
-  Object.keys(newAllocation).forEach((key) => {
-    const target = key as HashpowerAllocationTarget
-    hashpowerAllocation[target] = newAllocation[target] as number
-  })
-
-  // update thermodynamic posture
-  adjustLabor()
-
-  return hashpowerAllocation
+function setMovementAction(action: UnsignedAction): void {
+  _movementAction = action;
+  // trigger update to movement workers TODO LEFTOFF
 }
 
-// Dispose and Spawn workers according to the hashpower allocation
-const adjustLabor = () => {
-  // dispose of workers
-  Object.keys(workzone).forEach((key) => {
-    const target = key as HashpowerAllocationTarget
-    const workers = workzone[target]
-    const numWorkers = workers.length
-    const targetAllocation = hashpowerAllocation[target]
-    if (numWorkers > targetAllocation) {
-      const numWorkersToDispose = numWorkers - targetAllocation
-      const workersToDispose = workers.slice(0, numWorkersToDispose)
-      workersToDispose.forEach((worker) => {
-        worker.terminate()
-      })
-      workzone[target].splice(0, numWorkersToDispose) // delete the terminated workers but keep the array
-    }
-  })
-  // spawn workers
-  Object.keys(workzone).forEach((key) => {
-    console.log('spawningworker')
-    const target = key as HashpowerAllocationTarget
-    const workers = workzone[target]
-    const numWorkers = workers.length
-    const targetAllocation = hashpowerAllocation[target]
-    if (numWorkers < targetAllocation) {
-      const numWorkersToSpawn = targetAllocation - numWorkers
-      for (let i = 0; i < numWorkersToSpawn; i++) {
-        const worker = new workerTypes[target]()
-        // set up worker.onmessage here to listen for messages from the worker
-        worker.onmessage = workerMessage
-        workers.push(worker)
-      }
-    }
-  })
-}
-
-
-// LEFTOFF @TODO this should not be called multiple times in a row, but it is. Need a way to check if the worker is already busy with this. Or, program the worker to ignore duplicate requests, although we may need to update the latestAction with a newer timestamp at some point.
-export const move = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction, id: IdentityType, rel: RelayObject) => {
-  identity = id
-  relays = rel
-  issueWorkerCommand('movement', 'start', { throttle, quaternion, genesisAction, latestAction, pubkey: identity.pubkey })
-}
-
-export const stopMove = () => {
-  issueWorkerCommand('movement', 'stop')
-}
-
-type WorkerCommandOptions = {
-  attackTarget?: string, // hex pubkey
-  throttle?: number
-  quaternion?: THREE.Quaternion
-  genesisAction: GenesisAction // NOT optional if options are defined
-  latestAction: LatestAction // NOT optional if options are defined
-  pubkey: string
-}
-
-// @TODO I could split issueWorkerCommand into multiple different functions and parts: update the latest action/genesis, issue an Movement command or Action command, etc.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-// if options is omitted, we are sending a STOP command of some kind.
-const issueWorkerCommand = (target: HashpowerAllocationTarget, command: string, options?: WorkerCommandOptions ) => {
-  console.log('issueworkercommand', target, options, command, workzone)
-  let eventToMine: UnsignedAction | undefined
-  // if options is defined, we are sending a START command of some kind and need to produce an event to be mined.
-  if (options) {
-    // we are issuing a command to begin some hashpower action
-    // save the genesis action received
-    updateGenesisAction(options.genesisAction)
-    // save the latest action received only the first time; otherwise, use the latest action produced by the Engine.
-    // this call to updateLatestAction is only successful in updating the latestAction the first time it runs -- when the application starts -- so we can initialize the latest action. After that, updateLatestAction is only successfully updated from workerMessage() when a new action is created by a worker. The latest action is set by this function's return value so that the next worker can use the latest action to create a new action.
-    options.latestAction = updateLatestAction(options.latestAction, true)
-
-    // Prepare the event to be sent to the workers for mining.
-    // if genesis is true and latest is false, then we need to create a new genesis action.
-    if (options.genesisAction === true && options.latestAction === false) {
-      // LEFTOFF
-      // send a fresh genesis action to be mined
-      // It doesn't matter which hashpower/worker target we have here. The genesis action will be generic to any worker.
-      eventToMine = createUnsignedGenesisAction(options.pubkey)
-    } else if (options.latestAction) {
-      if (target === 'movement') {
-        // LEFTOFF
-        // create this function
-        eventToMine = createUnsignedDriftAction(options.pubkey, options.genesisAction as Action, options.latestAction as Action)
-      } else if (target === 'action') {
-        // use command to create a new action
-        if (command === 'derezz') {
-          // eventToMine = createUnsignedDerezzAction(options.pubkey, command, )
-        } else if (command === 'vortex') {
-          //
-        } else if (command === 'bubble') {
-          //
-        } else if (command === 'armor') {
-          // create an armor event
-        } else if (command === 'stealth') {
-          //
-        } else if (command === 'portal') {
-          // 
-        } else if (command === 'shout') {
-          // this one doesn't go in the action chain
-        } else if (command === 'noop') {
-          // this should be an easy one - no mining required.
-        }
-      }
-    }
-  } else {
-    // we are issuing an action to end some hashpower action
-    // no action needed here because we have no event to send for hashing
+function updateMovementAction(): void {
+  if (_movement && _pubkey && _genesis) {
+    const action = createUnsignedDriftAction(_pubkey, getLatestAction()!, getGenesisAction()!)
+    setMovementAction(action)
   }
+}
+// Define the functions that can be called by the user interface
 
-  // LEFTOFF
-  // 
-  if (eventToMine) {
-    // begin nonce offset at 0
-    // add nonce tag to eventToMine
-    // serialize eventToMine
-    // convert serialized eventToMine to binary
-    // determine the offset of the nonce tag contents in the binary (length is known - 16)
-  }
+
 
   // increment the nonce offset by 1_000_000 and send to each worker
 

@@ -234,7 +234,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
   } as UnsignedAction
 }
 
-export const createUnsignedDriftAction = (pubkey: string, genesisAction: Action , latestAction: Action): UnsignedAction|undefined => {
+export const createUnsignedDriftAction = (pubkey: string, genesisAction: Action , latestAction: Action): UnsignedAction => {
   const time = getTime()
   const newAction = simulateNextEvent(latestAction, time) as UnsignedAction
   if (newAction === undefined) {

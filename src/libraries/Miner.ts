@@ -127,16 +127,15 @@ export const incrementNonceBuffer = (buffer: Uint8Array, startIndex: number, end
   return buffer
 }
 
-// LEFTOFF @TODO need to test this - copilot wrote it.
 export const incrementNonceBufferBy = (buffer: Uint8Array, startIndex: number, endIndex: number, increment: number): Uint8Array => {
   // Convert the nonce from a big-endian array of bytes to a number
-  let nonce = 0;
+  let nonce = 0
   for (let i = startIndex; i < endIndex; i++) {
-    nonce = (nonce << 4) | (buffer[i] - 48);
+    nonce = (nonce << 4) | (buffer[i] - 48)
   }
 
   // Increment the nonce
-  nonce += increment;
+  nonce += increment
 
   // Convert the nonce back to a big-endian array of bytes
   for (let i = endIndex - 1; i >= startIndex; i--) {

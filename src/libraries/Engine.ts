@@ -3,7 +3,9 @@ import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cy
 import { createUnsignedDriftAction, createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
 import { IdentityType } from '../types/IdentityType'
 import { RelayObject } from '../types/NostrRelay'
-import { getGenesisAction, getLatestAction, initializeGenesisAction, updateLatestAction } from './ActionTracker'
+import { getGenesisAction, getLatestAction, updateGenesisAction, updateLatestAction } from './ActionTracker'
+import { update } from 'three/examples/jsm/libs/tween.module.js'
+import { setWorkerCallback, workzone } from './WorkerManager'
 
 // New version of Engine.ts
 
@@ -14,20 +16,30 @@ let _throttle: number | null = null
 let _quaternion: THREE.Quaternion | null = null
 let _movement: boolean = false
 let _genesis: boolean = false // do we have a genesis action? If not, this is the first thing that will be created.
-let _movementAction: UnsignedAction | null = null
+let _previousMovementActionToMine: UnsignedAction | null = null
+let _movementActionToMine: UnsignedAction | null = null
 
 // Define the setters for the state variables.
 function setPubkey(value: string) {
+  if (_pubkey === value) { // reject if the value is the same. Effectively memoizes the value.
+    return;
+  }
   _pubkey = value;
   updateMovementAction();
 }
 
 function setRelays(value: RelayObject[]) {
+  if (_relays === value) {
+    return;
+  }
   _relays = value;
   updateMovementAction();
 }
 
 function setThrottle(value: number) {
+  if (_throttle === value) {
+    return;
+  }
   if (value < 1) {
     stopDrift()
   }
@@ -36,29 +48,52 @@ function setThrottle(value: number) {
 }
 
 function setQuaternion(value: THREE.Quaternion) {
+  if (_quaternion === value) {
+    return;
+  }
   _quaternion = value;
   updateMovementAction();
 }
 
 function toggleMovement(value: boolean) {
+  if (_movement === value) {
+    return;
+  }
   _movement = value;
   updateMovementAction();
 }
 
-function setActions(latest: LatestAction, genesis: GenesisAction) {
-  updateLatestAction(latest)
-  initializeGenesisAction(genesis)
+function createGenesisAction(): void {
+  if (!_pubkey) {
+    return
+  }
+  // create a genesis action
+  const action = createUnsignedGenesisAction(_pubkey)
+  // publish it
+  // ....... publishy stuff
+  // TODO LEFTOFF
+  updateGenesisAction(publishedAction)
+  updateLatestAction(publishedAction) // the latest action IS the genesis action
   _genesis = true
+  updateMovementAction();
 }
 
-export function Engine(pubkey: string, relays: RelayObject[]) {
-  setPubkey(pubkey);
-  setRelays(relays);
+function setGenesisAction(genesis: GenesisAction) {
+  updateGenesisAction(genesis)
+  _genesis = true
+  updateMovementAction();
+}
 
-  return {setActions, drift, stopDrift}
+function setLatestAction(latest: LatestAction) {
+  updateLatestAction(latest)
+  updateMovementAction();
 }
 
 function drift(throttle: number, quaternion: THREE.Quaternion): void {
+  if (!_genesis) {
+    createGenesisAction();
+    return
+  }
   setThrottle(throttle);
   setQuaternion(quaternion);
   if (!_movement) {
@@ -70,40 +105,50 @@ function stopDrift(): void {
   toggleMovement(false);
 }
 
-function setMovementAction(action: UnsignedAction): void {
-  _movementAction = action;
-  // trigger update to movement workers TODO LEFTOFF
+// import into Avatar and initialize with the pubkey and relays to get the functions that can be called by the user interface.
+export function Engine(pubkey: string, relays: RelayObject[]) {
+  setPubkey(pubkey);
+  setRelays(relays);
+
+  return {setGenesisAction, setLatestAction, drift, stopDrift}
 }
 
 function updateMovementAction(): void {
   if (_movement && _pubkey && _genesis) {
     const action = createUnsignedDriftAction(_pubkey, getLatestAction()!, getGenesisAction()!)
-    setMovementAction(action)
+    // we assert that getLatestAction() and getGenesisAction() are not null because _genesis is true
+    setMovementActionToMine(action)
+    triggerMovementWorkers()
+  } 
+}
+
+function setMovementActionToMine(action: UnsignedAction): void {
+  _previousMovementActionToMine = _movementActionToMine
+  _movementActionToMine = action;
+}
+
+function triggerMovementWorkers(): void {
+  if (_movementActionToMine !== _previousMovementActionToMine) {
+    const workers = workzone['movement']
+    const NONCE_OFFSET = 1_000_000
+    let nonce = -NONCE_OFFSET
+    // post a command to all applicable workers
+    workers.forEach((worker) => {
+      nonce += NONCE_OFFSET
+      worker.postMessage({
+        command: 'start',
+        data: {
+          action: _movementActionToMine,
+          nonceStart: nonce,
+          nonceEnd: nonce + NONCE_OFFSET,
+        }
+      })
+    })
   }
 }
-// Define the functions that can be called by the user interface
 
-
-
-  // increment the nonce offset by 1_000_000 and send to each worker
-
-  // @TODO this logic can mark the worker as "busy" and the worker can mark itself as "not busy" in a response message. Then this worker busyness state can be ready by Engine to prevent duplicate requests.
-
-
-  // send data to workers
-  const workers = workzone[target]
-  // post a command to all applicable workers
-  workers.forEach((worker) => {
-    worker.postMessage({
-      command,
-      data: {
-        ...(options ?? {}),
-      }
-    })
-  })
-}
-
-const workerMessage = (event: MessageEvent) => {
+// TODO rewrite this whole thing.
+const movementWorkerMessage = (event: MessageEvent) => {
   // Each worker will be calling this same function with completed actions. We need to make sure that the action is valid and that it references the most recent action; then we must update it synchronously so that the next worker can use the updated value.
   // TODO: we must be receiving a fully formed Event from the worker, or do we need to parse the action binary into an Event? How should this work be split up?
   if (event.data.action) {
@@ -128,10 +173,11 @@ const workerMessage = (event: MessageEvent) => {
       }
     }
     // OK, the action is valid.
-    // LEFTOFF
     // TODO: publish the action
     // update the latestAction action with this action
     updateLatestAction(event.data.action)
     // TODO: trigger workers to use new latestAction and genesisAction values
   }
 }
+
+setWorkerCallback('movement', movementWorkerMessage)

@@ -6,7 +6,7 @@ let genesisAction: GenesisAction | null = null
 let latestAction: LatestAction | null = null
 
 // Define a function to initialize the genesis action
-export function initializeGenesisAction(action: GenesisAction) {
+export function updateGenesisAction(action: GenesisAction) {
   genesisAction = action
 }
 

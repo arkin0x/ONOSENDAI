@@ -23,10 +23,22 @@ const workerTypes: WorkerTypes = {
 }
 
 // This is where the spawned workers live
-const workzone: Workzone = {
+export const workzone: Workzone = {
   'observation': [],
   'movement': [],
   'action': [],
+}
+
+type WorkerCallbacks = {
+  'observation': ((event: MessageEvent) => void) | (() => void)
+  'movement': ((event: MessageEvent) => void) | (() => void)
+  'action': ((event: MessageEvent) => void) | (() => void)
+}
+
+const workerCallbacks: WorkerCallbacks = {
+  'observation': () => {},
+  'movement': () => {},
+  'action': () => {},
 }
 
 // Dispose and Spawn workers according to the hashpower allocation
@@ -58,9 +70,16 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
       for (let i = 0; i < numWorkersToSpawn; i++) {
         const worker = new workerTypes[target]()
         // set up worker.onmessage here to listen for messages from the worker
-        worker.onmessage = workerMessage
+        worker.onmessage = workerCallbacks[target]
         workers.push(worker)
       }
     }
   })
 }
+
+// use this to set what happens when a movement worker sends a message
+export function setWorkerCallback(target: HashpowerAllocationTarget, callback: (event: MessageEvent) => void) {
+  workerCallbacks[target] = callback
+}
+
+// TODO: setObservationWorkerResponseCallback, setActionWorkerResponseCallback

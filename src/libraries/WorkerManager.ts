@@ -10,16 +10,16 @@ type WorkerTypes = {
   'action': typeof ActionWorker
 }
 
-type Workzone = {
-  'observation': Worker[]
-  'movement': Worker[]
-  'action': Worker[]
-}
-
 const workerTypes: WorkerTypes = {
   'observation': ObservationWorker,
   'movement': MovementWorker,
   'action': ActionWorker,
+}
+
+type Workzone = {
+  'observation': Worker[]
+  'movement': Worker[]
+  'action': Worker[]
 }
 
 // This is where the spawned workers live

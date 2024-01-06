@@ -139,11 +139,22 @@ export const incrementNonceBufferBy = (buffer: Uint8Array, startIndex: number, e
 
   // Convert the nonce back to a big-endian array of bytes
   for (let i = endIndex - 1; i >= startIndex; i--) {
-    buffer[i] = (nonce & 0xF) + 48;
-    nonce = nonce >> 4;
+    buffer[i] = (nonce & 0xF) + 48
+    nonce = nonce >> 4
   }
 
-  return buffer;
+  return buffer
+}
+
+export const setNonceBuffer = (buffer: Uint8Array, startIndex: number, endIndex: number, nonce: number): Uint8Array => {
+
+  // Convert the nonce back to a big-endian array of bytes
+  for (let i = endIndex - 1; i >= startIndex; i--) {
+    buffer[i] = (nonce & 0xF) + 48
+    nonce = nonce >> 4
+  }
+
+  return buffer
 }
 
 export const calculateHashrate = (duration: number): number => {

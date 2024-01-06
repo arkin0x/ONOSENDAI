@@ -10,6 +10,7 @@ import { getNonceBounds, serializeEvent } from './Miner'
 
 
 // New version of Engine.ts
+const NONCE_OFFSET = 1_000_000
 
 // Define the state variables.
 let _pubkey: string | null = null
@@ -20,6 +21,7 @@ let _movement: boolean = false
 let _genesis: boolean = false // do we have a genesis action? If not, this is the first thing that will be created.
 let _previousMovementActionToMine: UnsignedAction | null = null
 let _movementActionToMine: UnsignedAction | null = null
+let _movementActionNonce: number = 0
 
 // Define the setters for the state variables.
 function setPubkey(value: string) {
@@ -129,32 +131,46 @@ function setMovementActionToMine(action: UnsignedAction): void {
   _movementActionToMine = action;
 }
 
+function setMovementActionNonce(nonce: number): void {
+  _movementActionNonce = nonce;
+}
+
 function triggerMovementWorkers(): void {
   if (_movementActionToMine !== _previousMovementActionToMine) {
     const workers = workzone['movement']
-    const NONCE_OFFSET = 1_000_000
-    let nonce = 0
+    setMovementActionNonce(0)
     const actionCopySerialized = serializeEvent(_movementActionToMine!)
     const nonceBounds = getNonceBounds(actionCopySerialized)
     const actionBinary = new TextEncoder().encode(actionCopySerialized)
     const targetPOW = parseInt(_movementActionToMine!.tags.find( tag => tag[0] === 'nonce')![2])
     // post a command to all applicable workers
-    workers.forEach((worker) => {
+    workers.forEach((worker, thread) => {
       worker.postMessage({
+        thread,
+        threadCount: workers.length,
+        nonceOffset: NONCE_OFFSET,
         command: 'start',
         data: {
           action: actionBinary,
           nonceBounds,
-          nonceStartValue: nonce,
-          nonceEndValue: nonce + NONCE_OFFSET,
+          nonceStartValue: _movementActionNonce,
+          nonceEndValue: _movementActionNonce + NONCE_OFFSET,
           targetPOW,
         }
       })
-      nonce += NONCE_OFFSET
+      setMovementActionNonce( _movementActionNonce + NONCE_OFFSET )
     })
   }
 }
 
+const movementWorkerMessage = (event: MessageEvent) => {
+
+  // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
+
+
+  // if the worker reports 'nonce-range-completed, do nothing.
+
+}
 // TODO rewrite this whole thing.
 const movementWorkerMessage = (event: MessageEvent) => {
   // Each worker will be calling this same function with completed actions. We need to make sure that the action is valid and that it references the most recent action; then we must update it synchronously so that the next worker can use the updated value.

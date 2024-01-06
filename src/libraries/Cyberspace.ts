@@ -4,7 +4,7 @@ import almostEqual from "almost-equal"
 import { Action, CyberspaceCoordinates, LatestAction, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time, UnsignedAction } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
 import { EventTemplate } from "nostr-tools"
-import { countLeadingZeroes } from "./Hash"
+import { countLeadingZeroesHex } from "./Hash"
 import { DecimalVector3 } from "./DecimalVector3"
 
 export const CYBERSPACE_AXIS = new Decimal(2).pow(85)
@@ -234,7 +234,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
   } as UnsignedAction
 }
 
-export const createUnsignedDriftAction = (pubkey: string, genesisAction: Action , latestAction: Action): UnsignedAction => {
+export const createUnsignedDriftAction = (pubkey: string, throttle: number, genesisAction: Action , latestAction: Action): UnsignedAction => {
   const time = getTime()
   const newAction = simulateNextEvent(latestAction, time) as UnsignedAction
   if (newAction === undefined) {
@@ -245,6 +245,7 @@ export const createUnsignedDriftAction = (pubkey: string, genesisAction: Action 
   newAction.tags.push(['A', 'drift'])
   newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
   newAction.tags.push(['e', latestAction.id, '', 'previous'])
+  newAction.tags.push(['nonce', '0000000000000000', throttle.toString()])
   return newAction as UnsignedAction
 }
 
@@ -287,7 +288,7 @@ export const simulateNextEvent = (startEvent: Action, toTime: Time): EventTempla
 
   // add POW to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
-    const POW = countLeadingZeroes(startEvent.id)
+    const POW = countLeadingZeroesHex(startEvent.id)
     const velocityPOW = Math.pow(2, POW)
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation)

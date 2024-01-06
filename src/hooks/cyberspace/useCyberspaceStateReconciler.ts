@@ -10,7 +10,7 @@ import { extractActionState, getMillisecondsTimestampFromAction, getVector3FromC
 import { Action, MillisecondsTimestamp } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
-import { countLeadingZeroes } from "../../libraries/Hash"
+import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import { ActionChainState } from "../../types/Cyberspace"
 
@@ -77,7 +77,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       if (latest.tags.find(getTagValue('A','drift'))) {
         // quaternion from the action
         // add POW to velocity for drift event
-        const POW = countLeadingZeroes(latest.id)
+        const POW = countLeadingZeroesHex(latest.id)
         const newVelocity = new Decimal(2).pow(POW)
         const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
         const addedVelocity = bodyVelocity.applyQuaternion(rotation)

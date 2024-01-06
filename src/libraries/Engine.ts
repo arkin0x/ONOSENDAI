@@ -6,6 +6,8 @@ import { RelayObject } from '../types/NostrRelay'
 import { getGenesisAction, getLatestAction, updateGenesisAction, updateLatestAction } from './ActionTracker'
 import { update } from 'three/examples/jsm/libs/tween.module.js'
 import { setWorkerCallback, workzone } from './WorkerManager'
+import { getNonceBounds, serializeEvent } from './Miner'
+
 
 // New version of Engine.ts
 
@@ -114,8 +116,8 @@ export function Engine(pubkey: string, relays: RelayObject[]) {
 }
 
 function updateMovementAction(): void {
-  if (_movement && _pubkey && _genesis) {
-    const action = createUnsignedDriftAction(_pubkey, getLatestAction()!, getGenesisAction()!)
+  if (_movement && _pubkey && _throttle && _genesis) {
+    const action = createUnsignedDriftAction(_pubkey, _throttle, getLatestAction()!, getGenesisAction()!)
     // we assert that getLatestAction() and getGenesisAction() are not null because _genesis is true
     setMovementActionToMine(action)
     triggerMovementWorkers()
@@ -131,18 +133,24 @@ function triggerMovementWorkers(): void {
   if (_movementActionToMine !== _previousMovementActionToMine) {
     const workers = workzone['movement']
     const NONCE_OFFSET = 1_000_000
-    let nonce = -NONCE_OFFSET
+    let nonce = 0
+    const actionCopySerialized = serializeEvent(_movementActionToMine!)
+    const nonceBounds = getNonceBounds(actionCopySerialized)
+    const actionBinary = new TextEncoder().encode(actionCopySerialized)
+    const targetPOW = parseInt(_movementActionToMine!.tags.find( tag => tag[0] === 'nonce')![2])
     // post a command to all applicable workers
     workers.forEach((worker) => {
-      nonce += NONCE_OFFSET
       worker.postMessage({
         command: 'start',
         data: {
-          action: _movementActionToMine,
-          nonceStart: nonce,
-          nonceEnd: nonce + NONCE_OFFSET,
+          action: actionBinary,
+          nonceBounds,
+          nonceStartValue: nonce,
+          nonceEndValue: nonce + NONCE_OFFSET,
+          targetPOW,
         }
       })
+      nonce += NONCE_OFFSET
     })
   }
 }

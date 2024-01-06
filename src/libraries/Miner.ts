@@ -54,7 +54,7 @@ export const getNonceBounds = (serializedEvent: string): Array<number> => {
 export const serializeEvent = (event: UnsignedEvent): string => {
   return JSON.stringify([
     0,
-    event.pubkey,
+    event.pubkey.toLowerCase(),
     event.created_at,
     event.kind,
     event.tags,

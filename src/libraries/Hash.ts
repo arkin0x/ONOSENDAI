@@ -8,8 +8,24 @@ export function validateHash(value: string): boolean {
   return false
 }
 
+export function countLeadingZeroesBin(binary: Uint8Array) {
+  let count = 0
+
+  for (let i = 0; i < binary.length; i++) {
+    const byte = binary[i]
+    if (byte === 0) {
+      count += 8
+    } else {
+      count += Math.clz32(byte) - 24
+      break
+    }
+  }
+
+  return count
+}
+
 // hex should be a hexadecimal string (with no 0x prefix)
-export function countLeadingZeroes(hex: string) {
+export function countLeadingZeroesHex(hex: string) {
   let count = 0
 
   for (let i = 0; i < hex.length; i++) {

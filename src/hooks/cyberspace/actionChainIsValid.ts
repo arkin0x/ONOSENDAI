@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { countLeadingZeroes } from "../../libraries/Hash"
+import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { DRAG, FRAME, decimalAlmostEqual, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
 import { ActionsState } from "./actionReducerTypes"
 import { getTag, getTagValue } from "../../libraries/Nostr"
@@ -116,7 +116,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
           // quaternion from the action
           const q = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
           // add POW to velocity for drift event
-          const POW = countLeadingZeroes(action.id)
+          const POW = countLeadingZeroesHex(action.id)
           const newVelocity = new Decimal(2).pow(POW)
           const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
           const addedVelocity = bodyVelocity.applyQuaternion(q)

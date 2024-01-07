@@ -56,7 +56,7 @@ function initiateMining(data) {
       let POW = countLeadingZeroesBin(digest)
 
       if (POW === targetPOW) {
-        postMessage({ thread: threadID, status: 'pow-target-found', data: { action, digest, POW } })
+        postMessage({ thread: threadID, status: 'pow-target-found', data: { action, digest, currentNonce, POW } })
         active = false
         return
       }
@@ -72,10 +72,11 @@ function initiateMining(data) {
     }
 
     if (currentNonce > nonceEndValue) {
-      // figure out what the next nonce range will be based on our threadID and threadCount; use NONCE_OFFSET to change our starting point
-      data.nonceStartValue = data.nonceStartValue + threadCountNum * NONCE_OFFSET
+      // figure out what the next nonce range will be for this worker based on our threadCount; use NONCE_OFFSET to change our starting point
+      data.nonceStartValue += threadCountNum * NONCE_OFFSET
       data.nonceEndValue += data.nonceStartValue + NONCE_OFFSET
-      initiateMining // LEFTOFF
+      // keep mining at new nonce range
+      setTimeout(() => initiateMining(data), 1)
     }
   }
 

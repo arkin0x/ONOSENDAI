@@ -13,6 +13,11 @@ export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
 
   const newState = [...state, action.payload]
 
+  if (newState.length < 2) {
+    // if we only have zero or one actions, just return
+    return newState
+  }
+
   // sort actions by created_at+ms tag from oldest to newest
   newState.sort((a, b) => {
     const aMs = a.tags.find(tag => tag[0] === 'ms')
@@ -21,6 +26,16 @@ export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
     const bTs = b.created_at * 1000 + (bMs ? parseInt(bMs[1]) : 0)
     return aTs - bTs
   })
+
+  if (newState.length >= 2) {
+    // find newest genesis action and dump everything before it
+    for (let i = newState.length - 1; i >= 0; i--) {
+      if (isGenesisAction(newState[i])) {
+        newState.splice(0, i)
+        break
+      }
+    }
+  }
 
   // check if the newest action is a genesis action
   // if so, dump all previous actions
@@ -34,6 +49,9 @@ export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
   // if we received an event belonging to a prior action chain, dump that too
   const currentChainGenesisID = latest.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')![1]
   newState.filter(action => {
+    if (isGenesisAction(action)) {
+      return true
+    }
     const actionGenesisID = action.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')![1]
     return actionGenesisID === currentChainGenesisID
   })

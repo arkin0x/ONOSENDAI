@@ -7,6 +7,7 @@ import Engine, { EngineControls } from '../libraries/Engine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
+import { updateHashpowerAllocation } from '../libraries/HashpowerManager.ts'
 
 /**
  * Avatar component
@@ -86,16 +87,15 @@ export const Avatar = () => {
   }, [camera, lerpPosition, currentRotation])
 
   const driftProxy = (throttle: number, quaternion: THREE.Quaternion) => {
+    console.log('drift proxy', engineReady)
     if (!engineControls) return
     if (!engineReady) return
     engineControls.drift(throttle, quaternion)
-    console.log('drift')
   }
   const stopDriftProxy = () => {
     if (!engineControls) return
     if (!engineReady) return
     engineControls.stopDrift()
-    console.log('stop drift')
   }
 
   // set up controls for avatar
@@ -105,16 +105,19 @@ export const Avatar = () => {
       // console.log(e)
       if (e.code === "KeyW" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
+        console.log('drift')
         driftProxy(throttle, currentRotation)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.code === "KeyS" || e.key === "ArrowDown") {
         // mine drift events in reverse
+        console.log('reverse drift')
         driftProxy(throttle, currentRotation.clone().invert())
       }
     }
     const handleInactive = () => {
+      console.log('stop drift')
       stopDriftProxy()
     }
     window.addEventListener("keydown", handleForward)
@@ -135,7 +138,7 @@ export const Avatar = () => {
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
 
-    // updateHashpowerAllocation()
+    updateHashpowerAllocation()
 
     return () => {
       window.removeEventListener("keydown", handleForward)

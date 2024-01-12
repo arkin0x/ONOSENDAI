@@ -60,7 +60,6 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
   })
   // spawn workers
   Object.keys(workzone).forEach((key) => {
-    console.log('spawningworker')
     const target = key as HashpowerAllocationTarget
     const workers = workzone[target]
     const numWorkers = workers.length

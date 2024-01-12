@@ -21,6 +21,14 @@ let _previousMovementActionToMine: UnsignedEvent | null = null
 let _movementActionToMine: UnsignedEvent | null = null
 let _movementActionNonce: number = 0 // set to 0 whenever we have a new action to mine.
 
+// DEBUG ONLY
+let _chainHeight: number = 0
+
+function incrementChainHeight() {
+  _chainHeight += 1
+  console.log('chain height', _chainHeight)
+}
+
 // Define the setters for the state variables.
 function setPubkey(value: string) {
   if (_pubkey === value) { // reject if the value is the same. Effectively memoizes the value.
@@ -85,12 +93,15 @@ function setGenesisAction(genesis: Event) {
 }
 
 function setLatestAction(latest: Event) {
+  console.warn('setLatestAction', latest)
   updateLatestAction(latest)
   updateMovementAction()
 }
 
 function drift(throttle: number, quaternion: THREE.Quaternion): void {
+  console.log('Engine:drift', _genesis)
   if (!_genesis) {
+    console.log('create genesis action')
     createGenesisAction()
     return
   }
@@ -108,8 +119,9 @@ function stopDrift(): void {
 
 // it's OK if this is called all the time because the workers will only be triggered if the action to mine has changed, thanks to the memoization in setMovementActionToMine.
 function updateMovementAction(): void {
+  console.log('Engine:updateMovementAction', _movement && _pubkey && _throttle && _quaternion && _genesis)
   if (_movement && _pubkey && _throttle && _quaternion && _genesis) {
-    const action = createUnsignedDriftAction(_pubkey, _throttle, _quaternion, getLatestAction()!, getGenesisAction()!)
+    const action = createUnsignedDriftAction(_pubkey, _throttle, _quaternion, getGenesisAction()!, getLatestAction()!)
     // we assert that getLatestAction() and getGenesisAction() are not null because _genesis is true
     setMovementActionToMine(action)
     triggerMovementWorkers()
@@ -171,6 +183,7 @@ const movementWorkerMessage = (event: MessageEvent) => {
   // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
   
   if (event.data.status === 'pow-target-found') {
+    incrementChainHeight()
     stopMovementWorkers()
     const actionBinary = event.data.action
     const actionSerialized = new TextDecoder().decode(actionBinary)
@@ -184,6 +197,7 @@ const movementWorkerMessage = (event: MessageEvent) => {
 
 async function publishGenesisAction(action: UnsignedEvent): Promise<void> {
   const publishedAction = await publishEvent(action as UnsignedEvent, _relays as RelayObject)
+  console.warn('genesis published:', publishedAction)
   updateGenesisAction(publishedAction)
   updateLatestAction(publishedAction) // the latest action IS the genesis action
   _genesis = true

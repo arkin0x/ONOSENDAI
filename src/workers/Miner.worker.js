@@ -34,6 +34,7 @@ function safeInterrupt(data) {
 
 // called with the data needed to mine the next action in the chain
 function initiateMining(data) {
+  console.log('worker',threadID,'starting')
   let {
     action,
     nonceBounds,
@@ -56,7 +57,7 @@ function initiateMining(data) {
       let POW = countLeadingZeroesBin(digest)
 
       if (POW === targetPOW) {
-        postMessage({ thread: threadID, status: 'pow-target-found', data: { action, nonceBounds, digest, currentNonce, POW } })
+        postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, currentNonce, POW })
         active = false
         return
       }

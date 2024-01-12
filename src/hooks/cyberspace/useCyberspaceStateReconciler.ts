@@ -44,11 +44,12 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   useEffect(() => {
     // TODO: right now we are only getting the user's own actions. We need to get all actions from nearby users at some point.
     const filter: Filter<333> = {kinds: [333], authors: [identity.pubkey]}
-    const relayList: RelayList = getRelayList(relays, ['read'])
-    const sub = pool.sub(relayList, [filter])
+    // const relayList: RelayList = getRelayList(relays, ['read'])
+    const sub = pool.sub(['wss://cyberspace.nostr1.com'], [filter])
     // get actions from your relays
     sub.on('event', (event) => {
       // save every action
+      console.log(event)
       saveAction({type: 'add', payload: event})
       console.log('action chain',actions)
       // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.

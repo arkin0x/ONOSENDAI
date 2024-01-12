@@ -109,14 +109,6 @@ function stopDrift(): void {
   toggleMovement(false);
 }
 
-// import into Avatar and initialize with the pubkey and relays to get the functions that can be called by the user interface.
-export function Engine(pubkey: string, relays: RelayObject[]) {
-  setPubkey(pubkey);
-  setRelays(relays);
-
-  return {setGenesisAction, setLatestAction, drift, stopDrift}
-}
-
 function updateMovementAction(): void {
   if (_movement && _pubkey && _throttle && _genesis) {
     const action = createUnsignedDriftAction(_pubkey, _throttle, getLatestAction()!, getGenesisAction()!)
@@ -146,11 +138,11 @@ function triggerMovementWorkers(): void {
     // post a command to all applicable workers
     workers.forEach((worker, thread) => {
       worker.postMessage({
-        thread,
-        threadCount: workers.length,
-        nonceOffset: NONCE_OFFSET,
         command: 'start',
         data: {
+          thread,
+          threadCount: workers.length,
+          nonceOffset: NONCE_OFFSET,
           action: actionBinary,
           nonceBounds,
           nonceStartValue: _movementActionNonce,
@@ -166,11 +158,28 @@ function triggerMovementWorkers(): void {
 const movementWorkerMessage = (event: MessageEvent) => {
 
   // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
+  
+  if (event.data.status === 'pow-target-found') {
+    // stop all workers
+    const workers = workzone['movement']
+    workers.forEach((worker) => {
+      worker.postMessage({
+        command: 'stop',
+        data: {}
+      })
+    })
+    // publish the action
+    const action = _movementActionToMine!
+    // update state with the mined action as our latest
+    // TODO publish the action
+    // update the latestAction action with this action
+    updateLatestAction(action)
 
 
   // if the worker reports 'nonce-range-completed, do nothing.
 
 }
+
 // TODO rewrite this whole thing.
 const movementWorkerMessage = (event: MessageEvent) => {
   // Each worker will be calling this same function with completed actions. We need to make sure that the action is valid and that it references the most recent action; then we must update it synchronously so that the next worker can use the updated value.
@@ -205,3 +214,13 @@ const movementWorkerMessage = (event: MessageEvent) => {
 }
 
 setWorkerCallback('movement', movementWorkerMessage)
+// setWorkerCallback('observation', observationWorkerMessage)
+// setWorkerCallback('action', actionWorkerMessage)
+
+// import into Avatar and initialize with the pubkey and relays to get the functions that can be called by the user interface.
+export function Engine(pubkey: string, relays: RelayObject[]) {
+  setPubkey(pubkey);
+  setRelays(relays);
+
+  return {setGenesisAction, setLatestAction, drift, stopDrift}
+}

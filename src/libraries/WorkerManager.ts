@@ -1,6 +1,6 @@
-import ObservationWorker from '../workers/MovementMiner.worker?worker'
-import ActionWorker from '../workers/MovementMiner.worker?worker'
-import MovementWorker from '../workers/MovementMiner.worker?worker'
+import ObservationWorker from '../workers/Miner.worker?worker'
+import ActionWorker from '../workers/Miner.worker?worker'
+import MovementWorker from '../workers/Miner.worker?worker'
 import { HashpowerAllocation, HashpowerAllocationTarget } from './HashpowerManager'
 
 // This defines the worker types

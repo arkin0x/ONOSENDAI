@@ -29,11 +29,6 @@ export type MinerCommand = {
   command: MinerCommandStatus
 }
 
-export const WORKER_COUNT = 10
-// 6 bytes is 281474976710655, which is slightly less than the max size of a number in javascript that still fits nicely into a Uint8Array 6 elemenst long.
-// Divide up the max nonce into 6 equal parts, one for each worker.
-export const BATCH_SIZE = Math.floor( 281474976710655 / WORKER_COUNT )
-
 /**
  * Determine the beginning and ending index of the nonce in the serialized event
  * @param serializedEvent string

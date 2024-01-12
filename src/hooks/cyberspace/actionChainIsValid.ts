@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { countLeadingZeroesHex } from "../../libraries/Hash"
-import { DRAG, FRAME, decimalAlmostEqual, getMillisecondsTimestampFromAction, getPlaneFromAction, vector3Equal } from "../../libraries/Cyberspace"
+import { DRAG, FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction } from "../../libraries/Cyberspace"
 import { ActionsState } from "./actionReducerTypes"
 import { getTag, getTagValue } from "../../libraries/Nostr"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"

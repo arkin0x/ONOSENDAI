@@ -1,10 +1,7 @@
-import { useThree } from '@react-three/fiber'
-import { useEffect, useRef, useState } from 'react'
-import { Canvas, useFrame } from "@react-three/fiber"
+import { useRef } from 'react'
+import { Canvas } from "@react-three/fiber"
 import { Cyberspace } from './ThreeCyberspace'
 import "../scss/CyberspaceViewer.scss"
-import { Euler, PerspectiveCamera, Vector3 } from 'three'
-import { DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from '../libraries/Cyberspace'
 import { Avatar } from './Avatar'
 // import { Avatar } from './Avatar.tsx'
 

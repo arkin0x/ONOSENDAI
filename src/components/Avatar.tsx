@@ -20,7 +20,7 @@ export const Avatar = () => {
   const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
   const [lerpPosition, setLerpPosition] = useState<DecimalVector3>(new DecimalVector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS))
   const [lerpVelocity, setLerpVelocity] = useState<DecimalVector3>(new DecimalVector3(0, 0, 0))
-  const [currentRotation, setCurrentRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1)) // rotation is based on last state + pointer drag
+  const [currentRotation,] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1)) // rotation is based on last state + pointer drag
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(Date.now())
   const [throttle, setThrottle] = useState(1)
   const {position, velocity, rotation, simulationHeight, actionChainState} = useCyberspaceStateReconciler()
@@ -89,11 +89,13 @@ export const Avatar = () => {
     if (!engineControls) return
     if (!engineReady) return
     engineControls.drift(throttle, quaternion)
+    console.log('drift')
   }
   const stopDriftProxy = () => {
     if (!engineControls) return
     if (!engineReady) return
     engineControls.stopDrift()
+    console.log('stop drift')
   }
 
   // set up controls for avatar

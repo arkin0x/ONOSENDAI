@@ -1,13 +1,5 @@
-import { Event, UnsignedEvent } from 'nostr-tools'
+import { Event } from 'nostr-tools'
 import { Decimal } from 'decimal.js'
-
-export type UnsignedAction = UnsignedEvent<333> & {
-  kind: 333,
-}
-
-export type Action = Event<333> & {
-  kind: 333,
-}
 
 export type Plane = "d-space" | "i-space"
  
@@ -27,13 +19,10 @@ export type MiniatureCyberspaceCoordinates = {
   plane: Plane
 }
 
-export type GenesisAction = Action
-export type LatestAction = Action
-
 export type ActionChainState = 
   | { status: 'loading' }
   | { status: 'invalid' }
-  | { status: 'valid', genesisAction: GenesisAction, latestAction: LatestAction};
+  | { status: 'valid', genesisAction: Event, latestAction: Event};
 
 export type MillisecondsTimestamp = number // typical JS timestamp
 export type SecondsTimestamp = number // created_at seconds timestamp with no milliseconds

@@ -1,4 +1,4 @@
-import { SimplePool, Filter, Sub, Event } from "nostr-tools"
+import { SimplePool, Filter, Sub, Event, UnsignedEvent } from "nostr-tools"
 import { IdentityType } from "../types/IdentityType"
 import { RelayList, RelayObject, RelayReadWrite, FilterReadWrite } from "../types/NostrRelay"
 
@@ -125,4 +125,11 @@ export const getMyProfile = async (pubkey: string): Promise<IdentityType> => {
     console.warn('Failed to parse profile from user metadata.')
     return defaultProfile
   }
+}
+
+export const publishEvent = async (event: UnsignedEvent, relays: RelayObject = defaultRelays): Promise<Event<number>> => {
+  const signedEvent = await window.nostr.signEvent(event)
+  const relayList: RelayList = getRelayList(relays, ['read'])
+  pool.publish(relayList, signedEvent)
+  return signedEvent
 }

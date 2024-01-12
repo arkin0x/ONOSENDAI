@@ -1,7 +1,6 @@
-import { Action } from "../../types/Cyberspace"
-
-export type ActionsState = Action[]
+import { Event } from 'nostr-tools'
+export type ActionsState = Event[]
 export type ActionsReducer = {
-  type: 'add'
-  payload: Action
+  type: 'add' | 'reset'
+  payload?: Event
 }

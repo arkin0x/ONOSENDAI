@@ -1,13 +1,13 @@
 import { useContext, useEffect, useState, useReducer } from "react"
 import { Decimal } from 'decimal.js'
 import * as THREE from "three"
-import { Filter } from "nostr-tools"
+import { Event, Filter } from "nostr-tools"
 import { getRelayList, getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { RelayList } from "../../types/NostrRelay"
-import { extractActionState, getMillisecondsTimestampFromAction, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
-import { Action, MillisecondsTimestamp } from "../../types/Cyberspace"
+import { extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { MillisecondsTimestamp } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroesHex } from "../../libraries/Hash"
@@ -15,7 +15,7 @@ import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import { ActionChainState } from "../../types/Cyberspace"
 
 type CyberspaceStateReconciler = {
-  actions: Action[]
+  actions: Event[]
   position: DecimalVector3
   velocity: DecimalVector3
   rotation: THREE.Quaternion
@@ -34,6 +34,11 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   const [position, setPosition] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [velocity, setVelocity] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))
+
+  // This will run whenever identity.pubkey changes to clear our actions and start over.
+  useEffect(() => {
+    saveAction({type: 'reset'})
+  }, [identity.pubkey])
 
   // retrieve action events, store and validate action chain
   useEffect(() => {
@@ -61,7 +66,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       sub.unsub()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [identity])
 
 
   // If the action chain is valid, we can just return the latest action's position/velocity/etc. If it's not valid, we return the home coordinates and zero velocity.
@@ -96,7 +101,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setRotation(new THREE.Quaternion(0,0,0,1))
       setSimulationHeight(Date.now())
     }
-  }, [validChain, actions])
+  }, [validChain, actions, identity])
 
   let actionChainState: ActionChainState
 

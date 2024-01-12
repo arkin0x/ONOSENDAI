@@ -1,12 +1,11 @@
 import * as THREE from 'three'
-import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cyberspace'
-import { createUnsignedDriftAction, createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
-import { IdentityType } from '../types/IdentityType'
+import { createUnsignedDriftAction, createUnsignedGenesisAction } from './Cyberspace'
 import { RelayObject } from '../types/NostrRelay'
 import { getGenesisAction, getLatestAction, updateGenesisAction, updateLatestAction } from './ActionTracker'
-import { update } from 'three/examples/jsm/libs/tween.module.js'
 import { setWorkerCallback, workzone } from './WorkerManager'
-import { getNonceBounds, serializeEvent } from './Miner'
+import { deserializeEvent, getNonceBounds, serializeEvent } from './Miner'
+import { publishEvent } from './Nostr'
+import { Event, UnsignedEvent } from 'nostr-tools'
 
 
 // New version of Engine.ts
@@ -14,125 +13,123 @@ const NONCE_OFFSET = 1_000_000
 
 // Define the state variables.
 let _pubkey: string | null = null
-let _relays: RelayObject[] | null = null
+let _relays: RelayObject | null = null
 let _throttle: number | null = null
 let _quaternion: THREE.Quaternion | null = null
 let _movement: boolean = false
 let _genesis: boolean = false // do we have a genesis action? If not, this is the first thing that will be created.
-let _previousMovementActionToMine: UnsignedAction | null = null
-let _movementActionToMine: UnsignedAction | null = null
-let _movementActionNonce: number = 0
+let _previousMovementActionToMine: UnsignedEvent | null = null
+let _movementActionToMine: UnsignedEvent | null = null
+let _movementActionNonce: number = 0 // set to 0 whenever we have a new action to mine.
 
 // Define the setters for the state variables.
 function setPubkey(value: string) {
   if (_pubkey === value) { // reject if the value is the same. Effectively memoizes the value.
-    return;
+    return
   }
-  _pubkey = value;
-  updateMovementAction();
+  _pubkey = value
+  updateMovementAction()
 }
 
-function setRelays(value: RelayObject[]) {
+function setRelays(value: RelayObject) {
   if (_relays === value) {
-    return;
+    return
   }
-  _relays = value;
-  updateMovementAction();
+  _relays = value
+  updateMovementAction()
 }
 
 function setThrottle(value: number) {
   if (_throttle === value) {
-    return;
+    return
   }
   if (value < 1) {
     stopDrift()
   }
-  _throttle = value;
-  updateMovementAction();
+  _throttle = value
+  updateMovementAction()
 }
 
 function setQuaternion(value: THREE.Quaternion) {
   if (_quaternion === value) {
-    return;
+    return
   }
-  _quaternion = value;
-  updateMovementAction();
+  _quaternion = value
+  updateMovementAction()
 }
 
 function toggleMovement(value: boolean) {
   if (_movement === value) {
-    return;
+    return
   }
-  _movement = value;
-  updateMovementAction();
+  _movement = value
+  updateMovementAction()
 }
 
 function createGenesisAction(): void {
-  if (!_pubkey) {
+  if (!_pubkey || !_relays) {
     return
   }
   // create a genesis action
   const action = createUnsignedGenesisAction(_pubkey)
   // publish it
-  // ....... publishy stuff
-  // TODO LEFTOFF
-  updateGenesisAction(publishedAction)
-  updateLatestAction(publishedAction) // the latest action IS the genesis action
-  _genesis = true
-  updateMovementAction();
+  publishGenesisAction(action)
 }
 
-function setGenesisAction(genesis: GenesisAction) {
+function setGenesisAction(genesis: Event) {
   updateGenesisAction(genesis)
   _genesis = true
-  updateMovementAction();
+  updateMovementAction()
 }
 
-function setLatestAction(latest: LatestAction) {
+function setLatestAction(latest: Event) {
   updateLatestAction(latest)
-  updateMovementAction();
+  updateMovementAction()
 }
 
 function drift(throttle: number, quaternion: THREE.Quaternion): void {
   if (!_genesis) {
-    createGenesisAction();
+    createGenesisAction()
     return
   }
-  setThrottle(throttle);
-  setQuaternion(quaternion);
+  setThrottle(throttle)
+  setQuaternion(quaternion)
   if (!_movement) {
-    toggleMovement(true);
+    toggleMovement(true)
   }
 }
 
 function stopDrift(): void {
-  toggleMovement(false);
+  toggleMovement(false)
 }
 
 function updateMovementAction(): void {
-  if (_movement && _pubkey && _throttle && _genesis) {
-    const action = createUnsignedDriftAction(_pubkey, _throttle, getLatestAction()!, getGenesisAction()!)
+  if (_movement && _pubkey && _throttle && _quaternion && _genesis) {
+    const action = createUnsignedDriftAction(_pubkey, _throttle, _quaternion, getLatestAction()!, getGenesisAction()!)
     // we assert that getLatestAction() and getGenesisAction() are not null because _genesis is true
     setMovementActionToMine(action)
     triggerMovementWorkers()
   } 
 }
 
-function setMovementActionToMine(action: UnsignedAction): void {
+// This essentially memoizes the action to mine so the workers don't get interrupted.
+function setMovementActionToMine(action: UnsignedEvent): void {
   _previousMovementActionToMine = _movementActionToMine
-  _movementActionToMine = action;
+  _movementActionToMine = action
 }
 
 function setMovementActionNonce(nonce: number): void {
-  _movementActionNonce = nonce;
+  _movementActionNonce = nonce
 }
 
 function triggerMovementWorkers(): void {
+  // memoized so we don't trigger the workers if the action is the same as the previous action.
   if (_movementActionToMine !== _previousMovementActionToMine) {
     const workers = workzone['movement']
     setMovementActionNonce(0)
     const actionCopySerialized = serializeEvent(_movementActionToMine!)
     const nonceBounds = getNonceBounds(actionCopySerialized)
+    // @NOTE: we are assuming the action does not contain characters that encode to more than one byte, or else the nonceBounds will be incorrect and the action binary will be corrupted.
     const actionBinary = new TextEncoder().encode(actionCopySerialized)
     const targetPOW = parseInt(_movementActionToMine!.tags.find( tag => tag[0] === 'nonce')![2])
     // post a command to all applicable workers
@@ -168,59 +165,38 @@ const movementWorkerMessage = (event: MessageEvent) => {
         data: {}
       })
     })
+
+    const actionBinary = event.data.action
+    const actionSerialized = new TextDecoder().decode(actionBinary)
+    const action = deserializeEvent(actionSerialized)
     // publish the action
-    const action = _movementActionToMine!
-    // update state with the mined action as our latest
-    // TODO publish the action
     // update the latestAction action with this action
-    updateLatestAction(action)
-
-
-  // if the worker reports 'nonce-range-completed, do nothing.
-
-}
-
-// TODO rewrite this whole thing.
-const movementWorkerMessage = (event: MessageEvent) => {
-  // Each worker will be calling this same function with completed actions. We need to make sure that the action is valid and that it references the most recent action; then we must update it synchronously so that the next worker can use the updated value.
-  // TODO: we must be receiving a fully formed Event from the worker, or do we need to parse the action binary into an Event? How should this work be split up?
-  if (event.data.action) {
-    // make sure the completed unit references the most recent action
-    if (latestAction) {
-      // there is a previous action, which also means that the newly created action is not a genesis action
-      const latestActionID = latestAction.id
-      const referenceToLatest = event.data.action.tags.find((tag: string[]) => tag[0] === 'e' && tag[3] === 'genesis')![1]
-      if (latestActionID !== referenceToLatest) {
-        console.warn('The completed action does not reference the most recent action. The state is not properly managed!')
-        // So which is wrong: the worker thread or the latestActionID? Most likely the worker thread since it receives information last.
-        // hopefully this warning just never happens because we manage state properly.
-        return // dump the action
-      }
-      // 
-    } else {
-      // there is no previous action, which means that the newly created action is a genesis action
-      // make sure it is a genesis action
-      if (!isGenesisAction(event.data.action)) {
-        console.warn('The completed action should be a genesis event but it is not! The state is not properly managed!')
-        return // dump the action
-      }
-    }
-    // OK, the action is valid.
-    // TODO: publish the action
-    // update the latestAction action with this action
-    updateLatestAction(event.data.action)
-    // TODO: trigger workers to use new latestAction and genesisAction values
+    publishMovementAction(action)
   }
+  // if the worker reports 'nonce-range-completed, do nothing.
 }
+
+async function publishGenesisAction(action: UnsignedEvent): Promise<void> {
+  const publishedAction = await publishEvent(action as UnsignedEvent, _relays as RelayObject)
+  updateGenesisAction(publishedAction)
+  updateLatestAction(publishedAction) // the latest action IS the genesis action
+  _genesis = true
+}
+
+async function publishMovementAction(action: UnsignedEvent): Promise<void> {
+  const publishedAction = await publishEvent(action as UnsignedEvent, _relays as RelayObject)
+  updateLatestAction(publishedAction)
+}
+
 
 setWorkerCallback('movement', movementWorkerMessage)
 // setWorkerCallback('observation', observationWorkerMessage)
 // setWorkerCallback('action', actionWorkerMessage)
 
 // import into Avatar and initialize with the pubkey and relays to get the functions that can be called by the user interface.
-export function Engine(pubkey: string, relays: RelayObject[]) {
-  setPubkey(pubkey);
-  setRelays(relays);
+export function Engine(pubkey: string, relays: RelayObject) {
+  setPubkey(pubkey)
+  setRelays(relays)
 
   return {setGenesisAction, setLatestAction, drift, stopDrift}
 }

@@ -58,6 +58,22 @@ export const serializeEvent = (event: UnsignedEvent): string => {
 }
 
 /**
+ * Deserialize a nostr event from a string
+ * @param serializedEvent string
+ * @returns UnsignedEvent
+ */
+export const deserializeEvent = (serializedEvent: string): UnsignedEvent => {
+  const eventArray = JSON.parse(serializedEvent)
+  return {
+    pubkey: eventArray[1],
+    created_at: eventArray[2],
+    kind: eventArray[3],
+    tags: eventArray[4],
+    content: eventArray[5],
+  }
+}
+
+/**
  * Used to convert a nonce buffer into a number (big-endian)
  * 6 bytes is (slightly less than) the max size of a number in javascript: 
  * 6 bytes max is 281474976710655

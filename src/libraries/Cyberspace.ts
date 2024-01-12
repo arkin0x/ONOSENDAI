@@ -1,9 +1,9 @@
 import * as THREE from "three"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { Action, CyberspaceCoordinates, LatestAction, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time, UnsignedAction } from "../types/Cyberspace"
+import { CyberspaceCoordinates, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
-import { EventTemplate } from "nostr-tools"
+import { Event, EventTemplate, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
 import { DecimalVector3 } from "./DecimalVector3"
 
@@ -181,11 +181,11 @@ export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalV
   return new DecimalVector3(coords.x, coords.y, coords.z)
 }
 
-export const getMillisecondsTimestampFromAction = (action: Action): number => {
+export const getMillisecondsTimestampFromAction = (action: Event): number => {
   return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1])
 }
 
-export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
+export const getPlaneFromAction = (action: Event): 'i-space' | 'd-space' => {
   // 0 = d-space (reality, first)
   // 1 = i-space (cyberreality, second)
   const lastNibble = action.tags.find(getTag('C'))![1].substring(63)
@@ -194,7 +194,7 @@ export const getPlaneFromAction = (action: Action): 'i-space' | 'd-space' => {
   return binToPlane(lastBit)
 }
 
-export const getTime = (action?: Action): Time => {
+export const getTime = (action?: Event): Time => {
   let now
   if (action) {
     now = new Date(getMillisecondsTimestampFromAction(action))
@@ -216,7 +216,7 @@ export const getSecondsTimestamp = (): SecondsTimestamp => {
   return Math.floor(getMillisecondsTimestamp() / 1000)
 }
 
-export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
+export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
   return {
     pubkey, 
@@ -231,25 +231,26 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedAction => {
       ['version', '1'],
       ['A', 'noop']
     ]
-  } as UnsignedAction
+  } as UnsignedEvent
 }
 
-export const createUnsignedDriftAction = (pubkey: string, throttle: number, genesisAction: Action , latestAction: Action): UnsignedAction => {
+export const createUnsignedDriftAction = (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): UnsignedEvent => {
   const time = getTime()
-  const newAction = simulateNextEvent(latestAction, time) as UnsignedAction
+  const newAction = simulateNextEvent(latestAction, time) as UnsignedEvent
   if (newAction === undefined) {
     // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
   }
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
+  newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toString())])
   newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
   newAction.tags.push(['e', latestAction.id, '', 'previous'])
   newAction.tags.push(['nonce', '0000000000000000', throttle.toString()])
-  return newAction as UnsignedAction
+  return newAction as UnsignedEvent
 }
 
-export const isGenesisAction = (action: Action): boolean => {
+export const isGenesisAction = (action: Event): boolean => {
   const hasPubkeyCoordinate = action.pubkey === action.tags.find(tag => tag[0] === 'C')![1] 
   const hasNoETags = !action.tags.find(tag => tag[0] === 'e')
   const hasZeroVelocity = action.tags.find(tag => tag[0] === 'velocity')!.slice(1).join('') === "000"
@@ -257,7 +258,7 @@ export const isGenesisAction = (action: Action): boolean => {
 }
 
 // get the state from a cyberspace action
-export const extractActionState = (action: Action): {position: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event): {position: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
   // get position
   const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
   // get plane
@@ -272,7 +273,7 @@ export const extractActionState = (action: Action): {position: DecimalVector3, p
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = (startEvent: Action, toTime: Time): EventTemplate => {
+export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplate => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
@@ -310,7 +311,7 @@ export const simulateNextEvent = (startEvent: Action, toTime: Time): EventTempla
 
   const velocityArray = updatedVelocity.toArray()
 
-  const rotationArray = rotation.toArray().map(n => n.toString())
+  // const rotationArray = rotation.toArray().map(n => n.toString())
 
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event: EventTemplate = {
@@ -320,7 +321,7 @@ export const simulateNextEvent = (startEvent: Action, toTime: Time): EventTempla
     tags: [
       ['C', hexCoord],
       ['velocity', ...velocityArray],
-      ['quaternion', ...rotationArray],
+      // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', time.ms_padded],
       ['version', '1'],
     ]

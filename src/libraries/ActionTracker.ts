@@ -1,26 +1,25 @@
-import { Action, UnsignedAction, GenesisAction, LatestAction } from '../types/Cyberspace'
-import { createUnsignedDriftAction, createUnsignedGenesisAction, isGenesisAction } from './Cyberspace'
+import { Event } from 'nostr-tools'
 
 // Define your state variables
-let genesisAction: GenesisAction | null = null
-let latestAction: LatestAction | null = null
+let genesisAction: Event | null = null
+let latestAction: Event | null = null
 
 // Define a function to initialize the genesis action
-export function updateGenesisAction(action: GenesisAction) {
+export function updateGenesisAction(action: Event) {
   genesisAction = action
 }
 
 // Define a function to update the latest action
-export function updateLatestAction(action: LatestAction) {
+export function updateLatestAction(action: Event) {
   latestAction = action
 }
 
 // Define a function to get the genesis action
-export function getGenesisAction(): GenesisAction | null {
+export function getGenesisAction(): Event | null {
   return genesisAction
 }
 
 // Define a function to get the latest action
-export function getLatestAction(): LatestAction | null {
+export function getLatestAction(): Event | null {
   return latestAction
 }

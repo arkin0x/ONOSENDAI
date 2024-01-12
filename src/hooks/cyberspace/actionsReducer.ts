@@ -4,6 +4,13 @@ import { ActionsState, ActionsReducer } from "./actionReducerTypes"
 // actions are not necessarily received in order by timestamp!
 export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
 
+  if (action.type === 'reset') {
+    return []
+  }
+  if (!action.payload) {
+    return state
+  }
+
   const newState = [...state, action.payload]
 
   // sort actions by created_at+ms tag from oldest to newest

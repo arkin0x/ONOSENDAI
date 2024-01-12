@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha256'
-import { incrementNonceBuffer, incrementNonceBufferBy, setNonceBuffer } from "../libraries/Miner"
+import { incrementNonceBuffer, setNonceBuffer } from "../libraries/Miner"
 import { countLeadingZeroesBin } from "../libraries/Hash"
 
 let threadID = undefined
@@ -9,10 +9,10 @@ let active = false
 let currentNonce = 0
 
 self.onmessage = function(message) {
-  const { thread, threadCount, nonceOffset, command, data } = message.data
-  threadID = thread
-  threadCountNum = threadCount
-  NONCE_OFFSET = nonceOffset
+  const { command, data } = message.data
+  if (data.thread) threadID = data.thread
+  if (data.threadCount) threadCountNum = data.threadCount
+  if (data.nonceOffset) NONCE_OFFSET = data.nonceOffset
   switch (command) {
     case 'start':
       safeInterrupt(data)
@@ -56,7 +56,7 @@ function initiateMining(data) {
       let POW = countLeadingZeroesBin(digest)
 
       if (POW === targetPOW) {
-        postMessage({ thread: threadID, status: 'pow-target-found', data: { action, digest, currentNonce, POW } })
+        postMessage({ thread: threadID, status: 'pow-target-found', data: { action, nonceBounds, digest, currentNonce, POW } })
         active = false
         return
       }

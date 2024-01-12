@@ -7,7 +7,6 @@ import { deserializeEvent, getNonceBounds, serializeEvent } from './Miner'
 import { publishEvent } from './Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
 
-
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
 
@@ -78,6 +77,9 @@ function createGenesisAction(): void {
 
 function setGenesisAction(genesis: Event) {
   updateGenesisAction(genesis)
+  if (getLatestAction() === null) {
+    updateLatestAction(genesis)
+  }
   _genesis = true
   updateMovementAction()
 }
@@ -198,9 +200,16 @@ setWorkerCallback('movement', movementWorkerMessage)
 // setWorkerCallback('action', actionWorkerMessage)
 
 // import into Avatar and initialize with the pubkey and relays to get the functions that can be called by the user interface.
-export function Engine(pubkey: string, relays: RelayObject) {
+export default function Engine(pubkey: string, relays: RelayObject): EngineControls {
   setPubkey(pubkey)
   setRelays(relays)
 
   return {setGenesisAction, setLatestAction, drift, stopDrift}
+}
+
+export type EngineControls = {
+  setGenesisAction: (genesis: Event) => void
+  setLatestAction: (latest: Event) => void
+  drift: (throttle: number, quaternion: THREE.Quaternion) => void
+  stopDrift: () => void
 }

@@ -3,10 +3,9 @@ import { useFrame, useThree } from "@react-three/fiber"
 import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
-import { move, stopMove, updateHashpowerAllocation } from '../libraries/Engine.ts'
+import Engine, { EngineControls } from '../libraries/Engine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
-import { GenesisAction, LatestAction } from '../types/Cyberspace.ts'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
 
 /**
@@ -24,21 +23,34 @@ export const Avatar = () => {
   const [currentRotation, setCurrentRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1)) // rotation is based on last state + pointer drag
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(Date.now())
   const [throttle, setThrottle] = useState(1)
-  const {position, velocity, rotation, simulationHeight, genesisAction, latestAction} = useCyberspaceStateReconciler()
-
-  console.log('genesis', genesisAction, 'latest', latestAction)
-
-  // const position = new DecimalVector3(HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS)
-  // const velocity = new DecimalVector3(0, 0, 0)
-  // const rotation = new THREE.Quaternion(0,0,0,1)
-  // const simulationHeight = Date.now()
-  // const genesisAction = null
-  // const latestAction = null
+  const {position, velocity, rotation, simulationHeight, actionChainState} = useCyberspaceStateReconciler()
+  const [engineControls, setEngineControls] = useState<EngineControls|null>(null)
+  const [engineReady, setEngineReady] = useState(false)
 
   // handle camera
   const { camera } = useThree()
 
   camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
+
+  // initialize Engine
+  useEffect(() => {
+    if (!identity.pubkey || !relays) return
+    setEngineControls(Engine(identity.pubkey, relays))
+  }, [identity.pubkey, relays])
+  
+  // update Engine with required state and/or activate it
+  useEffect(() => {
+    if (!engineControls) return
+    if (actionChainState.status === 'valid') {
+      // update Engine with valid genesis and latest action
+      engineControls.setGenesisAction(actionChainState.genesisAction)
+      engineControls.setLatestAction(actionChainState.latestAction)
+      setEngineReady(true)
+    } else if (actionChainState.status === 'invalid') {
+      // if the chain is invalid, a new genesis action is required and the engine will make one if it is activated without one.
+      setEngineReady(true)
+    }
+  }, [engineControls, actionChainState])
 
   // when the position, velocity, or rotation changes, use this as the basis for a newly calculated LERP position/velocity/rotation
   useEffect(() => {
@@ -49,10 +61,11 @@ export const Avatar = () => {
     // we don't set rotation because that is controlled by the user and whatever we receive is likely to be stale.
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position, velocity, rotation, simulationHeight, genesisAction, latestAction])
+  }, [position, velocity, rotation, simulationHeight, actionChainState])
 
+
+  // apply physics to the avatar based on state to LERP animation until next state. If last state was a while ago, LERP to current time's simulated position.
   useFrame(() => {
-    // apply physics to the avatar based on state to LERP animation until next state. If last state was a while ago, LERP to current position.
     const timestamp = Date.now()
     const elapsed = (timestamp - processedTimestamp) // milliseconds since last processed frame or last state change
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
@@ -72,10 +85,15 @@ export const Avatar = () => {
     camera.updateProjectionMatrix()
   }, [camera, lerpPosition, currentRotation])
 
-  // abstract the passing of identity and relays to move().
-  const moveProxy = (throttle: number, quaternion: THREE.Quaternion, genesisAction: GenesisAction, latestAction: LatestAction) => {
-    // console.log('moving')
-    move(throttle, quaternion, genesisAction, latestAction, identity, relays)
+  const driftProxy = (throttle: number, quaternion: THREE.Quaternion) => {
+    if (!engineControls) return
+    if (!engineReady) return
+    engineControls.drift(throttle, quaternion)
+  }
+  const stopDriftProxy = () => {
+    if (!engineControls) return
+    if (!engineReady) return
+    engineControls.stopDrift()
   }
 
   // set up controls for avatar
@@ -85,17 +103,17 @@ export const Avatar = () => {
       // console.log(e)
       if (e.code === "KeyW" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-        moveProxy(throttle, currentRotation, genesisAction, latestAction)
+        driftProxy(throttle, currentRotation)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.code === "KeyS" || e.key === "ArrowDown") {
         // mine drift events in reverse
-        moveProxy(throttle, currentRotation.clone().invert(), genesisAction, latestAction)
+        driftProxy(throttle, currentRotation.clone().invert())
       }
     }
     const handleInactive = () => {
-      stopMove()
+      stopDriftProxy()
     }
     window.addEventListener("keydown", handleForward)
     window.addEventListener("keydown", handleReverse)
@@ -115,7 +133,7 @@ export const Avatar = () => {
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
 
-    updateHashpowerAllocation()
+    // updateHashpowerAllocation()
 
     return () => {
       window.removeEventListener("keydown", handleForward)

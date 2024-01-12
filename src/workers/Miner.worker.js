@@ -29,7 +29,7 @@ function safeInterrupt(data) {
   setTimeout(() => {
     active = true
     initiateMining(data)
-  }, 1)
+  }, 2)
 }
 
 // called with the data needed to mine the next action in the chain

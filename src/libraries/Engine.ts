@@ -101,8 +101,10 @@ function drift(throttle: number, quaternion: THREE.Quaternion): void {
 
 function stopDrift(): void {
   toggleMovement(false)
+  stopMovementWorkers()
 }
 
+// it's OK if this is called all the time because the workers will only be triggered if the action to mine has changed, thanks to the memoization in setMovementActionToMine.
 function updateMovementAction(): void {
   if (_movement && _pubkey && _throttle && _quaternion && _genesis) {
     const action = createUnsignedDriftAction(_pubkey, _throttle, _quaternion, getLatestAction()!, getGenesisAction()!)
@@ -152,20 +154,22 @@ function triggerMovementWorkers(): void {
   }
 }
 
+const stopMovementWorkers = () => {
+  const workers = workzone['movement']
+  workers.forEach((worker) => {
+    worker.postMessage({
+      command: 'stop',
+      data: {}
+    })
+  })
+}
+
 const movementWorkerMessage = (event: MessageEvent) => {
 
   // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
   
   if (event.data.status === 'pow-target-found') {
-    // stop all workers
-    const workers = workzone['movement']
-    workers.forEach((worker) => {
-      worker.postMessage({
-        command: 'stop',
-        data: {}
-      })
-    })
-
+    stopMovementWorkers()
     const actionBinary = event.data.action
     const actionSerialized = new TextDecoder().decode(actionBinary)
     const action = deserializeEvent(actionSerialized)

@@ -7,6 +7,7 @@ import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import Decimal from "decimal.js"
 
 export const actionChainIsValid = (actions: ActionsState): boolean => {
+  // console.log('actionChainIsValid',actions.length)
   const tests = []
 
   // wrap the whole thing in a try; any errors will invalidate the chain, although this could lead to false invalidations if the code is wrong but the chain is right... 🤔 #TODO

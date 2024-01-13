@@ -70,6 +70,8 @@ function initiateMining(data) {
 
       return
 
+    } else if (!active) {
+      console.log('worker',threadID,'stopped')
     }
 
     if (currentNonce > nonceEndValue) {

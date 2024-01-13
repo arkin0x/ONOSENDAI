@@ -11,12 +11,11 @@ export const actionsReducer = (state: ActionsState, action: ActionsReducer) => {
     return state
   }
 
+  // console.log('check state', state)
+
   const newState = [...state, action.payload]
 
-  if (newState.length < 2) {
-    // if we only have zero or one actions, just return
-    return newState
-  }
+  // console.log('check reducer', state, newState, action.payload)
 
   // sort actions by created_at+ms tag from oldest to newest
   newState.sort((a, b) => {

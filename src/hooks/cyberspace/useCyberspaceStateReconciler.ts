@@ -28,6 +28,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions; they may come from the relay pool unordered but the reducer will sort them by timestamp AND purge old actions if a new action chain begins (new genesis event.)
   const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
   const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
+  const [actionChainState, setActionChainState] = useState<ActionChainState>({status: 'loading'})
 
   // action state vars
   const [simulationHeight, setSimulationHeight] = useState<MillisecondsTimestamp>(0) // the most recent timestamp (ms) that the simulation has been updated to
@@ -37,8 +38,11 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
   // This will run whenever identity.pubkey changes to clear our actions and start over.
   useEffect(() => {
+    console.warn('RESET RECONCILER')
     saveAction({type: 'reset'})
-  }, [identity.pubkey])
+    setValidChain(false)
+    setLoadedWholeChain(false)
+  }, [identity])
 
   // retrieve action events, store and validate action chain
   useEffect(() => {
@@ -49,12 +53,9 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     // get actions from your relays
     sub.on('event', (event) => {
       // save every action
-      console.log(event)
+      // console.log('new event', event.created_at)
       saveAction({type: 'add', payload: event})
-      console.log('action chain',actions)
       // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.
-      const chainStatus = validateActionChain(actions)
-      setValidChain(chainStatus)
     })
     sub.on('eose', () => {
       console.log('eose')
@@ -69,6 +70,10 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity])
 
+  useEffect(() => {
+    const chainStatus = validateActionChain(actions)
+    setValidChain(chainStatus)
+  }, [actions])
 
   // If the action chain is valid, we can just return the latest action's position/velocity/etc. If it's not valid, we return the home coordinates and zero velocity.
   useEffect(() => {
@@ -93,7 +98,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setPosition(position)
       setVelocity(driftVelocity)
       setRotation(rotation)
-      setSimulationHeight(time.ms_only)
+      setSimulationHeight(time.ms_timestamp)
     } else {
       // set state to home coordinates and zero velocity
       const homeCoord = getVector3FromCyberspaceCoordinate(identity.pubkey)
@@ -102,19 +107,19 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setRotation(new THREE.Quaternion(0,0,0,1))
       setSimulationHeight(Date.now())
     }
-  }, [validChain, actions, identity])
+  }, [validChain])
 
-  let actionChainState: ActionChainState
-
-  if (!loadedWholeChain) {
-    actionChainState = { status: 'loading' }
-  } else if (!validChain) {
-    actionChainState = { status: 'invalid' }
-  } else {
-    const genesisAction = actions[0]
-    const latestAction = actions[actions.length - 1]
-    actionChainState = { status: 'valid', genesisAction, latestAction }
-  }
+  useEffect(() => {
+    if (!loadedWholeChain) {
+      setActionChainState({ status: 'loading' })
+    } else if (!validChain) {
+      setActionChainState({ status: 'invalid' })
+    } else {
+      const genesisAction = actions[0]
+      const latestAction = actions[actions.length - 1]
+      setActionChainState({ status: 'valid', genesisAction, latestAction })
+    }
+  }, [loadedWholeChain, validChain])
 
   return {actions, position, velocity, rotation, simulationHeight, actionChainState}
 

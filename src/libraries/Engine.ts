@@ -84,6 +84,7 @@ function createGenesisAction(): void {
 }
 
 function setGenesisAction(genesis: Event) {
+  console.warn('setGenesisAction', genesis)
   updateGenesisAction(genesis)
   if (getLatestAction() === null) {
     updateLatestAction(genesis)

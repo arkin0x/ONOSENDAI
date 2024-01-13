@@ -29,9 +29,8 @@ export const Avatar = () => {
   const [engineReady, setEngineReady] = useState(false)
 
   // handle camera
-  const { camera } = useThree()
-
-  camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
+  // const { camera } = useThree()
+  // camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
 
   // initialize Engine
   useEffect(() => {
@@ -51,7 +50,7 @@ export const Avatar = () => {
       // if the chain is invalid, a new genesis action is required and the engine will make one if it is activated without one.
       setEngineReady(true)
     }
-  }, [engineControls, actionChainState])
+  }, [engineControls])
 
   // when the position, velocity, or rotation changes, use this as the basis for a newly calculated LERP position/velocity/rotation
   useEffect(() => {
@@ -80,11 +79,11 @@ export const Avatar = () => {
   })
 
   // when the lerp position changes, update the camera's position
-  useEffect(() => {
-    camera.position.copy(lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
-    camera.quaternion.copy(currentRotation)
-    camera.updateProjectionMatrix()
-  }, [camera, lerpPosition, currentRotation])
+  // useEffect(() => {
+  //   camera.position.copy(lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
+  //   camera.quaternion.copy(currentRotation)
+  //   camera.updateProjectionMatrix()
+  // }, [camera, lerpPosition, currentRotation])
 
   const driftProxy = (throttle: number, quaternion: THREE.Quaternion) => {
     console.log('drift proxy', engineReady)

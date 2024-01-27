@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useFrame, useThree } from "@react-three/fiber"
 import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
@@ -26,12 +26,17 @@ export const Avatar = () => {
   const [throttle, setThrottle] = useState(1)
   const {position, velocity, rotation, simulationHeight, actionChainState} = useCyberspaceStateReconciler()
   const { setGenesisAction, setLatestAction, drift, stopDrift } = useEngine(identity.pubkey, relays)
-  const [engineReady, setEngineReady] = useState<boolean>(false)
+  const engineReadyRef = useRef(false)
 
   const { camera } = useThree()
 
+  function setEngineReady(ready: boolean) {
+    engineReadyRef.current = ready
+  }
+
   // update Engine with required state and/or let this component know we can start sending action requests to the engine.
   useEffect(() => {
+    console.log('actionChainState', actionChainState, engineReadyRef.current)
     if (actionChainState.status === 'valid') {
       // update Engine with valid genesis and latest action
       setGenesisAction(actionChainState.genesisAction)
@@ -62,14 +67,14 @@ export const Avatar = () => {
     const elapsed = (timestamp - processedTimestamp) // milliseconds since last processed frame or last state change
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
     let frames = Math.floor(elapsed / FRAME) // the physics runs at 60 frames per second
-    console.log(frames, 'frames to process')
+    // console.log(frames, 'frames to process')
     let lerpPositionTemp = lerpPosition
     let lerpVelocityTemp = lerpVelocity
     let processedTimestampTemp = processedTimestamp
     while (frames--) {
       if (lerpVelocityTemp.x.eq(0) && lerpVelocityTemp.y.eq(0) && lerpVelocityTemp.z.eq(0)){ // FIXME might need to use almost equal here because a decaying velocity will probabbly never equal exactly zero.
         processedTimestampTemp += FRAME * frames
-        console.log('skipping physics simulation because velocity is 0')
+        // console.log('skipping physics simulation because velocity is 0')
         break // if the velocity is 0, we don't need to do anything
       }
       lerpPositionTemp = lerpPositionTemp.add(lerpVelocityTemp)
@@ -142,16 +147,32 @@ export const Avatar = () => {
 
   // functions
   const driftWrapper = (throttle: number, quaternion: THREE.Quaternion) => {
-    console.log('drift proxy', engineReady)
-    if (!engineReady) return
+    console.log('drift proxy', engineReadyRef.current)
+    if (!engineReadyRef.current) return
     drift(throttle, quaternion)
   }
   const stopDriftWrapper = () => {
-    if (!engineReady) return
+    if (!engineReadyRef.current) return
     stopDrift()
   }
 
+  const boxPos = camera.position.clone()
+  boxPos.z -= 3
+  const boxRef = useRef<THREE.Mesh>(null)
+
+  useFrame(() => {
+    if (!boxRef.current) return
+    boxRef.current.rotation.x += 0.01
+    boxRef.current.rotation.y += 0.01
+  })
+
   return (
-    null
+    <group>
+    <ambientLight intensity={2.0} />
+    <mesh ref={boxRef} position={boxPos}>
+      <boxGeometry args={[1,1,1]} />
+      <meshStandardMaterial color="hotpink" />
+    </mesh>
+    </group>
   )
 }

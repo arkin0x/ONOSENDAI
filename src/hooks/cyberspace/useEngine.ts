@@ -27,6 +27,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   // const [latestAction, setLatestAction] = useState<Event|null>(null)
   const genesisActionRef = useRef<Event|null>(null)
   const latestActionRef = useRef<Event|null>(null)
+  const allowDriftRef = useRef<boolean>(false)
   // const [chainHeight, setChainHeight] = useState<number>(0) // I don't know if we need this
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<THREE.Quaternion | null>(null)
@@ -38,10 +39,17 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     },[])
 
   async function drift(throttle: number, quaternion: THREE.Quaternion): Promise<void> {
-    if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
-      // Arguments haven't changed, so do nothing
-      console.log('Engine:drift: noop (state has not changed)')
-      return
+    if (allowDriftRef.current){
+      allowDriftRef.current = false
+      // proceed with function
+      // we just mined a new action so we should allow a new drift
+    } else {
+      // if nothing else has changed, we don't need to do anything
+      if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
+        // Arguments haven't changed, so do nothing
+        console.log('Engine:drift: noop (state has not changed)')
+        return
+      }
     }
 
     // Update the refs with the new values
@@ -135,6 +143,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function setLatestAction(latest: Event) {
+    allowDriftRef.current = true // we just mined a new action so we should allow a new drift
     latestActionRef.current = latest
   }
 

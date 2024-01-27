@@ -30,7 +30,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
   const [actionChainState, setActionChainState] = useState<ActionChainState>({status: 'loading'})
 
   // action state vars
-  const [simulationHeight, setSimulationHeight] = useState<MillisecondsTimestamp>(0) // the most recent timestamp (ms) that the simulation has been updated to
+  const [simulationHeight, setSimulationHeight] = useState<MillisecondsTimestamp>(Date.now()) // the most recent timestamp (ms) that the simulation has been updated to
   const [position, setPosition] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [velocity, setVelocity] = useState<DecimalVector3>(new DecimalVector3(0,0,0))
   const [rotation, setRotation] = useState<THREE.Quaternion>(new THREE.Quaternion(0,0,0,1))

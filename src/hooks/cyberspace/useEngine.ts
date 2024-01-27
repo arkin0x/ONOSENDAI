@@ -22,7 +22,7 @@ type EngineControls = {
 
 export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   // FIXME logging relays so we don't get a warning
-  console.info(relays)
+  console.warn(relays)
   // const [genesisAction, setGenesisAction] = useState<Event|null>(null)
   // const [latestAction, setLatestAction] = useState<Event|null>(null)
   const genesisActionRef = useRef<Event|null>(null)

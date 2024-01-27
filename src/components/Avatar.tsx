@@ -55,17 +55,23 @@ export const Avatar = () => {
   }, [position, velocity, rotation, simulationHeight, actionChainState])
 
 
+  // PHYSICS SIMULATION
   // apply physics to the avatar based on state to LERP animation until next state. If last state was a while ago, LERP to current time's simulated position.
   useFrame(() => {
     const timestamp = Date.now()
     const elapsed = (timestamp - processedTimestamp) // milliseconds since last processed frame or last state change
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
     let frames = Math.floor(elapsed / FRAME) // the physics runs at 60 frames per second
-    // console.log(frames, 'frames to process')
+    console.log(frames, 'frames to process')
     let lerpPositionTemp = lerpPosition
     let lerpVelocityTemp = lerpVelocity
     let processedTimestampTemp = processedTimestamp
     while (frames--) {
+      if (lerpVelocityTemp.x.eq(0) && lerpVelocityTemp.y.eq(0) && lerpVelocityTemp.z.eq(0)){ // FIXME might need to use almost equal here because a decaying velocity will probabbly never equal exactly zero.
+        processedTimestampTemp += FRAME * frames
+        console.log('skipping physics simulation because velocity is 0')
+        break // if the velocity is 0, we don't need to do anything
+      }
       lerpPositionTemp = lerpPositionTemp.add(lerpVelocityTemp)
       lerpVelocityTemp = lerpVelocityTemp.multiplyScalar(DRAG) // multiply velocity by 0.999 to simulate friction every frame
       processedTimestampTemp += FRAME

@@ -3,7 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber"
 import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
-import Engine, { EngineControls } from '../libraries/Engine.ts'
+import Engine, { EngineControls } from '../hooks/cyberspace/useEngine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'

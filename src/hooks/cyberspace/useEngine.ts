@@ -1,49 +1,64 @@
+import { useRef, useState } from 'react'
 import * as THREE from 'three'
-import { createUnsignedDriftAction, createUnsignedGenesisAction } from './Cyberspace'
-import { RelayObject } from '../types/NostrRelay'
-import { getGenesisAction, getLatestAction, updateGenesisAction, updateLatestAction } from './ActionTracker'
-import { setWorkerCallback, workzone } from './WorkerManager'
-import { deserializeEvent, getNonceBounds, serializeEvent } from './Miner'
-import { publishEvent } from './Nostr'
+import { createUnsignedDriftAction, createUnsignedGenesisAction } from '../../libraries/Cyberspace'
+import { RelayObject } from '../../types/NostrRelay'
+import { getGenesisAction, getLatestAction, updateGenesisAction, updateLatestAction } from '../../libraries/ActionTracker'
+import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
+import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
+import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
 
-// Define the state variables.
-let _pubkey: string | null = null
-let _relays: RelayObject | null = null
-let _throttle: number | null = null
-let _quaternion: THREE.Quaternion | null = null
-let _movement: boolean = false
-let _genesis: boolean = false // do we have a genesis action? If not, this is the first thing that will be created.
-let _previousMovementActionToMine: UnsignedEvent | null = null
-let _movementActionToMine: UnsignedEvent | null = null
-let _movementActionNonce: number = 0 // set to 0 whenever we have a new action to mine.
+export function useEngine(pubkey: string, relays: RelayObject) {
+  const [quaternion, setQuaternionState] = useState<THREE.Quaternion|null>(null)
+  const [throttle, setThrottleState] = useState<number>(0)
+  const [genesisAction, setGenesisActionState] = useState<Event|null>(null)
+  const [latestAction, setLatestActionState] = useState<Event|null>(null)
+  const [chainHeight, setChainHeightState] = useState<number>(0)
+  const [currentMovementActionToMine, setMovementActionToMineState] = useState<UnsignedEvent|null>(null)
+  const [movementActionNonce, setMovementActionNonceState] = useState<number>(0)
 
-// DEBUG ONLY
-let _chainHeight: number = 0
+  const throttleRef = useRef<number | null>(null)
+  const quaternionRef = useRef<THREE.Quaternion | null>(null)
 
-function incrementChainHeight() {
-  _chainHeight += 1
-  console.log('chain height', _chainHeight)
-}
+    // ... other code ...
 
-// Define the setters for the state variables.
-function setPubkey(value: string) {
-  if (_pubkey === value) { // reject if the value is the same. Effectively memoizes the value.
-    return
+  function drift(throttle: number, quaternion: THREE.Quaternion) {
+    if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
+        // Arguments haven't changed, so do nothing
+        return
+      }
+
+    // Update the refs with the new values
+    throttleRef.current = throttle
+    quaternionRef.current = quaternion
+
+      // Check if there is a latestAction
+      const latestAction = getLatestAction()
+      if (!latestAction) {
+        // No latestAction, so create and publish a genesisAction
+        const genesisAction = createUnsignedGenesisAction(pubkey, throttle, quaternion)
+        publishEvent(genesisAction)
+        updateGenesisAction(genesisAction)
+        incrementChainHeight()
+        updateLatestAction(genesisAction)
+      } else {
+        // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
+        const action = createUnsignedDriftAction(pubkey, throttle, quaternion, getGenesisAction()!, latestAction)
+        setMovementActionToMine(action)
+        triggerMovementWorkers()
+      }
+    }
+
+    return {
+      // ... other returned variables and functions ...
+      drift,
+    }
   }
-  _pubkey = value
-  updateMovementAction()
-}
 
-function setRelays(value: RelayObject) {
-  if (_relays === value) {
-    return
-  }
-  _relays = value
-  updateMovementAction()
+  return {setGenesisActionState, setLatestActionState, drift, stopDrift}
 }
 
 function setThrottle(value: number) {

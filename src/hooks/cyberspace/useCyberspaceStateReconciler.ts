@@ -2,10 +2,9 @@ import { useContext, useEffect, useState, useReducer } from "react"
 import { Decimal } from 'decimal.js'
 import * as THREE from "three"
 import { Event, Filter } from "nostr-tools"
-import { getRelayList, getTagValue, pool } from "../../libraries/Nostr"
+import { getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
-import { RelayList } from "../../types/NostrRelay"
 import { extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { MillisecondsTimestamp } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
@@ -24,7 +23,7 @@ type CyberspaceStateReconciler = {
 }
 
 export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
-  const {identity, relays} = useContext<IdentityContextType>(IdentityContext)
+  const {identity} = useContext<IdentityContextType>(IdentityContext)
   const [actions, saveAction] = useReducer(actionsReducer, []) // this is a dump of all our actions; they may come from the relay pool unordered but the reducer will sort them by timestamp AND purge old actions if a new action chain begins (new genesis event.)
   const [validChain, setValidChain] = useState<boolean>(false) // this will hopefully change from false to true when all actions are sequential (none missing), or, when the whole chain is loaded fully
   const [loadedWholeChain, setLoadedWholeChain] = useState<boolean>(false) // this is set to true when we get EOSE from the relay pool
@@ -38,7 +37,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
   // This will run whenever identity.pubkey changes to clear our actions and start over.
   useEffect(() => {
-    console.warn('RESET RECONCILER')
+    console.warn('New identity - RESET RECONCILER')
     saveAction({type: 'reset'})
     setValidChain(false)
     setLoadedWholeChain(false)
@@ -53,7 +52,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     // get actions from your relays
     sub.on('event', (event) => {
       // save every action
-      // console.log('new event', event.created_at)
+      // console.log('new event', event)
       saveAction({type: 'add', payload: event})
       // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.
     })
@@ -107,6 +106,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setRotation(new THREE.Quaternion(0,0,0,1))
       setSimulationHeight(Date.now())
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validChain])
 
   useEffect(() => {
@@ -119,7 +119,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       const latestAction = actions[actions.length - 1]
       setActionChainState({ status: 'valid', genesisAction, latestAction })
     }
-  }, [loadedWholeChain, validChain])
+  }, [loadedWholeChain, validChain, actions])
 
   return {actions, position, velocity, rotation, simulationHeight, actionChainState}
 

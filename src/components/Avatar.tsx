@@ -1,9 +1,9 @@
 import { useContext, useEffect, useState } from 'react'
 import { useFrame, useThree } from "@react-three/fiber"
-import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
+import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
-import Engine, { EngineControls } from '../hooks/cyberspace/useEngine.ts'
+import { useEngine } from '../hooks/cyberspace/useEngine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
@@ -25,32 +25,23 @@ export const Avatar = () => {
   const [processedTimestamp, setProcessedTimestamp] = useState<number>(Date.now())
   const [throttle, setThrottle] = useState(1)
   const {position, velocity, rotation, simulationHeight, actionChainState} = useCyberspaceStateReconciler()
-  const [engineControls, setEngineControls] = useState<EngineControls|null>(null)
-  const [engineReady, setEngineReady] = useState(false)
+  const { setGenesisAction, setLatestAction, drift, stopDrift } = useEngine(identity.pubkey, relays)
+  const [engineReady, setEngineReady] = useState<boolean>(false)
 
-  // handle camera
-  // const { camera } = useThree()
-  // camera.far = DOWNSCALED_CYBERSPACE_AXIS * 2
+  const { camera } = useThree()
 
-  // initialize Engine
+  // update Engine with required state and/or let this component know we can start sending action requests to the engine.
   useEffect(() => {
-    if (!identity.pubkey || !relays) return
-    setEngineControls(Engine(identity.pubkey, relays))
-  }, [identity.pubkey, relays])
-  
-  // update Engine with required state and/or activate it
-  useEffect(() => {
-    if (!engineControls) return
     if (actionChainState.status === 'valid') {
       // update Engine with valid genesis and latest action
-      engineControls.setGenesisAction(actionChainState.genesisAction)
-      engineControls.setLatestAction(actionChainState.latestAction)
+      setGenesisAction(actionChainState.genesisAction)
+      setLatestAction(actionChainState.latestAction)
       setEngineReady(true)
     } else if (actionChainState.status === 'invalid') {
       // if the chain is invalid, a new genesis action is required and the engine will make one if it is activated without one.
       setEngineReady(true)
     }
-  }, [engineControls])
+  }, [actionChainState, setGenesisAction, setLatestAction])
 
   // when the position, velocity, or rotation changes, use this as the basis for a newly calculated LERP position/velocity/rotation
   useEffect(() => {
@@ -71,31 +62,26 @@ export const Avatar = () => {
     if (elapsed < FRAME) return // the simulation is already up to date, so don't do anything
     let frames = Math.floor(elapsed / FRAME) // the physics runs at 60 frames per second
     // console.log(frames, 'frames to process')
+    let lerpPositionTemp = lerpPosition
+    let lerpVelocityTemp = lerpVelocity
+    let processedTimestampTemp = processedTimestamp
     while (frames--) {
-      setLerpPosition(lerpPosition.add(lerpVelocity))
-      setLerpVelocity(lerpVelocity.multiplyScalar(DRAG)) // multiply velocity by 0.999 to simulate friction every frame
-      setProcessedTimestamp(processedTimestamp + FRAME)
+      lerpPositionTemp = lerpPositionTemp.add(lerpVelocityTemp)
+      lerpVelocityTemp = lerpVelocityTemp.multiplyScalar(DRAG) // multiply velocity by 0.999 to simulate friction every frame
+      processedTimestampTemp += FRAME
     }
+    // save the new state (we can't do this mid-loop because the value won't update in useFrame.)
+    setLerpPosition(lerpPositionTemp)
+    setLerpVelocity(lerpVelocityTemp)
+    setProcessedTimestamp(processedTimestampTemp)
   })
 
   // when the lerp position changes, update the camera's position
-  // useEffect(() => {
-  //   camera.position.copy(lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
-  //   camera.quaternion.copy(currentRotation)
-  //   camera.updateProjectionMatrix()
-  // }, [camera, lerpPosition, currentRotation])
-
-  const driftProxy = (throttle: number, quaternion: THREE.Quaternion) => {
-    console.log('drift proxy', engineReady)
-    if (!engineControls) return
-    if (!engineReady) return
-    engineControls.drift(throttle, quaternion)
-  }
-  const stopDriftProxy = () => {
-    if (!engineControls) return
-    if (!engineReady) return
-    engineControls.stopDrift()
-  }
+  useEffect(() => {
+    camera.position.copy(lerpPosition.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
+    camera.quaternion.copy(currentRotation)
+    camera.updateProjectionMatrix()
+  }, [camera, lerpPosition, currentRotation])
 
   // set up controls for avatar
   useEffect(() => {
@@ -105,19 +91,19 @@ export const Avatar = () => {
       if (e.code === "KeyW" || e.key === "ArrowUp") {
         // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
         console.log('drift')
-        driftProxy(throttle, currentRotation)
+        driftWrapper(throttle, currentRotation)
       }
     }
     const handleReverse = (e: KeyboardEvent) => {
       if (e.code === "KeyS" || e.key === "ArrowDown") {
         // mine drift events in reverse
         console.log('reverse drift')
-        driftProxy(throttle, currentRotation.clone().invert())
+        driftWrapper(throttle, currentRotation.clone().invert())
       }
     }
     const handleInactive = () => {
       console.log('stop drift')
-      stopDriftProxy()
+      stopDriftWrapper()
     }
     window.addEventListener("keydown", handleForward)
     window.addEventListener("keydown", handleReverse)
@@ -147,6 +133,17 @@ export const Avatar = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // functions
+  const driftWrapper = (throttle: number, quaternion: THREE.Quaternion) => {
+    console.log('drift proxy', engineReady)
+    if (!engineReady) return
+    drift(throttle, quaternion)
+  }
+  const stopDriftWrapper = () => {
+    if (!engineReady) return
+    stopDrift()
+  }
 
   return (
     null

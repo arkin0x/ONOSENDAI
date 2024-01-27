@@ -41,6 +41,7 @@ function initiateMining(data) {
     nonceStartValue,
     nonceEndValue,
     targetPOW,
+    chainHeight,
   } = data
 
   currentNonce = nonceStartValue
@@ -57,7 +58,7 @@ function initiateMining(data) {
       let POW = countLeadingZeroesBin(digest)
 
       if (POW === targetPOW) {
-        postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, currentNonce, POW })
+        postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, currentNonce, POW, chainHeight })
         active = false
         return
       }

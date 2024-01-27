@@ -129,7 +129,7 @@ export const getMyProfile = async (pubkey: string): Promise<IdentityType> => {
 
 export const publishEvent = async (event: UnsignedEvent, relays: RelayObject = defaultRelays): Promise<Event<number>> => {
   const signedEvent = await window.nostr.signEvent(event)
-  // const relayList: RelayList = getRelayList(relays, ['read'])
-  pool.publish(['wss://cyberspace.nostr1.com'], signedEvent)
+  const relayList: RelayList = getRelayList(relays, ['read'])
+  pool.publish(relayList, signedEvent)
   return signedEvent
 }

@@ -6,12 +6,10 @@ import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
+import { updateHashpowerAllocation } from '../../libraries/HashpowerManager'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
-
-// DEBUG RELAY ONLY
-const DEBUG_RELAY = {'wss://cyberspace.nostr1.com': {read: true, write: true}}
 
 type EngineControls = {
   setGenesisAction: (genesis: Event) => void
@@ -22,7 +20,6 @@ type EngineControls = {
 
 export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   // FIXME logging relays so we don't get a warning
-  console.warn(relays)
   // const [genesisAction, setGenesisAction] = useState<Event|null>(null)
   // const [latestAction, setLatestAction] = useState<Event|null>(null)
   const genesisActionRef = useRef<Event|null>(null)
@@ -34,6 +31,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   const chainHeight = useRef<number>(0)
 
     useEffect(() => {
+      console.log('Engine: useEffect', movementWorkerMessage)
       setWorkerCallback('movement', movementWorkerMessage)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     },[])
@@ -64,7 +62,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     if (!latestActionRef.current) {
       // No latestAction, so create and publish a genesisAction
       const genesisAction = createUnsignedGenesisAction(pubkey)
-      const genesisActionPublished = await publishEvent(genesisAction, DEBUG_RELAY) // FIXME we would normally pass in `relays` here
+      const genesisActionPublished = await publishEvent(genesisAction, relays) // FIXME we would normally pass in `relays` here
       // TODO might need to verify the event was published successfully
       setGenesisAction(genesisActionPublished)
       setLatestAction(genesisActionPublished)
@@ -120,7 +118,9 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   const movementWorkerMessage = (msg: MessageEvent) => {
     // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
-    if (msg.data.status === 'pow-target-found' && msg.data.chainHeight === chainHeight) {
+    console.log('Engine: movementWorkerMessage: ',msg)
+    if (msg.data.status === 'pow-target-found' && msg.data.chainHeight.current === chainHeight.current) {
+      console.log('Engine: movementWorkerMessage: pow-target-found')
       chainHeight.current += 1 // now any other mined events will be ignored because their chainHeight is lower; now we won't fork our chain.
       stopMovementWorkers()
       const actionBinary = msg.data.action
@@ -134,7 +134,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
-    const publishedAction = await publishEvent(action, DEBUG_RELAY) // FIXME we would normally pass in `relays` here
+    const publishedAction = await publishEvent(action, relays) // FIXME we would normally pass in `relays` here
     setLatestAction(publishedAction)
   }
 

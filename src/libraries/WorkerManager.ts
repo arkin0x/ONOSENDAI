@@ -3,11 +3,14 @@ import ActionWorker from '../workers/Miner.worker?worker'
 import MovementWorker from '../workers/Miner.worker?worker'
 import { HashpowerAllocation, HashpowerAllocationTarget } from './HashpowerManager'
 
-// This defines the worker types
+export type HashpowerAllocationTarget = 'observation' | 'movement' | 'action'
+
+export type HashpowerAllocation = {
+  [key in HashpowerAllocationTarget]: number
+}
+
 type WorkerTypes = {
-  'observation': typeof ObservationWorker
-  'movement': typeof MovementWorker
-  'action': typeof ActionWorker
+  [key in HashpowerAllocationTarget]: new () => Worker
 }
 
 const workerTypes: WorkerTypes = {
@@ -17,9 +20,7 @@ const workerTypes: WorkerTypes = {
 }
 
 type Workzone = {
-  'observation': Worker[]
-  'movement': Worker[]
-  'action': Worker[]
+  [key in HashpowerAllocationTarget]: Worker[]
 }
 
 // This is where the spawned workers live
@@ -30,9 +31,7 @@ export const workzone: Workzone = {
 }
 
 type WorkerCallbacks = {
-  'observation': ((event: MessageEvent) => void) | (() => void)
-  'movement': ((event: MessageEvent) => void) | (() => void)
-  'action': ((event: MessageEvent) => void) | (() => void)
+  [key in HashpowerAllocationTarget]: (event: MessageEvent) => void
 }
 
 const workerCallbacks: WorkerCallbacks = {
@@ -40,6 +39,13 @@ const workerCallbacks: WorkerCallbacks = {
   'movement': () => {},
   'action': () => {},
 }
+
+const hashpowerAllocation: HashpowerAllocation = {
+  'observation': 4,
+  'movement': 5,
+  'action': 1,
+}
+
 
 // Dispose and Spawn workers according to the hashpower allocation
 export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
@@ -79,6 +85,46 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
 // use this to set what happens when a movement worker sends a message
 export function setWorkerCallback(target: HashpowerAllocationTarget, callback: (event: MessageEvent) => void) {
   workerCallbacks[target] = callback
+  adjustLabor(hashpowerAllocation)
+}
+
+export const updateHashpowerAllocation = (newAllocation?: HashpowerAllocation) => {
+
+  // call with no args to return previous 
+  if (!newAllocation) {
+    adjustLabor(hashpowerAllocation)
+    return hashpowerAllocation
+  }
+
+  // ensure that the new allocation is valid
+  // test that the correct keys are being used
+  const validKeys = ['observation', 'movement', 'action']
+  const newAllocationKeys = Object.keys(newAllocation)
+  const keysAreValid = newAllocationKeys.every((key) => validKeys.includes(key))
+  // test that every value is a number
+  const valuesAreValid = Object.values(newAllocation).every((value) => typeof value === 'number' && isNaN(value) === false)
+  if (!keysAreValid || !valuesAreValid) {
+    console.warn('Invalid hashpower allocation key received.')
+    return hashpowerAllocation // just return the previous allocation
+  }
+
+  // validate that the sum of the new allocation is 10
+  const sum = Object.values(newAllocation).reduce((a, b) => a + b, 0)
+  if (sum !== 10) {
+    console.warn('Invalid hashpower allocation sum received.')
+    return hashpowerAllocation // just return the previous allocation
+  }
+
+  // copy new values into hashpowerAllocation
+  Object.keys(newAllocation).forEach((key) => {
+    const target = key as HashpowerAllocationTarget
+    hashpowerAllocation[target] = newAllocation[target] as number
+  })
+
+  // update thermodynamic posture
+  adjustLabor(hashpowerAllocation)
+
+  return hashpowerAllocation
 }
 
 // TODO: setObservationWorkerResponseCallback, setActionWorkerResponseCallback

@@ -58,6 +58,7 @@ function initiateMining(data) {
       let POW = countLeadingZeroesBin(digest)
 
       if (POW === targetPOW) {
+        // console.log('worker',threadID, 'pow',POW)
         postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, currentNonce, POW, chainHeight })
         active = false
         return

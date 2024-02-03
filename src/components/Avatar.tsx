@@ -7,7 +7,6 @@ import { useEngine } from '../hooks/cyberspace/useEngine.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { DecimalVector3 } from '../libraries/DecimalVector3.ts'
-import { updateHashpowerAllocation } from '../libraries/HashpowerManager.ts'
 
 /**
  * Avatar component
@@ -36,7 +35,6 @@ export const Avatar = () => {
 
   // update Engine with required state and/or let this component know we can start sending action requests to the engine.
   useEffect(() => {
-    console.log('actionChainState', actionChainState, engineReadyRef.current)
     if (actionChainState.status === 'valid') {
       // update Engine with valid genesis and latest action
       setGenesisAction(actionChainState.genesisAction)
@@ -133,8 +131,6 @@ export const Avatar = () => {
     window.addEventListener("wheel", handleWheel)
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
-
-    updateHashpowerAllocation()
 
     return () => {
       window.removeEventListener("keydown", handleForward)

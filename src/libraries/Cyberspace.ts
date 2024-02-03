@@ -91,7 +91,6 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
 
     // Convert the binary string to a hexadecimal string
     const hexString = BigInt('0b' + binaryString).toString(16).padStart(64, '0')
-    console.log(hexString)
 
     // Return the hexadecimal string
     return hexString
@@ -293,8 +292,6 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
-  console.log('simulateNextEvent: position', position.x.toFixed(), position.y.toFixed(), position.z.toFixed())
-
   const updatedPosition = position
   let updatedVelocity = velocity
 
@@ -309,23 +306,11 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   // simulate frames
   while (frames--) {
-    if (frames === 1) {
-      // DEBUG
-      console.log('Z Velocity', updatedVelocity.z.toFixed())
-      console.log('Z Position', updatedPosition.z.toFixed())
-      console.log('New Z Position', updatedPosition.z.plus(updatedVelocity.z).toFixed())
-    }
     // update position from velocity
     updatedPosition.add(updatedVelocity)
     // update velocity with drag
     updatedVelocity.multiplyScalar(DRAG)
   }  
-
-  // DEBUG
-  console.log(updatedPosition.x.eq(position.x))
-  console.log(updatedPosition.y.eq(position.y))
-  console.log(updatedPosition.z.eq(position.z))
-
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 

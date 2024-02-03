@@ -6,7 +6,6 @@ import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
-import { updateHashpowerAllocation } from '../../libraries/HashpowerManager'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -31,7 +30,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   const chainHeight = useRef<number>(0)
 
     useEffect(() => {
-      console.log('Engine: useEffect', movementWorkerMessage)
+      // console.log('Engine: useEffect', movementWorkerMessage)
       setWorkerCallback('movement', movementWorkerMessage)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     },[])
@@ -45,7 +44,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       // if nothing else has changed, we don't need to do anything
       if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
         // Arguments haven't changed, so do nothing
-        console.log('Engine:drift: noop (state has not changed)')
+        // console.log('Engine:drift: noop (state has not changed)')
         return
       }
     }
@@ -81,6 +80,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   function stopDrift(): void {
     stopMovementWorkers()
+    allowDriftRef.current = true
   }
 
   function triggerMovementWorkers(action: UnsignedEvent): void {
@@ -96,7 +96,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       worker.postMessage({
         command: 'start',
         data: {
-          thread, // thread number
+          thread: thread || 0, // thread number
           threadCount: workers.length, // total number of threads
           nonceOffset: NONCE_OFFSET, // the range of nonces to check for this thread. Used to automatically self-update to the next nonce range once the current range is finished unless mining is stopped. 
           action: actionBinary,
@@ -124,7 +124,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   const movementWorkerMessage = (msg: MessageEvent) => {
     // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
-    console.log('Engine: movementWorkerMessage: ',msg)
+    // console.log('Engine: movementWorkerMessage: ',msg)
     if (msg.data.status === 'pow-target-found' && msg.data.chainHeight.current === chainHeight.current) {
       console.log('Engine: movementWorkerMessage: pow-target-found')
       chainHeight.current += 1 // now any other mined events will be ignored because their chainHeight is lower; now we won't fork our chain.

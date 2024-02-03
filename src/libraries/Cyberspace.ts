@@ -43,7 +43,7 @@ P may be replaced with a 0 for d-space or a 1 for i-space.
 
 */
 
-export const CENTERCOORD_BINARY = '0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111'
+export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
 // usage: BigInt(CENTERCOORD_BINARY)
 
 export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
@@ -74,9 +74,9 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
     const Y = coords.y
     const Z = coords.z
     // Convert X, Y, and Z to BigInt and then to binary strings
-    const binaryX = BigInt(X.toFixed()).toString(2).padStart(85, '0')
-    const binaryY = BigInt(Y.toFixed()).toString(2).padStart(85, '0')
-    const binaryZ = BigInt(Z.toFixed()).toString(2).padStart(85, '0')
+    const binaryX = X.toBinary().substring(2).padStart(85, '0')
+    const binaryY = Y.toBinary().substring(2).padStart(85, '0')
+    const binaryZ = Z.toBinary().substring(2).padStart(85, '0')
 
     // Initialize an empty string to hold the interleaved bits
     let binaryString = ''
@@ -91,6 +91,7 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
 
     // Convert the binary string to a hexadecimal string
     const hexString = BigInt('0b' + binaryString).toString(16).padStart(64, '0')
+    console.log(hexString)
 
     // Return the hexadecimal string
     return hexString
@@ -292,7 +293,9 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
-  let updatedPosition = position
+  console.log('simulateNextEvent: position', position.toArray())
+
+  const updatedPosition = position
   let updatedVelocity = velocity
 
   // add POW to velocity if the startEvent was a drift action.
@@ -306,15 +309,27 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   // simulate frames
   while (frames--) {
+    if (frames === 1) {
+      // DEBUG
+      console.log('Z Velocity', updatedVelocity.z.toFixed())
+      console.log('Z Position', updatedPosition.z.toFixed())
+      console.log('New Z Position', updatedPosition.z.plus(updatedVelocity.z).toFixed())
+    }
     // update position from velocity
-    updatedPosition = updatedPosition.add(velocity)
+    updatedPosition.add(updatedVelocity)
     // update velocity with drag
-    updatedVelocity = updatedVelocity.multiplyScalar(DRAG)
+    updatedVelocity.multiplyScalar(DRAG)
   }  
+
+  // DEBUG
+  console.log(updatedPosition.x.eq(position.x))
+  console.log(updatedPosition.y.eq(position.y))
+  console.log(updatedPosition.z.eq(position.z))
+
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 
-  const cyberspaceCoord = getCoordinatesObj(position, plane)
+  const cyberspaceCoord = getCoordinatesObj(updatedPosition, plane)
   const hexCoord = encodeCoordinatesToHex(cyberspaceCoord)
 
   const velocityArray = updatedVelocity.toArray()

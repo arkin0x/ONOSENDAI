@@ -2,6 +2,8 @@ import * as THREE from "three"
 import { Decimal } from 'decimal.js'
 import { decimalAlmostEqual } from "./Cyberspace"
 
+Decimal.set({ precision: 100 })
+
 export class DecimalVector3 {
   x: Decimal 
   y: Decimal

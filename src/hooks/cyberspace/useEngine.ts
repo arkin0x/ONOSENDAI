@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { createUnsignedDriftAction, createUnsignedGenesisAction } from '../../libraries/Cyberspace'
+import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLastAction } from '../../libraries/Cyberspace'
 import { RelayObject } from '../../types/NostrRelay'
 import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
@@ -52,11 +52,12 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
     // Update the refs with the new values
     // throttle
-    if (throttle < 1) {
-      stopDrift()
-    }
     throttleRef.current = throttle
     quaternionRef.current = quaternion
+    if (throttle < 1) { // note: negative throttle is not possible. To go in reverse (to slow down) you use the inverted quaternion with positive throttle.
+      stopDrift()
+      return
+    }
 
     // Check if there is a latestAction
     if (!latestActionRef.current) {
@@ -67,9 +68,14 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       setGenesisAction(genesisActionPublished)
       setLatestAction(genesisActionPublished)
     } else if (genesisActionRef.current && latestActionRef.current) {
-      // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
-      const action = createUnsignedDriftAction(pubkey, throttle, quaternion, genesisActionRef.current, latestActionRef.current)
-      triggerMovementWorkers(action)
+      // determine if now is after the latestAction's created_at+ms
+      if (nowIsAfterLastAction(latestActionRef.current)) {
+        // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
+        const action = createUnsignedDriftAction(pubkey, throttle, quaternion, genesisActionRef.current, latestActionRef.current)
+        triggerMovementWorkers(action)
+      } else {
+        console.warn('Engine:drift: latestAction is not old enough to drift from')
+      }
     }
   }
 

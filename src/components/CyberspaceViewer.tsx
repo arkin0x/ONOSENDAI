@@ -7,6 +7,8 @@ import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceS
 import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
+import { createUnsignedGenesisAction, getTime } from '../libraries/Cyberspace'
+import { publishEvent } from '../libraries/Nostr'
 // import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler'
 // import { Avatar } from './Avatar.tsx'
 
@@ -66,17 +68,25 @@ const Tester = () => {
   }
 
   function move(){
-    console.log('MOVE')
-    drift(1, new Quaternion(0,0,0,1))
+    const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
+    console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
+    drift(0, new Quaternion(0,0,0,1))
+  }
+
+  async function restart(){
+    const genesisAction = createUnsignedGenesisAction(identity.pubkey)
+    const genesisActionPublished = await publishEvent(genesisAction, DEBUG_RELAY) // FIXME we would normally pass in `relays` here
+    console.warn('Restarting Action Chain with Genesis Action:', genesisActionPublished)
   }
 
   return (
     <div id="tester" style={{"color": "#777"}}>
-      <div id="actions">
-        <button onClick={move}>Move</button>
-      </div>
       <div id="debug">
         {debugActions()} 
+      </div>
+      <div id="actions" style={{"display": "flex"}}>
+        <button onClick={move}>Move</button>
+        <button onClick={restart}>Restart</button>
       </div>
     </div>
   )

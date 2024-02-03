@@ -208,14 +208,6 @@ export const getTime = (action?: Event): Time => {
   return {created_at, ms_timestamp, ms_only, ms_padded}
 }
 
-export const getMillisecondsTimestamp = (): MillisecondsTimestamp => {
-  return +new Date as MillisecondsTimestamp
-}
-
-export const getSecondsTimestamp = (): SecondsTimestamp => {
-  return Math.floor(getMillisecondsTimestamp() / 1000)
-}
-
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
   return {
@@ -232,6 +224,22 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
       ['A', 'noop']
     ]
   } as UnsignedEvent
+}
+
+export const nowIsAfterLastAction = (latestAction: Event): boolean => {
+  const now = getTime()
+  try {
+    // getMilliseconds is unsafe because it relies on tags that may not exist.
+    // hence the try/catch.
+    const latestActionTimestamp = getMillisecondsTimestampFromAction(latestAction)
+    if (latestActionTimestamp >= now.ms_timestamp) {
+      // not sure how this happens
+      return false
+    }
+    return true
+  } catch (e) {
+    return false
+  }
 }
 
 export const createUnsignedDriftAction = (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): UnsignedEvent => {

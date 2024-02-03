@@ -293,7 +293,7 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
-  console.log('simulateNextEvent: position', position.toArray())
+  console.log('simulateNextEvent: position', position.x.toFixed(), position.y.toFixed(), position.z.toFixed())
 
   const updatedPosition = position
   let updatedVelocity = velocity

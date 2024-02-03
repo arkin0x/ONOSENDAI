@@ -85,6 +85,9 @@ const Tester = () => {
   Decimal.set({ precision: 100 })
   const halfdec = new Decimal("14474011154664524427946373126085988481658748083205070504932198000989141204991")
   const halfbin = new Decimal("0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111")
+  const dA = new DecimalVector3(new Decimal("14474011154664524427946373126085988481658748083205070504932198000989141204991"), new Decimal("14474011154664524427946373126085988481658748083205070504932198000989141204991"), new Decimal("14474011154664524427946373126085988481658748083205070504932198000989141204991"))
+  const dB = new DecimalVector3(4.1234566, 5, 6)
+  const dAB = dA.add(dB)
 
   return (
     <div id="tester" style={{"color": "#777"}}>
@@ -97,8 +100,9 @@ const Tester = () => {
       </div>
       <div id="test_calculations">
         <pre>
-          {BigInt(halfdec.plus(20).toFixed()).toString()}<br/>
-          {halfdec.toBinary()}<br/>
+          {/* {BigInt(halfdec.plus(20).toFixed()).toString()}<br/> */}
+          {/* {halfdec.toBinary()}<br/> */}
+          { dAB.x.toFixed() }
         </pre>
       </div>
     </div>

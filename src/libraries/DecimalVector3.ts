@@ -51,7 +51,7 @@ export class DecimalVector3 {
     // calculate result * inverse quat
     this.x = ix.times(qw).plus(iw.times(qx.neg())).plus(iy.times(qz.neg())).minus(iz.times(qy.neg()))
     this.y = iy.times(qw).plus(iw.times(qy.neg())).plus(iz.times(qx.neg())).minus(ix.times(qz.neg()))
-    this.x = iz.times(qw).plus(iw.times(qz.neg())).plus(ix.times(qy.neg())).minus(iy.times(qx.neg()))
+    this.z = iz.times(qw).plus(iw.times(qz.neg())).plus(ix.times(qy.neg())).minus(iy.times(qx.neg()))
 
     // this.x = ix * qw + iw * -qx + iy * -qz - iz * -qy
     // this.y = iy * qw + iw * -qy + iz * -qx - ix * -qz

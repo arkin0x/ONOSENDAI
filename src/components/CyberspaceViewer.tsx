@@ -9,6 +9,7 @@ import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
 import { createUnsignedGenesisAction, getTime } from '../libraries/Cyberspace'
 import { publishEvent } from '../libraries/Nostr'
+import { DecimalVector3 } from '../libraries/DecimalVector3'
 // import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler'
 // import { Avatar } from './Avatar.tsx'
 
@@ -70,7 +71,7 @@ const Tester = () => {
   function move(){
     const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
     console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
-    drift(0, new Quaternion(0,0,0,1))
+    drift(1, new Quaternion(0,0,0,1))
   }
 
   async function restart(){
@@ -78,6 +79,11 @@ const Tester = () => {
     const genesisActionPublished = await publishEvent(genesisAction, DEBUG_RELAY) // FIXME we would normally pass in `relays` here
     console.warn('Restarting Action Chain with Genesis Action:', genesisActionPublished)
   }
+
+  // DEBUG
+  const bodyVelocity = new DecimalVector3(1,0,0)
+  const addedVelocity = bodyVelocity.applyQuaternion(new Quaternion(0,0,0,1))
+  const updatedVelocity = (new DecimalVector3(0,0,0)).add(addedVelocity)
 
   return (
     <div id="tester" style={{"color": "#777"}}>
@@ -87,6 +93,11 @@ const Tester = () => {
       <div id="actions" style={{"display": "flex"}}>
         <button onClick={move}>Move</button>
         <button onClick={restart}>Restart</button>
+      </div>
+      <div id="test_calculations">
+        <pre>
+          {updatedVelocity.x.toString()} {updatedVelocity.y.toString()} {updatedVelocity.z.toString()}
+        </pre>
       </div>
     </div>
   )

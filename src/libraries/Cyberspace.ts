@@ -290,7 +290,7 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
   // calculate simulation from startEvent to toTime
   let frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
 
-  const { position, plane, velocity, rotation, time } = extractActionState(startEvent)
+  const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
   let updatedPosition = position
   let updatedVelocity = velocity
@@ -330,7 +330,7 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
       ['C', hexCoord],
       ['velocity', ...velocityArray],
       // ['quaternion', ...rotationArray], // this will be set by the UI
-      ['ms', time.ms_padded],
+      ['ms', toTime.ms_padded],
       ['version', '1'],
     ]
   }

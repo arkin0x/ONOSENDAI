@@ -1,0 +1,20 @@
+// Telemetry
+
+.event-action {
+  position: relative;
+  &.genesis {
+    &::after {
+      border: 1px solid yellow;
+      border-radius: 1rem;
+      color: yellow;
+      content: "Genesis";
+      padding: 0.5rem;
+      position: absolute;
+      text-align: center;
+      top: 0;
+      right: 0;
+      width: 100px;
+      height: 1rem;
+    }
+  }
+}

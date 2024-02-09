@@ -70,9 +70,9 @@ export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): Cyber
 }
 
 export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
-    const X = coords.x
-    const Y = coords.y
-    const Z = coords.z
+    const X = coords.x.floor()
+    const Y = coords.y.floor()
+    const Z = coords.z.floor()
     // Convert X, Y, and Z to BigInt and then to binary strings
     const binaryX = X.toBinary().substring(2).padStart(85, '0')
     const binaryY = Y.toBinary().substring(2).padStart(85, '0')

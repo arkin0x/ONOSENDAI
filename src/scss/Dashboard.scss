@@ -147,7 +147,6 @@
     .tag-value {
       margin-left: 0.5rem;
       white-space: nowrap;
-      max-width: 8rem;
       vertical-align: text-top;
       // start tag on a new line
       // display: block;
@@ -156,6 +155,7 @@
         display: inline-block;
         overflow: hidden;
         text-overflow: ellipsis;
+        max-width: 16rem;
       }
     }
     .flexcol {

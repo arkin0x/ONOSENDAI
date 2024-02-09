@@ -7,6 +7,7 @@ import { Quaternion } from "three"
 export type CyberspaceTelemetry = {
   telemetryState: CyberspaceStateReconciler,
   stateIndex: number,
+  stateLength: number,
   changeIndex: (index: number) => void,
 }
 
@@ -29,6 +30,12 @@ export const useTelemetry = (): CyberspaceTelemetry => {
       setInDefaultState(false)
       return [action]
     } else {
+      // const lastState = state[state.length-1]
+      // const lastStateAction = lastState.actions[lastState.actions.length-1]
+      // const lastAction = action.actions[action.actions.length-1]
+      // if (lastStateAction === lastAction) { // don't save states where there are no new actions.
+      //   return state
+      // }
       return [...state, action]
     }
   },[defaultState])
@@ -43,7 +50,7 @@ export const useTelemetry = (): CyberspaceTelemetry => {
   useEffect(() => {
     if (!actions.length) return // don't save telemetry states where we have no actions, or when we don't have a new action.
     saveTelemetryState({actions, position, velocity, rotation, simulationHeight, actionChainState})
-  }, [actions])
+  }, [actions, actionChainState])
 
   const changeIndex = useCallback((index: number) => {
     if (index < 0) {
@@ -58,6 +65,7 @@ export const useTelemetry = (): CyberspaceTelemetry => {
   return { 
     telemetryState: telemetryStates[telemetryStateIndex],
     stateIndex: telemetryStateIndex,
+    stateLength: telemetryStates.length,
     changeIndex,
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLastAction } from '../../libraries/Cyberspace'
 import { RelayObject } from '../../types/NostrRelay'
@@ -15,14 +15,15 @@ type EngineControls = {
   setLatestAction: (latest: Event) => void
   drift: (throttle: number, quaternion: THREE.Quaternion) => void
   stopDrift: () => void
+  allowDriftRef: boolean
 }
 
 export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   // FIXME logging relays so we don't get a warning
   // const [genesisAction, setGenesisAction] = useState<Event|null>(null)
   // const [latestAction, setLatestAction] = useState<Event|null>(null)
-  const genesisActionRef = useRef<Event|null>(null)
-  const latestActionRef = useRef<Event|null>(null)
+  const [genesis, setGenesis] = useState<Event|null>(null)
+  const [latest, setLatest] = useState<Event|null>(null)
   const allowDriftRef = useRef<boolean>(false)
   // const [chainHeight, setChainHeight] = useState<number>(0) // I don't know if we need this
   const throttleRef = useRef<number | null>(null)
@@ -59,18 +60,18 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     }
 
     // Check if there is a latestAction
-    if (!latestActionRef.current) {
+    if (!latest) {
       // No latestAction, so create and publish a genesisAction
       const genesisAction = createUnsignedGenesisAction(pubkey)
       const genesisActionPublished = await publishEvent(genesisAction, relays) // FIXME we would normally pass in `relays` here
       // TODO might need to verify the event was published successfully
       setGenesisAction(genesisActionPublished)
       setLatestAction(genesisActionPublished)
-    } else if (genesisActionRef.current && latestActionRef.current) {
+    } else if (genesis && latest) {
       // determine if now is after the latestAction's created_at+ms
-      if (nowIsAfterLastAction(latestActionRef.current)) {
+      if (nowIsAfterLastAction(latest)) {
         // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
-        const action = createUnsignedDriftAction(pubkey, throttle, quaternion, genesisActionRef.current, latestActionRef.current)
+        const action = createUnsignedDriftAction(pubkey, throttle, quaternion, genesis, latest)
         triggerMovementWorkers(action)
       } else {
         console.warn('Engine:drift: latestAction is not old enough to drift from')
@@ -145,15 +146,15 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function setGenesisAction(genesis: Event) {
-    genesisActionRef.current = genesis
+    setGenesis(genesis)
   }
 
   function setLatestAction(latest: Event) {
     allowDriftRef.current = true // we just mined a new action so we should allow a new drift
-    latestActionRef.current = latest
+    setLatest(latest)
   }
 
-  return {setGenesisAction, setLatestAction, drift, stopDrift}
+  return {setGenesisAction, setLatestAction, drift, stopDrift, allowDriftRef: allowDriftRef.current}
 }
 
 

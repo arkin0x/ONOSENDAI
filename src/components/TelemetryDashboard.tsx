@@ -3,23 +3,25 @@ import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceS
 import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
-import { createUnsignedGenesisAction } from '../libraries/Cyberspace'
+import { createUnsignedGenesisAction, isGenesisAction } from '../libraries/Cyberspace'
 import { publishEvent } from '../libraries/Nostr'
 import { Event } from 'nostr-tools'
 import { useTelemetry } from '../hooks/cyberspace/useTelemetry'
+import { TimestampLive } from './TimestampLive'
+import '../scss/Telemetry.scss'
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {
-  const { telemetryState, stateIndex, changeIndex } = useTelemetry()
+  const { telemetryState, stateIndex, stateLength, changeIndex } = useTelemetry()
 
   const { actions, position, velocity, rotation, simulationHeight, actionChainState } = telemetryState
 
   const { identity } = useContext(IdentityContext)
 
-  const { drift, stopDrift, setGenesisAction, setLatestAction } = useEngine(identity.pubkey, DEBUG_RELAY)
+  const { drift, stopDrift, setGenesisAction, setLatestAction, allowDriftRef } = useEngine(identity.pubkey, DEBUG_RELAY)
 
   const engineReadyRef = useRef(false)
 
@@ -27,7 +29,10 @@ export const TelemetryDashboard = () => {
     if (actionChainState.status === 'valid') {
       setGenesisAction(actionChainState.genesisAction)
       setLatestAction(actionChainState.latestAction)
+      console.log('updating engine events')
       engineReadyRef.current = true
+    } else {
+      engineReadyRef.current = false
     }
   }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction])
 
@@ -44,24 +49,37 @@ export const TelemetryDashboard = () => {
   }
 
   async function restart() {
-    const genesisAction = createUnsignedGenesisAction(identity.pubkey);
-    const genesisActionPublished = await publishEvent(genesisAction, DEBUG_RELAY); // FIXME we would normally pass in `relays` here
-    console.warn('Restarting Action Chain with Genesis Action:', genesisActionPublished);
+    const genesisAction = createUnsignedGenesisAction(identity.pubkey)
+    const genesisActionPublished = await publishEvent(genesisAction, DEBUG_RELAY) // FIXME we would normally pass in `relays` here
+    console.warn('Restarting Action Chain with Genesis Action:', genesisActionPublished)
   }
 
   return (
     <div id="telemetry-dashboard" className="dashboard">
       <div className="panel" id="chain">
-        <h1>Action Chain</h1>
+        <h1>Action Chain States</h1>
+        <p>Each change in the action chain can be stepped through in the order they are received from useCyberspaceStateReconciler.</p>
         <div className="controls">
-          <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button>
-          <button onClick={() => changeIndex(stateIndex + 1)}>Next</button>
-          &nbsp; &mdash; {stateIndex} / {telemetryState.actions.length}
+          { stateIndex > 0 ? <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button> : null }
+          { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateIndex + 1)}>Next</button> : null }
+          &nbsp; &mdash; {stateIndex + 1} / {stateLength}
+          &nbsp; { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
         </div>
         {debugActions()}
+        <TimestampLive/>
       </div>
       <div className="panel" id="actions" style={{ "display": "flex" }}>
-        <button onClick={move}>Move</button>
+        <h1>Controls</h1>
+        <h3>Allow drift: {allowDriftRef ? 'true' : 'false'}</h3>
+        { actionChainState.status === "valid" ? 
+        <>
+          <button onClick={move}>Move</button>
+        </>
+        :
+        <>
+          <div>Engine not ready</div> 
+          <span>actionChainState: {actionChainState.status}</span>
+        </> }
         <button onClick={restart}>Restart</button>
       </div>
       <div id="test_calculations">
@@ -81,8 +99,9 @@ const ActionDOM = ({action}: {action: Event}) => {
   const tags = action.tags.map((tag, index) => {
     return <span key={tag[0] + index} className="tag no-break"><span className="tag-key highlight heavy">{tag[0]}</span> {tag.slice(1).filter(v => v.length > 0).map(str => str.length === 64 && tag[0] !== "C" ? <span className="tag-value heavy" style={{color: actionIDColor(str)}}>{str}</span> : str.length === 64 ? <span className="tag-value">{str}</span> : <span className="tag-value prevent-overflow">{str}</span>)}</span>
   })
+  const isGenesis = isGenesisAction(action)
   return (
-    <div key={action.id} className="event-action" style={{ margin: "1rem", wordWrap: "break-word" }}>
+    <div key={action.id} className={"event-action" + (isGenesis ? ' genesis' : '')} style={{ margin: "1rem", wordWrap: "break-word" }}>
       <span className="heavy">
         {action.created_at}<br />
       </span>

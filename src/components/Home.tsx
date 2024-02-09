@@ -2,16 +2,16 @@ import { SignInButton } from './SignInButton'
 import { SignUpButton } from './SignUpButton'
 import '../scss/Home.scss'
 import logo from '../assets/logo-cropped.png'
-import CyberspaceViewer from './CyberspaceViewer.tsx'
 import { useContext } from 'react'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
+import { Interface } from './Interface.tsx'
 
 export const Home = () => {
   const { isIdentityFresh } = useContext<IdentityContextType>(IdentityContext)
 
   if (isIdentityFresh()) {
-    return <CyberspaceViewer/>
+    return <Interface/>
   } else {
     return (
       <div id="home">

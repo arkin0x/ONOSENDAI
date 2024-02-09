@@ -105,3 +105,70 @@
   height: 4rem;
   border-radius: 2rem;
 }
+
+// ---
+
+@import url('https://fonts.googleapis.com/css2?family=Sono:wght@200;500&display=swap');
+
+.dashboard {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  .panel {
+    color: #ccc;
+    font-family: 'Sono', monospace;
+    font-size: 16px;
+    font-weight: 200;
+    display: flex;
+    flex-direction: column;
+    background-color: #111;
+    border-radius: 2rem;
+    margin: 1rem 0.5rem;
+    padding: 1rem;
+    position: relative;
+    min-width: 30svw;
+    span {
+      display: block;
+    }
+    span > span {
+      display: inline;
+    }
+    .heavy {
+      font-weight: 500;
+    }
+    .highlight {
+      color: yellow;
+    }
+    .flexcol {
+      margin: 0.6rem 0;
+    }
+    label {
+      margin: 0 0 0.6rem 0;
+    }
+    input {
+      font-family: monospace;
+      border: 1px solid transparent;
+      transition: border-color 0.25s;
+      display: block;
+      padding: 0.6em 1.2em;
+      flex-grow: 1;
+    }
+    button {
+      background: #2d1086;
+      border-radius: 0.5rem;
+      border-style: none;
+      color: #ccc;
+      font-family: 'Sono', monospace;
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0.25rem 0.125rem;
+      padding: 0.5rem;
+    }
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-size: 20px;
+    margin: 0 0 0.5rem 0;
+  }
+}

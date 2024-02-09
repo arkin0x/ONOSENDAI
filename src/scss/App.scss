@@ -45,19 +45,3 @@ body {
     height: 100vw;
   }
 }
-
-#actions {
-  background-color: rgba(0, 0, 0, 0.5);
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  padding: 10px;
-  z-index: 1000;
-  button {
-    color: #000;
-    font-size: 30px;
-    cursor: pointer;
-    border-radius: 5px;
-    margin: 10px;
-  }
-}

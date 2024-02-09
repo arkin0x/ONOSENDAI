@@ -17,7 +17,6 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
-      {/* <Tester/> */}
       <Canvas style={style}>
         <ambientLight intensity={2.0} />
         <Cyberspace>

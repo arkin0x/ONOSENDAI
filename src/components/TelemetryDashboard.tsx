@@ -5,13 +5,17 @@ import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
 import { createUnsignedGenesisAction } from '../libraries/Cyberspace'
 import { publishEvent } from '../libraries/Nostr'
+import { Event } from 'nostr-tools'
+import { useTelemetry } from '../hooks/cyberspace/useTelemetry'
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
 
-// LEFTOFF - treat tester as our new avatar class and build it up from the ground up. There is a memory leak in Avatar. see if we can utilize the engine to do the same thing as the avatar class but without modifying the display/camera.
-export const Tester = () => {
-  const { actions, position, velocity, rotation, simulationHeight, actionChainState } = useCyberspaceStateReconciler()
+// this dashboard is to visualize the nostr action chain.
+export const TelemetryDashboard = () => {
+  const { telemetryState, stateIndex, changeIndex } = useTelemetry()
+
+  const { actions, position, velocity, rotation, simulationHeight, actionChainState } = telemetryState
 
   const { identity } = useContext(IdentityContext)
 
@@ -28,21 +32,15 @@ export const Tester = () => {
   }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction])
 
   function debugActions() {
-    return actions.map((action, index) => {
-      return (
-        <div key={index} style={{ margin: "1rem", wordWrap: "break-word" }}>
-          {action.created_at}<br />
-          {action.id}<br />
-          {JSON.stringify(action.tags).replace(',', '\n')}
-        </div>
-      );
+    return actions.map((action) => {
+      return <ActionDOM key={action.id} action={action} />
     });
   }
 
   function move() {
     // const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
     // console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
-    drift(5, new Quaternion(0, 0, 0, 1));
+    drift(5, new Quaternion(0, 0, 0, 1))
   }
 
   async function restart() {
@@ -52,11 +50,16 @@ export const Tester = () => {
   }
 
   return (
-    <div id="tester" style={{ "color": "#777" }}>
-      <div id="debug">
+    <div id="telemetry-dashboard" className="dashboard">
+      <div className="panel" id="chain">
+        <h1>Action Chain</h1>
+        <div className="controls">
+          <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button>
+          <button onClick={() => changeIndex(stateIndex + 1)}>Next</button>
+        </div>
         {debugActions()}
       </div>
-      <div id="actions" style={{ "display": "flex" }}>
+      <div className="panel" id="actions" style={{ "display": "flex" }}>
         <button onClick={move}>Move</button>
         <button onClick={restart}>Restart</button>
       </div>
@@ -66,5 +69,22 @@ export const Tester = () => {
         </pre>
       </div>
     </div>
+  )
+}
+
+const ActionDOM = ({action}: {action: Event}) => {
+  const tags = action.tags.map((tag) => {
+    return <span key={tag[0]} className="tag"><span className="highlight">{tag[0]}:</span> {tag.slice(1).join(', ')}</span>
+  })
+  return (
+    <div key={action.id} className="event-action" style={{ margin: "1rem", wordWrap: "break-word" }}>
+      <span className="heavy">
+        {action.created_at}<br />
+      </span>
+      <span className="highlight">
+        {action.id}
+      </span>
+      {tags}
+    </div>
   );
-};
+}

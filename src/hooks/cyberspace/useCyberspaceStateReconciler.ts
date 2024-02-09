@@ -13,7 +13,7 @@ import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import { ActionChainState } from "../../types/Cyberspace"
 
-type CyberspaceStateReconciler = {
+export type CyberspaceStateReconciler = {
   actions: Event[]
   position: DecimalVector3
   velocity: DecimalVector3

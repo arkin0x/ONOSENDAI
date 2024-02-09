@@ -34,3 +34,16 @@
     }
   }
 }
+
+.button-glow {
+  // radiating purple glow around button
+  animation: glow 1s infinite normal;
+  @keyframes glow {
+    0% {
+      box-shadow: 0 0 0px 0px #5922fd;
+    }
+    100% {
+      box-shadow: 0 0 10px 10px rgba(255, 0, 255, 0);
+    }
+  }
+}

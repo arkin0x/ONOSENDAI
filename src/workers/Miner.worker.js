@@ -73,10 +73,11 @@ function initiateMining(data) {
       return
 
     } else if (!active) {
-      // console.log('worker',threadID,'stopped')
+      console.log('worker',threadID,'stopped')
     }
 
     if (currentNonce > nonceEndValue) {
+      console.log('worker',threadID,'finished')
       // figure out what the next nonce range will be for this worker based on our threadCount; use NONCE_OFFSET to change our starting point
       data.nonceStartValue += threadCountNum * NONCE_OFFSET
       data.nonceEndValue += data.nonceStartValue + NONCE_OFFSET

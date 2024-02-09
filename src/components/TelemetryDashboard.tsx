@@ -9,6 +9,7 @@ import { useTelemetry } from '../hooks/cyberspace/useTelemetry'
 import { TimestampLive } from './TimestampLive'
 import '../scss/Telemetry.scss'
 import { countLeadingZeroesHex } from '../libraries/Hash'
+import { DraggableCube } from './DraggableCube'
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
@@ -34,7 +35,7 @@ export const TelemetryDashboard = () => {
     } else {
       engineReadyRef.current = false
     }
-  }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction])
+  }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction, stateIndex, stateLength])
 
   function debugActions() {
     const reversedActions = [...actions].reverse()
@@ -65,23 +66,24 @@ export const TelemetryDashboard = () => {
           { stateIndex > 0 ? <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button> : null }
           { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateIndex + 1)}>Next</button> : null }
           &nbsp; &mdash; {stateIndex + 1} / {stateLength}
-          &nbsp; { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
+          &nbsp; { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
         </div>
         {debugActions()}
         <TimestampLive/>
       </div>
       <div className="panel" id="actions" style={{ "display": "flex" }}>
         <h1>Controls</h1>
-        { actionChainState.status === "valid" ? 
+        { actionChainState.status === "valid" && stateIndex === stateLength - 1 ? 
         <>
           <button onClick={move}>Move</button>
         </>
         :
         <>
           <div>Engine not ready</div> 
-          <span>actionChainState: {actionChainState.status}</span>
+          <p>actionChainState: {actionChainState.status}</p>
         </> }
         <button onClick={restart}>Restart</button>
+        <DraggableCube/>
       </div>
       <div id="test_calculations">
         <pre>

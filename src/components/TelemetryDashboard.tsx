@@ -21,7 +21,7 @@ export const TelemetryDashboard = () => {
 
   const { identity } = useContext(IdentityContext)
 
-  const { drift, stopDrift, setGenesisAction, setLatestAction, allowDriftRef } = useEngine(identity.pubkey, DEBUG_RELAY)
+  const { drift, stopDrift, setGenesisAction, setLatestAction } = useEngine(identity.pubkey, DEBUG_RELAY)
 
   const engineReadyRef = useRef(false)
 
@@ -72,7 +72,6 @@ export const TelemetryDashboard = () => {
       </div>
       <div className="panel" id="actions" style={{ "display": "flex" }}>
         <h1>Controls</h1>
-        <h3>Allow drift: {allowDriftRef ? 'true' : 'false'}</h3>
         { actionChainState.status === "valid" ? 
         <>
           <button onClick={move}>Move</button>

@@ -37,6 +37,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     },[])
 
   async function drift(throttle: number, quaternion: THREE.Quaternion): Promise<void> {
+    console.log('drift', allowDriftRef.current, throttle, quaternion.toArray().join(','))
     if (allowDriftRef.current){
       allowDriftRef.current = false
       // proceed with function
@@ -45,7 +46,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       // if nothing else has changed, we don't need to do anything
       if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
         // Arguments haven't changed, so do nothing
-        // console.log('Engine:drift: noop (state has not changed)')
+        console.log('Engine:drift: noop (state has not changed)')
         return
       }
     }

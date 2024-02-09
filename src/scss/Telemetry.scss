@@ -13,8 +13,24 @@
       text-align: center;
       top: 0;
       right: 0;
-      width: 100px;
+      width: 80px;
       height: 1rem;
+    }
+  }
+  &.not-genesis {
+    .pow {
+      border: 1px solid rgb(255, 136, 0);
+      border-radius: 1rem;
+      display: block;
+      color: rgb(255, 136, 0);
+      line-height: 1rem;
+      padding: 0.5rem;
+      position: absolute;
+      text-align: center;
+      top: 0;
+      right: 0;
+      width: 80px;
+      height: 2rem;
     }
   }
 }

@@ -1,5 +1,4 @@
 import { useContext, useEffect, useRef } from 'react'
-import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler'
 import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
@@ -9,6 +8,7 @@ import { Event } from 'nostr-tools'
 import { useTelemetry } from '../hooks/cyberspace/useTelemetry'
 import { TimestampLive } from './TimestampLive'
 import '../scss/Telemetry.scss'
+import { countLeadingZeroesHex } from '../libraries/Hash'
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
@@ -37,7 +37,8 @@ export const TelemetryDashboard = () => {
   }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction])
 
   function debugActions() {
-    return actions.map((action) => {
+    const reversedActions = [...actions].reverse()
+    return reversedActions.map((action) => {
       return <ActionDOM key={action.id} action={action} />
     })
   }
@@ -45,7 +46,8 @@ export const TelemetryDashboard = () => {
   function move() {
     // const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
     // console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
-    drift(5, new Quaternion(0, 0, 0, 1))
+    console.log('move clicked')
+    drift(Math.ceil(Math.random() * 5), new Quaternion(Math.random()/10, 0, 0, 1))
   }
 
   async function restart() {
@@ -100,8 +102,10 @@ const ActionDOM = ({action}: {action: Event}) => {
     return <span key={tag[0] + index} className="tag no-break"><span className="tag-key highlight heavy">{tag[0]}</span> {tag.slice(1).filter(v => v.length > 0).map(str => str.length === 64 && tag[0] !== "C" ? <span className="tag-value heavy" style={{color: actionIDColor(str)}}>{str}</span> : str.length === 64 ? <span className="tag-value">{str}</span> : <span className="tag-value prevent-overflow">{str}</span>)}</span>
   })
   const isGenesis = isGenesisAction(action)
+  const pow = countLeadingZeroesHex(action.id)
+  const styles = { margin: "1rem", wordWrap: "break-word"} as React.CSSProperties
   return (
-    <div key={action.id} className={"event-action" + (isGenesis ? ' genesis' : '')} style={{ margin: "1rem", wordWrap: "break-word" }}>
+    <div key={action.id} className={"event-action" + (isGenesis ? ' genesis' : ' not-genesis')} style={styles}>
       <span className="heavy">
         {action.created_at}<br />
       </span>
@@ -109,6 +113,7 @@ const ActionDOM = ({action}: {action: Event}) => {
         {action.id}
       </span>
       {tags}
+      {!isGenesis ? <span className="pow heavy">{pow} POW</span> : null}
     </div>
   );
 }

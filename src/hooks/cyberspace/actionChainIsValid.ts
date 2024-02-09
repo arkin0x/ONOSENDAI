@@ -39,6 +39,7 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       if (action.tags.find(getTagValue('e',nextAction.id))) {
         return true
       }
+      console.warn('invalid hash chain', action.id, nextAction.id)
       return false
     }))
 
@@ -48,6 +49,12 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
     const latest_ts = getMillisecondsTimestampFromAction(testLatestActionTimestampState)
     const current_ts = Date.now()
     tests.push(latest_ts <= current_ts)
+
+    // DEBUG
+    if (latest_ts > current_ts) {
+      console.warn('latest action is in the future', latest_ts, current_ts)
+    }
+
 
 
     // TEST 3 - VALID SIGNATURES
@@ -71,8 +78,12 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         } else {
           return false
         }
-      }, getMillisecondsTimestampFromAction(testTimestampSequenceState[0]))
+      }, 0)
       tests.push(!!timestampSequenceIsValid)
+
+      if (!timestampSequenceIsValid) {
+        console.warn('invalid timestamp sequence', timestampSequenceIsValid)
+      }
 
       // TEST 5 - VALID PLANES
       // check the plane and make sure it is valid
@@ -89,6 +100,10 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         }
       }, startPlane)
       tests.push(!!planeIsValid)
+
+      if (!planeIsValid) {
+        console.warn('invalid plane', planeIsValid)
+      }
 
       // TEST 6 - VALID VELOCITY
       // check the velocity and make sure it is within tolerances

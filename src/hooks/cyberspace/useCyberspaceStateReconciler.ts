@@ -5,7 +5,7 @@ import { Event, Filter } from "nostr-tools"
 import { getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
-import { extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { CYBERSPACE_DOWNSCALE, extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { MillisecondsTimestamp } from "../../types/Cyberspace"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
@@ -52,7 +52,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
     // get actions from your relays
     sub.on('event', (event) => {
       // save every action
-      // console.log('new event', event)
+      console.log('new event')
       saveAction({type: 'add', payload: event})
       // recalculate the chain status. An invalid chain can mean we are missing events or it can mean the chain is actually invalid. We need to wait for EOSE to know for sure.
     })
@@ -71,6 +71,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
   useEffect(() => {
     const chainStatus = validateActionChain(actions)
+    console.log('chainStatus', chainStatus, actions.length)
     setValidChain(chainStatus)
   }, [actions])
 
@@ -83,6 +84,8 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       let driftVelocity = new DecimalVector3(0,0,0)
 
       const { position, velocity, rotation, time } = extractActionState(latest)
+      // LEFTOFF - find out why position doesn't change in the console; does it change here as we mine new events?
+      console.log(new DecimalVector3().fromArray(position.toArray()).divideScalar(CYBERSPACE_DOWNSCALE).toArray())
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {
         // quaternion from the action
@@ -107,7 +110,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       setSimulationHeight(Date.now())
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [validChain])
+  }, [validChain, actions])
 
   useEffect(() => {
     if (!loadedWholeChain) {

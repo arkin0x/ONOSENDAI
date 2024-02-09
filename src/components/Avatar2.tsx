@@ -154,6 +154,7 @@ export const Avatar2 = () => {
     }
     const pos = new DecimalVector3().fromArray(position.toArray())
     camera.position.copy(pos.divideScalar(CYBERSPACE_DOWNSCALE).toVector3())
+    // console.log('camera position:', camera.position.toArray())
     camera.quaternion.copy(currentRotation.current)
     camera.updateProjectionMatrix()
     // camera.position.x = HALF_DOWNSCALED_CYBERSPACE_AXIS
@@ -183,13 +184,14 @@ export const Avatar2 = () => {
   })
 
   return (
-    <group>
-    <ambientLight intensity={2.0} />
-    <mesh ref={boxRef} position={boxPos}>
-      <boxGeometry args={[1,1,1]} />
-      <meshStandardMaterial color="hotpink" />
-    </mesh>
-    </group>
+    // <group>
+    // <ambientLight intensity={2.0} />
+    // <mesh ref={boxRef} position={boxPos}>
+    //   <boxGeometry args={[1,1,1]} />
+    //   <meshStandardMaterial color="hotpink" />
+    // </mesh>
+    // </group>
+    null
   )
  
 }

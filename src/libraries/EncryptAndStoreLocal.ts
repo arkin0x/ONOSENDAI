@@ -2,13 +2,15 @@
 const defaultPassword = 'nostridentitypassword'
 export const localStorageKey = 'storens'
 
-function setPassword() {
-  const newpass = prompt('Secure your new identity with a password:')
+function setPassword(newAccount: boolean) {
+  const promptString = newAccount ? 'Account created! ✨\n\n🔐 Set a password for extra security:' : 
+  'You are signed in with your Nsec! ✨\n\n🔐 Set a password for extra security:'
+  const newpass = prompt(promptString)
   if (newpass === null) return false
   if (newpass === '') {
-    const sure = confirm('Your identity be stored unencrypted. This is less safe. OK? Cancel to enter a password.')
+    const sure = confirm('❗ You didn\'t enter a password so your identity will be stored in your browser unencrypted. This is less safe. OK? \n\n(Press cancel to enter a password.)')
     if (!sure) {
-      return setPassword()
+      return setPassword(newAccount)
     } else {
       return ''
     }
@@ -22,11 +24,11 @@ function recallPassword(reason: 'export' | 'signing'){
   return prompt(`Enter your password to unlock your identity for ${reason}. \n\nLeave blank if you did not encrypt your identity with a password.`)
 }
 
-export async function encryptAndStorePrivateKey(privateKeyHex: string): Promise<boolean>{
+export async function encryptAndStorePrivateKey(privateKeyHex: string, newAccount = true): Promise<boolean>{
     const encoder = new TextEncoder()
     const privateKeyBytes = encoder.encode(privateKeyHex)
 
-    const proceed = setPassword()
+    const proceed = setPassword(newAccount)
 
     if (proceed === false) {
       return false

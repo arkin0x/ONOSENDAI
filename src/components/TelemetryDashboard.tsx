@@ -34,7 +34,7 @@ export const TelemetryDashboard = () => {
   function debugActions() {
     return actions.map((action) => {
       return <ActionDOM key={action.id} action={action} />
-    });
+    })
   }
 
   function move() {
@@ -56,6 +56,7 @@ export const TelemetryDashboard = () => {
         <div className="controls">
           <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button>
           <button onClick={() => changeIndex(stateIndex + 1)}>Next</button>
+          &nbsp; &mdash; {stateIndex} / {telemetryState.actions.length}
         </div>
         {debugActions()}
       </div>
@@ -72,16 +73,20 @@ export const TelemetryDashboard = () => {
   )
 }
 
+function actionIDColor(id: string) {
+  return `#${id.substring(0,6)}`
+}
+
 const ActionDOM = ({action}: {action: Event}) => {
-  const tags = action.tags.map((tag) => {
-    return <span key={tag[0]} className="tag"><span className="highlight">{tag[0]}:</span> {tag.slice(1).join(', ')}</span>
+  const tags = action.tags.map((tag, index) => {
+    return <span key={tag[0] + index} className="tag no-break"><span className="tag-key highlight heavy">{tag[0]}</span> {tag.slice(1).filter(v => v.length > 0).map(str => str.length === 64 && tag[0] !== "C" ? <span className="tag-value heavy" style={{color: actionIDColor(str)}}>{str}</span> : str.length === 64 ? <span className="tag-value">{str}</span> : <span className="tag-value prevent-overflow">{str}</span>)}</span>
   })
   return (
     <div key={action.id} className="event-action" style={{ margin: "1rem", wordWrap: "break-word" }}>
       <span className="heavy">
         {action.created_at}<br />
       </span>
-      <span className="highlight">
+      <span className="heavy" style={{ color: actionIDColor(action.id)}}>
         {action.id}
       </span>
       {tags}

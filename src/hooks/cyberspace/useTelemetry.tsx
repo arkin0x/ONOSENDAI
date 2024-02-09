@@ -41,8 +41,9 @@ export const useTelemetry = (): CyberspaceTelemetry => {
    * When any variable from useCyberspaceStateReconciler changes, save the state.
    */
   useEffect(() => {
+    if (!actions.length) return // don't save telemetry states where we have no actions, or when we don't have a new action.
     saveTelemetryState({actions, position, velocity, rotation, simulationHeight, actionChainState})
-  }, [actions, position, velocity, rotation, simulationHeight, actionChainState])
+  }, [actions])
 
   const changeIndex = useCallback((index: number) => {
     if (index < 0) {

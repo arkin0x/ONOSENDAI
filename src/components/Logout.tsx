@@ -6,7 +6,7 @@ import { Spinner } from './Spinner'
 import { localStorageKey } from '../libraries/EncryptAndStoreLocal'
 
 export const Logout = () => {
-  const {identity, setIdentity, setRelays, setContacts} = useContext<IdentityContextType>(IdentityContext)
+  const {identity, setIdentity, setRelays} = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export const Logout = () => {
       window.location.href='/'
     }
     wipe()
-  }, [navigate, identity, setIdentity, setRelays, setContacts])
+  }, [navigate, identity, setIdentity, setRelays])
 
   return (
     <div id="login">

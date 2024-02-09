@@ -31,7 +31,7 @@ export const getPublicKey = async (): Promise<string|null> => {
  * Try/catch wrapper for window.nostr.signEvent
  * nostr.signEvent can error if the user rejects the signature request or if no key has been set up yet.
  */
-export const signEvent = async (event: UnsignedEvent | SignableDraftPlace): Promise<Event|null> => {
+export const signEvent = async (event: UnsignedEvent): Promise<Event|null> => {
   let signed: Event 
   try {
     signed = await window.nostr.signEvent(event)

@@ -128,7 +128,7 @@
     margin: 1rem 0.5rem;
     padding: 1rem;
     position: relative;
-    min-width: 30svw;
+    min-width: 20svw;
     span {
       display: block;
     }
@@ -140,6 +140,23 @@
     }
     .highlight {
       color: yellow;
+    }
+    .no-break {
+      // white-space: nowrap;
+    }
+    .tag-value {
+      margin-left: 0.5rem;
+      white-space: nowrap;
+      max-width: 8rem;
+      vertical-align: text-top;
+      // start tag on a new line
+      // display: block;
+      // text-align: right;
+      &.prevent-overflow {
+        display: inline-block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
     }
     .flexcol {
       margin: 0.6rem 0;
@@ -160,6 +177,7 @@
       border-radius: 0.5rem;
       border-style: none;
       color: #ccc;
+      cursor: pointer;
       font-family: 'Sono', monospace;
       font-size: 16px;
       font-weight: 500;

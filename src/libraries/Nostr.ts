@@ -1,6 +1,8 @@
-import { SimplePool, Filter, Sub, Event, UnsignedEvent } from "nostr-tools"
+import { SimplePool, Filter, Sub, Event, UnsignedEvent, getEventHash, getSignature } from "nostr-tools"
 import { IdentityType } from "../types/IdentityType"
 import { RelayList, RelayObject, RelayReadWrite, FilterReadWrite } from "../types/NostrRelay"
+import { decryptPrivateKey } from "./EncryptAndStoreLocal"
+import { signEvent } from "./NIP-07"
 
 const readWrite: RelayReadWrite = {read: true, write: true}
 
@@ -128,7 +130,37 @@ export const getMyProfile = async (pubkey: string): Promise<IdentityType> => {
 }
 
 export const publishEvent = async (event: UnsignedEvent, relays: RelayObject = defaultRelays): Promise<Event<number>> => {
-  const signedEvent = await window.nostr.signEvent(event)
+  let signedEvent
+
+  if (localStorage.getItem("storens")){
+    // sign via nostr-tools
+    let sk
+    const tryToSign = async () => {
+      try {
+        sk = await decryptPrivateKey('signing') 
+      } catch (e) {
+        alert("Wrong password! Could not decrypt local signing key. Please try publishing again.")
+      }
+    }
+    await tryToSign()
+    if (!sk) signedEvent = null
+    else {
+      const eventHash = await getEventHash(event)
+      const eventSig = await getSignature(event, sk)
+      signedEvent = event as Event
+      signedEvent.id = eventHash
+      signedEvent.sig = eventSig
+    }
+  } else {
+    signedEvent = await signEvent(event)
+  }
+
+  if (signedEvent === null) {
+    // TODO: notify user
+    console.error("Failed to sign event.")
+    return
+  }
+
   const relayList: RelayList = getRelayList(relays, ['read'])
   pool.publish(relayList, signedEvent)
   return signedEvent

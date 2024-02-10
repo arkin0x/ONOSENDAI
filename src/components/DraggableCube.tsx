@@ -68,7 +68,7 @@ function Scene({setPointer, quaternion, setQuaternion}) {
 export function DraggableCube({quaternion, setQuaternion}: {quaternion: Quaternion, setQuaternion: (q: Quaternion) => void}) {
   const [pointer, setPointer] = useState(false)
   return (
-    <Canvas style={{maxHeight: '300px', cursor: pointer ? 'pointer' : 'default'}}>
+    <Canvas style={{height: '300px', cursor: pointer ? 'pointer' : 'default'}}>
       <ambientLight/>
       <pointLight color={0xffffff} position={[-10, 10, 10]} intensity={100} />
       <Scene setPointer={setPointer} quaternion={quaternion} setQuaternion={setQuaternion} />

@@ -183,6 +183,11 @@
       font-weight: 500;
       margin: 0.25rem 0.125rem;
       padding: 0.5rem;
+      &:disabled {
+        animation: none;
+        background: #111;
+        color: #444;
+      }
     }
   }
   h1, h2, h3, h4, h5, h6 {

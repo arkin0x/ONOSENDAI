@@ -62,14 +62,17 @@ export const TelemetryDashboard = () => {
   return (
     <div id="telemetry-dashboard" className="dashboard">
       <div className="panel" id="chain">
+        <h1 style={{position: 'absolute', top: '0', right: '0', textAlign: 'right', color: '#333', margin: '1rem'}}>Cyberspace State Reconciler Telemetry</h1>
         <h1>Action Chain States</h1>
-        <p>Each change in the action chain can be stepped through in the order they are received from useCyberspaceStateReconciler.</p>
+        <p>Each change in the action chain can be stepped through in the order they are received from useCyberspaceStateReconciler. Note that the events are typically received newest-first, so your genesis action will be missing initially if your chain is of any length.</p>
+        <p>To start an action chain, click "Begin Action Chain" or "Restart Chain"</p>
+        <p>To build on the chain, click "Jump to End" and then "Move".</p>
         <div className="controls">
-          { stateIndex > 0 ? <button className="" onClick={() => changeIndex(0)}>Jump to Start</button> : null }
-          { stateIndex > 0 ? <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button> : null }
+          <button disabled={stateIndex <= 0} className="" onClick={() => changeIndex(0)}>Jump to Start</button>
+          <button disabled={stateIndex <= 0} onClick={() => changeIndex(stateIndex - 1)}>Previous</button>
           &nbsp; {stateIndex + 1} / {stateLength}
-          &nbsp; { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateIndex + 1)}>Next</button> : null }
-          { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
+          &nbsp; <button disabled={stateIndex + 1 >= stateLength} onClick={() => changeIndex(stateIndex + 1)}>Next</button>
+          <button disabled={stateIndex + 1 >= stateLength} className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button>
         </div>
         <TimestampLive/>
         <div id="chain-events">
@@ -86,11 +89,13 @@ export const TelemetryDashboard = () => {
         <>
           <div>Engine not ready. { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }</div> 
           <p>actionChainState: {actionChainState.status}</p>
+        <button onClick={restart}>Begin Action Chain</button>
         </> }
         <br/>
         <h5>Quaternion</h5>
+        <p>Drag to change movement angle.</p>
         <DraggableCube quaternion={quaternion} setQuaternion={setQuaternion}/>
-        <button onClick={restart}>Restart</button>
+        <button onClick={restart}>Restart Chain</button>
       </div>
       <div id="test_calculations">
         <pre>

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
@@ -16,6 +16,8 @@ const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true }
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {
+  const [quaternion, setQuaternion] = useState<Quaternion>(new Quaternion(0,0,0,1))
+
   const { telemetryState, stateIndex, stateLength, changeIndex } = useTelemetry()
 
   const { actions, position, velocity, rotation, simulationHeight, actionChainState } = telemetryState
@@ -48,7 +50,7 @@ export const TelemetryDashboard = () => {
     // const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
     // console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
     console.log('move clicked')
-    drift(Math.ceil(Math.random() * 5), new Quaternion(Math.random()/10, 0, 0, 1))
+    drift(Math.ceil(Math.random() * 5), quaternion)
   }
 
   async function restart() {
@@ -63,13 +65,16 @@ export const TelemetryDashboard = () => {
         <h1>Action Chain States</h1>
         <p>Each change in the action chain can be stepped through in the order they are received from useCyberspaceStateReconciler.</p>
         <div className="controls">
+          { stateIndex > 0 ? <button className="" onClick={() => changeIndex(0)}>Jump to Start</button> : null }
           { stateIndex > 0 ? <button onClick={() => changeIndex(stateIndex - 1)}>Previous</button> : null }
-          { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateIndex + 1)}>Next</button> : null }
-          &nbsp; &mdash; {stateIndex + 1} / {stateLength}
-          &nbsp; { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
+          &nbsp; {stateIndex + 1} / {stateLength}
+          &nbsp; { stateIndex + 1 < stateLength ? <button onClick={() => changeIndex(stateIndex + 1)}>Next</button> : null }
+          { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }
         </div>
-        {debugActions()}
         <TimestampLive/>
+        <div id="chain-events">
+          {debugActions()}
+        </div>
       </div>
       <div className="panel" id="actions" style={{ "display": "flex" }}>
         <h1>Controls</h1>
@@ -79,11 +84,13 @@ export const TelemetryDashboard = () => {
         </>
         :
         <>
-          <div>Engine not ready</div> 
+          <div>Engine not ready. { stateIndex + 1 < stateLength ? <button className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button> : null }</div> 
           <p>actionChainState: {actionChainState.status}</p>
         </> }
+        <br/>
+        <h5>Quaternion</h5>
+        <DraggableCube quaternion={quaternion} setQuaternion={setQuaternion}/>
         <button onClick={restart}>Restart</button>
-        <DraggableCube/>
       </div>
       <div id="test_calculations">
         <pre>

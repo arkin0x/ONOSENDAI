@@ -1,5 +1,13 @@
 // Telemetry
 
+#telemetry-dashboard {
+  max-height: 100svh;
+}
+
+#chain-events {
+  overflow-y: scroll;
+}
+
 .event-action {
   position: relative;
   &.genesis {

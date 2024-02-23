@@ -84,6 +84,13 @@ export class DecimalVector3 {
     return this
   }
 
+  floor () {
+    this.x = this.x.floor()
+    this.y = this.y.floor()
+    this.z = this.z.floor()
+    return this
+  }
+
   almostEqual (v: DecimalVector3): boolean {
     return decimalAlmostEqual(this.x, v.x) && decimalAlmostEqual(this.y, v.y) && decimalAlmostEqual(this.z, v.z)
   }

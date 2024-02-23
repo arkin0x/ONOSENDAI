@@ -1,12 +1,14 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler'
 import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion, Vector2, Vector3 } from 'three'
-import { CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, createUnsignedGenesisAction } from '../libraries/Cyberspace'
+import { CYBERSPACE_DOWNSCALE, DOWNSCALED_CYBERSPACE_AXIS, HALF_DOWNSCALED_CYBERSPACE_AXIS, createUnsignedGenesisAction, extractActionState } from '../libraries/Cyberspace'
 import { publishEvent } from '../libraries/Nostr'
-import { useFrame, useThree } from '@react-three/fiber'
+import { ThreeElements, useFrame, useThree } from '@react-three/fiber'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
+
+const MAX_THROTTLE = 128
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
@@ -118,7 +120,7 @@ export const Avatar2 = () => {
     const handleWheel = (e: WheelEvent) => {
       // e.preventDefault()
       if (e.deltaY > 0) {
-        throttle.current = Math.min(10,throttle.current + 1)
+        throttle.current = Math.min(MAX_THROTTLE,throttle.current + 1)
       } else {
         throttle.current = Math.max(0,throttle.current - 1)
       }
@@ -182,6 +184,35 @@ export const Avatar2 = () => {
     boxRef.current.rotation.x += 0.01
     boxRef.current.rotation.y += 0.01
   })
+
+  const trail = useMemo(() => {
+    //DEBUG
+    // console.log('CURRENT POSITION', position.divideScalar(CYBERSPACE_DOWNSCALE).toVector3().toArray())
+    // create a cone for each drift action event
+
+    return actions.map((action) => {
+
+
+      const actionState = extractActionState(action)
+      console.log('action state',actionState.position.divideScalar(CYBERSPACE_DOWNSCALE).toVector3().toArray())
+      const pos = actionState.position.divideScalar(CYBERSPACE_DOWNSCALE).toVector3()
+      const rot = actionState.rotation.setFromAxisAngle(new Vector3(1, 0, 0), -90 * (Math.PI / 180))
+
+      return (
+        <mesh 
+          key={action.id}
+          position={pos}
+          quaternion={rot}
+        >
+          <coneGeometry args={[1, 4, 16]}/>
+          <meshNormalMaterial />
+        </mesh>
+      )
+
+    })
+  }, [actions])
+
+  return trail
 
   return (
     // <group>

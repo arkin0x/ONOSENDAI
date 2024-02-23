@@ -60,7 +60,7 @@ function Scene({setPointer, quaternion, setQuaternion}) {
       onPointerLeave={() => setPointer(false)}
     >
       <coneGeometry args={[1, 4, 16]}/>
-      <meshNormalMaterial color={'orange'}  />
+      <meshNormalMaterial />
     </mesh>
   );
 }

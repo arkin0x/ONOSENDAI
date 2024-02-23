@@ -12,6 +12,7 @@ export const Logout = () => {
   useEffect(() => {
     const wipe = async () => {
       localStorage.removeItem('identity')
+      localStorage.removeItem('decryptedSecret')
       localStorage.removeItem('relays')
       localStorage.removeItem('contacts')
       localStorage.removeItem('draftPlace')

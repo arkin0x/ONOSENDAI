@@ -3,7 +3,7 @@ import { useEngine } from '../hooks/cyberspace/useEngine'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Quaternion } from 'three'
 import { createUnsignedGenesisAction, isGenesisAction } from '../libraries/Cyberspace'
-import { publishEvent } from '../libraries/Nostr'
+import { getTag, publishEvent } from '../libraries/Nostr'
 import { Event } from 'nostr-tools'
 import { useTelemetry } from '../hooks/cyberspace/useTelemetry'
 import { TimestampLive } from './TimestampLive'
@@ -28,6 +28,8 @@ export const TelemetryDashboard = () => {
 
   const engineReadyRef = useRef(false)
 
+  const [autoNext, setAutoNext] = useState(true)
+
   useEffect(() => {
     if (actionChainState.status === 'valid') {
       setGenesisAction(actionChainState.genesisAction)
@@ -36,6 +38,10 @@ export const TelemetryDashboard = () => {
       engineReadyRef.current = true
     } else {
       engineReadyRef.current = false
+    }
+    if (autoNext && stateIndex < stateLength - 1) {
+      changeIndex(stateLength-1)
+      move()
     }
   }, [actions, position, velocity, rotation, simulationHeight, actionChainState, setGenesisAction, setLatestAction, stateIndex, stateLength])
 
@@ -50,7 +56,13 @@ export const TelemetryDashboard = () => {
     // const { created_at, ms_timestamp, ms_only, ms_padded } = getTime()
     // console.log('MOVE', created_at, ms_timestamp, ms_only, ms_padded)
     console.log('move clicked')
-    drift(Math.ceil(Math.random() * 5), quaternion)
+    if (Math.abs(quaternion.x) > 0.0001) {
+      setQuaternion(new Quaternion(0,0,0,1))
+    } else {
+      setQuaternion(new Quaternion(quaternion.x + Math.random() / 100000, quaternion.y + Math.random() / 10000, quaternion.z + Math.random() / 10000, quaternion.w + Math.random() / 10000))
+    }
+    // drift(Math.ceil(Math.random() * 5), quaternion)
+    drift(14, quaternion)
   }
 
   async function restart() {
@@ -59,6 +71,23 @@ export const TelemetryDashboard = () => {
     console.warn('Restarting Action Chain with Genesis Action:', genesisActionPublished)
   }
 
+  function speedStats() {
+
+    try {
+      const velo = parseInt(actions[actions.length-1].tags.find(getTag('velocity'))?.slice(3)) // velocity
+      const speed = velo * 60
+      const sector = 2**35
+      const sectorSec = sector / speed
+      const sectorMin = sectorSec / 60
+      return [speed, sectorMin]
+    } catch (e) {
+      return [0, 0]
+    }
+  
+  }
+
+  const [speed, sectorMin] = speedStats()
+
   return (
     <div id="telemetry-dashboard" className="dashboard">
       <div className="panel" id="chain">
@@ -66,7 +95,7 @@ export const TelemetryDashboard = () => {
         <h1>Action Chain States</h1>
         <p>Each change in the action chain can be stepped through in the order they are received from useCyberspaceStateReconciler. Note that the events are typically received newest-first, so your genesis action will be missing initially if your chain is of any length.</p>
         <p>To start an action chain, click "Begin Action Chain" or "Restart Chain"</p>
-        <p>To build on the chain, click "Jump to End" and then "Move".</p>
+        <p>To build on the chain, click "Jump to End" and then "Drift".</p>
         <div className="controls">
           <button disabled={stateIndex <= 0} className="" onClick={() => changeIndex(0)}>Jump to Start</button>
           <button disabled={stateIndex <= 0} onClick={() => changeIndex(stateIndex - 1)}>Previous</button>
@@ -74,6 +103,11 @@ export const TelemetryDashboard = () => {
           &nbsp; <button disabled={stateIndex + 1 >= stateLength} onClick={() => changeIndex(stateIndex + 1)}>Next</button>
           <button disabled={stateIndex + 1 >= stateLength} className="button-glow" onClick={() => changeIndex(stateLength-1)}>Jump to End</button>
         </div>
+        <p>
+          <span><input type="checkbox" checked={autoNext} onChange={() => setAutoNext(!autoNext)} /> Auto-Next</span>
+        </p>
+        <p>Speed: {speed} Gibsons/sec</p>
+        <p>Minutes per Sector: {sectorMin.toFixed(2)}</p>
         <TimestampLive/>
         <div id="chain-events">
           {debugActions()}
@@ -83,7 +117,7 @@ export const TelemetryDashboard = () => {
         <h1>Controls</h1>
         { actionChainState.status === "valid" && stateIndex === stateLength - 1 ? 
         <>
-          <button onClick={move}>Move</button>
+          <button onClick={move}>Drift</button>
         </>
         :
         <>
@@ -107,7 +141,7 @@ export const TelemetryDashboard = () => {
 }
 
 function actionIDColor(id: string) {
-  return `#${id.substring(0,6)}`
+  return `#${id.substring(id.length-6)}`
 }
 
 const ActionDOM = ({action}: {action: Event}) => {

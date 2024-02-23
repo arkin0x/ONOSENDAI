@@ -5,6 +5,7 @@ import CyberspaceViewer from "./CyberspaceViewer"
 import { UIContext } from "../providers/UIProvider"
 import '../scss/Dashboard.scss'
 import { useNavigate } from "react-router-dom"
+import { Testing } from "./Testing"
 
 export const Interface = () => {
 
@@ -21,6 +22,8 @@ export const Interface = () => {
         return <CyberspaceViewer/>
       case UIState.telemetry:
         return <TelemetryDashboard/>
+      case UIState.testing:
+        return <Testing/>
       default:
         break
     }
@@ -31,6 +34,7 @@ export const Interface = () => {
       <div id="interface-header">
         <button onClick={() => setUIState(UIState.cyberspace)}>Cyberspace</button>
         <button onClick={() => setUIState(UIState.telemetry)}>Telemetry</button>
+        <button onClick={() => setUIState(UIState.testing)}>Testing</button>
         <button onClick={() => setUIState(UIState.settings)}>Settings</button>
         <button onClick={() => setUIState(UIState.about)}>About</button>
         <button onClick={logOut}>Log Out</button>

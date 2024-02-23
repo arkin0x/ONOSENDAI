@@ -85,7 +85,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
 
       const { position, velocity, rotation, time } = extractActionState(latest)
       // LEFTOFF - find out why position doesn't change in the console; does it change here as we mine new events?
-      console.log(new DecimalVector3().fromArray(position.toArray()).divideScalar(CYBERSPACE_DOWNSCALE).toArray())
+      // console.log('NEW POSITION', new DecimalVector3().fromArray(position.toArray()).divideScalar(CYBERSPACE_DOWNSCALE).toArray())
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {
         // quaternion from the action

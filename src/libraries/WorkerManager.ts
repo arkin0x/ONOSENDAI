@@ -41,9 +41,9 @@ const workerCallbacks: WorkerCallbacks = {
 }
 
 const hashpowerAllocation: HashpowerAllocation = {
-  'observation': 4,
-  'movement': 5,
-  'action': 1,
+  'observation': 0,
+  'movement': 10,
+  'action': 0,
 }
 
 

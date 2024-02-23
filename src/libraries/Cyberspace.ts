@@ -49,7 +49,7 @@ export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111
 export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 
 export const FRAME = 1000 / 60 // each frame is 1/60th of a second
-export const DRAG = 0.999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
+export const DRAG = 0.999999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
 export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {

@@ -134,10 +134,10 @@ export const publishEvent = async (event: UnsignedEvent, relays: RelayObject = d
 
   if (localStorage.getItem("storens")){
     // sign via nostr-tools
-    let sk
+    let sk = localStorage.getItem("decryptedSecret") || false
     const tryToSign = async () => {
       try {
-        sk = await decryptPrivateKey('signing') 
+        if (!sk) sk = await decryptPrivateKey('signing') 
       } catch (e) {
         alert("Wrong password! Could not decrypt local signing key. Please try publishing again.")
       }
@@ -145,6 +145,7 @@ export const publishEvent = async (event: UnsignedEvent, relays: RelayObject = d
     await tryToSign()
     if (!sk) signedEvent = null
     else {
+      localStorage.setItem("decryptedSecret", sk)
       const eventHash = await getEventHash(event)
       const eventSig = await getSignature(event, sk)
       signedEvent = event as Event

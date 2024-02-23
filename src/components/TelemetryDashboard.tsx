@@ -62,7 +62,7 @@ export const TelemetryDashboard = () => {
       setQuaternion(new Quaternion(quaternion.x + Math.random() / 100000, quaternion.y + Math.random() / 10000, quaternion.z + Math.random() / 10000, quaternion.w + Math.random() / 10000))
     }
     // drift(Math.ceil(Math.random() * 5), quaternion)
-    drift(14, quaternion)
+    drift(15, quaternion)
   }
 
   async function restart() {
@@ -76,17 +76,22 @@ export const TelemetryDashboard = () => {
     try {
       const velo = parseInt(actions[actions.length-1].tags.find(getTag('velocity'))?.slice(3)) // velocity
       const speed = velo * 60
-      const sector = 2**35
+      const sector = 2**50
       const sectorSec = sector / speed
       const sectorMin = sectorSec / 60
-      return [speed, sectorMin]
+      const sectorHour = sectorMin / 60
+      const sectorDay = sectorHour / 24
+      const sectorYear = sectorDay / 365
+      return [speed, sectorMin, sectorHour, sectorDay, sectorYear]
     } catch (e) {
-      return [0, 0]
+      return [0, 0, 0, 0, 0]
     }
   
   }
 
-  const [speed, sectorMin] = speedStats()
+  const [speed, sectorMin, sectorHour, sectorDay, sectorYear] = speedStats()
+
+  const avgTime = actions.reduce((acc, action, actionIndex, allActions) => acc + action.created_at - (actionIndex == 0 ? action.created_at : allActions[actionIndex-1].created_at), 0) / (actions.length - 1)
 
   return (
     <div id="telemetry-dashboard" className="dashboard">
@@ -106,8 +111,13 @@ export const TelemetryDashboard = () => {
         <p>
           <span><input type="checkbox" checked={autoNext} onChange={() => setAutoNext(!autoNext)} /> Auto-Next</span>
         </p>
-        <p>Speed: {speed} Gibsons/sec</p>
-        <p>Minutes per Sector: {sectorMin.toFixed(2)}</p>
+        <p>Speed: <strong style={{backgroundColor: '#000', padding: '5px'}}>{speed.toLocaleString('en-US')} Gibsons/sec</strong><br/>
+        Minutes per Sector: {sectorMin.toLocaleString('en-US')}<br/>
+        Hours per Sector: {sectorHour.toLocaleString('en-US')}<br/>
+        Days per Sector: {sectorDay.toFixed(2)}<br/>
+        Years per Sector: {sectorYear.toFixed(2)}<br/>
+        Years to travel the full length of cyberspace: {(sectorYear * (2**35)).toLocaleString('en-US')}</p>
+        <p>Average Time per Action: {avgTime.toFixed(2)}s</p>
         <TimestampLive/>
         <div id="chain-events">
           {debugActions()}

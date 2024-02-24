@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export const TimestampLive = () => {
+export const TimestampLive = ({start}) => {
   const [timestamp, setTimestamp] = useState(Date.now())
 
   useEffect(() => {
@@ -13,5 +13,14 @@ export const TimestampLive = () => {
     return () => cancelAnimationFrame(renderLoop)
   }, [])
 
-  return <div className="heavy" style={{ margin: "1rem"}}>{Math.floor(timestamp/1000)}</div>
+  const now = Math.floor(timestamp/1000)
+
+  const elapsed = now - start
+
+  return (
+    <>
+      <div className="heavy">elapsed: {elapsed}s / {(elapsed / 60).toFixed(0)}m</div>
+      <div className="light">now: {now}</div>
+    </>
+  )
 }

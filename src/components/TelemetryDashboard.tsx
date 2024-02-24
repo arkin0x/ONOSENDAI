@@ -10,9 +10,12 @@ import { TimestampLive } from './TimestampLive'
 import '../scss/Telemetry.scss'
 import { countLeadingZeroesHex } from '../libraries/Hash'
 import { DraggableCube } from './DraggableCube'
+import Decimal from 'decimal.js'
 
 // DEBUG RELAY ONLY
 const DEBUG_RELAY = { 'wss://cyberspace.nostr1.com': { read: true, write: true } }
+
+const DRIFT_SPEED = 12
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {
@@ -62,7 +65,7 @@ export const TelemetryDashboard = () => {
       setQuaternion(new Quaternion(quaternion.x + Math.random() / 100000, quaternion.y + Math.random() / 10000, quaternion.z + Math.random() / 10000, quaternion.w + Math.random() / 10000))
     }
     // drift(Math.ceil(Math.random() * 5), quaternion)
-    drift(15, quaternion)
+    drift(DRIFT_SPEED, quaternion)
   }
 
   async function restart() {
@@ -82,14 +85,15 @@ export const TelemetryDashboard = () => {
       const sectorHour = sectorMin / 60
       const sectorDay = sectorHour / 24
       const sectorYear = sectorDay / 365
-      return [speed, sectorMin, sectorHour, sectorDay, sectorYear]
+      const speedDecimal = new Decimal(speed)
+      const speedMeters = speedDecimal.times(new Decimal("0.0000000000000024829894037310508230452510414210109956911765038967132568359375")).div(1000)
+      return [speed, sectorMin, sectorHour, sectorDay, sectorYear, speedMeters]
     } catch (e) {
-      return [0, 0, 0, 0, 0]
+      return [0, 0, 0, 0, 0, 0]
     }
-  
   }
 
-  const [speed, sectorMin, sectorHour, sectorDay, sectorYear] = speedStats()
+  const [speed, sectorMin, sectorHour, sectorDay, sectorYear, speedMeters] = speedStats()
 
   const avgTime = actions.reduce((acc, action, actionIndex, allActions) => acc + action.created_at - (actionIndex == 0 ? action.created_at : allActions[actionIndex-1].created_at), 0) / (actions.length - 1)
 
@@ -111,14 +115,15 @@ export const TelemetryDashboard = () => {
         <p>
           <span><input type="checkbox" checked={autoNext} onChange={() => setAutoNext(!autoNext)} /> Auto-Next</span>
         </p>
-        <p>Speed: <strong style={{backgroundColor: '#000', padding: '5px'}}>{speed.toLocaleString('en-US')} Gibsons/sec</strong><br/>
+        <p>Speed: <span style={{display: 'inline-block', border: '1px solid white', margin: '5px 0',backgroundColor: '#000', color: '#fff', padding: '5px'}}>{speed.toLocaleString('en-US')} Gibsons/sec</span><br/>
+        Dataspace speed: {speedMeters.toFixed(5)} meters/second<br/>
         Minutes per Sector: {sectorMin.toLocaleString('en-US')}<br/>
         Hours per Sector: {sectorHour.toLocaleString('en-US')}<br/>
         Days per Sector: {sectorDay.toFixed(2)}<br/>
         Years per Sector: {sectorYear.toFixed(2)}<br/>
         Years to travel the full length of cyberspace: {(sectorYear * (2**35)).toLocaleString('en-US')}</p>
         <p>Average Time per Action: {avgTime.toFixed(2)}s</p>
-        <TimestampLive/>
+        <TimestampLive start={actions.length ? actions[0].created_at : 0}/>
         <div id="chain-events">
           {debugActions()}
         </div>

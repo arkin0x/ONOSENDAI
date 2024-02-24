@@ -49,7 +49,7 @@ export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111
 export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 
 export const FRAME = 1000 / 60 // each frame is 1/60th of a second
-export const DRAG = 0.999999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
+export const DRAG = 0.99999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
 export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
@@ -298,7 +298,8 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
   // add POW to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex(startEvent.id)
-    const velocityPOW = Math.pow(2, POW)
+    // const velocityPOW = Math.pow(2, POW) * 6712339022318254
+    const velocityPOW = Math.pow(2, POW) * 10_000_000
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation)
     updatedVelocity = updatedVelocity.add(addedVelocity)

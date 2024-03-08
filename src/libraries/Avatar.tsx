@@ -136,7 +136,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
       // all actions from present back to the genesis event will arrive here
       fullActionHistory.on('event', onReceiveActions)
-      // on historical EOSE, send to web worker for validation
+      // on historical EOSE, now get Genesis Event 
       fullActionHistory.on('eose', getGenesisEvent)
 
       // Clean up any subscriptions or resources in the cleanup function
@@ -175,6 +175,14 @@ export const Avatar = ({pubkey}: AvatarProps) => {
     }
   }, [historyComplete])
 
+  // simulate from latest action to present
+  useEffect(() => {
+    if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
+    if (genesisId){
+      // LEFTOFF
+        // simulateWorker.postMessage(latestAction)
+    }
+  }, [genesisId])
 
   // 8. return a visible avatar for threejs
   return null

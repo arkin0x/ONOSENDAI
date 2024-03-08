@@ -14,6 +14,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@nostr-dev-kit/ndk": "^2.5.0",
     "@react-three/drei": "^9.80.9",
     "@react-three/fiber": "^8.13.7",
     "almost-equal": "^1.1.0",

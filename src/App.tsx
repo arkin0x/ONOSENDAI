@@ -6,22 +6,25 @@ import { Home } from './components/Home.tsx'
 import './scss/App.scss'
 import { UIProvider } from './providers/UIProvider.tsx'
 import { Logout } from './components/Logout.tsx'
+import { NDKProvider } from './providers/NDKProvider.tsx'
 
 function App() {
 
   return (
     <div id="app">
-      <IdentityProvider>
-        <UIProvider>
-          <ModalProvider>
-            <Routes>
-              <Route path="/" element={<Home/>}/>
-              <Route path="/login" element={<Login/>}/>
-              <Route path="/logout" element={<Logout/>}/>
-            </Routes>
-          </ModalProvider>
-        </UIProvider>
-      </IdentityProvider>
+      <NDKProvider>
+        <IdentityProvider>
+          <UIProvider>
+            <ModalProvider>
+              <Routes>
+                <Route path="/" element={<Home/>}/>
+                <Route path="/login" element={<Login/>}/>
+                <Route path="/logout" element={<Logout/>}/>
+              </Routes>
+            </ModalProvider>
+          </UIProvider>
+        </IdentityProvider>
+      </NDKProvider>
     </div>
   )
 }

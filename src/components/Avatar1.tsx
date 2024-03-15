@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { useFrame, useThree } from "@react-three/fiber"
-import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace"
+import { FRAME, DRAG, CYBERSPACE_DOWNSCALE, HALF_DOWNSCALED_CYBERSPACE_AXIS } from "../libraries/Cyberspace.ts"
 import * as THREE from 'three'
 import { useCyberspaceStateReconciler } from '../hooks/cyberspace/useCyberspaceStateReconciler.ts'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'

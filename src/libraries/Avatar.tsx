@@ -13,6 +13,7 @@ type AvatarProps = {
 
 export const Avatar = ({pubkey}: AvatarProps) => {
 
+  // get NDK, the library used to subscribe to relays and fetch events
   const ndk = useContext(NDKContext)
 
   const [actionChain, reduceActions] = useReducer(actionsReducer, [])

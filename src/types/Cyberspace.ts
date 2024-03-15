@@ -1,5 +1,7 @@
 import { Event } from 'nostr-tools'
 import { Decimal } from 'decimal.js'
+import { DecimalVector3 } from '../libraries/DecimalVector3'
+import { Quaternion } from 'three'
 
 export type Plane = "d-space" | "i-space"
  
@@ -33,4 +35,12 @@ export type Time = {
   ms_timestamp: MillisecondsTimestamp
   ms_only: Milliseconds
   ms_padded: MillisecondsPadded 
+}
+
+// Presence is the current state of an Avatar derived from its most recent action chain state.
+export type Presence = {
+  position: DecimalVector3
+  velocity: DecimalVector3
+  quaternion: Quaternion
+  ms_timestamp: MillisecondsTimestamp
 }

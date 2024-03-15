@@ -1,7 +1,6 @@
 import { useRef } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../scss/CyberspaceViewer.scss"
-import { UserAvatar } from './Controls'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,

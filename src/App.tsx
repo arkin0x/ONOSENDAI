@@ -7,6 +7,7 @@ import './scss/App.scss'
 import { UIProvider } from './providers/UIProvider.tsx'
 import { Logout } from './components/Logout.tsx'
 import { NDKProvider } from './providers/NDKProvider.tsx'
+import { AvatarProvider } from './providers/AvatarContext.tsx'
 
 function App() {
 
@@ -14,15 +15,17 @@ function App() {
     <div id="app">
       <NDKProvider>
         <IdentityProvider>
-          <UIProvider>
-            <ModalProvider>
-              <Routes>
-                <Route path="/" element={<Home/>}/>
-                <Route path="/login" element={<Login/>}/>
-                <Route path="/logout" element={<Logout/>}/>
-              </Routes>
-            </ModalProvider>
-          </UIProvider>
+          <AvatarProvider>
+            <UIProvider>
+              <ModalProvider>
+                <Routes>
+                  <Route path="/" element={<Home/>}/>
+                  <Route path="/login" element={<Login/>}/>
+                  <Route path="/logout" element={<Logout/>}/>
+                </Routes>
+              </ModalProvider>
+            </UIProvider>
+          </AvatarProvider>
         </IdentityProvider>
       </NDKProvider>
     </div>

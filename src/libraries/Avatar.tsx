@@ -3,29 +3,25 @@ import { NDKContext } from "../providers/NDKProvider"
 import { Event } from "nostr-tools"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../types/CyberspaceNDK"
 import { NDKFilter } from "@nostr-dev-kit/ndk"
+import { actionChainIsValid } from "../hooks/cyberspace/actionChainIsValid"
+import { ActionReducer } from "../hooks/cyberspace/actionReducerTypes"
+import { actionsReducer } from "../hooks/cyberspace/actionsReducer"
 
 type AvatarProps = {
   pubkey: string
-}
-
-type ActionReducer = {
-  type: 'push' | 'unshift' | 'reset',
-  payload?: Event
 }
 
 export const Avatar = ({pubkey}: AvatarProps) => {
 
   const ndk = useContext(NDKContext)
 
-  const [actionChain, reduceActions] = useReducer((state: Event[], action: ActionReducer): Event[] => {
-    console.log('reducer: event', action.payload || action.type)
-    if (action.type === 'reset') return [] as Event[]
-    if (action.type === 'unshift') return [action.payload, ...state] as Event[]
-    if (action.type === 'push') return [...state, action.payload] as Event[]
-    return state
-  }, [])
+  const [actionChain, reduceActions] = useReducer(actionsReducer, [])
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
+  
+  /**
+   * When historyComplete is true, the existing actionChain is complete from genesis to present and is ready for validation
+   */
   const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
   // initialize avatar
@@ -37,6 +33,13 @@ export const Avatar = ({pubkey}: AvatarProps) => {
     const latestActionFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], authors: [pubkey], limit: 1}
     const latestAction = ndk.subscribe(latestActionFilter, {closeOnEose: false})
       
+    // define functions
+
+    /**
+     * Pass in an event to extract the genesis event ID from the tags
+     * @param latestAction the most recent action for the pubkey
+     * @returns the genesis event ID of the action chain for the most recent event
+     */
     const getGenesisId = (latestAction: Event) => {
       try {
         const g = latestAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1]
@@ -44,9 +47,9 @@ export const Avatar = ({pubkey}: AvatarProps) => {
           // we got a genesis event id
           // is the current genesisId null?
           if (genesisId !== g) {
-            // the genesisId changed. This triggers a re-initialization of the avatar.
+            // the genesisId changed. This triggers a re-initialization of the avatar because genesisId is a dependency of this useEffect.
             setGenesisId(g)
-          } else if (genesisId === g) {
+          } else {
             // the genesisId is the same. noop.
           }
           return g // return the id
@@ -61,6 +64,10 @@ export const Avatar = ({pubkey}: AvatarProps) => {
       }
     }
 
+    /**
+     * callback for when an action is received from NDK
+     * @param latestAction an action received from NDK
+     */
     const onReceiveLatestAction = (latestAction: Event) => {
       // 2. on receive, get genesis id from action
       const action = {
@@ -74,28 +81,6 @@ export const Avatar = ({pubkey}: AvatarProps) => {
     // the latest action and all new actions will arrive here
     latestAction.on('event', onReceiveLatestAction)
 
-    // need to work these in yet --
-    const simulateAction = (latestAction: Action) => {
-      // 6. send latest action to another web worker for simulation
-      // Pseudocode: simulate(latestAction);
-    };
-
-    const simulate = (actionToSimulate: Action) => {
-      // Pseudocode: Implement web worker logic for action simulation
-    };
-
-    const onReceiveSimulationResults = (simulationResults: any) => {
-      // 7. receive results of simulation web worker and convert it for display
-      // Pseudocode: convertSimulationResults(simulationResults);
-    };
-
-    const convertSimulationResults = (simulationResults: any) => {
-      // Pseudocode: Implement logic to convert simulation results for display
-    };
-
-    // Call the necessary functions to initiate the process
-    // Pseudocode: ndk.queryLatestAction(pubkey, onReceiveLatestAction);
-
     // Clean up any subscriptions or resources in the cleanup function
     return () => {
       // Pseudocode: Clean up any subscriptions or resources
@@ -107,11 +92,14 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
     if (genesisId){
-      // 3. query all actions for genesisId
+      // 3. query all actions for genesisId (except genesis event itself because it does not have the 'e' tag referencing the genesis event)
       const fullActionHistoryFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], '#e': [genesisId]}
       const fullActionHistory = ndk.subscribe(fullActionHistoryFilter, {closeOnEose: false})
 
-      // define functions
+      /**
+       * callback for when an action is received from NDK
+       * @param receivedAction an action received from NDK
+       */
       const onReceiveActions = (receivedAction: Event) => {
         // 4. on receive, store each action in some kind of state
         const action = {
@@ -152,26 +140,13 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   // Pseudocode: validateActions(receivedActions);
   useEffect(() => {
     if (historyComplete){
-      const validateActions = () => {
-        // Pseudocode: Implement web worker logic for action validation
-        // validateWorker.postMessage(actionChain)
-        // console.log('validateActions', actionChain)
-        // DEBUG BELOW
-        actionChain.forEach(event => {
-          const e = {
-            id: event.id,
-            // kind: event.kind,
-            // content: event.content,
-            created_at: event.created_at,
-            // pubkey: event.pubkey,
-            // sig: event.sig,
-            tags: event.tags
-          }
-          console.log(e.created_at, e.id)
-        })
-
+      const isValid = actionChainIsValid(actionChain)
+      if (isValid) {
+        console.log('action chain is valid')
+      } else {
+        console.error('action chain is invalid')
+        // TODO: publish a new genesis event.
       }
-      validateActions()
     }
   }, [historyComplete])
 

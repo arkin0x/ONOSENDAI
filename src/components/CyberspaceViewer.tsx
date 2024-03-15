@@ -1,10 +1,12 @@
 // import { useEffect, useRef } from 'react'
-import { useRef } from 'react'
+import { useContext, useRef } from 'react'
 import { Canvas } from "@react-three/fiber"
 // import { Cyberspace } from './ThreeCyberspace'
 import "../scss/CyberspaceViewer.scss"
 // import { Avatar } from './Avatar.tsx'
 import { Avatar } from '../libraries/Avatar.tsx'
+import { IdentityContext } from '../providers/IdentityProvider.tsx'
+import { IdentityContextType } from '../types/IdentityType.tsx'
 // import { Tester } from './Tester'
 
 export type CyberspaceViewerProps = {
@@ -14,12 +16,13 @@ export type CyberspaceViewerProps = {
 const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
 
   const viewerRef = useRef<HTMLDivElement>(null)
+  const {identity} = useContext<IdentityContextType>(IdentityContext)
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
       <Canvas style={style}>
         <ambientLight intensity={2.0} />
-        <Avatar pubkey={'3a0d60ea3c211817f0fcf2b771c935052b82e2acfdfa5661b805cabfd98294bc'}/>
+        <Avatar pubkey={identity.pubkey}/>
       </Canvas>
     </div>
   )

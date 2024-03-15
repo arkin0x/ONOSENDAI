@@ -1,12 +1,12 @@
 import * as THREE from "three"
 import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { DRAG, FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction } from "../../libraries/Cyberspace"
-import { ActionsState } from "./actionReducerTypes"
 import { getTag, getTagValue } from "../../libraries/Nostr"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import Decimal from "decimal.js"
+import { Event } from "nostr-tools"
 
-export const actionChainIsValid = (actions: ActionsState): boolean => {
+export const actionChainIsValid = (actions: Event[]): boolean => {
   // console.log('actionChainIsValid',actions.length)
   const tests = []
 
@@ -111,12 +111,13 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
       const testVelocityState = [...actions]
       // running simulated velocity
       let simulatedVelocity: DecimalVector3 = new DecimalVector3(0, 0, 0)
-      tests.push(testVelocityState.every((action, index) => {
+      const resultVelocity = testVelocityState.every((action, index) => {
         // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
         // this action's velocity should match the velocity simulation
         // get velocity from action and parse values into a DecimalVector3
         const v = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
         if (!v.almostEqual(simulatedVelocity)) {
+          console.log('velocity mismatch at action index', index, v.toArray(), simulatedVelocity.toArray())
           return false
         }
 
@@ -161,7 +162,11 @@ export const actionChainIsValid = (actions: ActionsState): boolean => {
         }
         // done simulating velocity. we'll see if it matches the next action in the next iteration of the loop.
         return true
-      }))
+      })
+      tests.push(resultVelocity)
+      if (!resultVelocity) {
+        console.warn('invalid velocity', resultVelocity)
+      }
     }
   } catch (error) {
     console.error(error)

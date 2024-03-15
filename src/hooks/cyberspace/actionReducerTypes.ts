@@ -1,6 +1,6 @@
 import { Event } from 'nostr-tools'
 export type ActionsState = Event[]
-export type ActionsReducer = {
-  type: 'add' | 'reset'
+export type ActionReducer = {
+  type: 'push' | 'unshift' | 'reset'
   payload?: Event
 }

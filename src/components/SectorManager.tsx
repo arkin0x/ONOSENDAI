@@ -60,9 +60,10 @@ export const SectorManager = () => {
     const handleEvent = (event: Event) => {
       if (event.kind === CyberspaceKinds.Action) {
         // TODO
-        // LEFTOFF: we need a sector state provider + reducer to store objects found in sectors and address them by sector.
+        // we should just get the pubkey and fire it off to useActionChain. Also useActionChain should not be part of the Avatar component; it should run regradless of the Avatar component, but it should STOP running when it's simulated presence isn't in the current sector. 
       } else if( event.kind === CyberspaceKinds.Construct) {
         // TODO
+        // need a context to store constructs by sector
       }
     }
 

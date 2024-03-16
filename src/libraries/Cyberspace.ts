@@ -8,6 +8,8 @@ import { countLeadingZeroesHex } from "./Hash"
 import { DecimalVector3 } from "./DecimalVector3"
 
 export const CYBERSPACE_AXIS = new Decimal(2).pow(85)
+export const CYBERSPACE_SECTOR = new Decimal(2).pow(30)
+export const CYBERSPACE_SECTORS_PER_AXIS = new Decimal(2).pow(55)
 export const CYBERSPACE_DOWNSCALE = new Decimal(2).pow(35) // this is the size of a cyberspace axis reduced by 2**35 so that it fits into a number primitive in JavaScript (< Number.MAX_SAFE_INTEGER)
 export const DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).toNumber()
 export const HALF_DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).div(2).toNumber()
@@ -336,4 +338,16 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
     ]
   }
   return event
+}
+
+export const getSectorFromCoordinate = (coordinate: string): DecimalVector3 => {
+  const coords = decodeHexToCoordinates(coordinate)
+
+  const sectorX = coords.x.div(CYBERSPACE_SECTOR).floor()
+  const sectorY = coords.y.div(CYBERSPACE_SECTOR).floor()
+  const sectorZ = coords.z.div(CYBERSPACE_SECTOR).floor()
+  
+  const sector = new DecimalVector3(sectorX, sectorY, sectorZ)
+
+  return sector
 }

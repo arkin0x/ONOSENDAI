@@ -6,7 +6,7 @@ type AvatarState = {
   [pubkey: string]: Event[]
 }
 
-type AvatarAction =
+export type AvatarAction =
   | { type: 'unshift' | 'push'; pubkey: string; actions: Event[] }
   | { type: 'reset'; pubkey: string }
 
@@ -54,12 +54,10 @@ const avatarReducer = (state: AvatarState, action: AvatarAction): AvatarState =>
 }
 
 export const AvatarContext = createContext<{
-  // state: AvatarState;
-  getAvatar: (pubkey: string) => Event[]
+  state: AvatarState;
   dispatch: React.Dispatch<AvatarAction>
 }>({
-  // state: initialState,
-  getAvatar: () => [],
+  state: initialState,
   dispatch: () => {},
 })
 
@@ -70,12 +68,8 @@ type AvatarProviderProps = {
 export const AvatarProvider = ({ children }: AvatarProviderProps) => {
   const [state, dispatch] = useReducer(avatarReducer, initialState)
 
-  const getAvatar = (pubkey: string) => {
-    return state[pubkey]
-  }
-
   return (
-    <AvatarContext.Provider value={{ getAvatar, dispatch }}>
+    <AvatarContext.Provider value={{ state, dispatch }}>
       {children}
     </AvatarContext.Provider>
   )

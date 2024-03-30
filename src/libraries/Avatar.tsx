@@ -8,6 +8,11 @@ type AvatarProps = {
   pubkey: string
 }
 
+/**
+ * Avatar takes a pubkey and renders a ThreeAvatar while setting up action chain management and state storage of the avatar's actions and simulated state.
+ * @param pubkey string
+ * @returns ThreeAvatar
+ */
 export const Avatar = ({pubkey}: AvatarProps) => {
 
   useActionChain(pubkey)

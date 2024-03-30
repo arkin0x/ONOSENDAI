@@ -2,6 +2,10 @@ import { useContext, useEffect, useState } from 'react'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 
+/**
+ * The <Controls> component sets up HID input listeners for avatar control and thermodynamic posture control. Input is translated into commands dispatched to Engine for mining and camera control. 
+ * @returns null
+ */
 export const Controls = () => {
 
   const { identity } = useContext<IdentityContextType>(IdentityContext)

@@ -1,10 +1,3 @@
-/**
- * AvatarContext.tsx
- * 
- * @description AvatarContext provides a react context for managing the state of all avatars encountered, including the current user.
- * - There are two states: actionState and simulatedState. actionState is the state of the avatar as it has been recorded in POW events. simulatedState is the state of the avatar as it is being simulated in the cyberspace from the most recent actionState until the current timestamp.
- * - The simulatedState contains an unmined action with the values used to display the avatar in the cyberspace and mine new valid actions.
-*/
 import React, { createContext, useReducer } from 'react'
 import { Event, UnsignedEvent } from 'nostr-tools'
 
@@ -61,7 +54,7 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   return newState
 }
 
-// type for storing avatars' most recent simulated state
+// type for storing avatars' most recent simulated state. This will sometimes be an UnsignedEvent copy of the most recent Event in the action state.
 type AvatarSimulatedState = {
   [pubkey: string]: UnsignedEvent 
 }
@@ -70,7 +63,7 @@ type AvatarSimulatedState = {
 export type AvatarSimulatedDispatched = {
   type: 'update',
   pubkey: string,
-  action: Event
+  action: UnsignedEvent
 }
 
 const initialSimulatedState: AvatarSimulatedState = {}
@@ -92,6 +85,13 @@ export type AvatarContextType = {
   dispatchSimulatedState: React.Dispatch<AvatarSimulatedDispatched>
 }
 
+/**
+ * AvatarContext.tsx
+ * 
+ * @description AvatarContext provides a react context for managing the state of all avatars encountered, including the current user.
+ * - There are two states: actionState and simulatedState. actionState is the state of the avatar as it has been recorded in POW events. simulatedState is the state of the avatar as it is being simulated in the cyberspace from the most recent actionState until the current timestamp.
+ * - The simulatedState contains an unmined action with the values used to display the avatar in the cyberspace and mine new valid actions.
+*/
 export const AvatarContext = createContext<AvatarContextType>({
   actionState: initialActionState,
   dispatchActionState: () => {},

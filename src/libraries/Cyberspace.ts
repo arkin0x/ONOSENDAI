@@ -294,7 +294,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplate => {
+export const simulateNextEvent = (startEvent: Event, toTime: Time): UnsignedEvent => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
@@ -311,8 +311,7 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
   // add POW to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex(startEvent.id)
-    // const velocityPOW = Math.pow(2, POW) * 6712339022318254
-    const velocityPOW = Math.pow(2, POW) * 10_000_000
+    const velocityPOW = Math.floor(Math.pow(2, POW-1)) // if POW is 0, 2**(0-1) is 0.5, which will be floored to 0. This is necessary because 0 POW should result in 0 acceleration.
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation)
     updatedVelocity = updatedVelocity.add(addedVelocity)
@@ -335,13 +334,21 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
 
   // const rotationArray = rotation.toArray().map(n => n.toString())
 
+  const decimalArray = [
+    updatedPosition.x.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
+    updatedPosition.y.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
+    updatedPosition.z.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
+  ]
+
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
-  const event: EventTemplate = {
+  const event: UnsignedEvent = {
+    pubkey: startEvent.pubkey,
     kind: 333,
     created_at: toTime.created_at,
     content: '',
     tags: [
       ['C', hexCoord],
+      ['Cd', ...decimalArray ],
       ['velocity', ...velocityArray],
       // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],

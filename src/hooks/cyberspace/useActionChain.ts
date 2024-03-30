@@ -11,15 +11,16 @@ import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { actionChainIsValid } from "../cyberspace/actionChainIsValid"
 import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
+import { getTime, simulateNextEvent } from "../../libraries/Cyberspace";
 
 export const useActionChain = (pubkey: string) => {
 
   // get NDK, the library used to subscribe to relays and fetch events
   const ndk = useContext(NDKContext)
 
-  const {actionState: state, dispatchActionState: dispatch} = useContext(AvatarContext)
+  const {actionState, dispatchActionState, simulatedState, dispatchSimulatedState} = useContext(AvatarContext)
 
-  const actionChainState = state[pubkey]
+  const actionChainState = actionState[pubkey]
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
   
@@ -28,17 +29,17 @@ export const useActionChain = (pubkey: string) => {
    */
   const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
-  // initialize avatar
+  /**
+   * Initialize: set up subscription for latest action and get genesisId from it.
+   */
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    dispatch({type: 'reset', pubkey: pubkey})
+    dispatchActionState({type: 'reset', pubkey: pubkey})
 
-    // 1. query latest action for pubkey
+    // define subscription for latest action only.
     const latestActionFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], authors: [pubkey], limit: 1}
     const latestAction = ndk.subscribe(latestActionFilter, {closeOnEose: false})
       
-    // define functions
-
     /**
      * Pass in an event to extract the genesis event ID from the tags
      * @param latestAction the most recent action for the pubkey
@@ -69,7 +70,7 @@ export const useActionChain = (pubkey: string) => {
     }
 
     /**
-     * callback for when an action is received from NDK
+     * Callback for when an action is received from NDK
      * @param latestAction an action received from NDK
      */
     const onReceiveLatestAction = (latestAction: Event) => {
@@ -79,7 +80,7 @@ export const useActionChain = (pubkey: string) => {
         pubkey: pubkey,
         actions: [latestAction] as Event[],
       } as AvatarActionDispatched 
-      dispatch(action)
+      dispatchActionState(action)
       getGenesisId(latestAction)
     }
 
@@ -93,16 +94,18 @@ export const useActionChain = (pubkey: string) => {
     }
   }, [ndk, pubkey, genesisId])
 
-  // gather action history for genesisId
+  /** 
+   * Gather action history for genesisId once it is set by the previous useEffect.
+  */
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
     if (genesisId){
-      // 3. query all actions for genesisId (except genesis event itself because it does not have the 'e' tag referencing the genesis event)
+      // Query all actions for genesisId (except genesis event itself because it does not have the 'e' tag referencing the genesis event)
       const fullActionHistoryFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], '#e': [genesisId]}
       const fullActionHistory = ndk.subscribe(fullActionHistoryFilter, {closeOnEose: false})
 
       /**
-       * callback for when an action is received from NDK
+       * Callback for when an action is received from NDK
        * @param receivedAction an action received from NDK
        */
       const onReceiveActions = (receivedAction: Event) => {
@@ -112,7 +115,7 @@ export const useActionChain = (pubkey: string) => {
           pubkey: pubkey,
           actions: [receivedAction] as Event[],
         } as AvatarActionDispatched 
-        dispatch(action)
+        dispatchActionState(action)
       }
 
       const getGenesisEvent = () => {
@@ -124,7 +127,7 @@ export const useActionChain = (pubkey: string) => {
             pubkey: pubkey,
             actions: [genesisEvent] as Event[],
           } as AvatarActionDispatched
-          dispatch(action)
+          dispatchActionState(action)
           setHistoryComplete(true)
         })
       }
@@ -142,10 +145,9 @@ export const useActionChain = (pubkey: string) => {
     }
   }, [ndk, genesisId])
 
-  // validate from genesis action to latest action
-  // once history is assembled, validate the action chain
-  // 5. send past actions to web worker for validation
-  // Pseudocode: validateActions(receivedActions);
+  /**
+   * Once history is assembled in previous useEffect, validate the action chain.
+  */
   useEffect(() => {
     if (historyComplete){
       // TODO: 
@@ -159,13 +161,20 @@ export const useActionChain = (pubkey: string) => {
     }
   }, [historyComplete, actionChainState])
 
-  // simulate from latest action to present
+  /**
+   * Once history is assembled in previous-previous useEffect, simulate from the most recent action to the present time and store in the avatar simulation context.
+   * Whenever the actionChainState changes, this will begin simulating from the most recent action in the chain to the present time.
+   */
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
     if (genesisId){
       // if genesisId is set then we also have the most recent action, so we can simulate the future.
       // LEFTOFF
-        // simulateWorker.postMessage(latestAction)
+      // TODO: simulateWorker.postMessage(latestAction)
+      const mostRecentAction = actionChainState.slice(-1)[0]
+      const now = getTime()
+      const simulated = simulateNextEvent(mostRecentAction, now)
+      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulated})
     }
-  }, [ndk, genesisId, actionChainState])
+  }, [ndk, genesisId, actionChainState, pubkey, dispatchSimulatedState])
 }

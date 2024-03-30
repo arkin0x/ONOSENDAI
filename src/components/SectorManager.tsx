@@ -10,9 +10,10 @@ import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
 import { NDKSubscription } from '@nostr-dev-kit/ndk'
 
 /**
- *  The adjacent <Avatar> in <CyberspaceViewer> will initialize the user's pubkey into the AvatarContext. Then this sector manager will use the user's latest action in the AvatarContext to determine the current sector. It will then subscribe to the sectors in a cube around the current sector, including the current sector. It will then render the objects in the sectors.
+ * SectorManager will use the user's latest simulated action in the AvatarContext to determine the current sector. It will then subscribe to the sectors in a cube around the current sector, including the current sector. It will then render the objects in the sectors.
  * 
  * Rendering the objects in the sector involves modulus on each object's cyberspace axis to determine their coordinate within this sector. 
+ * The adjacent <Avatar> in <CyberspaceViewer> will initialize the user's pubkey into the AvatarContext.
  */
 export const SectorManager = () => {
   const ndk = useContext(NDKContext)

@@ -5,6 +5,7 @@ import { Avatar } from '../libraries/Avatar'
 import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { SectorManager } from './SectorManager'
+import { Controls } from './Controls'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -21,6 +22,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <ambientLight intensity={2.0} />
         <SectorManager />
         <Avatar pubkey={identity.pubkey} />
+        <Controls />
       </Canvas>
     </div>
   )

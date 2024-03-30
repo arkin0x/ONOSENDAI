@@ -2,26 +2,32 @@ import { useContext, useEffect, useState } from 'react'
 import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
-import { getSectorFromCoordinate } from '../libraries/Cyberspace'
+import { getSectorFromCoordinate, getSectorId } from '../libraries/Cyberspace'
 import { NDKContext } from '../providers/NDKProvider'
 import { AvatarContext } from '../providers/AvatarContext'
 import { Event } from 'nostr-tools'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
 import { NDKSubscription } from '@nostr-dev-kit/ndk'
 
+/**
+ *  The adjacent <Avatar> in <CyberspaceViewer> will initialize the user's pubkey into the AvatarContext. Then this sector manager will use the user's latest action in the AvatarContext to determine the current sector. It will then subscribe to the sectors in a cube around the current sector, including the current sector. It will then render the objects in the sectors.
+ * 
+ * Rendering the objects in the sector involves modulus on each object's cyberspace axis to determine their coordinate within this sector. 
+ */
 export const SectorManager = () => {
   const ndk = useContext(NDKContext)
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const {state} = useContext(AvatarContext)
+  const {actionState: state} = useContext(AvatarContext)
   const [currentSector, setCurrentSector] = useState<DecimalVector3>()
 
-  // get the latest user state and update the current sector
+  // get the latest user state from AvatarContext and update the current sector id
   // FIXME: this should actually be based on latest simulated state, not the latest action state, but oh well.
   useEffect(() => {
     if (!ndk || !identity) return
 
-    const latestUserState = state[identity.pubkey].slice(-1)[0] as Event
-    if (!latestUserState) return // no actions received yet
+    const userActions = state[identity.pubkey]
+    if (!userActions || userActions.length === 0) return
+    const latestUserState = userActions.slice(-1)[0] as Event
 
     try {
       const coordinate = latestUserState.tags.find(tag => tag[0] === 'C')?.[1]
@@ -48,7 +54,7 @@ export const SectorManager = () => {
       for (let y = -1; y < 2; y++) {
         for (let z = -1; z < 2; z++) {
           const copyCurrentSector = new DecimalVector3(currentSector.x.add(x), currentSector.y.add(y), currentSector.z.add(z))
-          const filter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds], '#S': [ ...copyCurrentSector.toArray().join('-')]}
+          const filter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds], '#S': [ getSectorId(copyCurrentSector) ]}
           console.log('filter', filter, filter['#S'])
           const sub = ndk.subscribe(filter, {closeOnEose: false})
           subscriptions.push(sub)

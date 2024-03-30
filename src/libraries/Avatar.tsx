@@ -1,4 +1,8 @@
 import { useActionChain } from "../hooks/cyberspace/useActionChain"
+import { ThreeAvatar } from "../components/ThreeAvatar"
+import { useContext, useEffect } from "react"
+import { AvatarContext } from "../providers/AvatarContext"
+import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinates } from "./Cyberspace"
 
 type AvatarProps = {
   pubkey: string
@@ -8,7 +12,10 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   useActionChain(pubkey)
 
-  // 8. return a visible avatar for threejs
-  return null
+  const {simulatedState} = useContext(AvatarContext)
+
+  const {sectorPosition, plane, velocity, rotation, time} = extractActionState(simulatedState[pubkey])
+
+  return <ThreeAvatar position={sectorPosition.toArray().map(x => parseFloat(x))} />
 }
 

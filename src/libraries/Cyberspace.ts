@@ -51,7 +51,9 @@ export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111
 export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 
 export const FRAME = 1000 / 60 // each frame is 1/60th of a second
-export const DRAG = 0.99999 // 0.999 is multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
+export const DRAG = 0.999999 // multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
+export const FRACTIONAL_PRECISION = 100_000_000 // 8 decimal places for Avatar position precision in "Cd" tag.
+
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
 export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
@@ -183,11 +185,11 @@ export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalV
   return new DecimalVector3(coords.x, coords.y, coords.z)
 }
 
-export const getMillisecondsTimestampFromAction = (action: Event): number => {
+export const getMillisecondsTimestampFromAction = (action: Event|UnsignedEvent): number => {
   return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1])
 }
 
-export const getPlaneFromAction = (action: Event): 'i-space' | 'd-space' => {
+export const getPlaneFromAction = (action: Event|UnsignedEvent): 'i-space' | 'd-space' => {
   // 0 = d-space (reality, first)
   // 1 = i-space (cyberreality, second)
   const lastNibble = action.tags.find(getTag('C'))![1].substring(63)
@@ -196,7 +198,7 @@ export const getPlaneFromAction = (action: Event): 'i-space' | 'd-space' => {
   return binToPlane(lastBit)
 }
 
-export const getTime = (action?: Event): Time => {
+export const getTime = (action?: Event|UnsignedEvent): Time => {
   let now
   if (action) {
     now = new Date(getMillisecondsTimestampFromAction(action))
@@ -268,9 +270,18 @@ export const isGenesisAction = (action: Event): boolean => {
 }
 
 // get the state from a cyberspace action
-export const extractActionState = (action: Event): {position: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event|UnsignedEvent): {position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
   // get position
   const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
+  // add fractional position if present
+  const positionDecimalsTag = action.tags.find(getTag('Cd'))
+  if (positionDecimalsTag) {
+    const decimals = positionDecimalsTag.slice(1).map(v => parseInt(v) / FRACTIONAL_PRECISION)
+    position.x = position.x.plus(new Decimal(decimals[0]))
+    position.y = position.y.plus(new Decimal(decimals[1]))
+    position.z = position.z.plus(new Decimal(decimals[2]))
+  }
+  const sectorPosition = cyberspaceToSectorPosition(position)
   // get plane
   const plane = getPlaneFromAction(action)
   // get velocity
@@ -279,7 +290,7 @@ export const extractActionState = (action: Event): {position: DecimalVector3, pl
   // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
   const rotation = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
   const time = getTime(action)
-  return {position, plane, velocity, rotation, time}
+  return {position, sectorPosition, plane, velocity, rotation, time}
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
@@ -340,12 +351,51 @@ export const simulateNextEvent = (startEvent: Event, toTime: Time): EventTemplat
   return event
 }
 
+/**
+ * Used for converting a hex cyberspace coordinate into a DecimalVector3 representing the sector the coordinate is in.
+ * @param coordinate string
+ * @returns DecimalVector3
+ */
 export const getSectorFromCoordinate = (coordinate: string): DecimalVector3 => {
-  const coords = decodeHexToCoordinates(coordinate)
+  const coord = decodeHexToCoordinates(coordinate)
 
-  const sectorX = coords.x.div(CYBERSPACE_SECTOR).floor()
-  const sectorY = coords.y.div(CYBERSPACE_SECTOR).floor()
-  const sectorZ = coords.z.div(CYBERSPACE_SECTOR).floor()
+  const sectorX = coord.x.div(CYBERSPACE_SECTOR).floor()
+  const sectorY = coord.y.div(CYBERSPACE_SECTOR).floor()
+  const sectorZ = coord.z.div(CYBERSPACE_SECTOR).floor()
+  
+  const sector = new DecimalVector3(sectorX, sectorY, sectorZ)
+
+  return sector
+}
+
+/**
+ * Render the sector identifier from a DecimalVector3 sector. This is used in the "S" tag for querying objects in a sector.
+ */
+export const getSectorId = (sector: DecimalVector3): string => {
+  return sector.toArray().join('-')
+}
+
+/**
+ * Transform a global cyberspace position to a local sector position for rendering in Three.js.
+ * @param cyberspacePosition DecimalVector3
+ */
+export const cyberspaceToSectorPosition = (cyberspacePosition: DecimalVector3): DecimalVector3 => {
+
+  const localX = cyberspacePosition.x.mod(CYBERSPACE_SECTOR)
+  const localY = cyberspacePosition.y.mod(CYBERSPACE_SECTOR)
+  const localZ = cyberspacePosition.z.mod(CYBERSPACE_SECTOR)
+
+  const local = new DecimalVector3(localX, localY, localZ)
+
+  return local
+}
+
+export const getSectorCoordinatesFromCyberspaceCoordinates = (coordinate: string): DecimalVector3 => {
+  const coord = decodeHexToCoordinates(coordinate)
+
+  const sectorX = coord.x.mod(CYBERSPACE_SECTOR)
+  const sectorY = coord.y.mod(CYBERSPACE_SECTOR)
+  const sectorZ = coord.z.mod(CYBERSPACE_SECTOR)
   
   const sector = new DecimalVector3(sectorX, sectorY, sectorZ)
 

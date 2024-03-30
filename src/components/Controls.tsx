@@ -1,13 +1,11 @@
-import { useContext, useEffect, useRef, useState } from 'react'
-import { Avatar } from '../libraries/Avatar.tsx'
+import { useContext, useEffect, useState } from 'react'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 
 export const Controls = () => {
 
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-
-  const avatarRef = useRef()
+  console.log(identity.pubkey) // pubkey
 
   const [throttle, setThrottle] = useState<number>(1)
 
@@ -61,5 +59,5 @@ export const Controls = () => {
   }, [])
 
 
-  return <Avatar ref={avatarRef} pubkey={identity.pubkey}/>
+  return null
 }

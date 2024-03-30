@@ -1,20 +1,28 @@
-// AvatarContext.tsx
+/**
+ * AvatarContext.tsx
+ * 
+ * @description AvatarContext provides a react context for managing the state of all avatars encountered, including the current user.
+ * - There are two states: actionState and simulatedState. actionState is the state of the avatar as it has been recorded in POW events. simulatedState is the state of the avatar as it is being simulated in the cyberspace from the most recent actionState until the current timestamp.
+ * - The simulatedState contains an unmined action with the values used to display the avatar in the cyberspace and mine new valid actions.
+*/
 import React, { createContext, useReducer } from 'react'
-import { Event } from 'nostr-tools'
+import { Event, UnsignedEvent } from 'nostr-tools'
 
-type AvatarState = {
+// type for storing avatar actions in state
+type AvatarActionState = {
   [pubkey: string]: Event[]
 }
 
-export type AvatarAction =
+// dispatch action type to update the action state
+export type AvatarActionDispatched = 
   | { type: 'unshift' | 'push'; pubkey: string; actions: Event[] }
   | { type: 'reset'; pubkey: string }
 
-const initialState: AvatarState = {}
+const initialActionState: AvatarActionState = {}
 
-const avatarReducer = (state: AvatarState, action: AvatarAction): AvatarState => {
+const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
 
-  const newState = {...state} as AvatarState
+  const newState = {...state} as AvatarActionState
 
   // check for action's pubkey in state and initialize if necessary
   if (newState[action.pubkey] === undefined) {
@@ -53,12 +61,42 @@ const avatarReducer = (state: AvatarState, action: AvatarAction): AvatarState =>
   return newState
 }
 
-export const AvatarContext = createContext<{
-  state: AvatarState;
-  dispatch: React.Dispatch<AvatarAction>
-}>({
-  state: initialState,
-  dispatch: () => {},
+// type for storing avatars' most recent simulated state
+type AvatarSimulatedState = {
+  [pubkey: string]: UnsignedEvent 
+}
+
+// dispatch action type to update the simulated state
+export type AvatarSimulatedDispatched = {
+  type: 'update',
+  pubkey: string,
+  action: Event
+}
+
+const initialSimulatedState: AvatarSimulatedState = {}
+
+const avatarSimulatedStateReducer = (state: AvatarSimulatedState, action: AvatarSimulatedDispatched): AvatarSimulatedState => {
+  const newState = {...state} as AvatarSimulatedState
+
+  newState[action.pubkey] = action.action
+
+  return newState
+}
+
+// ---  AvatarContext  ---
+
+export type AvatarContextType = {
+  actionState: AvatarActionState;
+  dispatchActionState: React.Dispatch<AvatarActionDispatched>
+  simulatedState: AvatarSimulatedState;
+  dispatchSimulatedState: React.Dispatch<AvatarSimulatedDispatched>
+}
+
+export const AvatarContext = createContext<AvatarContextType>({
+  actionState: initialActionState,
+  dispatchActionState: () => {},
+  simulatedState: initialSimulatedState,
+  dispatchSimulatedState: () => {},
 })
 
 type AvatarProviderProps = {
@@ -66,10 +104,11 @@ type AvatarProviderProps = {
 }
 
 export const AvatarProvider = ({ children }: AvatarProviderProps) => {
-  const [state, dispatch] = useReducer(avatarReducer, initialState)
+  const [actionState, dispatchActionState] = useReducer(avatarActionStateReducer, initialActionState)
+  const [simulatedState, dispatchSimulatedState] = useReducer(avatarSimulatedStateReducer, initialSimulatedState)
 
   return (
-    <AvatarContext.Provider value={{ state, dispatch }}>
+    <AvatarContext.Provider value={{ actionState, dispatchActionState, simulatedState, dispatchSimulatedState }}>
       {children}
     </AvatarContext.Provider>
   )

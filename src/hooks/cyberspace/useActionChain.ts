@@ -1,7 +1,7 @@
 /**
  * useActionChain.ts
  * 
- * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future. This hook is only meant to be used in the Avatar component.
+ * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
  */
 import { useContext, useEffect, useState } from "react"
 import { Event } from 'nostr-tools';
@@ -9,14 +9,15 @@ import { NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { actionChainIsValid } from "../cyberspace/actionChainIsValid"
-import { AvatarAction, AvatarContext } from "../../providers/AvatarContext"
+import { AvatarContext } from "../../providers/AvatarContext"
+import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
 
 export const useActionChain = (pubkey: string) => {
 
   // get NDK, the library used to subscribe to relays and fetch events
   const ndk = useContext(NDKContext)
 
-  const {state, dispatch} = useContext(AvatarContext)
+  const {actionState: state, dispatchActionState: dispatch} = useContext(AvatarContext)
 
   const actionChainState = state[pubkey]
 
@@ -77,7 +78,7 @@ export const useActionChain = (pubkey: string) => {
         type: 'push',
         pubkey: pubkey,
         actions: [latestAction] as Event[],
-      } as AvatarAction 
+      } as AvatarActionDispatched 
       dispatch(action)
       getGenesisId(latestAction)
     }
@@ -110,7 +111,7 @@ export const useActionChain = (pubkey: string) => {
           type: 'unshift',
           pubkey: pubkey,
           actions: [receivedAction] as Event[],
-        } as AvatarAction 
+        } as AvatarActionDispatched 
         dispatch(action)
       }
 
@@ -122,7 +123,7 @@ export const useActionChain = (pubkey: string) => {
             type: 'unshift',
             pubkey: pubkey,
             actions: [genesisEvent] as Event[],
-          } as AvatarAction
+          } as AvatarActionDispatched
           dispatch(action)
           setHistoryComplete(true)
         })

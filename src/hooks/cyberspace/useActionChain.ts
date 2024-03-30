@@ -12,6 +12,7 @@ import { actionChainIsValid } from "../cyberspace/actionChainIsValid"
 import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
 import { getTime, simulateNextEvent } from "../../libraries/Cyberspace";
+import { usePreviousValue } from "../usePreviousValue";
 
 export const useActionChain = (pubkey: string) => {
 
@@ -21,6 +22,9 @@ export const useActionChain = (pubkey: string) => {
   const {actionState, dispatchActionState, simulatedState, dispatchSimulatedState} = useContext(AvatarContext)
 
   const actionChainState = actionState[pubkey]
+  const lastSimulated = simulatedState[pubkey]
+
+  const prevActionChainState = usePreviousValue(actionChainState)
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
   
@@ -173,8 +177,15 @@ export const useActionChain = (pubkey: string) => {
       // TODO: simulateWorker.postMessage(latestAction)
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
-      const simulated = simulateNextEvent(mostRecentAction, now)
-      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulated})
+      let simulatedEvent
+      if (!prevActionChainState || prevActionChainState.length < actionChainState.length){
+        // the action chain has been updated. simulate the next event using this.
+        simulatedEvent = simulateNextEvent(mostRecentAction, now)
+      } else {
+        // simulate with previously simulated action
+        simulatedEvent = simulateNextEvent(lastSimulated, now)
+      }
+      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
     }
   }, [ndk, genesisId, actionChainState, pubkey, dispatchSimulatedState])
 }

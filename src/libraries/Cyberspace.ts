@@ -294,7 +294,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = (startEvent: Event, toTime: Time): UnsignedEvent => {
+export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time): UnsignedEvent => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.

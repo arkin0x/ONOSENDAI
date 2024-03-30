@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useReducer, useState } from 'react'
 import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
@@ -7,84 +7,163 @@ import { NDKContext } from '../providers/NDKProvider'
 import { AvatarContext } from '../providers/AvatarContext'
 import { Event } from 'nostr-tools'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
-import { NDKSubscription } from '@nostr-dev-kit/ndk'
+import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
+
+type SectorState = {
+  [sectorid: string]: {
+    avatars: Set<string>, // pubkeys
+    constructs: Set<string>, // event ids
+  }
+}
+
+const initialSectorState: SectorState = {}
+
+type SectorAction = 
+  | {type: 'dump'; sectorId: string} // remove a sector from state and all of its objects
+  | {type: 'mount'; sectorId: string} // add a sector to state and begin processing its objects
+  | {type: 'addAvatar'; sectorId: string; pubkey: string} // add an avatar's pubkey
+  | {type: 'removeAvatar'; sectorId: string; pubkey: string} // remove an avatar's pubkey. This would happen if the simulated or current state of an avatar went outside of our sector radius.
+  | {type: 'addConstruct'; sectorId: string; eventId: string} // add a construct. (We don't need to remove them.)
+
+const sectorReducer = (state: SectorState, action: SectorAction): SectorState => {
+  const newState = {...state}
+
+  if (action.type === 'dump') {
+    delete newState[action.sectorId]
+  }
+  if (action.type === 'mount') {
+    newState[action.sectorId] = {avatars: new Set(), constructs: new Set()}
+  }
+  if (action.type === 'addAvatar') {
+    newState[action.sectorId].avatars.add(action.pubkey)
+  }
+  if (action.type === 'removeAvatar') { // this would happen if the simulated or current state of an avatar went outside of our sector radius.
+    newState[action.sectorId].avatars.delete(action.pubkey)
+  }
+  if (action.type === 'addConstruct') {
+    newState[action.sectorId].constructs.add(action.eventId)
+  }
+
+  return newState
+}
 
 /**
- * SectorManager will use the user's latest simulated action in the AvatarContext to determine the current sector. It will then subscribe to the sectors in a cube around the current sector, including the current sector. It will then render the objects in the sectors.
- * 
- * Rendering the objects in the sector involves modulus on each object's cyberspace axis to determine their coordinate within this sector. 
  * The adjacent <Avatar> in <CyberspaceViewer> will initialize the user's pubkey into the AvatarContext.
+ * SectorManager will use the user's latest simulated action in the AvatarContext to determine the current sector. It will then subscribe to the sectors in a cube around the current sector, including the current sector. It will then render the objects in the sectors.
+ * When the sector changes, the subscriptions will be updated and SectorManager will update the objects we are rendering.
  */
-export const SectorManager = () => {
+export const SectorManager = ({radius}: {radius?: number}) => {
   const ndk = useContext(NDKContext)
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const {actionState: state} = useContext(AvatarContext)
+  const {identity} = useContext<IdentityContextType>(IdentityContext)
+  const {actionState, simulatedState} = useContext(AvatarContext)
   const [currentSector, setCurrentSector] = useState<DecimalVector3>()
+  const [sector, dispatchSector] = useReducer(sectorReducer, initialSectorState)
 
-  // get the latest user state from AvatarContext and update the current sector id
-  // FIXME: this should actually be based on latest simulated state, not the latest action state, but oh well.
+  const pubkey = identity?.pubkey
+  if (!pubkey) throw new Error('Sector Manager: No pubkey found in identity context')
+
+  /**
+   * Functions
+   */
+
+  /**
+   * Subscribes to the sectors in a cube around the current sector, including the current sector.
+   */
+  const subscribeToSector = (ndk: NDK, sectorCoord: DecimalVector3) => {
+    const filter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds], '#S': [ getSectorId(sectorCoord) ]}
+    console.log('filter', filter, filter['#S'])
+    const sub = ndk.subscribe(filter, {closeOnEose: false})
+    return sub
+  }
+
+  /**
+   * Get the current sector from the user's latest simulated state.
+   */
   useEffect(() => {
     if (!ndk || !identity) return
 
-    const userActions = state[identity.pubkey]
-    if (!userActions || userActions.length === 0) return
-    const latestUserState = userActions.slice(-1)[0] as Event
+    let presence = simulatedState[pubkey]
+
+    if (!presence) {
+      presence = actionState[pubkey].slice(-1)[0] as Event
+    }
 
     try {
-      const coordinate = latestUserState.tags.find(tag => tag[0] === 'C')?.[1]
-      if (!coordinate) throw new Error('No coordinate tag found')
+      const coordinate = presence.tags.find(tag => tag[0] === 'C')?.[1]
+      if (!coordinate) throw new Error('Sector Manager: No coordinate tag found on presence event')
 
       const sector = getSectorFromCoordinate(coordinate)
       setCurrentSector(sector)
 
     } catch (e) {
-      console.error('Error getting coordinate tag', e)
+      console.error('Sector Manager: Error getting coordinate tag', e)
     }
 
-  }, [ndk, identity.pubkey, state[identity.pubkey]])
+  }, [ndk, pubkey, actionState, simulatedState])
+
+  /**
+   * When the current sector changes, mount the sector in the state.
+   */
+  useEffect(() => {
+    if (!currentSector) return
+
+    dispatchSector({type: 'mount', sectorId: getSectorId(currentSector)})
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSector])
 
   // when the current sector changes, update the sectors we are getting data for
   useEffect(() => {
     if (!ndk || !identity || !currentSector) return
 
+    const newSectorSet = new Set<string>()
     const subscriptions: NDKSubscription[] = []
 
-    // subscribe to the sectors in a cube around the curret sector, including the current sector
-
-    for (let x = -1; x < 2; x++) {
-      for (let y = -1; y < 2; y++) {
-        for (let z = -1; z < 2; z++) {
-          const copyCurrentSector = new DecimalVector3(currentSector.x.add(x), currentSector.y.add(y), currentSector.z.add(z))
-          const filter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds], '#S': [ getSectorId(copyCurrentSector) ]}
-          console.log('filter', filter, filter['#S'])
-          const sub = ndk.subscribe(filter, {closeOnEose: false})
-          subscriptions.push(sub)
+    // subscribe to the sectors in a cube radius around the curret sector, including the current sector
+    const rT = Math.abs(radius || 0) // radius top (positive)
+    const rB = -rT // radius bottom (negative)
+    for (let x = rB; x <= rT; x++) {
+      for (let y = rB; y <= rT; y++) {
+        for (let z = rB; z <= rT; z++) {
+          const sectorCopy = new DecimalVector3(currentSector.x.add(x), currentSector.y.add(y), currentSector.z.add(z))
+          // add new sectors to set for comparing to old sectors
+          newSectorSet.add(getSectorId(sectorCopy))
+          // subscribe to new sectors
+          subscriptions.push(subscribeToSector(ndk, sectorCopy))
         }
       }
     }
 
+    // delete old sectors that are not in the new set
+    const oldSectorSet = new Set<string>(Object.keys(sector))
+    oldSectorSet.forEach(sectorId => {
+      if (!newSectorSet.has(sectorId)) {
+        dispatchSector({type: 'dump', sectorId})
+      }
+    })
+
     // setup listeners for subscriptions
     const handleEvent = (event: Event) => {
       if (event.kind === CyberspaceKinds.Action) {
-        // TODO
-        // we should just get the pubkey and fire it off to useActionChain. Also useActionChain should not be part of the Avatar component; it should run regradless of the Avatar component, but it should STOP running when it's simulated presence isn't in the current sector. 
+        dispatchSector({type: 'addAvatar', sectorId: getSectorId(currentSector), pubkey: event.pubkey})
       } else if( event.kind === CyberspaceKinds.Construct) {
         // TODO
-        // need a context to store constructs by sector
+        dispatchSector({type: 'addConstruct', sectorId: getSectorId(currentSector), eventId: event.id})
       }
     }
-
     subscriptions.forEach(sub => sub.on('event', handleEvent))
 
     return () => {
-      // cleanup sector subscriptions
+      // cleanup sector subscriptions (will happen when useEffect dependencies change or on unmount.)
       subscriptions.forEach(sub => sub.stop())
     }
-  }, [currentSector])
+  }, [ndk, identity, currentSector, radius])
 
   if (!currentSector) return null
 
-  return <Sector id={currentSector?.toArray().join('-')} />// TODO: return sectors here
+  // LEFTOFF
+  // TODO: render sectors here. Each sector should initialize an <Avatar> and <Construct> for each object in that sector.
+  return <Sector id={getSectorId(currentSector)} />
 }
 
 type SectorProps = {

@@ -4,7 +4,8 @@
  * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
  */
 import { useContext, useEffect, useState } from "react"
-import { Event } from 'nostr-tools';
+import { useFrame } from '@react-three/fiber'
+import { Event } from 'nostr-tools'
 import { NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
@@ -24,7 +25,7 @@ export const useActionChain = (pubkey: string) => {
   const actionChainState = actionState[pubkey]
   const lastSimulated = simulatedState[pubkey]
 
-  const prevActionChainState = usePreviousValue(actionChainState)
+  const prevActionChainState = usePreviousValue(actionChainState) // starting value is undefined
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
   
@@ -166,20 +167,19 @@ export const useActionChain = (pubkey: string) => {
   }, [historyComplete, actionChainState])
 
   /**
-   * Once history is assembled in previous-previous useEffect, simulate from the most recent action to the present time and store in the avatar simulation context.
+   * Simulate from the most recent action to the present time and store in the avatar simulation context.
    * Whenever the actionChainState changes, this will begin simulating from the most recent action in the chain to the present time.
    */
-  useEffect(() => {
+  useFrame(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    if (genesisId){
-      // if genesisId is set then we also have the most recent action, so we can simulate the future.
-      // LEFTOFF
-      // TODO: simulateWorker.postMessage(latestAction)
+    if (genesisId){ // if genesisId is set then we also have the most recent action, so we can simulate the future.
+      // FIXME: use a worker to simulate instead of main thread.
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
       let simulatedEvent
-      if (!prevActionChainState || prevActionChainState.length < actionChainState.length){
+      if (!prevActionChainState || prevActionChainState.length < actionChainState.length){ //  if this is the first update OR the action chain has been updated beyond where it was...
         // the action chain has been updated. simulate the next event using this.
+        // Note: if the time diff between mostRecentAction and now is less than 1 frame, this will simply return mostRecentAction.
         simulatedEvent = simulateNextEvent(mostRecentAction, now)
       } else {
         // simulate with previously simulated action
@@ -187,5 +187,5 @@ export const useActionChain = (pubkey: string) => {
       }
       dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
     }
-  }, [ndk, genesisId, actionChainState, pubkey, dispatchSimulatedState])
+  })
 }

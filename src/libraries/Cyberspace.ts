@@ -303,6 +303,11 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // calculate simulation from startEvent to toTime
   let frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
 
+  if (frames === 0) {
+    // no need to simulate if the time difference is less than a frame.
+    return startEvent
+  }
+
   const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
   const updatedPosition = position

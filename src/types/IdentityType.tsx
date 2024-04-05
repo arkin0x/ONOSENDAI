@@ -3,7 +3,8 @@ import { RelayObject } from './NostrRelay'
 
 export type IdentityType = {
   pubkey: string
-  last_updated?: number // record the last time the profile was updated from relays. This also serves as a marker that the account has been loaded. Updated in Login component.
+  npub?: string
+  created_at?: number // record the last time the profile was updated from relays. This also serves as a marker that the account has been loaded. Updated in Login component.
   name?: string
   username?: string
   display_name?: string
@@ -12,7 +13,9 @@ export type IdentityType = {
   nip05?: string
   website?: string
   picture?: string
+  image?: string
   banner?: string
+  lud06?: string
   lud16?: string
   // [key: string]: string | undefined
 }

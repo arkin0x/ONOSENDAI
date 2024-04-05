@@ -12,12 +12,19 @@ export const defaultRelays: RelayObject = {
 }
 
 export const defaultProfile: IdentityType = {
-  'name': 'unknown',
-  'username': 'unknown',
-  'display_name': 'unknown',
-  'displayName': 'unknown',
-  'nip05': 'unknown',
-  'pubkey': '0000000000000000000000000000000000000000000000000000000000000000'
+    "banner": "",
+    "website": "",
+    "nip05": "",
+    "image": "",
+    "lud16": "",
+    "displayName": "",
+    "about": "",
+    "name": "",
+    "username": "",
+    "lud06": "",
+    "created_at": 0,
+    'pubkey': '0000000000000000000000000000000000000000000000000000000000000000',
+    "npub": "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzqujme"
 }
 
 export const pool = new SimplePool()

@@ -31,14 +31,14 @@ export const Interface = () => {
 
   return (
     <div id="interface">
-      <div id="interface-header">
+      {/* <div id="interface-header">
         <button onClick={() => setUIState(UIState.cyberspace)}>Cyberspace</button>
         <button onClick={() => setUIState(UIState.telemetry)}>Telemetry</button>
         <button onClick={() => setUIState(UIState.testing)}>Testing</button>
         <button onClick={() => setUIState(UIState.settings)}>Settings</button>
         <button onClick={() => setUIState(UIState.about)}>About</button>
         <button onClick={logOut}>Log Out</button>
-      </div>
+      </div> */}
       <div id="interface-body">
         {getInterface()}
       </div>

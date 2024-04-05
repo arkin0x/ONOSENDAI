@@ -14,18 +14,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@nostr-dev-kit/ndk": "^2.5.0",
-    "@react-three/drei": "^9.80.9",
-    "@react-three/fiber": "^8.13.7",
+    "@nostr-dev-kit/ndk": "^2.7.1",
+    "@react-three/drei": "^9.105.1",
+    "@react-three/fiber": "^8.16.1",
     "almost-equal": "^1.1.0",
     "augmented-ui": "^2.0.0",
     "decimal.js": "^10.4.3",
     "dompurify": "^3.0.5",
-    "nostr-tools": "^1.17.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.15.0",
-    "three": "^0.156.0",
+    "three": "^0.163.0",
     "url-regex": "^5.0.0"
   },
   "devDependencies": {

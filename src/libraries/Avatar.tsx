@@ -19,6 +19,8 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   const {simulatedState} = useContext(AvatarContext)
 
+  if (!simulatedState[pubkey]) return null
+
   const {sectorPosition, plane, velocity, rotation, time} = extractActionState(simulatedState[pubkey])
 
   return <ThreeAvatar position={sectorPosition.toArray().map(x => parseFloat(x))} />

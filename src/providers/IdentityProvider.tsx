@@ -27,7 +27,7 @@ export const IdentityProvider: React.FC<IdentityProviderProps> = ({children})=> 
   const [relays, setRelays] = usePersistedState<RelayObject>('relays', defaultRelays)
 
   const isIdentityFresh = (): boolean => {
-    if (identity?.last_updated && +new Date() - identity.last_updated < STALE_PROFILE) {
+    if (identity?.created_at && Math.floor((+new Date())/1000) - identity.created_at < STALE_PROFILE) {
       return true 
     }
     return false

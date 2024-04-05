@@ -60,7 +60,7 @@ export const SectorManager = ({radius}: {radius?: number}) => {
   const [sector, dispatchSector] = useReducer(sectorReducer, initialSectorState)
 
   const pubkey = identity?.pubkey
-  if (!pubkey) throw new Error('Sector Manager: No pubkey found in identity context')
+  if (!pubkey) console.warn('Sector Manager: No pubkey found in identity context')
 
   /**
    * Functions
@@ -80,23 +80,31 @@ export const SectorManager = ({radius}: {radius?: number}) => {
    * Get the current sector from the user's latest simulated state.
    */
   useEffect(() => {
-    if (!ndk || !identity) return
+    if (!ndk || !identity || !simulatedState[pubkey] || actionState[pubkey] ) return
 
     let presence = simulatedState[pubkey]
 
-    if (!presence) {
-      presence = actionState[pubkey].slice(-1)[0] as Event
-    }
-
     try {
+
+      if (!presence) {
+        // if (actionState[pubkey]) // if we don't have any actions yet, we can't determine the sector. Wait for this useEffect to run again.
+        presence = actionState[pubkey].slice(-1)[0] as Event
+      }
+
+      console.log('presence update!', presence)
+
       const coordinate = presence.tags.find(tag => tag[0] === 'C')?.[1]
-      if (!coordinate) throw new Error('Sector Manager: No coordinate tag found on presence event')
+
+      if (!coordinate) {
+        console.warn('Sector Manager: No coordinate tag found on presence event')
+        throw new Error('No coordinate tag found on presence event')
+      }
 
       const sector = getSectorFromCoordinate(coordinate)
       setCurrentSector(sector)
 
     } catch (e) {
-      console.error('Sector Manager: Error getting coordinate tag', e)
+      console.warn('Sector Manager: Error getting coordinate tag', e, presence, actionState[pubkey])
     }
 
   }, [ndk, pubkey, actionState, simulatedState])

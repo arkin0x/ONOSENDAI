@@ -9,7 +9,7 @@ type UIContextType = {
 }
 
 const defaultUIState: UIContextType = {
-  uiState: UIState.telemetry,
+  uiState: UIState.cyberspace,
   setUIState: () => {}
 }
 
@@ -21,7 +21,7 @@ type UIProviderProps = {
 
 export const UIProvider: React.FC<UIProviderProps> = ({children}) => {
 
-  const [uiState, setUIState] = usePersistedState<UIState>('ui', UIState.telemetry)
+  const [uiState, setUIState] = usePersistedState<UIState>('ui', UIState.cyberspace)
 
   return (
     <UIContext.Provider value={{uiState, setUIState}}>

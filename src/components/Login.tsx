@@ -2,37 +2,34 @@ import { useContext, useEffect, useState } from "react"
 import { useNavigate } from 'react-router-dom'
 import { IdentityContext } from "../providers/IdentityProvider"
 import { IdentityContextType } from "../types/IdentityType"
-import { defaultProfile, defaultRelays, getMyProfile, getMyRelays } from "../libraries/Nostr"
 import { Spinner } from './Spinner'
+import { NDKContext } from "../providers/NDKProvider"
 
 export const Login = () => {
   const [loading, setLoading] = useState(false)
   const {identity, setIdentity, isIdentityFresh, setRelays} = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
+  const ndk = useContext(NDKContext)
 
   useEffect(() => {
+    if (!ndk) return
     const loadProfile = async () => {
       // retrieve profile
-      const loadedProfile = await getMyProfile(identity.pubkey)
-      if (loadedProfile === defaultProfile) {
-        // no profile found. use default as template but add pubkey
-        const newProfile = {...defaultProfile, pubkey: identity.pubkey, last_updated: +new Date()}
-        setIdentity(newProfile)
-      } else {
-        const profile = {...loadedProfile, pubkey: identity.pubkey, last_updated: +new Date()}
-        setIdentity(profile)
-      }
-      // retrieve relays
-      const loadedRelays = await getMyRelays(identity.pubkey)
-      console.log('loadedRelays', loadedRelays)
-      if (loadedRelays !== defaultRelays) {
-        setRelays(loadedRelays)
-      }
+      const ndkUser = ndk.getUser({ pubkey: identity.pubkey })
+      const userRelays = ndkUser.relayUrls
+      const profile = await ndkUser.fetchProfile()
+      console.log('Login: relays',userRelays)
+      setIdentity(profile)
+      setRelays(userRelays)
+      console.log('fresh:', isIdentityFresh(), identity.created_at)
     }
+    // console.log('Login: identity',identity)
     // redirect to homepage if login page is accessed with no identity
     if (!identity) {
+      console.log('beans')
       navigate('/')
     } else if (isIdentityFresh()) {
+      console.log('fresh beans')
       // profile is still fresh. redirect to dashboard
       navigate('/')
     } else {
@@ -41,7 +38,7 @@ export const Login = () => {
       loadProfile()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity,navigate /* isIdentityFresh, setIdentity, setRelays are ok to exclude */])
+  }, [ndk, identity, navigate /* isIdentityFresh, setIdentity, setRelays are ok to exclude */])
 
   return (
     <div id="login">

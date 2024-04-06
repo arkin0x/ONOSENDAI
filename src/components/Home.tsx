@@ -8,11 +8,11 @@ import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { Interface } from './Interface.tsx'
 
 export const Home = () => {
-  const { isIdentityFresh } = useContext<IdentityContextType>(IdentityContext)
+  const { profileLoaded } = useContext<IdentityContextType>(IdentityContext)
 
   // return <Interface/>
 
-  if (isIdentityFresh()) {
+  if (profileLoaded()) {
     return <Interface/>
   } else {
     return (

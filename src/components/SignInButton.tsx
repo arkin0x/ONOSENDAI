@@ -5,7 +5,7 @@ import { IdentityContext } from "../providers/IdentityProvider"
 import { getPublicKey } from "../libraries/NIP-07"
 
 export const SignInButton = () => {
-  const { setIdentity, isIdentityFresh } = useContext<IdentityContextType>(IdentityContext)
+  const { setIdentity, profileLoaded } = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
 
   const signIn = async () => {
@@ -20,7 +20,7 @@ export const SignInButton = () => {
       // trigger "key not set up yet" dialog
     }
   }
-  if (isIdentityFresh()) {
+  if (profileLoaded()) {
     return (
       <div className="column">
       You're already logged in!

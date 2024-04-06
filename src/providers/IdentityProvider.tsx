@@ -11,7 +11,7 @@ const defaultIdentityContext: IdentityContextType = {
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   identity: null!,
   setIdentity: () => {},
-  isIdentityFresh: () => {},
+  profileLoaded: () => {},
   relays: defaultRelays,
   setRelays: () => {},
 }
@@ -26,15 +26,15 @@ export const IdentityProvider: React.FC<IdentityProviderProps> = ({children})=> 
   const [identity, setIdentity] = usePersistedState<IdentityType>('identity')
   const [relays, setRelays] = usePersistedState<RelayObject>('relays', defaultRelays)
 
-  const isIdentityFresh = (): boolean => {
-    if (identity?.created_at && Math.floor((+new Date())/1000) - identity.created_at < STALE_PROFILE) {
+  const profileLoaded = (): boolean => {
+    if (identity && identity.pubkey && identity.created_at && identity.npub) {
       return true 
     }
     return false
   }
 
   return (
-    <IdentityContext.Provider value={{identity, setIdentity, isIdentityFresh, relays, setRelays}}>
+    <IdentityContext.Provider value={{identity, setIdentity, profileLoaded: profileLoaded, relays, setRelays}}>
       {children}
     </IdentityContext.Provider>
   )

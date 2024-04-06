@@ -7,7 +7,7 @@ import { NDKContext } from "../providers/NDKProvider"
 
 export const Login = () => {
   const [loading, setLoading] = useState(false)
-  const {identity, setIdentity, isIdentityFresh, setRelays} = useContext<IdentityContextType>(IdentityContext)
+  const {identity, setIdentity, profileLoaded, setRelays} = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
   const ndk = useContext(NDKContext)
 
@@ -21,14 +21,14 @@ export const Login = () => {
       console.log('Login: relays',userRelays)
       setIdentity(profile)
       setRelays(userRelays)
-      console.log('fresh:', isIdentityFresh(), identity.created_at)
+      console.log('fresh:', profileLoaded(), identity.created_at)
     }
     // console.log('Login: identity',identity)
     // redirect to homepage if login page is accessed with no identity
     if (!identity) {
       console.log('beans')
       navigate('/')
-    } else if (isIdentityFresh()) {
+    } else if (profileLoaded()) {
       console.log('fresh beans')
       // profile is still fresh. redirect to dashboard
       navigate('/')
@@ -38,7 +38,7 @@ export const Login = () => {
       loadProfile()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ndk, identity, navigate /* isIdentityFresh, setIdentity, setRelays are ok to exclude */])
+  }, [ndk, identity, navigate /* profileLoaded, setIdentity, setRelays are ok to exclude */])
 
   return (
     <div id="login">

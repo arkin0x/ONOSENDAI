@@ -23,7 +23,7 @@ export type IdentityType = {
 export type IdentityContextType = {
   identity: IdentityType,
   setIdentity: Function,
-  isIdentityFresh: Function,
+  profileLoaded: Function,
   relays: RelayObject,
   setRelays: Function,
 }

@@ -246,9 +246,9 @@ export const nowIsAfterLastAction = (latestAction: Event): boolean => {
   }
 }
 
-export const createUnsignedDriftAction = (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): UnsignedEvent => {
+export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): Promise<UnsignedEvent> => {
   const time = getTime()
-  const newAction = simulateNextEvent(latestAction, time) as UnsignedEvent
+  const newAction = await simulateNextEvent(latestAction, time)
   if (newAction === undefined) {
     // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
@@ -294,7 +294,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time): UnsignedEvent => {
+export const simulateNextEvent = async (startEvent: Event|UnsignedEvent, toTime: Time): Promise<UnsignedEvent> => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
@@ -302,6 +302,8 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   }
   // calculate simulation from startEvent to toTime
   let frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
+
+  console.log('frames', frames, startTimestamp)
 
   if (frames === 0) {
     // no need to simulate if the time difference is less than a frame.
@@ -323,11 +325,14 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   }
 
   // simulate frames
+  // FIXME: this needs to run in a thread
+  // FIXME: this needs to save the latest progress somewhere so we never need to recalculate it again SHEESH. Maybe it even publishes a note as a checkpoint.
   while (frames--) {
     // update position from velocity
     updatedPosition.add(updatedVelocity)
     // update velocity with drag
     updatedVelocity.multiplyScalar(DRAG)
+    console.log(frames)
   }  
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.

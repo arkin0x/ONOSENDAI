@@ -24,12 +24,10 @@ export const Login = () => {
       console.log('fresh:', profileLoaded(), identity.created_at)
     }
     // console.log('Login: identity',identity)
-    // redirect to homepage if login page is accessed with no identity
     if (!identity) {
-      console.log('beans')
+      // redirect to homepage if login page is accessed with no identity
       navigate('/')
     } else if (profileLoaded()) {
-      console.log('fresh beans')
       // profile is still fresh. redirect to dashboard
       navigate('/')
     } else {

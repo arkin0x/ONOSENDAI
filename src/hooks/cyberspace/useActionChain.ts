@@ -4,8 +4,7 @@
  * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
  */
 import { useContext, useEffect, useState } from "react"
-import { useFrame } from '@react-three/fiber'
-import { Event } from 'nostr-tools'
+import { Event, UnsignedEvent } from 'nostr-tools'
 import { NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
@@ -14,6 +13,7 @@ import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
 import { getTime, simulateNextEvent } from "../../libraries/Cyberspace";
 import { usePreviousValue } from "../usePreviousValue";
+import { Time } from "../../types/Cyberspace"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -38,6 +38,7 @@ export const useActionChain = (pubkey: string) => {
    * Initialize: set up subscription for latest action and get genesisId from it.
    */
   useEffect(() => {
+    console.log('useActionChain run')
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
     dispatchActionState({type: 'reset', pubkey: pubkey})
 
@@ -97,7 +98,7 @@ export const useActionChain = (pubkey: string) => {
       // Pseudocode: Clean up any subscriptions or resources
       latestAction.stop()
     }
-  }, [ndk, pubkey, genesisId])
+  }, [ndk, pubkey, genesisId, dispatchActionState])
 
   /** 
    * Gather action history for genesisId once it is set by the previous useEffect.
@@ -170,22 +171,28 @@ export const useActionChain = (pubkey: string) => {
    * Simulate from the most recent action to the present time and store in the avatar simulation context.
    * Whenever the actionChainState changes, this will begin simulating from the most recent action in the chain to the present time.
    */
-  useFrame(() => {
+  // FIXME: this isn't synchronous; will this lead to errors? Will the chain get out of order?
+  useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
+
+    // function definition for simulating and dispatching the next event
+    const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
+      const simulatedEvent = await simulateNextEvent(action, now)
+      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
+    }
+
     if (genesisId){ // if genesisId is set then we also have the most recent action, so we can simulate the future.
       // FIXME: use a worker to simulate instead of main thread.
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
-      let simulatedEvent
       if (!prevActionChainState || prevActionChainState.length < actionChainState.length){ //  if this is the first update OR the action chain has been updated beyond where it was...
         // the action chain has been updated. simulate the next event using this.
         // Note: if the time diff between mostRecentAction and now is less than 1 frame, this will simply return mostRecentAction.
-        simulatedEvent = simulateNextEvent(mostRecentAction, now)
+        simulateAndDispatch(mostRecentAction, now)
       } else {
         // simulate with previously simulated action
-        simulatedEvent = simulateNextEvent(lastSimulated, now)
+        simulateAndDispatch(lastSimulated, now)
       }
-      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
     }
-  })
+  }, [actionChainState, lastSimulated, prevActionChainState, genesisId, dispatchSimulatedState, ndk, pubkey])
 }

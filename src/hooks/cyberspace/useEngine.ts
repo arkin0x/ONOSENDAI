@@ -64,7 +64,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       // determine if now is after the latestAction's created_at+ms
       if (nowIsAfterLastAction(latest)) {
         // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
-        const action = createUnsignedDriftAction(pubkey, throttle, quaternion, genesis, latest)
+        const action = await createUnsignedDriftAction(pubkey, throttle, quaternion, genesis, latest)
         triggerMovementWorkers(action)
       } else {
         console.warn('Engine:drift: latestAction is not old enough to drift from')

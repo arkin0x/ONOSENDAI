@@ -3,7 +3,7 @@ import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
 import { CyberspaceCoordinates, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time } from "../types/Cyberspace"
 import { getTag, getTagValue } from "./Nostr"
-import { Event, EventTemplate, UnsignedEvent } from "nostr-tools"
+import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
 import { DecimalVector3 } from "./DecimalVector3"
 
@@ -51,7 +51,6 @@ export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111
 export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
 
 export const FRAME = 1000 / 60 // each frame is 1/60th of a second
-export const DRAG = 0.999999 // multiplied by each velocity component each frame to simulate drag, simply so that acceleration is not infinite.
 export const FRACTIONAL_PRECISION = 100_000_000 // 8 decimal places for Avatar position precision in "Cd" tag.
 
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
@@ -294,14 +293,14 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = async (startEvent: Event|UnsignedEvent, toTime: Time): Promise<UnsignedEvent> => {
+export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time): UnsignedEvent => {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
     throw new Error ("Cannot simulate to a time before the start event.")
   }
   // calculate simulation from startEvent to toTime
-  let frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
+  const frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
 
   console.log('frames', frames, startTimestamp)
 
@@ -316,24 +315,17 @@ export const simulateNextEvent = async (startEvent: Event|UnsignedEvent, toTime:
   let updatedVelocity = velocity
 
   // add POW to velocity if the startEvent was a drift action.
-  if (startEvent.tags.find(getTagValue('A','drift'))) {
-    const POW = countLeadingZeroesHex(startEvent.id)
+  if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
+    const POW = countLeadingZeroesHex((startEvent as Event).id)
     const velocityPOW = Math.floor(Math.pow(2, POW-1)) // if POW is 0, 2**(0-1) is 0.5, which will be floored to 0. This is necessary because 0 POW should result in 0 acceleration.
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation)
     updatedVelocity = updatedVelocity.add(addedVelocity)
   }
 
-  // simulate frames
-  // FIXME: this needs to run in a thread
-  // FIXME: this needs to save the latest progress somewhere so we never need to recalculate it again SHEESH. Maybe it even publishes a note as a checkpoint.
-  while (frames--) {
-    // update position from velocity
-    updatedPosition.add(updatedVelocity)
-    // update velocity with drag
-    updatedVelocity.multiplyScalar(DRAG)
-    console.log(frames)
-  }  
+  // simulate position based on number of frames that have passed
+  const simulatedVelocity = updatedVelocity.clone().multiplyScalar(frames)
+  updatedPosition.add(simulatedVelocity)
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 
@@ -344,6 +336,7 @@ export const simulateNextEvent = async (startEvent: Event|UnsignedEvent, toTime:
 
   // const rotationArray = rotation.toArray().map(n => n.toString())
 
+  // decimal array is 8-digit integers representing the fractional part of the position, because the fractional part can't be stored in the cyberspace coordinate.
   const decimalArray = [
     updatedPosition.x.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
     updatedPosition.y.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),

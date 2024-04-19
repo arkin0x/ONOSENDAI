@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { countLeadingZeroesHex } from "../../libraries/Hash"
-import { DRAG, FRAME, getMillisecondsTimestampFromAction, getPlaneFromAction } from "../../libraries/Cyberspace"
+import { extractActionState, getMillisecondsTimestampFromAction, getPlaneFromAction, simulateNextEvent } from "../../libraries/Cyberspace"
 import { getTag, getTagValue } from "../../libraries/Nostr"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
 import Decimal from "decimal.js"
@@ -105,68 +105,36 @@ export const actionChainIsValid = (actions: Event[]): boolean => {
         console.warn('invalid plane', planeIsValid)
       }
 
-      // TEST 6 - VALID VELOCITY
-      // check the velocity and make sure it is within tolerances
-      // TODO: also check position!!! probably makes sense to do that here too.
-      const testVelocityState = [...actions]
-      // running simulated velocity
-      let simulatedVelocity: DecimalVector3 = new DecimalVector3(0, 0, 0)
-      const resultVelocity = testVelocityState.every((action, index) => {
-        // for all other actions, simulate velocity changes since previous action and compare to this action's recordeded velocity
-        // this action's velocity should match the velocity simulation
-        // get velocity from action and parse values into a DecimalVector3
-        const v = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
-        if (!v.almostEqual(simulatedVelocity)) {
-          console.log('velocity mismatch at action index', index, v.toArray(), simulatedVelocity.toArray())
-          return false
-        }
+      // TEST 6 - Next Action === Simulated Action
+      const testSimulatedActionState = [...actions]
 
+      // for each action in the chain, simulate the next action and compare it to the next action in the chain. Omit the last action as there is nothing to compare it to.
+      const resultSimulatedAction = testSimulatedActionState.every((action, index) => {
         // if this is the last action, we're done
         if (index === LAST_INDEX) {
           return true
         }
+        // if this is not the last action, simulate the next action and compare it to the next action in the chain.
+        const nextAction = testSimulatedActionState[index + 1]
+        const nextActionState = extractActionState(nextAction)
+        const simulatedNextAction = simulateNextEvent(action, nextActionState.time)
 
-        // if this is not the last action, simulate velocity until next action
+        // compare the simulated action to the next action in the chain
+        // compare 'Cd' tag values
+        const decimal1 = simulatedNextAction.tags.find(getTag('Cd'))!.slice(1)
+        const decimal2 = nextAction.tags.find(getTag('Cd'))!.slice(1)
+        const decimalEqual = decimal1.every((v, i) => decimal2[i] === v)
+        // compare 'velocity' tag values
+        const velocity1 = simulatedNextAction.tags.find(getTag('velocity'))!.slice(1)
+        const velocity2 = nextAction.tags.find(getTag('velocity'))!.slice(1)
+        const velocityEqual = velocity1.every((v, i) => velocity2[i] === v)
+        // compare 'C' tag
+        const coordinateEqual = simulatedNextAction.tags.find(getTag('C'))![1] === nextAction.tags.find(getTag('C'))![1]
 
-        // 1. for drift eventns, add POW as velocity on quaternion
-        if (action.tags.find(getTagValue('A','drift'))) {
-          // quaternion from the action
-          const q = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
-          // add POW to velocity for drift event
-          const POW = countLeadingZeroesHex(action.id)
-          const newVelocity = new Decimal(2).pow(POW)
-          const bodyVelocity = new DecimalVector3(0, 0, newVelocity)
-          const addedVelocity = bodyVelocity.applyQuaternion(q)
-          simulatedVelocity = simulatedVelocity.add(addedVelocity)
-        }
-
-        // 2. simulate velocity for each frame up to and not including the next action.
-        // timestamp with ms
-        // NOTE: we have the getMillisecondsTimestampFromActions function but we aren't using it here because we want to validate that the millisecond tags are within valid ranges.
-        const start_ms = parseInt(action.tags.find(getTag('ms'))![1])
-        // ms must only be within 0-999
-        if (start_ms < 0 || start_ms > 999) return false
-        const start_ts = start_ms + action.created_at * 1000
-
-        // get next action so we can simulate velocity changes between this action and next action.
-        const nextAction = testVelocityState[index + 1]
-        // next action timestamp with ms
-        const end_ms = parseInt(nextAction.tags.find(getTag('ms'))![1])
-        if (end_ms < 0 || end_ms > 999) return false
-        const end_ts = end_ms + nextAction.created_at * 1000
-
-        // Using Math.floor() because drag is not applied to the last frame. The next action will calculate drag starting at its own timestamp. The time between the last frame and the next action is variable and will be less than a frame. Technically, operators are penalized with more drag over time if this duration is shorter, and optimizing the length of time between actions is a strategy for maximizing velocity. This is not a bug; to keep things simple we restart the frame clock with each new action, which has the side effect of making this overlap possible.
-        let iterations = Math.floor((end_ts - start_ts) / FRAME)
-        while (iterations--) {
-          simulatedVelocity = simulatedVelocity.multiplyScalar(DRAG)
-        }
-        // done simulating velocity. we'll see if it matches the next action in the next iteration of the loop.
-        return true
+        return decimalEqual && coordinateEqual && velocityEqual
       })
-      tests.push(resultVelocity)
-      if (!resultVelocity) {
-        console.warn('invalid velocity', resultVelocity)
-      }
+
+      tests.push(resultSimulatedAction)
     }
   } catch (error) {
     console.error(error)

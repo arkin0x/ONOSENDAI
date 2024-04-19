@@ -15,6 +15,10 @@ export class DecimalVector3 {
     this.z = new Decimal(z)
   }
 
+  clone(): DecimalVector3 {
+    return new DecimalVector3(this.x, this.y, this.z)
+  }
+
   fromArray(arr: (string|number|Decimal)[]): DecimalVector3 {
     if (arr.length !== 3) {
       throw new Error('Array must contain exactly three elements')
@@ -26,7 +30,7 @@ export class DecimalVector3 {
   }
 
   toArray(): [string, string, string] {
-    return [this.x.toString(), this.y.toString(), this.z.toString()]
+    return [this.x.toFixed(8), this.y.toFixed(8), this.z.toFixed(8)]
   }
 
   applyQuaternion(q: THREE.Quaternion) {
@@ -45,22 +49,12 @@ export class DecimalVector3 {
     const iz = qw.times(z).plus(qx.times(y)).minus(qy.times(x))
     const iw = qx.neg().times(x).minus(qy.times(y)).minus(qz.times(z))
 
-    // const ix = qw * x + qy * z - qz * y
-    // const iy = qw * y + qz * x - qx * z
-    // const iz = qw * z + qx * y - qy * x
-    // const iw = -qx * x - qy * y - qz * z
-
     // calculate result * inverse quat
     this.x = ix.times(qw).plus(iw.times(qx.neg())).plus(iy.times(qz.neg())).minus(iz.times(qy.neg()))
     this.y = iy.times(qw).plus(iw.times(qy.neg())).plus(iz.times(qx.neg())).minus(ix.times(qz.neg()))
     this.z = iz.times(qw).plus(iw.times(qz.neg())).plus(ix.times(qy.neg())).minus(iy.times(qx.neg()))
 
-    // this.x = ix * qw + iw * -qx + iy * -qz - iz * -qy
-    // this.y = iy * qw + iw * -qy + iz * -qx - ix * -qz
-    // this.z = iz * qw + iw * -qz + ix * -qy - iy * -qx
-
     return this
-
   }
 
   add (v: DecimalVector3) {
@@ -96,6 +90,6 @@ export class DecimalVector3 {
   }
 
   toVector3(): THREE.Vector3 {
-    return new THREE.Vector3(parseFloat(this.x.toString()), parseFloat(this.y.toString()), parseFloat(this.z.toString()))
+    return new THREE.Vector3(parseFloat(this.x.toFixed(8)), parseFloat(this.y.toFixed(8)), parseFloat(this.z.toFixed(8)))
   }
 }

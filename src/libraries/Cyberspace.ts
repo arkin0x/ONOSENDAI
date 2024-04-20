@@ -269,7 +269,7 @@ export const isGenesisAction = (action: Event): boolean => {
 }
 
 // get the state from a cyberspace action
-export const extractActionState = (action: Event|UnsignedEvent): {position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event|UnsignedEvent): {position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation?: THREE.Quaternion, time: Time} => {
   // get position
   const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
   // add fractional position if present
@@ -287,7 +287,11 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
   const velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
   // get rotation
   // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
-  const rotation = new THREE.Quaternion().fromArray(action.tags.find(getTag('quaternion'))!.slice(1).map(parseFloat))
+  const quaternionTag = action.tags.find(getTag('quaternion'))
+  let rotation
+  if (quaternionTag) {
+    rotation = new THREE.Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
+  }
   const time = getTime(action)
   return {position, sectorPosition, plane, velocity, rotation, time}
 }
@@ -302,7 +306,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // calculate simulation from startEvent to toTime
   const frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
 
-  console.log('frames', frames, startTimestamp)
+  // console.log('frames', frames, startTimestamp)
 
   if (frames === 0) {
     // no need to simulate if the time difference is less than a frame.

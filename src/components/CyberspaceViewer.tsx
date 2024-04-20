@@ -8,6 +8,7 @@ import { SectorManager } from './SectorManager'
 import { Controls } from './Controls'
 import { Vector3 } from 'three'
 import { useFrame } from '@react-three/fiber'
+import { Hud } from './Hud/Hud'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -20,13 +21,20 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
-      <Canvas style={style}>
-        <ambientLight intensity={2.0} />
-        <SectorManager />
-        <Avatar pubkey={identity.pubkey} />
-        {/* <Controls /> */}
-        <TestMesh />
-      </Canvas>
+      <div id="cyberspace">
+        <Canvas style={style}>
+          <ambientLight intensity={2.0} />
+          <SectorManager />
+          <Avatar pubkey={identity.pubkey} />
+          {/* <Controls /> */}
+          {/* <TestMesh /> */}
+        </Canvas>
+      </div>
+      <div id="cyberspace-hud">
+        <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
+          <Hud/>
+        </Canvas>
+      </div>
     </div>
   )
 }

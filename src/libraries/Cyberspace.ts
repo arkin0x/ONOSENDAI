@@ -269,9 +269,11 @@ export const isGenesisAction = (action: Event): boolean => {
 }
 
 // get the state from a cyberspace action
-export const extractActionState = (action: Event|UnsignedEvent): {position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation?: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation?: THREE.Quaternion, time: Time} => {
   // get position
-  const position = getVector3FromCyberspaceCoordinate(action.tags.find(getTag('C'))![1])
+  const cyberspaceCoordinate = action.tags.find(getTag('C'))![1]
+  const sectorId = getSectorId(getSectorFromCoordinate(cyberspaceCoordinate))
+  const position = getVector3FromCyberspaceCoordinate(cyberspaceCoordinate)
   // add fractional position if present
   const positionDecimalsTag = action.tags.find(getTag('Cd'))
   if (positionDecimalsTag) {
@@ -293,7 +295,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {position: Deci
     rotation = new THREE.Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
   }
   const time = getTime(action)
-  return {position, sectorPosition, plane, velocity, rotation, time}
+  return {cyberspaceCoordinate, sectorId, position, sectorPosition, plane, velocity, rotation, time}
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
@@ -386,7 +388,7 @@ export const getSectorFromCoordinate = (coordinate: string): DecimalVector3 => {
  * Render the sector identifier from a DecimalVector3 sector. This is used in the "S" tag for querying objects in a sector.
  */
 export const getSectorId = (sector: DecimalVector3): string => {
-  return sector.toArray().join('-')
+  return sector.toArray(0).join('-')
 }
 
 /**

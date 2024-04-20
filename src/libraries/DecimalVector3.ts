@@ -29,8 +29,13 @@ export class DecimalVector3 {
     return this
   }
 
-  toArray(): [string, string, string] {
-    return [this.x.toFixed(8), this.y.toFixed(8), this.z.toFixed(8)]
+  /**
+   * 
+   * @param fixed how many decimal places to round to
+   * @returns 
+   */
+  toArray(fixed: number = 8): [string, string, string] {
+    return [this.x.toFixed(fixed), this.y.toFixed(fixed), this.z.toFixed(fixed)]
   }
 
   applyQuaternion(q: THREE.Quaternion) {

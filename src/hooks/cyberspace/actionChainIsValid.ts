@@ -121,6 +121,7 @@ export const actionChainIsValid = (actions: Event[]): boolean => {
 
         // compare the simulated action to the next action in the chain
         // compare 'Cd' tag values
+        // FIXME: old events might not have Cd tags.
         const decimal1 = simulatedNextAction.tags.find(getTag('Cd'))!.slice(1)
         const decimal2 = nextAction.tags.find(getTag('Cd'))!.slice(1)
         const decimalEqual = decimal1.every((v, i) => decimal2[i] === v)

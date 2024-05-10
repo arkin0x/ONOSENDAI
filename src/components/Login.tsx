@@ -4,6 +4,7 @@ import { IdentityContext } from "../providers/IdentityProvider"
 import { IdentityContextType } from "../types/IdentityType"
 import { Spinner } from './Spinner'
 import { NDKContext } from "../providers/NDKProvider"
+import { defaultRelays } from "../libraries/Nostr"
 
 export const Login = () => {
   const [loading, setLoading] = useState(false)
@@ -16,12 +17,11 @@ export const Login = () => {
     const loadProfile = async () => {
       // retrieve profile
       const ndkUser = ndk.getUser({ pubkey: identity.pubkey })
-      const userRelays = ndkUser.relayUrls
+      // FIXME: actually get the user's relays.
       const profile = await ndkUser.fetchProfile()
-      console.log('Login: relays',userRelays)
+      profile!.created_at = (+new Date()).toString()
       setIdentity(profile)
-      setRelays(userRelays)
-      console.log('fresh:', profileLoaded(), identity.created_at)
+      setRelays(defaultRelays)
     }
     // console.log('Login: identity',identity)
     if (!identity) {

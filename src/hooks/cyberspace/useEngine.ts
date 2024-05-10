@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import * as THREE from 'three'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { Quaternion } from 'three'
 import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLastAction } from '../../libraries/Cyberspace'
 import { RelayObject } from '../../types/NostrRelay'
-import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
+import { updateHashpowerAllocation, setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
+import { AvatarContext } from '../../providers/AvatarContext'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -13,7 +14,7 @@ const NONCE_OFFSET = 1_000_000
 type EngineControls = {
   setGenesisAction: (genesis: Event) => void
   setLatestAction: (latest: Event) => void
-  drift: (throttle: number, quaternion: THREE.Quaternion) => void
+  drift: (throttle: number, quaternion: Quaternion) => void
   stopDrift: () => void
 }
 
@@ -21,25 +22,29 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   // FIXME logging relays so we don't get a warning
   // const [genesisAction, setGenesisAction] = useState<Event|null>(null)
   // const [latestAction, setLatestAction] = useState<Event|null>(null)
+  const {dispatchActionState} = useContext(AvatarContext)
   const [genesis, setGenesis] = useState<Event|null>(null)
   const [latest, setLatest] = useState<Event|null>(null)
   // const [chainHeight, setChainHeight] = useState<number>(0) // I don't know if we need this
   const throttleRef = useRef<number | null>(null)
-  const quaternionRef = useRef<THREE.Quaternion | null>(null)
+  const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
 
-    useEffect(() => {
-      // console.log('Engine: useEffect', movementWorkerMessage)
-      setWorkerCallback('movement', movementWorkerMessage)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    },[])
+  // initialize engine
+  useEffect(() => {
+    updateHashpowerAllocation()
+    setWorkerCallback('movement', movementWorkerMessage)
+    // setWorkerCallback('observation', observationWorkerMessage)
+    // setWorkerCallback('action', actionWorkerMessage)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[])
 
-  async function drift(throttle: number, quaternion: THREE.Quaternion): Promise<void> {
-    console.log('drift', throttle, quaternion.toArray().join(','))
+  async function drift(throttle: number, quaternion: Quaternion): Promise<void> {
+    // console.log('drift', throttle, quaternion.toArray().join(','))
     // if nothing else has changed, we don't need to do anything
     if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
       // Arguments haven't changed, so do nothing
-      console.log('Engine:drift: noop (state has not changed)')
+      // console.log('Engine:drift: noop (state has not changed)')
       return
     }
 
@@ -77,6 +82,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function triggerMovementWorkers(action: UnsignedEvent): void {
+    console.log('workers starting')
     const workers = workzone['movement']
     const actionCopySerialized = serializeEvent(action!)
     const nonceBounds = getNonceBounds(actionCopySerialized)
@@ -106,6 +112,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function stopMovementWorkers() {
+    console.log('workers stopped')
     const workers = workzone['movement']
     workers.forEach((worker) => {
       worker.postMessage({
@@ -135,6 +142,8 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
     const publishedAction = await publishEvent(action, relays) // FIXME we would normally pass in `relays` here
     setLatestAction(publishedAction)
+    // save the action to the AvatarContext
+    dispatchActionState({type: 'push', actions: [publishedAction], pubkey: action.pubkey})
   }
 
   function setGenesisAction(genesis: Event) {

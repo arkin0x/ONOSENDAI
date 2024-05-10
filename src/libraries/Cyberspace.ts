@@ -270,6 +270,8 @@ export const isGenesisAction = (action: Event): boolean => {
 
 // get the state from a cyberspace action
 export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation?: THREE.Quaternion, time: Time} => {
+// debug
+  // console.log('extractActionState: action', action)
   // get position
   const cyberspaceCoordinate = action.tags.find(getTag('C'))![1]
   const sectorId = getSectorId(getSectorFromCoordinate(cyberspaceCoordinate))

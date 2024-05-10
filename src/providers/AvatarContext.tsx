@@ -44,12 +44,22 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     return aTs - bTs
   })
 
-  // dedupe actions
-  newState[action.pubkey] = newState[action.pubkey].filter((action, index, self) =>
-    index === self.findIndex((t) => (
-      t.id === action.id
-    ))
-  )
+  // dedupe actions and prefer signed events
+  /////// gpt code below
+  newState[action.pubkey] = newState[action.pubkey].reduce((acc, currentAction) => {
+    const existingAction = acc.find((action) => action.id === currentAction.id)
+
+    if (!existingAction) {
+      return [...acc, currentAction]
+    }
+
+    if (currentAction.sig && !existingAction.sig) {
+      return [...acc.filter((action) => action.id !== currentAction.id), currentAction]
+    }
+
+    return acc
+  }, [] as Event[])
+  //////////// gpt code above
 
   return newState
 }

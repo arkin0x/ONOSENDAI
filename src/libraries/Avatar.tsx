@@ -19,7 +19,10 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   const {simulatedState} = useContext(AvatarContext)
 
-  if (!simulatedState[pubkey]) return null
+  if (!simulatedState[pubkey]) {
+    console.log('Avatar: no simulated state for', pubkey)
+    return null
+  }
 
   const {sectorPosition, plane, velocity, rotation, time} = extractActionState(simulatedState[pubkey])
 

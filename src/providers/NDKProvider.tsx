@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext } from "react"
 import NDK, { NDKNip07Signer } from '@nostr-dev-kit/ndk'
+import { defaultRelays, getRelayList } from "../libraries/Nostr"
 
 type NDKContextType = NDK | null 
 
@@ -17,7 +18,7 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
       const signer = new NDKNip07Signer(3000)
       const ndkRef = new NDK({
         signer,
-        explicitRelayUrls: ["wss://cyberspace.nostr1.com"]
+        explicitRelayUrls: getRelayList(defaultRelays)
       })
       await ndkRef.connect()
       setNDK(ndkRef)

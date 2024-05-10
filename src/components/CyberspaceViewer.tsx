@@ -26,7 +26,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <ambientLight intensity={2.0} />
           <SectorManager />
           <Avatar pubkey={identity.pubkey} />
-          {/* <Controls /> */}
+          <Controls />
           {/* <TestMesh /> */}
         </Canvas>
       </div>

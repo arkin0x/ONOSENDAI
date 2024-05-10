@@ -11,7 +11,7 @@ import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { actionChainIsValid } from "../cyberspace/actionChainIsValid"
 import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
-import { getTime, simulateNextEvent } from "../../libraries/Cyberspace";
+import { getTime, isGenesisAction, simulateNextEvent } from "../../libraries/Cyberspace";
 import { usePreviousValue } from "../usePreviousValue";
 import { Time } from "../../types/Cyberspace"
 
@@ -38,8 +38,8 @@ export const useActionChain = (pubkey: string) => {
    * Initialize: set up subscription for latest action and get genesisId from it.
    */
   useEffect(() => {
-    console.log('useActionChain run')
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
+    console.log('useActionChain run')
     dispatchActionState({type: 'reset', pubkey: pubkey})
 
     // define subscription for latest action only.
@@ -52,21 +52,27 @@ export const useActionChain = (pubkey: string) => {
      * @returns the genesis event ID of the action chain for the most recent event
      */
     const getGenesisId = (latestAction: Event) => {
+      console.log('set genesis id')
       try {
-        const g = latestAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1]
-        if (g) {
-          // we got a genesis event id
-          // is the current genesisId null?
-          if (genesisId !== g) {
-            // the genesisId changed. This triggers a re-initialization of the avatar because genesisId is a dependency of this useEffect.
-            setGenesisId(g)
+        const isGen = isGenesisAction(latestAction) // check if the action is a genesis action
+        if(isGen) setGenesisId(latestAction.id) // if it is, set the genesisId
+        else {
+          // the action is not a genesis action. Check if it refers to a genesis tag.
+          const g = latestAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1]
+          if (g) {
+            // we got a genesis event id
+            // is the current genesisId null?
+            if (genesisId !== g) {
+              // the genesisId changed. This triggers a re-initialization of the avatar because genesisId is a dependency of this useEffect.
+              setGenesisId(g)
+            } else {
+              // the genesisId is the same. noop.
+            }
+            return g // return the id
           } else {
-            // the genesisId is the same. noop.
+            // FIXME: recover from this error
+            return null // failed to get genesis ID
           }
-          return g // return the id
-        } else {
-          // FIXME: recover from this error
-          return null // failed to get genesis ID
         }
       } catch (e) {
         console.error('Error getting genesis tag', e)
@@ -175,9 +181,12 @@ export const useActionChain = (pubkey: string) => {
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
 
+    console.log('simulating', genesisId)
+
     // function definition for simulating and dispatching the next event
     const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
       const simulatedEvent = await simulateNextEvent(action, now)
+      console.log('simulatedEvent', simulatedEvent)
       dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
     }
 
@@ -186,10 +195,12 @@ export const useActionChain = (pubkey: string) => {
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
       if (!prevActionChainState || prevActionChainState.length < actionChainState.length){ //  if this is the first update OR the action chain has been updated beyond where it was...
+        console.log('sim: first update')
         // the action chain has been updated. simulate the next event using this.
         // Note: if the time diff between mostRecentAction and now is less than 1 frame, this will simply return mostRecentAction.
         simulateAndDispatch(mostRecentAction, now)
       } else {
+        console.log('sim: subsequent updates')
         // simulate with previously simulated action
         simulateAndDispatch(lastSimulated, now)
       }

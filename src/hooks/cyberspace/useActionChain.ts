@@ -39,7 +39,6 @@ export const useActionChain = (pubkey: string) => {
    */
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    console.log('useActionChain run')
     dispatchActionState({type: 'reset', pubkey: pubkey})
 
     // define subscription for latest action only.
@@ -52,7 +51,6 @@ export const useActionChain = (pubkey: string) => {
      * @returns the genesis event ID of the action chain for the most recent event
      */
     const getGenesisId = (latestAction: Event) => {
-      console.log('set genesis id')
       try {
         const isGen = isGenesisAction(latestAction) // check if the action is a genesis action
         if(isGen) setGenesisId(latestAction.id) // if it is, set the genesisId
@@ -181,12 +179,9 @@ export const useActionChain = (pubkey: string) => {
   useEffect(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
 
-    console.log('simulating', genesisId)
-
     // function definition for simulating and dispatching the next event
     const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
       const simulatedEvent = await simulateNextEvent(action, now)
-      console.log('simulatedEvent', simulatedEvent)
       dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
     }
 
@@ -195,12 +190,10 @@ export const useActionChain = (pubkey: string) => {
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
       if (!prevActionChainState || prevActionChainState.length < actionChainState.length){ //  if this is the first update OR the action chain has been updated beyond where it was...
-        console.log('sim: first update')
         // the action chain has been updated. simulate the next event using this.
         // Note: if the time diff between mostRecentAction and now is less than 1 frame, this will simply return mostRecentAction.
         simulateAndDispatch(mostRecentAction, now)
       } else {
-        console.log('sim: subsequent updates')
         // simulate with previously simulated action
         simulateAndDispatch(lastSimulated, now)
       }

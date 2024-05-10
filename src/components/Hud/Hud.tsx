@@ -17,8 +17,6 @@ export const Hud = () => {
 
   const {cyberspaceCoordinate, sectorId, sectorPosition, plane, velocity, rotation, time} = extractActionState(simulatedState[pubkey])
 
-  console.log(sectorId)
-
   const x = 1
   const y = 1
   const r = Math.PI / 6

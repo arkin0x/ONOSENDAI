@@ -1,13 +1,8 @@
-import * as THREE from "three"
-import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { extractActionState, getMillisecondsTimestampFromAction, getPlaneFromAction, simulateNextEvent } from "../../libraries/Cyberspace"
 import { getTag, getTagValue } from "../../libraries/Nostr"
-import { DecimalVector3 } from "../../libraries/DecimalVector3"
-import Decimal from "decimal.js"
 import { Event } from "nostr-tools"
 
 export const actionChainIsValid = (actions: Event[]): boolean => {
-  // console.log('actionChainIsValid',actions.length)
   const tests = []
 
   // wrap the whole thing in a try; any errors will invalidate the chain, although this could lead to false invalidations if the code is wrong but the chain is right... 🤔 #TODO

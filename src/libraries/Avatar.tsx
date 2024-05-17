@@ -20,7 +20,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   const {simulatedState} = useContext(AvatarContext)
 
   if (!simulatedState[pubkey]) {
-    console.log('Avatar: no simulated state for', pubkey)
+    console.log('Avatar: no simulated state for', pubkey,". Not rendering.")
     return null
   }
 

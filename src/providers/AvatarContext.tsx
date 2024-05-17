@@ -17,6 +17,10 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
 
   const newState = {...state} as AvatarActionState
 
+  // debug time
+  const t = +new Date()
+  console.log(t, 'old avatar state', state[action.pubkey])
+
   // check for action's pubkey in state and initialize if necessary
   if (newState[action.pubkey] === undefined) {
     newState[action.pubkey] = [] as Event[]
@@ -26,12 +30,15 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
 
   if (action.type === 'reset'){
     newState[action.pubkey] = [] as Event[]
+    console.log(t, 'reset avatar state', newState[action.pubkey])
     return newState
   }
   if (action.type === 'unshift') {
+    console.log(t, 'unshift avatar state')
     newState[action.pubkey] = [...action.actions, ...avatarActions] as Event[]
   }
   if (action.type === 'push') {
+    console.log(t, 'push avatar state')
     newState[action.pubkey] = [...avatarActions, ...action.actions] as Event[]
   }
 
@@ -45,22 +52,28 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   })
 
   // dedupe actions and prefer signed events
-  /////// gpt code below
   newState[action.pubkey] = newState[action.pubkey].reduce((acc, currentAction) => {
+    // Check if the current action already exists in the accumulator
     const existingAction = acc.find((action) => action.id === currentAction.id)
 
+    // If the current action doesn't exist in the accumulator, add it
     if (!existingAction) {
       return [...acc, currentAction]
     }
 
+    // The current action exists in the accumulator.
+    console.log('duplicate action:', currentAction.id.substring(0,8))
+
+    // If the current action is signed and the existing action is not, replace the existing action with the current action
     if (currentAction.sig && !existingAction.sig) {
       return [...acc.filter((action) => action.id !== currentAction.id), currentAction]
     }
 
+    // If none of the above conditions are met, keep the existing action in the accumulator
     return acc
   }, [] as Event[])
-  //////////// gpt code above
 
+  console.log(t,'new avatar state', newState[action.pubkey])
   return newState
 }
 

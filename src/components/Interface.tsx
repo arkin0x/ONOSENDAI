@@ -20,10 +20,10 @@ export const Interface = () => {
     switch (uiState) {
       case UIState.cyberspace:
         return <CyberspaceViewer/>
-      case UIState.telemetry:
-        return <TelemetryDashboard/>
-      case UIState.testing:
-        return <Testing/>
+      // case UIState.telemetry:
+      //   return <TelemetryDashboard/>
+      // case UIState.testing:
+      //   return <Testing/>
       default:
         break
     }

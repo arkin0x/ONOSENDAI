@@ -8,17 +8,19 @@ import { Event, UnsignedEvent } from 'nostr-tools'
 import { NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
-import { actionChainIsValid } from "../cyberspace/actionChainIsValid"
 import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
 import { getTime, isGenesisAction, simulateNextEvent } from "../../libraries/Cyberspace";
 import { usePreviousValue } from "../usePreviousValue";
 import { Time } from "../../types/Cyberspace"
+import { validateActionChain } from "./validateActionChain"
 
 export const useActionChain = (pubkey: string) => {
 
   // get NDK, the library used to subscribe to relays and fetch events
   const ndk = useContext(NDKContext)
+
+  const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
 
   const {actionState, dispatchActionState, simulatedState, dispatchSimulatedState} = useContext(AvatarContext)
 
@@ -38,7 +40,9 @@ export const useActionChain = (pubkey: string) => {
    * Initialize: set up subscription for latest action and get genesisId from it.
    */
   useEffect(() => {
+    if (runInitializeOnce) return // this effect should only run once
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
+    setRunInitializeOnce(true)
     dispatchActionState({type: 'reset', pubkey: pubkey})
 
     // define subscription for latest action only.
@@ -84,6 +88,7 @@ export const useActionChain = (pubkey: string) => {
      * @param latestAction an action received from NDK
      */
     const onReceiveLatestAction = (latestAction: Event) => {
+      console.log('Receive action:', latestAction.id, 'for pubkey:', pubkey)
       // 2. on receive, get genesis id from action
       const action = {
         type: 'push',
@@ -102,7 +107,9 @@ export const useActionChain = (pubkey: string) => {
       // Pseudocode: Clean up any subscriptions or resources
       latestAction.stop()
     }
-  }, [ndk, pubkey, genesisId, dispatchActionState])
+  // we only want to run this once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ndk])
 
   /** 
    * Gather action history for genesisId once it is set by the previous useEffect.
@@ -131,7 +138,6 @@ export const useActionChain = (pubkey: string) => {
       const getGenesisEvent = () => {
         // get genesis event
         ndk.fetchEvent(genesisId).then(genesisEvent => {
-          console.log('FETCHING GENESIS EVENT', genesisEvent)
           const action = {
             type: 'unshift',
             pubkey: pubkey,
@@ -139,6 +145,7 @@ export const useActionChain = (pubkey: string) => {
           } as AvatarActionDispatched
           dispatchActionState(action)
           setHistoryComplete(true)
+          console.log('Received all actions for current chain.')
         })
       }
 
@@ -161,11 +168,11 @@ export const useActionChain = (pubkey: string) => {
   useEffect(() => {
     if (historyComplete){
       // TODO: 
-      const isValid = actionChainIsValid(actionChainState)
+      const isValid = validateActionChain(actionChainState)
       if (isValid) {
-        console.log('action chain is valid')
+        // console.log('action chain is valid')
       } else {
-        console.error('action chain is invalid')
+        // console.error('action chain is invalid')
         // TODO: publish a new genesis event.
       }
     }

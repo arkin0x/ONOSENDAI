@@ -20,7 +20,7 @@ export const Controls = () => {
   const [throttle, setThrottle] = useState<number>(5)
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
 
-  console.log('actions',actions)
+  // console.log('actions',actions)
 
   // get the current rotation from the most recent action state and set the currentRotationRef
   useEffect(() => {

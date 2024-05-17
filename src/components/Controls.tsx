@@ -5,6 +5,21 @@ import { useEngine } from '../hooks/cyberspace/useEngine.ts'
 import { Quaternion } from 'three'
 import { AvatarContext } from '../providers/AvatarContext.tsx'
 import { extractActionState } from '../libraries/Cyberspace.ts'
+import { useFrame } from '@react-three/fiber'
+
+type ControlState = {
+  forward: boolean
+  forwardReleased: boolean // true for 1 frame after the forward key is set to false
+  reverse: boolean
+  reverseReleased: boolean
+}
+
+const initialControlState: ControlState = {
+  forward: false,
+  forwardReleased: false,
+  reverse: false,
+  reverseReleased: false,
+}
 
 /**
  * The <Controls> component sets up HID input listeners for avatar control and thermodynamic posture control. Input is translated into commands dispatched to Engine for mining and camera control. 
@@ -17,10 +32,11 @@ export const Controls = () => {
   const engine = useEngine(pubkey, relays)
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
+  const controlsRef = useRef<ControlState>(initialControlState)
   const throttleRef = useRef<number>(5)
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
 
-  // console.log('actions',actions)
+  console.log('/// CONTROLS RERUN')
 
   // get the current rotation from the most recent action state and set the currentRotationRef
   useEffect(() => {
@@ -45,51 +61,72 @@ export const Controls = () => {
 
   // set up controls for avatar
   // on mount, set up listener for W key to go forward. On unmount, remove listener.
-  const handleForward = (e: KeyboardEvent) => {
-    // console.log(e)
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.code === "KeyW" || e.key === "ArrowUp") {
-      // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-      engine.drift(throttleRef.current, currentRotationRef.current)
+      controlsRef.current.forward = true
+    } else if (e.code === "KeyS" || e.key === "ArrowDown") {
+      controlsRef.current.reverse = true
     }
   }
-  const handleReverse = (e: KeyboardEvent) => {
-    if (e.code === "KeyS" || e.key === "ArrowDown") {
-      // mine drift events in reverse
-      console.log('reverse drift')
-      engine.drift(throttleRef.current, currentRotationRef.current.clone().invert())
+
+  const handleKeyUp = (e: KeyboardEvent) => {
+    if (e.code === "KeyW" || e.key === "ArrowUp") {
+      controlsRef.current.forward = false
+      controlsRef.current.forwardReleased = true
+    } else if (e.code === "KeyS" || e.key === "ArrowDown") {
+      controlsRef.current.reverse = false
+      controlsRef.current.reverseReleased = true
     }
   }
-  const handleInactive = () => {
-    console.log('stop drift')
-    engine.stopDrift()
-  }
-  // set handler for throttle change via scroll wheel
+
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault()
     console.log('wheel: ', throttleRef.current)
     if (e.deltaY > 0) {
-      throttleRef.current = Math.min(10,throttleRef.current + 1) // Use a function to update state based on previous state
+      throttleRef.current = Math.min(10, throttleRef.current + 1) // Use a function to update state based on previous state
     } else {
-      throttleRef.current = Math.max(0,throttleRef.current - 1)
+      throttleRef.current = Math.max(0, throttleRef.current - 1)
     }
   }
+
   // add listeners for the controls
   useEffect(() => {
-    window.addEventListener("keydown", handleForward)
-    window.addEventListener("keydown", handleReverse)
-    window.addEventListener("keyup", handleInactive)
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
     window.addEventListener("wheel", handleWheel)
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
     return () => {
-      window.removeEventListener("keydown", handleForward)
-      window.removeEventListener("keydown", handleReverse)
-      window.removeEventListener("keyup", handleInactive)
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
       window.removeEventListener("wheel", handleWheel)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // add useFrame to take actions based on controlsRef each frame
+  useFrame(() => {
+    // if forward key is pressed, drift forward
+    if (controlsRef.current.forward) {
+      engine.drift(throttleRef.current, currentRotationRef.current)
+    } else
+    // if forward key is up and reverse key is pressed, drift in reverse
+    if (controlsRef.current.reverse) {
+      engine.drift(throttleRef.current, currentRotationRef.current.clone().invert())
+    }
+
+    // reset released flags
+    // if forward key is released, stop drifting
+    if (!controlsRef.current.forward && controlsRef.current.forwardReleased) {
+      engine.stopDrift()
+      controlsRef.current.forwardReleased = false
+    }
+    // if reverse key is released, stop drifting
+    if (!controlsRef.current.reverse && controlsRef.current.reverseReleased) {
+      engine.stopDrift()
+      controlsRef.current.reverseReleased = false
+    }
+  })
 
   return null
 }

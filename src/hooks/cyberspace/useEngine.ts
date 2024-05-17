@@ -127,7 +127,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   const movementWorkerMessage = (msg: MessageEvent) => {
     // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
-    // console.log('Engine: movementWorkerMessage: ',msg)
+    console.log('Engine: movementWorkerMessage: ',msg)
     if (msg.data.status === 'pow-target-found' && msg.data.chainHeight.current === chainHeight.current) {
       console.log('Engine: movementWorkerMessage: pow-target-found')
       chainHeight.current += 1 // now any other mined events will be ignored because their chainHeight is lower; now we won't fork our chain.

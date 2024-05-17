@@ -229,7 +229,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   } as UnsignedEvent
 }
 
-export const nowIsAfterLastAction = (latestAction: Event): boolean => {
+export const nowIsAfterLatestAction = (latestAction: Event): boolean => {
   const now = getTime()
   try {
     // getMilliseconds is unsafe because it relies on tags that may not exist.

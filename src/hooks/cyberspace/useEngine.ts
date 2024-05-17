@@ -1,12 +1,13 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Quaternion } from 'three'
-import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLastAction } from '../../libraries/Cyberspace'
+import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction } from '../../libraries/Cyberspace'
 import { RelayObject } from '../../types/NostrRelay'
-import { updateHashpowerAllocation, setWorkerCallback, workzone } from '../../libraries/WorkerManager'
+import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { AvatarContext } from '../../providers/AvatarContext'
+import { usePreviousValue } from '../usePreviousValue'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -29,6 +30,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
+  const restartMinersRef = useRef<boolean>(false)
 
   // debug reruns
   console.log('/// ENGINE RERUN', !!genesis, !!latest)
@@ -45,8 +47,8 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   async function drift(throttle: number, quaternion: Quaternion): Promise<void> {
     // console.log('drift', throttle, quaternion.toArray().join(','))
     // if nothing else has changed, we don't need to do anything
-    if (throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
-      // Arguments haven't changed, so do nothing
+    if (restartMinersRef.current === false && throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
+      // We don't need to restart the miners, and the arguments haven't changed, so do nothing.
       // console.log('Engine:drift: noop (state has not changed)')
       return
     }
@@ -61,6 +63,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     }
 
     // Check if there is a latestAction
+    // FIXME: is this a race condition? If we haven't received events from relays when this loads, it publishes a new action chain???
     if (!latest) {
       // No latestAction, so create and publish a genesisAction
       const genesisAction = createUnsignedGenesisAction(pubkey)
@@ -70,10 +73,11 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
       setLatestAction(genesisActionPublished)
     } else if (genesis && latest) {
       // determine if now is after the latestAction's created_at+ms
-      if (nowIsAfterLastAction(latest)) {
+      if (nowIsAfterLatestAction(latest)) {
         // There is a latestAction, so create a new event to mine and dispatch it to the movement workers
         const action = await createUnsignedDriftAction(pubkey, throttle, quaternion, genesis, latest)
         triggerMovementWorkers(action)
+        restartMinersRef.current = false
       } else {
         console.warn('Engine:drift: latestAction is not old enough to drift from')
       }
@@ -82,6 +86,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   function stopDrift(): void {
     stopMovementWorkers()
+    restartMinersRef.current = true
   }
 
   function triggerMovementWorkers(action: UnsignedEvent): void {
@@ -147,6 +152,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     setLatestAction(publishedAction)
     // save the action to the AvatarContext
     dispatchActionState({type: 'push', actions: [publishedAction], pubkey: action.pubkey})
+    restartMinersRef.current = true
   }
 
   function setGenesisAction(genesis: Event) {

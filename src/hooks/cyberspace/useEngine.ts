@@ -30,9 +30,12 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
 
+  // debug reruns
+  console.log('/// ENGINE RERUN', !!genesis, !!latest)
+
   // initialize engine
   useEffect(() => {
-    updateHashpowerAllocation()
+    console.log('// Engine initialized')
     setWorkerCallback('movement', movementWorkerMessage)
     // setWorkerCallback('observation', observationWorkerMessage)
     // setWorkerCallback('action', actionWorkerMessage)

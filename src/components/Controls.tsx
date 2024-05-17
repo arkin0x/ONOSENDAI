@@ -17,7 +17,7 @@ export const Controls = () => {
   const engine = useEngine(pubkey, relays)
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
-  const [throttle, setThrottle] = useState<number>(5)
+  const throttleRef = useRef<number>(5)
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
 
   // console.log('actions',actions)
@@ -28,6 +28,8 @@ export const Controls = () => {
       // if no action state, set currentRotation to identity rotation
       currentRotationRef.current = new Quaternion()
     } else {
+      // debug
+      console.log('controls set genesis and latest action')
       // set genesis action
       engine.setGenesisAction(actions[0])
       // set latest action
@@ -42,44 +44,43 @@ export const Controls = () => {
   },[actions])
 
   // set up controls for avatar
+  // on mount, set up listener for W key to go forward. On unmount, remove listener.
+  const handleForward = (e: KeyboardEvent) => {
+    // console.log(e)
+    if (e.code === "KeyW" || e.key === "ArrowUp") {
+      // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
+      engine.drift(throttleRef.current, currentRotationRef.current)
+    }
+  }
+  const handleReverse = (e: KeyboardEvent) => {
+    if (e.code === "KeyS" || e.key === "ArrowDown") {
+      // mine drift events in reverse
+      console.log('reverse drift')
+      engine.drift(throttleRef.current, currentRotationRef.current.clone().invert())
+    }
+  }
+  const handleInactive = () => {
+    console.log('stop drift')
+    engine.stopDrift()
+  }
+  // set handler for throttle change via scroll wheel
+  const handleWheel = (e: WheelEvent) => {
+    e.preventDefault()
+    console.log('wheel: ', throttleRef.current)
+    if (e.deltaY > 0) {
+      throttleRef.current = Math.min(10,throttleRef.current + 1) // Use a function to update state based on previous state
+    } else {
+      throttleRef.current = Math.max(0,throttleRef.current - 1)
+    }
+  }
+  // add listeners for the controls
   useEffect(() => {
-    // on mount, set up listener for W key to go forward. On unmount, remove listener.
-    const handleForward = (e: KeyboardEvent) => {
-      // console.log(e)
-      if (e.code === "KeyW" || e.key === "ArrowUp") {
-        // while holding W, mine drift events until one is found of the current throttle or higher or the W key is released.
-        engine.drift(throttle, currentRotationRef.current)
-      }
-    }
-    const handleReverse = (e: KeyboardEvent) => {
-      if (e.code === "KeyS" || e.key === "ArrowDown") {
-        // mine drift events in reverse
-        console.log('reverse drift')
-        engine.drift(throttle, currentRotationRef.current.clone().invert())
-      }
-    }
-    const handleInactive = () => {
-      console.log('stop drift')
-      engine.stopDrift()
-    }
     window.addEventListener("keydown", handleForward)
     window.addEventListener("keydown", handleReverse)
     window.addEventListener("keyup", handleInactive)
-    
-    // set handler for throttle change via scroll wheel
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      if (e.deltaY > 0) {
-        setThrottle(Math.min(10,throttle + 1))
-      } else {
-        setThrottle(Math.max(0,throttle - 1))
-      }
-      console.log(throttle)
-    }
     window.addEventListener("wheel", handleWheel)
 
     // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
-
     return () => {
       window.removeEventListener("keydown", handleForward)
       window.removeEventListener("keydown", handleReverse)

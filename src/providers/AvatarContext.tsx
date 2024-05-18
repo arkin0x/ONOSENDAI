@@ -94,6 +94,9 @@ const initialSimulatedState: AvatarSimulatedState = {}
 const avatarSimulatedStateReducer = (state: AvatarSimulatedState, action: AvatarSimulatedDispatched): AvatarSimulatedState => {
   const newState = {...state} as AvatarSimulatedState
 
+  // warn for info
+  if(state[action.pubkey] === action.action) console.warn('duplicate event dispatched to simulated state')
+
   newState[action.pubkey] = action.action
 
   return newState

@@ -14,6 +14,7 @@ import { getTime, isGenesisAction, simulateNextEvent } from "../../libraries/Cyb
 import { usePreviousValue } from "../usePreviousValue";
 import { Time } from "../../types/Cyberspace"
 import { validateActionChain } from "./validateActionChain"
+import { getTag } from "../../libraries/Nostr"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -189,7 +190,12 @@ export const useActionChain = (pubkey: string) => {
     // function definition for simulating and dispatching the next event
     const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
       const simulatedEvent = await simulateNextEvent(action, now)
-      dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
+      if(simulatedEvent === action) {
+        // not enough time has passed to simulate a new event. schedule the next simulation.
+        setTimeout(() => simulateAndDispatch(action, getTime()), 1000)//1000/60+1)
+      } else {
+        dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
+      }
     }
 
     if (genesisId){ // if genesisId is set then we also have the most recent action, so we can simulate the future.
@@ -202,6 +208,7 @@ export const useActionChain = (pubkey: string) => {
         simulateAndDispatch(mostRecentAction, now)
       } else {
         // simulate with previously simulated action
+        console.log('\\\\\\ SIMULATING', lastSimulated.tags.find(getTag('C'))![1], now)
         simulateAndDispatch(lastSimulated, now)
       }
     }

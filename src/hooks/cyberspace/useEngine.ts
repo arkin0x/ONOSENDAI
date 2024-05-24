@@ -17,6 +17,8 @@ type EngineControls = {
   setLatestAction: (latest: Event) => void
   drift: (throttle: number, quaternion: Quaternion) => void
   stopDrift: () => void
+  freeze: () => void
+  respawn: () => void
 }
 
 export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
@@ -33,7 +35,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   const restartMinersRef = useRef<boolean>(false)
 
   // debug reruns
-  console.log('/// ENGINE RERUN', !!genesis, !!latest)
+  console.log('/// ENGINE RERUN', genesis?.id.substring(0,8), latest?.id.substring(0,8))
 
   // initialize engine
   useEffect(() => {
@@ -82,6 +84,27 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
         console.warn('Engine:drift: latestAction is not old enough to drift from')
       }
     }
+  }
+
+  async function respawn(): Promise<void> {
+    console.log('respawn')
+    console.log('/// Events', genesis?.id.substring(0,8), genesis, latest?.id.substring(0,8), latest)
+    stopDrift()
+    restartMinersRef.current = false
+    setGenesis(null)
+    setLatest(null)
+    const genesisAction = createUnsignedGenesisAction(pubkey)
+    const genesisActionPublished = await publishEvent(genesisAction, relays) // FIXME we would normally pass in `relays` here
+    setGenesisAction(genesisActionPublished)
+    setLatestAction(genesisActionPublished)
+    dispatchActionState({type: 'reset', pubkey: pubkey})
+    dispatchActionState({type: 'push', actions: [genesisActionPublished], pubkey: pubkey})
+  }
+
+  function freeze(): void {
+    // todo: implement freeze
+    // this will be like drift but will mine an action with a type of 'freeze' instead of 'drift'
+    // Freeze will be used to decay the avatar's velocity. The POW on the freeze event determines how much the velocity is decayed. This is useful because without freeze it would be nearly impossible to completely stop the avatar's movement.
   }
 
   function stopDrift(): void {
@@ -163,7 +186,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     setLatest(latest)
   }
 
-  return {setGenesisAction, setLatestAction, drift, stopDrift }
+  return {setGenesisAction, setLatestAction, drift, stopDrift, freeze, respawn }
 }
 
 

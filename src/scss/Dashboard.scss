@@ -1,197 +1,230 @@
-#dashboard {
-  text-align: left;
-  height: 100%;
-  overflow: hidden;
-  position: relative;
-}
-
-.messagebox {
-  display: flex;
-  flex-direction: column;
-  background-color: #111;
-  border-radius: 2rem;
-  margin: 2rem 0;
-  padding: 1rem;
-  position: relative;
-  .flexcol {
-    margin: 0.6rem 0;
-  }
-  label {
-    margin: 0 0 0.6rem 0;
-  }
-  input {
-    font-family: monospace;
-    border: 1px solid transparent;
-    transition: border-color 0.25s;
-    display: block;
-    padding: 0.6em 1.2em;
-    flex-grow: 1;
-  }
-}
-
-.profile {
-  border-radius: 1rem;
-  padding: 1rem;
-  min-height: 30vh;
-  $profile-size: max(10vw, 4rem);
-
-  .profile-picture {
-    min-width: $profile-size;
-    max-height: $profile-size;
-    border-radius: $profile-size;
-    margin-right: 1rem;
-  }
-  // .display-name {
-  // }
-  .about {
-    background-color: #000c;
-    border-radius: 1rem;
-    padding: 1rem;
-    white-space: break-spaces;
-  }
-}
-
-// .mapboxgl-map {
-// }
-.mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact {
-  background-color: transparent;
-  padding: 0.25rem;
-  button.mapboxgl-ctrl-attrib-button:not(:disabled):hover {
-    background-color: hsla(0,0%,100%,.5);
-  }
-}
-.mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact-show {
-  background-color: hsla(0,0%,100%,.5);
-  padding: 0.25rem;
-  font-size: 10px;
-  .mapboxgl-ctrl-attrib-button {
-    // position: static;
-    // float: right;
-    top: -2rem;
-  }
-}
-
-.mapboxgl-ctrl-attrib-button {
-  padding: 0;
-  margin: 0;
-  width: initial;
-  height: initial;
-}
-
-.mapboxgl-ctrl {
-  button:focus, button:focus-visible {
-    // background-color: hsla(0,0%,100%,.5);
-    outline: transparent;
-    box-shadow: none;
-  }
-}
-
-.mapboxgl-ctrl.mapboxgl-compact-show {
-  button.mapboxgl-ctrl-attrib-button {
-    // display: none;
-  }
-}
-
-.float-button-menu {
-  display: flex;
-  flex-direction: column-reverse;
-  position: absolute;
-  right: 0rem;
-  bottom: 2rem;
-}
-.circle-float-button {
-  display: block;
-  width: 4rem;
-  height: 4rem;
-  border-radius: 2rem;
-}
-
-// ---
-
 @import url('https://fonts.googleapis.com/css2?family=Sono:wght@200;500&display=swap');
 
-.dashboard {
-  display: flex;
-  flex-direction: row;
-  height: 100%;
-  overflow: hidden;
-  position: relative;
-  .panel {
-    color: #ccc;
-    font-family: 'Sono', monospace;
-    font-size: 16px;
-    font-weight: 200;
-    display: flex;
-    flex-direction: column;
-    background-color: #111;
-    border-radius: 2rem;
-    margin: 1rem 0.5rem;
-    padding: 1rem;
-    position: relative;
-    min-width: 20svw;
-    span {
-      display: block;
-    }
-    span > span {
-      display: inline;
-    }
-    .heavy {
-      font-weight: 500;
-    }
-    .highlight {
-      color: yellow;
-    }
-    .no-break {
-      // white-space: nowrap;
-    }
-    .tag-value {
-      margin-left: 0.5rem;
-      white-space: nowrap;
-      vertical-align: text-top;
-      // start tag on a new line
-      // display: block;
-      // text-align: right;
-      &.prevent-overflow {
-        display: inline-block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 16rem;
-      }
-    }
-    .flexcol {
-      margin: 0.6rem 0;
-    }
-    label {
-      margin: 0 0 0.6rem 0;
-    }
-    input {
-      font-family: monospace;
-      border: 1px solid transparent;
-      transition: border-color 0.25s;
-      display: block;
-      padding: 0.6em 1.2em;
-      flex-grow: 1;
-    }
-    button {
-      background: #2d1086;
-      border-radius: 0.5rem;
-      border-style: none;
-      color: #ccc;
-      cursor: pointer;
-      font-family: 'Sono', monospace;
-      font-size: 16px;
-      font-weight: 500;
-      margin: 0.25rem 0.125rem;
-      padding: 0.5rem;
-      &:disabled {
-        animation: none;
-        background: #111;
-        color: #444;
-      }
-    }
-  }
-  h1, h2, h3, h4, h5, h6 {
+#telemetry-dashboard {
+  background-color: #111c;
+  color: #eee;
+  font-family: 'Sono', monospace;
+  height: 50svh;
+  left: 0;
+  padding: 1em;
+  position: absolute;
+  top: 0;
+  width: 100%;
+  h1 {
     font-size: 20px;
     margin: 0 0 0.5rem 0;
   }
 }
+
+#actions {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin: 1rem 0;
+}
+
+.action {
+  .block {
+    border: 3px solid #eee;
+    width: 3rem;
+    height: 3rem;
+    margin: auto auto;
+    overflow: hidden;
+    .data {
+      display: inline;
+      font-size: 10px;
+      overflow-wrap: break-word;
+    }
+  }
+  .genesis {
+  }
+}
+
+// .messagebox {
+//   display: flex;
+//   flex-direction: column;
+//   background-color: #111;
+//   border-radius: 2rem;
+//   margin: 2rem 0;
+//   padding: 1rem;
+//   position: relative;
+//   .flexcol {
+//     margin: 0.6rem 0;
+//   }
+//   label {
+//     margin: 0 0 0.6rem 0;
+//   }
+//   input {
+//     font-family: monospace;
+//     border: 1px solid transparent;
+//     transition: border-color 0.25s;
+//     display: block;
+//     padding: 0.6em 1.2em;
+//     flex-grow: 1;
+//   }
+// }
+
+// .profile {
+//   border-radius: 1rem;
+//   padding: 1rem;
+//   min-height: 30vh;
+//   $profile-size: max(10vw, 4rem);
+
+//   .profile-picture {
+//     min-width: $profile-size;
+//     max-height: $profile-size;
+//     border-radius: $profile-size;
+//     margin-right: 1rem;
+//   }
+//   // .display-name {
+//   // }
+//   .about {
+//     background-color: #000c;
+//     border-radius: 1rem;
+//     padding: 1rem;
+//     white-space: break-spaces;
+//   }
+// }
+
+// // .mapboxgl-map {
+// // }
+// .mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact {
+//   background-color: transparent;
+//   padding: 0.25rem;
+//   button.mapboxgl-ctrl-attrib-button:not(:disabled):hover {
+//     background-color: hsla(0,0%,100%,.5);
+//   }
+// }
+// .mapboxgl-ctrl.mapboxgl-ctrl-attrib.mapboxgl-compact-show {
+//   background-color: hsla(0,0%,100%,.5);
+//   padding: 0.25rem;
+//   font-size: 10px;
+//   .mapboxgl-ctrl-attrib-button {
+//     // position: static;
+//     // float: right;
+//     top: -2rem;
+//   }
+// }
+
+// .mapboxgl-ctrl-attrib-button {
+//   padding: 0;
+//   margin: 0;
+//   width: initial;
+//   height: initial;
+// }
+
+// .mapboxgl-ctrl {
+//   button:focus, button:focus-visible {
+//     // background-color: hsla(0,0%,100%,.5);
+//     outline: transparent;
+//     box-shadow: none;
+//   }
+// }
+
+// .mapboxgl-ctrl.mapboxgl-compact-show {
+//   button.mapboxgl-ctrl-attrib-button {
+//     // display: none;
+//   }
+// }
+
+// .float-button-menu {
+//   display: flex;
+//   flex-direction: column-reverse;
+//   position: absolute;
+//   right: 0rem;
+//   bottom: 2rem;
+// }
+// .circle-float-button {
+//   display: block;
+//   width: 4rem;
+//   height: 4rem;
+//   border-radius: 2rem;
+// }
+
+// // ---
+
+// .dashboard {
+//   display: flex;
+//   flex-direction: row;
+//   height: 100%;
+//   overflow: hidden;
+//   position: relative;
+//   .panel {
+//     color: #ccc;
+//     font-family: 'Sono', monospace;
+//     font-size: 16px;
+//     font-weight: 200;
+//     display: flex;
+//     flex-direction: column;
+//     background-color: #111;
+//     border-radius: 2rem;
+//     margin: 1rem 0.5rem;
+//     padding: 1rem;
+//     position: relative;
+//     min-width: 20svw;
+//     span {
+//       display: block;
+//     }
+//     span > span {
+//       display: inline;
+//     }
+//     .heavy {
+//       font-weight: 500;
+//     }
+//     .highlight {
+//       color: yellow;
+//     }
+//     .no-break {
+//       // white-space: nowrap;
+//     }
+//     .tag-value {
+//       margin-left: 0.5rem;
+//       white-space: nowrap;
+//       vertical-align: text-top;
+//       // start tag on a new line
+//       // display: block;
+//       // text-align: right;
+//       &.prevent-overflow {
+//         display: inline-block;
+//         overflow: hidden;
+//         text-overflow: ellipsis;
+//         max-width: 16rem;
+//       }
+//     }
+//     .flexcol {
+//       margin: 0.6rem 0;
+//     }
+//     label {
+//       margin: 0 0 0.6rem 0;
+//     }
+//     input {
+//       font-family: monospace;
+//       border: 1px solid transparent;
+//       transition: border-color 0.25s;
+//       display: block;
+//       padding: 0.6em 1.2em;
+//       flex-grow: 1;
+//     }
+//     button {
+//       background: #2d1086;
+//       border-radius: 0.5rem;
+//       border-style: none;
+//       color: #ccc;
+//       cursor: pointer;
+//       font-family: 'Sono', monospace;
+//       font-size: 16px;
+//       font-weight: 500;
+//       margin: 0.25rem 0.125rem;
+//       padding: 0.5rem;
+//       &:disabled {
+//         animation: none;
+//         background: #111;
+//         color: #444;
+//       }
+//     }
+//   }
+//   h1, h2, h3, h4, h5, h6 {
+//     font-size: 20px;
+//     margin: 0 0 0.5rem 0;
+//   }
+// }

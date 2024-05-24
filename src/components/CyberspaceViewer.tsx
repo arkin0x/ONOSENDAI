@@ -1,4 +1,4 @@
-import { useContext, useRef } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../scss/CyberspaceViewer.scss"
 import { Avatar } from '../libraries/Avatar'
@@ -9,6 +9,7 @@ import { Controls } from './Controls'
 import { Vector3 } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { Hud } from './Hud/Hud'
+import { TelemetryDashboard } from './TelemetryDashboard'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -19,6 +20,22 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const viewerRef = useRef<HTMLDivElement>(null)
   const { identity } = useContext<IdentityContextType>(IdentityContext)
 
+  // toggle telemetry view
+  const [showTelemetry, setShowTelemetry] = useState(false)
+
+  useEffect(() => {
+    // set up keyboard listeres to activate telemetry panel
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 't') {
+        setShowTelemetry(!showTelemetry)
+      }
+    }
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [showTelemetry])
+
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
       <div id="cyberspace">
@@ -27,7 +44,6 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <SectorManager />
           <Avatar pubkey={identity.pubkey} />
           <Controls />
-          {/* <TestMesh /> */}
         </Canvas>
       </div>
       <div id="cyberspace-hud">
@@ -35,6 +51,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <Hud/>
         </Canvas>
       </div>
+      { showTelemetry ? <TelemetryDashboard/> : null}
     </div>
   )
 }

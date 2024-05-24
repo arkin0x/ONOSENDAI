@@ -15,6 +15,7 @@ import { usePreviousValue } from "../usePreviousValue";
 import { Time } from "../../types/Cyberspace"
 import { validateActionChain } from "./validateActionChain"
 import { getTag } from "../../libraries/Nostr"
+import { useFrame } from "@react-three/fiber"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -28,7 +29,7 @@ export const useActionChain = (pubkey: string) => {
   const actionChainState = actionState[pubkey]
   const lastSimulated = simulatedState[pubkey]
 
-  const prevActionChainState = usePreviousValue(actionChainState) // starting value is undefined
+  const prevActionChainStateLength = usePreviousValue(actionChainState.length) // starting value is undefined
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
   
@@ -89,7 +90,7 @@ export const useActionChain = (pubkey: string) => {
      * @param latestAction an action received from NDK
      */
     const onReceiveLatestAction = (latestAction: Event) => {
-      console.log('Receive action:', latestAction.id, 'for pubkey:', pubkey)
+      console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
       // 2. on receive, get genesis id from action
       const action = {
         type: 'push',
@@ -184,7 +185,7 @@ export const useActionChain = (pubkey: string) => {
    * Whenever the actionChainState changes, this will begin simulating from the most recent action in the chain to the present time.
    */
   // FIXME: this isn't synchronous; will this lead to errors? Will the chain get out of order?
-  useEffect(() => {
+  useFrame(() => {
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
 
     // function definition for simulating and dispatching the next event
@@ -192,7 +193,7 @@ export const useActionChain = (pubkey: string) => {
       const simulatedEvent = await simulateNextEvent(action, now)
       if(simulatedEvent === action) {
         // not enough time has passed to simulate a new event. schedule the next simulation.
-        setTimeout(() => simulateAndDispatch(action, getTime()), 1000)//1000/60+1)
+        // setTimeout(() => simulateAndDispatch(action, getTime()), 1000)//1000/60+1)
       } else {
         dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
       }
@@ -202,15 +203,7 @@ export const useActionChain = (pubkey: string) => {
       // FIXME: use a worker to simulate instead of main thread.
       const mostRecentAction = actionChainState.slice(-1)[0]
       const now = getTime()
-      if (!prevActionChainState || prevActionChainState.length < actionChainState.length){ //  if this is the first update OR the action chain has been updated beyond where it was...
-        // the action chain has been updated. simulate the next event using this.
-        // Note: if the time diff between mostRecentAction and now is less than 1 frame, this will simply return mostRecentAction.
-        simulateAndDispatch(mostRecentAction, now)
-      } else {
-        // simulate with previously simulated action
-        console.log('\\\\\\ SIMULATING', lastSimulated.tags.find(getTag('C'))![1], now)
-        simulateAndDispatch(lastSimulated, now)
-      }
+      simulateAndDispatch(mostRecentAction, now)
     }
-  }, [actionChainState, lastSimulated, prevActionChainState, genesisId, dispatchSimulatedState, ndk, pubkey])
+  })
 }

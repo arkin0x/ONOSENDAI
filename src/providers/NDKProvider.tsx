@@ -18,7 +18,8 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
       const signer = new NDKNip07Signer(3000)
       const ndkRef = new NDK({
         signer,
-        explicitRelayUrls: getRelayList(defaultRelays)
+        explicitRelayUrls: getRelayList(defaultRelays),
+        enableOutboxModel: false,
       })
       await ndkRef.connect()
       setNDK(ndkRef)

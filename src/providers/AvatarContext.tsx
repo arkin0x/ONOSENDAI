@@ -18,8 +18,8 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   const newState = {...state} as AvatarActionState
 
   // debug time
-  const t = +new Date()
-  console.log(t, 'old avatar state', state[action.pubkey])
+  // const t = +new Date()
+  // console.log(t, 'old avatar state', state[action.pubkey])
 
   // check for action's pubkey in state and initialize if necessary
   if (newState[action.pubkey] === undefined) {
@@ -30,15 +30,15 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
 
   if (action.type === 'reset'){
     newState[action.pubkey] = [] as Event[]
-    console.log(t, 'reset avatar state', newState[action.pubkey])
+    // console.log(t, 'reset avatar state', newState[action.pubkey])
     return newState
   }
   if (action.type === 'unshift') {
-    console.log(t, 'unshift avatar state')
+    // console.log(t, 'unshift avatar state')
     newState[action.pubkey] = [...action.actions, ...avatarActions] as Event[]
   }
   if (action.type === 'push') {
-    console.log(t, 'push avatar state')
+    // console.log(t, 'push avatar state')
     newState[action.pubkey] = [...avatarActions, ...action.actions] as Event[]
   }
 
@@ -62,7 +62,7 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     }
 
     // The current action exists in the accumulator.
-    console.log('duplicate action:', currentAction.id.substring(0,8))
+    // console.log('duplicate action:', currentAction.id.substring(0,8))
 
     // If the current action is signed and the existing action is not, replace the existing action with the current action
     if (currentAction.sig && !existingAction.sig) {
@@ -73,7 +73,7 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     return acc
   }, [] as Event[])
 
-  console.log(t,'new avatar state', newState[action.pubkey])
+  // console.log(t,'new avatar state', newState[action.pubkey])
   return newState
 }
 

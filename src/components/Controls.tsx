@@ -12,6 +12,8 @@ type ControlState = {
   forwardReleased: boolean // true for 1 frame after the forward key is set to false
   reverse: boolean
   reverseReleased: boolean
+  respawn: boolean
+  freeze: boolean
 }
 
 const initialControlState: ControlState = {
@@ -19,6 +21,8 @@ const initialControlState: ControlState = {
   forwardReleased: false,
   reverse: false,
   reverseReleased: false,
+  respawn: false,
+  freeze: false,
 }
 
 /**
@@ -36,7 +40,7 @@ export const Controls = () => {
   const throttleRef = useRef<number>(5)
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
 
-  console.log('/// CONTROLS RERUN')
+  // console.log('/// CONTROLS RERUN')
 
   // get the current rotation from the most recent action state and set the currentRotationRef
   useEffect(() => {
@@ -66,6 +70,12 @@ export const Controls = () => {
       controlsRef.current.forward = true
     } else if (e.code === "KeyS" || e.key === "ArrowDown") {
       controlsRef.current.reverse = true
+    } else if (e.code === "Escape") {
+      // respawn
+      controlsRef.current.respawn = true
+    } else if (e.code === "Space") {
+      // stop
+      controlsRef.current.freeze = true
     }
   }
 
@@ -106,6 +116,18 @@ export const Controls = () => {
 
   // add useFrame to take actions based on controlsRef each frame
   useFrame(() => {
+    if(controlsRef.current.respawn) {
+      engine.respawn()
+      controlsRef.current.respawn = false
+      controlsRef.current = initialControlState
+      // console.log('respawn')
+    }
+
+    if(controlsRef.current.freeze) {
+      engine.freeze()
+      controlsRef.current.freeze = false
+    }
+    
     // if forward key is pressed, drift forward
     if (controlsRef.current.forward) {
       engine.drift(throttleRef.current, currentRotationRef.current)

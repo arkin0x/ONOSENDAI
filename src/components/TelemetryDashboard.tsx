@@ -31,20 +31,20 @@ export const TelemetryDashboard = () => {
 }
 
 type ActionDOMProps = {
-  action: NDKEvent
+  action: Event 
 }
 const ActionDOM = ({action}: ActionDOMProps) => {
 
   const [expanded, setExpanded] = useState(false)
 
   const borderColor = "#" + action.id.substring(0,6)
-  const isGenesis = isGenesisAction(action.rawEvent() as Event)
+  const isGenesis = isGenesisAction(action)
 
   return (
     <div className="action">
       <div className="block" style={{borderColor}} onClick={() => setExpanded(!expanded)}>
         { expanded ? 
-          <pre>{JSON.stringify(action.rawEvent())}</pre>
+          <pre>{JSON.stringify(action)}</pre>
         : <span className="data">{action.id}</span>
       }
       </div>

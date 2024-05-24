@@ -5,7 +5,7 @@
  */
 import { useContext, useEffect, useState } from "react"
 import { Event, UnsignedEvent } from 'nostr-tools'
-import { NDKFilter } from "@nostr-dev-kit/ndk"
+import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { AvatarContext } from "../../providers/AvatarContext"
@@ -24,12 +24,9 @@ export const useActionChain = (pubkey: string) => {
 
   const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
 
-  const {actionState, dispatchActionState, simulatedState, dispatchSimulatedState} = useContext(AvatarContext)
+  const {actionState, dispatchActionState, dispatchSimulatedState} = useContext(AvatarContext)
 
   const actionChainState = actionState[pubkey]
-  const lastSimulated = simulatedState[pubkey]
-
-  const prevActionChainStateLength = usePreviousValue(actionChainState.length) // starting value is undefined
 
   const [genesisId, setGenesisId] = useState<string|null>(null)
   
@@ -89,16 +86,17 @@ export const useActionChain = (pubkey: string) => {
      * Callback for when an action is received from NDK
      * @param latestAction an action received from NDK
      */
-    const onReceiveLatestAction = (latestAction: Event) => {
+    const onReceiveLatestAction = (latestAction: NDKEvent) => {
       console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
+      const event = latestAction.rawEvent() as Event
       // 2. on receive, get genesis id from action
       const action = {
         type: 'push',
         pubkey: pubkey,
-        actions: [latestAction] as Event[],
+        actions: [event] as Event[],
       } as AvatarActionDispatched 
       dispatchActionState(action)
-      getGenesisId(latestAction)
+      getGenesisId(event)
     }
 
     // the latest action and all new actions will arrive here
@@ -127,12 +125,13 @@ export const useActionChain = (pubkey: string) => {
        * Callback for when an action is received from NDK
        * @param receivedAction an action received from NDK
        */
-      const onReceiveActions = (receivedAction: Event) => {
+      const onReceiveActions = (receivedAction: NDKEvent) => {
+        const event = receivedAction.rawEvent() as Event
         // 4. on receive, store each action in some kind of state
         const action = {
           type: 'unshift',
           pubkey: pubkey,
-          actions: [receivedAction] as Event[],
+          actions: [event] as Event[],
         } as AvatarActionDispatched 
         dispatchActionState(action)
       }
@@ -140,10 +139,15 @@ export const useActionChain = (pubkey: string) => {
       const getGenesisEvent = () => {
         // get genesis event
         ndk.fetchEvent(genesisId).then(genesisEvent => {
+          if (!genesisEvent) {
+            // TODO: give option to restart action chain or refresh page to try again.
+            throw new Error('Failed to get genesis event.')
+          }
+          const event = genesisEvent.rawEvent() as Event
           const action = {
             type: 'unshift',
             pubkey: pubkey,
-            actions: [genesisEvent] as Event[],
+            actions: [event] as Event[],
           } as AvatarActionDispatched
           dispatchActionState(action)
           setHistoryComplete(true)

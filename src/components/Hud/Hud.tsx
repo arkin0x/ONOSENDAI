@@ -9,9 +9,10 @@ import { extractActionState } from "../../libraries/Cyberspace"
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const {simulatedState} = useContext(AvatarContext)
+  const {actionState, simulatedState} = useContext(AvatarContext)
 
   const pubkey = identity.pubkey
+  const actions = actionState[pubkey]
 
   if (!simulatedState[pubkey]) return null
 
@@ -29,7 +30,10 @@ export const Hud = () => {
       <CoordinateText position={{x, y: y + 3}} rotation={[0, r, 0]} text={sectorPosition.y.toFixed(8)} align="left" />
       <CoordinateText position={{x, y: y + 1}} rotation={[0, r, 0]} text={sectorPosition.z.toFixed(8)} align="left" />
       <CoordinateText position={{x, y: y + 7}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
-      <CoordinateText position={{x, y: y + 9}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: y + 9}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: y + 11}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: y + 13}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed(8)} align="left" />
+      <CoordinateText position={{x, y: y + 15}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
     </group>
     </>
   )

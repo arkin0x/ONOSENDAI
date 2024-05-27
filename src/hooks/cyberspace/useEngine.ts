@@ -64,15 +64,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     // FIXME: is this a race condition? If we haven't received events from relays when this loads, it publishes a new action chain???
     if (!latest) {
       // No latestAction, so create and publish a genesisAction
-      const genesisAction = createUnsignedGenesisAction(pubkey)
-      const genesisActionPublished = await publishEvent(genesisAction) // FIXME we would normally pass in `relays` here
-      if (!genesisActionPublished) {
-        throw new Error('Engine.drift: failed to publish genesis action')
-      } else {
-        // set actions
-        setGenesisAction(genesisActionPublished.rawEvent())
-        setLatestAction(genesisActionPublished.rawEvent())
-      }
+      await newGenesis()
     } else if (genesis && latest) {
       // determine if now is after the latestAction's created_at+ms
       if (nowIsAfterLatestAction(latest)) {
@@ -87,18 +79,27 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   async function respawn(): Promise<void> {
-    console.log('respawn')
     stopDrift()
     restartMinersRef.current = false
     setGenesis(null)
     setLatest(null)
+    await newGenesis()
+  }
+
+  async function newGenesis() {
     const genesisAction = createUnsignedGenesisAction(pubkey)
-    const genesisActionPublished = await publishEvent(genesisAction) // FIXME we would normally pass in `relays` here
-    setGenesisAction(genesisActionPublished)
-    setLatestAction(genesisActionPublished)
-    console.log('new genesis:', genesisActionPublished)
-    dispatchActionState({type: 'reset', pubkey: pubkey})
-    dispatchActionState({type: 'push', actions: [genesisActionPublished], pubkey: pubkey})
+    const genesisActionPublished = await publishEvent(genesisAction)
+    const rawGenesis = genesisActionPublished && genesisActionPublished.rawEvent() as Event
+    if (!rawGenesis) {
+      throw new Error('Engine.drift: failed to publish genesis action')
+    } else {
+      // set actions
+      setGenesisAction(rawGenesis)
+      setLatestAction(rawGenesis)
+    }
+    console.log('new genesis:', rawGenesis)
+    dispatchActionState({ type: 'reset', pubkey: pubkey })
+    dispatchActionState({ type: 'push', actions: [], pubkey: pubkey })
   }
 
   function freeze(): void {

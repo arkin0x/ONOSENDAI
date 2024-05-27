@@ -11,10 +11,8 @@ import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { AvatarContext } from "../../providers/AvatarContext"
 import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
 import { getTime, isGenesisAction, simulateNextEvent } from "../../libraries/Cyberspace";
-import { usePreviousValue } from "../usePreviousValue";
 import { Time } from "../../types/Cyberspace"
 import { validateActionChain } from "./validateActionChain"
-import { getTag } from "../../libraries/Nostr"
 import { useFrame } from "@react-three/fiber"
 
 export const useActionChain = (pubkey: string) => {

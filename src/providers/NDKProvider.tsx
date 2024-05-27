@@ -1,15 +1,16 @@
 import type { UnsignedEvent } from 'nostr-tools'
 import { useState, useEffect, createContext } from "react"
 import NDK, { NDKEvent, NDKNip07Signer, NostrEvent } from '@nostr-dev-kit/ndk'
-import { defaultRelays, getRelayList } from "../libraries/Nostr"
+// import { defaultRelays, getRelayList } from "../libraries/Nostr"
 
 type NDKContextType = {
   ndk?: NDK,
-  publishEvent: (event: UnsignedEvent) => void
+  publishEvent: (event: UnsignedEvent) => Promise<false | NDKEvent>
 }
 
 const defaultNDKContext: NDKContextType = {
-  publishEvent: () => {}
+  ndk: undefined,
+  publishEvent: async () => false
 }
 
 export const NDKContext = createContext<NDKContextType>(defaultNDKContext)
@@ -26,10 +27,11 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
       const signer = new NDKNip07Signer(3000)
       const ndkRef = new NDK({
         signer,
-        explicitRelayUrls: getRelayList(defaultRelays),
+        explicitRelayUrls: ['wss://cyberspace.nostr1.com'],
         enableOutboxModel: false,
+        autoConnectUserRelays: false,
       })
-      await ndkRef.connect()
+      ndkRef.connect(1000)
       setNDK(ndkRef)
     }
     setupNDK()
@@ -38,15 +40,12 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
   async function publishEvent(event: UnsignedEvent): Promise<NDKEvent|false> {
     if (ndk) {
       const ndkEvent = new NDKEvent(ndk, event as NostrEvent)
-      console.log('created NDKEvent: ', ndkEvent)
       ndkEvent.sign()
-      console.log('signed NDKEvent: ', ndkEvent)
       const pubs = await ndkEvent.publish()
-      console.log('published NDKEvent: ', ndkEvent)
-      console.log('publishEvent: Published event to relays:', pubs)
+      console.log('Published NDKEvent: ', ndkEvent, 'to relays', pubs)
       return ndkEvent
     } else {
-      console.warn(`publishEvent: Could not publish event because NDK is not ready.`, event)
+      console.warn(`publishEvent: Could not publish event because NDK is not ready.`, ndk, event)
       return false
     }
   }

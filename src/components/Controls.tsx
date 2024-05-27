@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'
-import { Quaternion } from 'three'
+import { Euler, Quaternion } from 'three'
 import { AvatarContext } from '../providers/AvatarContext.tsx'
 import { extractActionState } from '../libraries/Cyberspace.ts'
 import { useFrame } from '@react-three/fiber'
@@ -15,6 +15,10 @@ type ControlState = {
   reverseReleased: boolean
   respawn: boolean
   freeze: boolean
+  pitchUp: boolean
+  pitchDown: boolean
+  yawLeft: boolean
+  yawRight: boolean
 }
 
 const initialControlState: ControlState = {
@@ -24,6 +28,10 @@ const initialControlState: ControlState = {
   reverseReleased: false,
   respawn: false,
   freeze: false,
+  pitchUp: false,
+  pitchDown: false,
+  yawLeft: false,
+  yawRight: false,
 }
 
 /**
@@ -40,6 +48,7 @@ export const Controls = () => {
   const controlsRef = useRef<ControlState>(initialControlState)
   const throttleRef = useRef<number>(5)
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
+  const inReverse = useRef<boolean>(false)
 
   // console.log('/// CONTROLS RERUN')
   useEffect(() => {
@@ -73,15 +82,37 @@ export const Controls = () => {
   // set up controls for avatar
   // on mount, set up listener for W key to go forward. On unmount, remove listener.
   const handleKeyDown = (e: KeyboardEvent) => {
+    console.log('key down', e.code, e.key)
+    // forward
     if (e.code === "KeyW" || e.key === "ArrowUp") {
       controlsRef.current.forward = true
+
+    // reverse
     } else if (e.code === "KeyS" || e.key === "ArrowDown") {
       controlsRef.current.reverse = true
+
+    // pitch up
+    } else if (e.code === "KeyR") {
+      controlsRef.current.pitchUp = true
+
+    // pitch down
+    } else if (e.code === "KeyF") {
+      controlsRef.current.pitchDown = true
+
+    // yaw left
+    } else if (e.code === "KeyQ") {
+      controlsRef.current.yawLeft = true
+
+    // yaw right
+    } else if (e.code === "KeyE") {
+      controlsRef.current.yawRight = true
+
+    // respawn
     } else if (e.code === "Escape") {
-      // respawn
       controlsRef.current.respawn = true
+
+    // stop
     } else if (e.code === "Space") {
-      // stop
       controlsRef.current.freeze = true
     }
   }
@@ -90,9 +121,29 @@ export const Controls = () => {
     if (e.code === "KeyW" || e.key === "ArrowUp") {
       controlsRef.current.forward = false
       controlsRef.current.forwardReleased = true
+
     } else if (e.code === "KeyS" || e.key === "ArrowDown") {
       controlsRef.current.reverse = false
       controlsRef.current.reverseReleased = true
+      inReverse.current = false 
+
+    } else if (e.code === "KeyR") {
+      controlsRef.current.pitchUp = false
+
+    } else if (e.code === "KeyF") {
+      controlsRef.current.pitchDown = false
+
+    } else if (e.code === "KeyQ") {
+      controlsRef.current.yawLeft = false
+
+    } else if (e.code === "KeyE") {
+      controlsRef.current.yawRight = false
+
+    } else if (e.code === "Escape") {
+      controlsRef.current.respawn = false
+
+    } else if (e.code === "Space") {
+      controlsRef.current.freeze = false
     }
   }
 
@@ -136,6 +187,31 @@ export const Controls = () => {
       engine.freeze()
       controlsRef.current.freeze = false
     }
+
+    // change rotation
+    if (controlsRef.current.pitchDown) {
+      const rotation = currentRotationRef.current.clone()
+      rotation.multiply(new Quaternion().setFromEuler(new Euler(0.01, 0, 0)))
+      currentRotationRef.current = rotation
+    }
+
+    if (controlsRef.current.pitchUp) {
+      const rotation = currentRotationRef.current.clone()
+      rotation.multiply(new Quaternion().setFromEuler(new Euler(-0.01, 0, 0)))
+      currentRotationRef.current = rotation
+    }
+
+    if (controlsRef.current.yawLeft) {
+      const rotation = currentRotationRef.current.clone()
+      rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0.01, 0)))
+      currentRotationRef.current = rotation
+    }
+
+    if (controlsRef.current.yawRight) {
+      const rotation = currentRotationRef.current.clone()
+      rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
+      currentRotationRef.current = rotation
+    }
     
     // if forward key is pressed, drift forward
     if (controlsRef.current.forward) {
@@ -144,9 +220,13 @@ export const Controls = () => {
       engine.drift(throttleRef.current, currentRotationRef.current)
     } else
     // if forward key is up and reverse key is pressed, drift in reverse
-    if (controlsRef.current.reverse) {
-      const reverse = currentRotationRef.current.clone().invert()
-      engine.drift(throttleRef.current, reverse)
+    if (!controlsRef.current.forward && controlsRef.current.reverse) {
+      if (inReverse.current === false) {
+        // if we are not already in reverse, invert the quaternion and drift in reverse
+        currentRotationRef.current = currentRotationRef.current.clone().invert()
+      }
+      inReverse.current = true
+      engine.drift(throttleRef.current, currentRotationRef.current)
     }
 
     // reset released flags
@@ -160,6 +240,8 @@ export const Controls = () => {
       engine.stopDrift()
       controlsRef.current.reverseReleased = false
     }
+    // check quat
+    console.log(currentRotationRef.current.toArray().join(', '))
   })
 
   return null

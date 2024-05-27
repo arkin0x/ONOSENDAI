@@ -10,7 +10,7 @@ export const Login = () => {
   const [loading, setLoading] = useState(false)
   const {identity, setIdentity, profileLoaded, setRelays} = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
-  const ndk = useContext(NDKContext)
+  const {ndk} = useContext(NDKContext)
 
   useEffect(() => {
     if (!ndk) return
@@ -19,7 +19,7 @@ export const Login = () => {
       const ndkUser = ndk.getUser({ pubkey: identity.pubkey })
       // FIXME: actually get the user's relays.
       const profile = await ndkUser.fetchProfile()
-      profile!.created_at = (+new Date()).toString()
+      profile!.created_at = +new Date()
       setIdentity(profile)
       setRelays(defaultRelays)
     }

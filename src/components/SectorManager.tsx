@@ -53,7 +53,7 @@ const sectorReducer = (state: SectorState, action: SectorAction): SectorState =>
  * When the sector changes, the subscriptions will be updated and SectorManager will update the objects we are rendering.
  */
 export const SectorManager = ({radius}: {radius?: number}) => {
-  const ndk = useContext(NDKContext)
+  const {ndk} = useContext(NDKContext)
   const {identity} = useContext<IdentityContextType>(IdentityContext)
   const {actionState, simulatedState} = useContext(AvatarContext)
   const [currentSector, setCurrentSector] = useState<DecimalVector3>()

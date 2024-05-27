@@ -20,7 +20,7 @@ import { useFrame } from "@react-three/fiber"
 export const useActionChain = (pubkey: string) => {
 
   // get NDK, the library used to subscribe to relays and fetch events
-  const ndk = useContext(NDKContext)
+  const {ndk} = useContext(NDKContext)
 
   const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
 

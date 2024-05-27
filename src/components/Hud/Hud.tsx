@@ -32,8 +32,9 @@ export const Hud = () => {
       <CoordinateText position={{x, y: y + 7}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
       <CoordinateText position={{x, y: y + 9}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: y + 11}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: y + 13}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed(8)} align="left" />
+      <CoordinateText position={{x, y: y + 13}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
       <CoordinateText position={{x, y: y + 15}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
+      { rotation ? <CoordinateText position={{x, y: y + 17}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z} align="left" /> : null }
     </group>
     </>
   )

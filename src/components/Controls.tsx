@@ -6,6 +6,7 @@ import { Quaternion } from 'three'
 import { AvatarContext } from '../providers/AvatarContext.tsx'
 import { extractActionState } from '../libraries/Cyberspace.ts'
 import { useFrame } from '@react-three/fiber'
+import { defaultRelays } from '../libraries/Nostr.ts'
 
 type ControlState = {
   forward: boolean
@@ -31,9 +32,9 @@ const initialControlState: ControlState = {
  */
 export const Controls = () => {
 
-  const { identity, relays } = useContext<IdentityContextType>(IdentityContext)
+  const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
-  const engine = useEngine(pubkey, relays)
+  const engine = useEngine(pubkey, defaultRelays)
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
   const controlsRef = useRef<ControlState>(initialControlState)
@@ -41,6 +42,12 @@ export const Controls = () => {
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
 
   // console.log('/// CONTROLS RERUN')
+  useEffect(() => {
+    const test = new Quaternion()
+    console.log('test quat', test)
+    const test2 = test.invert()
+    console.log('test inv', test2)
+  },[])
 
   // get the current rotation from the most recent action state and set the currentRotationRef
   useEffect(() => {
@@ -49,7 +56,7 @@ export const Controls = () => {
       currentRotationRef.current = new Quaternion()
     } else {
       // debug
-      console.log('controls set genesis and latest action')
+      // console.log('controls set genesis and latest action')
       // set genesis action
       engine.setGenesisAction(actions[0])
       // set latest action
@@ -91,12 +98,14 @@ export const Controls = () => {
 
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault()
-    console.log('wheel: ', throttleRef.current)
     if (e.deltaY > 0) {
+      // console.log('wheel down', e.deltaY)
       throttleRef.current = Math.min(10, throttleRef.current + 1) // Use a function to update state based on previous state
     } else {
+      // console.log('wheel up', e.deltaY)
       throttleRef.current = Math.max(0, throttleRef.current - 1)
     }
+    console.log('wheel: ', throttleRef.current)
   }
 
   // add listeners for the controls
@@ -130,11 +139,14 @@ export const Controls = () => {
     
     // if forward key is pressed, drift forward
     if (controlsRef.current.forward) {
+      // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
+      // engine.drift(throttleRef.current, jitter)
       engine.drift(throttleRef.current, currentRotationRef.current)
     } else
     // if forward key is up and reverse key is pressed, drift in reverse
     if (controlsRef.current.reverse) {
-      engine.drift(throttleRef.current, currentRotationRef.current.clone().invert())
+      const reverse = currentRotationRef.current.clone().invert()
+      engine.drift(throttleRef.current, reverse)
     }
 
     // reset released flags

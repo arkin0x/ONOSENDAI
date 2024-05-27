@@ -4,10 +4,9 @@ import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLates
 import { RelayObject } from '../../types/NostrRelay'
 import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
-import { publishEvent } from '../../libraries/Nostr'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { AvatarContext } from '../../providers/AvatarContext'
-import { usePreviousValue } from '../usePreviousValue'
+import { NDKContext } from '../../providers/NDKProvider'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -22,20 +21,17 @@ type EngineControls = {
 }
 
 export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
-  // FIXME logging relays so we don't get a warning
-  // const [genesisAction, setGenesisAction] = useState<Event|null>(null)
-  // const [latestAction, setLatestAction] = useState<Event|null>(null)
   const {dispatchActionState} = useContext(AvatarContext)
   const [genesis, setGenesis] = useState<Event|null>(null)
   const [latest, setLatest] = useState<Event|null>(null)
-  // const [chainHeight, setChainHeight] = useState<number>(0) // I don't know if we need this
+  const {publishEvent} = useContext(NDKContext)
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
   const restartMinersRef = useRef<boolean>(false)
 
   // debug reruns
-  console.log('/// ENGINE RERUN', genesis?.id.substring(0,8), latest?.id.substring(0,8))
+  // console.log('/// ENGINE RERUN', genesis?.id.substring(0,8), latest?.id.substring(0,8))
 
   // initialize engine
   useEffect(() => {
@@ -47,7 +43,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   },[])
 
   async function drift(throttle: number, quaternion: Quaternion): Promise<void> {
-    // console.log('drift', throttle, quaternion.toArray().join(','))
+    console.log('drift', throttle, quaternion.toArray().join(','))
     // if nothing else has changed, we don't need to do anything
     if (restartMinersRef.current === false && throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
       // We don't need to restart the miners, and the arguments haven't changed, so do nothing.
@@ -69,10 +65,14 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
     if (!latest) {
       // No latestAction, so create and publish a genesisAction
       const genesisAction = createUnsignedGenesisAction(pubkey)
-      const genesisActionPublished = await publishEvent(genesisAction, relays) // FIXME we would normally pass in `relays` here
-      // TODO might need to verify the event was published successfully
-      setGenesisAction(genesisActionPublished)
-      setLatestAction(genesisActionPublished)
+      const genesisActionPublished = await publishEvent(genesisAction) // FIXME we would normally pass in `relays` here
+      if (!genesisActionPublished) {
+        throw new Error('Engine.drift: failed to publish genesis action')
+      } else {
+        // set actions
+        setGenesisAction(genesisActionPublished.rawEvent())
+        setLatestAction(genesisActionPublished.rawEvent())
+      }
     } else if (genesis && latest) {
       // determine if now is after the latestAction's created_at+ms
       if (nowIsAfterLatestAction(latest)) {
@@ -88,15 +88,15 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   async function respawn(): Promise<void> {
     console.log('respawn')
-    console.log('/// Events', genesis?.id.substring(0,8), genesis, latest?.id.substring(0,8), latest)
     stopDrift()
     restartMinersRef.current = false
     setGenesis(null)
     setLatest(null)
     const genesisAction = createUnsignedGenesisAction(pubkey)
-    const genesisActionPublished = await publishEvent(genesisAction, relays) // FIXME we would normally pass in `relays` here
+    const genesisActionPublished = await publishEvent(genesisAction) // FIXME we would normally pass in `relays` here
     setGenesisAction(genesisActionPublished)
     setLatestAction(genesisActionPublished)
+    console.log('new genesis:', genesisActionPublished)
     dispatchActionState({type: 'reset', pubkey: pubkey})
     dispatchActionState({type: 'push', actions: [genesisActionPublished], pubkey: pubkey})
   }
@@ -113,7 +113,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function triggerMovementWorkers(action: UnsignedEvent): void {
-    console.log('workers starting')
+    // console.log('workers starting')
     const workers = workzone['movement']
     const actionCopySerialized = serializeEvent(action!)
     const nonceBounds = getNonceBounds(actionCopySerialized)
@@ -143,7 +143,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   function stopMovementWorkers() {
-    console.log('workers stopped')
+    // console.log('workers stopped')
     const workers = workzone['movement']
     workers.forEach((worker) => {
       worker.postMessage({
@@ -155,9 +155,9 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
 
   const movementWorkerMessage = (msg: MessageEvent) => {
     // if the worker reports 'pow-target-found', we need to stop all workers and publish the action
-    console.log('Engine: movementWorkerMessage: ',msg)
+    // console.log('Engine: movementWorkerMessage: ',msg)
     if (msg.data.status === 'pow-target-found' && msg.data.chainHeight.current === chainHeight.current) {
-      console.log('Engine: movementWorkerMessage: pow-target-found')
+      // console.log('Engine: movementWorkerMessage: pow-target-found')
       chainHeight.current += 1 // now any other mined events will be ignored because their chainHeight is lower; now we won't fork our chain.
       stopMovementWorkers()
       const actionBinary = msg.data.action

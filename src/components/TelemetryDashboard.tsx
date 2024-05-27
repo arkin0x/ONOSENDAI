@@ -37,7 +37,7 @@ const ActionDOM = ({action}: ActionDOMProps) => {
 
   const [expanded, setExpanded] = useState(false)
 
-  const borderColor = "#" + action.id.substring(0,6)
+  const borderColor = "#" + action.id.substring(action.id.length-6, action.id.length)
   const isGenesis = isGenesisAction(action)
 
   return (

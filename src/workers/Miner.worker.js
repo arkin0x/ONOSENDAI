@@ -34,7 +34,7 @@ function safeInterrupt(data) {
 
 // called with the data needed to mine the next action in the chain
 function initiateMining(data) {
-  console.log('worker',threadID,'starting')
+  // console.log('worker',threadID,'starting')
   let {
     action,
     nonceBounds,
@@ -73,7 +73,7 @@ function initiateMining(data) {
       return
 
     } else if (!active) {
-      console.log('worker',threadID,'stopped')
+      // console.log('worker',threadID,'stopped')
     }
 
     if (currentNonce > nonceEndValue) {

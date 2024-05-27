@@ -49,7 +49,6 @@ const hashpowerAllocation: HashpowerAllocation = {
 
 // Dispose and Spawn workers according to the hashpower allocation
 export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
-  console.log('adjustLabor called')
   // dispose of workers
   Object.keys(workzone).forEach((key) => {
     const target = key as HashpowerAllocationTarget
@@ -85,7 +84,6 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
 
 // use this to set what happens when a movement worker sends a message
 export function setWorkerCallback(target: HashpowerAllocationTarget, callback: (event: MessageEvent) => void) {
-  console.log('setWorkerCallback called')
   workerCallbacks[target] = callback
   adjustLabor(hashpowerAllocation) // reassigns the callbacks to the workers
 }

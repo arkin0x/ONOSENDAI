@@ -151,7 +151,7 @@ export const Controls = () => {
     e.preventDefault()
     if (e.deltaY > 0) {
       // console.log('wheel down', e.deltaY)
-      throttleRef.current = Math.min(10, throttleRef.current + 1) // Use a function to update state based on previous state
+      throttleRef.current = Math.min(128, throttleRef.current + 1) // Use a function to update state based on previous state
     } else {
       // console.log('wheel up', e.deltaY)
       throttleRef.current = Math.max(0, throttleRef.current - 1)

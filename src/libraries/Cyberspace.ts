@@ -254,7 +254,7 @@ export const createUnsignedDriftAction = async (pubkey: string, throttle: number
   }
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
-  newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toString())])
+  newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toFixed(8))])
   newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
   newAction.tags.push(['e', latestAction.id, '', 'previous'])
   newAction.tags.push(['nonce', '0000000000000000', throttle.toString()])

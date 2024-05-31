@@ -1,12 +1,13 @@
-@import url('https://fonts.googleapis.com/css2?family=Sono:wght@200;500&display=swap');
+// @import url('https://fonts.googleapis.com/css2?family=Gloock:wght@200;500&display=swap');
 
 #telemetry-dashboard {
-  background-color: #111c;
+  background-color: rgba(14, 3, 15, 0.9);
   color: #eee;
-  font-family: 'Sono', monospace;
+  font-family: 'Monaspace Krypton', monospace;
   height: 50svh;
   left: 0;
-  padding: 1em;
+  overflow-y: scroll;
+  padding: 2em;
   position: absolute;
   top: 0;
   width: 100%;
@@ -22,11 +23,18 @@
   flex-direction: row;
   justify-content: space-between;
   margin: 1rem 0;
+  .selected-action {
+    font-size: 16px;
+  }
+  pre {
+    font-family: 'Monaspace Krypton', monospace;
+  }
 }
 
+// the action block in the telemetry dashboard
 .action {
   .block {
-    border: 3px solid #eee;
+    border: 1px solid #eee;
     width: 3rem;
     height: 3rem;
     margin: auto auto;

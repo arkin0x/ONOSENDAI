@@ -31,9 +31,9 @@ export const Hud = () => {
     <>
     <group>
       {/* <Axes position={[-1,-2,0]} rotation={[0,0,0]} /> */}
-      <CoordinateText position={{x, y: y + 5}} rotation={[0, r, 0]} text={sectorPosition.x.toFixed(8)} align="left" />
-      <CoordinateText position={{x, y: y + 3}} rotation={[0, r, 0]} text={sectorPosition.y.toFixed(8)} align="left" />
-      <CoordinateText position={{x, y: y + 1}} rotation={[0, r, 0]} text={sectorPosition.z.toFixed(8)} align="left" />
+      <CoordinateText position={{x, y: y + 5}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(8)} align="left" />
+      <CoordinateText position={{x, y: y + 3}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(8)} align="left" />
+      <CoordinateText position={{x, y: y + 1}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(8)} align="left" />
       <CoordinateText position={{x, y: y + 7}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
       <CoordinateText position={{x, y: y + 9}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: y + 11}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />

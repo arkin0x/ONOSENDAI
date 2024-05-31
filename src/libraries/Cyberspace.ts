@@ -213,6 +213,8 @@ export const getTime = (action?: Event|UnsignedEvent): Time => {
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
+  const sector = getSectorFromCoordinate(pubkey) 
+  const s = getSectorCoordinatesFromCyberspaceCoordinates(pubkey)
   return {
     pubkey, 
     kind: 333,
@@ -408,6 +410,11 @@ export const cyberspaceToSectorPosition = (cyberspacePosition: DecimalVector3): 
   return local
 }
 
+/**
+ * Used to get the sector-based coordinates (different from the global cyberspace coordinates) from a 256-bit hex string.
+ * @param coordinate 
+ * @returns 
+ */
 export const getSectorCoordinatesFromCyberspaceCoordinates = (coordinate: string): DecimalVector3 => {
   const coord = decodeHexToCoordinates(coordinate)
 

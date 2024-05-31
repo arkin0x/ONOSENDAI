@@ -59,7 +59,7 @@ const ActionDOM = ({action, select}: ActionDOMProps) => {
   return (
     <div className="action">
       <div className={"block"} style={{borderColor}} onClick={() => select(action)}>
-        <span className="data">{action.id}</span>
+        <span className="pow">{countLeadingZeroesHex(action.id)}</span>
       </div>
       {isGenesis ? <label className="genesis">GENESIS</label> : null}
     </div>

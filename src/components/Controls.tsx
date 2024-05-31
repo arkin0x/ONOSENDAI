@@ -8,32 +8,7 @@ import { AvatarContext } from '../providers/AvatarContext.tsx'
 import { extractActionState } from '../libraries/Cyberspace.ts'
 import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../libraries/Nostr.ts'
-
-type ControlState = {
-  forward: boolean
-  forwardReleased: boolean // true for 1 frame after the forward key is set to false
-  reverse: boolean
-  reverseReleased: boolean
-  respawn: boolean
-  freeze: boolean
-  pitchUp: boolean
-  pitchDown: boolean
-  yawLeft: boolean
-  yawRight: boolean
-}
-
-const initialControlState: ControlState = {
-  forward: false,
-  forwardReleased: false,
-  reverse: false,
-  reverseReleased: false,
-  respawn: false,
-  freeze: false,
-  pitchUp: false,
-  pitchDown: false,
-  yawLeft: false,
-  yawRight: false,
-}
+import { useControlStore } from '../store/ControlStore.ts'
 
 /**
  * The <Controls> component sets up HID input listeners for avatar control and thermodynamic posture control. Input is translated into commands dispatched to Engine for mining and camera control. 
@@ -46,8 +21,8 @@ export const Controls = () => {
   const engine = useEngine(pubkey, defaultRelays)
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
-  const controlsRef = useRef<ControlState>(initialControlState)
   const { throttle, setThrottle } = useThrottleStore()
+  const { controlState, setControlState, resetControlState } = useControlStore()
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
   const inReverse = useRef<boolean>(false)
 
@@ -85,65 +60,75 @@ export const Controls = () => {
     // console.log('key down', e.code, e.key)
     // forward
     if (e.code === "KeyW" || e.key === "ArrowUp") {
-      controlsRef.current.forward = true
+      setControlState({forward: true})
+
+    // cruise (no need to hold down forward)
+    } else if (e.code === "KeyX") {
+      if (controlState.cruise) {
+        setControlState({cruise: false})
+      } else {
+        setControlState({forward: false})
+        setControlState({cruise: true})
+      }
 
     // reverse
     } else if (e.code === "KeyS" || e.key === "ArrowDown") {
-      controlsRef.current.reverse = true
+      setControlState({reverse: true})
+
 
     // pitch up
     } else if (e.code === "KeyR") {
-      controlsRef.current.pitchUp = true
+      setControlState({pitchUp: true})
 
     // pitch down
     } else if (e.code === "KeyF") {
-      controlsRef.current.pitchDown = true
+      setControlState({pitchDown: true})
 
     // yaw left
     } else if (e.code === "KeyQ") {
-      controlsRef.current.yawLeft = true
+      setControlState({yawLeft: true})
 
     // yaw right
     } else if (e.code === "KeyE") {
-      controlsRef.current.yawRight = true
+      setControlState({yawRight: true})
 
     // respawn
     } else if (e.code === "Escape") {
-      controlsRef.current.respawn = true
+      setControlState({respawn: true})
 
     // stop
     } else if (e.code === "Space") {
-      controlsRef.current.freeze = true
+      setControlState({freeze: true})
     }
   }
 
   const handleKeyUp = (e: KeyboardEvent) => {
     if (e.code === "KeyW" || e.key === "ArrowUp") {
-      controlsRef.current.forward = false
-      controlsRef.current.forwardReleased = true
+      setControlState({forward: false})
+      setControlState({forwardReleased: true})
 
     } else if (e.code === "KeyS" || e.key === "ArrowDown") {
-      controlsRef.current.reverse = false
-      controlsRef.current.reverseReleased = true
+      setControlState({reverse: false})
+      setControlState({reverseReleased: true})
       inReverse.current = false 
 
     } else if (e.code === "KeyR") {
-      controlsRef.current.pitchUp = false
+      setControlState({pitchUp: false})
 
     } else if (e.code === "KeyF") {
-      controlsRef.current.pitchDown = false
+      setControlState({pitchDown: false})
 
     } else if (e.code === "KeyQ") {
-      controlsRef.current.yawLeft = false
+      setControlState({yawLeft: false})
 
     } else if (e.code === "KeyE") {
-      controlsRef.current.yawRight = false
+      setControlState({yawRight: false})
 
     } else if (e.code === "Escape") {
-      controlsRef.current.respawn = false
+      setControlState({respawn: false})
 
     } else if (e.code === "Space") {
-      controlsRef.current.freeze = false
+      setControlState({freeze: false})
     }
   }
 
@@ -180,73 +165,83 @@ export const Controls = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [throttle])
 
-  // add useFrame to take actions based on controlsRef each frame
+  // add useFrame to take actions based on controlState each frame
   useFrame(() => {
-    if(controlsRef.current.respawn) {
+    if(controlState.respawn) {
       engine.respawn()
-      controlsRef.current.respawn = false
-      controlsRef.current = initialControlState
-      // console.log('respawn')
-    }
-
-    if(controlsRef.current.freeze) {
-      engine.freeze()
-      controlsRef.current.freeze = false
+      setControlState({respawn: false})
+      resetControlState()
+      return
     }
 
     // change rotation
-    if (controlsRef.current.pitchDown) {
+    if (controlState.pitchDown) {
       const rotation = currentRotationRef.current.clone()
       rotation.multiply(new Quaternion().setFromEuler(new Euler(0.01, 0, 0)))
       currentRotationRef.current = rotation
     }
 
-    if (controlsRef.current.pitchUp) {
+    if (controlState.pitchUp) {
       const rotation = currentRotationRef.current.clone()
       rotation.multiply(new Quaternion().setFromEuler(new Euler(-0.01, 0, 0)))
       currentRotationRef.current = rotation
     }
 
-    if (controlsRef.current.yawLeft) {
+    if (controlState.yawLeft) {
       const rotation = currentRotationRef.current.clone()
       rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0.01, 0)))
       currentRotationRef.current = rotation
     }
 
-    if (controlsRef.current.yawRight) {
+    if (controlState.yawRight) {
       const rotation = currentRotationRef.current.clone()
       rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
       currentRotationRef.current = rotation
     }
     
-    // if forward key is pressed, drift forward
-    if (controlsRef.current.forward) {
-      // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
-      // engine.drift(throttleRef.current, jitter)
-      engine.drift(throttle, currentRotationRef.current)
-    } else
-    // if forward key is up and reverse key is pressed, drift in reverse
-    if (!controlsRef.current.forward && controlsRef.current.reverse) {
-      if (inReverse.current === false) {
-        // if we are not already in reverse, invert the quaternion and drift in reverse
-        currentRotationRef.current = currentRotationRef.current.clone().invert()
-      }
-      inReverse.current = true
-      engine.drift(throttle, currentRotationRef.current)
+    // slow down
+    if(controlState.freeze) {
+      engine.freeze()
+      setControlState({freeze: false})
     }
 
-    // reset released flags
-    // if forward key is released, stop drifting
-    if (!controlsRef.current.forward && controlsRef.current.forwardReleased) {
-      engine.stopDrift()
-      controlsRef.current.forwardReleased = false
+    if (controlState.cruise) {
+      engine.drift(throttle, currentRotationRef.current)
+    
+    // if not cruising, handle forward and reverse drifts
+    } else if (!controlState.cruise) {
+
+      // if forward key is pressed, drift forward
+      if (controlState.forward) {
+        // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
+        // engine.drift(throttleRef.current, jitter)
+        engine.drift(throttle, currentRotationRef.current)
+      } else
+      // if forward key is up and reverse key is pressed, drift in reverse
+      if (!controlState.forward && controlState.reverse) {
+        if (inReverse.current === false) {
+          // if we are not already in reverse, invert the quaternion and drift in reverse
+          currentRotationRef.current = currentRotationRef.current.clone().invert()
+        }
+        inReverse.current = true
+        engine.drift(throttle, currentRotationRef.current)
+      }
+
+      // reset released flags
+      // if forward key is released, stop drifting
+      if (!controlState.forward && controlState.forwardReleased) {
+        engine.stopDrift()
+        setControlState({forwardReleased: false})
+      }
+      // if reverse key is released, stop drifting
+      if (!controlState.reverse && controlState.reverseReleased) {
+        engine.stopDrift()
+        setControlState({reverseReleased: false})
+      }
+
     }
-    // if reverse key is released, stop drifting
-    if (!controlsRef.current.reverse && controlsRef.current.reverseReleased) {
-      engine.stopDrift()
-      controlsRef.current.reverseReleased = false
-    }
-    // check quat
+
+    // DEBUG check quat
     // console.log(currentRotationRef.current.toArray().join(', '))
   })
 

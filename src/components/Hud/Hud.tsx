@@ -6,13 +6,18 @@ import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { AvatarContext } from "../../providers/AvatarContext"
 import { extractActionState } from "../../libraries/Cyberspace"
+import { useThrottleStore } from "../../store/ThrottleStore"
+import { useControlStore } from "../../store/ControlStore"
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const {actionState, simulatedState} = useContext(AvatarContext)
+  const { throttle } = useThrottleStore()
+  const { controlState } = useControlStore()
 
   const pubkey = identity.pubkey
   const actions = actionState[pubkey]
+
 
   if (!simulatedState[pubkey]) return null
 
@@ -35,6 +40,8 @@ export const Hud = () => {
       <CoordinateText position={{x, y: y + 13}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
       <CoordinateText position={{x, y: y + 15}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
       { rotation ? <CoordinateText position={{x, y: y + 17}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z} align="left" /> : null }
+      <CoordinateText position={{x, y: y + 17}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
+      { controlState.cruise ? <CoordinateText position={{x, y: y + 19}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> : null }
     </group>
     </>
   )
@@ -48,6 +55,7 @@ type CoordinateTextProps = {
   rotation?: [number, number, number],
   text: string,
   align?: "left" | "center" | "right"
+  color?: string
 }
 
 export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
@@ -61,7 +69,7 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
 
   return (
     <Text
-      color="#ff9123"
+      color={ props.color || "#ff9123"}
       fontSize={0.15}
       maxWidth={300}
       lineHeight={1}

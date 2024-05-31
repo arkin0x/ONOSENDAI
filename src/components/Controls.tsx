@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef } from 'react'
-import { useThrottleStore } from '../stores/throttleStore'
+import { useThrottleStore } from '../store/ThrottleStore.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'
@@ -47,11 +47,10 @@ export const Controls = () => {
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
   const controlsRef = useRef<ControlState>(initialControlState)
-  const throttleStore = useThrottleStore()
+  const { throttle, setThrottle } = useThrottleStore()
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
   const inReverse = useRef<boolean>(false)
 
-  // console.log('/// CONTROLS RERUN')
   useEffect(() => {
     const test = new Quaternion()
     console.log('test quat', test)
@@ -83,7 +82,7 @@ export const Controls = () => {
   // set up controls for avatar
   // on mount, set up listener for W key to go forward. On unmount, remove listener.
   const handleKeyDown = (e: KeyboardEvent) => {
-    console.log('key down', e.code, e.key)
+    // console.log('key down', e.code, e.key)
     // forward
     if (e.code === "KeyW" || e.key === "ArrowUp") {
       controlsRef.current.forward = true
@@ -149,16 +148,22 @@ export const Controls = () => {
   }
 
   const handleWheel = (e: WheelEvent) => {
-    e.preventDefault()
+    // e.preventDefault()
     if (e.deltaY > 0) {
       // console.log('wheel down', e.deltaY)
-      throttleStore.setThrottle(Math.min(128, throttleStore.throttle + 1))
+      // console.log('throttle', throttle)
+      const newThrottle = Math.min(128, throttle + 1)
+      // console.log('new throttle', newThrottle)  
+      setThrottle(newThrottle)
     } else {
       // console.log('wheel up', e.deltaY)
-      throttleStore.setThrottle(Math.max(0, throttleStore.throttle - 1))
+      // console.log('throttle', throttle)
+      const newThrottle = Math.max(0, throttle - 1)
+      // console.log('new throttle', newThrottle)  
+      setThrottle(newThrottle)
     }
-    console.log('wheel: ', throttleStore.throttle)
   }
+    // console.log('wheel: ', throttle)
 
   // add listeners for the controls
   useEffect(() => {
@@ -173,7 +178,7 @@ export const Controls = () => {
       window.removeEventListener("wheel", handleWheel)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [throttle])
 
   // add useFrame to take actions based on controlsRef each frame
   useFrame(() => {
@@ -218,7 +223,7 @@ export const Controls = () => {
     if (controlsRef.current.forward) {
       // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
       // engine.drift(throttleRef.current, jitter)
-      engine.drift(throttleStore.throttle, currentRotationRef.current)
+      engine.drift(throttle, currentRotationRef.current)
     } else
     // if forward key is up and reverse key is pressed, drift in reverse
     if (!controlsRef.current.forward && controlsRef.current.reverse) {
@@ -227,7 +232,7 @@ export const Controls = () => {
         currentRotationRef.current = currentRotationRef.current.clone().invert()
       }
       inReverse.current = true
-      engine.drift(throttleStore.throttle, currentRotationRef.current)
+      engine.drift(throttle, currentRotationRef.current)
     }
 
     // reset released flags
@@ -242,7 +247,7 @@ export const Controls = () => {
       controlsRef.current.reverseReleased = false
     }
     // check quat
-    console.log(currentRotationRef.current.toArray().join(', '))
+    // console.log(currentRotationRef.current.toArray().join(', '))
   })
 
   return null

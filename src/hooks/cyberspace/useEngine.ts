@@ -43,7 +43,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   },[])
 
   async function drift(throttle: number, quaternion: Quaternion): Promise<void> {
-    console.log('drift', throttle, quaternion.toArray().join(','))
+    // console.log('drift', throttle, quaternion.toArray().join(','))
     // if nothing else has changed, we don't need to do anything
     if (restartMinersRef.current === false && throttle === throttleRef.current && quaternionRef.current !== null && quaternion.equals(quaternionRef.current)) {
       // We don't need to restart the miners, and the arguments haven't changed, so do nothing.

@@ -1,4 +1,5 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef } from 'react'
+import { useThrottleStore } from '../stores/throttleStore'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'
@@ -46,7 +47,7 @@ export const Controls = () => {
   const {actionState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
   const controlsRef = useRef<ControlState>(initialControlState)
-  const throttleRef = useRef<number>(5)
+  const throttleStore = useThrottleStore()
   const currentRotationRef = useRef<Quaternion>(new Quaternion())
   const inReverse = useRef<boolean>(false)
 
@@ -151,12 +152,12 @@ export const Controls = () => {
     e.preventDefault()
     if (e.deltaY > 0) {
       // console.log('wheel down', e.deltaY)
-      throttleRef.current = Math.min(128, throttleRef.current + 1) // Use a function to update state based on previous state
+      throttleStore.setThrottle(Math.min(128, throttleStore.throttle + 1))
     } else {
       // console.log('wheel up', e.deltaY)
-      throttleRef.current = Math.max(0, throttleRef.current - 1)
+      throttleStore.setThrottle(Math.max(0, throttleStore.throttle - 1))
     }
-    console.log('wheel: ', throttleRef.current)
+    console.log('wheel: ', throttleStore.throttle)
   }
 
   // add listeners for the controls
@@ -217,7 +218,7 @@ export const Controls = () => {
     if (controlsRef.current.forward) {
       // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
       // engine.drift(throttleRef.current, jitter)
-      engine.drift(throttleRef.current, currentRotationRef.current)
+      engine.drift(throttleStore.throttle, currentRotationRef.current)
     } else
     // if forward key is up and reverse key is pressed, drift in reverse
     if (!controlsRef.current.forward && controlsRef.current.reverse) {
@@ -226,7 +227,7 @@ export const Controls = () => {
         currentRotationRef.current = currentRotationRef.current.clone().invert()
       }
       inReverse.current = true
-      engine.drift(throttleRef.current, currentRotationRef.current)
+      engine.drift(throttleStore.throttle, currentRotationRef.current)
     }
 
     // reset released flags

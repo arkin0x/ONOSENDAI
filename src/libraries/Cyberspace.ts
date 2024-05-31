@@ -214,7 +214,7 @@ export const getTime = (action?: Event|UnsignedEvent): Time => {
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
   const sector = getSectorFromCoordinate(pubkey) 
-  const s = getSectorCoordinatesFromCyberspaceCoordinates(pubkey)
+  const sectorId = getSectorId(sector)
   return {
     pubkey, 
     kind: 333,
@@ -226,7 +226,8 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
       ['quaternion', ...IDENTITY_QUATERNION.map(n => n.toString())],
       ['ms', ms_padded],
       ['version', '1'],
-      ['A', 'noop']
+      ['A', 'noop'],
+      ['S', sectorId],
     ]
   } as UnsignedEvent
 }
@@ -254,12 +255,16 @@ export const createUnsignedDriftAction = async (pubkey: string, throttle: number
     // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
   }
+  const coord = newAction.tags.find(getTag('C'))![1]
+  const sector = getSectorFromCoordinate(coord) 
+  const sectorId = getSectorId(sector)
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
   newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toFixed(8))])
   newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
   newAction.tags.push(['e', latestAction.id, '', 'previous'])
   newAction.tags.push(['nonce', '0000000000000000', throttle.toString()])
+  newAction.tags.push(['S', sectorId])
   return newAction as UnsignedEvent
 }
 

@@ -163,7 +163,7 @@ export const Controls = () => {
       window.removeEventListener("wheel", handleWheel)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [throttle])
+  }, [throttle, controlState, setControlState, setThrottle])
 
   // add useFrame to take actions based on controlState each frame
   useFrame(() => {

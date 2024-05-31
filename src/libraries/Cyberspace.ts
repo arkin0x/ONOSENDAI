@@ -372,7 +372,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
 }
 
 /**
- * Used for converting a hex cyberspace coordinate into a DecimalVector3 representing the sector the coordinate is in.
+ * Used for converting a hex cyberspace coordinate into a DecimalVector3 representing the sector id that the coordinate is in.
  * @param coordinate string
  * @returns DecimalVector3
  */

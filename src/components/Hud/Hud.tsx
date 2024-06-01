@@ -27,7 +27,6 @@ export const Hud = () => {
   const {cyberspaceCoordinate, sectorId, sectorPosition, plane, velocity} = extractActionState(simulatedState[pubkey])
 
   const x = 1
-  const y = 1
   const r = Math.PI / 6
 
   let line = 1
@@ -56,7 +55,10 @@ export const Hud = () => {
 
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
 
-      { controlState.cruise ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> : null }
+      { controlState.cruise 
+        ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> 
+        : <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PRESS X FOR CRUISE'} align="left" color={"#ff3377"} />  
+      }
 
     </group>
     </>

@@ -5,7 +5,6 @@ import { IdentityContextType } from '../types/IdentityType.tsx'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'
 import { Euler, Quaternion } from 'three'
 import { AvatarContext } from '../providers/AvatarContext.tsx'
-import { extractActionState } from '../libraries/Cyberspace.ts'
 import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../libraries/Nostr.ts'
 import { useControlStore } from '../store/ControlStore.ts'
@@ -80,6 +79,14 @@ export const Controls = () => {
     } else if (e.code === "KeyE") {
       setControlState({yawRight: true})
 
+    // roll left
+    } else if (e.code === "KeyZ") {
+      setControlState({rollLeft: true})
+
+    // roll right
+    } else if (e.code === "KeyC") {
+      setControlState({rollRight: true})
+
     // respawn
     } else if (e.code === "Escape") {
       setControlState({respawn: true})
@@ -111,6 +118,12 @@ export const Controls = () => {
 
     } else if (e.code === "KeyE") {
       setControlState({yawRight: false})
+
+    } else if (e.code === "KeyZ") {
+      setControlState({rollLeft: false})
+
+    } else if (e.code === "KeyC") {
+      setControlState({rollRight: false})
 
     } else if (e.code === "Escape") {
       setControlState({respawn: false})
@@ -184,6 +197,18 @@ export const Controls = () => {
     if (controlState.yawRight) {
       const _rotation = rotation.clone()
       _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
+      setRotation(_rotation)
+    }
+
+    if (controlState.rollLeft) {
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, 0.01)))
+      setRotation(_rotation)
+    }
+
+    if (controlState.rollRight) {
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, -0.01)))
       setRotation(_rotation)
     }
     

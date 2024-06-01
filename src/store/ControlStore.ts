@@ -12,6 +12,8 @@ type ControlState = {
   pitchDown: boolean
   yawLeft: boolean
   yawRight: boolean
+  rollLeft: boolean
+  rollRight: boolean
 }
 
 type ControlStore = {
@@ -32,6 +34,8 @@ const initialControlState: ControlState = {
   pitchDown: false,
   yawLeft: false,
   yawRight: false,
+  rollLeft: false,
+  rollRight: false,
 }
 
 export const useControlStore = create<ControlStore>((set) => ({

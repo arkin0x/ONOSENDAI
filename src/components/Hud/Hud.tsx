@@ -8,6 +8,7 @@ import { AvatarContext } from "../../providers/AvatarContext"
 import { extractActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
+import { useRotationStore } from "../../store/RotationStore"
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -18,30 +19,45 @@ export const Hud = () => {
   const pubkey = identity.pubkey
   const actions = actionState[pubkey]
 
+  const { rotation } = useRotationStore()
+
 
   if (!simulatedState[pubkey]) return null
 
-  const {cyberspaceCoordinate, sectorId, sectorPosition, plane, velocity, rotation, time} = extractActionState(simulatedState[pubkey])
+  const {cyberspaceCoordinate, sectorId, sectorPosition, plane, velocity} = extractActionState(simulatedState[pubkey])
 
   const x = 1
   const y = 1
   const r = Math.PI / 6
 
+  let line = 1
+
+  const nextLine = () => {
+    line += 2
+    return line
+  }
+
   return (
     <>
     <group>
-      {/* <Axes position={[-1,-2,0]} rotation={[0,0,0]} /> */}
-      <CoordinateText position={{x, y: y + 5}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(8)} align="left" />
-      <CoordinateText position={{x, y: y + 3}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(8)} align="left" />
-      <CoordinateText position={{x, y: y + 1}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(8)} align="left" />
-      <CoordinateText position={{x, y: y + 7}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
-      <CoordinateText position={{x, y: y + 9}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: y + 11}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: y + 13}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
-      <CoordinateText position={{x, y: y + 15}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
-      { rotation ? <CoordinateText position={{x, y: y + 17}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z} align="left" /> : null }
-      <CoordinateText position={{x, y: y + 17}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
-      { controlState.cruise ? <CoordinateText position={{x, y: y + 19}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> : null }
+      <Axes position={[-1,-2,0]} rotation={rotation} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X VELOCITY ' + velocity.x.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y VELOCITY ' + velocity.y.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
+
+      { rotation ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z} align="left" /> : null }
+
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
+
+      { controlState.cruise ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> : null }
+
     </group>
     </>
   )

@@ -24,16 +24,13 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   if (!rotation) {
     rotation = new THREE.Quaternion()
   }
+
   const { camera } = useThree()
-  const currentRotation = useRef<THREE.Quaternion|null>(null)
 
   // update camera
   useFrame(() => {
-    if (!currentRotation.current) {
-      currentRotation.current = rotation.clone()
-    }
     camera.position.copy(position.toVector3())
-    camera.quaternion.copy(currentRotation.current)
+    camera.quaternion.copy(rotation)
     camera.updateProjectionMatrix()
   })
 

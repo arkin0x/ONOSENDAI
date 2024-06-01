@@ -2,12 +2,13 @@ import { useContext, useEffect, useReducer, useState } from 'react'
 import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
-import { getSectorFromCoordinate, getSectorId } from '../libraries/Cyberspace'
+import { extractActionState, getSectorFromCoordinate, getSectorId } from '../libraries/Cyberspace'
 import { NDKContext } from '../providers/NDKProvider'
 import { AvatarContext } from '../providers/AvatarContext'
 import { Event } from 'nostr-tools'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
+import { PurpleLineMaterial } from './ThreeMaterials'
 
 type SectorState = {
   [sectorid: string]: {
@@ -185,7 +186,19 @@ type SectorProps = {
 export const Sector = ({id: string}: SectorProps) => {
   // get the objects in the sector from the context via sector ID
   // render them
+  
+  const {identity} = useContext<IdentityContextType>(IdentityContext)
+  const pubkey = identity?.pubkey
+  const {simulatedState} = useContext(AvatarContext)
+  const {sectorPosition} = extractActionState(simulatedState[pubkey])
+
+  const position = sectorPosition.toVector3()
 
   console.log('rendering sector of id', string)
-  return null
+
+  const cube = []
+
+  cube.push(<gridHelper key="z-" args={[2**30, 2**10]} material={PurpleLineMaterial} position={position.add(new Vector3(0, 0, -100))}/>)
+
+  return cube
 }

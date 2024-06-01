@@ -9,6 +9,7 @@ import { extractActionState } from '../libraries/Cyberspace.ts'
 import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../libraries/Nostr.ts'
 import { useControlStore } from '../store/ControlStore.ts'
+import { useRotationStore } from '../store/RotationStore.ts'
 
 /**
  * The <Controls> component sets up HID input listeners for avatar control and thermodynamic posture control. Input is translated into commands dispatched to Engine for mining and camera control. 
@@ -23,21 +24,13 @@ export const Controls = () => {
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
-  const currentRotationRef = useRef<Quaternion>(new Quaternion())
+  const { rotation, setRotation } = useRotationStore() // use the new store
   const inReverse = useRef<boolean>(false)
 
-  useEffect(() => {
-    const test = new Quaternion()
-    console.log('test quat', test)
-    const test2 = test.invert()
-    console.log('test inv', test2)
-  },[])
-
-  // get the current rotation from the most recent action state and set the currentRotationRef
+  // get the current rotation from the most recent action state
   useEffect(() => {
     if(!actions || actions.length === 0) {
-      // if no action state, set currentRotation to identity rotation
-      currentRotationRef.current = new Quaternion()
+      // if no action state
     } else {
       // debug
       // console.log('controls set genesis and latest action')
@@ -45,11 +38,6 @@ export const Controls = () => {
       engine.setGenesisAction(actions[0])
       // set latest action
       engine.setLatestAction(actions[actions.length-1])
-
-      // get rotation from most recent action state
-      const latestAction = actions[actions.length-1]
-      const {rotation} = extractActionState(latestAction)
-      currentRotationRef.current = rotation ?? new Quaternion()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[actions])
@@ -176,27 +164,27 @@ export const Controls = () => {
 
     // change rotation
     if (controlState.pitchDown) {
-      const rotation = currentRotationRef.current.clone()
-      rotation.multiply(new Quaternion().setFromEuler(new Euler(0.01, 0, 0)))
-      currentRotationRef.current = rotation
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(-0.01, 0, 0)))
+      setRotation(_rotation)
     }
 
     if (controlState.pitchUp) {
-      const rotation = currentRotationRef.current.clone()
-      rotation.multiply(new Quaternion().setFromEuler(new Euler(-0.01, 0, 0)))
-      currentRotationRef.current = rotation
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0.01, 0, 0)))
+      setRotation(_rotation)
     }
 
     if (controlState.yawLeft) {
-      const rotation = currentRotationRef.current.clone()
-      rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0.01, 0)))
-      currentRotationRef.current = rotation
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0.01, 0)))
+      setRotation(_rotation)
     }
 
     if (controlState.yawRight) {
-      const rotation = currentRotationRef.current.clone()
-      rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
-      currentRotationRef.current = rotation
+      const _rotation = rotation.clone()
+      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
+      setRotation(_rotation)
     }
     
     // slow down
@@ -206,25 +194,23 @@ export const Controls = () => {
     }
 
     if (controlState.cruise) {
-      engine.drift(throttle, currentRotationRef.current)
+      engine.drift(throttle, rotation)
     
     // if not cruising, handle forward and reverse drifts
     } else if (!controlState.cruise) {
 
       // if forward key is pressed, drift forward
       if (controlState.forward) {
-        // const jitter = new Quaternion(currentRotationRef.current.x + Math.random() / 100000, currentRotationRef.current.y + Math.random() / 10000, currentRotationRef.current.z + Math.random() / 10000, currentRotationRef.current.w + Math.random() / 10000)
-        // engine.drift(throttleRef.current, jitter)
-        engine.drift(throttle, currentRotationRef.current)
+        engine.drift(throttle, rotation)
       } else
       // if forward key is up and reverse key is pressed, drift in reverse
       if (!controlState.forward && controlState.reverse) {
         if (inReverse.current === false) {
           // if we are not already in reverse, invert the quaternion and drift in reverse
-          currentRotationRef.current = currentRotationRef.current.clone().invert()
+          setRotation(rotation.clone().invert())
         }
         inReverse.current = true
-        engine.drift(throttle, currentRotationRef.current)
+        engine.drift(throttle, rotation)
       }
 
       // reset released flags
@@ -241,8 +227,6 @@ export const Controls = () => {
 
     }
 
-    // DEBUG check quat
-    // console.log(currentRotationRef.current.toArray().join(', '))
   })
 
   return null

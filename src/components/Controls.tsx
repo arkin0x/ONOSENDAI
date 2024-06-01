@@ -172,6 +172,8 @@ export const Controls = () => {
       engine.respawn()
       setControlState({respawn: false})
       resetControlState()
+      setRotation(new Quaternion())
+      setThrottle(5)
       return
     }
 

@@ -9,6 +9,7 @@ import { extractActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
+import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -39,7 +40,7 @@ export const Hud = () => {
   return (
     <>
     <group>
-      <Axes position={[-3,-1,-1]} rotation={rotation.clone().invert()} />
+      <Axes position={[-3,-0.75,-1]} rotation={rotation.clone().invert()} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(0)} align="left" />
@@ -59,6 +60,8 @@ export const Hud = () => {
         ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> 
         : <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PRESS X FOR CRUISE'} align="left" color={"#ff3377"} />  
       }
+
+      <CoordinateText position={{x, y: 55}} rotation={[0, r, 0]} text={'PRESS T FOR TELEMETRY'} align="left" color={`#${LOGO_TEAL.toString(16).padStart(6, '0')}`} /> 
 
     </group>
     </>

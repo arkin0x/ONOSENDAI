@@ -40,7 +40,7 @@ export const Hud = () => {
   return (
     <>
     <group>
-      <Axes position={[-1,-2,0]} rotation={rotation} />
+      <Axes position={[-3,-1,-1]} rotation={rotation.clone().invert()} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(0)} align="left" />
@@ -52,7 +52,7 @@ export const Hud = () => {
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
 
-      { rotation ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z} align="left" /> : null }
+      { rotation ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z + '/' + rotation.w} align="left" /> : null }
 
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
 
@@ -112,7 +112,8 @@ const Axes = (props) => {
   useEffect(() => {
     ref.current = new AxesHelper(1)
     ref.current.position.fromArray(props.position)
-    ref.current.rotation.setFromVector3(new Vector3().fromArray(props.rotation))
+    // ref.current.rotation.setFromVector3(new Vector3().fromArray(props.rotation))
+    ref.current.setRotationFromQuaternion(props.rotation)
     scene.add(ref.current)
 
     return () => { // Cleanup function to remove the helper when the component unmounts

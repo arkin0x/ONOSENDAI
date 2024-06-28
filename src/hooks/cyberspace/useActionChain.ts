@@ -34,6 +34,17 @@ export const useActionChain = (pubkey: string) => {
   const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
   /**
+   * Reset: if actionChainState is empty, we need to reset other variables.
+   */
+  useEffect(() => {
+    if (actionChainState && actionChainState.length === 0) {
+      setRunInitializeOnce(false)
+      setGenesisId(null)
+      setHistoryComplete(false)
+    }
+  }, [actionChainState])
+
+  /**
    * Initialize: set up subscription for latest action and get genesisId from it.
    */
   useEffect(() => {

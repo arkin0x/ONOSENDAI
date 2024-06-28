@@ -42,12 +42,12 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   const positionVec = position.toVector3()
     useFrame(({clock}) => {
 
-      // const elapsedTime = clock.getElapsedTime()
-      const radius = 5
-      // const angle = Math.PI //elapsedTime * 0.5 // adjust the rotation speed as desired
-      // const x = Math.cos(angle) * radius
-      // const z = Math.sin(angle) * radius
-      camera.position.set(positionVec.x, positionVec.y, positionVec.z + radius)
+      const elapsedTime = clock.getElapsedTime()
+      const radius = 200
+      const angle = 0//Math.PI//elapsedTime * 0.5 // adjust the rotation speed as desired
+      const x = Math.cos(angle) * radius
+      const z = Math.sin(angle) * radius
+      camera.position.set(positionVec.x + x, positionVec.y + 0, positionVec.z + z)
       camera.lookAt(position.toVector3())
       camera.updateProjectionMatrix()
     })
@@ -55,7 +55,7 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   return (
     <group position={position.toVector3()}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
-      <mesh geometry={AvatarGeometry} material={AvatarMaterial} />
+      {/* <mesh geometry={AvatarGeometry} material={AvatarMaterial} /> */}
     </group>
   )
 }

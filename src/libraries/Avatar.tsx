@@ -1,5 +1,5 @@
 import { useActionChain } from "../hooks/cyberspace/useActionChain"
-import { BufferGeometry, LineBasicMaterial, Vector3 } from "three"
+import { BufferGeometry, LineBasicMaterial, Quaternion, Vector3 } from "three"
 import { ThreeAvatar } from "../components/ThreeAvatar"
 import { useContext, useEffect, useRef } from "react"
 import { AvatarContext } from "../providers/AvatarContext"
@@ -7,6 +7,7 @@ import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinates } fro
 import { useRotationStore } from "../store/RotationStore"
 import { getTag } from "./Nostr"
 import { useFrame } from "@react-three/fiber"
+import { DecimalVector3 } from "./DecimalVector3"
 
 type AvatarProps = {
   pubkey: string
@@ -32,19 +33,18 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   const {sectorPosition, plane, velocity, time} = extractActionState(simulatedState[pubkey])
 
   return <>
-    <ThreeAvatarTrail pubkey={pubkey}/>
+    <ThreeAvatarTrail position={sectorPosition} rotation={rotation} pubkey={pubkey}/>
     <ThreeAvatar position={sectorPosition} rotation={rotation} />
   </>
 }
 
-function ThreeAvatarTrail({pubkey}: {pubkey: string}) {
+function ThreeAvatarTrail({pubkey, position, rotation}: {pubkey: string, position: DecimalVector3, rotation: Quaternion}) {
   const {actionState, simulatedState} = useContext(AvatarContext)
   const actions = actionState[pubkey]
   // for each pair of actions, render a line between them
   const lines = []
-  const AvatarLineMaterial = new LineBasicMaterial({
-    color: 0x2b0c40,
-  })
+
+  const AvatarMaterialEdges = new LineBasicMaterial({ color: 0xff2323 })
 
   if (!actions || actions.length < 2) {
     return null
@@ -62,26 +62,29 @@ function ThreeAvatarTrail({pubkey}: {pubkey: string}) {
         endPoint = getSectorCoordinatesFromCyberspaceCoordinates(actions[i+1].tags.find(getTag('C'))![1]).toVector3()
       }
 
-      const line = <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([startPoint, endPoint])} key={i} material={AvatarLineMaterial} />
+      const line = <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([startPoint, endPoint])} key={i} material={AvatarMaterialEdges} />
       lines.push(line)
     } catch (e) {
       console.error('ThreeAvatarTrail:', e)
     }
   }
 
-  console.log(lines)
+  // console.log(lines)
 
   function tracer() {
     const currentPos = getSectorCoordinatesFromCyberspaceCoordinates(simulatedState[pubkey].tags.find(getTag('C'))![1]).toVector3()
     const trace = currentPos.clone().add(new Vector3(5, 5, 0))
+    // console.log(currentPos, trace)
     return (
-      <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([currentPos, trace])} key={"tracer"} material={AvatarLineMaterial} />
+      <group position={position.toVector3()}>
+        <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([new Vector3(), new Vector3(0,0,10).applyQuaternion(rotation)])} key={"tracer"} material={AvatarMaterialEdges} />
+      </group>
     )
   }
 
   return <>
     {/* <TestMesh/> */}
-    {/* {lines} */}
+    {lines}
     {tracer()}
   </>
 }

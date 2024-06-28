@@ -27,6 +27,8 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
 
   const { camera } = useThree()
 
+  camera.far = 2**30
+
   // update camera
   // useFrame(() => {
   //   // camera.position.copy(position.toVector3())
@@ -41,13 +43,15 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   // })
   const positionVec = position.toVector3()
     useFrame(({clock}) => {
-
       const elapsedTime = clock.getElapsedTime()
-      const radius = 200
-      const angle = 0//Math.PI//elapsedTime * 0.5 // adjust the rotation speed as desired
+      const radius = 50
+      const angle = -Math.PI/2//Math.PI//elapsedTime * 0.5 // adjust the rotation speed as desired
       const x = Math.cos(angle) * radius
       const z = Math.sin(angle) * radius
-      camera.position.set(positionVec.x + x, positionVec.y + 0, positionVec.z + z)
+      const oppositeRotation = rotation.clone()//.invert()
+      const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
+      const cameraPosition = positionVec.clone().add(cameraDirection.multiplyScalar(radius))
+      camera.position.copy(cameraPosition)
       camera.lookAt(position.toVector3())
       camera.updateProjectionMatrix()
     })

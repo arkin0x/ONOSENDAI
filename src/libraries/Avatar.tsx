@@ -72,8 +72,8 @@ function ThreeAvatarTrail({pubkey, position, rotation}: {pubkey: string, positio
   // console.log(lines)
 
   function tracer() {
-    const currentPos = getSectorCoordinatesFromCyberspaceCoordinates(simulatedState[pubkey].tags.find(getTag('C'))![1]).toVector3()
-    const trace = currentPos.clone().add(new Vector3(5, 5, 0))
+    // const currentPos = getSectorCoordinatesFromCyberspaceCoordinates(simulatedState[pubkey].tags.find(getTag('C'))![1]).toVector3()
+    // const trace = currentPos.clone().add(new Vector3(5, 5, 0))
     // console.log(currentPos, trace)
     return (
       <group position={position.toVector3()}>
@@ -85,7 +85,7 @@ function ThreeAvatarTrail({pubkey, position, rotation}: {pubkey: string, positio
   return <>
     {/* <TestMesh/> */}
     {lines}
-    {tracer()}
+    {/* {tracer()} */}
   </>
 }
 

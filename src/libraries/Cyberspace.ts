@@ -422,12 +422,6 @@ export const cyberspaceToSectorPosition = (cyberspacePosition: DecimalVector3): 
  */
 export const getSectorCoordinatesFromCyberspaceCoordinates = (coordinate: string): DecimalVector3 => {
   const coord = decodeHexToCoordinates(coordinate)
-
-  const sectorX = coord.x.mod(CYBERSPACE_SECTOR)
-  const sectorY = coord.y.mod(CYBERSPACE_SECTOR)
-  const sectorZ = coord.z.mod(CYBERSPACE_SECTOR)
-  
-  const sector = new DecimalVector3(sectorX, sectorY, sectorZ)
-
-  return sector
+  const position = new DecimalVector3(coord.x, coord.y, coord.z)
+  return cyberspaceToSectorPosition(position)
 }

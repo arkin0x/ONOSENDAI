@@ -28,11 +28,29 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   const { camera } = useThree()
 
   // update camera
-  useFrame(() => {
-    camera.position.copy(position.toVector3())
-    camera.quaternion.copy(rotation)
-    camera.updateProjectionMatrix()
-  })
+  // useFrame(() => {
+  //   // camera.position.copy(position.toVector3())
+  //   // camera.quaternion.copy(rotation)
+  //   // camera.updateProjectionMatrix()
+  //   const clock = useRef<THREE.Clock>(new THREE.Clock())
+
+  //   camera.position.copy(position.toVector3().add(new THREE.Vector3(1, 1, -1)))
+  //   camera.lookAt(position.toVector3())
+  //   camera.updateProjectionMatrix()
+  //   console.log('playerv3', position.toVector3())
+  // })
+  const positionVec = position.toVector3()
+    useFrame(({clock}) => {
+
+      // const elapsedTime = clock.getElapsedTime()
+      const radius = 5
+      // const angle = Math.PI //elapsedTime * 0.5 // adjust the rotation speed as desired
+      // const x = Math.cos(angle) * radius
+      // const z = Math.sin(angle) * radius
+      camera.position.set(positionVec.x, positionVec.y, positionVec.z + radius)
+      camera.lookAt(position.toVector3())
+      camera.updateProjectionMatrix()
+    })
 
   return (
     <group position={position.toVector3()}>

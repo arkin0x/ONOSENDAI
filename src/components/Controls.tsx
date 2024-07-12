@@ -19,6 +19,7 @@ export const Controls: React.FC = () => {
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
   const { rotation, setRotation } = useRotationStore()
+  const [isDragging, setIsDragging] = useState(false)
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
 
   const isHopping = useRef<boolean>(false)
@@ -107,19 +108,6 @@ export const Controls: React.FC = () => {
     }
   }, [setControlState])
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    const sensitivity = 0.0002
-    if (lastMousePosition) {
-      const deltaX = e.clientX - lastMousePosition.x
-      const deltaY = e.clientY - lastMousePosition.y
-      
-      const newRotation = rotation.clone()
-      newRotation.multiply(new Quaternion().setFromEuler(new Euler(-deltaY * sensitivity, -deltaX * sensitivity, 0, 'YXZ')))
-      setRotation(newRotation)
-    }
-    setLastMousePosition({ x: e.clientX, y: e.clientY })
-  }, [rotation, setRotation, lastMousePosition])
-
   const handleMouseEnter = useCallback((e: MouseEvent) => {
     setLastMousePosition({ x: e.clientX, y: e.clientY })
   }, [])
@@ -148,10 +136,37 @@ export const Controls: React.FC = () => {
       console.log("Action menu opened")
       // Implement action menu logic here
     } else if (e.button === 0) { // Left mouse button
-      console.log("Selected action used")
-      // Implement selected action logic here
+      setIsDragging(true)
+      setLastMousePosition({ x: e.clientX, y: e.clientY })
     }
   }, [])
+
+  const handleMouseUp = useCallback((e: MouseEvent) => {
+    if (e.button === 0) { // Left mouse button
+      setIsDragging(false)
+      setLastMousePosition(null)
+    }
+  }, [])
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging && lastMousePosition) {
+      const sensitivity = 0.003
+      const deltaX = e.clientX - lastMousePosition.x
+      const deltaY = e.clientY - lastMousePosition.y
+
+      // Create quaternions for rotation around X and Y axes
+      const rotationX = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), deltaY * sensitivity)
+      const rotationY = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -deltaX * sensitivity)
+
+      // Combine rotations
+      const newRotation = rotation.clone()
+        .multiply(rotationY)  // First rotate around Y-axis (left-right)
+        .multiply(rotationX)  // Then rotate around X-axis (up-down)
+
+      setRotation(newRotation.normalize())
+      setLastMousePosition({ x: e.clientX, y: e.clientY })
+    }
+  }, [isDragging, lastMousePosition, rotation, setRotation])
 
   const handleWheel = useCallback((e: WheelEvent) => {
     setThrottle(Math.max(0, Math.min(128, throttle + (e.deltaY > 0 ? 1 : -1))))
@@ -166,6 +181,7 @@ export const Controls: React.FC = () => {
     window.addEventListener("keyup", handleKeyUp)
     window.addEventListener("mousemove", handleMouseMove)
     window.addEventListener("mousedown", handleMouseDown)
+    window.addEventListener("mouseup", handleMouseUp)
     window.addEventListener("wheel", handleWheel)
     window.addEventListener("contextmenu", handleContextMenu)
 
@@ -180,10 +196,11 @@ export const Controls: React.FC = () => {
       window.removeEventListener("keyup", handleKeyUp)
       window.removeEventListener("mousemove", handleMouseMove)
       window.removeEventListener("mousedown", handleMouseDown)
+      window.removeEventListener("mouseup", handleMouseUp)
       window.removeEventListener("wheel", handleWheel)
       window.removeEventListener("contextmenu", handleContextMenu)
     }
-  }, [handleKeyDown, handleKeyUp, handleMouseMove, handleMouseDown, handleWheel, handleContextMenu])
+  }, [handleKeyDown, handleKeyUp, handleMouseMove, handleMouseDown, handleMouseUp, handleWheel, handleContextMenu])
 
   useFrame(() => {
     if (controlState.respawn) {

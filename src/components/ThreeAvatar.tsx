@@ -2,7 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber"
 import React, { useRef } from "react"
 import * as THREE from "three"
 import { DecimalVector3 } from "../libraries/DecimalVector3"
-import { Text } from "@react-three/drei"
+import { Plane, Text } from "@react-three/drei"
 
 const AvatarMaterial = new THREE.MeshStandardMaterial({
   color: 0xff2323,
@@ -62,6 +62,14 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
     <group position={position.toVector3()}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       {/* <mesh geometry={AvatarGeometry} material={AvatarMaterial} /> */}
+      <mesh 
+        position={new THREE.Vector3(0, 0, 0)}
+        rotation={new THREE.Euler().setFromVector3(new THREE.Vector3(Math.PI/2,0,0))}
+      >
+        <coneGeometry args={[.1, 1, 16]}/>
+        <meshNormalMaterial />
+      </mesh>
+      <Plane args={[1, 1]} position={[0, -0.5, 0]} rotation={new THREE.Euler(Math.PI/2, 0, 0, 'XYZ')} material={new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide})}/>
     </group>
   )
 }

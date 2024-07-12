@@ -29,6 +29,8 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
 
   camera.far = 2**30
 
+  // console.log(rotation.toArray().map((x) => x.toFixed(2)))
+
   // update camera
   // useFrame(() => {
   //   // camera.position.copy(position.toVector3())

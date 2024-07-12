@@ -1,259 +1,246 @@
-import { useContext, useEffect, useRef } from 'react'
+import React, { useContext, useEffect, useRef, useCallback, useState } from 'react'
 import { useThrottleStore } from '../store/ThrottleStore.ts'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { useEngine } from '../hooks/cyberspace/useEngine.ts'
-import { Euler, Quaternion } from 'three'
+import { Euler, Quaternion, Vector3 } from 'three'
 import { AvatarContext } from '../providers/AvatarContext.tsx'
 import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../libraries/Nostr.ts'
 import { useControlStore } from '../store/ControlStore.ts'
 import { useRotationStore } from '../store/RotationStore.ts'
 
-/**
- * The <Controls> component sets up HID input listeners for avatar control and thermodynamic posture control. Input is translated into commands dispatched to Engine for mining and camera control. 
- * @returns null
- */
-export const Controls = () => {
-
+export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
   const engine = useEngine(pubkey, defaultRelays)
-  const {actionState} = useContext(AvatarContext)
+  const { actionState } = useContext(AvatarContext)
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
-  const { rotation, setRotation } = useRotationStore() // use the new store
-  const inReverse = useRef<boolean>(false)
+  const { rotation, setRotation } = useRotationStore()
+  const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
 
-  // get the current rotation from the most recent action state
+  const isHopping = useRef<boolean>(false)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
   useEffect(() => {
-    if(!actions || actions.length === 0) {
-      // if no action state
-    } else {
-      // debug
-      // console.log('controls set genesis and latest action')
-      // set genesis action
+    if (actions && actions.length > 0) {
       engine.setGenesisAction(actions[0])
-      // set latest action
-      engine.setLatestAction(actions[actions.length-1])
+      engine.setLatestAction(actions[actions.length - 1])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[actions])
+  }, [actions, engine])
 
-  // set up controls for avatar
-  // on mount, set up listener for W key to go forward. On unmount, remove listener.
-  const handleKeyDown = (e: KeyboardEvent) => {
-    // console.log('key down', e.code, e.key)
-    // forward
-    if (e.code === "KeyW" || e.key === "ArrowUp") {
-      setControlState({forward: true})
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    switch (e.code) {
+      case "KeyQ":
+        setControlState({ rollLeft: true, rollLeftCompleted: false })
+        break
+      case "KeyE":
+        setControlState({ rollRight: true, rollRightCompleted: false })
+        break
+      case "KeyW":
+        setControlState({ forward: true })
+        break
+      case "KeyS":
+        setControlState({ backward: true })
+        break
+      case "KeyA":
+        setControlState({ left: true })
+        break
+      case "KeyD":
+        setControlState({ right: true })
+        break
+      case "KeyX":
+        isHopping.current = !isHopping.current
+        console.log(isHopping.current ? "Hopping mode enabled" : "Drifting mode enabled")
+        break
+      case "Space":
+        setControlState({ up: true })
+        break
+      case "ShiftLeft":
+      case "ShiftRight":
+        setControlState({ down: true })
+        break
+      case "AltLeft":
+        setControlState({ freeze: true })
+        break
+      case "Escape":
+        setControlState({ respawn: true })
+        break
+    }
+  }, [setControlState])
 
-    // cruise (no need to hold down forward)
-    } else if (e.code === "KeyX") {
-      if (controlState.cruise) {
-        setControlState({cruise: false})
-      } else {
-        setControlState({forward: false})
-        setControlState({cruise: true})
+  const handleKeyUp = useCallback((e: KeyboardEvent) => {
+    switch (e.code) {
+      case "KeyQ":
+        setControlState({ rollLeft: false, rollLeftCompleted: false })
+        break
+      case "KeyE":
+        setControlState({ rollRight: false, rollRightCompleted: false })
+        break
+      case "KeyW":
+        setControlState({ forward: false })
+        break
+      case "KeyS":
+        setControlState({ backward: false })
+        break
+      case "KeyA":
+        setControlState({ left: false })
+        break
+      case "KeyD":
+        setControlState({ right: false })
+        break
+      case "Space":
+        setControlState({ up: false })
+        break
+      case "ShiftLeft":
+      case "ShiftRight":
+        setControlState({ down: false })
+        break
+      case "AltLeft":
+        setControlState({ freeze: false })
+        break
+      case "Escape":
+        setControlState({ respawn: false })
+        break
+    }
+  }, [setControlState])
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    const sensitivity = 0.0002
+    if (lastMousePosition) {
+      const deltaX = e.clientX - lastMousePosition.x
+      const deltaY = e.clientY - lastMousePosition.y
+      
+      const newRotation = rotation.clone()
+      newRotation.multiply(new Quaternion().setFromEuler(new Euler(-deltaY * sensitivity, -deltaX * sensitivity, 0, 'YXZ')))
+      setRotation(newRotation)
+    }
+    setLastMousePosition({ x: e.clientX, y: e.clientY })
+  }, [rotation, setRotation, lastMousePosition])
+
+  const handleMouseEnter = useCallback((e: MouseEvent) => {
+    setLastMousePosition({ x: e.clientX, y: e.clientY })
+  }, [])
+
+  const handleMouseLeave = useCallback(() => {
+    setLastMousePosition(null)
+  }, [])
+
+  useEffect(() => {
+    const canvas = document.querySelector('canvas')
+    if (canvas) {
+      canvas.addEventListener('mouseenter', handleMouseEnter)
+      canvas.addEventListener('mouseleave', handleMouseLeave)
+    }
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener('mouseenter', handleMouseEnter)
+        canvas.removeEventListener('mouseleave', handleMouseLeave)
       }
-
-    // reverse
-    } else if (e.code === "KeyS" || e.key === "ArrowDown") {
-      setControlState({reverse: true})
-
-
-    // pitch up
-    } else if (e.code === "KeyR") {
-      setControlState({pitchUp: true})
-
-    // pitch down
-    } else if (e.code === "KeyF") {
-      setControlState({pitchDown: true})
-
-    // yaw left
-    } else if (e.code === "KeyQ") {
-      setControlState({yawLeft: true})
-
-    // yaw right
-    } else if (e.code === "KeyE") {
-      setControlState({yawRight: true})
-
-    // roll left
-    } else if (e.code === "KeyZ") {
-      setControlState({rollLeft: true})
-
-    // roll right
-    } else if (e.code === "KeyC") {
-      setControlState({rollRight: true})
-
-    // respawn
-    } else if (e.code === "Escape") {
-      setControlState({respawn: true})
-
-    // stop
-    } else if (e.code === "Space") {
-      setControlState({freeze: true})
     }
-  }
+  }, [handleMouseEnter, handleMouseLeave]) 
 
-  const handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === "KeyW" || e.key === "ArrowUp") {
-      setControlState({forward: false})
-      setControlState({forwardReleased: true})
-
-    } else if (e.code === "KeyS" || e.key === "ArrowDown") {
-      setControlState({reverse: false})
-      setControlState({reverseReleased: true})
-      inReverse.current = false 
-
-    } else if (e.code === "KeyR") {
-      setControlState({pitchUp: false})
-
-    } else if (e.code === "KeyF") {
-      setControlState({pitchDown: false})
-
-    } else if (e.code === "KeyQ") {
-      setControlState({yawLeft: false})
-
-    } else if (e.code === "KeyE") {
-      setControlState({yawRight: false})
-
-    } else if (e.code === "KeyZ") {
-      setControlState({rollLeft: false})
-
-    } else if (e.code === "KeyC") {
-      setControlState({rollRight: false})
-
-    } else if (e.code === "Escape") {
-      setControlState({respawn: false})
-
-    } else if (e.code === "Space") {
-      setControlState({freeze: false})
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (e.button === 2) { // Right mouse button
+      console.log("Action menu opened")
+      // Implement action menu logic here
+    } else if (e.button === 0) { // Left mouse button
+      console.log("Selected action used")
+      // Implement selected action logic here
     }
-  }
+  }, [])
 
-  const handleWheel = (e: WheelEvent) => {
-    // e.preventDefault()
-    if (e.deltaY > 0) {
-      // console.log('wheel down', e.deltaY)
-      // console.log('throttle', throttle)
-      const newThrottle = Math.min(128, throttle + 1)
-      // console.log('new throttle', newThrottle)  
-      setThrottle(newThrottle)
-    } else {
-      // console.log('wheel up', e.deltaY)
-      // console.log('throttle', throttle)
-      const newThrottle = Math.max(0, throttle - 1)
-      // console.log('new throttle', newThrottle)  
-      setThrottle(newThrottle)
-    }
-  }
-    // console.log('wheel: ', throttle)
+  const handleWheel = useCallback((e: WheelEvent) => {
+    setThrottle(Math.max(0, Math.min(128, throttle + (e.deltaY > 0 ? 1 : -1))))
+  }, [setThrottle, throttle])
 
-  // add listeners for the controls
+  const handleContextMenu = useCallback((e: MouseEvent) => {
+    e.preventDefault() // Prevent the default context menu
+  }, [])
+
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown)
     window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mousedown", handleMouseDown)
     window.addEventListener("wheel", handleWheel)
+    window.addEventListener("contextmenu", handleContextMenu)
 
-    // @TODO - set handler for pointer drag to rotate avatar and setCurrentRotation
+    const canvas = document.querySelector('canvas')
+    if (canvas) {
+      canvasRef.current = canvas
+      canvas.addEventListener('click', () => canvas.requestPointerLock())
+    }
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mousedown", handleMouseDown)
       window.removeEventListener("wheel", handleWheel)
+      window.removeEventListener("contextmenu", handleContextMenu)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [throttle, controlState, setControlState, setThrottle])
+  }, [handleKeyDown, handleKeyUp, handleMouseMove, handleMouseDown, handleWheel, handleContextMenu])
 
-  // add useFrame to take actions based on controlState each frame
   useFrame(() => {
-    if(controlState.respawn) {
+    if (controlState.respawn) {
       engine.respawn()
-      setControlState({respawn: false})
       resetControlState()
       setRotation(new Quaternion())
       setThrottle(5)
       return
     }
 
-    // change rotation
-    if (controlState.pitchDown) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(-0.01, 0, 0)))
-      setRotation(_rotation)
+    // Handle roll rotation
+    const rotationChange = Math.PI / 2 // 90 degrees
+    const newRotation = rotation.clone()
+
+    if (controlState.rollLeft && !controlState.rollLeftCompleted) {
+      newRotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, rotationChange)))
+      setControlState({ rollLeftCompleted: true })
+    }
+    if (controlState.rollRight && !controlState.rollRightCompleted) {
+      newRotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, -rotationChange)))
+      setControlState({ rollRightCompleted: true })
     }
 
-    if (controlState.pitchUp) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0.01, 0, 0)))
-      setRotation(_rotation)
+    setRotation(newRotation)
+
+    // Handle movement
+    const moveVector = new Vector3()
+
+    if (controlState.forward) moveVector.z -= 1
+    if (controlState.backward) moveVector.z += 1
+    if (controlState.left) moveVector.x -= 1
+    if (controlState.right) moveVector.x += 1
+    if (controlState.up) moveVector.y += 1
+    if (controlState.down) moveVector.y -= 1
+
+    // Handle drift/hop
+    if (moveVector.lengthSq() > 0) {
+      moveVector.normalize()
+
+      // Convert movement vector to world space based on camera rotation
+      moveVector.applyQuaternion(newRotation)
+
+      // Convert world space movement vector to a quaternion
+      const movementQuaternion = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), moveVector)
+      
+      if (isHopping.current) {
+        console.log("Hopping in direction:", moveVector)
+        // Implement hopping logic here
+      } else {
+        engine.drift(throttle, movementQuaternion)
+      }
     }
 
-    if (controlState.yawLeft) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0.01, 0)))
-      setRotation(_rotation)
-    }
-
-    if (controlState.yawRight) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, -0.01, 0)))
-      setRotation(_rotation)
-    }
-
-    if (controlState.rollLeft) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, 0.01)))
-      setRotation(_rotation)
-    }
-
-    if (controlState.rollRight) {
-      const _rotation = rotation.clone()
-      _rotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, -0.01)))
-      setRotation(_rotation)
-    }
-    
-    // slow down
-    if(controlState.freeze) {
+    // Handle freeze
+    if (controlState.freeze) {
       engine.freeze()
-      setControlState({freeze: false})
     }
-
-    if (controlState.cruise) {
-      engine.drift(throttle, rotation)
-    
-    // if not cruising, handle forward and reverse drifts
-    } else if (!controlState.cruise) {
-
-      // if forward key is pressed, drift forward
-      if (controlState.forward) {
-        engine.drift(throttle, rotation)
-      } else
-      // if forward key is up and reverse key is pressed, drift in reverse
-      if (!controlState.forward && controlState.reverse) {
-        if (inReverse.current === false) {
-          // if we are not already in reverse, invert the quaternion and drift in reverse
-          setRotation(rotation.clone().invert())
-        }
-        inReverse.current = true
-        engine.drift(throttle, rotation)
-      }
-
-      // reset released flags
-      // if forward key is released, stop drifting
-      if (!controlState.forward && controlState.forwardReleased) {
-        engine.stopDrift()
-        setControlState({forwardReleased: false})
-      }
-      // if reverse key is released, stop drifting
-      if (!controlState.reverse && controlState.reverseReleased) {
-        engine.stopDrift()
-        setControlState({reverseReleased: false})
-      }
-
-    }
-
   })
 
   return null

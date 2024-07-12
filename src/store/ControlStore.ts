@@ -1,19 +1,18 @@
 import { create } from 'zustand'
 
 type ControlState = {
-  cruise: boolean
   forward: boolean
-  forwardReleased: boolean
-  reverse: boolean
-  reverseReleased: boolean
-  respawn: boolean
-  freeze: boolean
-  pitchUp: boolean
-  pitchDown: boolean
-  yawLeft: boolean
-  yawRight: boolean
+  backward: boolean
+  left: boolean
+  right: boolean
+  up: boolean
+  down: boolean
   rollLeft: boolean
+  rollLeftCompleted: boolean
   rollRight: boolean
+  rollRightCompleted: boolean
+  freeze: boolean
+  respawn: boolean
 }
 
 type ControlStore = {
@@ -23,19 +22,16 @@ type ControlStore = {
 }
 
 const initialControlState: ControlState = {
-  cruise: false,
   forward: false,
-  forwardReleased: false,
-  reverse: false,
-  reverseReleased: false,
-  respawn: false,
-  freeze: false,
-  pitchUp: false,
-  pitchDown: false,
-  yawLeft: false,
-  yawRight: false,
+  backward: false,
+  left: false,
+  right: false,
+  up: false,
+  down: false,
   rollLeft: false,
   rollRight: false,
+  freeze: false,
+  respawn: false,
 }
 
 export const useControlStore = create<ControlStore>((set) => ({

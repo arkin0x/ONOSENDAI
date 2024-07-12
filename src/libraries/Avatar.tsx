@@ -62,7 +62,7 @@ function ThreeAvatarTrail({pubkey, position, rotation}: {pubkey: string, positio
   const actions = actionState[pubkey]
   // for each pair of actions, render a line between them
 
-  console.log(lines.length)
+  // console.log(lines.length)
 
   const AvatarMaterialEdges = new LineBasicMaterial({ color: 0xff2323 })
 

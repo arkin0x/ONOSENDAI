@@ -44,7 +44,7 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
   const positionVec = position.toVector3()
     useFrame(({clock}) => {
       const elapsedTime = clock.getElapsedTime()
-      const radius = 50
+      const radius = 5
       const angle = -Math.PI/2//Math.PI//elapsedTime * 0.5 // adjust the rotation speed as desired
       const x = Math.cos(angle) * radius
       const z = Math.sin(angle) * radius

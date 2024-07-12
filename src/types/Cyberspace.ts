@@ -7,6 +7,7 @@ export type Plane = "d-space" | "i-space"
  
 // Cyberspace X/Y/Z coordinates must be reprersented by Decimal objects that can represent the truly huge values.
 export type CyberspaceCoordinates = {
+  vector: DecimalVector3
   x: Decimal
   y: Decimal
   z: Decimal 

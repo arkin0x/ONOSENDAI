@@ -38,6 +38,20 @@ export class DecimalVector3 {
     return [this.x.toFixed(fixed), this.y.toFixed(fixed), this.z.toFixed(fixed)]
   }
 
+  /**
+   * return an array of strings representing only the decimal places of the vector
+   * @param fixed how many decimal places to round to
+   * @returns [string, string, string]
+   */
+  toArrayDecimals(fixed: number = 8): [string, string, string] {
+    const precision = new Decimal(10).pow(fixed)
+    return [
+      this.x.mod(1).times(precision).floor().toString(),
+      this.y.mod(1).times(precision).floor().toString(),
+      this.z.mod(1).times(precision).floor().toString(),
+    ]
+  }
+
   applyQuaternion(q: THREE.Quaternion) {
 
     const x = this.x

@@ -65,6 +65,7 @@ export const planeToBin = (plane: 'i-space' | 'd-space'): number => {
 
 export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
   return {
+    vector: position,
     x: position.x,
     y: position.y,
     z: position.z,
@@ -73,29 +74,31 @@ export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): Cyber
 }
 
 export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
-    const X = coords.x.floor()
-    const Y = coords.y.floor()
-    const Z = coords.z.floor()
-    // Convert X, Y, and Z to BigInt and then to binary strings
-    const binaryX = X.toBinary().substring(2).padStart(85, '0')
-    const binaryY = Y.toBinary().substring(2).padStart(85, '0')
-    const binaryZ = Z.toBinary().substring(2).padStart(85, '0')
+    const X = new Decimal(coords.vector.x).floor()
+    const Y = new Decimal(coords.vector.y).floor()
+    const Z = new Decimal(coords.vector.z).floor()
 
-    // Initialize an empty string to hold the interleaved bits
+    // Convert to binary strings, ensuring 85 bits for each coordinate
+    const binaryX = X.toBinary().slice(2).padStart(85, '0')
+    const binaryY = Y.toBinary().slice(2).padStart(85, '0')
+    const binaryZ = Z.toBinary().slice(2).padStart(85, '0')
+
+    // Interleave the binary strings
     let binaryString = ''
-
-    // Loop through the binary strings of X, Y, and Z, adding one bit from each to the interleaved string in turn
     for (let i = 0; i < 85; i++) {
         binaryString += binaryX[i] + binaryY[i] + binaryZ[i]
     }
 
-    // Add the plane bit to the end of the string
+    // Add the plane bit
     binaryString += planeToBin(coords.plane) 
 
-    // Convert the binary string to a hexadecimal string
-    const hexString = BigInt('0b' + binaryString).toString(16).padStart(64, '0')
+    // Convert binary string to hexadecimal
+    let hexString = ''
+    for (let i = 0; i < 256; i += 4) {
+        const chunk = binaryString.slice(i, i + 4)
+        hexString += parseInt(chunk, 2).toString(16)
+    }
 
-    // Return the hexadecimal string
     return hexString
 }
 
@@ -136,6 +139,7 @@ export function decodeHexToCoordinates(hexString: string): CyberspaceCoordinates
     const decimalZ = new Decimal(Z.toString())
 
     return {
+      vector: new DecimalVector3(decimalX, decimalY, decimalZ),
       x: decimalX,
       y: decimalY,
       z: decimalZ,
@@ -181,7 +185,7 @@ export const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
 
 export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
   const coords = decodeHexToCoordinates(coordinate)
-  return new DecimalVector3(coords.x, coords.y, coords.z)
+  return coords.vector
 }
 
 export const getMillisecondsTimestampFromAction = (action: Event|UnsignedEvent): number => {
@@ -250,7 +254,7 @@ export const nowIsAfterLatestAction = (latestAction: Event): boolean => {
 
 export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): Promise<UnsignedEvent> => {
   const time = getTime()
-  const newAction = await simulateNextEvent(latestAction, time)
+  const newAction = simulateNextEvent(latestAction, time)
   if (newAction === undefined) {
     // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
@@ -326,15 +330,15 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
 
   const { position, plane, velocity, rotation } = extractActionState(startEvent)
 
-  const updatedPosition = position
-  let updatedVelocity = velocity
+  const updatedPosition = position.clone()
+  let updatedVelocity = velocity.clone()
 
   // add POW to velocity if the startEvent was a drift action.
   if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex((startEvent as Event).id)
     const velocityPOW = Math.floor(Math.pow(2, POW-1)) // if POW is 0, 2**(0-1) is 0.5, which will be floored to 0. This is necessary because 0 POW should result in 0 acceleration.
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
-    const addedVelocity = bodyVelocity.applyQuaternion(rotation)
+    const addedVelocity = bodyVelocity.applyQuaternion(rotation || new THREE.Quaternion(0,0,0,1))
     updatedVelocity = updatedVelocity.add(addedVelocity)
   }
 
@@ -352,11 +356,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // const rotationArray = rotation.toArray().map(n => n.toString())
 
   // decimal array is 8-digit integers representing the fractional part of the position, because the fractional part can't be stored in the cyberspace coordinate.
-  const decimalArray = [
-    updatedPosition.x.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
-    updatedPosition.y.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
-    updatedPosition.z.mod(1).times(FRACTIONAL_PRECISION).floor().toString(),
-  ]
+  const decimalArray = updatedPosition.toArrayDecimals()
 
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event: UnsignedEvent = {

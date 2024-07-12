@@ -1,13 +1,14 @@
 import { useActionChain } from "../hooks/cyberspace/useActionChain"
 import { BufferGeometry, LineBasicMaterial, Quaternion, Vector3 } from "three"
 import { ThreeAvatar } from "../components/ThreeAvatar"
-import { useContext, useEffect, useRef } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { AvatarContext } from "../providers/AvatarContext"
-import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinates } from "./Cyberspace"
+import { cyberspaceToSectorPosition, extractActionState, getSectorCoordinatesFromCyberspaceCoordinates } from "./Cyberspace"
 import { useRotationStore } from "../store/RotationStore"
 import { getTag } from "./Nostr"
 import { useFrame } from "@react-three/fiber"
 import { DecimalVector3 } from "./DecimalVector3"
+import Decimal from "decimal.js"
 
 type AvatarProps = {
   pubkey: string
@@ -30,44 +31,75 @@ export const Avatar = ({pubkey}: AvatarProps) => {
     return null
   }
 
+
   const {sectorPosition, plane, velocity, time} = extractActionState(simulatedState[pubkey])
+
+  // console.log(simulatedState[pubkey].tags.find(getTag('Cd')), sectorPosition.toArray())
 
   return <>
     <ThreeAvatarTrail position={sectorPosition} rotation={rotation} pubkey={pubkey}/>
+    {/* <Tether pubkey={pubkey} sectorPosition={sectorPosition}/> */}
     <ThreeAvatar position={sectorPosition} rotation={rotation} />
   </>
 }
 
+function Tether({pubkey, sectorPosition}: {pubkey: string, sectorPosition: DecimalVector3}) {
+
+  const home = getSectorCoordinatesFromCyberspaceCoordinates(pubkey).toVector3()
+
+  const tetherMaterial = new LineBasicMaterial({ color: 0xff2323 })
+
+  const lineBufferGeometry = new BufferGeometry().setFromPoints([home, sectorPosition.toVector3()])
+
+  return (
+    <lineSegments scale={[1,1,1]} geometry={lineBufferGeometry} material={tetherMaterial} />
+  )
+}
+
 function ThreeAvatarTrail({pubkey, position, rotation}: {pubkey: string, position: DecimalVector3, rotation: Quaternion}) {
   const {actionState, simulatedState} = useContext(AvatarContext)
+  const [lines, setLines] = useState<JSX.Element[]>([])
   const actions = actionState[pubkey]
   // for each pair of actions, render a line between them
-  const lines = []
+
+  console.log(lines.length)
 
   const AvatarMaterialEdges = new LineBasicMaterial({ color: 0xff2323 })
 
-  if (!actions || actions.length < 2) {
-    return null
-  }
-
-  for (let i = 0; i < actions.length; i++) {
-    try {
-      let startPoint, endPoint
-      if (i === actions.length - 1){
-        startPoint = getSectorCoordinatesFromCyberspaceCoordinates(actions[i].tags.find(getTag('C'))![1]).toVector3()
-        // use simulated state for last line
-        endPoint = getSectorCoordinatesFromCyberspaceCoordinates(simulatedState[pubkey].tags.find(getTag('C'))![1]).toVector3()
-      } else {
-        startPoint = getSectorCoordinatesFromCyberspaceCoordinates(actions[i].tags.find(getTag('C'))![1]).toVector3()
-        endPoint = getSectorCoordinatesFromCyberspaceCoordinates(actions[i+1].tags.find(getTag('C'))![1]).toVector3()
-      }
-
-      const line = <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([startPoint, endPoint])} key={i} material={AvatarMaterialEdges} />
-      lines.push(line)
-    } catch (e) {
-      console.error('ThreeAvatarTrail:', e)
+  useEffect(() => {
+    if (!actions || actions.length < 2) {
+      return
     }
-  }
+
+    const _lines: JSX.Element[] = [ ]
+
+    for (let i = 0; i < actions.length; i++) {
+      try {
+        let startPoint, endPoint 
+        if (i === actions.length - 1){
+          startPoint = extractActionState(actions[i])
+          // use simulated state for last line
+          endPoint = position.toVector3()
+        } else {
+          startPoint = extractActionState(actions[i])
+          endPoint = extractActionState(actions[i+1]).sectorPosition.toVector3()
+        }
+
+        const line = <lineSegments scale={[1,1,1]} geometry={new BufferGeometry().setFromPoints([startPoint.sectorPosition.toVector3(), endPoint])} key={Math.random().toString()} material={AvatarMaterialEdges} />
+        _lines.push(line)
+      } catch (e) {
+        console.error('ThreeAvatarTrail:', e)
+      }
+    }
+
+    setLines(() => [..._lines])
+
+    return () => {
+      lines.forEach(line => {
+        line.props.geometry.dispose()
+      })
+    }
+  }, [actionState])
 
   // console.log(lines)
 

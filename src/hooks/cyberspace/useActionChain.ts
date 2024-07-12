@@ -96,7 +96,7 @@ export const useActionChain = (pubkey: string) => {
      * @param latestAction an action received from NDK
      */
     const onReceiveLatestAction = (latestAction: NDKEvent) => {
-      console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
+      // console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
       const event = latestAction.rawEvent() as Event
       // 2. on receive, get genesis id from action
       const action = {

@@ -151,8 +151,19 @@ export const Controls: React.FC = () => {
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDragging && lastMousePosition) {
       const sensitivity = 0.003
-      const deltaX = e.clientX - lastMousePosition.x
-      const deltaY = e.clientY - lastMousePosition.y
+      let deltaX = e.clientX - lastMousePosition.x
+      let deltaY = e.clientY - lastMousePosition.y
+
+      // clamp deltaX so whether it's negative or positive it can't be more than MAX_DELTA
+      // const MAX_DELTA = 2
+      // if (Math.abs(deltaX) > MAX_DELTA) {
+      //   deltaX = Math.sign(deltaX) * MAX_DELTA
+      // }
+      // if (Math.abs(deltaY) > MAX_DELTA) {
+      //   deltaY = Math.sign(deltaY) * MAX_DELTA
+      // }
+
+
 
       // Create quaternions for rotation around X and Y axes
       const rotationX = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), deltaY * sensitivity)
@@ -202,6 +213,7 @@ export const Controls: React.FC = () => {
     }
   }, [handleKeyDown, handleKeyUp, handleMouseMove, handleMouseDown, handleMouseUp, handleWheel, handleContextMenu])
 
+  
   useFrame(() => {
     if (controlState.respawn) {
       engine.respawn()
@@ -216,15 +228,15 @@ export const Controls: React.FC = () => {
     const newRotation = rotation.clone()
 
     if (controlState.rollLeft && !controlState.rollLeftCompleted) {
-      newRotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, rotationChange)))
+      newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), rotationChange).normalize())
       setControlState({ rollLeftCompleted: true })
     }
     if (controlState.rollRight && !controlState.rollRightCompleted) {
-      newRotation.multiply(new Quaternion().setFromEuler(new Euler(0, 0, -rotationChange)))
+      newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), -rotationChange).normalize())
       setControlState({ rollRightCompleted: true })
     }
 
-    setRotation(newRotation)
+    setRotation(newRotation.normalize())
 
     // Handle movement
     const moveVector = new Vector3()
@@ -240,18 +252,21 @@ export const Controls: React.FC = () => {
     if (moveVector.lengthSq() > 0) {
       moveVector.normalize()
 
-      // Convert movement vector to world space based on camera rotation
+      // Apply rotation to movement vector
       moveVector.applyQuaternion(newRotation)
 
-      // Convert world space movement vector to a quaternion
-      const movementQuaternion = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), moveVector)
-      
       if (isHopping.current) {
         console.log("Hopping in direction:", moveVector)
         // Implement hopping logic here
       } else {
+        // Convert the rotated move vector directly to a quaternion
+        const movementQuaternion = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), moveVector)
+        // console.log("movequat", movementQuaternion.toArray().map((x) => x.toFixed(2)))
         engine.drift(throttle, movementQuaternion)
       }
+    } else {
+      // If no movement, stop drifting
+      // engine.stopDrift()
     }
 
     // Handle freeze
@@ -259,6 +274,7 @@ export const Controls: React.FC = () => {
       engine.freeze()
     }
   })
+  
 
   return null
 }

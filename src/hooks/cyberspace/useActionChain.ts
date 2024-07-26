@@ -203,7 +203,7 @@ export const useActionChain = (pubkey: string) => {
 
     // function definition for simulating and dispatching the next event
     const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
-      const simulatedEvent = await simulateNextEvent(action, now)
+      const simulatedEvent = simulateNextEvent(action, now)
       if(simulatedEvent === action) {
         // not enough time has passed to simulate a new event. schedule the next simulation.
         // setTimeout(() => simulateAndDispatch(action, getTime()), 1000)//1000/60+1)

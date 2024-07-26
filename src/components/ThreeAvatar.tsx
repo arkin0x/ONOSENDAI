@@ -64,19 +64,23 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
     velocity.toVector3().normalize() // Normalized velocity vector
   )
 
+  const velocityMagnitude = velocity.toVector3().normalize().length()
+  // Calculate the offset position for the cone's base
+  const coneLength = Math.sqrt(velocityMagnitude)+0.25
+  const conePosition = velocity.toVector3().normalize()
+
   return (
     <group position={position.toVector3()}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
-      {/* <mesh geometry={AvatarGeometry} material={AvatarMaterial} /> */}
-      <mesh 
-        position={new THREE.Vector3(0, 0, 0)}
-        quaternion={coneQuaternion}
-      >
-        <coneGeometry args={[.1, 1, 16]}/>
-        {/* <meshNormalMaterial /> */}
-        <meshBasicMaterial color={0xff2323} wireframe />
-      </mesh>
-      {/* <Plane args={[1, 1]} position={[0, -0.5, 0]} rotation={new THREE.Euler(Math.PI/2, 0, 0, 'XYZ')} material={new THREE.MeshBasicMaterial({color: 0xff0000, side: THREE.DoubleSide})}/> */}
+      <group rotation={[0, 0, 0]}>
+        <mesh
+          position={conePosition}
+          quaternion={coneQuaternion} // Apply the calculated quaternion
+        >
+          <coneGeometry args={[0.1, 0.5, 8]} /> {/* Scale the height of the cone based on velocity magnitude */}
+          <meshBasicMaterial color={0xff2323} wireframe />
+        </mesh>
+      </group>
     </group>
   )
 }

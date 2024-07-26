@@ -64,9 +64,9 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
     velocity.toVector3().normalize() // Normalized velocity vector
   )
 
-  const velocityMagnitude = velocity.toVector3().normalize().length()
   // Calculate the offset position for the cone's base
-  const coneLength = Math.sqrt(velocityMagnitude)+0.25
+  const velocityMagnitude = velocity.toVector3().length()
+  const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
   const conePosition = velocity.toVector3().normalize()
 
   return (
@@ -75,9 +75,9 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
       <group rotation={[0, 0, 0]}>
         <mesh
           position={conePosition}
-          quaternion={coneQuaternion} // Apply the calculated quaternion
+          quaternion={coneQuaternion}
         >
-          <coneGeometry args={[0.1, 0.5, 8]} /> {/* Scale the height of the cone based on velocity magnitude */}
+          <coneGeometry args={[0.1, coneLength, 8]} />
           <meshBasicMaterial color={0xff2323} wireframe />
         </mesh>
       </group>

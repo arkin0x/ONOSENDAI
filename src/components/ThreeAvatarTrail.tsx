@@ -15,27 +15,34 @@ interface ThreeAvatarTrailProps {
 const AvatarMaterialEdges = new LineBasicMaterial({ color: 0xff2323 })
 
 export function ThreeAvatarTrail({ pubkey, position, rotation }: ThreeAvatarTrailProps) {
-  const { actionState, simulatedState } = useContext(AvatarContext)
+  const { actionState } = useContext(AvatarContext)
   const lineRef = useRef<THREE.Line>(null)
   const positionsRef = useRef<Float32Array | null>(null)
 
   const actions = actionState[pubkey]
 
   const trailPoints = useMemo(() => {
-    if (!actions || actions.length < 2) return []
+    if (!actions || actions.length < 1) return [position.toVector3()]
 
     return actions.map(action => extractActionState(action).sectorPosition.toVector3())
-  }, [actions])
+  }, [actions, position])
 
   useEffect(() => {
-    if (trailPoints.length < 2) return
+    if (trailPoints.length < 1) return
 
-    const positions = new Float32Array(trailPoints.length * 3)
+    const positions = new Float32Array(Math.max(trailPoints.length, 2) * 3)
     trailPoints.forEach((point, index) => {
       positions[index * 3] = point.x
       positions[index * 3 + 1] = point.y
       positions[index * 3 + 2] = point.z
     })
+
+    // If there's only one point, duplicate it to create a valid line
+    if (trailPoints.length === 1) {
+      positions[3] = positions[0]
+      positions[4] = positions[1]
+      positions[5] = positions[2]
+    }
 
     positionsRef.current = positions
 
@@ -65,6 +72,10 @@ export function ThreeAvatarTrail({ pubkey, position, rotation }: ThreeAvatarTrai
     geometry.setAttribute('position', new BufferAttribute(positions, 3))
     return geometry
   }, [])
+
+  if (trailPoints.length < 1) {
+    return null // Don't render anything if there are no trail points
+  }
 
   return (
     <>

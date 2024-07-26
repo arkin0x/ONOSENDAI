@@ -14,6 +14,8 @@ export const CYBERSPACE_DOWNSCALE = new Decimal(2).pow(35) // this is the size o
 export const DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).toNumber()
 export const HALF_DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).div(2).toNumber()
 
+export const ZERO_VELOCITY = 0.0009765625 // Math.POW(2,-10) and below is rounded to zero.
+
 /*
 Deriving the center coordinate of cyberspace:
 
@@ -336,7 +338,11 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // add POW to velocity if the startEvent was a drift action.
   if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex((startEvent as Event).id)
-    const velocityPOW = Math.floor(Math.pow(2, POW-1)) // if POW is 0, 2**(0-1) is 0.5, which will be floored to 0. This is necessary because 0 POW should result in 0 acceleration.
+    let velocityPOW = Math.pow(2, POW-10)
+    if (velocityPOW <= ZERO_VELOCITY) {
+      // POW=0 will result in zero velocity.
+      velocityPOW = 0
+    }
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
     const addedVelocity = bodyVelocity.applyQuaternion(rotation || new THREE.Quaternion(0,0,0,1))
     updatedVelocity = updatedVelocity.add(addedVelocity)

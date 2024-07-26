@@ -6,7 +6,7 @@ type ThrottleStore = {
 }
 
 export const useThrottleStore = create<ThrottleStore>((set) => ({
-  throttle: 5,
+  throttle: 1,
   setThrottle: (value) => {
     // console.log('set throttle to', value)
     set({ throttle: value })

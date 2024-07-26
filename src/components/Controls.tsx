@@ -18,9 +18,11 @@ export const Controls: React.FC = () => {
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
-  const { rotation, setRotation } = useRotationStore()
+  const { setRotation } = useRotationStore()
   const [isDragging, setIsDragging] = useState(false)
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
+  const [pitch, setPitch] = useState(0)
+  const [yaw, setYaw] = useState(0)
 
   const isHopping = useRef<boolean>(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -151,33 +153,20 @@ export const Controls: React.FC = () => {
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDragging && lastMousePosition) {
       const sensitivity = 0.003
-      let deltaX = e.clientX - lastMousePosition.x
-      let deltaY = e.clientY - lastMousePosition.y
+      const deltaX = e.clientX - lastMousePosition.x
+      const deltaY = e.clientY - lastMousePosition.y
 
-      // clamp deltaX so whether it's negative or positive it can't be more than MAX_DELTA
-      // const MAX_DELTA = 2
-      // if (Math.abs(deltaX) > MAX_DELTA) {
-      //   deltaX = Math.sign(deltaX) * MAX_DELTA
-      // }
-      // if (Math.abs(deltaY) > MAX_DELTA) {
-      //   deltaY = Math.sign(deltaY) * MAX_DELTA
-      // }
+      // Update yaw and pitch
+      setYaw((prevYaw) => prevYaw - deltaX * sensitivity)
+      setPitch((prevPitch) => {
+        // Clamp pitch to avoid flipping
+        return prevPitch + deltaY * sensitivity
+      })
 
-
-
-      // Create quaternions for rotation around X and Y axes
-      const rotationX = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), deltaY * sensitivity)
-      const rotationY = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -deltaX * sensitivity)
-
-      // Combine rotations
-      const newRotation = rotation.clone()
-        .multiply(rotationY)  // First rotate around Y-axis (left-right)
-        .multiply(rotationX)  // Then rotate around X-axis (up-down)
-
-      setRotation(newRotation.normalize())
       setLastMousePosition({ x: e.clientX, y: e.clientY })
     }
-  }, [isDragging, lastMousePosition, rotation, setRotation])
+  }, [isDragging, lastMousePosition])
+
 
   const handleWheel = useCallback((e: WheelEvent) => {
     setThrottle(Math.max(0, Math.min(128, throttle + (e.deltaY > 0 ? 1 : -1))))
@@ -224,19 +213,25 @@ export const Controls: React.FC = () => {
     }
 
     // Handle roll rotation
-    const rotationChange = Math.PI / 2 // 90 degrees
-    const newRotation = rotation.clone()
+    // const rotationChange = Math.PI / 2 // 90 degrees
+    // const newRotation = rotation.clone()
 
-    if (controlState.rollLeft && !controlState.rollLeftCompleted) {
-      newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), rotationChange).normalize())
-      setControlState({ rollLeftCompleted: true })
-    }
-    if (controlState.rollRight && !controlState.rollRightCompleted) {
-      newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), -rotationChange).normalize())
-      setControlState({ rollRightCompleted: true })
-    }
+    // if (controlState.rollLeft && !controlState.rollLeftCompleted) {
+    //   newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), rotationChange).normalize())
+    //   setControlState({ rollLeftCompleted: true })
+    // }
+    // if (controlState.rollRight && !controlState.rollRightCompleted) {
+    //   newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), -rotationChange).normalize())
+    //   setControlState({ rollRightCompleted: true })
+    // }
+
+    // Create a new quaternion from pitch and yaw
+    const pitchQuat = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch)
+    const yawQuat = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw)
+    const newRotation = yawQuat.multiply(pitchQuat)
 
     setRotation(newRotation.normalize())
+
 
     // Handle movement
     const moveVector = new Vector3()

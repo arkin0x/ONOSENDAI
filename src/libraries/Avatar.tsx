@@ -39,7 +39,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinates(pubkey).toVector3()
 
   return <>
-    <ThreeAvatarTrail position={sectorPosition} rotation={rotation} pubkey={pubkey}/>
+    {/* <ThreeAvatarTrail position={sectorPosition} rotation={rotation} pubkey={pubkey}/> */}
     {/* <Tether pubkey={pubkey} sectorPosition={sectorPosition}/> */}
     <ThreeAvatar position={sectorPosition} rotation={rotation} />
     <SpawnModel position={spawnPosition} />

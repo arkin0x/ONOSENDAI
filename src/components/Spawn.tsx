@@ -26,7 +26,7 @@ export function SpawnModel(props: JSX.IntrinsicElements['group']) {
       />
       <mesh 
         geometry={nodes.BoundaryHexMiddleWarning.geometry}
-        material={materials.Hex}
+        material={materials.HexYellow}
       />
       {/* cube */}
       <mesh 

@@ -41,7 +41,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
   return <>
     {/* <ThreeAvatarTrail position={sectorPosition} rotation={rotation} pubkey={pubkey}/> */}
     {/* <Tether pubkey={pubkey} sectorPosition={sectorPosition}/> */}
-    <ThreeAvatar position={sectorPosition} rotation={rotation} />
+    <ThreeAvatar position={sectorPosition} rotation={rotation} velocity={velocity} />
     <SpawnModel position={spawnPosition} />
   </>
 }

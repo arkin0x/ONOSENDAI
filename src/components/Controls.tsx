@@ -207,8 +207,10 @@ export const Controls: React.FC = () => {
     if (controlState.respawn) {
       engine.respawn()
       resetControlState()
+      setPitch(0)
+      setYaw(0)
       setRotation(new Quaternion())
-      setThrottle(5)
+      setThrottle(1)
       return
     }
 

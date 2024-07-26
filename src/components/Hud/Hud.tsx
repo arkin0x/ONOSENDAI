@@ -40,7 +40,7 @@ export const Hud = () => {
   return (
     <>
     <group>
-      <Axes position={[-3,-0.75,-1]} rotation={rotation.clone().invert()} />
+      <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(0)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(0)} align="left" />

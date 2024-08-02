@@ -3,6 +3,7 @@ import React, { useRef, useContext } from "react"
 import * as THREE from "three"
 import { AvatarContext } from "../providers/AvatarContext"
 import { extractActionState } from "../libraries/Cyberspace"
+import { useRotationStore } from "../store/RotationStore"
 
 const AvatarGeometry = new THREE.IcosahedronGeometry(.5,1)
 
@@ -15,25 +16,24 @@ const AvatarMaterialEdges = new THREE.LineBasicMaterial({ color: 0xff2323 })
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { camera } = useThree()
   const { getSimulatedState } = useContext(AvatarContext)
-  const positionRef = useRef(new THREE.Vector3())
-  const rotationRef = useRef(new THREE.Quaternion())
-  const velocityRef = useRef(new THREE.Vector3())
+  const { rotation } = useRotationStore()
+  const positionRef = useRef(new THREE.Vector3(0,0,0))
+  const velocityRef = useRef(new THREE.Vector3(0,0,0))
 
   camera.far = 2**30
 
   useFrame(() => {
     const simulatedEvent = getSimulatedState(pubkey)
     if (simulatedEvent) {
-      const { sectorPosition, velocity, rotation } = extractActionState(simulatedEvent)
-      // console.log(sectorPosition.toArray(), velocity.toArray(), rotation.toArray())
+      const { sectorPosition, velocity } = extractActionState(simulatedEvent)
+      // console.log('3av',sectorPosition.toArray())//, velocity.toArray(), rotation.toArray())
       
       positionRef.current.copy(sectorPosition.toVector3())
-      rotationRef.current.copy(rotation)
       velocityRef.current.copy(velocity.toVector3())
     }
 
     const radius = 5
-    const oppositeRotation = rotationRef.current.clone()
+    const oppositeRotation = rotation.clone()
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
     const cameraPosition = positionRef.current.clone().add(cameraDirection.multiplyScalar(radius))
     camera.position.copy(cameraPosition)
@@ -52,6 +52,8 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
   const conePosition = velocityRef.current.normalize()
 
+  // console.log(positionRef.current, camera.position)
+
   return (
     <group position={positionRef.current}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
@@ -61,15 +63,15 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
           quaternion={coneQuaternion}
         >
           <coneGeometry args={[0.1, coneLength, 8]} />
-          {/* <meshBasicMaterial color={0xff2323} wireframe /> */}
-          <meshStandardMaterial 
+          <meshBasicMaterial color={0xff2323} wireframe />
+          {/* <meshStandardMaterial 
             wireframe 
             color={0xff2323} 
             metalness={0.8}
             roughness={0.4}
             emissive={0xff2323}
             emissiveIntensity={0.2}
-          />
+          /> */}
         </mesh>
       </group>
     </group>

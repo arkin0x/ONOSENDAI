@@ -14,19 +14,21 @@ import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { actionState, getSimulatedState } = useContext(AvatarContext)
-  const [simulatedState, setSimulatedState] = useState<ExtractedActionState>()
+  const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
   const { rotation } = useRotationStore()
 
   const pubkey = identity.pubkey
-  const actions = actionState[pubkey]
-  const simulated = getSimulatedState(pubkey)
+  const actionsRef = useRef(actionState[pubkey])
 
-  useEffect(() => {
-    if (!simulated) return
-    setSimulatedState(extractActionState(simulated))
-  }, [actionState])
+  useFrame(() => {
+  const simulated = getSimulatedState(pubkey)
+    if (simulated) {
+      setSimulatedState(extractActionState(simulated))
+    }
+    actionsRef.current = actionState[pubkey]
+  })
 
   const x = 1
   const r = Math.PI / 6
@@ -44,18 +46,18 @@ export const Hud = () => {
     <>
     <group>
       <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +simulatedState.sectorPosition.z.toFixed(0)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +simulatedState.sectorPosition.y.toFixed(0)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +simulatedState.sectorPosition.x.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.sectorPosition.z.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.sectorPosition.y.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.sectorPosition.x.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sectorId} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.cyberspaceCoordinate.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X VELOCITY ' + simulatedState.velocity.x.toFixed()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y VELOCITY ' + simulatedState.velocity.y.toFixed()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + simulatedState.velocity.z.toFixed()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X VELOCITY ' + simulatedState.velocity.x.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y VELOCITY ' + simulatedState.velocity.y.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + simulatedState.velocity.z.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" />
 
-      { rotation ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z + '/' + rotation.w} align="left" /> : null }
+      { rotation && <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x.toFixed(2) + '/' + rotation.y.toFixed(2) + '/' + rotation.z.toFixed(2) + '/' + rotation.w.toFixed(2)} align="left" /> }
 
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle} align="left" />
 

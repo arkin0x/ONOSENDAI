@@ -1,5 +1,6 @@
 import React, { createContext, useReducer } from 'react'
 import { Event, UnsignedEvent } from 'nostr-tools'
+import { getTime, simulateNextEvent } from "../libraries/Cyberspace"
 
 // type for storing avatar actions in state
 type AvatarActionState = {
@@ -77,29 +78,14 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   return newState
 }
 
-// type for storing avatars' most recent simulated state. This will sometimes be an UnsignedEvent copy of the most recent Event in the action state.
-type AvatarSimulatedState = {
-  [pubkey: string]: UnsignedEvent 
-}
-
-// dispatch action type to update the simulated state
-export type AvatarSimulatedDispatched = {
-  type: 'update',
-  pubkey: string,
-  action: UnsignedEvent
-}
-
-const initialSimulatedState: AvatarSimulatedState = {}
-
-const avatarSimulatedStateReducer = (state: AvatarSimulatedState, action: AvatarSimulatedDispatched): AvatarSimulatedState => {
-  const newState = {...state} as AvatarSimulatedState
-
-  // warn for info
-  if(state[action.pubkey] === action.action) console.warn('duplicate event dispatched to simulated state')
-
-  newState[action.pubkey] = action.action
-
-  return newState
+const simulate = (pubkey: string, actionState: AvatarActionState): UnsignedEvent | null => {
+  const actions = actionState[pubkey]
+  if (actions && actions.length > 0) {
+    const mostRecentAction = actions[actions.length - 1]
+    const now = getTime()
+    return simulateNextEvent(mostRecentAction, now)
+  }
+  return null
 }
 
 // ---  AvatarContext  ---
@@ -107,8 +93,7 @@ const avatarSimulatedStateReducer = (state: AvatarSimulatedState, action: Avatar
 export type AvatarContextType = {
   actionState: AvatarActionState;
   dispatchActionState: React.Dispatch<AvatarActionDispatched>
-  simulatedState: AvatarSimulatedState;
-  dispatchSimulatedState: React.Dispatch<AvatarSimulatedDispatched>
+  getSimulatedState: (pubkey: string) => UnsignedEvent | null;
 }
 
 /**
@@ -121,8 +106,7 @@ export type AvatarContextType = {
 export const AvatarContext = createContext<AvatarContextType>({
   actionState: initialActionState,
   dispatchActionState: () => {},
-  simulatedState: initialSimulatedState,
-  dispatchSimulatedState: () => {},
+  getSimulatedState: () => null
 })
 
 type AvatarProviderProps = {
@@ -131,10 +115,11 @@ type AvatarProviderProps = {
 
 export const AvatarProvider = ({ children }: AvatarProviderProps) => {
   const [actionState, dispatchActionState] = useReducer(avatarActionStateReducer, initialActionState)
-  const [simulatedState, dispatchSimulatedState] = useReducer(avatarSimulatedStateReducer, initialSimulatedState)
+
+  const getSimulatedStateForPubkey = (pubkey: string) => simulate(pubkey, actionState)
 
   return (
-    <AvatarContext.Provider value={{ actionState, dispatchActionState, simulatedState, dispatchSimulatedState }}>
+    <AvatarContext.Provider value={{ actionState, dispatchActionState, getSimulatedState: getSimulatedStateForPubkey }}>
       {children}
     </AvatarContext.Provider>
   )

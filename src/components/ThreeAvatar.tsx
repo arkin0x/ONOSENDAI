@@ -1,16 +1,8 @@
 import { useFrame, useThree } from "@react-three/fiber"
-import React, { useRef } from "react"
+import React, { useRef, useContext } from "react"
 import * as THREE from "three"
-import { DecimalVector3 } from "../libraries/DecimalVector3"
-import { Plane, Text } from "@react-three/drei"
-
-const AvatarMaterial = new THREE.MeshStandardMaterial({
-  color: 0xff2323,
-  metalness: 0.8,
-  roughness: 0.4,
-  emissive: 0xff2323,
-  emissiveIntensity: 0.2,
-})
+import { AvatarContext } from "../providers/AvatarContext"
+import { extractActionState } from "../libraries/Cyberspace"
 
 const AvatarGeometry = new THREE.IcosahedronGeometry(.5,1)
 
@@ -20,57 +12,48 @@ const AvatarMaterialEdges = new THREE.LineBasicMaterial({ color: 0xff2323 })
 
 // Add the wireframe to your scene
 
-export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Quaternion|undefined, velocity: DecimalVector3}> = ({position, rotation, velocity}) => {
-  if (!rotation) {
-    rotation = new THREE.Quaternion()
-  }
-
+export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { camera } = useThree()
+  const { getSimulatedState } = useContext(AvatarContext)
+  const positionRef = useRef(new THREE.Vector3())
+  const rotationRef = useRef(new THREE.Quaternion())
+  const velocityRef = useRef(new THREE.Vector3())
 
   camera.far = 2**30
 
-  // console.log(rotation.toArray().map((x) => x.toFixed(2)))
+  useFrame(() => {
+    const simulatedEvent = getSimulatedState(pubkey)
+    if (simulatedEvent) {
+      const { sectorPosition, velocity, rotation } = extractActionState(simulatedEvent)
+      // console.log(sectorPosition.toArray(), velocity.toArray(), rotation.toArray())
+      
+      positionRef.current.copy(sectorPosition.toVector3())
+      rotationRef.current.copy(rotation)
+      velocityRef.current.copy(velocity.toVector3())
+    }
 
-  // update camera
-  // useFrame(() => {
-  //   // camera.position.copy(position.toVector3())
-  //   // camera.quaternion.copy(rotation)
-  //   // camera.updateProjectionMatrix()
-  //   const clock = useRef<THREE.Clock>(new THREE.Clock())
-
-  //   camera.position.copy(position.toVector3().add(new THREE.Vector3(1, 1, -1)))
-  //   camera.lookAt(position.toVector3())
-  //   camera.updateProjectionMatrix()
-  //   console.log('playerv3', position.toVector3())
-  // })
-  const positionVec = position.toVector3()
-    useFrame(({clock}) => {
-      const elapsedTime = clock.getElapsedTime()
-      const radius = 5
-      const angle = -Math.PI/2//Math.PI//elapsedTime * 0.5 // adjust the rotation speed as desired
-      const x = Math.cos(angle) * radius
-      const z = Math.sin(angle) * radius
-      const oppositeRotation = rotation.clone()//.invert()
-      const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
-      const cameraPosition = positionVec.clone().add(cameraDirection.multiplyScalar(radius))
-      camera.position.copy(cameraPosition)
-      camera.lookAt(position.toVector3())
-      camera.updateProjectionMatrix()
-    })
+    const radius = 5
+    const oppositeRotation = rotationRef.current.clone()
+    const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
+    const cameraPosition = positionRef.current.clone().add(cameraDirection.multiplyScalar(radius))
+    camera.position.copy(cameraPosition)
+    camera.lookAt(positionRef.current)
+    camera.updateProjectionMatrix()
+  })
 
   // Calculate the quaternion for the cone's rotation based on the velocity vector
   const coneQuaternion = new THREE.Quaternion().setFromUnitVectors(
     new THREE.Vector3(0, 1, 0), // Default up vector
-    velocity.toVector3().normalize() // Normalized velocity vector
+    velocityRef.current.normalize() // Normalized velocity vector
   )
 
   // Calculate the offset position for the cone's base
-  const velocityMagnitude = velocity.toVector3().length()
+  const velocityMagnitude = velocityRef.current.length()
   const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
-  const conePosition = velocity.toVector3().normalize()
+  const conePosition = velocityRef.current.normalize()
 
   return (
-    <group position={position.toVector3()}>
+    <group position={positionRef.current}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       <group rotation={[0, 0, 0]}>
         <mesh
@@ -78,7 +61,15 @@ export const ThreeAvatar: React.FC<{ position: DecimalVector3, rotation: THREE.Q
           quaternion={coneQuaternion}
         >
           <coneGeometry args={[0.1, coneLength, 8]} />
-          <meshBasicMaterial color={0xff2323} wireframe />
+          {/* <meshBasicMaterial color={0xff2323} wireframe /> */}
+          <meshStandardMaterial 
+            wireframe 
+            color={0xff2323} 
+            metalness={0.8}
+            roughness={0.4}
+            emissive={0xff2323}
+            emissiveIntensity={0.2}
+          />
         </mesh>
       </group>
     </group>

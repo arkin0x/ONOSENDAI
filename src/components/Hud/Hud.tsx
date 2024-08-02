@@ -1,11 +1,11 @@
 import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
-import { useContext, useEffect, useRef } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { AxesHelper, Vector3 } from "three"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { AvatarContext } from "../../providers/AvatarContext"
-import { extractActionState } from "../../libraries/Cyberspace"
+import { extractActionState, ExtractedActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
@@ -13,19 +13,20 @@ import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const {actionState, simulatedState} = useContext(AvatarContext)
+  const { actionState, getSimulatedState } = useContext(AvatarContext)
+  const [simulatedState, setSimulatedState] = useState<ExtractedActionState>()
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
+  const { rotation } = useRotationStore()
 
   const pubkey = identity.pubkey
   const actions = actionState[pubkey]
+  const simulated = getSimulatedState(pubkey)
 
-  const { rotation } = useRotationStore()
-
-
-  if (!simulatedState[pubkey]) return null
-
-  const {cyberspaceCoordinate, sectorId, sectorPosition, plane, velocity} = extractActionState(simulatedState[pubkey])
+  useEffect(() => {
+    if (!simulated) return
+    setSimulatedState(extractActionState(simulated))
+  }, [actionState])
 
   const x = 1
   const r = Math.PI / 6
@@ -37,19 +38,21 @@ export const Hud = () => {
     return line
   }
 
+  if (!simulatedState) return null
+
   return (
     <>
     <group>
       <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +sectorPosition.z.toFixed(0)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +sectorPosition.y.toFixed(0)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +sectorPosition.x.toFixed(0)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + sectorId} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + plane.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + cyberspaceCoordinate.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X VELOCITY ' + velocity.x.toFixed()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y VELOCITY ' + velocity.y.toFixed()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + velocity.z.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' +simulatedState.sectorPosition.z.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' +simulatedState.sectorPosition.y.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' +simulatedState.sectorPosition.x.toFixed(0)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sectorId} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.cyberspaceCoordinate.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X VELOCITY ' + simulatedState.velocity.x.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y VELOCITY ' + simulatedState.velocity.y.toFixed()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z VELOCITY ' + simulatedState.velocity.z.toFixed()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actions.length} align="left" />
 
       { rotation ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Q ' + rotation.x + '/' + rotation.y + '/' + rotation.z + '/' + rotation.w} align="left" /> : null }

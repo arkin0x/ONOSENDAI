@@ -4,16 +4,14 @@
  * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
  */
 import { useContext, useEffect, useState } from "react"
-import { Event, UnsignedEvent } from 'nostr-tools'
+import { Event } from 'nostr-tools'
 import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { AvatarContext } from "../../providers/AvatarContext"
-import type {AvatarActionDispatched, AvatarSimulatedDispatched} from "../../providers/AvatarContext"
-import { getTime, isGenesisAction, simulateNextEvent } from "../../libraries/Cyberspace";
-import { Time } from "../../types/Cyberspace"
+import type { AvatarActionDispatched } from "../../providers/AvatarContext"
+import { isGenesisAction } from "../../libraries/Cyberspace";
 import { validateActionChain } from "./validateActionChain"
-import { useFrame } from "@react-three/fiber"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -22,7 +20,7 @@ export const useActionChain = (pubkey: string) => {
 
   const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
 
-  const {actionState, dispatchActionState, dispatchSimulatedState} = useContext(AvatarContext)
+  const {actionState, dispatchActionState} = useContext(AvatarContext)
 
   const actionChainState = actionState[pubkey]
 
@@ -192,31 +190,4 @@ export const useActionChain = (pubkey: string) => {
       }
     }
   }, [historyComplete, actionChainState])
-
-  /**
-   * Simulate from the most recent action to the present time and store in the avatar simulation context.
-   * Whenever the actionChainState changes, this will begin simulating from the most recent action in the chain to the present time.
-   */
-  // FIXME: this isn't synchronous; will this lead to errors? Will the chain get out of order?
-  useFrame(() => {
-    if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-
-    // function definition for simulating and dispatching the next event
-    const simulateAndDispatch = async (action: Event|UnsignedEvent, now: Time) => {
-      const simulatedEvent = simulateNextEvent(action, now)
-      if(simulatedEvent === action) {
-        // not enough time has passed to simulate a new event. schedule the next simulation.
-        // setTimeout(() => simulateAndDispatch(action, getTime()), 1000)//1000/60+1)
-      } else {
-        dispatchSimulatedState({type: 'update', pubkey: pubkey, action: simulatedEvent} as AvatarSimulatedDispatched)
-      }
-    }
-
-    if (genesisId){ // if genesisId is set then we also have the most recent action, so we can simulate the future.
-      // FIXME: use a worker to simulate instead of main thread.
-      const mostRecentAction = actionChainState.slice(-1)[0]
-      const now = getTime()
-      simulateAndDispatch(mostRecentAction, now)
-    }
-  })
 }

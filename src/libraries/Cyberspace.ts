@@ -281,8 +281,9 @@ export const isGenesisAction = (action: Event): boolean => {
   return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }
 
+export type ExtractedActionState = ReturnType<typeof extractActionState>
 // get the state from a cyberspace action
-export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation?: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
 // debug
   // console.log('extractActionState: action', action)
   // get position
@@ -305,7 +306,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoor
   // get rotation
   // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
   const quaternionTag = action.tags.find(getTag('quaternion'))
-  let rotation
+  let rotation = new THREE.Quaternion()
   if (quaternionTag) {
     rotation = new THREE.Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
   }

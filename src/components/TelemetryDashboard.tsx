@@ -13,7 +13,7 @@ export const TelemetryDashboard = () => {
 
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
-  const {actionState, simulatedState} = useContext(AvatarContext)
+  const {actionState} = useContext(AvatarContext)
 
   const actions = actionState[pubkey]
 

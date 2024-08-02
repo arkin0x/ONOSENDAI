@@ -41,7 +41,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          <SectorManager />
+          {/* <SectorManager /> */}
           <Avatar pubkey={identity.pubkey} />
           <Controls />
         </Canvas>
@@ -57,24 +57,3 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
 }
 
 export default CyberspaceViewer
-
-const TestMesh = () => {
-
-  const testRef = useRef<THREE.Mesh>(null)
-
-  useFrame(() => {
-    if (testRef.current) {
-      testRef.current.rotation.x += 0.01
-      testRef.current.rotation.y += 0.01
-    }
-  })
-
-  return (
-    <mesh ref={testRef}
-      position={new Vector3(0, 0, -1)}
-    >
-      <coneGeometry args={[1, 4, 16]}/>
-      <meshNormalMaterial />
-    </mesh>
-  )
-}

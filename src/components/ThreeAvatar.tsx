@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber"
-import React, { useRef, useContext } from "react"
+import React, { useRef, useContext, useState } from "react"
 import * as THREE from "three"
 import { AvatarContext } from "../providers/AvatarContext"
 import { extractActionState } from "../libraries/Cyberspace"
@@ -17,8 +17,9 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { camera } = useThree()
   const { getSimulatedState } = useContext(AvatarContext)
   const { rotation } = useRotationStore()
-  const positionRef = useRef(new THREE.Vector3(0,0,0))
-  const velocityRef = useRef(new THREE.Vector3(0,0,0))
+  const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))
+  const [velocity, setVelocity] = useState(() => new THREE.Vector3(0, 0, 0))
+
 
   camera.far = 2**30
 
@@ -28,34 +29,34 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
       const { sectorPosition, velocity } = extractActionState(simulatedEvent)
       // console.log('3av',sectorPosition.toArray())//, velocity.toArray(), rotation.toArray())
       
-      positionRef.current.copy(sectorPosition.toVector3())
-      velocityRef.current.copy(velocity.toVector3())
+      setPosition(sectorPosition.toVector3())
+      setVelocity(velocity.toVector3())
     }
 
     const radius = 5
     const oppositeRotation = rotation.clone()
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
-    const cameraPosition = positionRef.current.clone().add(cameraDirection.multiplyScalar(radius))
+    const cameraPosition = position.clone().add(cameraDirection.multiplyScalar(radius))
     camera.position.copy(cameraPosition)
-    camera.lookAt(positionRef.current)
+    camera.lookAt(position)
     camera.updateProjectionMatrix()
   })
 
   // Calculate the quaternion for the cone's rotation based on the velocity vector
   const coneQuaternion = new THREE.Quaternion().setFromUnitVectors(
     new THREE.Vector3(0, 1, 0), // Default up vector
-    velocityRef.current.normalize() // Normalized velocity vector
+    velocity.normalize() // Normalized velocity vector
   )
 
   // Calculate the offset position for the cone's base
-  const velocityMagnitude = velocityRef.current.length()
+  const velocityMagnitude = velocity.length()
   const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
-  const conePosition = velocityRef.current.normalize()
+  const conePosition = velocity.normalize()
 
-  // console.log(positionRef.current, camera.position)
+  // console.log(position, camera.position)
 
   return (
-    <group position={positionRef.current}>
+    <group position={position}>
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       <group rotation={[0, 0, 0]}>
         <mesh

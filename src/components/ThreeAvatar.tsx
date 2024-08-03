@@ -2,7 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber"
 import React, { useRef, useContext, useState } from "react"
 import * as THREE from "three"
 import { AvatarContext } from "../providers/AvatarContext"
-import { extractActionState } from "../libraries/Cyberspace"
+import { CYBERSPACE_SECTOR, extractActionState } from "../libraries/Cyberspace"
 import { useRotationStore } from "../store/RotationStore"
 
 const AvatarGeometry = new THREE.IcosahedronGeometry(.5,1)
@@ -14,14 +14,20 @@ const AvatarMaterialEdges = new THREE.LineBasicMaterial({ color: 0xff2323 })
 // Add the wireframe to your scene
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
-  const { camera } = useThree()
+  const { scene, camera } = useThree()
   const { getSimulatedState } = useContext(AvatarContext)
   const { rotation } = useRotationStore()
   const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))
   const [velocity, setVelocity] = useState(() => new THREE.Vector3(0, 0, 0))
 
+  // Set fog on the scene
+  const fogColor = 0x000000 // Color of the fog
+  const near = 1 // Start distance of the fog
+  const far = CYBERSPACE_SECTOR * 2 // End distance of the fog
+  scene.fog = new THREE.Fog(fogColor, near, far)
 
   camera.far = 2**30
+  
 
   useFrame(() => {
     const simulatedEvent = getSimulatedState(pubkey)

@@ -148,7 +148,8 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
 const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: { avatars: Set<string>; constructs: Set<string> } }> = ({ position, current, id, data }) => {
   const sectorSize = CYBERSPACE_SECTOR.toNumber()//(2**10)
 
-  // console.log(id, relativeSectorPosition.toVector3(), sectorSize)
+  const adjacentScale = 0.9
+  const size = current ? sectorSize : sectorSize * adjacentScale
 
   return (
     <group position={position}>
@@ -157,7 +158,7 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
         <meshBasicMaterial color={current ? 0x062cd : 0x78004e} transparent opacity={0.5} side={BackSide} wireframe/>
       </mesh> */}
       <lineSegments
-        geometry={new EdgesGeometry(new BoxGeometry(sectorSize, sectorSize, sectorSize))}
+        geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
         material={new LineBasicMaterial({ color: current ? 0x062cd : 0x78004e })}
       />
       {/* Render avatars and constructs here */}

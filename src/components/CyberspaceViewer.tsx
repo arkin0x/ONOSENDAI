@@ -39,7 +39,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          <SectorManager adjacentLayers={0} />
+          <SectorManager adjacentLayers={1} />
           <Avatar pubkey={identity.pubkey} />
           <Controls />
         </Canvas>

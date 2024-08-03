@@ -2,11 +2,12 @@ import React, { useContext, useEffect, useReducer, useState } from 'react'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { AvatarContext } from '../providers/AvatarContext'
 import { NDKContext } from '../providers/NDKProvider'
-import { CYBERSPACE_SECTOR, extractActionState, getSectorDecimalFromId, getSectorIdFromCoordinate } from '../libraries/Cyberspace'
+import { CYBERSPACE_SECTOR, extractActionState, relativeSectorPosition } from '../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
+import { BackSide, BoxGeometry, EdgesGeometry, LineBasicMaterial, LineSegments, Vector3 } from 'three'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string> }>
@@ -133,27 +134,32 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
   // Return
 
   // console.log('sectorState', sectorState)
+  if (!currentSector) return null
 
   return (
     <>
       {Object.keys(sectorState).map(sectorId => (
-        <Sector key={sectorId} id={sectorId} data={sectorState[sectorId]} />
+        <Sector position={relativeSectorPosition(currentSector, sectorId).toVector3()} current={currentSector === sectorId} key={sectorId} id={sectorId} data={sectorState[sectorId]} />
       ))}
     </>
   )
 }
 
-const Sector: React.FC<{ id: string; data: { avatars: Set<string>; constructs: Set<string> } }> = ({ id, data }) => {
-  const sectorSize = CYBERSPACE_SECTOR.toNumber()
-  const relativeSectorPosition = getSectorDecimalFromId(id)
-  const position = relativeSectorPosition.multiplyScalar(CYBERSPACE_SECTOR).toVector3()
+const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: { avatars: Set<string>; constructs: Set<string> } }> = ({ position, current, id, data }) => {
+  const sectorSize = CYBERSPACE_SECTOR.toNumber()//(2**10)
+
+  // console.log(id, relativeSectorPosition.toVector3(), sectorSize)
 
   return (
     <group position={position}>
-      <mesh position={[sectorSize / 2, sectorSize / 2, sectorSize / 2]}>
+      {/* <mesh position={[sectorSize / 2, sectorSize / 2, sectorSize / 2]}>
         <boxGeometry args={[sectorSize, sectorSize, sectorSize]} />
-        <meshBasicMaterial color={0x00ff00} transparent opacity={0.1} wireframe={true} />
-      </mesh>
+        <meshBasicMaterial color={current ? 0x062cd : 0x78004e} transparent opacity={0.5} side={BackSide} wireframe/>
+      </mesh> */}
+      <lineSegments
+        geometry={new EdgesGeometry(new BoxGeometry(sectorSize, sectorSize, sectorSize))}
+        material={new LineBasicMaterial({ color: current ? 0x062cd : 0x78004e })}
+      />
       {/* Render avatars and constructs here */}
     </group>
   )

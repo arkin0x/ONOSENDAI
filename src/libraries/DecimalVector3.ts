@@ -83,6 +83,13 @@ export class DecimalVector3 {
     return this
   }
 
+  sub (v: DecimalVector3) {
+    this.x = this.x.minus(v.x)
+    this.y = this.y.minus(v.y)
+    this.z = this.z.minus(v.z)
+    return this
+  }
+
   multiplyScalar (scalar: number|Decimal) {
     this.x = this.x.times(scalar)
     this.y = this.y.times(scalar)

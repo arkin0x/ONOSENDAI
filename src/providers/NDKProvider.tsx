@@ -1,6 +1,7 @@
 import type { UnsignedEvent } from 'nostr-tools'
 import { useState, useEffect, createContext } from "react"
 import NDK, { NDKEvent, NDKNip07Signer, NostrEvent } from '@nostr-dev-kit/ndk'
+import { defaultRelays, getRelayList } from '../libraries/Nostr'
 // import { defaultRelays, getRelayList } from "../libraries/Nostr"
 
 type NDKContextType = {
@@ -27,7 +28,7 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
       const signer = new NDKNip07Signer(3000)
       const ndkRef = new NDK({
         signer,
-        explicitRelayUrls: ['wss://cyberspace.nostr1.com'],
+        explicitRelayUrls: getRelayList(defaultRelays),
         enableOutboxModel: false,
         autoConnectUserRelays: false,
       })

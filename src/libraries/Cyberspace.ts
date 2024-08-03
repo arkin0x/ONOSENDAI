@@ -443,3 +443,9 @@ export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string)
   const position = new DecimalVector3(coord.x, coord.y, coord.z)
   return cyberspaceVectorToSectorDecimal(position)
 }
+
+export const relativeSectorPosition = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
+  const baseSector = getSectorDecimalFromId(baseSectorId)
+  const targetSector = getSectorDecimalFromId(targetSectorId)
+  return targetSector.sub(baseSector).multiplyScalar(CYBERSPACE_SECTOR)
+}

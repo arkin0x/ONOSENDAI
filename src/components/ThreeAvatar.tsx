@@ -57,23 +57,22 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
 
   return (
     <group position={position}>
+      {/* default avatar represented by dodecahedron */}
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       <group rotation={[0, 0, 0]}>
-        <mesh
+        {/* vector represented by cone */}
+        <mesh 
           position={conePosition}
           quaternion={coneQuaternion}
         >
           <coneGeometry args={[0.1, coneLength, 8]} />
-          <meshBasicMaterial color={0xff2323} wireframe />
-          {/* <meshStandardMaterial 
-            wireframe 
-            color={0xff2323} 
-            metalness={0.8}
-            roughness={0.4}
-            emissive={0xff2323}
-            emissiveIntensity={0.2}
-          /> */}
+          <meshBasicMaterial color={0x06a4a4} wireframe />
+          {/* 0xff9123 */}
         </mesh>
+        {/* <mesh>
+          <boxGeometry args={[1,1,1]} />
+          <meshBasicMaterial color={0x00ff00} transparent opacity={0.1} side={THREE.DoubleSide} />
+        </mesh> */}
       </group>
     </group>
   )

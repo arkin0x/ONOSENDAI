@@ -219,8 +219,8 @@ export const getTime = (action?: Event|UnsignedEvent): Time => {
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
-  const sector = getSectorFromCoordinate(pubkey) 
-  const sectorId = getSectorId(sector)
+  const sector = getSectorIdFromCoordinate(pubkey) 
+  const sectorId = getSectorIdFromDecimal(sector)
   return {
     pubkey, 
     kind: 333,
@@ -262,8 +262,8 @@ export const createUnsignedDriftAction = async (pubkey: string, throttle: number
     throw new Error("Simulation failed for latest event.")
   }
   const coord = newAction.tags.find(getTag('C'))![1]
-  const sector = getSectorFromCoordinate(coord) 
-  const sectorId = getSectorId(sector)
+  const sector = getSectorIdFromCoordinate(coord) 
+  const sectorId = getSectorIdFromDecimal(sector)
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
   newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toFixed(8))])
@@ -288,7 +288,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoor
   // console.log('extractActionState: action', action)
   // get position
   const cyberspaceCoordinate = action.tags.find(getTag('C'))![1]
-  const sectorId = getSectorId(getSectorFromCoordinate(cyberspaceCoordinate))
+  const sectorId = getSectorIdFromDecimal(getSectorIdFromCoordinate(cyberspaceCoordinate))
   const position = getVector3FromCyberspaceCoordinate(cyberspaceCoordinate)
   // add fractional position if present
   const positionDecimalsTag = action.tags.find(getTag('Cd'))
@@ -298,7 +298,7 @@ export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoor
     position.y = position.y.plus(new Decimal(decimals[1]))
     position.z = position.z.plus(new Decimal(decimals[2]))
   }
-  const sectorPosition = cyberspaceToSectorPosition(position)
+  const sectorPosition = cyberspaceVectorToSectorDecimal(position)
   // get plane
   const plane = getPlaneFromAction(action)
   // get velocity
@@ -388,7 +388,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
  * @param coordinate string
  * @returns DecimalVector3
  */
-export const getSectorFromCoordinate = (coordinate: string): DecimalVector3 => {
+export const getSectorIdFromCoordinate = (coordinate: string): DecimalVector3 => {
   const coord = decodeHexToCoordinates(coordinate)
 
   const sectorX = coord.x.div(CYBERSPACE_SECTOR).floor()
@@ -403,15 +403,25 @@ export const getSectorFromCoordinate = (coordinate: string): DecimalVector3 => {
 /**
  * Render the sector identifier from a DecimalVector3 sector. This is used in the "S" tag for querying objects in a sector.
  */
-export const getSectorId = (sector: DecimalVector3): string => {
+export const getSectorIdFromDecimal = (sector: DecimalVector3): string => {
   return sector.toArray(0).join('-')
+}
+
+/**
+ * Turn a sectorId string into a DecimalVector3.
+ * @param sectorId string
+ * @returns DecimalVector3
+ */
+export const getSectorDecimalFromId = (sectorId: string): DecimalVector3 => {
+  const [x, y, z] = sectorId.split('-').map(coord => new Decimal(coord))
+  return new DecimalVector3(x, y, z)
 }
 
 /**
  * Transform a global cyberspace position to a local sector position for rendering in Three.js.
  * @param cyberspacePosition DecimalVector3
  */
-export const cyberspaceToSectorPosition = (cyberspacePosition: DecimalVector3): DecimalVector3 => {
+export const cyberspaceVectorToSectorDecimal = (cyberspacePosition: DecimalVector3): DecimalVector3 => {
 
   const localX = cyberspacePosition.x.mod(CYBERSPACE_SECTOR)
   const localY = cyberspacePosition.y.mod(CYBERSPACE_SECTOR)
@@ -423,12 +433,13 @@ export const cyberspaceToSectorPosition = (cyberspacePosition: DecimalVector3): 
 }
 
 /**
+ * Global cyberspace position to local sector position for rendering in Three.js.
  * Used to get the sector-based coordinates (different from the global cyberspace coordinates) from a 256-bit hex string.
  * @param coordinate 
  * @returns 
  */
-export const getSectorCoordinatesFromCyberspaceCoordinates = (coordinate: string): DecimalVector3 => {
+export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
   const coord = decodeHexToCoordinates(coordinate)
   const position = new DecimalVector3(coord.x, coord.y, coord.z)
-  return cyberspaceToSectorPosition(position)
+  return cyberspaceVectorToSectorDecimal(position)
 }

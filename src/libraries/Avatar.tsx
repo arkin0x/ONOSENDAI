@@ -1,6 +1,6 @@
 import { useActionChain } from "../hooks/cyberspace/useActionChain"
 import { ThreeAvatar } from "../components/ThreeAvatar"
-import { getSectorCoordinatesFromCyberspaceCoordinates } from "./Cyberspace"
+import { getSectorCoordinatesFromCyberspaceCoordinate } from "./Cyberspace"
 import { SpawnModel } from "../components/Spawn"
 import { ThreeAvatarTrail } from "../components/ThreeAvatarTrail"
 
@@ -17,7 +17,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   useActionChain(pubkey)
 
-  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinates(pubkey).toVector3()
+  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
 
   return <>
     <ThreeAvatar pubkey={pubkey} />

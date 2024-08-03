@@ -1,13 +1,12 @@
-import React, { useContext, useEffect, useMemo, useReducer, useState } from 'react'
+import React, { useContext, useEffect, useReducer, useState } from 'react'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { AvatarContext } from '../providers/AvatarContext'
 import { NDKContext } from '../providers/NDKProvider'
-import { DecimalVector3 } from '../libraries/DecimalVector3'
-import { CYBERSPACE_SECTOR, extractActionState, getSectorFromCoordinate, getSectorId } from '../libraries/Cyberspace'
+import { CYBERSPACE_SECTOR, extractActionState, getSectorDecimalFromId, getSectorIdFromCoordinate } from '../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
-import { Vector3 } from 'three'
+import Decimal from 'decimal.js'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string> }>
@@ -73,43 +72,52 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
   const { ndk } = useContext(NDKContext)
   const { identity } = useContext(IdentityContext)
   const [sectorState, dispatchSector] = useReducer(sectorReducer, {}) // keep track of sectors, avatars, and constructs
-  const [currentSector, setCurrentSector] = useState<string | null>(null)
   const { actionState } = useContext(AvatarContext)
+  const [currentSector, setCurrentSector] = useState<string | null>(null)
+
+  const pubkey = identity?.pubkey
 
   // Debug
 
+  // Functions 
+
+  const subscribeToSector = (sectorId: string, ndk: NDK): NDKSubscription => {
+    const filter = {
+      kinds: [CyberspaceKinds.Action, CyberspaceKinds.Construct] as CyberspaceNDKKinds[],
+      '#S': [sectorId]
+    }
+    return ndk.subscribe(filter, { closeOnEose: false })
+  }
+
+  const handleEvent = (event: Event, sectorId: string) => {
+    if (event.kind === CyberspaceKinds.Action) {
+      dispatchSector({ type: 'ADD_AVATAR', sectorId, pubkey: event.pubkey })
+    } else if (event.kind === CyberspaceKinds.Construct) {
+      dispatchSector({ type: 'ADD_CONSTRUCT', sectorId, eventId: event.id })
+    }
+  }
+
   // Effects
 
-  // update currentSector
+  // update currentSector if it changes
   useEffect(() => {
-    const pubkey = identity?.pubkey
-    const lastAction = [...actionState[pubkey]].reverse()[0]
-  console.log('try extract action state')
-    const { sectorId } = extractActionState(lastAction)
-  console.log('done extract action state')
-    // only update currentSector if it changes
-    if (sectorId !== currentSector) setCurrentSector(sectorId)
+    if (actionState[pubkey] && actionState[pubkey].length > 0) {
+      const lastAction = actionState[pubkey][actionState[pubkey].length - 1]
+      const { sectorId } = extractActionState(lastAction)
+      if (sectorId !== currentSector) setCurrentSector(sectorId)
+    }
   }, [actionState, currentSector, identity])
 
-  // handle subscriptions to sectors
+  // handle subscriptions to sectors when current sector changes
   useEffect(() => {
     if (!currentSector || !ndk) return
-
-    const subscribeToSector = (sectorCoord: DecimalVector3): NDKSubscription => {
-      const filter = {
-        kinds: [CyberspaceKinds.Action, CyberspaceKinds.Construct] as CyberspaceNDKKinds[],
-        '#S': [getSectorId(sectorCoord)]
-      }
-      return ndk.subscribe(filter, { closeOnEose: false })
-    }
 
     const sectorsToLoad = getSectorsToLoad(currentSector, adjacentLayers)
     const subscriptions: NDKSubscription[] = []
 
     sectorsToLoad.forEach(sectorId => {
       dispatchSector({ type: 'MOUNT_SECTOR', sectorId })
-      const sectorCoord = getSectorFromCoordinate(sectorId)
-      const subscription = subscribeToSector(sectorCoord)
+      const subscription = subscribeToSector(sectorId, ndk)
       subscription.on('event', (event: Event) => handleEvent(event, sectorId))
       subscriptions.push(subscription)
     })
@@ -122,17 +130,9 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
     }
   }, [currentSector, adjacentLayers, ndk])
 
-  // Functions 
-
-  const handleEvent = (event: Event, sectorId: string) => {
-    if (event.kind === CyberspaceKinds.Action) {
-      dispatchSector({ type: 'ADD_AVATAR', sectorId, pubkey: event.pubkey })
-    } else if (event.kind === CyberspaceKinds.Construct) {
-      dispatchSector({ type: 'ADD_CONSTRUCT', sectorId, eventId: event.id })
-    }
-  }
-
   // Return
+
+  // console.log('sectorState', sectorState)
 
   return (
     <>
@@ -145,11 +145,12 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
 
 const Sector: React.FC<{ id: string; data: { avatars: Set<string>; constructs: Set<string> } }> = ({ id, data }) => {
   const sectorSize = CYBERSPACE_SECTOR.toNumber()
-  const position = getSectorFromCoordinate(id).toVector3().multiplyScalar(sectorSize)
+  const relativeSectorPosition = getSectorDecimalFromId(id)
+  const position = relativeSectorPosition.multiplyScalar(CYBERSPACE_SECTOR).toVector3()
 
   return (
     <group position={position}>
-      <mesh>
+      <mesh position={[sectorSize / 2, sectorSize / 2, sectorSize / 2]}>
         <boxGeometry args={[sectorSize, sectorSize, sectorSize]} />
         <meshBasicMaterial color={0x00ff00} transparent opacity={0.1} wireframe={true} />
       </mesh>
@@ -159,10 +160,52 @@ const Sector: React.FC<{ id: string; data: { avatars: Set<string>; constructs: S
 }
 
 function getSectorsToLoad(currentSector: string, adjacentLayers: number): string[] {
+  const MAX_SECTOR_ID = new Decimal('36028797018963968')
+  const MIN_SECTOR_ID = new Decimal('0')
+
+  // Validate inputs
+  if (!currentSector || typeof currentSector !== 'string' || !currentSector.match(/^\d+-\d+-\d+$/)) {
+    throw new Error('Invalid sector ID')
+  }
+  if (adjacentLayers < 0) {
+    throw new Error('adjacentLayers must be non-negative')
+  }
+
   const sectors = [currentSector]
   if (adjacentLayers > 0) {
-    // Add logic to get adjacent sector IDs
-    // This is a placeholder and needs to be implemented based on your sector structure
+    const radius = Math.abs(adjacentLayers) // radius for adjacent layers
+
+    // Split the current sector ID into its x, y, z components and convert to Decimal
+    const [x0, y0, z0] = currentSector.split('-').map(coord => new Decimal(coord))
+
+    // Check if the current sector is within bounds
+    if (x0.gt(MAX_SECTOR_ID) || x0.lt(MIN_SECTOR_ID) || y0.gt(MAX_SECTOR_ID) || y0.lt(MIN_SECTOR_ID) || z0.gt(MAX_SECTOR_ID) || z0.lt(MIN_SECTOR_ID)) {
+      throw new Error('Sector ID out of bounds')
+    }
+
+    // Iterate through the cubic radius around the current sector
+    for (let x = -radius; x <= radius; x++) {
+      for (let y = -radius; y <= radius; y++) {
+        for (let z = -radius; z <= radius; z++) {
+          // Skip the current sector itself
+          if (x === 0 && y === 0 && z === 0) continue
+
+          // Calculate the adjacent sector ID using Decimal arithmetic
+          const adjacentX = x0.plus(x)
+          const adjacentY = y0.plus(y)
+          const adjacentZ = z0.plus(z)
+
+          // Check if the adjacent sector is within bounds
+          if (adjacentX.lte(MAX_SECTOR_ID) && adjacentX.gte(MIN_SECTOR_ID) &&
+              adjacentY.lte(MAX_SECTOR_ID) && adjacentY.gte(MIN_SECTOR_ID) &&
+              adjacentZ.lte(MAX_SECTOR_ID) && adjacentZ.gte(MIN_SECTOR_ID)) {
+            const adjacentSector = `${adjacentX.toString()}-${adjacentY.toString()}-${adjacentZ.toString()}`
+            sectors.push(adjacentSector)
+          }
+        }
+      }
+    }
   }
+
   return sectors
 }

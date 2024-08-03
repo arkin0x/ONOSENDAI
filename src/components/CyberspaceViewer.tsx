@@ -6,8 +6,6 @@ import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { SectorManager } from './SectorManager'
 import { Controls } from './Controls'
-import { Vector3 } from 'three'
-import { useFrame } from '@react-three/fiber'
 import { Hud } from './Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 
@@ -41,7 +39,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          {/* <SectorManager /> */}
+          <SectorManager />
           <Avatar pubkey={identity.pubkey} />
           <Controls />
         </Canvas>

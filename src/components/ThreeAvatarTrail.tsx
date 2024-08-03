@@ -2,7 +2,7 @@ import { useContext, useMemo } from 'react'
 import { Color } from 'three'
 import { Line } from '@react-three/drei'
 import { AvatarContext } from '../providers/AvatarContext'
-import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinates } from '../libraries/Cyberspace'
+import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../libraries/Cyberspace'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
@@ -11,7 +11,7 @@ interface ThreeAvatarTrailProps {
 export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
   const { actionState } = useContext(AvatarContext)
 
-  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinates(pubkey).toVector3()
+  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
 
   const trailPoints = useMemo(() => {
     const actions = actionState[pubkey] || []

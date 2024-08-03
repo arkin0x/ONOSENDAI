@@ -23,7 +23,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   // Set fog on the scene
   const fogColor = 0x000000 // Color of the fog
   const near = 1 // Start distance of the fog
-  const far = CYBERSPACE_SECTOR * 2 // End distance of the fog
+  const far = CYBERSPACE_SECTOR.toNumber() * 2 // End distance of the fog
   scene.fog = new THREE.Fog(fogColor, near, far)
 
   camera.far = 2**30
@@ -72,7 +72,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
           quaternion={coneQuaternion}
         >
           <coneGeometry args={[0.1, coneLength, 8]} />
-          <meshBasicMaterial color={0x06a4a4} wireframe />
+          <meshBasicMaterial color={0xff9123} wireframe />
           {/* 0xff9123 */}
         </mesh>
         {/* <mesh>

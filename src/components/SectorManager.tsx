@@ -159,7 +159,7 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
       </mesh> */}
       <lineSegments
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
-        material={new LineBasicMaterial({ color: current ? 0x062cd : 0x78004e })}
+        material={new LineBasicMaterial({ color: current ? 0xff9123 : 0x78004e })}
       />
       {/* Render avatars and constructs here */}
     </group>

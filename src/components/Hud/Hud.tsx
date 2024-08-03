@@ -11,6 +11,7 @@ import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
 import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
 
+const orange = '#ff9123'
 const purple = '#78004e'
 const blue = '#0062cd'
 const teal = '#06a4a4'

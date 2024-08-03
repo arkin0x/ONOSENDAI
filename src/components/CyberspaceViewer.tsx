@@ -8,6 +8,7 @@ import { SectorManager } from './SectorManager'
 import { Controls } from './Controls'
 import { Hud } from './Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
+import SpeedLines from './Hud/SpeedLines'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -47,6 +48,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <Hud/>
+          {/* <SpeedLines/> */}
         </Canvas>
       </div>
       { showTelemetry ? <TelemetryDashboard/> : null}

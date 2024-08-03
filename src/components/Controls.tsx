@@ -39,17 +39,17 @@ export const Controls: React.FC = () => {
       case "KeyQ":
         setControlState({ rollLeft: true, rollLeftCompleted: false })
         break
-      case "KeyE":
-        setControlState({ rollRight: true, rollRightCompleted: false })
-        break
       case "KeyW":
         setControlState({ forward: true })
         break
-      case "KeyS":
-        setControlState({ backward: true })
+      case "KeyE":
+        setControlState({ rollRight: true, rollRightCompleted: false })
         break
       case "KeyA":
         setControlState({ left: true })
+        break
+      case "KeyS":
+        setControlState({ backward: true })
         break
       case "KeyD":
         setControlState({ right: true })
@@ -57,6 +57,9 @@ export const Controls: React.FC = () => {
       case "KeyX":
         isHopping.current = !isHopping.current
         console.log(isHopping.current ? "Hopping mode enabled" : "Drifting mode enabled")
+        break
+      case "KeyC":
+        setControlState({ cruise: !controlState.cruise })
         break
       case "Space":
         setControlState({ up: true })
@@ -72,24 +75,24 @@ export const Controls: React.FC = () => {
         setControlState({ respawn: true })
         break
     }
-  }, [setControlState])
+  }, [controlState, setControlState])
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
     switch (e.code) {
       case "KeyQ":
         setControlState({ rollLeft: false, rollLeftCompleted: false })
         break
-      case "KeyE":
-        setControlState({ rollRight: false, rollRightCompleted: false })
-        break
       case "KeyW":
         setControlState({ forward: false })
         break
-      case "KeyS":
-        setControlState({ backward: false })
+      case "KeyE":
+        setControlState({ rollRight: false, rollRightCompleted: false })
         break
       case "KeyA":
         setControlState({ left: false })
+        break
+      case "KeyS":
+        setControlState({ backward: false })
         break
       case "KeyD":
         setControlState({ right: false })
@@ -238,7 +241,7 @@ export const Controls: React.FC = () => {
     // Handle movement
     const moveVector = new Vector3()
 
-    if (controlState.forward) moveVector.z -= 1
+    if (controlState.forward || controlState.cruise) moveVector.z -= 1
     if (controlState.backward) moveVector.z += 1
     if (controlState.left) moveVector.x -= 1
     if (controlState.right) moveVector.x += 1

@@ -8,6 +8,7 @@ import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BackSide, BoxGeometry, EdgesGeometry, LineBasicMaterial, LineSegments, Vector3 } from 'three'
+import { Blocks } from './Blocks'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string> }>
@@ -69,6 +70,8 @@ interface SectorManagerProps {
   adjacentLayers?: number
 }
 
+// Components
+
 export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0 }) => {
   const { ndk } = useContext(NDKContext)
   const { identity } = useContext(IdentityContext)
@@ -77,6 +80,7 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
   const [currentSector, setCurrentSector] = useState<string | null>(null)
 
   const pubkey = identity?.pubkey
+
 
   // Debug
 
@@ -159,12 +163,15 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
       </mesh> */}
       <lineSegments
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
-        material={new LineBasicMaterial({ color: current ? 0xff9123 : 0x78004e })}
+        material={new LineBasicMaterial({ color: current ? 0xff9123 : 0x78004e, linewidth: 1 })}
       />
       {/* Render avatars and constructs here */}
+      <Blocks sectorId={id} />
     </group>
   )
 }
+
+// Functions
 
 function getSectorsToLoad(currentSector: string, adjacentLayers: number): string[] {
   const MAX_SECTOR_ID = new Decimal('36028797018963968')

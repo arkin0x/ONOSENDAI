@@ -17,6 +17,7 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   useActionChain(pubkey)
 
+  // TODO: <SpawnModel> should take a pubkey and determine if it is within the current sector. Or, it should be a child of <Sector> and render at the pubkey location for every unique pubkey in the sector (based on querying any and all 333 events.) 
   const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
 
   return <>

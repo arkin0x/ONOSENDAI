@@ -447,5 +447,9 @@ export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string)
 export const relativeSectorPosition = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
   const baseSector = getSectorDecimalFromId(baseSectorId)
   const targetSector = getSectorDecimalFromId(targetSectorId)
-  return targetSector.sub(baseSector).multiplyScalar(CYBERSPACE_SECTOR)
+  const position = targetSector.sub(baseSector).multiplyScalar(CYBERSPACE_SECTOR)
+  position.x.add(CYBERSPACE_AXIS.div(2))
+  position.y.add(CYBERSPACE_AXIS.div(2))
+  position.z.add(CYBERSPACE_AXIS.div(2))
+  return position
 }

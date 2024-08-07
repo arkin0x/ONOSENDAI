@@ -9,6 +9,8 @@ export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
 }
 
+const MAP_SIZE = 2**9
+
 const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
 
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -34,7 +36,9 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
       <div id="map">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          <Grid />
+          <Grid size={MAP_SIZE}>
+            {/* <AvatarMarker pubkey={identity.pubkey} /> */}
+          </Grid>
         </Canvas>
       </div>
       {/* <div id="map-hud">

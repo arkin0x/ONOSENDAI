@@ -3,15 +3,15 @@ import { UIState } from "../types/UI"
 import { UIContext } from "../providers/UIProvider"
 import CyberspaceViewer from "./CyberspaceViewer"
 import { useNavigate } from "react-router-dom"
-import '../scss/Interface.scss'
-import '../scss/Dashboard.scss'
+import CyberspaceMap from "./CyberspaceMap"
+import "../scss/Interface.scss"
+import "../scss/Dashboard.scss"
 
 export const Interface = () => {
-
   const navigate = useNavigate()
 
   const logOut = () => {
-    navigate('/logout')
+    navigate("/logout")
   }
 
   const { uiState, setUIState } = useContext(UIContext)
@@ -19,9 +19,9 @@ export const Interface = () => {
   const getInterface = useCallback(() => {
     switch (uiState) {
       case UIState.cyberspace:
-        return <CyberspaceViewer/>
+        return <CyberspaceViewer />
       case UIState.map:
-        return <div>Map</div>
+        return <CyberspaceMap />
       // case UIState.testing:
       //   return <Testing/>
       default:
@@ -31,11 +31,11 @@ export const Interface = () => {
 
   return (
     <div id="interface">
-      <div id="interface-body">
-        {getInterface()}
-      </div>
+      <div id="interface-body">{getInterface()}</div>
       <div id="interface-header">
-        <button onClick={() => setUIState(UIState.cyberspace)}>Cyberspace</button>
+        <button onClick={() => setUIState(UIState.cyberspace)}>
+          Cyberspace
+        </button>
         <button onClick={() => setUIState(UIState.map)}>Map</button>
         {/* <button onClick={() => setUIState(UIState.telemetry)}>Telemetry</button> */}
         {/* <button onClick={() => setUIState(UIState.testing)}>Testing</button> */}
@@ -45,6 +45,4 @@ export const Interface = () => {
       </div>
     </div>
   )
-
 }
-

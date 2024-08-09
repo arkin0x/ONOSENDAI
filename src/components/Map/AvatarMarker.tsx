@@ -39,7 +39,6 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
 
     setPosition(mapPosition)
 
-
   }, [latestAction])
 
   useFrame(() => {
@@ -56,8 +55,6 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
 
     // Calculate radius using eased zoom
     const radius = easedZoom * 2048
-
-    console.log(zoom, radius)
 
     // camera.position.set(scale/2, scale*3, scale/2)
     // camera.rotation.set(-Math.PI/2, 0, 0)

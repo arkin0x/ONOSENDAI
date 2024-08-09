@@ -6,6 +6,7 @@ import { IdentityContext } from '../providers/IdentityProvider'
 import { Grid } from './Map/Grid'
 import { AvatarMarker } from './Map/AvatarMarker'
 import { MapControls } from './Map/MapControls'
+import { BlockMarkers } from './Map/BlockMarkers'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -42,6 +43,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
+            <BlockMarkers scale={MAP_SIZE} />
           </Grid>
           <axesHelper scale={128} position={[-128,-128,-128]} />
           {/* The X axis is red

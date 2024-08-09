@@ -43,7 +43,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
           </Grid>
-          <axesHelper scale={512} position={[0,0,0]} />
+          <axesHelper scale={128} position={[-128,-128,-128]} />
           {/* The X axis is red
             * The Y axis is green
             * The Z axis is blue. */}

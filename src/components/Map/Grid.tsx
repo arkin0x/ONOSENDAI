@@ -23,7 +23,7 @@ export function Grid({children, scale}: {children?: ReactNode, scale: number}) {
       />
       <mesh // Black Sun
         position={[scale/2, scale/2, -scale/2]}>
-        <circleGeometry args={[scale/2]} />
+        <circleGeometry args={[scale/4]} />
         <meshBasicMaterial color={0x2b0c40} />
       </mesh>
       {/* // HALF_DOWNSCALED_CYBERSPACE_AXIS/2, 64)} material={SunMaterial} position={[HALF_DOWNSCALED_CYBERSPACE_AXIS,HALF_DOWNSCALED_CYBERSPACE_AXIS,-HALF_DOWNSCALED_CYBERSPACE_AXIS]} renderOrder={-1}/> */}

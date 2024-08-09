@@ -6,7 +6,7 @@ import { useRotationStore } from '../../store/RotationStore.ts'
 import { Plane } from '@react-three/drei'
 
 export const MapControls: React.FC = () => {
-  const { zoom, setZoom } = useZoomStore()
+  const { zoom, setZoom, ZOOM_MAX } = useZoomStore()
   const { setRotation } = useRotationStore()
   const [isDragging, setIsDragging] = useState(false)
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
@@ -73,7 +73,7 @@ export const MapControls: React.FC = () => {
 
   const handleWheel = useCallback((e: WheelEvent) => {
     console.log(e.deltaY)
-    setZoom(Math.max(0, Math.min(128, zoom + (e.deltaY < 0 ? 1 : -1))))
+    setZoom(Math.max(0, Math.min(ZOOM_MAX, zoom + (e.deltaY > 0 ? 1 : -1))))
   }, [setZoom, zoom])
 
   const handleContextMenu = useCallback((e: MouseEvent) => {

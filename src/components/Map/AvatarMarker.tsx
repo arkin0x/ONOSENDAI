@@ -13,7 +13,7 @@ import { useZoomStore } from "../../store/ZoomStore"
 
 export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   const { rotation } = useRotationStore()
-  const { zoom } = useZoomStore()
+  const { zoom, ZOOM_MAX } = useZoomStore()
 
   const [position, setPosition] = useState(new THREE.Vector3(0, 0, 0))
 
@@ -22,6 +22,7 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   const { camera } = useThree()
 
   camera.far = scale ** 2
+  camera.near = 0.01
 
   useActionChain(pubkey)
 
@@ -38,11 +39,25 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
 
     setPosition(mapPosition)
 
+
   }, [latestAction])
 
   useFrame(() => {
 
-    const radius = scale * 2 - (zoom/64) * scale
+    // Normalize zoom to be between 0 and 1
+    const normalizedZoom = zoom / ZOOM_MAX 
+
+    // Apply cubic easing function
+    // const easedZoom = 3 * normalizedZoom ** 2 - 2 * normalizedZoom ** 3
+
+    // Apply piecewise easing function
+    const easedZoom = 2 * normalizedZoom ** 4
+      // Linear ease-out
+
+    // Calculate radius using eased zoom
+    const radius = easedZoom * 2048
+
+    console.log(zoom, radius)
 
     // camera.position.set(scale/2, scale*3, scale/2)
     // camera.rotation.set(-Math.PI/2, 0, 0)
@@ -50,7 +65,7 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
     const cameraPosition = position.clone().add(cameraDirection.multiplyScalar(radius))
     camera.position.copy(cameraPosition)
-    camera.lookAt(new THREE.Vector3(scale/2,scale/2,scale/2))
+    camera.lookAt(position)
     camera.updateProjectionMatrix()
     
   })
@@ -59,7 +74,7 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   return (
     <group position={position}>
       {/* default avatar represented by dodecahedron */}
-      <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
+      <lineSegments scale={[.5,.5,.5]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       {/* <axesHelper position={[0,0,0]} scale={512}/> */}
     </group>
   )

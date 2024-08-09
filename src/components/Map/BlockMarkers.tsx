@@ -12,13 +12,14 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
   const { ndk } = useContext(NDKContext)
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
 
+  // TODO: 
   useEffect(() => {
     if (!ndk) return
 
     const fetchBlocks = async () => {
       const filter = {
         kinds: [321], // Assuming 331 is the kind for blocks, adjust if necessary
-        limit: 200
+        limit: 100
       }
 
       try {
@@ -34,7 +35,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
     fetchBlocks()
   }, [ndk])
 
-  console.log('Blocks:', blocks.length)
+  // console.log('Blocks:', blocks.length)
 
   return (
     <>

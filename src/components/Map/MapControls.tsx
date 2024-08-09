@@ -72,7 +72,6 @@ export const MapControls: React.FC = () => {
 
 
   const handleWheel = useCallback((e: WheelEvent) => {
-    console.log(e.deltaY)
     setZoom(Math.max(0, Math.min(ZOOM_MAX, zoom + (e.deltaY > 0 ? 1 : -1))))
   }, [setZoom, zoom])
 

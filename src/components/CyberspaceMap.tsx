@@ -7,6 +7,7 @@ import { Grid } from './Map/Grid'
 import { AvatarMarker } from './Map/AvatarMarker'
 import { MapControls } from './Map/MapControls'
 import { BlockMarkers } from './Map/BlockMarkers'
+import { Constructs } from './Map/Constructs'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -43,9 +44,10 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
+            <Constructs scale={MAP_SIZE} />
             <BlockMarkers scale={MAP_SIZE} />
           </Grid>
-          <axesHelper scale={128} position={[-128,-128,-128]} />
+          {/* <axesHelper scale={128} position={[-128,-128,-128]} /> */}
           {/* The X axis is red
             * The Y axis is green
             * The Z axis is blue. */}

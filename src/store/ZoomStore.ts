@@ -12,7 +12,6 @@ export const useZoomStore = create<ZoomStore>((set) => ({
   zoom: 16,
   ZOOM_MAX,
   setZoom: (value) => {
-    console.log("Setting zoom to", value)
     set({ zoom: value })
   }
 }))

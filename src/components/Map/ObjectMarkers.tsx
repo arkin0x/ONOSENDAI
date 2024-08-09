@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
-import { Vector3 } from 'three'
+import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { ConstructGeometryEdges, ConstructMaterialEdges } from '../../data/ConstructModel'
@@ -16,7 +16,7 @@ export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
   const [constructs, setConstructs] = useState<NDKEvent[]>([])
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
 
-  const limit = 1000
+  const limit = 300
 
   // TODO: figure out why 321 and 331 can't be in the same filter, and why NDK merges filters when two separate components are doing separate subscriptions.
   useEffect(() => {
@@ -31,11 +31,9 @@ export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
         kinds: [321], 
         limit
       }]
-      const pool = new SimplePool()
-      const sub = pool.sub(getRelayList(defaultRelays), filter)
-
       try {
-        sub.on('event', (event: Event) => {
+        const events = await ndk.subscribe(filter)
+        events.on('event', (event: NDKEvent) => {
           if (event.kind === 331) {
             setConstructs((constructs) => [...constructs, event as NDKEvent])
           } else if (event.kind === 321) {
@@ -109,12 +107,22 @@ const Block: React.FC<BlockProps> = ({ event, scale }) => {
   const position = getBlockPosition(event, scale)
   const size = getBlockSize(event)
 
-  return (
-    <mesh position={position}>
-      <boxGeometry args={[size, size, size]} />
-      <meshBasicMaterial color={0xff9900} />
-    </mesh>
-  )
+  const geometry = useMemo(() => {
+    const geo = new BufferGeometry()
+    geo.setAttribute('position', new Float32BufferAttribute([position.x, position.y, position.z], 3))
+    return geo
+  }, [position])
+
+  const material = useMemo(() => {
+    return new PointsMaterial({
+      color: 0xff9900,
+      size: size,
+      sizeAttenuation: false
+    })
+  }, [size])
+
+  return <points geometry={geometry} material={material} />
+
 }
 
 function getBlockPosition(event: NDKEvent, scale: number): Vector3 {
@@ -134,5 +142,5 @@ function getBlockSize(event: NDKEvent): number {
   // Extract size from event tags or content
   // This is a placeholder implementation
   // You might want to base this on some property of the event
-  return 1 // Fixed size of 5 units
+  return 2 // Fixed size of 5 units
 }

@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
-import { Vector3 } from 'three'
+import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 
@@ -19,7 +19,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
     const fetchBlocks = async () => {
       const filter = {
         kinds: [321], // Assuming 331 is the kind for blocks, adjust if necessary
-        limit: 500
+        limit: 100
       }
 
       try {
@@ -55,12 +55,22 @@ const Block: React.FC<BlockProps> = ({ event, scale }) => {
   const position = getBlockPosition(event, scale)
   const size = getBlockSize(event)
 
-  return (
-    <mesh position={position}>
-      <boxGeometry args={[size, size, size]} />
-      <meshBasicMaterial color={0xff9900} />
-    </mesh>
-  )
+  const geometry = useMemo(() => {
+    const geo = new BufferGeometry()
+    geo.setAttribute('position', new Float32BufferAttribute([position.x, position.y, position.z], 3))
+    return geo
+  }, [position])
+
+  const material = useMemo(() => {
+    return new PointsMaterial({
+      color: 0xff9900,
+      size: 2,
+      sizeAttenuation: false
+    })
+  }, [size])
+
+  return <points geometry={geometry} material={material} />
+
 }
 
 function getBlockPosition(event: NDKEvent, scale: number): Vector3 {

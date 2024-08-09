@@ -46,6 +46,8 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
             <ObjectMarkers scale={MAP_SIZE} />
+            {/* <BlockMarkers scale={MAP_SIZE} /> */}
+            {/* <Constructs scale={MAP_SIZE} /> */}
           </Grid>
           {/* <axesHelper scale={128} position={[-128,-128,-128]} /> */}
           {/* The X axis is red

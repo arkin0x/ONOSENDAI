@@ -20,13 +20,12 @@ export const Constructs: React.FC<ConstructsProps> = ({ scale }) => {
     const fetchConstructs = async () => {
       const filter = {
         kinds: [331], // Assuming 331 is the kind for constructs, adjust if necessary
-        limit: 100
+        limit: 500
       }
 
       try {
         const events = await ndk.subscribe(filter)
         events.on('event', (event: NDKEvent) => {
-          console.log('construct:', event.tags)
           setConstructs((constructs) => [...constructs, event])
         })
       } catch (error) {

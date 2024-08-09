@@ -19,7 +19,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
     const fetchBlocks = async () => {
       const filter = {
         kinds: [321], // Assuming 331 is the kind for blocks, adjust if necessary
-        limit: 100
+        limit: 500
       }
 
       try {
@@ -58,7 +58,7 @@ const Block: React.FC<BlockProps> = ({ event, scale }) => {
   return (
     <mesh position={position}>
       <boxGeometry args={[size, size, size]} />
-      <meshBasicMaterial color={0xffff00} />
+      <meshBasicMaterial color={0xff9900} />
     </mesh>
   )
 }

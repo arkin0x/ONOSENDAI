@@ -16,6 +16,7 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   const { zoom, ZOOM_MAX } = useZoomStore()
 
   const [position, setPosition] = useState(new THREE.Vector3(0, 0, 0))
+  // const [rotationAngle, setRotationAngle] = useState(0)
 
   const { getSimulatedState } = useContext(AvatarContext)
 
@@ -56,12 +57,20 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
     // Calculate radius using eased zoom
     const radius = easedZoom * 2048
 
+    // setRotationAngle(prevAngle => prevAngle - 0.001) // Adjust the increment value for desired speed
+
     // camera.position.set(scale/2, scale*3, scale/2)
     // camera.rotation.set(-Math.PI/2, 0, 0)
     const oppositeRotation = rotation.clone()
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
     const cameraPosition = position.clone().add(cameraDirection.multiplyScalar(radius))
     camera.position.copy(cameraPosition)
+    // camera.position.set(
+    //   cameraPosition.x * Math.cos(rotationAngle) - cameraPosition.z * Math.sin(rotationAngle),
+    //   cameraPosition.y,
+    //   cameraPosition.x * Math.sin(rotationAngle) + cameraPosition.z * Math.cos(rotationAngle)
+    // )
+    // camera.lookAt(new THREE.Vector3(scale/2, scale/2, scale/2))
     camera.lookAt(position)
     camera.updateProjectionMatrix()
     

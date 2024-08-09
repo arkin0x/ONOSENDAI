@@ -122,7 +122,7 @@ export const Controls: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    const canvas = document.querySelector('canvas')
+    const canvas = document.querySelector('#cyberspace canvas')
     if (canvas) {
       canvas.addEventListener('mouseenter', handleMouseEnter)
       canvas.addEventListener('mouseleave', handleMouseLeave)
@@ -191,7 +191,7 @@ export const Controls: React.FC = () => {
     const canvas = document.querySelector('canvas')
     if (canvas) {
       canvasRef.current = canvas
-      canvas.addEventListener('click', () => canvas.requestPointerLock())
+      // canvas.addEventListener('click', () => canvas.requestPointerLock())
     }
 
     return () => {

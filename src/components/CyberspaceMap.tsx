@@ -5,12 +5,13 @@ import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Grid } from './Map/Grid'
 import { AvatarMarker } from './Map/AvatarMarker'
+import { MapControls } from './Map/MapControls'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
 }
 
-const MAP_SIZE = 2**9
+const MAP_SIZE = 2**10
 
 const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
 
@@ -36,10 +37,16 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
     <div className="cyberspace-map">
       <div id="map">
         <Canvas style={style}>
+          <axesHelper scale={1} position={[0,0,0]} />
+          <MapControls />
           <ambientLight intensity={2.0} />
-          <Grid size={MAP_SIZE}>
-            <AvatarMarker pubkey={identity?.pubkey} />
+          <Grid scale={MAP_SIZE}>
+            <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
           </Grid>
+          <axesHelper scale={512} position={[0,0,0]} />
+          {/* The X axis is red
+            * The Y axis is green
+            * The Z axis is blue. */}
         </Canvas>
       </div>
       {/* <div id="map-hud">

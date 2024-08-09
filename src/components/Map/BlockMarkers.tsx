@@ -2,7 +2,7 @@ import React, { useEffect, useState, useContext, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
-import { NDKEvent } from '@nostr-dev-kit/ndk'
+import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 
 interface BlocksProps {
   scale: number
@@ -11,36 +11,56 @@ interface BlocksProps {
 export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
   const { ndk } = useContext(NDKContext)
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
+  const [fetchCounter, setFetchCounter] = useState(0)
 
-  // TODO: 
   useEffect(() => {
     if (!ndk) return
 
-    const fetchBlocks = async () => {
-      const filter = {
-        kinds: [321], // Assuming 331 is the kind for blocks, adjust if necessary
-        limit: 100
+    const fetchNextBlock = async () => {
+      let filter: NDKFilter
+
+      if (blocks.length === 0) {
+        // Fetch the first block
+        filter = {
+          kinds: [321],
+          limit: 1,
+          "#P": ["0000000000000000000000000000000000000000000000000000000000000000"]
+        }
+      } else {
+        // Fetch the next block
+    const nextBlockHash = blocks[blocks.length - 1].tags.find(tag => tag[0] === 'N')?.[1]
+        if (!nextBlockHash) {
+          console.error('Block event is missing N tag')
+          return
+        }
+        filter = {
+          kinds: [321],
+        limit: 1,
+        "#H": [nextBlockHash]
+        }
       }
 
       try {
-        const events = await ndk.subscribe(filter)
-        events.on('event', (event: NDKEvent) => {
-          setBlocks((blocks) => [...blocks, event])
-        })
+      const event = await ndk.fetchEvent(filter)
+        if (event) {
+          setBlocks(prevBlocks => [...prevBlocks, event])
+          // Trigger next fetch after a short delay
+          setTimeout(() => setFetchCounter(prev => prev + 1), 1000)
+      } else {
+          console.log('No more blocks to fetch. Last block fetched:' , blocks[blocks.length - 1].tags.find(tag => tag[0] === 'H')?.[1])
+        }
       } catch (error) {
-        console.error('Error fetching blocks:', error)
+        console.error('Failed to fetch block:', error)
       }
     }
 
-    fetchBlocks()
-  }, [ndk])
-
-  // console.log('Blocks:', blocks.length)
+    fetchNextBlock()
+  }, [ndk, blocks, fetchCounter])
 
   return (
     <>
-      {blocks.map((block, x) => (
-        <Block key={x} event={block} scale={scale} />
+      {blocks.map((block, index) => (
+        <Block key={index} event={block} scale={scale} />
       ))}
     </>
   )

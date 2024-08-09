@@ -3,7 +3,7 @@ import { NDKContext } from '../../providers/NDKProvider'
 import { Vector3 } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
-import { ConstructGeometryEdges, ConstructMaterialEdges } from '../Avatar/ConstructModel'
+import { ConstructGeometryEdges, ConstructMaterialEdges } from '../../data/ConstructModel'
 import { Event, SimplePool } from 'nostr-tools'
 import { defaultRelays, getRelayList } from '../../libraries/Nostr'
 
@@ -16,7 +16,7 @@ export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
   const [constructs, setConstructs] = useState<NDKEvent[]>([])
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
 
-  const limit = 10000
+  const limit = 1000
 
   // TODO: figure out why 321 and 331 can't be in the same filter, and why NDK merges filters when two separate components are doing separate subscriptions.
   useEffect(() => {
@@ -24,10 +24,11 @@ export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
 
     const fetchObjects = async () => {
       const filter = [{
-        kinds: [321], 
-        limit
-      }, {
         kinds: [331],
+        limit
+      },
+      {
+        kinds: [321], 
         limit
       }]
       const pool = new SimplePool()
@@ -35,7 +36,6 @@ export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
 
       try {
         sub.on('event', (event: Event) => {
-          console.log(event.kind)
           if (event.kind === 331) {
             setConstructs((constructs) => [...constructs, event as NDKEvent])
           } else if (event.kind === 321) {

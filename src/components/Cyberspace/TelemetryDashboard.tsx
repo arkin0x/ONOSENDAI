@@ -1,12 +1,12 @@
 import type { Event } from 'nostr-tools'
 import { useContext, useState } from 'react'
-import '../scss/Telemetry.scss'
-import { AvatarContext } from '../providers/AvatarContext'
-import { IdentityContextType } from '../types/IdentityType'
-import { IdentityContext } from '../providers/IdentityProvider'
-import { isGenesisAction } from '../libraries/Cyberspace'
+import '../../scss/Telemetry.scss'
+import { AvatarContext } from '../../providers/AvatarContext'
+import { IdentityContextType } from '../../types/IdentityType'
+import { IdentityContext } from '../../providers/IdentityProvider'
+import { isGenesisAction } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
-import { countLeadingZeroesHex } from '../libraries/Hash'
+import { countLeadingZeroesHex } from '../../libraries/Hash'
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {

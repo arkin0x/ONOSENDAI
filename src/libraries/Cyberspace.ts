@@ -1,7 +1,7 @@
 import * as THREE from "three"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { CyberspaceCoordinates, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time } from "../types/Cyberspace"
+import { CyberspaceCoordinates, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time } from "../types/CyberspaceTypes"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"

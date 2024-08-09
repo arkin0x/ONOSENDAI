@@ -6,12 +6,12 @@ import { getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
 import { CYBERSPACE_DOWNSCALE, extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
-import { MillisecondsTimestamp } from "../../types/Cyberspace"
+import { MillisecondsTimestamp } from "../../types/CyberspaceTypes"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
 import { countLeadingZeroesHex } from "../../libraries/Hash"
 import { DecimalVector3 } from "../../libraries/DecimalVector3"
-import { ActionChainState } from "../../types/Cyberspace"
+import { ActionChainState } from "../../types/CyberspaceTypes"
 
 export type CyberspaceStateReconciler = {
   actions: Event[]

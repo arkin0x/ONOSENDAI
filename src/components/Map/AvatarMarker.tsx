@@ -4,7 +4,7 @@
 import { useContext, useEffect, useState } from "react"
 import { AvatarContext } from "../../providers/AvatarContext"
 import { CYBERSPACE_AXIS, extractActionState } from "../../libraries/Cyberspace"
-import { AvatarGeometryEdges, AvatarMaterialEdges } from "../Avatar/AvatarModel"
+import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import * as THREE from "three"
 import { useActionChain } from "../../hooks/cyberspace/useActionChain"
 import { useFrame, useThree } from "@react-three/fiber"

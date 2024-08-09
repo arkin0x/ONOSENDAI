@@ -1,10 +1,10 @@
 import { useFrame, useThree } from "@react-three/fiber"
 import React, { useContext, useState } from "react"
 import * as THREE from "three"
-import { AvatarContext } from "../providers/AvatarContext"
-import { CYBERSPACE_SECTOR, extractActionState } from "../libraries/Cyberspace"
-import { useRotationStore } from "../store/RotationStore"
-import { AvatarGeometryEdges, AvatarMaterialEdges } from "./Avatar/AvatarModel"
+import { AvatarContext } from "../../providers/AvatarContext"
+import { CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
+import { useRotationStore } from "../../store/RotationStore"
+import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()

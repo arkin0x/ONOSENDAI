@@ -1,14 +1,14 @@
 import React, { useContext, useEffect, useReducer, useState } from 'react'
-import { IdentityContext } from '../providers/IdentityProvider'
-import { AvatarContext } from '../providers/AvatarContext'
-import { NDKContext } from '../providers/NDKProvider'
-import { CYBERSPACE_SECTOR, extractActionState, relativeSectorPosition } from '../libraries/Cyberspace'
-import { CyberspaceKinds, CyberspaceNDKKinds } from '../types/CyberspaceNDK'
+import { IdentityContext } from '../../providers/IdentityProvider'
+import { AvatarContext } from '../../providers/AvatarContext'
+import { NDKContext } from '../../providers/NDKProvider'
+import { CYBERSPACE_SECTOR, extractActionState, relativeSectorPosition } from '../../libraries/Cyberspace'
+import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BackSide, BoxGeometry, EdgesGeometry, LineBasicMaterial, LineSegments, Vector3 } from 'three'
-import { Blocks } from './Blocks'
+import { Blocks } from '../Blocks'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string> }>

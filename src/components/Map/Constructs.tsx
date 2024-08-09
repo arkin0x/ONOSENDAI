@@ -3,7 +3,7 @@ import { NDKContext } from '../../providers/NDKProvider'
 import { Vector3 } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
-import { ConstructGeometryEdges, ConstructMaterialEdges } from '../Avatar/ConstructModel'
+import { ConstructGeometryEdges, ConstructMaterialEdges } from '../../data/ConstructModel'
 
 interface ConstructsProps {
   scale: number

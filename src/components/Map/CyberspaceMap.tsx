@@ -1,14 +1,14 @@
 import { useContext, useEffect, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
-import "../scss/CyberspaceViewer.scss"
-import { IdentityContextType } from '../types/IdentityType'
-import { IdentityContext } from '../providers/IdentityProvider'
-import { Grid } from './Map/Grid'
-import { AvatarMarker } from './Map/AvatarMarker'
-import { MapControls } from './Map/MapControls'
-import { BlockMarkers } from './Map/BlockMarkers'
-import { Constructs } from './Map/Constructs'
-import { ObjectMarkers } from './Map/ObjectMarkers'
+import "../../scss/CyberspaceViewer.scss"
+import { IdentityContextType } from '../../types/IdentityType'
+import { IdentityContext } from '../../providers/IdentityProvider'
+import { Grid } from './Grid'
+import { AvatarMarker } from './AvatarMarker'
+import { MapControls } from './MapControls'
+import { BlockMarkers } from './BlockMarkers'
+import { Constructs } from './Constructs'
+import { ObjectMarkers } from './ObjectMarkers'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,

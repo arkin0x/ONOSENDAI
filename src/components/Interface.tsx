@@ -1,9 +1,9 @@
 import { useCallback, useContext } from "react"
 import { UIState } from "../types/UI"
 import { UIContext } from "../providers/UIProvider"
-import CyberspaceViewer from "./CyberspaceViewer"
+import CyberspaceViewer from "./Cyberspace/CyberspaceViewer"
 import { useNavigate } from "react-router-dom"
-import CyberspaceMap from "./CyberspaceMap"
+import CyberspaceMap from "./Map/CyberspaceMap"
 import "../scss/Interface.scss"
 import "../scss/Dashboard.scss"
 

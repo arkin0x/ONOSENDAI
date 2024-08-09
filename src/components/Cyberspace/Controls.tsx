@@ -1,14 +1,14 @@
 import React, { useContext, useEffect, useRef, useCallback, useState } from 'react'
-import { useThrottleStore } from '../store/ThrottleStore.ts'
-import { IdentityContext } from '../providers/IdentityProvider.tsx'
-import { IdentityContextType } from '../types/IdentityType.tsx'
-import { useEngine } from '../hooks/cyberspace/useEngine.ts'
-import { Euler, Quaternion, Vector3 } from 'three'
-import { AvatarContext } from '../providers/AvatarContext.tsx'
+import { useThrottleStore } from '../../store/ThrottleStore.ts'
+import { IdentityContext } from '../../providers/IdentityProvider.tsx'
+import { IdentityContextType } from '../../types/IdentityType.tsx'
+import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
+import { Quaternion, Vector3 } from 'three'
+import { AvatarContext } from '../../providers/AvatarContext.tsx'
 import { useFrame } from '@react-three/fiber'
-import { defaultRelays } from '../libraries/Nostr.ts'
-import { useControlStore } from '../store/ControlStore.ts'
-import { useRotationStore } from '../store/RotationStore.ts'
+import { defaultRelays } from '../../libraries/Nostr.ts'
+import { useControlStore } from '../../store/ControlStore.ts'
+import { useRotationStore } from '../../store/RotationStore.ts'
 
 export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)

@@ -1,12 +1,12 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
-import "../scss/CyberspaceViewer.scss"
-import { Avatar } from '../libraries/Avatar'
-import { IdentityContextType } from '../types/IdentityType'
-import { IdentityContext } from '../providers/IdentityProvider'
+import "../../scss/CyberspaceViewer.scss"
+import { Avatar } from '../../libraries/Avatar'
+import { IdentityContextType } from '../../types/IdentityType'
+import { IdentityContext } from '../../providers/IdentityProvider'
 import { SectorManager } from './SectorManager'
 import { Controls } from './Controls'
-import { Hud } from './Hud/Hud'
+import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 import SpeedLines from './Hud/SpeedLines'
 

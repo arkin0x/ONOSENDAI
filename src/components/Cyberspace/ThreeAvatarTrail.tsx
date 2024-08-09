@@ -1,8 +1,8 @@
 import { useContext, useMemo } from 'react'
 import { Color } from 'three'
 import { Line } from '@react-three/drei'
-import { AvatarContext } from '../providers/AvatarContext'
-import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../libraries/Cyberspace'
+import { AvatarContext } from '../../providers/AvatarContext'
+import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 
 interface ThreeAvatarTrailProps {
   pubkey: string

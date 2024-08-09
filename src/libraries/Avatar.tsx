@@ -1,8 +1,8 @@
 import { useActionChain } from "../hooks/cyberspace/useActionChain"
-import { ThreeAvatar } from "../components/ThreeAvatar"
+import { ThreeAvatar } from "../components/Cyberspace/ThreeAvatar"
 import { getSectorCoordinatesFromCyberspaceCoordinate } from "./Cyberspace"
-import { SpawnModel } from "../components/Spawn"
-import { ThreeAvatarTrail } from "../components/ThreeAvatarTrail"
+import { SpawnModel } from "../components/Cyberspace/Spawn"
+import { ThreeAvatarTrail } from "../components/Cyberspace/ThreeAvatarTrail"
 
 type AvatarProps = {
   pubkey: string

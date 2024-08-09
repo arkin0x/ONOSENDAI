@@ -4,6 +4,7 @@ import "../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../types/IdentityType'
 import { IdentityContext } from '../providers/IdentityProvider'
 import { Grid } from './Map/Grid'
+import { AvatarMarker } from './Map/AvatarMarker'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -37,7 +38,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <Grid size={MAP_SIZE}>
-            {/* <AvatarMarker pubkey={identity.pubkey} /> */}
+            <AvatarMarker pubkey={identity?.pubkey} />
           </Grid>
         </Canvas>
       </div>

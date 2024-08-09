@@ -1,17 +1,10 @@
 import { useFrame, useThree } from "@react-three/fiber"
-import React, { useRef, useContext, useState } from "react"
+import React, { useContext, useState } from "react"
 import * as THREE from "three"
 import { AvatarContext } from "../providers/AvatarContext"
 import { CYBERSPACE_SECTOR, extractActionState } from "../libraries/Cyberspace"
 import { useRotationStore } from "../store/RotationStore"
-
-const AvatarGeometry = new THREE.IcosahedronGeometry(.5,1)
-
-// Create edges geometry for the golden wireframe
-const AvatarGeometryEdges = new THREE.EdgesGeometry(AvatarGeometry)
-const AvatarMaterialEdges = new THREE.LineBasicMaterial({ color: 0xff2323 })
-
-// Add the wireframe to your scene
+import { AvatarGeometryEdges, AvatarMaterialEdges } from "./Avatar/AvatarModel"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()

@@ -9,6 +9,7 @@ import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../../libraries/Nostr.ts'
 import { useControlStore } from '../../store/ControlStore.ts'
 import { useRotationStore } from '../../store/RotationStore.ts'
+import { extractActionState } from '../../libraries/Cyberspace.ts'
 
 export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -23,6 +24,21 @@ export const Controls: React.FC = () => {
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
+  const [currentDirection, setCurrentDirection] = useState<Quaternion>(new Quaternion())
+  const { getSimulatedState } = useContext(AvatarContext)
+  const simulatedEvent = getSimulatedState(pubkey)
+
+  useEffect(() => {
+    if (simulatedEvent) {
+      const { velocity } = extractActionState(simulatedEvent)
+      const currentDirection = new Quaternion().setFromUnitVectors(
+        new Vector3(0, 1, 0), // Default up vector
+        velocity.toVector3().normalize() // Normalized velocity vector
+      )
+      setCurrentDirection(currentDirection)
+    }
+
+  }, [simulatedEvent])
 
   const isHopping = useRef<boolean>(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -75,7 +91,7 @@ export const Controls: React.FC = () => {
         setControlState({ respawn: true })
         break
       case "Escape":
-        setControlState({ resetView: true })
+        setControlState({ resetView: !controlState.resetView})
         break
     }
   }, [controlState, setControlState])
@@ -112,9 +128,6 @@ export const Controls: React.FC = () => {
         break
       case "Backspace":
         setControlState({ respawn: false })
-        break
-      case "Escape":
-        setControlState({ resetView: false })
         break
     }
   }, [setControlState])
@@ -173,6 +186,9 @@ export const Controls: React.FC = () => {
       })
 
       setLastMousePosition({ x: e.clientX, y: e.clientY })
+
+      // Reset the resetView state when the user starts dragging
+      setControlState({ resetView: false })
     }
   }, [isDragging, lastMousePosition])
 
@@ -224,32 +240,29 @@ export const Controls: React.FC = () => {
     }
 
     if (controlState.resetView) {
-      resetControlState()
-      setPitch(0)
-      setYaw(0)
-      setRotation(new Quaternion())
+      if (simulatedEvent) {
+        const { velocity } = extractActionState(simulatedEvent)
+        const directionOfTravel = velocity.toVector3().normalize()
+
+        // Invert the direction to place the camera behind the avatar
+        const cameraDirection = directionOfTravel.clone().negate()
+
+        // Reset pitch and yaw based on the direction of travel
+        const newRotation = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), cameraDirection)
+        
+        setRotation(newRotation)
+        // setPitch(0)
+        // setYaw(0)
+
+      }
+    } else {
+      // Create a new quaternion from pitch and yaw
+      const pitchQuat = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch)
+      const yawQuat = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw)
+      const newRotation = yawQuat.multiply(pitchQuat)
+
+      setRotation(newRotation.normalize())
     }
-
-    // Handle roll rotation
-    // const rotationChange = Math.PI / 2 // 90 degrees
-    // const newRotation = rotation.clone()
-
-    // if (controlState.rollLeft && !controlState.rollLeftCompleted) {
-    //   newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), rotationChange).normalize())
-    //   setControlState({ rollLeftCompleted: true })
-    // }
-    // if (controlState.rollRight && !controlState.rollRightCompleted) {
-    //   newRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), -rotationChange).normalize())
-    //   setControlState({ rollRightCompleted: true })
-    // }
-
-    // Create a new quaternion from pitch and yaw
-    const pitchQuat = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch)
-    const yawQuat = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw)
-    const newRotation = yawQuat.multiply(pitchQuat)
-
-    setRotation(newRotation.normalize())
-
 
     // Handle movement
     const moveVector = new Vector3()
@@ -291,3 +304,4 @@ export const Controls: React.FC = () => {
 
   return null
 }
+

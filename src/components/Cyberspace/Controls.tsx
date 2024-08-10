@@ -71,8 +71,11 @@ export const Controls: React.FC = () => {
       case "AltLeft":
         setControlState({ freeze: true })
         break
-      case "Escape":
+      case "Backspace":
         setControlState({ respawn: true })
+        break
+      case "Escape":
+        setControlState({ resetView: true })
         break
     }
   }, [controlState, setControlState])
@@ -107,8 +110,11 @@ export const Controls: React.FC = () => {
       case "AltLeft":
         setControlState({ freeze: false })
         break
-      case "Escape":
+      case "Backspace":
         setControlState({ respawn: false })
+        break
+      case "Escape":
+        setControlState({ resetView: false })
         break
     }
   }, [setControlState])
@@ -215,6 +221,13 @@ export const Controls: React.FC = () => {
       setRotation(new Quaternion())
       setThrottle(1)
       return
+    }
+
+    if (controlState.resetView) {
+      resetControlState()
+      setPitch(0)
+      setYaw(0)
+      setRotation(new Quaternion())
     }
 
     // Handle roll rotation

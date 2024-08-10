@@ -14,6 +14,7 @@ type ControlState = {
   freeze: boolean
   respawn: boolean
   cruise: boolean
+  resetView: boolean
 }
 
 type ControlStore = {
@@ -35,7 +36,8 @@ const initialControlState: ControlState = {
   respawn: false,
   rollLeftCompleted: false,
   rollRightCompleted: false,
-  cruise: false
+  cruise: false,
+  resetView: false,
 }
 
 export const useControlStore = create<ControlStore>((set) => ({

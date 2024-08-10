@@ -155,8 +155,10 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
   const adjacentScale = 0.9
   const size = current ? sectorSize : sectorSize * adjacentScale
 
+  const centerPosition = position.clone().add(new Vector3(sectorSize / 2, sectorSize / 2, sectorSize / 2))
+
   return (
-    <group position={position}>
+    <group position={centerPosition}>
       {/* <mesh position={[sectorSize / 2, sectorSize / 2, sectorSize / 2]}>
         <boxGeometry args={[sectorSize, sectorSize, sectorSize]} />
         <meshBasicMaterial color={current ? 0x062cd : 0x78004e} transparent opacity={0.5} side={BackSide} wireframe/>

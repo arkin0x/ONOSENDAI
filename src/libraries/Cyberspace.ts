@@ -448,8 +448,5 @@ export const relativeSectorPosition = (baseSectorId: string, targetSectorId: str
   const baseSector = getSectorDecimalFromId(baseSectorId)
   const targetSector = getSectorDecimalFromId(targetSectorId)
   const position = targetSector.sub(baseSector).multiplyScalar(CYBERSPACE_SECTOR)
-  position.x.add(CYBERSPACE_AXIS.div(2))
-  position.y.add(CYBERSPACE_AXIS.div(2))
-  position.z.add(CYBERSPACE_AXIS.div(2))
   return position
 }

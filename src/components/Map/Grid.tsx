@@ -22,7 +22,9 @@ export function Grid({children, scale}: {children?: ReactNode, scale: number}) {
         position={[scale/2, 0, scale/2]} // all coordinates are positive, so the top left corner of the grid should be x0 z0.
       />
       <mesh // Black Sun
-        position={[scale/2, scale/2, -scale/2]}>
+        position={[scale/2, scale/2, -scale/2]}
+        renderOrder={-1}
+      >
         <circleGeometry args={[scale/4]} />
         <meshBasicMaterial color={0x2b0c40} />
       </mesh>

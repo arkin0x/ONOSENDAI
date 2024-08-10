@@ -3,7 +3,7 @@
 
 import { useContext, useEffect, useState } from "react"
 import { AvatarContext } from "../../providers/AvatarContext"
-import { CYBERSPACE_AXIS, extractActionState } from "../../libraries/Cyberspace"
+import { CYBERSPACE_AXIS, CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import * as THREE from "three"
 import { useActionChain } from "../../hooks/cyberspace/useActionChain"
@@ -20,7 +20,16 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
 
   const { getSimulatedState } = useContext(AvatarContext)
 
-  const { camera } = useThree()
+  const { scene, camera } = useThree()
+
+  // console.log(zoom)
+
+
+  // Set fog on the scene
+  const fogColor = 0x000000 // Color of the fog
+  const near = 1 // Start distance of the fog
+  const far = 1 + scale * 8 * Math.max(zoom,4)/32 // End distance of the fog
+  scene.fog = new THREE.Fog(fogColor, near, far)
 
   camera.far = scale ** 2
   camera.near = 0.01

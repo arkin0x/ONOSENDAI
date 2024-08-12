@@ -6,10 +6,11 @@ import { IdentityContext } from '../../providers/IdentityProvider'
 import { Grid } from './Grid'
 import { AvatarMarker } from './AvatarMarker'
 import { MapControls } from './MapControls'
-import { BlockMarkers } from './BlockMarkers'
-import { Constructs } from './Constructs'
-import { ObjectMarkers } from './ObjectMarkers'
+// import { BlockMarkers } from './BlockMarkers'
+// import { Constructs } from './Constructs'
+// import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
+import SectorMarkers from './SectorMarkers'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -47,15 +48,16 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
-            <BlockMarkers scale={MAP_SIZE} />
-            <Constructs scale={MAP_SIZE} />
+            {/* <BlockMarkers scale={MAP_SIZE} /> */}
+            {/* <Constructs scale={MAP_SIZE} /> */}
+            <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} />
           </Grid>
           {/* <axesHelper scale={128} position={[-128,-128,-128]} /> */}
           {/* The X axis is red
             * The Y axis is green
             * The Z axis is blue. */}
           <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.00001} luminanceSmoothing={0} />
+            <Bloom mipmapBlur levels={9} intensity={15} luminanceThreshold={0.00001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>
       </div>

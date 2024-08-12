@@ -12,7 +12,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()
   const { getSimulatedState } = useAvatarStore()
   const { rotation } = useRotationStore()
-  const { updateSectorId } = useSectorStore()
+  const { updateUserCurrentSectorId } = useSectorStore()
   const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))
   const [velocity, setVelocity] = useState(() => new THREE.Vector3(0, 0, 0))
   const [frameSectorId, setFrameSectorId] = useState<string>()
@@ -40,9 +40,9 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   // "Memoize" updateSectorId call
   useEffect(() => {
     if (frameSectorId) {
-      updateSectorId(frameSectorId)
+      updateUserCurrentSectorId(frameSectorId)
     }
-  }, [frameSectorId, updateSectorId])
+  }, [frameSectorId, updateUserCurrentSectorId])
 
   // update camera each frame
   useFrame(() => {

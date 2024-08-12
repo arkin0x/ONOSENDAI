@@ -1,7 +1,5 @@
-import React, { useContext, useEffect, useReducer, useState } from 'react'
-import { IdentityContext } from '../../providers/IdentityProvider'
+import React, { useContext, useEffect, useReducer } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
-import { useAvatarStore } from '../../store/AvatarStore'
 import { CYBERSPACE_SECTOR, relativeSectorPosition } from '../../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
@@ -11,7 +9,6 @@ import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
-import { SpawnModel } from './Spawn'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string>, hyperjumps: Set<string> }>
@@ -89,7 +86,7 @@ interface SectorManagerProps {
 export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0 }) => {
   const { ndk } = useContext(NDKContext)
   const [sectorState, dispatchSector] = useReducer(sectorReducer, {}) // keep track of sectors, avatars, and constructs
-  const { currentSectorId } = useSectorStore()
+  const { userCurrentSectorId } = useSectorStore()
 
   // Debug
 
@@ -117,9 +114,9 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
 
   // handle subscriptions to sectors when current sector changes
   useEffect(() => {
-    if (!currentSectorId || !ndk) return
+    if (!userCurrentSectorId || !ndk) return
 
-    const sectorsToLoad = getSectorsToLoad(currentSectorId, adjacentLayers)
+    const sectorsToLoad = getSectorsToLoad(userCurrentSectorId, adjacentLayers)
     const subscriptions: NDKSubscription[] = []
 
     sectorsToLoad.forEach(sectorId => {
@@ -135,18 +132,18 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
         dispatchSector({ type: 'UNMOUNT_SECTOR', sectorId })
       })
     }
-  }, [currentSectorId, adjacentLayers, ndk])
+  }, [userCurrentSectorId, adjacentLayers, ndk])
 
   // Return
 
-  if (!currentSectorId) return null
+  if (!userCurrentSectorId) return null
 
   return (
     <>
       {Object.keys(sectorState).map( groupSectorId => (
         <Sector 
-          position={relativeSectorPosition(currentSectorId, groupSectorId).toVector3()} 
-          current={currentSectorId === groupSectorId} 
+          position={relativeSectorPosition(userCurrentSectorId, groupSectorId).toVector3()} 
+          current={userCurrentSectorId === groupSectorId} 
           key={groupSectorId} 
           id={groupSectorId} 
           data={sectorState[groupSectorId]} />

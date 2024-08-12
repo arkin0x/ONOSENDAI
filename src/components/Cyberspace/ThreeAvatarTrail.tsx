@@ -3,6 +3,7 @@ import { Line } from '@react-three/drei'
 import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useAvatarStore } from '../../store/AvatarStore'
+import { useSectorStore } from '../../store/SectorStore'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
@@ -10,6 +11,7 @@ interface ThreeAvatarTrailProps {
 
 export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
   const { actionState } = useAvatarStore()
+  const { userCurrentSectorId } = useSectorStore()
   // const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
 
   const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
@@ -21,17 +23,21 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     const acts = [...actions]
 
     const lines = acts.map(action => {
-      const { sectorPosition } = extractActionState(action)
+      const { sectorPosition, sectorId } = extractActionState(action)
+      if (sectorId !== userCurrentSectorId) {
+        console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
+        return null
+      }
       // I need to subtract the spawn position to get the relative position
       const newVec = sectorPosition.toVector3().sub(spawnPosition)
       return newVec
-    })
+    }).filter(Boolean) as THREE.Vector3[]
     // if (simulatedState) {
     //   const pos = simulatedState.sectorPosition.toVector3().sub(spawnPosition)
     //   lines.push(pos)
     // }
     return lines
-  }, [actionState, pubkey, /*simulatedState*/])
+  }, [actionState, pubkey, spawnPosition, userCurrentSectorId])
 
   // uncomment this for trail to current position
   // useFrame(() => {

@@ -1,4 +1,4 @@
-import create from 'zustand'
+import { create } from 'zustand'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { getTime, simulateNextEvent } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/Nostr'
@@ -19,6 +19,7 @@ interface AvatarStore {
   getLatest: (pubkey: string) => Event | null
   getGenesisSectorId: (pubkey: string) => string | null
   getLatestSectorId: (pubkey: string) => string | null
+  getSimulatedSectorId: (pubkey: string) => string | null
 }
 
 const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
@@ -90,6 +91,10 @@ export const useAvatarStore = create<AvatarStore>((set, get) => ({
     return genesis ? genesis.tags.find(getTag('S'))?.[1] ?? null : null
   },
   getLatestSectorId: (pubkey: string) => {
+    const latest = get().getLatest(pubkey)
+    return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
+  },
+  getSimulatedSectorId: (pubkey: string) => {
     const latest = get().getSimulatedState(pubkey)
     return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
   },

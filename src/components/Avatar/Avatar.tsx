@@ -20,18 +20,16 @@ export const Avatar = ({pubkey}: AvatarProps) => {
 
   useActionChain(pubkey)
 
-  const { currentSectorId } = useSectorStore()
+  // when this changes, we should re-check/run effects
+  const { userCurrentSectorId } = useSectorStore()
 
-  const { actionState, getLatestSectorId , getGenesisSectorId } = useAvatarStore()
+  const { actionState, getSimulatedSectorId, getGenesisSectorId } = useAvatarStore()
 
   useEffect(() => {
-    const latestSectorId = getLatestSectorId(pubkey)
+    const simulatedSectorId = getSimulatedSectorId(pubkey)
     const genesisSectorId = getGenesisSectorId(pubkey)
-    setInGenesisSector(latestSectorId === genesisSectorId)
-  }, [currentSectorId, getGenesisSectorId, getLatestSectorId, pubkey])
-
-  console.log('is genesis sector?',inGenesisSector)
-  console.log(actionState[pubkey])
+    setInGenesisSector(simulatedSectorId === genesisSectorId)
+  }, [actionState, userCurrentSectorId, getGenesisSectorId, getSimulatedSectorId, pubkey])
 
   return <>
     <ThreeAvatar pubkey={pubkey} />

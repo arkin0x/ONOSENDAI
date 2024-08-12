@@ -379,6 +379,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
       // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],
       ['version', '1'],
+      ['S', getSectorIdFromDecimal(getSectorIdFromCoordinate(hexCoord))],
     ]
   }
   return event

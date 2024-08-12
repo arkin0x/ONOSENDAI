@@ -8,10 +8,9 @@ import { Event } from 'nostr-tools'
 import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
-import { AvatarContext } from "../../providers/AvatarContext"
-import type { AvatarActionDispatched } from "../../providers/AvatarContext"
 import { isGenesisAction } from "../../libraries/Cyberspace";
 import { validateActionChain } from "./validateActionChain"
+import { useAvatarStore } from "../../store/AvatarStore"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -20,7 +19,7 @@ export const useActionChain = (pubkey: string) => {
 
   const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
 
-  const {actionState, dispatchActionState} = useContext(AvatarContext)
+  const {actionState, dispatchActionState} = useAvatarStore()
 
   const actionChainState = actionState[pubkey]
 

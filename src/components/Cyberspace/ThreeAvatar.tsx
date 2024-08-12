@@ -1,16 +1,16 @@
 import { useFrame, useThree } from "@react-three/fiber"
-import React, { useContext, useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import * as THREE from "three"
-import { AvatarContext } from "../../providers/AvatarContext"
 import { CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
 import { useRotationStore } from "../../store/RotationStore"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import { useSectorStore } from "../../store/SectorStore"
 import COLORS from "../../data/Colors"
+import { useAvatarStore } from "../../store/AvatarStore"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()
-  const { getSimulatedState } = useContext(AvatarContext)
+  const { getSimulatedState } = useAvatarStore()
   const { rotation } = useRotationStore()
   const { updateSectorId } = useSectorStore()
   const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))

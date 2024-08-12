@@ -1,14 +1,14 @@
 import { create } from 'zustand'
 
 type SectorStore = {
-  sectorId: string
+  currentSectorId: string
   updateSectorId: (id: string) => void
 }
 
 export const useSectorStore = create<SectorStore>((set) => ({
-  sectorId: '',
+  currentSectorId: '',
   updateSectorId: (id) => {
-    set({ sectorId: id })
+    set({ currentSectorId: id })
   }
 }))
 

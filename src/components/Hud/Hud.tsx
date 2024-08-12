@@ -1,22 +1,20 @@
-import { Text, Text3D } from "@react-three/drei"
+import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useContext, useEffect, useRef, useState } from "react"
-import { AxesHelper, MeshBasicMaterial, Vector3 } from "three"
+import { AxesHelper, Vector3 } from "three"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
-import { AvatarContext } from "../../providers/AvatarContext"
 import { extractActionState, ExtractedActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
-import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
 import COLORS from "../../data/Colors"
-import { Grid } from "../Map/Grid"
+import { useAvatarStore } from "../../store/AvatarStore"
 
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const { actionState, getSimulatedState } = useContext(AvatarContext)
+  const { actionState, getSimulatedState } = useAvatarStore()
   const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()

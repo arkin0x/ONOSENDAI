@@ -1,17 +1,15 @@
-import { useContext, useMemo, useState } from 'react'
-import { Color, Vector3 } from 'three'
+import { useMemo } from 'react'
 import { Line } from '@react-three/drei'
-import { AvatarContext } from '../../providers/AvatarContext'
-import { extractActionState, ExtractedActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
-import { useFrame } from '@react-three/fiber'
+import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
+import { useAvatarStore } from '../../store/AvatarStore'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
 }
 
 export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
-  const { actionState } = useContext(AvatarContext)
+  const { actionState } = useAvatarStore()
   // const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
 
   const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()

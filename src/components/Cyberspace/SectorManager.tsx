@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useReducer, useState } from 'react'
 import { IdentityContext } from '../../providers/IdentityProvider'
-import { AvatarContext } from '../../providers/AvatarContext'
 import { NDKContext } from '../../providers/NDKProvider'
-import { CYBERSPACE_SECTOR, extractActionState, relativeSectorPosition } from '../../libraries/Cyberspace'
+import { useAvatarStore } from '../../store/AvatarStore'
+import { CYBERSPACE_SECTOR, relativeSectorPosition } from '../../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
@@ -11,6 +11,7 @@ import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
+import { SpawnModel } from './Spawn'
 
 // Types
 type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string>, hyperjumps: Set<string> }>
@@ -87,11 +88,8 @@ interface SectorManagerProps {
 
 export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0 }) => {
   const { ndk } = useContext(NDKContext)
-  const { identity } = useContext(IdentityContext)
   const [sectorState, dispatchSector] = useReducer(sectorReducer, {}) // keep track of sectors, avatars, and constructs
-  const { sectorId } = useSectorStore()
-
-  const pubkey = identity?.pubkey
+  const { currentSectorId } = useSectorStore()
 
   // Debug
 
@@ -119,9 +117,9 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
 
   // handle subscriptions to sectors when current sector changes
   useEffect(() => {
-    if (!sectorId || !ndk) return
+    if (!currentSectorId || !ndk) return
 
-    const sectorsToLoad = getSectorsToLoad(sectorId, adjacentLayers)
+    const sectorsToLoad = getSectorsToLoad(currentSectorId, adjacentLayers)
     const subscriptions: NDKSubscription[] = []
 
     sectorsToLoad.forEach(sectorId => {
@@ -137,22 +135,27 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
         dispatchSector({ type: 'UNMOUNT_SECTOR', sectorId })
       })
     }
-  }, [sectorId, adjacentLayers, ndk])
+  }, [currentSectorId, adjacentLayers, ndk])
 
   // Return
 
-  if (!sectorId) return null
+  if (!currentSectorId) return null
 
   return (
     <>
-      {Object.keys(sectorState).map( s => (
-        <Sector position={relativeSectorPosition(sectorId, s).toVector3()} current={sectorId === s} key={s} id={s} data={sectorState[s]} />
+      {Object.keys(sectorState).map( groupSectorId => (
+        <Sector 
+          position={relativeSectorPosition(currentSectorId, groupSectorId).toVector3()} 
+          current={currentSectorId === groupSectorId} 
+          key={groupSectorId} 
+          id={groupSectorId} 
+          data={sectorState[groupSectorId]} />
       ))}
     </>
   )
 }
 
-const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: { avatars: Set<string>; constructs: Set<string> } }> = ({ position, current, id, data }) => {
+const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: { avatars: Set<string>; constructs: Set<string>, hyperjumps: Set<string> } }> = ({ position, current, id, data }) => {
   const sectorSize = CYBERSPACE_SECTOR.toNumber()//(2**10)
 
   const adjacentScale = 0.9

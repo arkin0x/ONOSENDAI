@@ -1,8 +1,10 @@
 import { useActionChain } from "../../hooks/cyberspace/useActionChain"
 import { ThreeAvatar } from "../Cyberspace/ThreeAvatar"
-import { getSectorCoordinatesFromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { SpawnModel } from "../Cyberspace/Spawn"
 import { ThreeAvatarTrail } from "../Cyberspace/ThreeAvatarTrail"
+import { useAvatarStore } from "../../store/AvatarStore"
+import { useEffect, useState } from "react"
+import { useSectorStore } from "../../store/SectorStore"
 
 type AvatarProps = {
   pubkey: string
@@ -14,15 +16,26 @@ type AvatarProps = {
  * @returns ThreeAvatar
  */
 export const Avatar = ({pubkey}: AvatarProps) => {
+  const [inGenesisSector, setInGenesisSector] = useState<boolean>(false)
 
   useActionChain(pubkey)
 
-  // TODO: <SpawnModel> should take a pubkey and determine if it is within the current sector. Or, it should be a child of <Sector> and render at the pubkey location for every unique pubkey in the sector (based on querying any and all 333 events.) 
-  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
+  const { currentSectorId } = useSectorStore()
+
+  const { actionState, getLatestSectorId , getGenesisSectorId } = useAvatarStore()
+
+  useEffect(() => {
+    const latestSectorId = getLatestSectorId(pubkey)
+    const genesisSectorId = getGenesisSectorId(pubkey)
+    setInGenesisSector(latestSectorId === genesisSectorId)
+  }, [currentSectorId, getGenesisSectorId, getLatestSectorId, pubkey])
+
+  console.log('is genesis sector?',inGenesisSector)
+  console.log(actionState[pubkey])
 
   return <>
     <ThreeAvatar pubkey={pubkey} />
-    <SpawnModel position={spawnPosition} />
+    { inGenesisSector ? <SpawnModel pubkey={pubkey} /> : null }
     <ThreeAvatarTrail pubkey={pubkey}/>
   </>
 }

@@ -4,7 +4,7 @@ import { IdentityContext } from '../../providers/IdentityProvider.tsx'
 import { IdentityContextType } from '../../types/IdentityType.tsx'
 import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
 import { Quaternion, Vector3 } from 'three'
-import { AvatarContext } from '../../providers/AvatarContext.tsx'
+import { useAvatarStore } from '../../store/AvatarStore.ts'
 import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../../libraries/Nostr.ts'
 import { useControlStore } from '../../store/ControlStore.ts'
@@ -15,7 +15,7 @@ export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
   const engine = useEngine(pubkey, defaultRelays)
-  const { actionState } = useContext(AvatarContext)
+  const { actionState, getSimulatedState } = useAvatarStore()
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
@@ -25,7 +25,6 @@ export const Controls: React.FC = () => {
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
   const [currentDirection, setCurrentDirection] = useState<Quaternion>(new Quaternion())
-  const { getSimulatedState } = useContext(AvatarContext)
   const simulatedEvent = getSimulatedState(pubkey)
 
   useEffect(() => {

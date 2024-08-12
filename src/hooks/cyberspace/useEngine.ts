@@ -5,8 +5,8 @@ import { RelayObject } from '../../types/NostrRelay'
 import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { Event, UnsignedEvent } from 'nostr-tools'
-import { AvatarContext } from '../../providers/AvatarContext'
 import { NDKContext } from '../../providers/NDKProvider'
+import { useAvatarStore } from '../../store/AvatarStore'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -20,8 +20,8 @@ type EngineControls = {
   respawn: () => void
 }
 
-export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
-  const {dispatchActionState} = useContext(AvatarContext)
+export function useEngine(pubkey: string): EngineControls {
+  const {dispatchActionState} = useAvatarStore()
   const [genesis, setGenesis] = useState<Event|null>(null)
   const [latest, setLatest] = useState<Event|null>(null)
   const {publishEvent} = useContext(NDKContext)
@@ -172,7 +172,7 @@ export function useEngine(pubkey: string, relays: RelayObject): EngineControls {
   }
 
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
-    const publishedAction = await publishEvent(action, relays) // FIXME we would normally pass in `relays` here
+    const publishedAction = await publishEvent(action) // FIXME we would normally pass in `relays` here
     setLatestAction(publishedAction)
     // save the action to the AvatarContext
     dispatchActionState({type: 'push', actions: [publishedAction], pubkey: action.pubkey})

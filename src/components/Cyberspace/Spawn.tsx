@@ -1,5 +1,6 @@
 import { useGLTF } from '@react-three/drei'
 import { GLTF } from 'three-stdlib'
+import { getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 
 type GLTFResult = GLTF & {
   nodes: {
@@ -10,11 +11,12 @@ type GLTFResult = GLTF & {
   }
 }
 
-export function SpawnModel(props: JSX.IntrinsicElements['group']) {
+export function SpawnModel({ pubkey }: { pubkey: string }) {
+  const position = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
   const { nodes, materials } = useGLTF('/src/assets/spawn.glb') as GLTFResult
 
   return (
-    <group {...props} scale={[3,3,3]} dispose={null}>
+    <group position={position} scale={[3,3,3]} dispose={null}>
       {/* hexes */}
       <mesh 
         geometry={nodes.BoundaryHexBack.geometry}

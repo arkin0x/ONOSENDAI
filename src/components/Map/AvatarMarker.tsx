@@ -1,15 +1,12 @@
-
-//create a component that takes the pubkey as a prop and renders a dot in the correct position for the avatar's pubkey coordinate
-
-import { useContext, useEffect, useState } from "react"
-import { AvatarContext } from "../../providers/AvatarContext"
-import { CYBERSPACE_AXIS, CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
+import { useEffect, useState } from "react"
+import { CYBERSPACE_AXIS, extractActionState } from "../../libraries/Cyberspace"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import * as THREE from "three"
 import { useActionChain } from "../../hooks/cyberspace/useActionChain"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useRotationStore } from "../../store/RotationStore"
 import { useZoomStore } from "../../store/ZoomStore"
+import { useAvatarStore } from "../../store/AvatarStore"
 
 export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   const { rotation } = useRotationStore()
@@ -18,12 +15,9 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
   const [position, setPosition] = useState(new THREE.Vector3(0, 0, 0))
   // const [rotationAngle, setRotationAngle] = useState(0)
 
-  const { getSimulatedState } = useContext(AvatarContext)
+  const { getSimulatedState } = useAvatarStore()
 
-  const { scene, camera } = useThree()
-
-  // console.log(zoom)
-
+  const { camera } = useThree()
 
   // Set fog on the scene
   // const fogColor = 0x000000 // Color of the fog

@@ -194,7 +194,7 @@ export const Controls: React.FC = () => {
 
 
   const handleWheel = useCallback((e: WheelEvent) => {
-    setThrottle(Math.max(0, Math.min(128, throttle + (e.deltaY > 0 ? 1 : -1))))
+    setThrottle(Math.max(0, Math.min(128, throttle + (e.deltaY < 0 ? 1 : -1))))
   }, [setThrottle, throttle])
 
   const handleContextMenu = useCallback((e: MouseEvent) => {
@@ -239,6 +239,8 @@ export const Controls: React.FC = () => {
       return
     }
 
+    let newRotation
+
     if (controlState.resetView) {
       if (simulatedEvent) {
         const { velocity } = extractActionState(simulatedEvent)
@@ -248,7 +250,7 @@ export const Controls: React.FC = () => {
         const cameraDirection = directionOfTravel.clone().negate()
 
         // Reset pitch and yaw based on the direction of travel
-        const newRotation = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), cameraDirection)
+        newRotation = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), cameraDirection)
         
         setRotation(newRotation)
         // setPitch(0)
@@ -259,7 +261,7 @@ export const Controls: React.FC = () => {
       // Create a new quaternion from pitch and yaw
       const pitchQuat = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch)
       const yawQuat = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw)
-      const newRotation = yawQuat.multiply(pitchQuat)
+      newRotation = yawQuat.multiply(pitchQuat)
 
       setRotation(newRotation.normalize())
     }
@@ -279,7 +281,7 @@ export const Controls: React.FC = () => {
       moveVector.normalize()
 
       // Apply rotation to movement vector
-      moveVector.applyQuaternion(newRotation)
+      moveVector.applyQuaternion(newRotation as Quaternion)
 
       if (isHopping.current) {
         console.log("Hopping in direction:", moveVector)

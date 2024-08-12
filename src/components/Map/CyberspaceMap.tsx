@@ -9,6 +9,7 @@ import { MapControls } from './MapControls'
 import { BlockMarkers } from './BlockMarkers'
 import { Constructs } from './Constructs'
 import { ObjectMarkers } from './ObjectMarkers'
+import { Bloom, EffectComposer } from '@react-three/postprocessing'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -40,19 +41,22 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
     <div className="cyberspace-map">
       <div id="map">
         <Canvas style={style}>
-          <axesHelper scale={1} position={[0,0,0]} />
+          {/* <axesHelper scale={1} position={[0,0,0]} /> */}
           <MapControls />
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE}>
             <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
             <BlockMarkers scale={MAP_SIZE} />
-            {/* <Constructs scale={MAP_SIZE} /> */}
+            <Constructs scale={MAP_SIZE} />
           </Grid>
           {/* <axesHelper scale={128} position={[-128,-128,-128]} /> */}
           {/* The X axis is red
             * The Y axis is green
             * The Z axis is blue. */}
+          <EffectComposer disableNormalPass>
+            <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.00001} luminanceSmoothing={0} />
+          </EffectComposer>
         </Canvas>
       </div>
       {/* <div id="map-hud">

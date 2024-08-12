@@ -26,10 +26,10 @@ export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
 
 
   // Set fog on the scene
-  const fogColor = 0x000000 // Color of the fog
-  const near = 1 // Start distance of the fog
-  const far = 1 + scale * 8 * Math.max(zoom,4)/32 // End distance of the fog
-  scene.fog = new THREE.Fog(fogColor, near, far)
+  // const fogColor = 0x000000 // Color of the fog
+  // const near = 1 // Start distance of the fog
+  // const far = 1 + scale * 8 * Math.max(zoom,4)/32 // End distance of the fog
+  // scene.fog = new THREE.Fog(fogColor, near, far)
 
   camera.far = scale ** 2
   camera.near = 0.01

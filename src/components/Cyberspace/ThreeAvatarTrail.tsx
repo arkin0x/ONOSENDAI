@@ -1,8 +1,9 @@
-import { useContext, useMemo } from 'react'
-import { Color } from 'three'
+import { useContext, useMemo, useState } from 'react'
+import { Color, Vector3 } from 'three'
 import { Line } from '@react-three/drei'
 import { AvatarContext } from '../../providers/AvatarContext'
-import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { extractActionState, ExtractedActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { useFrame } from '@react-three/fiber'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
@@ -10,6 +11,7 @@ interface ThreeAvatarTrailProps {
 
 export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
   const { actionState } = useContext(AvatarContext)
+  // const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
 
   const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
 
@@ -17,13 +19,28 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     const actions = actionState[pubkey] || []
     if (actions.length < 2) return [] // We need at least 2 points to draw a line
 
-    return actions.map(action => {
+    const acts = [...actions]
+
+    const lines = acts.map(action => {
       const { sectorPosition } = extractActionState(action)
       // I need to subtract the spawn position to get the relative position
       const newVec = sectorPosition.toVector3().sub(spawnPosition)
       return newVec
     })
-  }, [actionState, pubkey])
+    // if (simulatedState) {
+    //   const pos = simulatedState.sectorPosition.toVector3().sub(spawnPosition)
+    //   lines.push(pos)
+    // }
+    return lines
+  }, [actionState, pubkey, /*simulatedState*/])
+
+  // uncomment this for trail to current position
+  // useFrame(() => {
+  // const simulated = getSimulatedState(pubkey)
+  //   if (simulated) {
+  //     setSimulatedState(extractActionState(simulated))
+  //   }
+  // })
 
   if (trailPoints.length < 2) {
     return null // Don't render anything if there are not enough trail points

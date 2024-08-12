@@ -17,6 +17,7 @@
     "@nostr-dev-kit/ndk": "^2.8.2",
     "@react-three/drei": "^9.105.1",
     "@react-three/fiber": "^8.16.1",
+    "@react-three/postprocessing": "^2.16.2",
     "almost-equal": "^1.1.0",
     "augmented-ui": "^2.0.0",
     "decimal.js": "^10.4.3",

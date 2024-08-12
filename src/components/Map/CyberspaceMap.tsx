@@ -54,7 +54,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           {/* The X axis is red
             * The Y axis is green
             * The Z axis is blue. */}
-          <EffectComposer disableNormalPass>
+          <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.00001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>

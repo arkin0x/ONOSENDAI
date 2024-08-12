@@ -4,6 +4,7 @@ import { Line } from '@react-three/drei'
 import { AvatarContext } from '../../providers/AvatarContext'
 import { extractActionState, ExtractedActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 import { useFrame } from '@react-three/fiber'
+import COLORS from '../../data/Colors'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
@@ -50,7 +51,7 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     <group position={spawnPosition}>
       <Line
         points={trailPoints}
-        color={new Color(0xff2323)}
+        color={COLORS.RED}
         lineWidth={1}
       />
     </group>

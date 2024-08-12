@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
+import COLORS from '../../data/Colors'
 
 const SpeedLines: React.FC = () => {
   const { camera, scene } = useThree()
@@ -52,7 +53,7 @@ const SpeedLines: React.FC = () => {
   }, [camera])
 
   const createLine = (start: THREE.Vector3, end: THREE.Vector3, group: THREE.Group) => {
-    const material = new THREE.LineBasicMaterial({ color: 0xffffff })
+    const material = new THREE.LineBasicMaterial({ color: COLORS.ORANGE })
     const geometry = new THREE.BufferGeometry().setFromPoints([start, end])
     const line = new THREE.Line(geometry, material)
     group.add(line)

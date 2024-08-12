@@ -4,6 +4,7 @@ import { Vector3 } from 'three'
 import { getSectorCoordinatesFromCyberspaceCoordinate, getSectorIdFromCoordinate } from '../libraries/Cyberspace'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
+import COLORS from '../data/Colors'
 
 interface BlocksProps {
   sectorId: string
@@ -54,7 +55,7 @@ const Block: React.FC<BlockProps> = ({ event }) => {
   return (
     <mesh position={position}>
       <boxGeometry args={[size, size, size]} />
-      <meshBasicMaterial color={0xffff00} /> {/* Yellow color */}
+      <meshBasicMaterial color={COLORS.YELLOW} /> {/* Yellow color */}
     </mesh>
   )
 }

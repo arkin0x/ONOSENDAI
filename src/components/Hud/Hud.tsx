@@ -1,7 +1,7 @@
-import { Text } from "@react-three/drei"
+import { Text, Text3D } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useContext, useEffect, useRef, useState } from "react"
-import { AxesHelper, Vector3 } from "three"
+import { AxesHelper, MeshBasicMaterial, Vector3 } from "three"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { AvatarContext } from "../../providers/AvatarContext"
@@ -10,11 +10,9 @@ import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
 import { LOGO_BLUE, LOGO_PURPLE, LOGO_TEAL } from "../ThreeMaterials"
+import COLORS from "../../data/Colors"
+import { Grid } from "../Map/Grid"
 
-const orange = '#ff9123'
-const purple = '#78004e'
-const blue = '#0062cd'
-const teal = '#06a4a4'
 
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -36,9 +34,13 @@ export const Hud = () => {
   })
 
   const x = 1
-  const r = Math.PI / 6
+  // const r = Math.PI / 5 // rotation
+  // Calculate the divisor based on window width
+  const windowWidth = window.innerWidth
+  const divisor = Math.max(4, Math.floor(windowWidth / 600))
+  const r = Math.PI / divisor // rotation
 
-  let line = 1
+  let line = 0
 
   const nextLine = () => {
     line += 2
@@ -50,28 +52,33 @@ export const Hud = () => {
   return (
     <>
     <group>
-      <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} />
+      {/* <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} /> */}
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" color={COLORS.DSPACE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.sectorPosition.z.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.sectorPosition.y.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.sectorPosition.x.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sectorId} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" color={teal} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.cyberspaceCoordinate.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedState.velocity.x.mul(60).toFixed(2)} G/s`} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={purple} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedState.velocity.x.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
 
-      { rotation && <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'QUATERNION ' + rotation.x.toFixed(2) + '/' + rotation.y.toFixed(2) + '/' + rotation.z.toFixed(2) + '/' + rotation.w.toFixed(2)} align="left" color={blue} /> }
+      { rotation && <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'QUATERNION ' + rotation.x.toFixed(2) + '/' + rotation.y.toFixed(2) + '/' + rotation.z.toFixed(2) + '/' + rotation.w.toFixed(2)} align="left" color={COLORS.ORANGE} /> }
 
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle + ' ' + '/'.repeat(throttle) + ' +' + (throttle === 0 ? 0 : Math.pow(2, throttle-10) * 60) + ' G/s'} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle + ' ' + '/'.repeat(throttle) + ' +' + (throttle === 0 ? 0 : Math.pow(2, throttle-10) * 60) + ' G/s'} align="left" color={COLORS.RED} />
+
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
 
       { controlState.cruise 
-        ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={"#ff3377"} /> 
-        : <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PRESS X FOR CRUISE'} align="left" color={"#ff3377"} />  
+        ? <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={COLORS.PINK} /> 
+        : <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PRESS X FOR CRUISE'} align="left" color={COLORS.PURPLE} />  
       }
 
-      <CoordinateText position={{x, y: 55}} rotation={[0, r, 0]} text={'PRESS T FOR TELEMETRY'} align="left" color={`#${LOGO_TEAL.toString(16).padStart(6, '0')}`} /> 
+      <CoordinateText position={{x, y: 95}} rotation={[0, r, 0]} text={'PRESS T FOR TELEMETRY'} align="left" color={COLORS.PURPLE} fontSize={0.10} /> 
+
+      {/* <group position={[1, 1, 0]} quaternion={rotation.clone().conjugate()}>
+        <Grid scale={1} />
+      </group> */}
 
     </group>
     </>
@@ -87,6 +94,7 @@ type CoordinateTextProps = {
   text: string,
   align?: "left" | "center" | "right"
   color?: string
+  fontSize?: number
 }
 
 export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
@@ -99,24 +107,42 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
   const position = new Vector3(-viewport.width / 2 + x, -viewport.height / 2 + y, 0)
 
   return (
+    <>
+    {/* <Text3D
+      material={new MeshBasicMaterial({ color: props.color || "#ff9123" })}
+      font={'/public/fonts/Monaspace Krypton ExtraLight_Regular.json'}
+      size={0.15}
+      height={0.01}
+      lineHeight={1.5}
+      position={position}
+      bevelEnabled={true}
+      bevelSize={0.001}
+      bevelThickness={0.001}
+      bevelOffset={0.001}
+      
+      rotation={props.rotation || [0, 0, 0]}
+    >
+        {props.text}
+    </Text3D> */}
     <Text
-      color={ props.color || "#ff9123"}
-      fontSize={0.15}
-      maxWidth={300}
-      lineHeight={1}
-      letterSpacing={0.02}
-      textAlign="center"
-      font="https://fonts.gstatic.com/s/roboto/v27/KFOmCnqEu92Fr1Mu4mxP.ttf"
       anchorX={props.align || 'center'}
       anchorY="bottom"
+      color={ props.color || COLORS.BITCOIN}
+      font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+      fontSize={ props.fontSize || 0.15}
+      frustumCulled={true}
+      letterSpacing={0.02}
+      lineHeight={1}
+      material-toneMapped={false}
+      maxWidth={300}
       position={position}
       rotation={props.rotation || [0, 0, 0]}
       scale={[1, 1, 1]}
-      frustumCulled={true}
-      material-toneMapped={false}
+      textAlign="center"
     >
       {props.text}
     </Text>
+    </>
   )
 }
 

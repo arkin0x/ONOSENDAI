@@ -1,17 +1,21 @@
 import { useFrame, useThree } from "@react-three/fiber"
-import React, { useContext, useState } from "react"
+import React, { useContext, useEffect, useState } from "react"
 import * as THREE from "three"
 import { AvatarContext } from "../../providers/AvatarContext"
 import { CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
 import { useRotationStore } from "../../store/RotationStore"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
+import { useSectorStore } from "../../store/SectorStore"
+import COLORS from "../../data/Colors"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()
   const { getSimulatedState } = useContext(AvatarContext)
   const { rotation } = useRotationStore()
+  const { updateSectorId } = useSectorStore()
   const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))
   const [velocity, setVelocity] = useState(() => new THREE.Vector3(0, 0, 0))
+  const [frameSectorId, setFrameSectorId] = useState<string>()
 
   // Set fog on the scene
   const fogColor = 0x000000 // Color of the fog
@@ -20,18 +24,28 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   scene.fog = new THREE.Fog(fogColor, near, far)
 
   camera.far = 2**30
-  
 
+  // get simulated sectorPosition and velocity each frame
   useFrame(() => {
     const simulatedEvent = getSimulatedState(pubkey)
     if (simulatedEvent) {
-      const { sectorPosition, velocity } = extractActionState(simulatedEvent)
-      // console.log('3av',sectorPosition.toArray())//, velocity.toArray(), rotation.toArray())
+      const { sectorPosition, velocity, sectorId } = extractActionState(simulatedEvent)
       
       setPosition(sectorPosition.toVector3())
       setVelocity(velocity.toVector3())
+      setFrameSectorId(sectorId)
     }
+  })
 
+  // "Memoize" updateSectorId call
+  useEffect(() => {
+    if (frameSectorId) {
+      updateSectorId(frameSectorId)
+    }
+  }, [frameSectorId, updateSectorId])
+
+  // update camera each frame
+  useFrame(() => {
     const radius = 5
     const oppositeRotation = rotation.clone()
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
@@ -65,13 +79,8 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
           quaternion={coneQuaternion}
         >
           <coneGeometry args={[0.1, coneLength, 8]} />
-          <meshBasicMaterial color={0xff9123} wireframe />
-          {/* 0xff9123 */}
+          <meshBasicMaterial color={COLORS.ORANGE} wireframe />
         </mesh>
-        {/* <mesh>
-          <boxGeometry args={[1,1,1]} />
-          <meshBasicMaterial color={0x00ff00} transparent opacity={0.1} side={THREE.DoubleSide} />
-        </mesh> */}
       </group>
     </group>
   )

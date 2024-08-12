@@ -41,7 +41,7 @@ const initialControlState: ControlState = {
 }
 
 export const useControlStore = create<ControlStore>((set) => ({
-  controlState: initialControlState,
+  controlState: { ...initialControlState },
   setControlState: (value) => set((state) => ({ controlState: { ...state.controlState, ...value } })),
-  resetControlState: () => set({ controlState: initialControlState }),
+  resetControlState: () => set({ controlState: { ...initialControlState} }),
 }))

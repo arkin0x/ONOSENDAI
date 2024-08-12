@@ -7,17 +7,20 @@ import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
-import { BackSide, BoxGeometry, EdgesGeometry, LineBasicMaterial, LineSegments, Vector3 } from 'three'
+import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Blocks } from '../Blocks'
+import { useSectorStore } from '../../store/SectorStore'
+import COLORS from '../../data/Colors'
 
 // Types
-type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string> }>
+type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string>, hyperjumps: Set<string> }>
 type SectorAction = 
   | { type: 'MOUNT_SECTOR'; sectorId: string }
   | { type: 'UNMOUNT_SECTOR'; sectorId: string }
   | { type: 'ADD_AVATAR'; sectorId: string; pubkey: string }
   | { type: 'REMOVE_AVATAR'; sectorId: string; pubkey: string }
   | { type: 'ADD_CONSTRUCT'; sectorId: string; eventId: string }
+  | { type: 'ADD_HYPERJUMP'; sectorId: string; eventId: string }
 
 // Reducer
 const sectorReducer = (state: SectorState, action: SectorAction): SectorState => {
@@ -25,7 +28,7 @@ const sectorReducer = (state: SectorState, action: SectorAction): SectorState =>
     case 'MOUNT_SECTOR':
       return { 
         ...state, 
-        [action.sectorId]: { avatars: new Set(), constructs: new Set() } 
+        [action.sectorId]: { avatars: new Set(), constructs: new Set(), hyperjumps: new Set() } 
       }
     case 'UNMOUNT_SECTOR': {
       const newState = { ...state }
@@ -61,6 +64,16 @@ const sectorReducer = (state: SectorState, action: SectorAction): SectorState =>
         }
       }
     }
+    case 'ADD_HYPERJUMP': {
+      const sectorData = state[action.sectorId]
+      return {
+        ...state,
+        [action.sectorId]: {
+          ...sectorData,
+          hyperjumps: new Set(sectorData.hyperjumps).add(action.eventId)
+        }
+      }
+    }
     default:
       return state
   }
@@ -76,19 +89,17 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
   const { ndk } = useContext(NDKContext)
   const { identity } = useContext(IdentityContext)
   const [sectorState, dispatchSector] = useReducer(sectorReducer, {}) // keep track of sectors, avatars, and constructs
-  const { actionState } = useContext(AvatarContext)
-  const [currentSector, setCurrentSector] = useState<string | null>(null)
+  const { sectorId } = useSectorStore()
 
   const pubkey = identity?.pubkey
-
 
   // Debug
 
   // Functions 
 
-  const subscribeToSector = (sectorId: string, ndk: NDK): NDKSubscription => {
+  const subscribeToSectorObjects = (sectorId: string, ndk: NDK): NDKSubscription => {
     const filter = {
-      kinds: [CyberspaceKinds.Action, CyberspaceKinds.Construct] as CyberspaceNDKKinds[],
+      kinds: [CyberspaceKinds.Action, CyberspaceKinds.Construct, CyberspaceKinds.Hyperjump] as CyberspaceNDKKinds[],
       '#S': [sectorId]
     }
     return ndk.subscribe(filter, { closeOnEose: false })
@@ -99,30 +110,23 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
       dispatchSector({ type: 'ADD_AVATAR', sectorId, pubkey: event.pubkey })
     } else if (event.kind === CyberspaceKinds.Construct) {
       dispatchSector({ type: 'ADD_CONSTRUCT', sectorId, eventId: event.id })
+    } else if (event.kind === CyberspaceKinds.Hyperjump) {
+      dispatchSector({ type: 'ADD_HYPERJUMP', sectorId, eventId: event.id })
     }
   }
 
   // Effects
 
-  // update currentSector if it changes
-  useEffect(() => {
-    if (actionState[pubkey] && actionState[pubkey].length > 0) {
-      const lastAction = actionState[pubkey][actionState[pubkey].length - 1]
-      const { sectorId } = extractActionState(lastAction)
-      if (sectorId !== currentSector) setCurrentSector(sectorId)
-    }
-  }, [actionState, currentSector, identity])
-
   // handle subscriptions to sectors when current sector changes
   useEffect(() => {
-    if (!currentSector || !ndk) return
+    if (!sectorId || !ndk) return
 
-    const sectorsToLoad = getSectorsToLoad(currentSector, adjacentLayers)
+    const sectorsToLoad = getSectorsToLoad(sectorId, adjacentLayers)
     const subscriptions: NDKSubscription[] = []
 
     sectorsToLoad.forEach(sectorId => {
       dispatchSector({ type: 'MOUNT_SECTOR', sectorId })
-      const subscription = subscribeToSector(sectorId, ndk)
+      const subscription = subscribeToSectorObjects(sectorId, ndk)
       subscription.on('event', (event: Event) => handleEvent(event, sectorId))
       subscriptions.push(subscription)
     })
@@ -133,17 +137,16 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
         dispatchSector({ type: 'UNMOUNT_SECTOR', sectorId })
       })
     }
-  }, [currentSector, adjacentLayers, ndk])
+  }, [sectorId, adjacentLayers, ndk])
 
   // Return
 
-  // console.log('sectorState', sectorState)
-  if (!currentSector) return null
+  if (!sectorId) return null
 
   return (
     <>
-      {Object.keys(sectorState).map(sectorId => (
-        <Sector position={relativeSectorPosition(currentSector, sectorId).toVector3()} current={currentSector === sectorId} key={sectorId} id={sectorId} data={sectorState[sectorId]} />
+      {Object.keys(sectorState).map( s => (
+        <Sector position={relativeSectorPosition(sectorId, s).toVector3()} current={sectorId === s} key={s} id={s} data={sectorState[s]} />
       ))}
     </>
   )
@@ -159,13 +162,9 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
 
   return (
     <group position={centerPosition}>
-      {/* <mesh position={[sectorSize / 2, sectorSize / 2, sectorSize / 2]}>
-        <boxGeometry args={[sectorSize, sectorSize, sectorSize]} />
-        <meshBasicMaterial color={current ? 0x062cd : 0x78004e} transparent opacity={0.5} side={BackSide} wireframe/>
-      </mesh> */}
       <lineSegments
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
-        material={new LineBasicMaterial({ color: current ? 0xff9123 : 0x78004e, linewidth: 1 })}
+        material={new LineBasicMaterial({ color: current ? COLORS.ORANGE : COLORS.DARK_PURPLE, linewidth: 1 })}
       />
       {/* Render avatars and constructs here */}
       <Blocks sectorId={id} />

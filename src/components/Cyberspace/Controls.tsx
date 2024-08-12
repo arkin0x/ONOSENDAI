@@ -256,6 +256,10 @@ export const Controls: React.FC = () => {
         // setPitch(0)
         // setYaw(0)
 
+      } else {
+        setRotation(new Quaternion())
+        setPitch(0)
+        setYaw(0)
       }
     } else {
       // Create a new quaternion from pitch and yaw

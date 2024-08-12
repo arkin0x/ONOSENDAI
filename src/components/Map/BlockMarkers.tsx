@@ -3,6 +3,7 @@ import { NDKContext } from '../../providers/NDKProvider'
 import { BufferGeometry, Vector3, LineBasicMaterial } from 'three'
 import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
 import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
+import COLORS from '../../data/Colors'
 
 interface BlocksProps {
   scale: number
@@ -93,7 +94,7 @@ const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale })
 
   const material = useMemo(() => {
     return new LineBasicMaterial({
-      color: 0xff9900,
+      color: COLORS.ORANGE,
       opacity: 0.5,
       linewidth: 1,
     })

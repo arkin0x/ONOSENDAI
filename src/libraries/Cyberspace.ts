@@ -339,7 +339,8 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // add POW to velocity if the startEvent was a drift action.
   if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex((startEvent as Event).id)
-    let velocityPOW = Math.pow(2, POW-10)
+    // DEBUG - add multiplier to POW for super travel
+    let velocityPOW = Math.pow(2, POW-10) + 2**20
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0

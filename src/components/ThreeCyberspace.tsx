@@ -1,24 +1,21 @@
 import React, { useMemo, useRef } from "react"
 import * as THREE from "three"
 import { HALF_DOWNSCALED_CYBERSPACE_AXIS, DOWNSCALED_CYBERSPACE_AXIS} from "../libraries/Cyberspace.js"
-
-// const LOGO_TEAL = 0x06a4a4
-const LOGO_PURPLE = 0x78004e
-const LOGO_BLUE = 0x0062cd
+import COLORS from "../data/Colors.js"
 
 // const TealLineMaterial = new THREE.LineBasicMaterial({
 //   color: LOGO_TEAL,
 // })
 const PurpleLineMaterial = new THREE.LineBasicMaterial({
-  color: LOGO_PURPLE,
+  color: COLORS.LOGO_PURPLE,
 })
 
 const BlueLineMaterial = new THREE.LineBasicMaterial({
-  color: LOGO_BLUE,
+  color: COLORS.LOGO_BLUE,
 })
 
 const SunMaterial = new THREE.MeshBasicMaterial({
- color: 0x2b0c40,
+ color: COLORS.BLACK_SUN, 
  side: THREE.DoubleSide,
 })
 

@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
-import { Avatar } from '../../libraries/Avatar'
+import { Avatar } from '../Avatar/Avatar'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
 import { SectorManager } from './SectorManager'
@@ -44,7 +44,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <SectorManager adjacentLayers={1} />
           <Avatar pubkey={identity.pubkey} />
           <Controls />
-          <EffectComposer disableNormalPass>
+          <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>
@@ -53,7 +53,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <Hud/>
           {/* <SpeedLines/> */}
-          <EffectComposer disableNormalPass>
+          <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>

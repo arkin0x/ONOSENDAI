@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useReducer } from 'react'
+import React, { useContext, useEffect } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { CYBERSPACE_SECTOR, relativeSectorPosition } from '../../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
@@ -9,86 +9,24 @@ import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
-
-// Types
-type SectorState = Record<string, { avatars: Set<string>, constructs: Set<string>, hyperjumps: Set<string> }>
-type SectorAction = 
-  | { type: 'MOUNT_SECTOR'; sectorId: string }
-  | { type: 'UNMOUNT_SECTOR'; sectorId: string }
-  | { type: 'ADD_AVATAR'; sectorId: string; pubkey: string }
-  | { type: 'REMOVE_AVATAR'; sectorId: string; pubkey: string }
-  | { type: 'ADD_CONSTRUCT'; sectorId: string; eventId: string }
-  | { type: 'ADD_HYPERJUMP'; sectorId: string; eventId: string }
-
-// Reducer
-const sectorReducer = (state: SectorState, action: SectorAction): SectorState => {
-  switch (action.type) {
-    case 'MOUNT_SECTOR':
-      return { 
-        ...state, 
-        [action.sectorId]: { avatars: new Set(), constructs: new Set(), hyperjumps: new Set() } 
-      }
-    case 'UNMOUNT_SECTOR': {
-      const newState = { ...state }
-      delete newState[action.sectorId]
-      return newState
-    }
-    case 'ADD_AVATAR': {
-      const sectorData = state[action.sectorId]
-      return {
-        ...state,
-        [action.sectorId]: {
-          ...sectorData,
-          avatars: new Set(sectorData.avatars).add(action.pubkey)
-        }
-      }
-    }
-    case 'REMOVE_AVATAR': {
-      const sectorData = state[action.sectorId]
-      const newAvatars = new Set(sectorData.avatars)
-      newAvatars.delete(action.pubkey)
-      return {
-        ...state,
-        [action.sectorId]: { ...sectorData, avatars: newAvatars }
-      }
-    }
-    case 'ADD_CONSTRUCT': {
-      const sectorData = state[action.sectorId]
-      return {
-        ...state,
-        [action.sectorId]: {
-          ...sectorData,
-          constructs: new Set(sectorData.constructs).add(action.eventId)
-        }
-      }
-    }
-    case 'ADD_HYPERJUMP': {
-      const sectorData = state[action.sectorId]
-      return {
-        ...state,
-        [action.sectorId]: {
-          ...sectorData,
-          hyperjumps: new Set(sectorData.hyperjumps).add(action.eventId)
-        }
-      }
-    }
-    default:
-      return state
-  }
-}
+import { Avatar } from '../Avatar/Avatar'
+import Hyperjump from './Hyperjump'
 
 interface SectorManagerProps {
   adjacentLayers?: number
 }
 
-// Components
-
-export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0 }) => {
+function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element {
   const { ndk } = useContext(NDKContext)
-  const [sectorState, dispatchSector] = useReducer(sectorReducer, {}) // keep track of sectors, avatars, and constructs
-  const { userCurrentSectorId } = useSectorStore()
-
-  // Debug
+  const { 
+    userCurrentSectorId, 
+    sectorState, 
+    mountSector, 
+    unmountSector, 
+    addAvatar, 
+    addConstruct, 
+    addHyperjump 
+  } = useSectorStore()
 
   // Functions 
 
@@ -100,27 +38,28 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
     return ndk.subscribe(filter, { closeOnEose: false })
   }
 
-  const handleEvent = (event: Event, sectorId: string) => {
-    if (event.kind === CyberspaceKinds.Action) {
-      dispatchSector({ type: 'ADD_AVATAR', sectorId, pubkey: event.pubkey })
-    } else if (event.kind === CyberspaceKinds.Construct) {
-      dispatchSector({ type: 'ADD_CONSTRUCT', sectorId, eventId: event.id })
-    } else if (event.kind === CyberspaceKinds.Hyperjump) {
-      dispatchSector({ type: 'ADD_HYPERJUMP', sectorId, eventId: event.id })
-    }
-  }
-
   // Effects
 
-  // handle subscriptions to sectors when current sector changes
   useEffect(() => {
+    const handleEvent = (event: Event, sectorId: string) => {
+      if (event.kind === CyberspaceKinds.Action) {
+        addAvatar(sectorId, event.pubkey)
+      } else if (event.kind === CyberspaceKinds.Construct) {
+        addConstruct(sectorId, event)
+      } else if (event.kind === CyberspaceKinds.Hyperjump) {
+        addHyperjump(sectorId, event)
+      }
+    }
+
     if (!userCurrentSectorId || !ndk) return
 
     const sectorsToLoad = getSectorsToLoad(userCurrentSectorId, adjacentLayers)
     const subscriptions: NDKSubscription[] = []
 
     sectorsToLoad.forEach(sectorId => {
-      dispatchSector({ type: 'MOUNT_SECTOR', sectorId })
+      if (!sectorState[sectorId]) {
+        mountSector(sectorId)
+      }
       const subscription = subscribeToSectorObjects(sectorId, ndk)
       subscription.on('event', (event: Event) => handleEvent(event, sectorId))
       subscriptions.push(subscription)
@@ -128,19 +67,20 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
 
     return () => {
       subscriptions.forEach(sub => sub.stop())
-      sectorsToLoad.forEach(sectorId => {
-        dispatchSector({ type: 'UNMOUNT_SECTOR', sectorId })
+      Object.keys(sectorState).forEach(sectorId => {
+        if (!sectorsToLoad.includes(sectorId)) {
+          unmountSector(sectorId)
+        }
       })
     }
-  }, [userCurrentSectorId, adjacentLayers, ndk])
-
-  // Return
+  // }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState])
+  }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState, addAvatar, addConstruct, addHyperjump])
 
   if (!userCurrentSectorId) return null
 
   return (
     <>
-      {Object.keys(sectorState).map( groupSectorId => (
+      {Object.keys(sectorState).map(groupSectorId => (
         <Sector 
           position={relativeSectorPosition(userCurrentSectorId, groupSectorId).toVector3()} 
           current={userCurrentSectorId === groupSectorId} 
@@ -152,13 +92,41 @@ export const SectorManager: React.FC<SectorManagerProps> = ({ adjacentLayers = 0
   )
 }
 
-const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: { avatars: Set<string>; constructs: Set<string>, hyperjumps: Set<string> } }> = ({ position, current, id, data }) => {
-  const sectorSize = CYBERSPACE_SECTOR.toNumber()//(2**10)
+interface SectorProps {
+  position: Vector3
+  current: boolean
+  id: string
+  data: { avatars: string[]; constructs: Event[], hyperjumps: Event[] }
+}
+
+function Sector({ 
+  position, 
+  current, 
+  id, 
+  data 
+}: SectorProps): JSX.Element {
+  const sectorSize = CYBERSPACE_SECTOR.toNumber()
 
   const adjacentScale = 0.9
   const size = current ? sectorSize : sectorSize * adjacentScale
 
   const centerPosition = position.clone().add(new Vector3(sectorSize / 2, sectorSize / 2, sectorSize / 2))
+
+  const renderAvatars = () => {
+    return data.avatars.map(pubkey => <Avatar key={pubkey} pubkey={pubkey} /> )
+  }
+
+  const renderConstructs = () => {
+    // TODO:
+    // render construct with the highest POW
+    // keep in mind the minimum size of a construct is 1 sector
+    // how to visualize it when you're in it?
+    return null
+  }
+
+  const renderHyperjumps = () => {
+    return data.hyperjumps.map(event => <Hyperjump key={event.id} event={event} /> )
+  }
 
   return (
     <group position={centerPosition}>
@@ -166,8 +134,9 @@ const Sector: React.FC<{ position: Vector3, current: boolean, id: string; data: 
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
         material={new LineBasicMaterial({ color: current ? COLORS.ORANGE : COLORS.DARK_PURPLE, linewidth: 1 })}
       />
-      {/* Render avatars and constructs here */}
-      <Blocks sectorId={id} />
+      {renderAvatars()}
+      {renderConstructs()}
+      {renderHyperjumps()}
     </group>
   )
 }
@@ -224,3 +193,5 @@ function getSectorsToLoad(currentSector: string, adjacentLayers: number): string
 
   return sectors
 }
+
+export default SectorManager

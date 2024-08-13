@@ -1,9 +1,8 @@
-import { useContext, useEffect, useState } from 'react'
+import { useContext } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
-import { Grid } from './Grid'
 import { AvatarMarker } from './AvatarMarker'
 import { MapControls } from './MapControls'
 // import { BlockMarkers } from './BlockMarkers'
@@ -11,51 +10,31 @@ import { MapControls } from './MapControls'
 // import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorMarkers from './SectorMarkers'
+import SectorGrid from './SectorGrid'
+import { OrbitControls } from '@react-three/drei'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
 }
 
-const MAP_SIZE = 2**10
+const MAP_SIZE = 2**30
 
 const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
-
   const { identity } = useContext<IdentityContextType>(IdentityContext)
-
-  // toggle telemetry view
-  const [showTelemetry, setShowTelemetry] = useState(false)
-
-  useEffect(() => {
-    // set up keyboard listeres to activate telemetry panel
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key === 't') {
-        setShowTelemetry(!showTelemetry)
-      }
-    }
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [showTelemetry])
 
   return (
     <div className="cyberspace-map">
       <div id="map">
         <Canvas style={style}>
-          {/* <axesHelper scale={1} position={[0,0,0]} /> */}
-          <MapControls />
           <ambientLight intensity={2.0} />
-          <Grid scale={MAP_SIZE}>
-            <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
-            {/* <ObjectMarkers scale={MAP_SIZE} /> */}
-            {/* <BlockMarkers scale={MAP_SIZE} /> */}
-            {/* <Constructs scale={MAP_SIZE} /> */}
-            <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} />
-          </Grid>
-          {/* <axesHelper scale={128} position={[-128,-128,-128]} /> */}
-          {/* The X axis is red
-            * The Y axis is green
-            * The Z axis is blue. */}
+          <MapControls />
+          <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
+          {/* <ObjectMarkers scale={MAP_SIZE} /> */}
+          {/* <BlockMarkers scale={MAP_SIZE} /> */}
+          {/* <Constructs scale={MAP_SIZE} /> */}
+          {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
+          <SectorGrid scale={MAP_SIZE} />
+          <OrbitControls target={[0,0,0]} />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={15} luminanceThreshold={0.00001} luminanceSmoothing={0} />
           </EffectComposer>

@@ -446,6 +446,13 @@ export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string)
   return cyberspaceVectorToSectorDecimal(position)
 }
 
+export const sectorManhattanDistance = (sectorIdA: string, sectorIdB: string): DecimalVector3 => {
+  const baseSector = getSectorDecimalFromId(sectorIdA)
+  const targetSector = getSectorDecimalFromId(sectorIdB)
+  const distance = targetSector.sub(baseSector)
+  return distance
+}
+
 export const relativeSectorPosition = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
   const baseSector = getSectorDecimalFromId(baseSectorId)
   const targetSector = getSectorDecimalFromId(targetSectorId)

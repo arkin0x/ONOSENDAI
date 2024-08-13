@@ -1,6 +1,6 @@
 // SectorMarkers.tsx
 
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { Text } from "@react-three/drei"
 import { useAvatarStore } from "../../store/AvatarStore"
 import { Vector3, BoxGeometry } from 'three'
@@ -8,15 +8,31 @@ import { CYBERSPACE_AXIS, CYBERSPACE_SECTOR, getSectorDecimalFromId } from '../.
 import COLORS from '../../data/Colors'
 import { getTag } from '../../libraries/Nostr'
 import { useSectorStore } from '../../store/SectorStore'
+import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 
 interface SectorMarkersProps {
   pubkey: string
   scale: number
 }
 
+const SECTOR_SIZE = 2**15
+
 export const SectorMarkers: React.FC<SectorMarkersProps> = ({ pubkey, scale }) => {
-  const { actionState } = useAvatarStore()
+  const SCALE = scale / SECTOR_SIZE
+  const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const { userCurrentSectorId } = useSectorStore()
+
+  // default center to user's current sector
+  useEffect(() => {
+    setCenter(userCurrentSectorId)
+  },[])
+
+  // render sector markers
+  // we want to render a marker for each sector the user has visited in their action chain
+  // we want to render sectors that have been scanned
+
+
+  const { actionState } = useAvatarStore()
 
   const actions = actionState[pubkey]
 

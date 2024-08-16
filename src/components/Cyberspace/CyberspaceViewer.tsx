@@ -4,7 +4,7 @@ import "../../scss/CyberspaceViewer.scss"
 import { Avatar } from '../Avatar/Avatar'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
-import { SectorManager } from './SectorManager'
+import SectorManager from './SectorManager'
 import { Controls } from './Controls'
 import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'

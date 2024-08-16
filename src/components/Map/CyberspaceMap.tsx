@@ -9,7 +9,6 @@ import { MapControls } from './MapControls'
 // import { Constructs } from './Constructs'
 // import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
-import SectorMarkers from './SectorMarkers'
 import SectorGrid from './SectorGrid'
 import { OrbitControls } from '@react-three/drei'
 

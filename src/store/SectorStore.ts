@@ -2,20 +2,21 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { Event } from 'nostr-tools'
 
-type SectorData = {
+export type SectorData = {
   avatars: string[]
   constructs: Event[]
   hyperjumps: Event[]
   isScanned: boolean
+  isGenesis: boolean
 }
 
-type SectorState = Record<string, SectorData>
+export type SectorState = Record<string, SectorData>
 
 type SectorStore = {
   userCurrentSectorId: string
   sectorState: SectorState
   updateUserCurrentSectorId: (id: string) => void
-  mountSector: (sectorId: string ) => void
+  mountSector: (sectorId: string, isGenesis?: boolean) => void
   unmountSector: (sectorId: string) => void
   addAvatar: (sectorId: string, pubkey: string) => void
   removeAvatar: (sectorId: string, pubkey: string) => void
@@ -30,10 +31,10 @@ export const useSectorStore = create<SectorStore>()(
       userCurrentSectorId: '',
       sectorState: {},
       updateUserCurrentSectorId: (id) => set({ userCurrentSectorId: id }),
-      mountSector: (sectorId) => set((state) => ({
+      mountSector: (sectorId, isGenesis = false) => set((state) => ({
         sectorState: {
           ...state.sectorState,
-          [sectorId]: { avatars: [], constructs: [], hyperjumps: [], isScanned: false }
+          [sectorId]: { avatars: [], constructs: [], hyperjumps: [], isScanned: false, isGenesis }
         }
       })),
       unmountSector: (sectorId) => set((state) => {

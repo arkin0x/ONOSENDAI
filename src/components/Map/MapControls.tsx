@@ -120,9 +120,5 @@ export const MapControls: React.FC = () => {
   })
   
 
-  return (
-      <Plane args={[1,1]} position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <meshBasicMaterial attach="material" color={"white"} />
-      </Plane>
-  )
+  return null
 }

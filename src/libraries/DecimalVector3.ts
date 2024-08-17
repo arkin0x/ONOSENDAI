@@ -9,7 +9,7 @@ export class DecimalVector3 {
   y: Decimal
   z: Decimal
 
-  constructor(x: number|Decimal = 0, y: number|Decimal = 0, z: number|Decimal = 0) {
+  constructor(x: number|Decimal|string = 0, y: number|Decimal|string = 0, z: number|Decimal|string = 0) {
     this.x = new Decimal(x)
     this.y = new Decimal(y)
     this.z = new Decimal(z)

@@ -25,7 +25,7 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     const lines = acts.map(action => {
       const { sectorPosition, sectorId } = extractActionState(action)
       if (sectorId !== userCurrentSectorId) {
-        console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
+        // console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
         return null
       }
       // I need to subtract the spawn position to get the relative position

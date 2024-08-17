@@ -1,7 +1,7 @@
 import * as THREE from "three"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { CyberspaceCoordinates, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, MiniatureCyberspaceCoordinates, Plane, SecondsTimestamp, Time } from "../types/CyberspaceTypes"
+import { CyberspaceCoordinate, CyberspaceCoordinateRaw, CyberspaceCoordinates, CyberspacePlane, factoryCyberspaceCoordinate, factoryCyberspaceDimension, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, Plane, SecondsTimestamp, Time } from "../types/CyberspaceTypes"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
@@ -57,12 +57,12 @@ export const FRACTIONAL_PRECISION = 100_000_000 // 8 decimal places for Avatar p
 
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
-export const binToPlane = (bin: string|number): 'i-space' | 'd-space' => {
-  return parseInt(bin.toString()) > 0 ? 'i-space' : 'd-space'
+export const binToPlane = (bin: string|number): Plane => {
+  return parseInt(bin.toString()) > 0 ? Plane.ISpace : Plane.DSpace
 }
 
-export const planeToBin = (plane: 'i-space' | 'd-space'): number => {
-  return plane === 'i-space' ? 1 : 0
+export const planeToBin = (plane: Plane): number => {
+  return plane === Plane.ISpace ? 1 : 0
 }
 
 export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
@@ -104,62 +104,46 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
     return hexString
 }
 
-export function decodeHexToCoordinates(hexString: string): CyberspaceCoordinates {
-    // Checking if the input string is a valid 64 character hexadecimal string
-    if (!/^([0-9A-Fa-f]{64})$/.test(hexString)) {
-        throw new Error("Invalid hexadecimal string.")
-    }
+export function decodeHexToCoordinates(hexString: CyberspaceCoordinateRaw): CyberspaceCoordinate {
+    // Convert hex string to binary
+    const binaryString = BigInt("0x" + hexString).toString(2).padStart(256, '0')
 
+    const plane = binaryString[255] === '0' ? CyberspacePlane.DSpace : CyberspacePlane.ISpace
+    
     // Initialize the coordinates
     let X = BigInt(0)
     let Y = BigInt(0)
     let Z = BigInt(0)
 
-    // Convert hex string to binary
-    const binaryString = BigInt("0x" + hexString).toString(2).padStart(256, '0')
-
     // Traverse through the binary string
     for (let i = 0; i < 255; i++) {
-        switch (i % 3) {
-            case 0:
-                X = (X << BigInt(1)) | BigInt(binaryString[i])
-                break
-            case 1:
-                Y = (Y << BigInt(1)) | BigInt(binaryString[i])
-                break
-            case 2:
-                Z = (Z << BigInt(1)) | BigInt(binaryString[i])
-                break
-        }
+      switch (i % 3) {
+        case 0:
+          X = (X << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+          break
+        case 1:
+          Y = (Y << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+          break
+        case 2:
+          Z = (Z << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+          break
+      }
     }
 
-    const plane = binToPlane(binaryString)
-
-    // convert bigints to decimal objects
+    // Convert BigInts to Decimal objects
     const decimalX = new Decimal(X.toString())
     const decimalY = new Decimal(Y.toString())
     const decimalZ = new Decimal(Z.toString())
 
-    return {
-      vector: new DecimalVector3(decimalX, decimalY, decimalZ),
-      x: decimalX,
-      y: decimalY,
-      z: decimalZ,
-      plane
-    } as CyberspaceCoordinates
+    return factoryCyberspaceCoordinate(
+        hexString,
+        factoryCyberspaceDimension(decimalX),
+        factoryCyberspaceDimension(decimalY),
+        factoryCyberspaceDimension(decimalZ),
+        plane
+    )
 }
 
-/** 
- * Transform a cyberspace coordinate into a downscaled cyberspace coordinate where each axis can be represented by a number primitive in JavaScript. Normally coordinates can be values well above Number.MAX_SAFE_INTEGER, so we need to downscale them to fit into a number primitive.
- */ 
-export function downscaleCoordinates(coords: CyberspaceCoordinates, downscale: Decimal = CYBERSPACE_DOWNSCALE): MiniatureCyberspaceCoordinates {
-  return {
-    x: coords.x.div(downscale).toNumber(),
-    y: coords.y.div(downscale).toNumber(),
-    z: coords.z.div(downscale).toNumber(),
-    plane: coords.plane
-  }
-}
 
 const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
 const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
@@ -339,8 +323,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
   // add POW to velocity if the startEvent was a drift action.
   if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
     const POW = countLeadingZeroesHex((startEvent as Event).id)
-    // DEBUG - add multiplier to POW for super travel
-    let velocityPOW = Math.pow(2, POW-10) + 2**20
+    let velocityPOW = Math.pow(2, POW-10)
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0
@@ -379,7 +362,6 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
       // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],
       ['version', '1'],
-      ['S', getSectorIdFromDecimal(getSectorIdFromCoordinate(hexCoord))],
     ]
   }
   return event
@@ -444,13 +426,6 @@ export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string)
   const coord = decodeHexToCoordinates(coordinate)
   const position = new DecimalVector3(coord.x, coord.y, coord.z)
   return cyberspaceVectorToSectorDecimal(position)
-}
-
-export const sectorManhattanDistance = (sectorIdA: string, sectorIdB: string): DecimalVector3 => {
-  const baseSector = getSectorDecimalFromId(sectorIdA)
-  const targetSector = getSectorDecimalFromId(sectorIdB)
-  const distance = targetSector.sub(baseSector)
-  return distance
 }
 
 export const relativeSectorPosition = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {

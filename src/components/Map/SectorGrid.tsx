@@ -1,27 +1,37 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, EdgesGeometry, LineSegments, LineBasicMaterial } from 'three'
 import { Text } from "@react-three/drei"
 import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
-import { getSectorDecimalFromId, getSectorIdFromDecimal } from '../../libraries/Cyberspace'
+import { getSectorDecimalFromId, getSectorIdFromDecimal, relativeSectorPosition } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { DecimalVector3 } from '../../libraries/DecimalVector3'
+import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
+import { Avatar } from '../Avatar/Avatar'
+import { AvatarMarker } from './AvatarMarker'
 
-const SECTOR_SIZE = 2**15
+interface SectorData {
+  sectorId: string
+  position: Vector3
+  color: Color
+}
 
-export const SectorGrid: React.FC<{ scale: number }> = ({ scale }) => {
-  const { sectorState } = useSectorStore()
-  const { setCenter } = useMapCenterSectorStore()
+export const SectorGrid = () => {
+  const { sectorState, userCurrentSectorId } = useSectorStore()
+  const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
-  const sectorData = useMemo(() => {
+  const focusSectorId = centerSectorId || userCurrentSectorId
+
+  const sectorData: SectorData[] = useMemo(() => {
     return Object.entries(sectorState).map(([sectorId]) => {
-      const xyz = getSectorDecimalFromId(sectorId)
-      const position = xyz.multiplyScalar(SECTOR_SIZE).toVector3()
+      const diff = relativeSectorPosition(focusSectorId, sectorId)
+      console.log('diff', diff.toArray(0), focusSectorId, sectorId)
+      const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, sectorState)
       return { sectorId, position, color }
     })
@@ -48,7 +58,7 @@ export const SectorGrid: React.FC<{ scale: number }> = ({ scale }) => {
       setHovered(intersects.length > 0 ? intersects[0].instanceId : undefined)
     }
   })
-
+  
   const handleClick = () => {
     if (hovered !== null) {
       const newCenterSectorId = getSectorIdFromDecimal(new DecimalVector3().fromArray(sectorData[hovered].position.toArray()))
@@ -56,44 +66,45 @@ export const SectorGrid: React.FC<{ scale: number }> = ({ scale }) => {
     }
   }
 
-  const boxGeometry = useMemo(() => new BoxGeometry(SECTOR_SIZE, SECTOR_SIZE, SECTOR_SIZE), [])
-  const edgesGeometry = useMemo(() => new EdgesGeometry(boxGeometry), [boxGeometry])
+  console.log(sectorData)
 
   return (
-    <group scale={scale}>
-      <instancedMesh
-        ref={meshRef}
-        args={[boxGeometry, null, sectorData.length]}
-        onClick={handleClick}
-      >
-        <meshBasicMaterial transparent opacity={0.1} />
-      </instancedMesh>
-      <instancedMesh
-        ref={edgesRef}
-        args={[edgesGeometry, null, sectorData.length]}
-      >
-        <lineBasicMaterial color={0xffffff} />
-      </instancedMesh>
-      {sectorData.map(({ sectorId, position }, i) => (
-        <Text
-          key={sectorId}
-          position={position.clone().add(new Vector3(-SECTOR_SIZE/2, 0, 0))}
-          fontSize={SECTOR_SIZE/10}
-          color={hovered === i ? 0xffffff : 0xaaaaaa}
-          anchorX="right"
-        >
-          {sectorId}
-        </Text>
+    <>
+      {sectorData.map(({ sectorId, position, color }, i) => (
+        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} />
       ))}
-    </group>
+    </>
   )
 }
 
+export default SectorGrid
+
 function getSectorColor(sectorId: string, sectorState: SectorState): Color {
+  console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
   if (sectorState[sectorId]) return new Color(COLORS.ORANGE)
   return new Color(COLORS.DARK_PURPLE)
 }
 
-export default SectorGrid
+function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color }) {
+
+  return (
+    <group position={position}>
+      <lineSegments renderOrder={selected ? -1 : 0}>
+        <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
+        <lineBasicMaterial color={color} linewidth={0.5} />
+      </lineSegments>
+      { avatar ? <AvatarMarker /> : null }
+      { selected ? <Text 
+        position={position.clone().add(new Vector3(-MAP_SECTOR_SIZE/2, 0, 0))}
+        fontSize={MAP_SECTOR_SIZE/10}
+        color={color}
+        anchorX="right"
+      >
+        {sectorId}
+      </Text> : null }
+    </group>
+  )
+
+}

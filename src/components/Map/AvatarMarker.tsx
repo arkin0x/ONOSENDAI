@@ -1,87 +1,8 @@
-import { useEffect, useState } from "react"
-import { CYBERSPACE_AXIS, extractActionState } from "../../libraries/Cyberspace"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
-import * as THREE from "three"
-import { useActionChain } from "../../hooks/cyberspace/useActionChain"
-import { useFrame, useThree } from "@react-three/fiber"
-import { useRotationStore } from "../../store/RotationStore"
-import { useZoomStore } from "../../store/ZoomStore"
-import { useAvatarStore } from "../../store/AvatarStore"
 
-export function AvatarMarker({pubkey, scale}: {pubkey: string, scale: number}) {
-  const { rotation } = useRotationStore()
-  const { zoom, ZOOM_MAX } = useZoomStore()
-
-  const [position, setPosition] = useState(new THREE.Vector3(0, 0, 0))
-  // const [rotationAngle, setRotationAngle] = useState(0)
-
-  const { getSimulatedState } = useAvatarStore()
-
-  const { camera } = useThree()
-
-  // Set fog on the scene
-  // const fogColor = 0x000000 // Color of the fog
-  // const near = 1 // Start distance of the fog
-  // const far = 1 + scale * 8 * Math.max(zoom,4)/32 // End distance of the fog
-  // scene.fog = new THREE.Fog(fogColor, near, far)
-
-  camera.far = scale ** 2
-  camera.near = 0.01
-
-  useActionChain(pubkey)
-
-  const DOWNSCALE = CYBERSPACE_AXIS.div(scale)
-
-  const latestAction = getSimulatedState(pubkey)
-
-  useEffect(() => {
-    if (!latestAction) return
-
-    const { position } = extractActionState(latestAction)
-
-    const mapPosition = position.divideScalar(DOWNSCALE).toVector3()
-
-    setPosition(mapPosition)
-
-  }, [latestAction])
-
-  useFrame(() => {
-
-    // Normalize zoom to be between 0 and 1
-    const normalizedZoom = zoom / ZOOM_MAX 
-
-    // Apply cubic easing function
-    // const easedZoom = 3 * normalizedZoom ** 2 - 2 * normalizedZoom ** 3
-
-    // Apply piecewise easing function
-    const easedZoom = 2 * normalizedZoom ** 4
-      // Linear ease-out
-
-    // Calculate radius using eased zoom
-    const radius = easedZoom * 2048
-
-    // setRotationAngle(prevAngle => prevAngle - 0.001) // Adjust the increment value for desired speed
-
-    // camera.position.set(scale/2, scale*3, scale/2)
-    // camera.rotation.set(-Math.PI/2, 0, 0)
-    const oppositeRotation = rotation.clone()
-    const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
-    const cameraPosition = position.clone().add(cameraDirection.multiplyScalar(radius))
-    camera.position.copy(cameraPosition)
-    // camera.position.set(
-    //   cameraPosition.x * Math.cos(rotationAngle) - cameraPosition.z * Math.sin(rotationAngle),
-    //   cameraPosition.y,
-    //   cameraPosition.x * Math.sin(rotationAngle) + cameraPosition.z * Math.cos(rotationAngle)
-    // )
-    // camera.lookAt(new THREE.Vector3(scale/2, scale/2, scale/2))
-    camera.lookAt(position)
-    camera.updateProjectionMatrix()
-    
-  })
-  // console.log(position)
-
+export function AvatarMarker() {
   return (
-    <group position={position}>
+    <group position={[0,0,0]}>
       {/* default avatar represented by dodecahedron */}
       <lineSegments scale={[.5,.5,.5]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
       {/* <axesHelper position={[0,0,0]} scale={512}/> */}

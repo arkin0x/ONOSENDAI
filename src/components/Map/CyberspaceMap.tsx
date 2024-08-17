@@ -10,16 +10,19 @@ import { MapControls } from './MapControls'
 // import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Text } from '@react-three/drei'
+import { sectorIdToMapCoord } from '../../libraries/CyberspaceMap'
+import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
 }
 
-const MAP_SIZE = 2**30
-
 const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { centerSectorId } = useMapCenterSectorStore()
+
+  // const orbitCameraTarget = sectorIdToMapCoord(centerSectorId).toVector3()
 
   return (
     <div className="cyberspace-map">
@@ -27,12 +30,12 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <MapControls />
-          <AvatarMarker pubkey={identity?.pubkey} scale={MAP_SIZE} />
+          <AvatarMarker />
           {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           {/* <BlockMarkers scale={MAP_SIZE} /> */}
           {/* <Constructs scale={MAP_SIZE} /> */}
           {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
-          <SectorGrid scale={MAP_SIZE} />
+          <SectorGrid />
           <OrbitControls target={[0,0,0]} />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={15} luminanceThreshold={0.00001} luminanceSmoothing={0} />
@@ -41,6 +44,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
       </div>
       {/* <div id="map-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }} children={undefined}>
+          <Text fontSize={0.07}>{orbitCameraTarget.toArray().toString()}</Text>
         </Canvas>
       </div> */}
     </div>

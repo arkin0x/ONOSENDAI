@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import { Event, UnsignedEvent } from 'nostr-tools'
-import { getTime, simulateNextEvent } from "../libraries/Cyberspace"
+import { CyberspaceAction, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/Nostr'
 
 type AvatarActionState = {
-  [pubkey: string]: Event[]
+  [pubkey: string]: CyberspaceAction[]
 }
 
 type AvatarActionDispatched = 
@@ -15,8 +15,8 @@ interface AvatarStore {
   actionState: AvatarActionState
   dispatchActionState: (action: AvatarActionDispatched) => void
   getSimulatedState: (pubkey: string) => UnsignedEvent | null
-  getGenesis: (pubkey: string) => Event | null
-  getLatest: (pubkey: string) => Event | null
+  getGenesis: (pubkey: string) => CyberspaceAction | null
+  getLatest: (pubkey: string) => CyberspaceAction | null
   getGenesisSectorId: (pubkey: string) => string | null
   getLatestSectorId: (pubkey: string) => string | null
   getSimulatedSectorId: (pubkey: string) => string | null
@@ -26,20 +26,26 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   const newState = {...state} as AvatarActionState
 
   if (newState[action.pubkey] === undefined) {
-    newState[action.pubkey] = [] as Event[]
+    newState[action.pubkey] = [] as CyberspaceAction[]
   }
 
-  const avatarActions: Event[] = newState[action.pubkey]
+  const avatarActions: CyberspaceAction[] = newState[action.pubkey]
 
   if (action.type === 'reset'){
-    newState[action.pubkey] = [] as Event[]
+    newState[action.pubkey] = [] as CyberspaceAction[]
     return newState
   }
+
+  const newActions = action.actions.map(validateCyberspaceAction).filter(Boolean)
+  if (newActions.length === 0) {
+    return state
+  }
+
   if (action.type === 'unshift') {
-    newState[action.pubkey] = [...action.actions, ...avatarActions] as Event[]
+    newState[action.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
   }
   if (action.type === 'push') {
-    newState[action.pubkey] = [...avatarActions, ...action.actions] as Event[]
+    newState[action.pubkey] = [...avatarActions, ...newActions] as CyberspaceAction[]
   }
 
   newState[action.pubkey].sort((a, b) => {
@@ -62,7 +68,7 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     }
 
     return acc
-  }, [] as Event[])
+  }, [] as CyberspaceAction[])
 
   return newState
 }

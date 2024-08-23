@@ -7,7 +7,8 @@ import { useContext, useEffect, useState } from "react"
 import { Event } from 'nostr-tools'
 import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
-import { CyberspaceKinds, CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
+import { CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
+import { CyberspaceKinds } from "../../libraries/Cyberspace"
 import { isGenesisAction } from "../../libraries/Cyberspace";
 import { validateActionChain } from "./validateActionChain"
 import { useAvatarStore } from "../../store/AvatarStore"

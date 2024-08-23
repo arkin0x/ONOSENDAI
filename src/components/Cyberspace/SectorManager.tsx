@@ -1,7 +1,8 @@
 import React, { useContext, useEffect } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
-import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
+import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
+import { CyberspaceKinds } from "../../libraries/Cyberspace"
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'

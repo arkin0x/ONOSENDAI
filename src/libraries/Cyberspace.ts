@@ -53,6 +53,13 @@ export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
 
 // CYBERSPACE
 
+// NOSTR KINDS
+export enum CyberspaceKinds {
+  Hyperjump = 321,
+  Construct = 331,
+  Action = 333
+}
+
 // COORDINATES
 // A Cyberspace coordinate is either a raw hex coordinate or a coordinate object including the raw hex, vector, individual dimensions, and plane.
 
@@ -394,6 +401,82 @@ export const nowIsAfterLatestAction = (latestAction: CyberspaceAction): boolean 
 
 // CyberspaceAction is a validated Event or valid UnsignedEvent. Its tags will be valid.
 export type CyberspaceAction = Event & { readonly __brand: unique symbol}
+
+export function validateCyberspaceAction(action: Event): CyberspaceAction|false {
+  if (action.kind !== CyberspaceKinds.Action) {
+    return false
+  }
+  const tagsToCheck = ['ms', 'C', 'Cd', 'quaternion', 'velocity', 'S', 'A', 'nonce', 'version']
+
+  // stipulations for each tag
+  // ms must be a 2-element array where the second element is a 3-digit string
+  // C must be a 64-character hex string
+  // Cd must be a 4-element array where the second thru fourth elements are 
+    // integer strings each a maximum of 8 digits long
+  // quaternion must be a 4-element array where the second thru fourth elements 
+    // are floating point number strings with a maximum of 8 decimal places
+  // velocity must be a 4-element array where the second thru fourth elements
+    // are floating point number strings with a maximum of 8 decimal places
+  // S must be a 2-element array where the second element is a sector id in the
+    // form "x-y-z" where x, y, and z are integers with no leading zeros
+  // nonce must be a 3-element array where the second element is a string and
+    // the third element is an integer string
+  // version must be a 2-element array where the second element is the string "1"
+
+  for (const tag of tagsToCheck) {
+    const tagItem = action.tags.find(getTag(tag))
+    if (!tagItem) {
+      return false
+    }
+
+    switch (tag) {
+      case 'ms':
+        if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^\d{3}$/.test(tagItem[1])) {
+          return false
+        }
+        break
+      case 'C':
+        if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^[a-fA-F0-9]{64}$/.test(tagItem[1])) {
+          return false
+        }
+        break
+      case 'Cd':
+        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d{1,8}$/.test(v))) {
+          return false
+        }
+        break
+      case 'quaternion':
+      case 'velocity':
+        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d+\.\d{1,8}$/.test(v))) {
+          return false
+        }
+        break
+      case 'S':
+        if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^\d+-\d+-\d+$/.test(tagItem[1])) {
+          return false
+        }
+        break
+      case 'nonce':
+        if (!Array.isArray(tagItem) || tagItem.length !== 3 || !/^\d+$/.test(tagItem[2])) {
+          return false
+        }
+        break
+      case 'version':
+        if (!Array.isArray(tagItem) || tagItem.length !== 2 || tagItem[1] !== '1') {
+          return false
+        }
+        break
+      default:
+        break
+    }
+
+  }
+  
+  // TODO: ...? what else should we validate here?
+  // NDK should handle signature checking already
+
+  return action as CyberspaceAction
+}
 
 export type CyberspaceActionTypes = 
   | 'drift'

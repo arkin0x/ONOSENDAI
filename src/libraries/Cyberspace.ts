@@ -37,6 +37,16 @@ type Hex256Bit = `${
   | '8' | '9' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
 }{64}`
 
+// Factory function to create a Hex256Bit from a string
+function factoryHex256Bit(hex: string): Hex256Bit {
+  // Check if the input string is exactly 64 hex characters
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new Error('Invalid Hex256Bit string: must be exactly 64 hex characters')
+  }
+  // Return the string as Hex256Bit
+  return hex.toLowerCase() as Hex256Bit
+}
+
 // Specific types for different entities
 export type NostrEventId = Hex256Bit & { readonly __brand: unique symbol }
 export type NostrPublicKey = Hex256Bit & { readonly __brand: unique symbol }
@@ -92,7 +102,8 @@ export const cyberspacePlaneToBin = (plane: CyberspacePlane): number => {
 // Usage functions
 
 export function cyberspaceCoordinateStringToObject(coordinateString: string): CyberspaceCoordinate {
-  return factoryCyberspaceCoordinate(coordinateString as CyberspaceCoordinateRaw) as CyberspaceCoordinate
+  const hex = factoryHex256Bit(coordinateString)
+  return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw) as CyberspaceCoordinate
 }
  
 // Takes a vector and a plane and returns a 256-bit hex string
@@ -124,7 +135,7 @@ export function cyberspaceEncodePartialToRaw(vector: CyberspaceCoordinateVector,
         hexString += parseInt(chunk, 2).toString(16)
     }
 
-    return hexString as CyberspaceCoordinateRaw
+    return factoryHex256Bit(hexString) as CyberspaceCoordinateRaw
 }
 
 // Behind-the-scenes Factory functions
@@ -162,8 +173,11 @@ function factoryCyberspaceDimension(value: Decimal | number | string): Cyberspac
 }
 
 function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): CyberspaceCoordinate {
+
+  const hex = factoryHex256Bit(coordinateRaw)
+
   // Convert hex string to binary
-  const binaryString = BigInt("0x" + coordinateRaw).toString(2).padStart(256, '0')
+  const binaryString = BigInt("0x" + hex).toString(2).padStart(256, '0')
 
   const plane = binaryString[255] === '0' ? CyberspacePlane.DSpace : CyberspacePlane.ISpace
   
@@ -197,7 +211,7 @@ function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): Cy
   const sector = cyberspaceSectorFromCoordinateVector(vector)
 
   return {
-    raw: coordinateRaw,
+    raw: hex as CyberspaceCoordinateRaw,
     vector,
     x: factoryCyberspaceDimension(dimensionX),
     y: factoryCyberspaceDimension(dimensionY),
@@ -229,17 +243,17 @@ type CyberspaceSectorIndex = Decimal & { readonly __brand: 'CyberspaceSectorInde
 type CyberspaceSectorVector = DecimalVector3 & { readonly __brand: 'CyberspaceSectorVector' }
 
 // Usage functions
-export function cyberspaceSectorStringToId(sectorString: string): CyberspaceSectorRaw {
-  return factoryCyberspaceSectorId(sectorString)
+export function cyberspaceSectorStringToRaw(sectorString: string): CyberspaceSectorRaw {
+  return factoryCyberspaceSectorRaw(sectorString)
 }
 
 export function cyberspaceSectorStringToObject(sectorString: string): CyberspaceSector {
-  const sectorId: CyberspaceSectorRaw = cyberspaceSectorStringToId(sectorString)
+  const sectorId: CyberspaceSectorRaw = cyberspaceSectorStringToRaw(sectorString)
   return factoryCyberspaceSector(sectorId)
 }
 
 // Behind-the-scenes Factory functions
-function factoryCyberspaceSectorId(id: string): CyberspaceSectorRaw {
+function factoryCyberspaceSectorRaw(id: string): CyberspaceSectorRaw {
   if (!/^\d+-\d+-\d+$/.test(id)) {
     throw new Error('Invalid sector ID format')
   }
@@ -281,21 +295,21 @@ function factoryCyberspaceSectorVector(x: number | string | Decimal, y: number |
 // Utility functions
 export function splitCyberspaceSectorId(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
   const [x, y, z] = sectorId.split('-')
-  return factoryCyberspaceSectorVector(x, y, z) as CyberspaceSectorVector
+  return factoryCyberspaceSectorVector(x, y, z)
 }
 
 export function cyberspaceSectorIdToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
   const { x, y, z } = splitCyberspaceSectorId(sectorId)
-  return factoryCyberspaceSectorVector(x, y, z) as CyberspaceSectorVector
+  return factoryCyberspaceSectorVector(x, y, z)
 }
 
 export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinateVector): CyberspaceSector {
-  const x = vector.x.div(CYBERSPACE_SECTOR).floor()
-  const y = vector.y.div(CYBERSPACE_SECTOR).floor()
-  const z = vector.z.div(CYBERSPACE_SECTOR).floor()
-  const sectorId = factoryCyberspaceSectorId(`${x}-${y}-${z}`)
+  const x = vector.x.div(CYBERSPACE_SECTOR).floor().toString()
+  const y = vector.y.div(CYBERSPACE_SECTOR).floor().toString()
+  const z = vector.z.div(CYBERSPACE_SECTOR).floor().toString()
+  const sectorId = factoryCyberspaceSectorRaw(`${x}-${y}-${z}`)
   const sector = factoryCyberspaceSector(sectorId)
-  return sector as CyberspaceSector
+  return sector
 }
 
 // ACTION CHAIN
@@ -405,12 +419,12 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
     content: '',
     tags: [
       ['C', pubkey],
+      ['S', sectorId],
+      ['ms', ms_padded],
       ['velocity', '0', '0', '0'],
       ['quaternion', ...IDENTITY_QUATERNION.map(n => n.toString())],
-      ['ms', ms_padded],
-      ['version', '1'],
       ['A', 'noop'],
-      ['S', sectorId],
+      ['version', '1'],
     ]
   } as UnsignedEvent
 }
@@ -438,16 +452,12 @@ export const createUnsignedDriftAction = async (pubkey: string, throttle: number
     // This shouldn't happen because the action chain needs to be valid to get to this point.
     throw new Error("Simulation failed for latest event.")
   }
-  const coord = newAction.tags.find(getTag('C'))![1]
-  const sector = getSectorIdFromCoordinate(coord) 
-  const sectorId = getSectorIdFromDecimal(sector)
   newAction.pubkey = pubkey
   newAction.tags.push(['A', 'drift'])
   newAction.tags.push(['quaternion', ..._quaternion.toArray().map(n => n.toFixed(8))])
   newAction.tags.push(['e', genesisAction.id, '', 'genesis'])
   newAction.tags.push(['e', latestAction.id, '', 'previous'])
   newAction.tags.push(['nonce', '0000000000000000', throttle.toString()])
-  newAction.tags.push(['S', sectorId])
   return newAction as UnsignedEvent
 }
 
@@ -532,14 +542,16 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 
-  const hexCoord: Hex256Bit = cyberspaceEncodePartialToHex(factoryCyberspaceCoordinateVector(updatedPosition.x, updatedPosition.y, updatedPosition.z), plane)
+  const positionVector = factoryCyberspaceCoordinateVector(updatedPosition.x, updatedPosition.y, updatedPosition.z)
+
+  const hexCoord: Hex256Bit = cyberspaceEncodePartialToRaw(positionVector, plane)
 
   const velocityArray = updatedVelocity.toArray()
 
-  // const rotationArray = rotation.toArray().map(n => n.toString())
-
   // decimal array is 8-digit integers representing the fractional part of the position, because the fractional part can't be stored in the cyberspace coordinate.
   const decimalArray = updatedPosition.toArrayDecimals()
+
+  const sector = cyberspaceSectorFromCoordinateVector(positionVector)
 
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event: UnsignedEvent = {
@@ -550,7 +562,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
     tags: [
       ['C', hexCoord],
       ['Cd', ...decimalArray ],
-      ['S', ]
+      ['S', sector.id],
       ['velocity', ...velocityArray],
       // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],

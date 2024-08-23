@@ -332,45 +332,7 @@ export type Time = {
   ms_padded: MillisecondsPadded 
 }
 
-
 // FUNCTIONS
-
-export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
-  return {
-    vector: position,
-    x: position.x,
-    y: position.y,
-    z: position.z,
-    plane
-  }
-}
-
-
-
-
-const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
-const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
-/**
- * Decimal Almost Equal
- * almost-equal implemented with decimal.js
- */
-export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
-  const difference = a.minus(b).abs()
-  if (difference.lessThanOrEqualTo(decimalFLT_EPSILON)) {
-    return true
-  }
-  if (difference.lessThanOrEqualTo(decimalDBL_EPSILON.times(Decimal.min(a.abs(), b.abs())))) {
-    return true
-  }
-  return a.equals(b)
-}
-
-/**
- * @NOTE This function is NOT compatible wiith DecimalVector3
- */
-export const vector3Equal = (a: Vector3, b: Vector3): boolean => {
-  return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)
-}
 
 export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
   const coords = factoryCyberspaceCoordinate(coordinate)
@@ -470,7 +432,8 @@ export const isGenesisAction = (action: Event): boolean => {
 
 export type ExtractedActionState = ReturnType<typeof extractActionState>
 // get the state from a cyberspace action
-export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: Quaternion, time: Time} => {
+// TODO: refactor with new types
+export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: CyberspacePlane, velocity: DecimalVector3, rotation: Quaternion, time: Time} => {
 // debug
   // console.log('extractActionState: action', action)
   // get position

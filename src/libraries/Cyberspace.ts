@@ -56,7 +56,9 @@ export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
 
 // ACTIONS
 
-export type CyberspaceAction = 
+export type CyberspaceAction = Event | UnsignedEvent & { readonly __brand: unique symbol}
+
+export type CyberspaceActionTypes = 
   | 'drift'
   | 'hop'
   | 'freeze'
@@ -72,20 +74,40 @@ export type CyberspaceAction =
 
 export type CyberspaceCoordinateRaw = Hex256Bit & { readonly __brand: unique symbol }
 
+// a global coordinate
 export type CyberspaceCoordinate = {
   raw: CyberspaceCoordinateRaw
   vector: CyberspaceCoordinateVector
   x: CyberspaceCoordinateDimension 
   y: CyberspaceCoordinateDimension
   z: CyberspaceCoordinateDimension
+  local: CyberspaceLocalCoordinate
   plane: CyberspacePlane
+  sector: CyberspaceSector
 }
 
-// partial type to express a single dimension of a coordinate
-export type CyberspaceCoordinateDimension = Decimal & { readonly __brand: 'CyberspaceDimension' }
+// partial type to express a single dimension of a global coordinate
+export type CyberspaceCoordinateDimension = Decimal & { readonly __brand: unique symbol }
 
-// partial type to express a vector of dimensions
+// partial type to express a vector of dimensions as global coordinates
 export type CyberspaceCoordinateVector = DecimalVector3 & { readonly __brand: unique symbol }
+
+// a local coordinate within the current sector
+export type CyberspaceLocalCoordinate = {
+  raw: CyberspaceCoordinateRaw // still global
+  vector: CyberspaceLocalCoordinateVector
+  x: CyberspaceLocalCoordinateDimension
+  y: CyberspaceLocalCoordinateDimension
+  z: CyberspaceLocalCoordinateDimension
+  plane: CyberspacePlane
+  sector: CyberspaceSector
+}
+
+// partial type to differentiate between local coordinates and global coordinates
+export type CyberspaceLocalCoordinateDimension = Decimal & { readonly __brand: unique symbol }
+
+// partial type to differenctiate between local coordinates and global coordinates
+export type CyberspaceLocalCoordinateVector = DecimalVector3 & { readonly __brand: unique symbol }
 
 // partial type to express a plane in cyberspace
 export enum CyberspacePlane {
@@ -95,7 +117,7 @@ export enum CyberspacePlane {
 
 // Utility functions
 
-export const cyberspacePlaneToBin = (plane: CyberspacePlane): number => {
+export function cyberspacePlaneToBin(plane: CyberspacePlane): number {
   return plane === CyberspacePlane.DSpace ? 0 : 1
 }
 
@@ -168,24 +190,27 @@ function factoryCyberspaceCoordinateVector(x: Decimal | number | string, y: Deci
   return new DecimalVector3(x, y, z) as CyberspaceCoordinateVector
 }
 
+function factoryCyberspaceLocalCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceLocalCoordinateVector {
+  return new DecimalVector3(x, y, z) as CyberspaceLocalCoordinateVector
+}
+
 function factoryCyberspaceDimension(value: Decimal | number | string): CyberspaceCoordinateDimension {
   return new Decimal(value) as CyberspaceCoordinateDimension
 }
 
+function factoryCyberspaceLocalCoordinateDimension(value: Decimal | number | string): CyberspaceLocalCoordinateDimension {
+  return new Decimal(value) as CyberspaceLocalCoordinateDimension
+}
+
 function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): CyberspaceCoordinate {
-
   const hex = factoryHex256Bit(coordinateRaw)
-
   // Convert hex string to binary
   const binaryString = BigInt("0x" + hex).toString(2).padStart(256, '0')
-
   const plane = binaryString[255] === '0' ? CyberspacePlane.DSpace : CyberspacePlane.ISpace
-  
   // Initialize the dimensions 
   let X = BigInt(0)
   let Y = BigInt(0)
   let Z = BigInt(0)
-
   // Traverse through the binary string
   for (let i = 0; i < 255; i++) {
     switch (i % 3) {
@@ -200,22 +225,26 @@ function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): Cy
         break
     }
   }
-
   // Convert BigInts to Decimal objects
   const dimensionX = new Decimal(X.toString())
   const dimensionY = new Decimal(Y.toString())
   const dimensionZ = new Decimal(Z.toString())
-
   const vector = factoryCyberspaceCoordinateVector(dimensionX, dimensionY, dimensionZ)
-
+  const localVector = factoryCyberspaceLocalCoordinateVector(dimensionX.mod(CYBERSPACE_SECTOR), dimensionY.mod(CYBERSPACE_SECTOR), dimensionZ.mod(CYBERSPACE_SECTOR))
   const sector = cyberspaceSectorFromCoordinateVector(vector)
-
   return {
     raw: hex as CyberspaceCoordinateRaw,
     vector,
     x: factoryCyberspaceDimension(dimensionX),
     y: factoryCyberspaceDimension(dimensionY),
     z: factoryCyberspaceDimension(dimensionZ),
+    local: {
+      raw: hex as CyberspaceCoordinateRaw,
+      vector: localVector,
+      x: factoryCyberspaceLocalCoordinateDimension(localVector.x),
+      y: factoryCyberspaceLocalCoordinateDimension(localVector.y),
+      z: factoryCyberspaceLocalCoordinateDimension(localVector.z),
+    } as CyberspaceLocalCoordinate,
     plane,
     sector,
   } as CyberspaceCoordinate
@@ -430,15 +459,26 @@ export const isGenesisAction = (action: Event): boolean => {
   return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
 }
 
-export type ExtractedActionState = ReturnType<typeof extractActionState>
+export type ExtractedCyberspaceActionState = {
+  coordinate: CyberspaceCoordinate
+  sector: CyberspaceSector
+  // cyberspaceCoordinate: string
+  // sectorId: string
+  // position: DecimalVector3
+  sectorPosition: DecimalVector3
+  plane: CyberspacePlane
+  velocity: DecimalVector3
+  rotation: Quaternion
+  time: Time
+}
 // get the state from a cyberspace action
+// note: CyberspaceAction are events that have been validated so we don't need to handle missing tags.
 // TODO: refactor with new types
-export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: CyberspacePlane, velocity: DecimalVector3, rotation: Quaternion, time: Time} => {
-// debug
-  // console.log('extractActionState: action', action)
+export const extractCyberspaceActionState = (action: CyberspaceAction): ExtractedCyberspaceActionState => {
   // get position
-  const cyberspaceCoordinate = action.tags.find(getTag('C'))![1]
-  const sectorId = getSectorIdFromDecimal(getSectorIdFromCoordinate(cyberspaceCoordinate))
+  const posTag = action.tags.find(getTag('C'))![1]
+  const coordinate = cyberspaceCoordinateStringToObject(posTag)
+  const sector = coordinate.sector
   const position = getVector3FromCyberspaceCoordinate(cyberspaceCoordinate)
   // add fractional position if present
   const positionDecimalsTag = action.tags.find(getTag('Cd'))
@@ -461,7 +501,11 @@ export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoor
     rotation = new Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
   }
   const time = getTime(action)
-  return {cyberspaceCoordinate, sectorId, position, sectorPosition, plane, velocity, rotation, time}
+  return {cyberspaceCoordinateRaw: cyberspaceCoordinate, sectorId, position, sectorPosition, plane, velocity, rotation, time}
+  return {
+    coordinate,
+    sector
+  }
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
@@ -481,7 +525,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
     return startEvent
   }
 
-  const { position, plane, velocity, rotation } = extractActionState(startEvent)
+  const { position, plane, velocity, rotation } = extractCyberspaceActionState(startEvent)
 
   const updatedPosition = position.clone()
   let updatedVelocity = velocity.clone()

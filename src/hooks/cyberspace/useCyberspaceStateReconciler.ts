@@ -5,7 +5,7 @@ import { Event, Filter } from "nostr-tools"
 import { getTagValue, pool } from "../../libraries/Nostr"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { IdentityContextType } from "../../types/IdentityType"
-import { CYBERSPACE_DOWNSCALE, extractActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
+import { CYBERSPACE_DOWNSCALE, extractCyberspaceActionState, getVector3FromCyberspaceCoordinate } from "../../libraries/Cyberspace"
 import { MillisecondsTimestamp } from "../../types/CyberspaceTypes"
 import { actionsReducer } from "./actionsReducer"
 import { validateActionChain } from "./validateActionChain"
@@ -83,7 +83,7 @@ export const useCyberspaceStateReconciler = (): CyberspaceStateReconciler => {
       const latest = actions[actions.length - 1]
       let driftVelocity = new DecimalVector3(0,0,0)
 
-      const { position, velocity, rotation, time } = extractActionState(latest)
+      const { position, velocity, rotation, time } = extractCyberspaceActionState(latest)
       // console.log('NEW POSITION', new DecimalVector3().fromArray(position.toArray()).divideScalar(CYBERSPACE_DOWNSCALE).toArray())
       // add POW to velocity if the most recent was a drift event
       if (latest.tags.find(getTagValue('A','drift'))) {

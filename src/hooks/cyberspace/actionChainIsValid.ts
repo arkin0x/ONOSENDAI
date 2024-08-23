@@ -1,4 +1,4 @@
-import { extractActionState, getMillisecondsTimestampFromAction, getPlaneFromAction, simulateNextEvent } from "../../libraries/Cyberspace"
+import { extractCyberspaceActionState, getMillisecondsTimestampFromAction, getCyberspacePlaneFromAction, simulateNextEvent } from "../../libraries/Cyberspace"
 import { getTag, getTagValue } from "../../libraries/Nostr"
 import { Event } from "nostr-tools"
 
@@ -84,10 +84,10 @@ export const actionChainIsValid = (actions: Event[]): boolean => {
       // check the plane and make sure it is valid
       // TODO: implement portals to switch planes; currently stuck on the starting plane
       const testPlaneState = [...actions]
-      const startPlane = getPlaneFromAction(GENESIS_ACTION)
+      const startPlane = getCyberspacePlaneFromAction(GENESIS_ACTION)
       const planeIsValid = testPlaneState.reduce<false | 'd-space' | 'i-space'>((plane, action) => {
         // get the plane from the action
-        const currPlane = getPlaneFromAction(action)
+        const currPlane = getCyberspacePlaneFromAction(action)
         if (plane === currPlane) {
           return plane
         } else {
@@ -111,7 +111,7 @@ export const actionChainIsValid = (actions: Event[]): boolean => {
         }
         // if this is not the last action, simulate the next action and compare it to the next action in the chain.
         const nextAction = testSimulatedActionState[index + 1]
-        const nextActionState = extractActionState(nextAction)
+        const nextActionState = extractCyberspaceActionState(nextAction)
         const simulatedNextAction = simulateNextEvent(action, nextActionState.time)
 
         // compare the simulated action to the next action in the chain

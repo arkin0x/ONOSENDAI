@@ -9,7 +9,7 @@ import { useFrame } from '@react-three/fiber'
 import { defaultRelays } from '../../libraries/Nostr.ts'
 import { useControlStore } from '../../store/ControlStore.ts'
 import { useRotationStore } from '../../store/RotationStore.ts'
-import { extractActionState } from '../../libraries/Cyberspace.ts'
+import { extractCyberspaceActionState } from '../../libraries/Cyberspace.ts'
 
 export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
@@ -29,7 +29,7 @@ export const Controls: React.FC = () => {
 
   useEffect(() => {
     if (simulatedEvent) {
-      const { velocity } = extractActionState(simulatedEvent)
+      const { velocity } = extractCyberspaceActionState(simulatedEvent)
       const currentDirection = new Quaternion().setFromUnitVectors(
         new Vector3(0, 1, 0), // Default up vector
         velocity.toVector3().normalize() // Normalized velocity vector
@@ -242,7 +242,7 @@ export const Controls: React.FC = () => {
 
     if (controlState.resetView) {
       if (simulatedEvent) {
-        const { velocity } = extractActionState(simulatedEvent)
+        const { velocity } = extractCyberspaceActionState(simulatedEvent)
         const directionOfTravel = velocity.toVector3().normalize()
 
         // Invert the direction to place the camera behind the avatar

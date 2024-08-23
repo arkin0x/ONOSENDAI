@@ -1,7 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber"
 import React, { useEffect, useState } from "react"
 import * as THREE from "three"
-import { CYBERSPACE_SECTOR, extractActionState } from "../../libraries/Cyberspace"
+import { CYBERSPACE_SECTOR, extractCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useRotationStore } from "../../store/RotationStore"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import { useSectorStore } from "../../store/SectorStore"
@@ -29,7 +29,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   useFrame(() => {
     const simulatedEvent = getSimulatedState(pubkey)
     if (simulatedEvent) {
-      const { sectorPosition, velocity, sectorId } = extractActionState(simulatedEvent)
+      const { sectorPosition, velocity, sectorId } = extractCyberspaceActionState(simulatedEvent)
       
       setPosition(sectorPosition.toVector3())
       setVelocity(velocity.toVector3())

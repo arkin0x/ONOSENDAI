@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Line } from '@react-three/drei'
-import { extractActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { extractCyberspaceActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { useSectorStore } from '../../store/SectorStore'
@@ -23,7 +23,7 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     const acts = [...actions]
 
     const lines = acts.map(action => {
-      const { sectorPosition, sectorId } = extractActionState(action)
+      const { sectorPosition, sectorId } = extractCyberspaceActionState(action)
       if (sectorId !== userCurrentSectorId) {
         // console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
         return null

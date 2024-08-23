@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { Vector3 } from 'three'
-import { CYBERSPACE_AXIS, decodeHexToCoordinates } from '../../libraries/Cyberspace'
+import { CYBERSPACE_AXIS, factoryCyberspaceCoordinate } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { ConstructGeometryEdges, ConstructMaterialEdges } from '../../data/ConstructModel'
 
@@ -71,7 +71,7 @@ function getConstructPosition(event: NDKEvent, scale: number): Vector3 {
   }
 
   const coordinate = cTag
-  const position = decodeHexToCoordinates(coordinate)
+  const position = factoryCyberspaceCoordinate(coordinate)
   const scaledPosition = position.vector.divideScalar(CYBERSPACE_AXIS.div(scale))
   return scaledPosition.toVector3()
 }

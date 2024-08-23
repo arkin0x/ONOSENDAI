@@ -1,8 +1,24 @@
-import * as THREE from "three"
 import { Decimal } from 'decimal.js'
-import { decimalAlmostEqual } from "./Cyberspace"
+import { Quaternion, Vector3 } from "three"
 
 Decimal.set({ precision: 100 })
+
+/**
+ * Decimal Almost Equal
+ * almost-equal implemented with decimal.js
+ */
+const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
+const decimalDBL_EPSILON = new Decimal(2.2204460492503131e-16)
+export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
+  const difference = a.minus(b).abs()
+  if (difference.lessThanOrEqualTo(decimalFLT_EPSILON)) {
+    return true
+  }
+  if (difference.lessThanOrEqualTo(decimalDBL_EPSILON.times(Decimal.min(a.abs(), b.abs())))) {
+    return true
+  }
+  return a.equals(b)
+}
 
 export class DecimalVector3 {
   x: Decimal 
@@ -52,7 +68,7 @@ export class DecimalVector3 {
     ]
   }
 
-  applyQuaternion(q: THREE.Quaternion) {
+  applyQuaternion(q: Quaternion) {
 
     const x = this.x
     const y = this.y
@@ -115,7 +131,7 @@ export class DecimalVector3 {
     return decimalAlmostEqual(this.x, v.x) && decimalAlmostEqual(this.y, v.y) && decimalAlmostEqual(this.z, v.z)
   }
 
-  toVector3(): THREE.Vector3 {
-    return new THREE.Vector3(parseFloat(this.x.toFixed(8)), parseFloat(this.y.toFixed(8)), parseFloat(this.z.toFixed(8)))
+  toVector3(): Vector3 {
+    return new Vector3(parseFloat(this.x.toFixed(8)), parseFloat(this.y.toFixed(8)), parseFloat(this.z.toFixed(8)))
   }
 }

@@ -4,7 +4,7 @@ import { useContext, useEffect, useRef, useState } from "react"
 import { AxesHelper, Vector3 } from "three"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
-import { extractActionState, ExtractedActionState } from "../../libraries/Cyberspace"
+import { extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
@@ -15,7 +15,7 @@ import { useAvatarStore } from "../../store/AvatarStore"
 export const Hud = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { actionState, getSimulatedState } = useAvatarStore()
-  const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
+  const [simulatedState, setSimulatedState] = useState<ExtractedCyberspaceActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
   const { rotation } = useRotationStore()
@@ -26,7 +26,7 @@ export const Hud = () => {
   useFrame(() => {
   const simulated = getSimulatedState(pubkey)
     if (simulated) {
-      setSimulatedState(extractActionState(simulated))
+      setSimulatedState(extractCyberspaceActionState(simulated))
     }
     actionsRef.current = actionState[pubkey]
   })

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo } from 'react'
 import { Text } from "@react-three/drei"
 import { useAvatarStore } from "../../store/AvatarStore"
 import { Vector3, BoxGeometry } from 'three'
-import { CYBERSPACE_AXIS, CYBERSPACE_SECTOR, getSectorDecimalFromId } from '../../libraries/Cyberspace'
+import { CYBERSPACE_AXIS, CYBERSPACE_SECTOR, cyberspaceSectorStringToObject, getSectorDecimalFromId } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { getTag } from '../../libraries/Nostr'
 import { useSectorStore } from '../../store/SectorStore'
@@ -105,6 +105,7 @@ const SectorMarker: React.FC<SectorMarkerProps> = ({ id, position, isGenesis, is
 
 function getSectorPosition(sectorId: string, scale: number): Vector3 {
   const DOWNSCALE = CYBERSPACE_AXIS.div(scale)
+  const sector = cyberspaceSectorStringToObject(sectorId)
   const sectorDecimal = getSectorDecimalFromId(sectorId).multiplyScalar(CYBERSPACE_SECTOR).divideScalar(DOWNSCALE)
   const v3 = sectorDecimal.toVector3()
   console.log('Sector position:', sectorId, sectorDecimal.toArray(32) )

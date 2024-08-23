@@ -1,14 +1,12 @@
 import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
-import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, EdgesGeometry, LineSegments, LineBasicMaterial } from 'three'
+import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry } from 'three'
 import { Text } from "@react-three/drei"
 import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
-import { getSectorDecimalFromId, getSectorIdFromDecimal, relativeSectorPosition } from '../../libraries/Cyberspace'
+import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
-import { DecimalVector3 } from '../../libraries/DecimalVector3'
 import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
-import { Avatar } from '../Avatar/Avatar'
 import { AvatarMarker } from './AvatarMarker'
 
 interface SectorData {
@@ -29,7 +27,7 @@ export const SectorGrid = () => {
 
   const sectorData: SectorData[] = useMemo(() => {
     return Object.entries(sectorState).map(([sectorId]) => {
-      const diff = relativeSectorPosition(focusSectorId, sectorId)
+      const diff = relativeSectorIndex(focusSectorId, sectorId)
       console.log('diff', diff.toArray(0), focusSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, sectorState)
@@ -61,7 +59,8 @@ export const SectorGrid = () => {
   
   const handleClick = () => {
     if (hovered !== null) {
-      const newCenterSectorId = getSectorIdFromDecimal(new DecimalVector3().fromArray(sectorData[hovered].position.toArray()))
+      // @TODO: this is broken
+      // const newCenterSectorId = new DecimalVector3().fromArray(sectorData[hovered].position.toArray())
       setCenter(newCenterSectorId)
     }
   }

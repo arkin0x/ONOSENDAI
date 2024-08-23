@@ -1,6 +1,6 @@
 import React, { useContext, useEffect } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
-import { CYBERSPACE_SECTOR, relativeSectorPosition } from '../../libraries/Cyberspace'
+import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { CyberspaceKinds, CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
@@ -82,7 +82,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element 
     <>
       {Object.keys(sectorState).map(groupSectorId => (
         <Sector 
-          position={relativeSectorPosition(userCurrentSectorId, groupSectorId).toVector3()} 
+          position={relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()} 
           current={userCurrentSectorId === groupSectorId} 
           key={groupSectorId} 
           id={groupSectorId} 

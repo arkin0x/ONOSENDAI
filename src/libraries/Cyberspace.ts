@@ -99,12 +99,6 @@ export enum CyberspacePlane {
   ISpace = "i-space"
 }
 
-// Utility functions
-
-export function cyberspacePlaneToBin(plane: CyberspacePlane): number {
-  return plane === CyberspacePlane.DSpace ? 0 : 1
-}
-
 // Usage functions
 
 // Takes a hex string and returns a CyberspaceCoordinate object
@@ -149,6 +143,12 @@ export function cyberspaceEncodePartialToRaw(vector: CyberspaceCoordinateVector,
     }
 
     return factoryHex256Bit(hexString) as CyberspaceCoordinateRaw
+}
+
+// Utility functions
+
+export function cyberspacePlaneToBin(plane: CyberspacePlane): number {
+  return plane === CyberspacePlane.DSpace ? 0 : 1
 }
 
 // Behind-the-scenes Factory functions
@@ -289,6 +289,21 @@ export function cyberspaceSectorStringToObject(sectorString: string): Cyberspace
   return factoryCyberspaceSector(sectorId)
 }
 
+// Utility functions
+export function cyberspaceSectorIdToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
+  const [x, y, z] = sectorId.split('-')
+  return factoryCyberspaceSectorVector(x, y, z)
+}
+
+export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinateVector): CyberspaceSector {
+  const x = vector.x.div(CYBERSPACE_SECTOR).floor().toString()
+  const y = vector.y.div(CYBERSPACE_SECTOR).floor().toString()
+  const z = vector.z.div(CYBERSPACE_SECTOR).floor().toString()
+  const sectorId = factoryCyberspaceSectorRaw(`${x}-${y}-${z}`)
+  const sector = factoryCyberspaceSector(sectorId)
+  return sector
+}
+
 // Behind-the-scenes Factory functions
 function factoryCyberspaceSectorRaw(id: string): CyberspaceSectorRaw {
   if (!/^\d+-\d+-\d+$/.test(id)) {
@@ -298,7 +313,7 @@ function factoryCyberspaceSectorRaw(id: string): CyberspaceSectorRaw {
 }
 
 function factoryCyberspaceSector(id: CyberspaceSectorRaw): CyberspaceSector {
-  const vector = splitCyberspaceSectorId(id)
+  const vector = cyberspaceSectorIdToVector(id)
 
   // The lowest coordinate corner of the sector cube.
   const cornerVector = factoryCyberspaceCoordinateVector(vector.x.mul(CYBERSPACE_SECTOR), vector.y.mul(CYBERSPACE_SECTOR), vector.z.mul(CYBERSPACE_SECTOR)) as CyberspaceCoordinateVector
@@ -327,26 +342,6 @@ function factoryCyberspaceSectorVector(x: number | string | Decimal, y: number |
     factoryCyberspaceSectorIndex(y),
     factoryCyberspaceSectorIndex(z)
   ) as CyberspaceSectorVector
-}
-
-// Utility functions
-export function splitCyberspaceSectorId(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
-  const [x, y, z] = sectorId.split('-')
-  return factoryCyberspaceSectorVector(x, y, z)
-}
-
-export function cyberspaceSectorIdToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
-  const { x, y, z } = splitCyberspaceSectorId(sectorId)
-  return factoryCyberspaceSectorVector(x, y, z)
-}
-
-export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinateVector): CyberspaceSector {
-  const x = vector.x.div(CYBERSPACE_SECTOR).floor().toString()
-  const y = vector.y.div(CYBERSPACE_SECTOR).floor().toString()
-  const z = vector.z.div(CYBERSPACE_SECTOR).floor().toString()
-  const sectorId = factoryCyberspaceSectorRaw(`${x}-${y}-${z}`)
-  const sector = factoryCyberspaceSector(sectorId)
-  return sector
 }
 
 // VELOCITY
@@ -413,8 +408,9 @@ export type CyberspaceActionTypes =
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
-  const sector = getSectorIdFromCoordinate(pubkey) 
-  const sectorId = getSectorIdFromDecimal(sector)
+  const coordinate = integerCyberspaceCoordinateFromString(pubkey)
+  const sector = coordinate.sector
+  const sectorId = sector.id
   return {
     pubkey, 
     kind: 333,
@@ -576,70 +572,18 @@ export type ActionChainState =
   | { status: 'invalid' }
   | { status: 'valid', genesisAction: Event, latestAction: Event}
 
-/**
- * Used for converting a hex cyberspace coordinate into a DecimalVector3 representing the sector id that the coordinate is in.
- * @param coordinate string
- * @returns DecimalVector3
- */
-export const getSectorIdFromCoordinate = (coordinate: string): DecimalVector3 => {
-  const coord = factoryCyberspaceCoordinate(coordinate)
-
-  const sectorX = coord.x.div(CYBERSPACE_SECTOR).floor()
-  const sectorY = coord.y.div(CYBERSPACE_SECTOR).floor()
-  const sectorZ = coord.z.div(CYBERSPACE_SECTOR).floor()
-  
-  const sector = new DecimalVector3(sectorX, sectorY, sectorZ)
-
-  return sector
-}
 
 /**
- * Render the sector identifier from a DecimalVector3 sector. This is used in the "S" tag for querying objects in a sector.
+ * Example output: [0, 1, -1]
+ * @param baseSectorId string
+ * @param targetSectorId string
+ * @returns CyberspaceSectorVector representing the difference in sector indices between the base and target sectors.
  */
-export const getSectorIdFromDecimal = (sector: DecimalVector3): string => {
-  return sector.toArray(0).join('-')
-}
-
-/**
- * Turn a sectorId string into a DecimalVector3.
- * @param sectorId string
- * @returns DecimalVector3
- */
-export const getSectorDecimalFromId = (sectorId: string): DecimalVector3 => {
-  const [x, y, z] = sectorId.split('-').map(coord => new Decimal(coord))
-  return new DecimalVector3(x, y, z)
-}
-
-/**
- * Transform a global cyberspace position to a local sector position for rendering in Three.js.
- * @param cyberspacePosition DecimalVector3
- */
-export const cyberspaceVectorToSectorDecimal = (cyberspacePosition: DecimalVector3): DecimalVector3 => {
-
-  const localX = cyberspacePosition.x.mod(CYBERSPACE_SECTOR)
-  const localY = cyberspacePosition.y.mod(CYBERSPACE_SECTOR)
-  const localZ = cyberspacePosition.z.mod(CYBERSPACE_SECTOR)
-
-  const local = new DecimalVector3(localX, localY, localZ)
-
-  return local
-}
-
-/**
- * Global cyberspace position to local sector position for rendering in Three.js.
- * Used to get the sector-based coordinates (different from the global cyberspace coordinates) from a 256-bit hex string.
- * @param coordinate 
- * @returns 
- */
-export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
-  const coord = factoryCyberspaceCoordinate(coordinate)
-  const position = new DecimalVector3(coord.x, coord.y, coord.z)
-  return cyberspaceVectorToSectorDecimal(position)
-}
-
-export const relativeSectorPosition = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
-  const baseSector = getSectorDecimalFromId(baseSectorId)
-  const targetSector = getSectorDecimalFromId(targetSectorId)
-  const position = targetSector.sub(baseSector).multiplyScalar(CYBERSPACE_SECTOR)
+export const relativeSectorIndex = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
+  const base = cyberspaceSectorStringToRaw(baseSectorId)
+  const target = cyberspaceSectorStringToRaw(targetSectorId)
+  const baseVector = cyberspaceSectorIdToVector(base)
+  const targetVector = cyberspaceSectorIdToVector(target)
+  const position = targetVector.sub(baseVector)
   return position
 }

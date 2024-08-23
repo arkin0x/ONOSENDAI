@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react'
 import { NDKContext } from '../providers/NDKProvider'
 import { Vector3 } from 'three'
-import { getSectorCoordinatesFromCyberspaceCoordinate, getSectorIdFromCoordinate } from '../libraries/Cyberspace'
+import { getSectorCoordinatesFromCyberspaceCoordinate } from '../libraries/Cyberspace'
 import { DecimalVector3 } from '../libraries/DecimalVector3'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import COLORS from '../data/Colors'

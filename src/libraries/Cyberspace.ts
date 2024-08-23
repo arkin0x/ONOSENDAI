@@ -123,11 +123,18 @@ export function cyberspacePlaneToBin(plane: CyberspacePlane): number {
 
 // Usage functions
 
-export function cyberspaceCoordinateStringToObject(coordinateString: string): CyberspaceCoordinate {
+// Takes a hex string and returns a CyberspaceCoordinate object
+export function integerCyberspaceCoordinateFromString(coordinateString: string): CyberspaceCoordinate {
   const hex = factoryHex256Bit(coordinateString)
   return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw) as CyberspaceCoordinate
 }
- 
+
+// Takes a hex string and a decimal axes array and returns a CyberspaceCoordinate object with decimal precision
+export function decimalCyberspaceCoordinateFromStrings(coordinateString: string, decimalAxes: string[]): CyberspaceCoordinate {
+  const hex = factoryHex256Bit(coordinateString)
+  return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw, decimalAxes) as CyberspaceCoordinate
+}
+
 // Takes a vector and a plane and returns a 256-bit hex string
 // This is used when simulating a position and converting the new position to a coordinate hex string.
 // "Partial" here refers to the separated vector and plane as opposed to the full coordinate object.
@@ -202,7 +209,13 @@ function factoryCyberspaceLocalCoordinateDimension(value: Decimal | number | str
   return new Decimal(value) as CyberspaceLocalCoordinateDimension
 }
 
-function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): CyberspaceCoordinate {
+/**
+ * Parse a raw hex coordinate into a CyberspaceCoordinate object, optionally adding the decimal axes if provided.
+ * @param coordinateRaw CyberspaceCoordinateRaw
+ * @param decimalAxes the full decimal tag, ie ["Cd", "00000000", "00000000", "00000000"]
+ * @returns CyberspaceCoordinate
+ */
+function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw, decimalAxes?: string[]): CyberspaceCoordinate {
   const hex = factoryHex256Bit(coordinateRaw)
   // Convert hex string to binary
   const binaryString = BigInt("0x" + hex).toString(2).padStart(256, '0')
@@ -226,9 +239,20 @@ function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): Cy
     }
   }
   // Convert BigInts to Decimal objects
-  const dimensionX = new Decimal(X.toString())
-  const dimensionY = new Decimal(Y.toString())
-  const dimensionZ = new Decimal(Z.toString())
+  let dimensionX = new Decimal(X.toString())
+  let dimensionY = new Decimal(Y.toString())
+  let dimensionZ = new Decimal(Z.toString())
+
+  // Parse the decimal axes if provided & valid
+  if (decimalAxes && decimalAxes.length === 4) {
+    const decimals = decimalAxes.slice(1,4).map(v => parseInt(v))
+    if (!decimals.some(v => isNaN(v))) {
+      dimensionX = dimensionX.add((new Decimal(decimals[0])).div(FRACTIONAL_PRECISION))
+      dimensionY = dimensionY.add((new Decimal(decimals[1])).div(FRACTIONAL_PRECISION))
+      dimensionZ = dimensionZ.add((new Decimal(decimals[2])).div(FRACTIONAL_PRECISION))
+    }
+  }
+
   const vector = factoryCyberspaceCoordinateVector(dimensionX, dimensionY, dimensionZ)
   const localVector = factoryCyberspaceLocalCoordinateVector(dimensionX.mod(CYBERSPACE_SECTOR), dimensionY.mod(CYBERSPACE_SECTOR), dimensionZ.mod(CYBERSPACE_SECTOR))
   const sector = cyberspaceSectorFromCoordinateVector(vector)
@@ -340,6 +364,10 @@ export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinat
   const sector = factoryCyberspaceSector(sectorId)
   return sector
 }
+
+// VELOCITY
+
+export type CyberspaceVelocity = DecimalVector3 & { readonly __brand: unique symbol }
 
 // ACTION CHAIN
 
@@ -461,13 +489,10 @@ export const isGenesisAction = (action: Event): boolean => {
 
 export type ExtractedCyberspaceActionState = {
   coordinate: CyberspaceCoordinate
-  sector: CyberspaceSector
-  // cyberspaceCoordinate: string
-  // sectorId: string
-  // position: DecimalVector3
-  sectorPosition: DecimalVector3
+  localCoordinate: CyberspaceLocalCoordinate
   plane: CyberspacePlane
-  velocity: DecimalVector3
+  sector: CyberspaceSector
+  velocity: CyberspaceVelocity
   rotation: Quaternion
   time: Time
 }
@@ -475,36 +500,30 @@ export type ExtractedCyberspaceActionState = {
 // note: CyberspaceAction are events that have been validated so we don't need to handle missing tags.
 // TODO: refactor with new types
 export const extractCyberspaceActionState = (action: CyberspaceAction): ExtractedCyberspaceActionState => {
-  // get position
-  const posTag = action.tags.find(getTag('C'))![1]
-  const coordinate = cyberspaceCoordinateStringToObject(posTag)
+  const coordinateTag = action.tags.find(getTag('C'))![1]
+  const coordinateDecimalsTag = action.tags.find(getTag('Cd'))!
+  const coordinate = decimalCyberspaceCoordinateFromStrings(coordinateTag, coordinateDecimalsTag)
+  const localCoordinate = coordinate.local
+  const plane = coordinate.plane
   const sector = coordinate.sector
-  const position = getVector3FromCyberspaceCoordinate(cyberspaceCoordinate)
-  // add fractional position if present
-  const positionDecimalsTag = action.tags.find(getTag('Cd'))
-  if (positionDecimalsTag) {
-    const decimals = positionDecimalsTag.slice(1).map(v => parseInt(v) / FRACTIONAL_PRECISION)
-    position.x = position.x.plus(new Decimal(decimals[0]))
-    position.y = position.y.plus(new Decimal(decimals[1]))
-    position.z = position.z.plus(new Decimal(decimals[2]))
-  }
-  const sectorPosition = cyberspaceVectorToSectorDecimal(position)
-  // get plane
-  const plane = getCyberspacePlaneFromAction(action)
   // get velocity
-  const velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
+  const velocityTag = action.tags.find(getTag('velocity'))!
+  const velocity = new DecimalVector3().fromArray(velocityTag.slice(1,4)) as CyberspaceVelocity
   // get rotation
-  // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
-  const quaternionTag = action.tags.find(getTag('quaternion'))
+  const quaternionTag = action.tags.find(getTag('quaternion'))!
   let rotation = new Quaternion()
   if (quaternionTag) {
-    rotation = new Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
+    rotation = new Quaternion().fromArray(quaternionTag.slice(1,4).map(parseFloat))
   }
   const time = getTime(action)
-  return {cyberspaceCoordinateRaw: cyberspaceCoordinate, sectorId, position, sectorPosition, plane, velocity, rotation, time}
   return {
     coordinate,
-    sector
+    localCoordinate,
+    plane,
+    sector,
+    velocity,
+    rotation,
+    time,
   }
 }
 

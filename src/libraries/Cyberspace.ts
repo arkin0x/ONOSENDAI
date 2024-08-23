@@ -1,84 +1,107 @@
-import * as THREE from "three"
+import { Quaternion, Vector3 } from "three"
 import { Decimal } from 'decimal.js'
 import almostEqual from "almost-equal"
-import { CyberspaceCoordinate, CyberspaceCoordinateRaw, CyberspaceCoordinates, CyberspacePlane, factoryCyberspaceCoordinate, factoryCyberspaceDimension, Milliseconds, MillisecondsPadded, MillisecondsTimestamp, Plane, SecondsTimestamp, Time } from "../types/CyberspaceTypes"
+import { DecimalVector3 } from "./DecimalVector3"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
-import { DecimalVector3 } from "./DecimalVector3"
+
+// CONSTANTS
 
 export const CYBERSPACE_AXIS = new Decimal(2).pow(85)
 export const CYBERSPACE_SECTOR = new Decimal(2).pow(30)
-export const CYBERSPACE_SECTORS_PER_AXIS = new Decimal(2).pow(55)
-export const CYBERSPACE_DOWNSCALE = new Decimal(2).pow(35) // this is the size of a cyberspace axis reduced by 2**35 so that it fits into a number primitive in JavaScript (< Number.MAX_SAFE_INTEGER)
-export const DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).toNumber()
-export const HALF_DOWNSCALED_CYBERSPACE_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_DOWNSCALE).div(2).toNumber()
+export const CYBERSPACE_SECTORS_PER_AXIS = CYBERSPACE_AXIS.div(CYBERSPACE_SECTOR) // 2^55 sectors per axis
 
-export const ZERO_VELOCITY = 0.0009765625 // Math.POW(2,-10) and below is rounded to zero.
+// Avatar velocity Math.POW(2,-10) and below is rounded to zero.
+export const ZERO_VELOCITY = 0.0009765625 
 
-/*
-Deriving the center coordinate of cyberspace:
+// center coordinates
+export const CENTERCOORD_DSPACE = "1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+export const CENTERCOORD_ISPACE = "1fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+export const CENTERCOORD_BINARY_DSPACE = "0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110"
+export const CENTERCOORD_BINARY_ISPACE = "0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
 
-Each axis of cyberspace is 2**85 long. However, the axes are index 0 which means the largest coordinate is actually 2**85 - 1, or 38685626227668133590597631.
+// quanta of time
+export const FRAME = 1000 / 60 // milliseconds. Each frame is 1/60th of a second
 
-Dividing this by 2 yields 19342813113834066795298815.5. Having a decimal in the coordinate system is not possible, so we round down to 19342813113834066795298815.
-
-Python:
-from decimal import Decimal
-axis = Decimal(2 ** 85 - 1)
-half_axis = axis // Decimal(2)
-print(half_axis)
-
-The 85-bit representation of 19342813113834066795298815 is 0b01...1.
-
-Python:
-bin(19342813113834066795298815)[2:] # 111111111111111111111111111111111111111111111111111111111111111111111111111111111111
-len(bin(19342813113834066795298815)[2:]) # 84 (84 1's; the leftmost bit is 0 and omitted as it is implied)
-
-The 85 bits of each axis are interleaved to form the 255-bit cyberspace coordinate. From left (most significant) to right (least significant) the final 255-bit coordinate is formed as follows:
-
-XYZXYZXYZ...XYZP
-
-Since the leftmost bit of the center coordinate on each axis is 0, the resulting 255-bit coordinate will be:
-
-000111111...111P (all implied bits are 1's)
-
-P may be replaced with a 0 for d-space or a 1 for i-space.
-
-*/
-
-export const CENTERCOORD_BINARY = "0b0001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-// usage: BigInt(CENTERCOORD_BINARY)
-
-export const CENTERCOORD = "1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
-
-export const FRAME = 1000 / 60 // each frame is 1/60th of a second
+// precision for fractional position
 export const FRACTIONAL_PRECISION = 100_000_000 // 8 decimal places for Avatar position precision in "Cd" tag.
 
 export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
-export const binToPlane = (bin: string|number): Plane => {
-  return parseInt(bin.toString()) > 0 ? Plane.ISpace : Plane.DSpace
+// TYPES
+
+// Base type for all 256-bit hex strings
+type Hex256Bit = `${
+  | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' 
+  | '8' | '9' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
+}{64}`
+
+// Specific types for different entities
+export type NostrEventId = Hex256Bit & { readonly __brand: unique symbol }
+export type NostrPublicKey = Hex256Bit & { readonly __brand: unique symbol }
+export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
+
+// CYBERSPACE
+
+// ACTIONS
+
+export type CyberspaceAction = 
+  | 'drift'
+  | 'hop'
+  | 'freeze'
+  | 'derezz'
+  | 'vortex'
+  | 'bubble'
+  | 'armor'
+  | 'stealth'
+  | 'noop'
+
+// COORDINATES
+// A Cyberspace coordinate is either a raw hex coordinate or a coordinate object including the raw hex, vector, individual dimensions, and plane.
+
+export type CyberspaceCoordinateRaw = Hex256Bit & { readonly __brand: unique symbol }
+
+export type CyberspaceCoordinate = {
+  raw: CyberspaceCoordinateRaw
+  vector: CyberspaceCoordinateVector
+  x: CyberspaceCoordinateDimension 
+  y: CyberspaceCoordinateDimension
+  z: CyberspaceCoordinateDimension
+  plane: CyberspacePlane
 }
 
-export const planeToBin = (plane: Plane): number => {
-  return plane === Plane.ISpace ? 1 : 0
+// partial type to express a single dimension of a coordinate
+export type CyberspaceCoordinateDimension = Decimal & { readonly __brand: 'CyberspaceDimension' }
+
+// partial type to express a vector of dimensions
+export type CyberspaceCoordinateVector = DecimalVector3 & { readonly __brand: unique symbol }
+
+// partial type to express a plane in cyberspace
+export enum CyberspacePlane {
+  DSpace = "d-space",
+  ISpace = "i-space"
 }
 
-export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
-  return {
-    vector: position,
-    x: position.x,
-    y: position.y,
-    z: position.z,
-    plane
-  }
+// Utility functions
+
+export const cyberspacePlaneToBin = (plane: CyberspacePlane): number => {
+  return plane === CyberspacePlane.DSpace ? 0 : 1
 }
 
-export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
-    const X = new Decimal(coords.vector.x).floor()
-    const Y = new Decimal(coords.vector.y).floor()
-    const Z = new Decimal(coords.vector.z).floor()
+// Usage functions
+
+export function cyberspaceCoordinateStringToObject(coordinateString: string): CyberspaceCoordinate {
+  return factoryCyberspaceCoordinate(coordinateString as CyberspaceCoordinateRaw) as CyberspaceCoordinate
+}
+ 
+// Takes a vector and a plane and returns a 256-bit hex string
+// This is used when simulating a position and converting the new position to a coordinate hex string.
+// "Partial" here refers to the separated vector and plane as opposed to the full coordinate object.
+export function cyberspaceEncodePartialToRaw(vector: CyberspaceCoordinateVector, plane: CyberspacePlane): CyberspaceCoordinateRaw {
+    const X = vector.x.floor()
+    const Y = vector.y.floor()
+    const Z = vector.z.floor()
 
     // Convert to binary strings, ensuring 85 bits for each coordinate
     const binaryX = X.toBinary().slice(2).padStart(85, '0')
@@ -92,7 +115,7 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
     }
 
     // Add the plane bit
-    binaryString += planeToBin(coords.plane) 
+    binaryString += cyberspacePlaneToBin(plane) 
 
     // Convert binary string to hexadecimal
     let hexString = ''
@@ -101,48 +124,214 @@ export function encodeCoordinatesToHex(coords: CyberspaceCoordinates): string {
         hexString += parseInt(chunk, 2).toString(16)
     }
 
-    return hexString
+    return hexString as CyberspaceCoordinateRaw
 }
 
-export function decodeHexToCoordinates(hexString: CyberspaceCoordinateRaw): CyberspaceCoordinate {
-    // Convert hex string to binary
-    const binaryString = BigInt("0x" + hexString).toString(2).padStart(256, '0')
+// Behind-the-scenes Factory functions
 
-    const plane = binaryString[255] === '0' ? CyberspacePlane.DSpace : CyberspacePlane.ISpace
-    
-    // Initialize the coordinates
-    let X = BigInt(0)
-    let Y = BigInt(0)
-    let Z = BigInt(0)
-
-    // Traverse through the binary string
-    for (let i = 0; i < 255; i++) {
-      switch (i % 3) {
-        case 0:
-          X = (X << BigInt(1)) | BigInt(parseInt(binaryString[i]))
-          break
-        case 1:
-          Y = (Y << BigInt(1)) | BigInt(parseInt(binaryString[i]))
-          break
-        case 2:
-          Z = (Z << BigInt(1)) | BigInt(parseInt(binaryString[i]))
-          break
-      }
+function factoryCyberspacePlane(value: string | number | boolean): CyberspacePlane {
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === CyberspacePlane.DSpace) {
+      return CyberspacePlane.DSpace
     }
-
-    // Convert BigInts to Decimal objects
-    const decimalX = new Decimal(X.toString())
-    const decimalY = new Decimal(Y.toString())
-    const decimalZ = new Decimal(Z.toString())
-
-    return factoryCyberspaceCoordinate(
-        hexString,
-        factoryCyberspaceDimension(decimalX),
-        factoryCyberspaceDimension(decimalY),
-        factoryCyberspaceDimension(decimalZ),
-        plane
-    )
+    if (value.toLowerCase() === CyberspacePlane.ISpace) {
+      return CyberspacePlane.ISpace
+    }
+    if (value === 'dspace' || value === 'd') {
+      return CyberspacePlane.DSpace
+    }
+    if (value === 'ispace' || value === 'i') {
+      return CyberspacePlane.ISpace
+    }
+    throw new Error('Invalid CyberspacePlane string')
+  }
+  if (value == 0) {
+    return CyberspacePlane.DSpace
+  } else {
+    // note: any non-zero value will return ISpace
+    return CyberspacePlane.ISpace
+  }
 }
+
+function factoryCyberspaceCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceCoordinateVector {
+  return new DecimalVector3(x, y, z) as CyberspaceCoordinateVector
+}
+
+function factoryCyberspaceDimension(value: Decimal | number | string): CyberspaceCoordinateDimension {
+  return new Decimal(value) as CyberspaceCoordinateDimension
+}
+
+function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw): CyberspaceCoordinate {
+  // Convert hex string to binary
+  const binaryString = BigInt("0x" + coordinateRaw).toString(2).padStart(256, '0')
+
+  const plane = binaryString[255] === '0' ? CyberspacePlane.DSpace : CyberspacePlane.ISpace
+  
+  // Initialize the dimensions 
+  let X = BigInt(0)
+  let Y = BigInt(0)
+  let Z = BigInt(0)
+
+  // Traverse through the binary string
+  for (let i = 0; i < 255; i++) {
+    switch (i % 3) {
+      case 0:
+        X = (X << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+        break
+      case 1:
+        Y = (Y << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+        break
+      case 2:
+        Z = (Z << BigInt(1)) | BigInt(parseInt(binaryString[i]))
+        break
+    }
+  }
+
+  // Convert BigInts to Decimal objects
+  const dimensionX = new Decimal(X.toString())
+  const dimensionY = new Decimal(Y.toString())
+  const dimensionZ = new Decimal(Z.toString())
+
+  const vector = factoryCyberspaceCoordinateVector(dimensionX, dimensionY, dimensionZ)
+
+  const sector = cyberspaceSectorFromCoordinateVector(vector)
+
+  return {
+    raw: coordinateRaw,
+    vector,
+    x: factoryCyberspaceDimension(dimensionX),
+    y: factoryCyberspaceDimension(dimensionY),
+    z: factoryCyberspaceDimension(dimensionZ),
+    plane,
+    sector,
+  } as CyberspaceCoordinate
+}
+
+// SECTORS
+// A sector is either a string representation of its indices or a full sector object including the raw string, vector, and indices.
+
+export type CyberspaceSectorRaw = string & { readonly __brand: 'CyberspaceSectorId' }
+
+export type CyberspaceSector = {
+  id: CyberspaceSectorRaw
+  vector: CyberspaceSectorVector
+  x: CyberspaceSectorIndex
+  y: CyberspaceSectorIndex
+  z: CyberspaceSectorIndex
+  corner: CyberspaceCoordinateVector
+  center: CyberspaceCoordinateVector
+}
+
+// partial type for individual sector indices(x, y, or z of a sector ID). It's the index of the sector on the axis.
+type CyberspaceSectorIndex = Decimal & { readonly __brand: 'CyberspaceSectorIndex' }
+
+// partial type for the vector representation of a sector's indices
+type CyberspaceSectorVector = DecimalVector3 & { readonly __brand: 'CyberspaceSectorVector' }
+
+// Usage functions
+export function cyberspaceSectorStringToId(sectorString: string): CyberspaceSectorRaw {
+  return factoryCyberspaceSectorId(sectorString)
+}
+
+export function cyberspaceSectorStringToObject(sectorString: string): CyberspaceSector {
+  const sectorId: CyberspaceSectorRaw = cyberspaceSectorStringToId(sectorString)
+  return factoryCyberspaceSector(sectorId)
+}
+
+// Behind-the-scenes Factory functions
+function factoryCyberspaceSectorId(id: string): CyberspaceSectorRaw {
+  if (!/^\d+-\d+-\d+$/.test(id)) {
+    throw new Error('Invalid sector ID format')
+  }
+  return id as CyberspaceSectorRaw
+}
+
+function factoryCyberspaceSector(id: CyberspaceSectorRaw): CyberspaceSector {
+  const vector = splitCyberspaceSectorId(id)
+
+  // The lowest coordinate corner of the sector cube.
+  const cornerVector = factoryCyberspaceCoordinateVector(vector.x.mul(CYBERSPACE_SECTOR), vector.y.mul(CYBERSPACE_SECTOR), vector.z.mul(CYBERSPACE_SECTOR)) as CyberspaceCoordinateVector
+
+  // The center of the sector is calculated by multiplying the sector index by the size of the sector and adding half of the sector size. This center will be used to downscale and display the sector in the Map UI, so it doesn't need to be rounded even though it may have a fractional Gibson.
+  const centerVector = factoryCyberspaceCoordinateVector(cornerVector.x.add(CYBERSPACE_SECTOR.div(2)), cornerVector.y.add(CYBERSPACE_SECTOR.div(2)), cornerVector.z.add(CYBERSPACE_SECTOR.div(2))) as CyberspaceCoordinateVector
+
+  return {
+    id,
+    vector,
+    x: factoryCyberspaceSectorIndex(vector.x),
+    y: factoryCyberspaceSectorIndex(vector.y),
+    z: factoryCyberspaceSectorIndex(vector.z),
+    corner: cornerVector,
+    center: centerVector
+  } as CyberspaceSector
+}
+
+function factoryCyberspaceSectorIndex(value: number | string | Decimal): CyberspaceSectorIndex {
+  return new Decimal(value) as CyberspaceSectorIndex
+}
+
+function factoryCyberspaceSectorVector(x: number | string | Decimal, y: number | string | Decimal, z: number | string | Decimal): CyberspaceSectorVector {
+  return new DecimalVector3(
+    factoryCyberspaceSectorIndex(x),
+    factoryCyberspaceSectorIndex(y),
+    factoryCyberspaceSectorIndex(z)
+  ) as CyberspaceSectorVector
+}
+
+// Utility functions
+export function splitCyberspaceSectorId(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
+  const [x, y, z] = sectorId.split('-')
+  return factoryCyberspaceSectorVector(x, y, z) as CyberspaceSectorVector
+}
+
+export function cyberspaceSectorIdToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
+  const { x, y, z } = splitCyberspaceSectorId(sectorId)
+  return factoryCyberspaceSectorVector(x, y, z) as CyberspaceSectorVector
+}
+
+export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinateVector): CyberspaceSector {
+  const x = vector.x.div(CYBERSPACE_SECTOR).floor()
+  const y = vector.y.div(CYBERSPACE_SECTOR).floor()
+  const z = vector.z.div(CYBERSPACE_SECTOR).floor()
+  const sectorId = factoryCyberspaceSectorId(`${x}-${y}-${z}`)
+  const sector = factoryCyberspaceSector(sectorId)
+  return sector as CyberspaceSector
+}
+
+// ACTION CHAIN
+
+export type ActionChainState = 
+  | { status: 'loading' }
+  | { status: 'invalid' }
+  | { status: 'valid', genesisAction: Event, latestAction: Event}
+
+// TIME
+
+export type MillisecondsTimestamp = number // typical JS timestamp
+export type SecondsTimestamp = number // created_at seconds timestamp with no milliseconds
+export type Milliseconds = number // 0 - 999
+export type MillisecondsPadded = string // 000 - 999
+export type Time = {
+  created_at: SecondsTimestamp
+  ms_timestamp: MillisecondsTimestamp
+  ms_only: Milliseconds
+  ms_padded: MillisecondsPadded 
+}
+
+
+// FUNCTIONS
+
+export const getCoordinatesObj = (position: DecimalVector3, plane: Plane): CyberspaceCoordinates => {
+  return {
+    vector: position,
+    x: position.x,
+    y: position.y,
+    z: position.z,
+    plane
+  }
+}
+
+
 
 
 const decimalFLT_EPSILON = new Decimal(1.19209290e-7)
@@ -165,12 +354,12 @@ export const decimalAlmostEqual = (a: Decimal, b: Decimal): boolean => {
 /**
  * @NOTE This function is NOT compatible wiith DecimalVector3
  */
-export const vector3Equal = (a: THREE.Vector3, b: THREE.Vector3): boolean => {
+export const vector3Equal = (a: Vector3, b: Vector3): boolean => {
   return almostEqual(a.x, b.x) && almostEqual(a.y, b.y) && almostEqual(a.z, b.z)
 }
 
 export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
-  const coords = decodeHexToCoordinates(coordinate)
+  const coords = factoryCyberspaceCoordinate(coordinate)
   return coords.vector
 }
 
@@ -178,13 +367,17 @@ export const getMillisecondsTimestampFromAction = (action: Event|UnsignedEvent):
   return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1])
 }
 
-export const getPlaneFromAction = (action: Event|UnsignedEvent): 'i-space' | 'd-space' => {
-  // 0 = d-space (reality, first)
-  // 1 = i-space (cyberreality, second)
-  const lastNibble = action.tags.find(getTag('C'))![1].substring(63)
+export const getCyberspacePlaneFromAction = (action: Event|UnsignedEvent): CyberspacePlane => {
+  let lastNibble
+  try {
+    lastNibble = action.tags.find(getTag('C'))![1].substring(63)
+  } catch (e) {
+    console.warn('getCyberspacePlaneFromAction(): Action did not contain required C tag. Defaulting to d-space.')
+    lastNibble = 'e' // default to d-space
+  }
   const binary = parseInt(lastNibble, 16).toString(2).padStart(4, '0')
   const lastBit = parseInt(binary[3])
-  return binToPlane(lastBit)
+  return factoryCyberspacePlane(lastBit)
 }
 
 export const getTime = (action?: Event|UnsignedEvent): Time => {
@@ -238,7 +431,7 @@ export const nowIsAfterLatestAction = (latestAction: Event): boolean => {
   }
 }
 
-export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: THREE.Quaternion, genesisAction: Event, latestAction: Event): Promise<UnsignedEvent> => {
+export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: Quaternion, genesisAction: Event, latestAction: Event): Promise<UnsignedEvent> => {
   const time = getTime()
   const newAction = simulateNextEvent(latestAction, time)
   if (newAction === undefined) {
@@ -267,7 +460,7 @@ export const isGenesisAction = (action: Event): boolean => {
 
 export type ExtractedActionState = ReturnType<typeof extractActionState>
 // get the state from a cyberspace action
-export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: THREE.Quaternion, time: Time} => {
+export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoordinate: string, sectorId: string,  position: DecimalVector3, sectorPosition: DecimalVector3, plane: Plane, velocity: DecimalVector3, rotation: Quaternion, time: Time} => {
 // debug
   // console.log('extractActionState: action', action)
   // get position
@@ -284,15 +477,15 @@ export const extractActionState = (action: Event|UnsignedEvent): {cyberspaceCoor
   }
   const sectorPosition = cyberspaceVectorToSectorDecimal(position)
   // get plane
-  const plane = getPlaneFromAction(action)
+  const plane = getCyberspacePlaneFromAction(action)
   // get velocity
   const velocity = new DecimalVector3().fromArray(action.tags.find(getTag('velocity'))!.slice(1))
   // get rotation
   // @TODO: should we accept floating point precision errors in rotation? If not, we need to implement a new quaternion based on Decimal.
   const quaternionTag = action.tags.find(getTag('quaternion'))
-  let rotation = new THREE.Quaternion()
+  let rotation = new Quaternion()
   if (quaternionTag) {
-    rotation = new THREE.Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
+    rotation = new Quaternion().fromArray(quaternionTag.slice(1).map(parseFloat))
   }
   const time = getTime(action)
   return {cyberspaceCoordinate, sectorId, position, sectorPosition, plane, velocity, rotation, time}
@@ -329,7 +522,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
       velocityPOW = 0
     }
     const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
-    const addedVelocity = bodyVelocity.applyQuaternion(rotation || new THREE.Quaternion(0,0,0,1))
+    const addedVelocity = bodyVelocity.applyQuaternion(rotation || new Quaternion(0,0,0,1))
     updatedVelocity = updatedVelocity.add(addedVelocity)
   }
 
@@ -339,8 +532,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
 
   // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
 
-  const cyberspaceCoord = getCoordinatesObj(updatedPosition, plane)
-  const hexCoord = encodeCoordinatesToHex(cyberspaceCoord)
+  const hexCoord: Hex256Bit = cyberspaceEncodePartialToHex(factoryCyberspaceCoordinateVector(updatedPosition.x, updatedPosition.y, updatedPosition.z), plane)
 
   const velocityArray = updatedVelocity.toArray()
 
@@ -358,6 +550,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
     tags: [
       ['C', hexCoord],
       ['Cd', ...decimalArray ],
+      ['S', ]
       ['velocity', ...velocityArray],
       // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],
@@ -373,7 +566,7 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
  * @returns DecimalVector3
  */
 export const getSectorIdFromCoordinate = (coordinate: string): DecimalVector3 => {
-  const coord = decodeHexToCoordinates(coordinate)
+  const coord = factoryCyberspaceCoordinate(coordinate)
 
   const sectorX = coord.x.div(CYBERSPACE_SECTOR).floor()
   const sectorY = coord.y.div(CYBERSPACE_SECTOR).floor()
@@ -423,7 +616,7 @@ export const cyberspaceVectorToSectorDecimal = (cyberspacePosition: DecimalVecto
  * @returns 
  */
 export const getSectorCoordinatesFromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
-  const coord = decodeHexToCoordinates(coordinate)
+  const coord = factoryCyberspaceCoordinate(coordinate)
   const position = new DecimalVector3(coord.x, coord.y, coord.z)
   return cyberspaceVectorToSectorDecimal(position)
 }

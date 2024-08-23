@@ -1,6 +1,5 @@
-import { Quaternion, Vector3 } from "three"
+import { Quaternion } from "three"
 import { Decimal } from 'decimal.js'
-import almostEqual from "almost-equal"
 import { DecimalVector3 } from "./DecimalVector3"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
@@ -53,21 +52,6 @@ export type NostrPublicKey = Hex256Bit & { readonly __brand: unique symbol }
 export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
 
 // CYBERSPACE
-
-// ACTIONS
-
-export type CyberspaceAction = Event | UnsignedEvent & { readonly __brand: unique symbol}
-
-export type CyberspaceActionTypes = 
-  | 'drift'
-  | 'hop'
-  | 'freeze'
-  | 'derezz'
-  | 'vortex'
-  | 'bubble'
-  | 'armor'
-  | 'stealth'
-  | 'noop'
 
 // COORDINATES
 // A Cyberspace coordinate is either a raw hex coordinate or a coordinate object including the raw hex, vector, individual dimensions, and plane.
@@ -369,19 +353,12 @@ export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinat
 
 export type CyberspaceVelocity = DecimalVector3 & { readonly __brand: unique symbol }
 
-// ACTION CHAIN
-
-export type ActionChainState = 
-  | { status: 'loading' }
-  | { status: 'invalid' }
-  | { status: 'valid', genesisAction: Event, latestAction: Event}
-
 // TIME
 
-export type MillisecondsTimestamp = number // typical JS timestamp
-export type SecondsTimestamp = number // created_at seconds timestamp with no milliseconds
-export type Milliseconds = number // 0 - 999
-export type MillisecondsPadded = string // 000 - 999
+export type SecondsTimestamp = number & { readonly __brand: unique symbol } // created_at seconds timestamp with no milliseconds
+export type MillisecondsTimestamp = number & { readonly __brand: unique symbol } // typical JS timestamp
+export type Milliseconds = number & { readonly __brand: unique symbol } // 0 - 999
+export type MillisecondsPadded = string & { readonly __brand: unique symbol } // "000" - "999"
 export type Time = {
   created_at: SecondsTimestamp
   ms_timestamp: MillisecondsTimestamp
@@ -389,31 +366,11 @@ export type Time = {
   ms_padded: MillisecondsPadded 
 }
 
-// FUNCTIONS
-
-export const getVector3FromCyberspaceCoordinate = (coordinate: string): DecimalVector3 => {
-  const coords = factoryCyberspaceCoordinate(coordinate)
-  return coords.vector
+export const getMillisecondsTimestampFromAction = (action: CyberspaceAction): MillisecondsTimestamp => {
+  return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1]) as MillisecondsTimestamp
 }
 
-export const getMillisecondsTimestampFromAction = (action: Event|UnsignedEvent): number => {
-  return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1])
-}
-
-export const getCyberspacePlaneFromAction = (action: Event|UnsignedEvent): CyberspacePlane => {
-  let lastNibble
-  try {
-    lastNibble = action.tags.find(getTag('C'))![1].substring(63)
-  } catch (e) {
-    console.warn('getCyberspacePlaneFromAction(): Action did not contain required C tag. Defaulting to d-space.')
-    lastNibble = 'e' // default to d-space
-  }
-  const binary = parseInt(lastNibble, 16).toString(2).padStart(4, '0')
-  const lastBit = parseInt(binary[3])
-  return factoryCyberspacePlane(lastBit)
-}
-
-export const getTime = (action?: Event|UnsignedEvent): Time => {
+export const getTime = (action?: CyberspaceAction): Time => {
   let now
   if (action) {
     now = new Date(getMillisecondsTimestampFromAction(action))
@@ -426,6 +383,33 @@ export const getTime = (action?: Event|UnsignedEvent): Time => {
   const ms_padded = now.getMilliseconds().toString().padStart(3, '0') as MillisecondsPadded
   return {created_at, ms_timestamp, ms_only, ms_padded}
 }
+
+export const nowIsAfterLatestAction = (latestAction: CyberspaceAction): boolean => {
+  const now = getTime()
+  const latestActionTimestamp = getMillisecondsTimestampFromAction(latestAction)
+  if (latestActionTimestamp >= now.ms_timestamp) {
+    // not sure how this happens
+    return false
+  }
+  return true
+}
+
+
+// ACTIONS
+
+// CyberspaceAction is a validated Event or valid UnsignedEvent. Its tags will be valid.
+export type CyberspaceAction = Event & { readonly __brand: unique symbol}
+
+export type CyberspaceActionTypes = 
+  | 'drift'
+  | 'hop'
+  | 'freeze'
+  | 'derezz'
+  | 'vortex'
+  | 'bubble'
+  | 'armor'
+  | 'stealth'
+  | 'noop'
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
@@ -448,23 +432,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   } as UnsignedEvent
 }
 
-export const nowIsAfterLatestAction = (latestAction: Event): boolean => {
-  const now = getTime()
-  try {
-    // getMilliseconds is unsafe because it relies on tags that may not exist.
-    // hence the try/catch.
-    const latestActionTimestamp = getMillisecondsTimestampFromAction(latestAction)
-    if (latestActionTimestamp >= now.ms_timestamp) {
-      // not sure how this happens
-      return false
-    }
-    return true
-  } catch (e) {
-    return false
-  }
-}
-
-export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: Quaternion, genesisAction: Event, latestAction: Event): Promise<UnsignedEvent> => {
+export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: Quaternion, genesisAction: CyberspaceAction, latestAction: CyberspaceAction): Promise<UnsignedEvent> => {
   const time = getTime()
   const newAction = simulateNextEvent(latestAction, time)
   if (newAction === undefined) {
@@ -497,9 +465,8 @@ export type ExtractedCyberspaceActionState = {
   time: Time
 }
 // get the state from a cyberspace action
-// note: CyberspaceAction are events that have been validated so we don't need to handle missing tags.
-// TODO: refactor with new types
-export const extractCyberspaceActionState = (action: CyberspaceAction): ExtractedCyberspaceActionState => {
+// note: type CyberspaceAction are events that have been validated so we don't need to handle missing tags.
+export function extractCyberspaceActionState(action: CyberspaceAction): ExtractedCyberspaceActionState {
   const coordinateTag = action.tags.find(getTag('C'))![1]
   const coordinateDecimalsTag = action.tags.find(getTag('Cd'))!
   const coordinate = decimalCyberspaceCoordinateFromStrings(coordinateTag, coordinateDecimalsTag)
@@ -528,11 +495,11 @@ export const extractCyberspaceActionState = (action: CyberspaceAction): Extracte
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time): UnsignedEvent => {
+export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): UnsignedEvent {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
-    throw new Error ("Cannot simulate to a time before the start event.")
+    throw new Error ("Cannot simulate to a time before event.")
   }
   // calculate simulation from startEvent to toTime
   const frames = Math.floor((toTime.ms_timestamp - startTimestamp) / FRAME)
@@ -544,33 +511,38 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
     return startEvent
   }
 
-  const { position, plane, velocity, rotation } = extractCyberspaceActionState(startEvent)
+  const { coordinate, plane, velocity, rotation } = extractCyberspaceActionState(startEvent)
 
-  const updatedPosition = position.clone()
+  const updatedPosition = coordinate.vector.clone()
   let updatedVelocity = velocity.clone()
 
+  // Handle POW
+  const POW = countLeadingZeroesHex(startEvent.id)
+
   // add POW to velocity if the startEvent was a drift action.
-  if ((startEvent as Event).id && startEvent.tags.find(getTagValue('A','drift'))) {
-    const POW = countLeadingZeroesHex((startEvent as Event).id)
+  if (startEvent.tags.find(getTagValue('A','drift'))) {
     let velocityPOW = Math.pow(2, POW-10)
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0
     }
-    const bodyVelocity = new DecimalVector3(0, 0, velocityPOW)
-    const addedVelocity = bodyVelocity.applyQuaternion(rotation || new Quaternion(0,0,0,1))
-    updatedVelocity = updatedVelocity.add(addedVelocity)
+    const bodyVelocity = new DecimalVector3(0, 0, velocityPOW) as CyberspaceVelocity
+    const appliedVelocity = bodyVelocity.applyQuaternion(rotation)
+    updatedVelocity = updatedVelocity.add(appliedVelocity)
   }
+
+  // Todo: handle offensive actions like vortex and bubble
 
   // simulate position based on number of frames that have passed
   const simulatedVelocity = updatedVelocity.clone().multiplyScalar(frames)
   updatedPosition.add(simulatedVelocity)
 
-  // simulation is complete. Construct a new action that represents the current valid state from the simulated state.
+  // simulation is complete. Construct a new action that represents the current valid simulated state.
 
   const positionVector = factoryCyberspaceCoordinateVector(updatedPosition.x, updatedPosition.y, updatedPosition.z)
 
-  const hexCoord: Hex256Bit = cyberspaceEncodePartialToRaw(positionVector, plane)
+  // turn the new position into a hex coordinate
+  const hexCoord: Hex256Bit = cyberspaceEncodePartialToRaw(positionVector, plane) as Hex256Bit
 
   const velocityArray = updatedVelocity.toArray()
 
@@ -590,13 +562,19 @@ export const simulateNextEvent = (startEvent: Event|UnsignedEvent, toTime: Time)
       ['Cd', ...decimalArray ],
       ['S', sector.id],
       ['velocity', ...velocityArray],
-      // ['quaternion', ...rotationArray], // this will be set by the UI
       ['ms', toTime.ms_padded],
       ['version', '1'],
-    ]
+    ] // we omit quaternion tag because it should be set by the client.
   }
   return event
 }
+
+// ACTION CHAIN
+
+export type ActionChainState = 
+  | { status: 'loading' }
+  | { status: 'invalid' }
+  | { status: 'valid', genesisAction: Event, latestAction: Event}
 
 /**
  * Used for converting a hex cyberspace coordinate into a DecimalVector3 representing the sector id that the coordinate is in.

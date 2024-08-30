@@ -1,6 +1,6 @@
 import { useGLTF } from '@react-three/drei'
 import { GLTF } from 'three-stdlib'
-import { getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 
 type GLTFResult = GLTF & {
   nodes: {
@@ -12,7 +12,8 @@ type GLTFResult = GLTF & {
 }
 
 export function SpawnModel({ pubkey }: { pubkey: string }) {
-  const position = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
+  const coord = cyberspaceCoordinateFromHexString(pubkey)
+  const position = coord.local.vector.toVector3()
   const { nodes, materials } = useGLTF('/src/assets/spawn.glb') as GLTFResult
 
   return (

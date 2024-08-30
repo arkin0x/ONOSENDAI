@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Line } from '@react-three/drei'
-import { extractCyberspaceActionState, getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { extractCyberspaceActionState, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { useSectorStore } from '../../store/SectorStore'
@@ -14,7 +14,8 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
   const { userCurrentSectorId } = useSectorStore()
   // const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
 
-  const spawnPosition = getSectorCoordinatesFromCyberspaceCoordinate(pubkey).toVector3()
+  const coord = cyberspaceCoordinateFromHexString(pubkey)
+  const spawnPosition = coord.local.vector.toVector3()
 
   const trailPoints = useMemo(() => {
     const actions = actionState[pubkey] || []
@@ -23,7 +24,9 @@ export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
     const acts = [...actions]
 
     const lines = acts.map(action => {
-      const { sectorPosition, sectorId } = extractCyberspaceActionState(action)
+      const { localCoordinate, sector } = extractCyberspaceActionState(action)
+      const sectorId = sector.id
+      const sectorPosition = localCoordinate.vector
       if (sectorId !== userCurrentSectorId) {
         // console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
         return null

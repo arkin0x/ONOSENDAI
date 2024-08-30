@@ -1,6 +1,6 @@
 import { Event } from 'nostr-tools'
 import { Vector3 } from 'three'
-import { getSectorCoordinatesFromCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import { DecimalVector3 } from '../../libraries/DecimalVector3'
 import COLORS from '../../data/Colors'
 
@@ -31,7 +31,7 @@ function getBlockPosition(event: Event): Vector3 {
   }
 
   const coordinate = cTag[1]
-  const localCoordinates: DecimalVector3 = getSectorCoordinatesFromCyberspaceCoordinate(coordinate)
+  const localCoordinates: DecimalVector3 = cyberspaceCoordinateFromHexString(coordinate)
   return localCoordinates.toVector3()
 }
 

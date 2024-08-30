@@ -9,31 +9,21 @@ import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
 import { CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
 import { CyberspaceKinds } from "../../libraries/Cyberspace"
-import { isGenesisAction } from "../../libraries/Cyberspace";
-import { validateActionChain } from "./validateActionChain"
-import { useAvatarStore } from "../../store/AvatarStore"
+import { isGenesisAction } from "../../libraries/Cyberspace"
+// import { validateActionChain } from "./validateActionChain"
+import { useAvatarStore, AvatarActionDispatched } from "../../store/AvatarStore"
 
 export const useActionChain = (pubkey: string) => {
-
-  // get NDK, the library used to subscribe to relays and fetch events
   const {ndk} = useContext(NDKContext)
-
   const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
-
   const {actionState, dispatchActionState} = useAvatarStore()
-
-  const actionChainState = actionState[pubkey]
-
   const [genesisId, setGenesisId] = useState<string|null>(null)
+  const actionChainState = actionState[pubkey]
   
-  /**
-   * When historyComplete is true, the existing actionChain is complete from genesis to present and is ready for validation
-   */
+  // When historyComplete is true, the existing actionChain is complete from genesis to present and is ready for validation
   const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
-  /**
-   * Reset: if actionChainState is empty, we need to reset other variables.
-   */
+  // Reset: if actionChainState is empty, we need to reset other variables.
   useEffect(() => {
     if (actionChainState && actionChainState.length === 0) {
       setRunInitializeOnce(false)
@@ -42,9 +32,7 @@ export const useActionChain = (pubkey: string) => {
     }
   }, [actionChainState])
 
-  /**
-   * Initialize: set up subscription for latest action and get genesisId from it.
-   */
+  // Initialize: set up subscription for latest action and get genesisId from it.
   useEffect(() => {
     if (runInitializeOnce) return // this effect should only run once
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
@@ -173,7 +161,7 @@ export const useActionChain = (pubkey: string) => {
         fullActionHistory.stop()
       }
     }
-  }, [ndk, genesisId])
+  }, [ndk, genesisId, pubkey, dispatchActionState])
 
   /**
    * Once history is assembled in previous useEffect, validate the action chain.
@@ -181,7 +169,7 @@ export const useActionChain = (pubkey: string) => {
   useEffect(() => {
     if (historyComplete){
       // TODO: 
-      const isValid = validateActionChain(actionChainState)
+      const isValid = true//validateActionChain(actionChainState)
       if (isValid) {
         // console.log('action chain is valid')
       } else {

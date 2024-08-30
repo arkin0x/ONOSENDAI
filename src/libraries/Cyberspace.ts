@@ -376,11 +376,11 @@ export type Time = {
   ms_padded: MillisecondsPadded 
 }
 
-export const getMillisecondsTimestampFromAction = (action: CyberspaceAction): MillisecondsTimestamp => {
+export const getMillisecondsTimestampFromAction = (action: CyberspaceAction | CyberspaceVirtualAction): MillisecondsTimestamp => {
   return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1]) as MillisecondsTimestamp
 }
 
-export const getTime = (action?: CyberspaceAction): Time => {
+export const getTime = (action?: CyberspaceAction | CyberspaceVirtualAction): Time => {
   let now
   if (action) {
     now = new Date(getMillisecondsTimestampFromAction(action))
@@ -407,8 +407,43 @@ export const nowIsAfterLatestAction = (latestAction: CyberspaceAction): boolean 
 
 // ACTIONS
 
-// CyberspaceAction is a validated Event or valid UnsignedEvent. Its tags will be valid.
-export type CyberspaceAction = Event & { readonly __brand: unique symbol}
+type MsTag = ['ms', string]
+type CTag = ['C', string]
+type CdTag = ['Cd', string, string, string]
+type QuaternionTag = ['quaternion', string, string, string, string]
+type VelocityTag = ['velocity', string, string, string]
+type STag = ['S', string]
+type ATag = ['A', string]
+type NonceTag = ['nonce', string, string]
+type VersionTag = ['version', string]
+
+type CyberspaceVirtualActionTemplateTag = CTag | CdTag | STag | VelocityTag | MsTag | VersionTag
+type CyberspaceVirtualActionTag = CyberspaceVirtualActionTemplateTag | QuaternionTag | ATag | NonceTag
+type CyberspaceActionTag = CyberspaceVirtualActionTag
+
+// CyberspaceAction is a validated Event. Its tags will be valid for a CyberspaceAction.
+export type CyberspaceAction = Event & { 
+  tags: CyberspaceActionTag[]
+  readonly __brand: unique symbol
+}
+// A CyberspaceVirtualAction is an unsigned Event. Its tags will be valid for a CyberspaceAction.
+export type CyberspaceVirtualAction = UnsignedEvent & { 
+  tags: CyberspaceVirtualActionTag[]
+  readonly __brand: unique symbol
+}
+
+export type CyberspaceVirtualActionTemplate = UnsignedEvent & {
+  tags: CyberspaceVirtualActionTemplateTag[]
+  readonly __brand: unique symbol
+}
+
+
+export function convertToVirtualAction(action: CyberspaceAction): CyberspaceVirtualAction {
+  // Destructure the action to exclude id and sig
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { id, sig, ...virtualAction } = action
+  return virtualAction as UnsignedEvent as CyberspaceVirtualAction
+}
 
 export function validateCyberspaceAction(action: Event): CyberspaceAction|false {
   if (action.kind !== CyberspaceKinds.Action) {
@@ -553,7 +588,7 @@ export type ExtractedCyberspaceActionState = {
 }
 // get the state from a cyberspace action
 // note: type CyberspaceAction are events that have been validated so we don't need to handle missing tags.
-export function extractCyberspaceActionState(action: CyberspaceAction): ExtractedCyberspaceActionState {
+export function extractCyberspaceActionState(action: CyberspaceAction | CyberspaceVirtualAction): ExtractedCyberspaceActionState {
   const coordinateTag = action.tags.find(getTag('C'))![1]
   const coordinateDecimalsTag = action.tags.find(getTag('Cd'))!
   const coordinate = cyberspaceCoordinateFromHexStringAndDecimal(coordinateTag, coordinateDecimalsTag)
@@ -582,7 +617,7 @@ export function extractCyberspaceActionState(action: CyberspaceAction): Extracte
 }
 
 // @TODO: this simulate function must take into account any other cyberspace objects that would affect its trajectory, such as vortices and bubbles targeting this avatar.
-export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): UnsignedEvent {
+export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): CyberspaceVirtualActionTemplate {
   const startTimestamp = getMillisecondsTimestampFromAction(startEvent)
   if (startTimestamp >= toTime.ms_timestamp) {
     // This shouldn't happen. The time passed in is generated from the current time, so it should always be greater than the start time.
@@ -594,8 +629,9 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): U
   // console.log('frames', frames, startTimestamp)
 
   if (frames === 0) {
-    // no need to simulate if the time difference is less than a frame.
-    return startEvent
+    // no need to simulate if the time difference is less than a frame. return the startEvent as-is.
+    const converted = convertToVirtualAction(startEvent)
+    return converted as CyberspaceVirtualAction
   }
 
   const { coordinate, plane, velocity, rotation } = extractCyberspaceActionState(startEvent)
@@ -639,7 +675,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): U
   const sector = cyberspaceSectorFromCoordinateVector(positionVector)
 
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
-  const event: UnsignedEvent = {
+  const event = {
     pubkey: startEvent.pubkey,
     kind: 333,
     created_at: toTime.created_at,
@@ -652,7 +688,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): U
       ['ms', toTime.ms_padded],
       ['version', '1'],
     ] // we omit quaternion tag because it should be set by the client.
-  }
+  } as UnsignedEvent as CyberspaceVirtualActionTemplate
   return event
 }
 

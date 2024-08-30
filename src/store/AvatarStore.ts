@@ -1,20 +1,20 @@
 import { create } from 'zustand'
 import { Event, UnsignedEvent } from 'nostr-tools'
-import { CyberspaceAction, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
+import { CyberspaceAction, CyberspaceVirtualAction, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/Nostr'
 
 type AvatarActionState = {
   [pubkey: string]: CyberspaceAction[]
 }
 
-type AvatarActionDispatched = 
+export type AvatarActionDispatched = 
   | { type: 'unshift' | 'push'; pubkey: string; actions: Event[] }
   | { type: 'reset'; pubkey: string }
 
 interface AvatarStore {
   actionState: AvatarActionState
   dispatchActionState: (action: AvatarActionDispatched) => void
-  getSimulatedState: (pubkey: string) => UnsignedEvent | null
+  getSimulatedState: (pubkey: string) => CyberspaceVirtualAction | null
   getGenesis: (pubkey: string) => CyberspaceAction | null
   getLatest: (pubkey: string) => CyberspaceAction | null
   getGenesisSectorId: (pubkey: string) => string | null
@@ -78,7 +78,7 @@ export const useAvatarStore = create<AvatarStore>((set, get) => ({
   dispatchActionState: (action: AvatarActionDispatched) => set(state => ({
     actionState: avatarActionStateReducer(state.actionState, action)
   })),
-  getSimulatedState: (pubkey: string) => {
+  getSimulatedState: function(pubkey: string): CyberspaceVirtualAction | null {
     const actions = get().actionState[pubkey]
     if (actions && actions.length > 0) {
       const mostRecentAction = actions[actions.length - 1]

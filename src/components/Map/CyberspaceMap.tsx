@@ -11,7 +11,6 @@ import { MapControls } from './MapControls'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
 import { OrbitControls, Text } from '@react-three/drei'
-import { sectorIdToMapCoord } from '../../libraries/CyberspaceMap'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 
 export type CyberspaceViewerProps = {

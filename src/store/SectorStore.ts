@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { Event } from 'nostr-tools'
 
+// sectorid -> sector data
+export type SectorState = Record<string, SectorData>
+
 export type SectorData = {
   avatars: string[]
   constructs: Event[]
@@ -10,10 +13,8 @@ export type SectorData = {
   isGenesis: boolean
 }
 
-export type SectorState = Record<string, SectorData>
-
 type SectorStore = {
-  userCurrentSectorId: string
+  userCurrentSectorId: string | null
   sectorState: SectorState
   updateUserCurrentSectorId: (id: string) => void
   mountSector: (sectorId: string, isGenesis?: boolean) => void
@@ -28,7 +29,7 @@ type SectorStore = {
 export const useSectorStore = create<SectorStore>()(
   persist(
     (set) => ({
-      userCurrentSectorId: '',
+      userCurrentSectorId: null,
       sectorState: {},
       updateUserCurrentSectorId: (id) => set({ userCurrentSectorId: id }),
       mountSector: (sectorId, isGenesis = false) => set((state) => ({

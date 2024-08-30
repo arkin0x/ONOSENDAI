@@ -27,13 +27,14 @@ export const SectorGrid = () => {
 
   const sectorData: SectorData[] = useMemo(() => {
     return Object.entries(sectorState).map(([sectorId]) => {
+      if (!focusSectorId) return false // no focus sector, can't do diff
       const diff = relativeSectorIndex(focusSectorId, sectorId)
       console.log('diff', diff.toArray(0), focusSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, sectorState)
       return { sectorId, position, color }
-    })
-  }, [sectorState])
+    }).filter(Boolean) as SectorData[]
+  }, [focusSectorId, sectorState])
 
   useEffect(() => {
     if (meshRef.current && edgesRef.current) {

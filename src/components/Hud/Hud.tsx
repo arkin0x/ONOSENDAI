@@ -1,7 +1,7 @@
 import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
-import { useContext, useEffect, useRef, useState } from "react"
-import { AxesHelper, Vector3 } from "three"
+import { useContext, useRef, useState } from "react"
+import { Vector3 } from "three"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
 import { extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
@@ -52,11 +52,11 @@ export const Hud = () => {
     <group>
       {/* <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} /> */}
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" color={COLORS.DSPACE} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.sectorPosition.z.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.sectorPosition.y.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.sectorPosition.x.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sectorId} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.cyberspaceCoordinate.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.localCoordinate.vector.z.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.localCoordinate.vector.y.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.localCoordinate.vector.x.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sector.id} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.coordinate.raw.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedState.velocity.x.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
@@ -91,7 +91,7 @@ type CoordinateTextProps = {
   rotation?: [number, number, number],
   text: string,
   align?: "left" | "center" | "right"
-  color?: string
+  color?: string | number
   fontSize?: number
 }
 
@@ -144,28 +144,28 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
   )
 }
 
-const Axes = (props) => {
-  const ref = useRef<AxesHelper>()
-  const { scene } = useThree()
+// const Axes = (props) => {
+//   const ref = useRef<AxesHelper>()
+//   const { scene } = useThree()
 
-  useEffect(() => {
-    ref.current = new AxesHelper(1)
-    ref.current.position.fromArray(props.position)
-    // ref.current.rotation.setFromVector3(new Vector3().fromArray(props.rotation))
-    ref.current.setRotationFromQuaternion(props.rotation)
-    scene.add(ref.current)
+//   useEffect(() => {
+//     ref.current = new AxesHelper(1)
+//     ref.current.position.fromArray(props.position)
+//     // ref.current.rotation.setFromVector3(new Vector3().fromArray(props.rotation))
+//     ref.current.setRotationFromQuaternion(props.rotation)
+//     scene.add(ref.current)
 
-    return () => { // Cleanup function to remove the helper when the component unmounts
-      scene.remove(ref.current!)
-    }
-  }, [scene, props]) // Dependency array. The effect will run again if these values change.
+//     return () => { // Cleanup function to remove the helper when the component unmounts
+//       scene.remove(ref.current!)
+//     }
+//   }, [scene, props]) // Dependency array. The effect will run again if these values change.
 
-  useFrame(() => {
-    if (ref.current) {
-      // Update the AxesHelper on each frame if needed
-      ref.current.updateMatrixWorld(true)
-    }
-  })
+//   useFrame(() => {
+//     if (ref.current) {
+//       // Update the AxesHelper on each frame if needed
+//       ref.current.updateMatrixWorld(true)
+//     }
+//   })
 
-  return null
-};
+//   return null
+// }

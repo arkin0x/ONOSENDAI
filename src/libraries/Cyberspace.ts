@@ -109,13 +109,13 @@ export enum CyberspacePlane {
 // Usage functions
 
 // Takes a hex string and returns a CyberspaceCoordinate object
-export function integerCyberspaceCoordinateFromString(coordinateString: string): CyberspaceCoordinate {
+export function cyberspaceCoordinateFromHexString(coordinateString: string): CyberspaceCoordinate {
   const hex = factoryHex256Bit(coordinateString)
   return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw) as CyberspaceCoordinate
 }
 
 // Takes a hex string and a decimal axes array and returns a CyberspaceCoordinate object with decimal precision
-export function decimalCyberspaceCoordinateFromStrings(coordinateString: string, decimalAxes: string[]): CyberspaceCoordinate {
+export function cyberspaceCoordinateFromHexStringAndDecimal(coordinateString: string, decimalAxes: string[]): CyberspaceCoordinate {
   const hex = factoryHex256Bit(coordinateString)
   return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw, decimalAxes) as CyberspaceCoordinate
 }
@@ -157,6 +157,14 @@ export function cyberspaceEncodePartialToRaw(vector: CyberspaceCoordinateVector,
 export function cyberspacePlaneToBin(plane: CyberspacePlane): number {
   return plane === CyberspacePlane.DSpace ? 0 : 1
 }
+
+export function getCyberspacePlaneFromAction(action: CyberspaceAction): CyberspacePlane {
+  const coordinateTag = action.tags.find(getTag('C'))![1]
+  const finalNibble = coordinateTag[63]
+  const finalBit = parseInt(finalNibble, 16) & 1
+  return factoryCyberspacePlane(finalBit)
+}
+
 
 // Behind-the-scenes Factory functions
 
@@ -491,7 +499,7 @@ export type CyberspaceActionTypes =
 
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
-  const coordinate = integerCyberspaceCoordinateFromString(pubkey)
+  const coordinate = cyberspaceCoordinateFromHexString(pubkey)
   const sector = coordinate.sector
   const sectorId = sector.id
   return {
@@ -548,7 +556,7 @@ export type ExtractedCyberspaceActionState = {
 export function extractCyberspaceActionState(action: CyberspaceAction): ExtractedCyberspaceActionState {
   const coordinateTag = action.tags.find(getTag('C'))![1]
   const coordinateDecimalsTag = action.tags.find(getTag('Cd'))!
-  const coordinate = decimalCyberspaceCoordinateFromStrings(coordinateTag, coordinateDecimalsTag)
+  const coordinate = cyberspaceCoordinateFromHexStringAndDecimal(coordinateTag, coordinateDecimalsTag)
   const localCoordinate = coordinate.local
   const plane = coordinate.plane
   const sector = coordinate.sector

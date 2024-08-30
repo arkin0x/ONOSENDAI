@@ -4,6 +4,7 @@ import { DecimalVector3 } from "./DecimalVector3"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
+import { Cyberspace } from "../components/ThreeCyberspace"
 
 // CONSTANTS
 
@@ -57,7 +58,7 @@ export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
 export enum CyberspaceKinds {
   Hyperjump = 321,
   Construct = 331,
-  Action = 333
+  Action = 3333
 }
 
 // COORDINATES
@@ -597,7 +598,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const sectorId = sector.id
   return {
     pubkey, 
-    kind: 333,
+    kind: CyberspaceKinds.Action,
     created_at,
     content: '',
     tags: [
@@ -659,9 +660,9 @@ export function extractCyberspaceActionState(action: CyberspaceAction | Cyberspa
   const velocity = new DecimalVector3().fromArray(velocityTag.slice(1,4)) as CyberspaceVelocity
   // get rotation
   const quaternionTag = action.tags.find(getTag('quaternion'))!
-  let rotation = new Quaternion()
+  let rotation = new Quaternion().fromArray(IDENTITY_QUATERNION)
   if (quaternionTag) {
-    rotation = new Quaternion().fromArray(quaternionTag.slice(1,4).map(parseFloat))
+    rotation = new Quaternion().fromArray(quaternionTag.slice(1,5).map(parseFloat))
   }
   const time = getTime(action)
   return {
@@ -737,7 +738,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event = {
     pubkey: startEvent.pubkey,
-    kind: 333,
+    kind: CyberspaceKinds.Action,
     created_at: toTime.created_at,
     content: '',
     tags: [

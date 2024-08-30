@@ -29,11 +29,11 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   useFrame(() => {
     const simulatedEvent = getSimulatedState(pubkey)
     if (simulatedEvent) {
-      const { sectorPosition, velocity, sectorId } = extractCyberspaceActionState(simulatedEvent)
+      const { localCoordinate, velocity, sector } = extractCyberspaceActionState(simulatedEvent)
       
-      setPosition(sectorPosition.toVector3())
+      setPosition(localCoordinate.vector.toVector3())
       setVelocity(velocity.toVector3())
-      setFrameSectorId(sectorId)
+      setFrameSectorId(sector.id)
     }
   })
 

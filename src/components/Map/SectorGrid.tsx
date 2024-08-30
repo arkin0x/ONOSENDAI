@@ -25,6 +25,10 @@ export const SectorGrid = () => {
 
   const focusSectorId = centerSectorId || userCurrentSectorId
 
+  useEffect(() => {
+    if (focusSectorId) setCenter(focusSectorId)
+  }, [focusSectorId, setCenter])
+
   const sectorData: SectorData[] = useMemo(() => {
     return Object.entries(sectorState).map(([sectorId]) => {
       if (!focusSectorId) return false // no focus sector, can't do diff
@@ -66,12 +70,10 @@ export const SectorGrid = () => {
     }
   }
 
-  console.log(sectorData)
-
   return (
     <>
       {sectorData.map(({ sectorId, position, color }, i) => (
-        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} />
+        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} avatar={sectorId === userCurrentSectorId} />
       ))}
     </>
   )
@@ -83,27 +85,37 @@ function getSectorColor(sectorId: string, sectorState: SectorState): Color {
   console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
-  if (sectorState[sectorId]) return new Color(COLORS.ORANGE)
+  // if (sectorState[sectorId]) return new Color(COLORS.ORANGE)
   return new Color(COLORS.DARK_PURPLE)
 }
 
 function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color }) {
 
+  const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.5, 0, 0))
+  // const size = 1//.001
+  const lineColor = COLORS.ORANGE//isGenesis ? COLORS.YELLOW : isCurrent ? COLORS.ORANGE : COLORS.BLUE
+  const boxColor = selected ? COLORS.ORANGE : color ? color : COLORS.DARK_PURPLE
+
   return (
     <group position={position}>
       <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={color} linewidth={0.5} />
+        <lineBasicMaterial color={color} linewidth={1} />
       </lineSegments>
       { avatar ? <AvatarMarker /> : null }
-      { selected ? <Text 
-        position={position.clone().add(new Vector3(-MAP_SECTOR_SIZE/2, 0, 0))}
-        fontSize={MAP_SECTOR_SIZE/10}
-        color={color}
-        anchorX="right"
-      >
-        {sectorId}
-      </Text> : null }
+      { selected ? 
+        <Text 
+          textAlign='left'
+          fontSize={0.15}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          anchorX={'left'}
+          position={textPosition} 
+          rotation={[0,0,0]} 
+          frustumCulled={true}
+          color={lineColor} >
+          SECTOR {sectorId}
+        </Text>
+      : null }
     </group>
   )
 

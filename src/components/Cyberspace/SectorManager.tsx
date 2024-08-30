@@ -59,7 +59,8 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
     sectorsToLoad.forEach(sectorId => {
       if (!sectorState[sectorId]) {
-        mountSector(sectorId)
+        const isGenesis = sectorId === userCurrentSectorId
+        mountSector(sectorId, isGenesis)
       }
       const subscription = subscribeToSectorObjects(sectorId, ndk)
       subscription.on('event', (event: Event) => handleEvent(event, sectorId))

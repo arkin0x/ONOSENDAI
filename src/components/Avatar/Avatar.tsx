@@ -3,7 +3,7 @@ import { ThreeAvatar } from "../Cyberspace/ThreeAvatar"
 import { SpawnModel } from "../Cyberspace/Spawn"
 import { ThreeAvatarTrail } from "../Cyberspace/ThreeAvatarTrail"
 import { useAvatarStore } from "../../store/AvatarStore"
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { useSectorStore } from "../../store/SectorStore"
 
 type AvatarProps = {
@@ -11,11 +11,11 @@ type AvatarProps = {
 }
 
 /**
- * Avatar takes a pubkey and renders a ThreeAvatar while setting up action chain management and state storage of the avatar's actions.
+ * Avatar takes a pubkey and renders a ThreeAvatar while setting up action chain management and state storage of the avatar's actions. Memoization prevents unnecessary re-renders or reloads of the action chain.
  * @param pubkey string
  * @returns ThreeAvatar
  */
-export const Avatar = ({pubkey}: AvatarProps) => {
+export const Avatar = memo(({pubkey}: AvatarProps) => {
   const [inGenesisSector, setInGenesisSector] = useState<boolean>(false)
 
   useActionChain(pubkey)
@@ -36,4 +36,4 @@ export const Avatar = ({pubkey}: AvatarProps) => {
     { inGenesisSector ? <SpawnModel pubkey={pubkey} /> : null }
     <ThreeAvatarTrail pubkey={pubkey}/>
   </>
-}
+})

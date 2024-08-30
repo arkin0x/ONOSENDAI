@@ -3,7 +3,7 @@
  * 
  * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
  */
-import { useContext, useEffect, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { Event } from 'nostr-tools'
 import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
 import { NDKContext } from "../../providers/NDKProvider"
@@ -15,29 +15,36 @@ import { useAvatarStore, AvatarActionDispatched } from "../../store/AvatarStore"
 
 export const useActionChain = (pubkey: string) => {
   const {ndk} = useContext(NDKContext)
-  const [runInitializeOnce, setRunInitializeOnce] = useState<boolean>(false) // this is used to run the initialization useEffect only once
   const {actionState, dispatchActionState} = useAvatarStore()
   const [genesisId, setGenesisId] = useState<string|null>(null)
   const actionChainState = actionState[pubkey]
+  const runInitializeOnceRef = useRef(false)
   
   // When historyComplete is true, the existing actionChain is complete from genesis to present and is ready for validation
   const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
   // Reset: if actionChainState is empty, we need to reset other variables.
-  useEffect(() => {
-    if (actionChainState && actionChainState.length === 0) {
-      setRunInitializeOnce(false)
-      setGenesisId(null)
-      setHistoryComplete(false)
-    }
-  }, [actionChainState])
+  // useEffect(() => {
+  //   if (actionChainState && actionChainState.length === 0) {
+  //     setRunInitializeOnce(false)
+  //     setGenesisId(null)
+  //     setHistoryComplete(false)
+  //   }
+  // }, [actionChainState])
 
   // Initialize: set up subscription for latest action and get genesisId from it.
   useEffect(() => {
-    if (runInitializeOnce) return // this effect should only run once
     if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    setRunInitializeOnce(true)
-    dispatchActionState({type: 'reset', pubkey: pubkey})
+    if (runInitializeOnceRef.current) return // this effect should only run once
+    runInitializeOnceRef.current = true
+
+    console.log('initialize action chain for avatar ', pubkey)
+
+    console.log('ndk', ndk)
+    
+    // if (!actionChainState || actionChainState.length === 0) {
+    //   dispatchActionState({type: 'reset', pubkey: pubkey})
+    // }
 
     // define subscription for latest action only.
     const latestActionFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], authors: [pubkey], limit: 1}
@@ -82,7 +89,7 @@ export const useActionChain = (pubkey: string) => {
      * @param latestAction an action received from NDK
      */
     const onReceiveLatestAction = (latestAction: NDKEvent) => {
-      // console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
+      console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
       const event = latestAction.rawEvent() as Event
       // 2. on receive, get genesis id from action
       const action = {
@@ -103,8 +110,7 @@ export const useActionChain = (pubkey: string) => {
       latestAction.stop()
     }
   // we only want to run this once.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ndk])
+  }, [actionChainState, dispatchActionState, genesisId, ndk, pubkey])
 
   /** 
    * Gather action history for genesisId once it is set by the previous useEffect.

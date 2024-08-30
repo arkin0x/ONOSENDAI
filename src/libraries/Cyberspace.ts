@@ -542,13 +542,13 @@ export function validateCyberspaceAction(action: Event|UnsignedEvent): Cyberspac
         }
         break
       case 'quaternion':
-        if (!Array.isArray(tagItem) || tagItem.length !== 5 || !tagItem.slice(1, 5).every(v => /^\d+(\.\d{1,8})?$/.test(v))) {
+        if (!Array.isArray(tagItem) || tagItem.length !== 5 || !tagItem.slice(1, 5).every(v => /^-?\d+(\.\d{1,8})?$/.test(v))) {
           console.log('quaternion tag invalid', tagItem)
           return false
         }
         break
       case 'velocity':
-        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d+(\.\d{1,8})?$/.test(v))) {
+        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^-?\d+(\.\d{1,8})?$/.test(v))) {
           console.log('velocity tag invalid')
           return false
         }

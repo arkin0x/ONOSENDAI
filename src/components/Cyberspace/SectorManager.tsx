@@ -1,4 +1,4 @@
-import React, { useContext, useEffect } from 'react'
+import React, { memo, useContext, useEffect, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
@@ -17,7 +17,7 @@ interface SectorManagerProps {
   adjacentLayers?: number
 }
 
-function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element {
+function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|null {
   const { ndk } = useContext(NDKContext)
   const { 
     userCurrentSectorId, 
@@ -77,19 +77,20 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element 
   // }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState])
   }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState, addAvatar, addConstruct, addHyperjump])
 
-  if (!userCurrentSectorId) return null
+  const sectorsToRender = useMemo(() => {
+    if (!userCurrentSectorId) return null
+    return Object.keys(sectorState).map(groupSectorId => (
+      <Sector 
+        position={relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()} 
+        current={userCurrentSectorId === groupSectorId} 
+        key={groupSectorId} 
+        id={groupSectorId} 
+        data={sectorState[groupSectorId]} />
+    ))
+  }, [userCurrentSectorId, sectorState])
 
   return (
-    <>
-      {Object.keys(sectorState).map(groupSectorId => (
-        <Sector 
-          position={relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()} 
-          current={userCurrentSectorId === groupSectorId} 
-          key={groupSectorId} 
-          id={groupSectorId} 
-          data={sectorState[groupSectorId]} />
-      ))}
-    </>
+    <>{sectorsToRender}</>
   )
 }
 
@@ -100,12 +101,12 @@ interface SectorProps {
   data: { avatars: string[]; constructs: Event[], hyperjumps: Event[] }
 }
 
-function Sector({ 
+const Sector = memo(({ 
   position, 
   current, 
   id, 
   data 
-}: SectorProps): JSX.Element {
+}: SectorProps): JSX.Element => {
   const sectorSize = CYBERSPACE_SECTOR.toNumber()
 
   const adjacentScale = 0.9
@@ -114,6 +115,7 @@ function Sector({
   const centerPosition = position.clone().add(new Vector3(sectorSize / 2, sectorSize / 2, sectorSize / 2))
 
   const renderAvatars = () => {
+    return null
     return data.avatars.map(pubkey => <Avatar key={pubkey} pubkey={pubkey} /> )
   }
 
@@ -140,7 +142,7 @@ function Sector({
       {renderHyperjumps()}
     </group>
   )
-}
+})
 
 // Functions
 

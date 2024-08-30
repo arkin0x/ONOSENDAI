@@ -47,6 +47,7 @@ export const Hud = () => {
   }
 
   if (!simulatedState) return null
+  if (!actionsRef.current) return null
 
   return (
     <>

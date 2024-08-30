@@ -32,7 +32,7 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
         enableOutboxModel: false,
         autoConnectUserRelays: false,
       })
-      ndkRef.connect(1000)
+      ndkRef.connect()
       setNDK(ndkRef)
     }
     setupNDK()

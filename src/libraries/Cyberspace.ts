@@ -376,11 +376,11 @@ export type Time = {
   ms_padded: MillisecondsPadded 
 }
 
-export const getMillisecondsTimestampFromAction = (action: CyberspaceAction | CyberspaceVirtualAction): MillisecondsTimestamp => {
+export const getMillisecondsTimestampFromAction = (action: CyberspaceAction | CyberspaceVirtualAction | CyberspaceVirtualActionTemplate): MillisecondsTimestamp => {
   return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1]) as MillisecondsTimestamp
 }
 
-export const getTime = (action?: CyberspaceAction | CyberspaceVirtualAction): Time => {
+export const getTime = (action?: CyberspaceAction | CyberspaceVirtualAction | CyberspaceVirtualActionTemplate): Time => {
   let now
   if (action) {
     now = new Date(getMillisecondsTimestampFromAction(action))
@@ -426,23 +426,44 @@ export type CyberspaceAction = Event & {
   tags: CyberspaceActionTag[]
   readonly __brand: unique symbol
 }
-// A CyberspaceVirtualAction is an unsigned Event. Its tags will be valid for a CyberspaceAction.
+// A CyberspaceVirtualAction is an unsigned Event that was created through
+// simulation. It will be used for mining or for projecting simulated state.
+// Its tags will be valid for a CyberspaceAction.
 export type CyberspaceVirtualAction = UnsignedEvent & { 
   tags: CyberspaceVirtualActionTag[]
   readonly __brand: unique symbol
 }
 
+// A CyberspaceVirtualActionTemplate is a partial virtual action that is generic
+// (missing required tags) so it can be used as a template for creating a
+// CyberspaceVirtualAction.
 export type CyberspaceVirtualActionTemplate = UnsignedEvent & {
   tags: CyberspaceVirtualActionTemplateTag[]
   readonly __brand: unique symbol
 }
 
 
-export function convertToVirtualAction(action: CyberspaceAction): CyberspaceVirtualAction {
+export function convertActionToVirtualAction(action: CyberspaceAction): CyberspaceVirtualAction {
   // Destructure the action to exclude id and sig
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { id, sig, ...virtualAction } = action
   return virtualAction as UnsignedEvent as CyberspaceVirtualAction
+}
+
+export function convertVirtualActionToVirtualActionTemplate(action: CyberspaceVirtualAction): CyberspaceVirtualActionTemplate {
+  // Define the tags to be removed
+  const tagsToRemove = ['quaternion', 'A', 'nonce'] // Replace with actual tags to be removed
+
+  const { ...virtualAction } = action
+
+  // Filter out the unnecessary tags
+  const filteredTags = virtualAction.tags.filter(tag => !tagsToRemove.includes(tag[0]))
+
+  // Return the modified object with filtered tags
+  return {
+    ...virtualAction,
+    tags: filteredTags
+  } as UnsignedEvent as CyberspaceVirtualActionTemplate
 }
 
 export function validateCyberspaceAction(action: Event): CyberspaceAction|false {
@@ -588,7 +609,7 @@ export type ExtractedCyberspaceActionState = {
 }
 // get the state from a cyberspace action
 // note: type CyberspaceAction are events that have been validated so we don't need to handle missing tags.
-export function extractCyberspaceActionState(action: CyberspaceAction | CyberspaceVirtualAction): ExtractedCyberspaceActionState {
+export function extractCyberspaceActionState(action: CyberspaceAction | CyberspaceVirtualAction | CyberspaceVirtualActionTemplate): ExtractedCyberspaceActionState {
   const coordinateTag = action.tags.find(getTag('C'))![1]
   const coordinateDecimalsTag = action.tags.find(getTag('Cd'))!
   const coordinate = cyberspaceCoordinateFromHexStringAndDecimal(coordinateTag, coordinateDecimalsTag)
@@ -630,8 +651,9 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
 
   if (frames === 0) {
     // no need to simulate if the time difference is less than a frame. return the startEvent as-is.
-    const converted = convertToVirtualAction(startEvent)
-    return converted as CyberspaceVirtualAction
+    const converted = convertActionToVirtualAction(startEvent)
+    const template = convertVirtualActionToVirtualActionTemplate(converted)
+    return template as CyberspaceVirtualActionTemplate
   }
 
   const { coordinate, plane, velocity, rotation } = extractCyberspaceActionState(startEvent)

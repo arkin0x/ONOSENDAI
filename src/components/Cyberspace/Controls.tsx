@@ -6,7 +6,6 @@ import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
 import { Quaternion, Vector3 } from 'three'
 import { useAvatarStore } from '../../store/AvatarStore.ts'
 import { useFrame } from '@react-three/fiber'
-import { defaultRelays } from '../../libraries/Nostr.ts'
 import { useControlStore } from '../../store/ControlStore.ts'
 import { useRotationStore } from '../../store/RotationStore.ts'
 import { extractCyberspaceActionState } from '../../libraries/Cyberspace.ts'
@@ -14,7 +13,7 @@ import { extractCyberspaceActionState } from '../../libraries/Cyberspace.ts'
 export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
-  const engine = useEngine(pubkey, defaultRelays)
+  const engine = useEngine(pubkey)
   const { actionState, getSimulatedState } = useAvatarStore()
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
@@ -24,7 +23,7 @@ export const Controls: React.FC = () => {
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
-  const [currentDirection, setCurrentDirection] = useState<Quaternion>(new Quaternion())
+  const [, setCurrentDirection] = useState<Quaternion>(new Quaternion())
   const simulatedEvent = getSimulatedState(pubkey)
 
   useEffect(() => {
@@ -142,13 +141,13 @@ export const Controls: React.FC = () => {
   useEffect(() => {
     const canvas = document.querySelector('#cyberspace canvas')
     if (canvas) {
-      canvas.addEventListener('mouseenter', handleMouseEnter)
+      canvas.addEventListener('mouseenter', handleMouseEnter as EventListener)
       canvas.addEventListener('mouseleave', handleMouseLeave)
     }
 
     return () => {
       if (canvas) {
-        canvas.removeEventListener('mouseenter', handleMouseEnter)
+        canvas.removeEventListener('mouseenter', handleMouseEnter as EventListener)
         canvas.removeEventListener('mouseleave', handleMouseLeave)
       }
     }
@@ -189,7 +188,7 @@ export const Controls: React.FC = () => {
       // Reset the resetView state when the user starts dragging
       setControlState({ resetView: false })
     }
-  }, [isDragging, lastMousePosition])
+  }, [isDragging, lastMousePosition, setControlState])
 
 
   const handleWheel = useCallback((e: WheelEvent) => {

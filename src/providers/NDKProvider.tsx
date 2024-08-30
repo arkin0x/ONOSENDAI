@@ -43,6 +43,11 @@ export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
       const ndkEvent = new NDKEvent(ndk, event as NostrEvent)
       ndkEvent.sign()
       const pubs = await ndkEvent.publish()
+      // check if pubs is a set of 0
+      if (pubs.size === 0) {
+        console.warn(`publishEvent: Could not publish event because no relays were available.`, ndk, event)
+        return false
+      }
       console.log('Published NDKEvent: ', ndkEvent, 'to relays', pubs)
       return ndkEvent
     } else {

@@ -1,7 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Quaternion } from 'three'
-import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction } from '../../libraries/Cyberspace'
-import { RelayObject } from '../../types/NostrRelay'
+import { createUnsignedDriftAction, createUnsignedGenesisAction, CyberspaceAction, nowIsAfterLatestAction, validateCyberspaceAction } from '../../libraries/Cyberspace'
 import { setWorkerCallback, workzone } from '../../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../../libraries/Miner'
 import { Event, UnsignedEvent } from 'nostr-tools'
@@ -12,8 +11,8 @@ import { useAvatarStore } from '../../store/AvatarStore'
 const NONCE_OFFSET = 1_000_000
 
 type EngineControls = {
-  setGenesisAction: (genesis: Event) => void
-  setLatestAction: (latest: Event) => void
+  setGenesisAction: (genesis: CyberspaceAction) => void
+  setLatestAction: (latest: CyberspaceAction) => void
   drift: (throttle: number, quaternion: Quaternion) => void
   stopDrift: () => void
   freeze: () => void
@@ -22,8 +21,8 @@ type EngineControls = {
 
 export function useEngine(pubkey: string): EngineControls {
   const {dispatchActionState} = useAvatarStore()
-  const [genesis, setGenesis] = useState<Event|null>(null)
-  const [latest, setLatest] = useState<Event|null>(null)
+  const [genesis, setGenesis] = useState<CyberspaceAction|null>(null)
+  const [latest, setLatest] = useState<CyberspaceAction|null>(null)
   const {publishEvent} = useContext(NDKContext)
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<Quaternion | null>(null)
@@ -94,12 +93,12 @@ export function useEngine(pubkey: string): EngineControls {
       throw new Error('Engine.drift: failed to publish genesis action')
     } else {
       // set actions
-      setGenesisAction(rawGenesis)
-      setLatestAction(rawGenesis)
+      setGenesisAction(rawGenesis as CyberspaceAction)
+      setLatestAction(rawGenesis as CyberspaceAction)
     }
     console.log('new genesis:', rawGenesis)
     dispatchActionState({ type: 'reset', pubkey: pubkey })
-    dispatchActionState({ type: 'push', actions: [], pubkey: pubkey })
+    dispatchActionState({ type: 'push', actions: [rawGenesis], pubkey: pubkey })
   }
 
   function freeze(): void {
@@ -164,26 +163,37 @@ export function useEngine(pubkey: string): EngineControls {
       const actionBinary = msg.data.action
       const actionSerialized = new TextDecoder().decode(actionBinary)
       const action = deserializeEvent(actionSerialized)
+      // make sure the action is valid
+      const validated = validateCyberspaceAction(action)
       // publish the action
       // update the latestAction action with this action
-      publishMovementAction(action)
+      if (validated) {
+        publishMovementAction(action)
+      } else {
+        console.error('Engine: movementWorkerMessage: action validation failed')
+      }
     }
     // if the worker reports 'nonce-range-completed, do nothing.
   }
 
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
     const publishedAction = await publishEvent(action) // FIXME we would normally pass in `relays` here
-    setLatestAction(publishedAction)
+    if (!publishedAction) {
+      console.error('Engine: publishMovementAction: failed to publish action')
+      return
+    }
+    const convertedAction = publishedAction.rawEvent() as Event as CyberspaceAction
+    setLatestAction(convertedAction)
     // save the action to the AvatarContext
-    dispatchActionState({type: 'push', actions: [publishedAction], pubkey: action.pubkey})
+    dispatchActionState({type: 'push', actions: [convertedAction], pubkey: action.pubkey})
     restartMinersRef.current = true
   }
 
-  function setGenesisAction(genesis: Event) {
+  function setGenesisAction(genesis: CyberspaceAction) {
     setGenesis(genesis)
   }
 
-  function setLatestAction(latest: Event) {
+  function setLatestAction(latest: CyberspaceAction) {
     setLatest(latest)
   }
 

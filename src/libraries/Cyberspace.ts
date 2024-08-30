@@ -466,11 +466,38 @@ export function convertVirtualActionToVirtualActionTemplate(action: CyberspaceVi
   } as UnsignedEvent as CyberspaceVirtualActionTemplate
 }
 
-export function validateCyberspaceAction(action: Event): CyberspaceAction|false {
+export function validateCyberspaceAction(action: Event|UnsignedEvent): CyberspaceAction|false {
+
+  // check kind
+  console.log('validateCyberspaceAction', action)
   if (action.kind !== CyberspaceKinds.Action) {
+    console.log('kind invalid')
     return false
   }
-  const tagsToCheck = ['ms', 'C', 'Cd', 'quaternion', 'velocity', 'S', 'A', 'nonce', 'version']
+
+  // check action type
+
+  const actionTag = action.tags.find(getTag('A'))
+  const actionType = actionTag ? actionTag[1] : null
+
+  if (!actionType) {
+    console.log('A tag not found or not valid')
+    return false
+  }
+
+  // check nonce for non-noop actions
+
+  if (actionType !== 'noop') {
+    // a nonce tag is required if the action is not a noop
+    const nonceTag = action.tags.find(getTag('nonce'))
+    // validate nonce tag
+    if (!Array.isArray(nonceTag) || nonceTag.length !== 3 || !/^\d+$/.test(nonceTag[2])) {
+      console.log('nonce tag invalid')
+      return false
+    }
+  }
+
+  const tagsToCheck = ['ms', 'C', 'Cd', 'quaternion', 'velocity', 'S', 'version']
 
   // stipulations for each tag
   // ms must be a 2-element array where the second element is a 3-digit string
@@ -490,43 +517,50 @@ export function validateCyberspaceAction(action: Event): CyberspaceAction|false 
   for (const tag of tagsToCheck) {
     const tagItem = action.tags.find(getTag(tag))
     if (!tagItem) {
+      console.log('tag not found', tag)
       return false
     }
 
     switch (tag) {
       case 'ms':
         if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^\d{3}$/.test(tagItem[1])) {
+          console.log('ms tag invalid')
           return false
         }
         break
       case 'C':
         if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^[a-fA-F0-9]{64}$/.test(tagItem[1])) {
+          console.log('C tag invalid')
           return false
         }
         break
       case 'Cd':
         if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d{1,8}$/.test(v))) {
+          console.log('Cd tag invalid')
           return false
         }
         break
       case 'quaternion':
+        if (!Array.isArray(tagItem) || tagItem.length !== 5 || !tagItem.slice(1, 5).every(v => /^\d+(\.\d{1,8})?$/.test(v))) {
+          console.log('quaternion tag invalid', tagItem)
+          return false
+        }
+        break
       case 'velocity':
-        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d+\.\d{1,8}$/.test(v))) {
+        if (!Array.isArray(tagItem) || tagItem.length !== 4 || !tagItem.slice(1, 4).every(v => /^\d+(\.\d{1,8})?$/.test(v))) {
+          console.log('velocity tag invalid')
           return false
         }
         break
       case 'S':
         if (!Array.isArray(tagItem) || tagItem.length !== 2 || !/^\d+-\d+-\d+$/.test(tagItem[1])) {
-          return false
-        }
-        break
-      case 'nonce':
-        if (!Array.isArray(tagItem) || tagItem.length !== 3 || !/^\d+$/.test(tagItem[2])) {
+          console.log('S tag invalid')
           return false
         }
         break
       case 'version':
         if (!Array.isArray(tagItem) || tagItem.length !== 2 || tagItem[1] !== '1') {
+          console.log('version tag invalid')
           return false
         }
         break
@@ -538,6 +572,9 @@ export function validateCyberspaceAction(action: Event): CyberspaceAction|false 
   
   // TODO: ...? what else should we validate here?
   // NDK should handle signature checking already
+
+  // if we get here, the action is valid
+  console.log('action is valid')
 
   return action as CyberspaceAction
 }
@@ -565,6 +602,7 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
     content: '',
     tags: [
       ['C', pubkey],
+      ['Cd', '0', '0', '0'],
       ['S', sectorId],
       ['ms', ms_padded],
       ['velocity', '0', '0', '0'],

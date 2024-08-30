@@ -9,7 +9,7 @@ import { Controls } from './Controls'
 import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
-import SpeedLines from './Hud/SpeedLines'
+// import SpeedLines from './Hud/SpeedLines'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,

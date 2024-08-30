@@ -8,8 +8,8 @@ import { extractCyberspaceActionState, ExtractedCyberspaceActionState } from "..
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
-import COLORS from "../../data/Colors"
 import { useAvatarStore } from "../../store/AvatarStore"
+import COLORS from "../../data/Colors"
 
 
 export const Hud = () => {
@@ -25,6 +25,7 @@ export const Hud = () => {
 
   useFrame(() => {
   const simulated = getSimulatedState(pubkey)
+  // console.log('simulated', simulated)
     if (simulated) {
       setSimulatedState(extractCyberspaceActionState(simulated))
     }

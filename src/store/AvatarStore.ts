@@ -23,6 +23,7 @@ interface AvatarStore {
 }
 
 const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
+  console.log('avatarActionStateReducer', state, action)
   const newState = {...state} as AvatarActionState
 
   if (newState[action.pubkey] === undefined) {
@@ -36,10 +37,14 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     return newState
   }
 
+  console.log('check 1')
+
   const newActions = action.actions.map(validateCyberspaceAction).filter(Boolean)
   if (newActions.length === 0) {
     return state
   }
+
+  console.log('check 2')
 
   if (action.type === 'unshift') {
     newState[action.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
@@ -69,6 +74,8 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
 
     return acc
   }, [] as CyberspaceAction[])
+
+  console.log('final newState', newState)
 
   return newState
 }

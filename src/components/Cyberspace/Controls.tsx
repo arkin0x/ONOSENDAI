@@ -237,7 +237,7 @@ export const Controls: React.FC = () => {
       return
     }
 
-    let newRotation
+    let newRotation = new Quaternion()
 
     if (controlState.resetView) {
       if (simulatedEvent) {

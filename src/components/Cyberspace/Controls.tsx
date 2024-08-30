@@ -14,7 +14,7 @@ export const Controls: React.FC = () => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const pubkey = identity.pubkey
   const engine = useEngine(pubkey)
-  const { actionState, getSimulatedState } = useAvatarStore()
+  const { actionState, getSimulatedState, getLatest } = useAvatarStore()
   const actions = actionState[pubkey]
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
@@ -24,7 +24,17 @@ export const Controls: React.FC = () => {
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
   const [, setCurrentDirection] = useState<Quaternion>(new Quaternion())
+  const [cruiseDirection, setCruiseDirection] = useState<Quaternion>(new Quaternion())
   const simulatedEvent = getSimulatedState(pubkey)
+  const latestAction = getLatest(pubkey)
+
+
+  // get the current direction of travel from the latest action for cruise control
+  useEffect(() => {
+    if (!latestAction) return
+    const { rotation } = extractCyberspaceActionState(latestAction)
+    setCruiseDirection(rotation)
+  }, [latestAction])
 
   useEffect(() => {
     if (simulatedEvent) {
@@ -292,7 +302,11 @@ export const Controls: React.FC = () => {
         // Convert the rotated move vector directly to a quaternion
         const movementQuaternion = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), moveVector)
         // console.log("movequat", movementQuaternion.toArray().map((x) => x.toFixed(2)))
-        engine.drift(throttle, movementQuaternion)
+        if (controlState.cruise) {
+          engine.drift(throttle, cruiseDirection)
+        } else {
+          engine.drift(throttle, movementQuaternion)
+        }
       }
     } else {
       // If no movement, stop drifting

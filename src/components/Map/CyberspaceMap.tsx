@@ -1,9 +1,10 @@
-import { useContext } from 'react'
-import { Canvas } from "@react-three/fiber"
+import { useContext, useEffect } from 'react'
+import { Canvas, useThree } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
 import { MapControls } from './MapControls'
+import { Fog } from 'three'
 // import { BlockMarkers } from './BlockMarkers'
 // import { Constructs } from './Constructs'
 // import { ObjectMarkers } from './ObjectMarkers'
@@ -35,6 +36,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           <SectorGrid />
           <OrbitControls target={[0,0,0]} />
+          <MapCamera />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
@@ -50,3 +52,15 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
 }
 
 export default CyberspaceMap 
+
+function MapCamera() {
+  const { camera, scene } = useThree()
+  useEffect(() => {
+    const fogColor = 0x000000 // Color of the fog
+    const far = 500
+    scene.fog = new Fog(fogColor, 1, far / 2)
+    camera.far = far
+    camera.updateProjectionMatrix()
+  }, [camera])
+  return null
+}

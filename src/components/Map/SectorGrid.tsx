@@ -110,22 +110,23 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
 
   const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
   const genesisTextPosition = new Vector3(-0.6, 0, 0)
-  // const size = 1//.001
-  // const lineColor = COLORS.ORANGE//isGenesis ? COLORS.YELLOW : isCurrent ? COLORS.ORANGE : COLORS.BLUE
-  // const boxColor = selected ? COLORS.ORANGE : color ? color : COLORS.DARK_PURPLE
-  genesis ? console.log('genesis', position) : null
-  avatar ? console.log('avatar', position) : null
 
+  const visited = color.getHex() === COLORS.LIGHT_PURPLE
+
+  const solid = avatar || genesis || visited
+
+  const opacity = solid ? 1 : 0.2
+  
   return (
     <group position={position}>
-      <lineSegments renderOrder={selected ? -1 : 0}>
+      { <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={color} linewidth={1} />
-      </lineSegments>
-      <mesh>
+        <lineBasicMaterial color={color} linewidth={1} transparent={true} opacity={opacity}/>
+      </lineSegments> }
+      { solid ? <mesh>
         <boxGeometry args={[1,1,1]} />
         <meshLambertMaterial side={FrontSide} color={color} opacity={0.1} transparent/>
-      </mesh>
+      </mesh> : null }
       { avatar ? <ThreeAvatarMarker /> : null }
       { selected ? 
         <Text 

@@ -1,11 +1,14 @@
 import { useFrame } from "@react-three/fiber"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
-import { useEffect, useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { useAvatarStore } from "../../store/AvatarStore"
 import { extractCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useSectorStore } from "../../store/SectorStore"
+import { IdentityContextType } from "../../types/IdentityType"
+import { IdentityContext } from "../../providers/IdentityProvider"
 
-export function ThreeAvatarMarker({pubkey}: {pubkey: string}) {
+export function ThreeAvatarMarker() {
+  const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { getSimulatedState } = useAvatarStore()
   const { updateUserCurrentSectorId } = useSectorStore()
   const [frameSectorId, setFrameSectorId] = useState<string>()
@@ -13,17 +16,20 @@ export function ThreeAvatarMarker({pubkey}: {pubkey: string}) {
 
   // get simulated sectorPosition and velocity each frame
   useFrame(() => {
-    const simulatedEvent = getSimulatedState(pubkey)
-    console.log('sim', simulatedEvent)
+    const simulatedEvent = getSimulatedState(identity?.pubkey)
     if (simulatedEvent) {
       const { sector } = extractCyberspaceActionState(simulatedEvent)
-      setFrameSectorId(sector.id)
+      if (frameSectorId !== sector.id) {
+        setFrameSectorId(sector.id)
+      }
     }
   })
 
-  // "Memoize" updateSectorId call
+  // update user's current sector id based on simulation for cyberspace map.
+  // "Memoize" updateSectorId call so it isn't called every frame.
   useEffect(() => {
     if (frameSectorId) {
+      console.log('updating sector id', frameSectorId)
       updateUserCurrentSectorId(frameSectorId)
     }
   }, [frameSectorId, updateUserCurrentSectorId])
@@ -32,7 +38,6 @@ export function ThreeAvatarMarker({pubkey}: {pubkey: string}) {
     <group position={[0,0,0]}>
       {/* default avatar represented by dodecahedron */}
       <lineSegments scale={[.5,.5,.5]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
-      {/* <axesHelper position={[0,0,0]} scale={512}/> */}
     </group>
   )
 }

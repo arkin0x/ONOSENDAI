@@ -29,7 +29,6 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <MapControls />
-          <ThreeAvatarMarker />
           {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           {/* <BlockMarkers scale={MAP_SIZE} /> */}
           {/* <Constructs scale={MAP_SIZE} /> */}

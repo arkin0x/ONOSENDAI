@@ -18,27 +18,31 @@ interface SectorData {
 export const SectorGrid = () => {
   const { sectorState, userCurrentSectorId } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
+  const [follow, setFollow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
-  const focusSectorId = centerSectorId || userCurrentSectorId
-
   useEffect(() => {
-    if (focusSectorId) setCenter(focusSectorId)
-  }, [focusSectorId, setCenter])
+    if (follow === "user" && userCurrentSectorId) {
+      setCenter(userCurrentSectorId)
+    }
+    if (follow === "roam" && centerSectorId) {
+      setCenter(centerSectorId)
+    }
+  }, [userCurrentSectorId, centerSectorId, setCenter, follow])
 
   const sectorData: SectorData[] = useMemo(() => {
     return Object.entries(sectorState).map(([sectorId]) => {
-      if (!focusSectorId) return false // no focus sector, can't do diff
-      const diff = relativeSectorIndex(focusSectorId, sectorId)
-      console.log('diff', diff.toArray(0), focusSectorId, sectorId)
+      if (!centerSectorId) return false // no focus sector, can't do diff
+      const diff = relativeSectorIndex(centerSectorId, sectorId)
+      console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
-      const color = getSectorColor(sectorId, sectorState)
+      const color = getSectorColor(sectorId, userCurrentSectorId, sectorState)
       return { sectorId, position, color }
     }).filter(Boolean) as SectorData[]
-  }, [focusSectorId, sectorState])
+  }, [centerSectorId, sectorState])
 
   useEffect(() => {
     if (meshRef.current && edgesRef.current) {
@@ -81,11 +85,11 @@ export const SectorGrid = () => {
 
 export default SectorGrid
 
-function getSectorColor(sectorId: string, sectorState: SectorState): Color {
+function getSectorColor(sectorId: string, userCurrentSectorId: string, sectorState: SectorState): Color {
   console.log('getSectorColor', sectorState[sectorId], sectorState)
+  if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
   if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
-  // if (sectorState[sectorId]) return new Color(COLORS.ORANGE)
   return new Color(COLORS.DARK_PURPLE)
 }
 

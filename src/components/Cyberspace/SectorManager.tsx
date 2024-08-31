@@ -1,6 +1,6 @@
-import React, { memo, useContext, useEffect, useMemo } from 'react'
+import { memo, useContext, useEffect, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
-import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
+import { CYBERSPACE_SECTOR, cyberspaceCoordinateFromHexString, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import { CyberspaceKinds } from "../../libraries/Cyberspace"
 import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
@@ -12,6 +12,8 @@ import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
 import { Avatar } from '../Avatar/Avatar'
 import Hyperjump from './Hyperjump'
+import { IdentityContextType } from '../../types/IdentityType'
+import { IdentityContext } from '../../providers/IdentityProvider'
 
 interface SectorManagerProps {
   adjacentLayers?: number
@@ -19,6 +21,7 @@ interface SectorManagerProps {
 
 function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|null {
   const { ndk } = useContext(NDKContext)
+  const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { 
     userCurrentSectorId, 
     sectorState, 
@@ -41,6 +44,17 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
   // Effects
 
+  // determine the user's genesis sector
+  useEffect(() => {
+    if (!identity.pubkey) return
+    const coord = cyberspaceCoordinateFromHexString(identity.pubkey)
+    const genesisSector = coord.sector.id
+    if (genesisSector) {
+      mountSector(genesisSector, true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const handleEvent = (event: Event, sectorId: string) => {
       if (event.kind === CyberspaceKinds.Action) {
@@ -59,8 +73,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
     sectorsToLoad.forEach(sectorId => {
       if (!sectorState[sectorId]) {
-        const isGenesis = sectorId === userCurrentSectorId
-        mountSector(sectorId, isGenesis)
+        mountSector(sectorId)
       }
       const subscription = subscribeToSectorObjects(sectorId, ndk)
       subscription.on('event', (event: Event) => handleEvent(event, sectorId))

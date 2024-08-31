@@ -3,7 +3,6 @@ import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
-import { ThreeAvatarMarker } from './ThreeAvatarMarker'
 import { MapControls } from './MapControls'
 // import { BlockMarkers } from './BlockMarkers'
 // import { Constructs } from './Constructs'
@@ -12,7 +11,7 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
-import SectorCrawler from './SectorCrawler'
+// import SectorCrawler from './SectorCrawler'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -35,7 +34,6 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           {/* <Constructs scale={MAP_SIZE} /> */}
           {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           <SectorGrid />
-          <SectorCrawler />
           <OrbitControls target={[0,0,0]} />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />

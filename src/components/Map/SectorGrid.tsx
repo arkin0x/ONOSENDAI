@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useEffect } from 'react'
+import { useRef, useMemo, useState, useEffect, useContext } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, BackSide, RGBA_ASTC_10x10_Format, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
@@ -8,22 +8,33 @@ import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
 import { ThreeAvatarMarker } from './ThreeAvatarMarker'
+import { IdentityContextType } from '../../types/IdentityType'
+import { IdentityContext } from '../../providers/IdentityProvider'
 
 interface SectorData {
   sectorId: string
   position: Vector3
   color: Color
+  genesis?: boolean
 }
 
-function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState): Color {
-  console.log('getSectorColor', sectorState[sectorId], sectorState)
+function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
+  // console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
   if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
-  if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
+  if (sectorState[sectorId]?.avatars.length > 0) {
+    if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
+      // there are other avatars in this sector
+      return new Color(COLORS.RED)
+    }
+    // it's just our trail in this sector
+    return new Color(COLORS.LIGHT_PURPLE)
+  }
   return new Color(COLORS.DARK_PURPLE)
 }
 
 export const SectorGrid = () => {
+  const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { sectorState, userCurrentSectorId } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const [follow, setFollow] = useState<"user"|"roam">("user")
@@ -31,6 +42,8 @@ export const SectorGrid = () => {
   const edgesRef = useRef<InstancedMesh>(null)
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
+
+  const pubkey = identity?.pubkey
 
   useEffect(() => {
     if (follow === "user" && userCurrentSectorId) {
@@ -45,12 +58,12 @@ export const SectorGrid = () => {
     return Object.entries(sectorState).map(([sectorId]) => {
       if (!centerSectorId) return false // no focus sector, can't do diff
       const diff = relativeSectorIndex(centerSectorId, sectorId)
-      console.log('diff', diff.toArray(0), centerSectorId, sectorId)
+      // console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
-      const color = getSectorColor(sectorId, userCurrentSectorId, sectorState)
-      return { sectorId, position, color }
+      const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
+      return { sectorId, position, color, genesis: color.getHex() === COLORS.YELLOW }
     }).filter(Boolean) as SectorData[]
-  }, [centerSectorId, sectorState])
+  }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
   useEffect(() => {
     if (meshRef.current && edgesRef.current) {
@@ -84,8 +97,8 @@ export const SectorGrid = () => {
 
   return (
     <>
-      {sectorData.map(({ sectorId, position, color }, i) => (
-        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} avatar={sectorId === userCurrentSectorId} />
+      {sectorData.map(({ sectorId, position, color, genesis }, i) => (
+        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} avatar={sectorId === userCurrentSectorId} genesis={genesis} />
       ))}
     </>
   )
@@ -93,12 +106,15 @@ export const SectorGrid = () => {
 
 export default SectorGrid
 
-function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color }) {
+function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color, genesis?: boolean }) {
 
-  const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.5, 0, 0))
+  const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
+  const genesisTextPosition = new Vector3(-0.6, 0, 0)
   // const size = 1//.001
-  const lineColor = COLORS.ORANGE//isGenesis ? COLORS.YELLOW : isCurrent ? COLORS.ORANGE : COLORS.BLUE
-  const boxColor = selected ? COLORS.ORANGE : color ? color : COLORS.DARK_PURPLE
+  // const lineColor = COLORS.ORANGE//isGenesis ? COLORS.YELLOW : isCurrent ? COLORS.ORANGE : COLORS.BLUE
+  // const boxColor = selected ? COLORS.ORANGE : color ? color : COLORS.DARK_PURPLE
+  genesis ? console.log('genesis', position) : null
+  avatar ? console.log('avatar', position) : null
 
   return (
     <group position={position}>
@@ -125,6 +141,20 @@ function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorI
           SECTOR {sectorId}
         </Text>
       : null }
+      { genesis ?
+        <Text 
+          textAlign='right'
+          fontSize={0.15}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          anchorX={'right'}
+          position={genesisTextPosition} 
+          rotation={[0,0,0]} 
+          frustumCulled={true}
+          renderOrder={-1}
+          color={color} >
+          GENESIS
+        </Text>
+      : null}
     </group>
   )
 

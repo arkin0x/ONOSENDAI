@@ -93,15 +93,21 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
   const sectorsToRender = useMemo(() => {
     if (!userCurrentSectorId) return null
-    return Object.keys(sectorState).map(groupSectorId => (
-      <Sector 
-        position={relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()} 
-        current={userCurrentSectorId === groupSectorId} 
-        key={groupSectorId} 
-        id={groupSectorId} 
-        data={sectorState[groupSectorId]} />
-    ))
+    return getSectorsToLoad(userCurrentSectorId, adjacentLayers).map(groupSectorId => {
+      if (!sectorState[groupSectorId]) return null
+      const idx = relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()
+      return (
+        <Sector 
+          position={idx} 
+          current={userCurrentSectorId === groupSectorId} 
+          key={groupSectorId} 
+          id={groupSectorId} 
+          data={sectorState[groupSectorId]} />
+      )
+    })
   }, [userCurrentSectorId, sectorState])
+
+  console.log('sectorsToRender', sectorsToRender?.length)
 
   return (
     <>{sectorsToRender}</>
@@ -126,7 +132,7 @@ const Sector = memo(({
   const adjacentScale = 0.9
   const size = current ? sectorSize : sectorSize * adjacentScale
 
-  const centerPosition = position.clone().add(new Vector3(sectorSize / 2, sectorSize / 2, sectorSize / 2))
+  const centerPosition = position.clone().multiplyScalar(sectorSize).addScalar(sectorSize / 2)
 
   const renderAvatars = () => {
     return null

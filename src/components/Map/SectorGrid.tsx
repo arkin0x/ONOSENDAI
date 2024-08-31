@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
-import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry } from 'three'
+import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, BackSide, RGBA_ASTC_10x10_Format, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
 import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
@@ -13,6 +13,14 @@ interface SectorData {
   sectorId: string
   position: Vector3
   color: Color
+}
+
+function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState): Color {
+  console.log('getSectorColor', sectorState[sectorId], sectorState)
+  if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
+  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
+  if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
+  return new Color(COLORS.DARK_PURPLE)
 }
 
 export const SectorGrid = () => {
@@ -66,13 +74,13 @@ export const SectorGrid = () => {
     }
   })
   
-  const handleClick = () => {
-    if (hovered !== null) {
-      // @TODO: this is broken
-      // const newCenterSectorId = new DecimalVector3().fromArray(sectorData[hovered].position.toArray())
-      setCenter(newCenterSectorId)
-    }
-  }
+  // const handleClick = () => {
+  //   if (hovered !== null) {
+  //     // @TODO: this is broken
+  //     // const newCenterSectorId = new DecimalVector3().fromArray(sectorData[hovered].position.toArray())
+  //     setCenter(newCenterSectorId)
+  //   }
+  // }
 
   return (
     <>
@@ -84,14 +92,6 @@ export const SectorGrid = () => {
 }
 
 export default SectorGrid
-
-function getSectorColor(sectorId: string, userCurrentSectorId: string, sectorState: SectorState): Color {
-  console.log('getSectorColor', sectorState[sectorId], sectorState)
-  if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
-  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
-  if (sectorState[sectorId]?.avatars.length > 0) return new Color(COLORS.RED)
-  return new Color(COLORS.DARK_PURPLE)
-}
 
 function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color }) {
 
@@ -106,6 +106,10 @@ function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorI
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
         <lineBasicMaterial color={color} linewidth={1} />
       </lineSegments>
+      <mesh>
+        <boxGeometry args={[1,1,1]} />
+        <meshLambertMaterial side={FrontSide} color={color} opacity={0.1} transparent/>
+      </mesh>
       { avatar ? <ThreeAvatarMarker /> : null }
       { selected ? 
         <Text 
@@ -116,6 +120,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorI
           position={textPosition} 
           rotation={[0,0,0]} 
           frustumCulled={true}
+          renderOrder={-1}
           color={color} >
           SECTOR {sectorId}
         </Text>

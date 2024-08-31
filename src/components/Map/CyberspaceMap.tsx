@@ -12,6 +12,7 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
+import SectorCrawler from './SectorCrawler'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -34,6 +35,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           {/* <Constructs scale={MAP_SIZE} /> */}
           {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           <SectorGrid />
+          <SectorCrawler />
           <OrbitControls target={[0,0,0]} />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />

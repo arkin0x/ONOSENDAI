@@ -36,7 +36,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <SectorGrid />
           <OrbitControls target={[0,0,0]} />
           <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={15} luminanceThreshold={0.00001} luminanceSmoothing={0} />
+            <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>
       </div>

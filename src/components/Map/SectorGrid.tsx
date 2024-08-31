@@ -7,7 +7,7 @@ import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
-import { AvatarMarker } from './AvatarMarker'
+import { ThreeAvatarMarker } from './ThreeAvatarMarker'
 
 interface SectorData {
   sectorId: string
@@ -102,7 +102,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorI
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
         <lineBasicMaterial color={color} linewidth={1} />
       </lineSegments>
-      { avatar ? <AvatarMarker /> : null }
+      { avatar ? <ThreeAvatarMarker /> : null }
       { selected ? 
         <Text 
           textAlign='left'
@@ -112,7 +112,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color }: { sectorI
           position={textPosition} 
           rotation={[0,0,0]} 
           frustumCulled={true}
-          color={lineColor} >
+          color={color} >
           SECTOR {sectorId}
         </Text>
       : null }

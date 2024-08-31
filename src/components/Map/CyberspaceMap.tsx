@@ -3,7 +3,7 @@ import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
-import { AvatarMarker } from './AvatarMarker'
+import { ThreeAvatarMarker } from './ThreeAvatarMarker'
 import { MapControls } from './MapControls'
 // import { BlockMarkers } from './BlockMarkers'
 // import { Constructs } from './Constructs'
@@ -29,7 +29,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <MapControls />
-          <AvatarMarker />
+          <ThreeAvatarMarker />
           {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           {/* <BlockMarkers scale={MAP_SIZE} /> */}
           {/* <Constructs scale={MAP_SIZE} /> */}

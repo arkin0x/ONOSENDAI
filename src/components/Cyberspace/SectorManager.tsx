@@ -71,7 +71,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
       subscriptions.forEach(sub => sub.stop())
       Object.keys(sectorState).forEach(sectorId => {
         if (!sectorsToLoad.includes(sectorId)) {
-          unmountSector(sectorId)
+          // unmountSector(sectorId)
         }
       })
     }

@@ -7,6 +7,7 @@ import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
+import { Text } from "@react-three/drei"
 import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
@@ -121,6 +122,7 @@ interface SectorProps {
   data: { avatars: string[]; constructs: Event[], hyperjumps: Event[] }
 }
 
+// SECTOR COMPONENT
 const Sector = memo(({ 
   position, 
   current, 
@@ -133,6 +135,8 @@ const Sector = memo(({
   const size = current ? sectorSize : sectorSize * adjacentScale
 
   const centerPosition = position.clone().multiplyScalar(sectorSize).addScalar(sectorSize / 2)
+
+  const halfSize = sectorSize/2
 
   const renderAvatars = () => {
     return null
@@ -157,6 +161,29 @@ const Sector = memo(({
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
         material={new LineBasicMaterial({ color: current ? COLORS.ORANGE : COLORS.DARK_PURPLE, linewidth: 1, fog: current ? false : true })}
       />
+      { current ? <Text 
+        textAlign='center'
+        fontSize={2**24 + 2**23}
+        font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+        anchorX={'center'}
+        position={[0, 0, halfSize]} 
+        // position={[0, -halfSize - 2**25, halfSize]} 
+        rotation={[0,-Math.PI,0]} 
+        frustumCulled={true}
+        color={COLORS.ORANGE} >
+        SECTOR {id}
+      </Text> : null }
+      {/* { current ? <Text 
+        textAlign='center'
+        fontSize={2**28}
+        font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+        anchorX={'center'}
+        position={[0, 0, halfSize]} 
+        rotation={[0,-Math.PI,0]} 
+        frustumCulled={true}
+        color={COLORS.ORANGE} >
+        //////
+      </Text> : null } */}
       {renderAvatars()}
       {renderConstructs()}
       {renderHyperjumps()}

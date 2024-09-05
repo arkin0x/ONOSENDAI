@@ -44,10 +44,10 @@ export const Interface = () => {
           <OrbitControls enablePan={false} enableZoom={false} enableRotate={false} />
           <ambientLight intensity={2.0} />
           <group>
-            <NavText text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)}/>
-            <NavText text="SECTOR" position={{x: 55, y: 0}} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)}/>
-            <NavText text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)}/>
-            <NavText text="LOGOUT" position={{x: 125, y: 0}} align="center" color={COLORS.PURPLE} onClick={logOut}/>
+            <NavText text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)} current={uiState === UIState.cyberspace}/>
+            <NavText text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
+            <NavText text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
+            <NavText text="LOGOUT" position={{x: 125, y: 0, z: 0}} align="center" color={0xBA005D} onClick={logOut}/>
           </group>
           <EffectComposer>
             <Bloom mipmapBlur levels={5} intensity={5} luminanceThreshold={-1} luminanceSmoothing={0} />
@@ -60,8 +60,9 @@ export const Interface = () => {
 
 type CoordinateTextProps = {
   position: {
-    x: number, // percent of viewport width
+    x: number // percent of viewport width
     y: number // percent of viewport height
+    z?: number
   }
   rotation?: [number, number, number],
   text: string,
@@ -69,6 +70,7 @@ type CoordinateTextProps = {
   color?: string | number
   fontSize?: number
   onClick?: () => void
+  current?: boolean
 }
 
 const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
@@ -80,6 +82,7 @@ const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
   // Use spring for smooth animation
   const { x } = useSpring({
     x: (hover ? 2 : 0 ),
+    y: (hover ? 2 : 0 ),
     config: { tension: 500, friction: 30 } // Adjust the animation config as needed
   })
 
@@ -126,7 +129,7 @@ const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
         geometry={shapeGeometry}
         position={position.clone().add(new Vector3(0, 3, 0))} // Position the shape slightly behind the text
         scale={[3,3,3]}
-        material={new MeshBasicMaterial({ color: 'transparent', opacity: 0, transparent: true })} // Make the shape invisible
+        material={new MeshBasicMaterial({ color: 0x000000, opacity: 0, transparent: true })} // Make the shape invisible
       />
       {/* <Plane
         args={[20, 7]} // Adjust the size of the plane as needed
@@ -152,7 +155,7 @@ const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
       >
         {props.text}
       </Text>
-      <lineLoop geometry={geometry} material={material} position={position.clone().add(new Vector3(0,3, 0))} scale={3} />
+      { hover || props.current ? <lineLoop geometry={geometry} material={material} position={position.clone().add(new Vector3(0,3, 0))} scale={3} /> : null }
       
     </animated.group>
   )

@@ -705,7 +705,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
 
   // add POW to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
-    let velocityPOW = Math.pow(2, POW-10) + 2**15 // tweak this for testing
+    let velocityPOW = Math.pow(2, POW-10)// + 2**15 // tweak this for testing
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0

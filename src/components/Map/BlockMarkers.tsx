@@ -16,7 +16,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
 
   useEffect(() => {
     if (!ndk) return
-    if (blocks.length > 20) return // abritrary limit that should be replaced with good caching.
+    if (blocks.length > 40) return // abritrary limit that should be replaced with good caching.
 
     const fetchNextBlock = async () => {
       let filter: NDKFilter
@@ -43,6 +43,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
       try {
         const event = await ndk.fetchEvent(filter)
         if (event) {
+          console.log(event)
           setBlocks(prevBlocks => [...prevBlocks, event])
           setTimeout(() => setFetchCounter(prev => prev + 1), 100)
         } else {

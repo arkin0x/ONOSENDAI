@@ -47,3 +47,9 @@ const COLORS = {
 }
 
 export default COLORS
+
+/**
+ * 0xafbc00 - limey yellow
+ * 0xcebe00 - not so bright yellow
+ * 0xBA005D - slightly brighter purple
+ */

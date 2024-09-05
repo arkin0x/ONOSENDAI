@@ -54,7 +54,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <Hud/>
           {/* <SpeedLines/> */}
           <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0.001} luminanceSmoothing={0} />
+            <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>
       </div>

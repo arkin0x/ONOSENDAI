@@ -47,7 +47,7 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   return (
     <div className="cyberspace-global">
       <div id="global">
-        <Canvas style={style}>
+        <Canvas style={style} camera={{position: [MAP_SIZE/2,MAP_SIZE*.9,MAP_SIZE]}}>
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE}>
             <ThreeAvatarMarker position={avatarPosition} />

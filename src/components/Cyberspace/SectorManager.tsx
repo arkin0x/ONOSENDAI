@@ -10,7 +10,7 @@ import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
-import { Avatar } from '../Avatar/Avatar'
+import { Avatar } from './Avatar'
 import Hyperjump from './Hyperjump'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
@@ -155,7 +155,7 @@ const Sector = memo(({
     <group position={centerPosition}>
       <lineSegments
         geometry={new EdgesGeometry(new BoxGeometry(size, size, size))}
-        material={new LineBasicMaterial({ color: current ? COLORS.ORANGE : COLORS.DARK_PURPLE, linewidth: 1 })}
+        material={new LineBasicMaterial({ color: current ? COLORS.ORANGE : COLORS.DARK_PURPLE, linewidth: 1, fog: current ? false : true })}
       />
       {renderAvatars()}
       {renderConstructs()}

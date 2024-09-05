@@ -1,10 +1,10 @@
-import { useContext, useEffect } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { Canvas, useThree } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
 import { MapControls } from './MapControls'
-import { Fog } from 'three'
+import { Fog, Vector3 } from 'three'
 // import { BlockMarkers } from './BlockMarkers'
 // import { Constructs } from './Constructs'
 // import { ObjectMarkers } from './ObjectMarkers'
@@ -12,31 +12,50 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
+import { Grid } from '../Map/Grid'
+import { BlockMarkers } from '../Map/BlockMarkers'
+import SectorMarkers from '../Map/SectorMarkers'
+import { ThreeAvatarMarker } from '../Map/ThreeAvatarMarker'
+import { ObjectMarkers } from '../Map/ObjectMarkers'
+import { useAvatarStore } from '../../store/AvatarStore'
+import { CYBERSPACE_AXIS, extractCyberspaceActionState } from '../../libraries/Cyberspace'
 // import SectorCrawler from './SectorCrawler'
+
+const MAP_SIZE = 100
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
 }
 
-const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
+const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getSimulatedState } = useAvatarStore()
   const { centerSectorId } = useMapCenterSectorStore()
 
-  // const orbitCameraTarget = sectorIdToMapCoord(centerSectorId).toVector3()
+  const [avatarPosition, setAvatarPosition] = useState(new Vector3(0,0,0))
+
+  const pubkey = identity?.pubkey
+
+  useEffect(() => {
+    const simulatedEvent = getSimulatedState(pubkey)
+    if (!simulatedEvent) return
+    const { coordinate } = extractCyberspaceActionState(simulatedEvent)
+    const avatarPosition = coordinate.vector.divideScalar(CYBERSPACE_AXIS).multiplyScalar(MAP_SIZE).toVector3()
+    setAvatarPosition(avatarPosition)
+  }, [pubkey, getSimulatedState])
 
   return (
-    <div className="cyberspace-map">
-      <div id="map">
+    <div className="cyberspace-global">
+      <div id="global">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          <MapControls />
-          {/* <ObjectMarkers scale={MAP_SIZE} /> */}
-          {/* <BlockMarkers scale={MAP_SIZE} /> */}
-          {/* <Constructs scale={MAP_SIZE} /> */}
-          {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
-          <SectorGrid />
-          <OrbitControls target={[0,0,0]} />
-          <MapCamera />
+          <Grid scale={MAP_SIZE}>
+            <ThreeAvatarMarker position={avatarPosition} />
+            <BlockMarkers scale={MAP_SIZE} />
+            {/* <Constructs scale={MAP_SIZE} /> */}
+            {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
+          </Grid>
+          <OrbitControls target={avatarPosition} />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
@@ -51,7 +70,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
   )
 }
 
-export default CyberspaceMap 
+export default CyberspaceGlobal 
 
 function MapCamera() {
   const { camera, scene } = useThree()

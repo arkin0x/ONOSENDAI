@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom"
 import CyberspaceMap from "./Map/CyberspaceMap"
 import "../scss/Interface.scss"
 import "../scss/Dashboard.scss"
+import CyberspaceGlobal from "./Global/CyberspaceGlobal"
 
 export const Interface = () => {
   const navigate = useNavigate()
@@ -22,6 +23,8 @@ export const Interface = () => {
         return <CyberspaceViewer />
       case UIState.map:
         return <CyberspaceMap />
+      case UIState.global:
+        return <CyberspaceGlobal />
       // case UIState.testing:
       //   return <Testing/>
       default:
@@ -34,10 +37,10 @@ export const Interface = () => {
       <div id="interface-body">{getInterface()}</div>
       <div id="interface-header">
         <button onClick={() => setUIState(UIState.cyberspace)}>
-          Cyberspace
+         Local 
         </button>
-        <button onClick={() => setUIState(UIState.map)}>Map</button>
-        {/* <button onClick={() => setUIState(UIState.telemetry)}>Telemetry</button> */}
+        <button onClick={() => setUIState(UIState.map)}>Sectors</button>
+        <button onClick={() => setUIState(UIState.global)}>Global</button>
         {/* <button onClick={() => setUIState(UIState.testing)}>Testing</button> */}
         {/* <button onClick={() => setUIState(UIState.settings)}>Settings</button> */}
         {/* <button onClick={() => setUIState(UIState.about)}>About</button> */}

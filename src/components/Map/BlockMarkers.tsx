@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext, useMemo } from 'react'
 import { NDKContext } from '../../providers/NDKProvider'
 import { BufferGeometry, Vector3, LineBasicMaterial } from 'three'
-import { CYBERSPACE_AXIS, factoryCyberspaceCoordinate } from '../../libraries/Cyberspace'
+import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString, cyberspaceCoordinateFromHexStringAndDecimal } from '../../libraries/Cyberspace'
 import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 import COLORS from '../../data/Colors'
 
@@ -120,7 +120,7 @@ function getBlockPosition(event: NDKEvent, scale: number): Vector3 {
   }
 
   const coordinate = cTag[1]
-  const position = factoryCyberspaceCoordinate(coordinate)
+  const position = cyberspaceCoordinateFromHexString(coordinate)
   const scaledPosition = position.vector.divideScalar(CYBERSPACE_AXIS.div(scale))
   return scaledPosition.toVector3()
 }

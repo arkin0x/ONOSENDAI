@@ -6,8 +6,13 @@ import { extractCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useSectorStore } from "../../store/SectorStore"
 import { IdentityContextType } from "../../types/IdentityType"
 import { IdentityContext } from "../../providers/IdentityProvider"
+import { Vector3 } from "three"
 
-export function ThreeAvatarMarker() {
+interface ThreeAvatarMarkerProps {
+  position: Vector3
+}
+
+export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {
   const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { getSimulatedState } = useAvatarStore()
   const { updateUserCurrentSectorId } = useSectorStore()
@@ -35,7 +40,7 @@ export function ThreeAvatarMarker() {
   }, [frameSectorId, updateUserCurrentSectorId])
 
   return (
-    <group position={[0,0,0]}>
+    <group position={position || [0,0,0]}>
       {/* default avatar represented by dodecahedron */}
       <lineSegments scale={[.5,.5,.5]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
     </group>

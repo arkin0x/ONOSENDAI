@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
-import { Avatar } from '../Avatar/Avatar'
+import { Avatar } from './Avatar'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
 import SectorManager from './SectorManager'

@@ -19,6 +19,7 @@ import { ThreeAvatarMarker } from '../Map/ThreeAvatarMarker'
 import { ObjectMarkers } from '../Map/ObjectMarkers'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { CYBERSPACE_AXIS, extractCyberspaceActionState } from '../../libraries/Cyberspace'
+import { Constructs } from '../Map/Constructs'
 // import SectorCrawler from './SectorCrawler'
 
 const MAP_SIZE = 100
@@ -53,6 +54,7 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
             <ThreeAvatarMarker position={avatarPosition} />
             <BlockMarkers scale={MAP_SIZE} />
             {/* <Constructs scale={MAP_SIZE} /> */}
+            {/* <ObjectMarkers scale={MAP_SIZE} /> */}
             {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           </Grid>
           <OrbitControls target={avatarPosition} />

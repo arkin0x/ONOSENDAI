@@ -16,7 +16,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
 
   useEffect(() => {
     if (!ndk) return
-    if (blocks.length > 40) return // abritrary limit that should be replaced with good caching.
+    if (blocks.length > 100) return // abritrary limit that should be replaced with good caching.
 
     const fetchNextBlock = async () => {
       let filter: NDKFilter

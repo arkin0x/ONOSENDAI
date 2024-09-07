@@ -34,6 +34,6 @@ export const Avatar = memo(({pubkey}: AvatarProps) => {
   return <>
     <ThreeAvatar pubkey={pubkey} />
     { inGenesisSector ? <SpawnModel pubkey={pubkey} /> : null }
-    <ThreeAvatarTrail pubkey={pubkey}/>
+    {/* <ThreeAvatarTrail pubkey={pubkey}/> */}
   </>
 })

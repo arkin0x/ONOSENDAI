@@ -8,7 +8,7 @@ interface HyperjumpProps {
   event: Event
 }
 
-const BLOCK_SIZE = 1
+const BLOCK_SIZE = 10
 
 function Hyperjump({event}: HyperjumpProps) {
 
@@ -24,7 +24,7 @@ function Hyperjump({event}: HyperjumpProps) {
   const material = useMemo(() => {
     return new PointsMaterial({
       color: 0xff9900,
-      size: size,
+      size: 3,
       sizeAttenuation: false
     })
   }, [size])

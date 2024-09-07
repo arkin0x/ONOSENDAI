@@ -4,9 +4,9 @@ import '../../scss/Telemetry.scss'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
 import { isGenesisAction } from '../../libraries/Cyberspace'
-import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { countLeadingZeroesHex } from '../../libraries/Hash'
 import { useAvatarStore } from '../../store/AvatarStore'
+import { DebugLocal } from '../DebugLocal'
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {
@@ -43,6 +43,9 @@ export const TelemetryDashboard = () => {
           : renderActions()
         }
       </div>
+      <div id="debug">
+          <DebugLocal/>
+      </div>
     </div>
   )
 }
@@ -65,3 +68,4 @@ const ActionDOM = ({action, select}: ActionDOMProps) => {
     </div>
   )
 }
+

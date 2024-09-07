@@ -4,7 +4,6 @@ import { DecimalVector3 } from "./DecimalVector3"
 import { getTag, getTagValue } from "./Nostr"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
-import { Cyberspace } from "../components/ThreeCyberspace"
 
 // CONSTANTS
 
@@ -121,6 +120,12 @@ export function cyberspaceCoordinateFromHexStringAndDecimal(coordinateString: st
   return factoryCyberspaceCoordinate(hex as CyberspaceCoordinateRaw, decimalAxes) as CyberspaceCoordinate
 }
 
+export function cyberspaceEncodeSectorPartialToRaw(sector: CyberspaceSectorRaw, vector: CyberspaceLocalCoordinateVector, plane: CyberspacePlane): CyberspaceCoordinateRaw {
+  const corner = cyberspaceSectorRawToCoordinateVector(sector)
+  const vectorAdd = corner.add(vector)
+  return cyberspaceEncodePartialToRaw(vectorAdd, plane)
+}
+
 // Takes a vector and a plane and returns a 256-bit hex string
 // This is used when simulating a position and converting the new position to a coordinate hex string.
 // "Partial" here refers to the separated vector and plane as opposed to the full coordinate object.
@@ -193,15 +198,15 @@ function factoryCyberspacePlane(value: string | number | boolean): CyberspacePla
   }
 }
 
-function factoryCyberspaceCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceCoordinateVector {
+export function factoryCyberspaceCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceCoordinateVector {
   return new DecimalVector3(x, y, z) as CyberspaceCoordinateVector
 }
 
-function factoryCyberspaceLocalCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceLocalCoordinateVector {
+export function factoryCyberspaceLocalCoordinateVector(x: Decimal | number | string, y: Decimal | number | string, z: Decimal | number | string): CyberspaceLocalCoordinateVector {
   return new DecimalVector3(x, y, z) as CyberspaceLocalCoordinateVector
 }
 
-function factoryCyberspaceDimension(value: Decimal | number | string): CyberspaceCoordinateDimension {
+function factoryCyberspaceCoordinateDimension(value: Decimal | number | string): CyberspaceCoordinateDimension {
   return new Decimal(value) as CyberspaceCoordinateDimension
 }
 
@@ -255,13 +260,13 @@ function factoryCyberspaceCoordinate(coordinateRaw: CyberspaceCoordinateRaw, dec
 
   const vector = factoryCyberspaceCoordinateVector(dimensionX, dimensionY, dimensionZ)
   const localVector = factoryCyberspaceLocalCoordinateVector(dimensionX.mod(CYBERSPACE_SECTOR), dimensionY.mod(CYBERSPACE_SECTOR), dimensionZ.mod(CYBERSPACE_SECTOR))
-  const sector = cyberspaceSectorFromCoordinateVector(vector)
+  const sector = cyberspaceCoordinateVectorToSectorId(vector)
   return {
     raw: hex as CyberspaceCoordinateRaw,
     vector,
-    x: factoryCyberspaceDimension(dimensionX),
-    y: factoryCyberspaceDimension(dimensionY),
-    z: factoryCyberspaceDimension(dimensionZ),
+    x: factoryCyberspaceCoordinateDimension(dimensionX),
+    y: factoryCyberspaceCoordinateDimension(dimensionY),
+    z: factoryCyberspaceCoordinateDimension(dimensionZ),
     local: {
       raw: hex as CyberspaceCoordinateRaw,
       vector: localVector,
@@ -306,12 +311,24 @@ export function cyberspaceSectorStringToObject(sectorString: string): Cyberspace
 }
 
 // Utility functions
-export function cyberspaceSectorIdToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
+export function cyberspaceSectorRawToVector(sectorId: CyberspaceSectorRaw): CyberspaceSectorVector {
   const [x, y, z] = sectorId.split('-')
   return factoryCyberspaceSectorVector(x, y, z)
 }
 
-export function cyberspaceSectorFromCoordinateVector(vector: CyberspaceCoordinateVector): CyberspaceSector {
+// this basically gets the corner of the sector cube closest to 0,0,0. Add local CyberspaceLocalCoordinateVector to get a point within the sector.
+export function cyberspaceSectorRawToCoordinateVector(sector: CyberspaceSectorRaw): CyberspaceCoordinateVector {
+  const sectorSplit: CyberspaceSectorVector = cyberspaceSectorRawToVector(sector) // sector id split into x, y, z
+  const sectorIndexX: CyberspaceSectorIndex = factoryCyberspaceSectorIndex(sectorSplit.x)
+  const sectorIndexY: CyberspaceSectorIndex = factoryCyberspaceSectorIndex(sectorSplit.y)
+  const sectorIndexZ: CyberspaceSectorIndex = factoryCyberspaceSectorIndex(sectorSplit.z)
+  const sectorX: CyberspaceCoordinateDimension = factoryCyberspaceCoordinateDimension(sectorIndexX.mul(CYBERSPACE_SECTOR))
+  const sectorY: CyberspaceCoordinateDimension = factoryCyberspaceCoordinateDimension(sectorIndexY.mul(CYBERSPACE_SECTOR))
+  const sectorZ: CyberspaceCoordinateDimension = factoryCyberspaceCoordinateDimension(sectorIndexZ.mul(CYBERSPACE_SECTOR))
+  return factoryCyberspaceCoordinateVector(sectorX, sectorY, sectorZ)
+}
+
+export function cyberspaceCoordinateVectorToSectorId(vector: CyberspaceCoordinateVector): CyberspaceSector {
   const x = vector.x.div(CYBERSPACE_SECTOR).floor().toString()
   const y = vector.y.div(CYBERSPACE_SECTOR).floor().toString()
   const z = vector.z.div(CYBERSPACE_SECTOR).floor().toString()
@@ -329,7 +346,7 @@ function factoryCyberspaceSectorRaw(id: string): CyberspaceSectorRaw {
 }
 
 function factoryCyberspaceSector(id: CyberspaceSectorRaw): CyberspaceSector {
-  const vector = cyberspaceSectorIdToVector(id)
+  const vector = cyberspaceSectorRawToVector(id)
 
   // The lowest coordinate corner of the sector cube.
   const cornerVector = factoryCyberspaceCoordinateVector(vector.x.mul(CYBERSPACE_SECTOR), vector.y.mul(CYBERSPACE_SECTOR), vector.z.mul(CYBERSPACE_SECTOR)) as CyberspaceCoordinateVector
@@ -700,12 +717,11 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
   const updatedPosition = coordinate.vector.clone()
   let updatedVelocity = velocity.clone()
 
-  // Handle POW
   const POW = countLeadingZeroesHex(startEvent.id)
 
-  // add POW to velocity if the startEvent was a drift action.
+  // add proof of work to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
-    let velocityPOW = Math.pow(2, POW-10)// + 2**15 // tweak this for testing
+    let velocityPOW = Math.pow(2, POW-10) // + 2**18 // tweak POW for testing
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0
@@ -733,7 +749,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
   // decimal array is 8-digit integers representing the fractional part of the position, because the fractional part can't be stored in the cyberspace coordinate.
   const decimalArray = updatedPosition.toArrayDecimals()
 
-  const sector = cyberspaceSectorFromCoordinateVector(positionVector)
+  const sector = cyberspaceCoordinateVectorToSectorId(positionVector)
 
   // this event is agnostic of the type of action it may represent. The 'A' tag and POW must still be added.
   const event = {
@@ -770,8 +786,8 @@ export type ActionChainState =
 export const relativeSectorIndex = (baseSectorId: string, targetSectorId: string): DecimalVector3 => {
   const base = cyberspaceSectorStringToRaw(baseSectorId)
   const target = cyberspaceSectorStringToRaw(targetSectorId)
-  const baseVector = cyberspaceSectorIdToVector(base)
-  const targetVector = cyberspaceSectorIdToVector(target)
+  const baseVector = cyberspaceSectorRawToVector(base)
+  const targetVector = cyberspaceSectorRawToVector(target)
   const position = targetVector.sub(baseVector)
   return position
 }

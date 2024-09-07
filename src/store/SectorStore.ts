@@ -70,15 +70,23 @@ export const useSectorStore = create<SectorStore>()(
           }
         }
       })),
-      addHyperjump: (sectorId, event) => set((state) => ({
-        sectorState: {
-          ...state.sectorState,
-          [sectorId]: {
-            ...state.sectorState[sectorId],
-            hyperjumps: [...new Set([...state.sectorState[sectorId].hyperjumps, event])]
-          }
+      addHyperjump: (sectorId, event) => set((state) => {
+        const currentHyperjumps = state.sectorState[sectorId]?.hyperjumps || [];
+        const hyperjumpExists = currentHyperjumps.some(hyperjump => hyperjump.id === event.id);
+        
+        if (!hyperjumpExists) {
+          return {
+            sectorState: {
+              ...state.sectorState,
+              [sectorId]: {
+                ...state.sectorState[sectorId],
+                hyperjumps: [...currentHyperjumps, event]
+              }
+            }
+          };
         }
-      })),
+        return state;
+      }),
       scanSector: (sectorId) => set((state) => ({
         sectorState: {
           ...state.sectorState,

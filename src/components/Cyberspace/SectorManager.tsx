@@ -92,6 +92,24 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
   // }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState])
   }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState, addAvatar, addConstruct, addHyperjump])
 
+  const renderAvatars = () => {
+    return null
+    return data.avatars.map(pubkey => <Avatar key={pubkey} pubkey={pubkey} /> )
+  }
+
+  const renderConstructs = () => {
+    // TODO:
+    // render construct with the highest POW
+    // keep in mind the minimum size of a construct is 1 sector
+    // how to visualize it when you're in it?
+    return null
+  }
+
+  const renderHyperjumps = () => {
+    if (!userCurrentSectorId) return null
+    return sectorState[userCurrentSectorId].hyperjumps.map(event => <Hyperjump key={event.id} event={event} /> )
+  }
+
   const sectorsToRender = useMemo(() => {
     if (!userCurrentSectorId) return null
     return getSectorsToLoad(userCurrentSectorId, adjacentLayers).map(groupSectorId => {
@@ -111,7 +129,12 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
   console.log('sectorsToRender', sectorsToRender?.length)
 
   return (
-    <>{sectorsToRender}</>
+    <>
+      {sectorsToRender}
+      {renderAvatars()}
+      {renderConstructs()}
+      {renderHyperjumps()}
+    </>
   )
 }
 
@@ -137,23 +160,6 @@ const Sector = memo(({
   const centerPosition = position.clone().multiplyScalar(sectorSize).addScalar(sectorSize / 2)
 
   const halfSize = sectorSize/2
-
-  const renderAvatars = () => {
-    return null
-    return data.avatars.map(pubkey => <Avatar key={pubkey} pubkey={pubkey} /> )
-  }
-
-  const renderConstructs = () => {
-    // TODO:
-    // render construct with the highest POW
-    // keep in mind the minimum size of a construct is 1 sector
-    // how to visualize it when you're in it?
-    return null
-  }
-
-  const renderHyperjumps = () => {
-    return data.hyperjumps.map(event => <Hyperjump key={event.id} event={event} /> )
-  }
 
   return (
     <group position={centerPosition}>
@@ -184,9 +190,6 @@ const Sector = memo(({
         color={COLORS.ORANGE} >
         //////
       </Text> : null } */}
-      {renderAvatars()}
-      {renderConstructs()}
-      {renderHyperjumps()}
     </group>
   )
 })

@@ -1,25 +1,46 @@
 import { Event } from 'nostr-tools'
-import { Vector3 } from 'three'
-import { cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
-import { DecimalVector3 } from '../../libraries/DecimalVector3'
+import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
+import { CyberspaceCoordinate, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
+import { useMemo } from 'react'
 
 interface HyperjumpProps {
   event: Event
 }
 
-const BLOCK_SIZE = 3
+const BLOCK_SIZE = 1
 
 function Hyperjump({event}: HyperjumpProps) {
 
   const position = getBlockPosition(event)
   const size = BLOCK_SIZE
 
+   const geometry = useMemo(() => {
+    const geo = new BufferGeometry()
+    geo.setAttribute('position', new Float32BufferAttribute([0,0,0], 3))
+    return geo
+  }, [position])
+
+  const material = useMemo(() => {
+    return new PointsMaterial({
+      color: 0xff9900,
+      size: size,
+      sizeAttenuation: false
+    })
+  }, [size])
+
+  // return 
+
+  console.log('hyperjump', position)
+
   return (
-    <mesh position={position}>
-      <boxGeometry args={[size, size, size]} />
-      <meshBasicMaterial color={COLORS.YELLOW} /> {/* Yellow color */}
-    </mesh>
+    <group position={position}>
+      <mesh>
+        <boxGeometry args={[size, size, size]} />
+        <meshBasicMaterial color={COLORS.YELLOW} />
+      </mesh>
+      <points geometry={geometry} material={material} />
+    </group>
   )
 }
 
@@ -31,8 +52,11 @@ function getBlockPosition(event: Event): Vector3 {
   }
 
   const coordinate = cTag[1]
-  const localCoordinates: DecimalVector3 = cyberspaceCoordinateFromHexString(coordinate)
-  return localCoordinates.toVector3()
+  console.log('ctag', coordinate, event)
+  const coord: CyberspaceCoordinate = cyberspaceCoordinateFromHexString(coordinate)
+  const localVector = coord.local.vector.toVector3()
+  console.log('localVector', localVector)
+  return localVector
 }
 
 export default Hyperjump

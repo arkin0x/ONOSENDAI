@@ -28,6 +28,10 @@ export const TelemetryDashboard = () => {
 
   return (
     <div id="telemetry-dashboard" className="dashboard">
+      <br/>
+      <br/>
+      <br/>
+      <br/>
       <h1>Telemetry Dashboard</h1>
       <div id="actions">
         {selectedAction 

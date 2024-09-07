@@ -107,6 +107,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
   const renderHyperjumps = () => {
     if (!userCurrentSectorId) return null
+    if (!sectorState[userCurrentSectorId]) return null
     return sectorState[userCurrentSectorId].hyperjumps.map(event => <Hyperjump key={event.id} event={event} /> )
   }
 

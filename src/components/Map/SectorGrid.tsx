@@ -18,10 +18,13 @@ interface SectorData {
   genesis?: boolean
 }
 
+const GENESIS_COLOR = COLORS.PINK
+
 function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
   // console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
-  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.YELLOW)
+  if (sectorState[sectorId]?.isGenesis) return new Color(GENESIS_COLOR)
+  if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) {
     if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
       // there are other avatars in this sector
@@ -61,7 +64,7 @@ export const SectorGrid = () => {
       // console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
-      return { sectorId, position, color, genesis: color.getHex() === COLORS.YELLOW }
+      return { sectorId, position, color, genesis: color.getHex() === GENESIS_COLOR }
     }).filter(Boolean) as SectorData[]
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
@@ -111,9 +114,11 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
   const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
   const genesisTextPosition = new Vector3(-0.6, 0, 0)
 
+  // FIXME: using the colors like this is a bit of a hack
   const visited = color.getHex() === COLORS.LIGHT_PURPLE
+  const hyperjump = color.getHex() === COLORS.YELLOW
 
-  const solid = avatar || genesis || visited
+  const solid = avatar || genesis || visited || hyperjump
 
   const opacity = solid ? 1 : 0.2
   

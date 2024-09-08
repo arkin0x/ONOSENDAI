@@ -2,15 +2,29 @@ import { SignInButton } from './SignInButton'
 import { SignUpButton } from './SignUpButton'
 import '../scss/Home.scss'
 import logo from '../assets/logo-cropped.png'
-import { useContext } from 'react'
+import { useContext, useEffect } from 'react'
 import { IdentityContextType } from '../types/IdentityType.tsx'
 import { IdentityContext } from '../providers/IdentityProvider.tsx'
 import { Interface } from './Interface.tsx'
+import { NDKContext } from '../providers/NDKProvider.tsx'
+import { useEngineStore } from '../store/EngineStore.ts'
 
 export const Home = () => {
-  const { profileLoaded } = useContext<IdentityContextType>(IdentityContext)
+  const { identity, profileLoaded } = useContext<IdentityContextType>(IdentityContext)
 
-  // return <Interface/>
+  const { publishEvent } = useContext(NDKContext)
+  const setPublishEvent = useEngineStore(state => state.setPublishEvent)
+  const setPubkey = useEngineStore(state => state.setPubkey)
+
+  useEffect(() => {
+    setPublishEvent(publishEvent)
+  }, [publishEvent, setPublishEvent])
+
+  useEffect(() => {
+    if (identity.pubkey) {
+      setPubkey(identity.pubkey)
+    }
+  }, [identity.pubkey, setPubkey])
 
   if (profileLoaded()) {
     return <Interface/>

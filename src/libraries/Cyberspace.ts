@@ -380,6 +380,18 @@ function factoryCyberspaceSectorVector(x: number | string | Decimal, y: number |
 // VELOCITY
 
 export type CyberspaceVelocity = DecimalVector3 & { readonly __brand: unique symbol }
+export type CyberspaceMAG = number & { readonly __brand: unique symbol } // Magnitude of Accumulated Gibsons (MAG) in G/s
+
+export function cyberspaceVelocityToMAG(velocity: CyberspaceVelocity): CyberspaceMAG {
+  // Calculate the magnitude of the velocity vector
+  const magnitude = Decimal.sqrt((velocity.x.pow(2).add(velocity.y.pow(2).add(velocity.z.pow(2)))))
+  
+  // Take the log2 of the magnitude
+  // We add a small value (1e-10) to avoid log(0) which is undefined
+  const log2Velocity = Decimal.log2(magnitude)
+  
+  return log2Velocity.toNumber() as CyberspaceMAG
+}
 
 // TIME
 
@@ -721,7 +733,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
 
   // add proof of work to velocity if the startEvent was a drift action.
   if (startEvent.tags.find(getTagValue('A','drift'))) {
-    let velocityPOW = Math.pow(2, POW-10) + 2**15 // tweak POW for testing
+    let velocityPOW = Math.pow(2, POW-10) // + 2**15 // tweak POW for testing
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.
       velocityPOW = 0

@@ -8,7 +8,7 @@ type AvatarActionState = {
 }
 
 export type AvatarActionDispatched = 
-  | { type: 'unshift' | 'push'; pubkey: string; actions: Event[] }
+  | { type: 'unshift' | 'push'; pubkey: string; actions: CyberspaceVirtualAction[] }
   | { type: 'reset'; pubkey: string }
 
 interface AvatarStore {

@@ -1,9 +1,9 @@
 // engineStore.ts
 import create from 'zustand'
 import { Quaternion } from 'three'
-import { CyberspaceAction, createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction, validateCyberspaceAction } from './Cyberspace'
+import { CyberspaceAction, CyberspaceVirtualAction, CyberspaceVirtualActionTemplate, createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction, validateCyberspaceAction } from '../libraries/Cyberspace'
 import { setWorkerCallback, workzone } from './WorkerManager'
-import { deserializeEvent, getNonceBounds, serializeEvent } from './Miner'
+import { deserializeEvent, getNonceBounds, serializeEvent } from '../libraries/Miner'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { useThrottleStore } from './ThrottleStore'
 import { useRotationStore } from './RotationStore'
@@ -86,15 +86,14 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     get().stopDrift()
     set({ restartMiners: false })
 
-    const genesisAction = createUnsignedGenesisAction(pubkey)
-    const rawGenesis = await publishEvent(genesisAction)
-    if (!rawGenesis) {
+    const genesisAction = createUnsignedGenesisAction(pubkey) as CyberspaceVirtualAction
+    useAvatarStore.getState().dispatchActionState({ type: 'reset', pubkey })
+    useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [genesisAction], pubkey })
+    const publishedGenesis = await publishEvent(genesisAction)
+    if (!publishedGenesis) {
       throw new Error('Engine.drift: failed to publish genesis action')
-    } else {
-      useAvatarStore.getState().dispatchActionState({ type: 'reset', pubkey })
-      useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [rawGenesis], pubkey })
-    }
-    console.log('new genesis:', rawGenesis)
+    } 
+    console.log('new genesis:', publishedGenesis)
   }
 }))
 
@@ -144,35 +143,26 @@ function stopMovementWorkers() {
 setWorkerCallback('movement', movementWorkerMessage)
 
 function movementWorkerMessage(msg: MessageEvent) {
+  const publishEvent = useEngineStore.getState().publishEvent
+  const pubkey = useEngineStore.getState().pubkey
+  if (!pubkey || !publishEvent) return
+
   if (msg.data.status === 'pow-target-found' && msg.data.chainHeight === useEngineStore.getState().chainHeight) {
     useEngineStore.setState({ chainHeight: useEngineStore.getState().chainHeight + 1 })
     stopMovementWorkers()
     const actionBinary = msg.data.action
     const actionSerialized = new TextDecoder().decode(actionBinary)
-    const action = deserializeEvent(actionSerialized)
-    const validated = validateCyberspaceAction(action)
-    if (validated) {
-      publishMovementAction(action)
-    } else {
+    const action = deserializeEvent(actionSerialized) as CyberspaceVirtualAction
+    // push the action to the avatar store
+    useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [action], pubkey })
+    useEngineStore.setState({ restartMiners: true })
+    // publish the action
+    const publishedAction = publishEvent(action)
+    if (!publishedAction) {
       console.error('Engine: movementWorkerMessage: action validation failed')
     }
+    useEngineStore.setState({ restartMiners: true })
   }
-}
-
-async function publishMovementAction(action: UnsignedEvent): Promise<void> {
-  const publishEvent = useEngineStore.getState().publishEvent
-  if (!publishEvent) {
-    console.error('Engine: publishMovementAction: publishEvent function is not set')
-    return
-  }
-  const publishedAction = await publishEvent(action)
-  if (!publishedAction) {
-    console.error('Engine: publishMovementAction: failed to publish action')
-    return
-  }
-  const convertedAction = publishedAction as CyberspaceAction
-  useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [convertedAction], pubkey: action.pubkey })
-  useEngineStore.setState({ restartMiners: true })
 }
 
 // You might need to implement or inject these functions:

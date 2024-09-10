@@ -8,7 +8,6 @@ import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Text } from "@react-three/drei"
-import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
 import { Avatar } from './Avatar'
@@ -177,20 +176,9 @@ const Sector = memo(({
         // position={[0, -halfSize - 2**25, halfSize]} 
         rotation={[0,-Math.PI,0]} 
         frustumCulled={true}
-        color={COLORS.ORANGE} >
+        color={COLORS.DARK_PURPLE} >
         SECTOR {id}
       </Text> : null }
-      {/* { current ? <Text 
-        textAlign='center'
-        fontSize={2**28}
-        font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
-        anchorX={'center'}
-        position={[0, 0, halfSize]} 
-        rotation={[0,-Math.PI,0]} 
-        frustumCulled={true}
-        color={COLORS.ORANGE} >
-        //////
-      </Text> : null } */}
     </group>
   )
 })

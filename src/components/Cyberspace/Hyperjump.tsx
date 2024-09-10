@@ -3,17 +3,19 @@ import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 
 import { CyberspaceCoordinate, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useMemo } from 'react'
+import { shardData } from '../../data/ShardData'
+import ShardViewer from './Shard'
 
 interface HyperjumpProps {
   event: Event
 }
 
-const BLOCK_SIZE = 10
+const BLOCK_SIZE = 1
 
 function Hyperjump({event}: HyperjumpProps) {
 
   const position = getBlockPosition(event)
-  const size = BLOCK_SIZE
+  const size = 1// BLOCK_SIZE
 
    const geometry = useMemo(() => {
     const geo = new BufferGeometry()
@@ -23,8 +25,8 @@ function Hyperjump({event}: HyperjumpProps) {
 
   const material = useMemo(() => {
     return new PointsMaterial({
-      color: 0xff9900,
-      size: 3,
+      color: 0x000000,//0xff9900,
+      size: 0,
       sizeAttenuation: false
     })
   }, [size])
@@ -35,11 +37,12 @@ function Hyperjump({event}: HyperjumpProps) {
 
   return (
     <group position={position}>
-      <mesh>
+      {/* <mesh>
         <boxGeometry args={[size, size, size]} />
         <meshBasicMaterial color={COLORS.YELLOW} />
       </mesh>
-      <points geometry={geometry} material={material} />
+      <points geometry={geometry} material={material} /> */}
+      <ShardViewer shardData={shardData} />
     </group>
   )
 }

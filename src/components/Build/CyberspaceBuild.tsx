@@ -13,12 +13,12 @@ const CyberspaceBuild: React.FC = () => {
 
   useEffect(() => {
     if (!currentShard && shards.length === 0) {
-      addShard();
+      addShard()
     }
   }, [currentShard, shards, addShard]);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: "#222222" }}>
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: "#14071f" }}>
       <div style={{ flex: 1 }}>
         <Canvas camera={{ position: [0, 5, 10], far: 2**30 }}>
           <ambientLight intensity={2} />

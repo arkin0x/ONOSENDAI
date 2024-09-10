@@ -50,8 +50,8 @@ export const Interface = () => {
             <NavText text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)} current={uiState === UIState.cyberspace}/>
             <NavText text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
             <NavText text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
-            <NavText text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.LOGO_BLUE} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
-            <NavText text="LOGOUT" position={{x: 160, y: 0, z: 0}} align="center" color={0xBA005D} onClick={logOut}/>
+            <NavText text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.PINK} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
+            <NavText text="LOGOUT" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGOUT} onClick={logOut}/>
           </group>
           <EffectComposer>
             <Bloom mipmapBlur levels={5} intensity={5} luminanceThreshold={-1} luminanceSmoothing={0} />

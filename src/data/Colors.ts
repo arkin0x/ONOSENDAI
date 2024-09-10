@@ -8,6 +8,7 @@ const CURSOR_YELLOW = 0xffff00
 const BITCOIN = 0xff9123
 const RED = 0xff2323
 const DARK_PURPLE = 0x2b0c40
+const LOGOUT = 0xBA005D
 const PINK = 0xff3377
 const GREEN = 0x4bc9a7
 
@@ -40,6 +41,7 @@ const COLORS = {
   GRID_CROSS,
   BLACK_SUN,
   DSPACE,
+  LOGOUT,
 
   LOGO_PURPLE,
   LOGO_BLUE,

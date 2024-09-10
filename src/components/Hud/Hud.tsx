@@ -10,6 +10,7 @@ import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
 import { useAvatarStore } from "../../store/AvatarStore"
 import COLORS from "../../data/Colors"
+import { generateSectorName } from "../../libraries/SectorName"
 
 
 export const Hud = () => {
@@ -57,7 +58,8 @@ export const Hud = () => {
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.localCoordinate.vector.z.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.localCoordinate.vector.y.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.localCoordinate.vector.x.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sector.id} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={generateSectorName(simulatedState.sector.id).toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ID ' + simulatedState.sector.id} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.coordinate.raw.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />

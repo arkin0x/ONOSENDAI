@@ -10,6 +10,7 @@ import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
 import { ThreeAvatarMarker } from './ThreeAvatarMarker'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
+import { generateSectorName } from '../../libraries/SectorName'
 
 interface SectorData {
   sectorId: string
@@ -144,7 +145,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
           frustumCulled={true}
           renderOrder={-1}
           color={color} >
-          SECTOR {sectorId}
+          SECTOR {generateSectorName(sectorId).toUpperCase()}
         </Text>
       : null }
       { genesis ?

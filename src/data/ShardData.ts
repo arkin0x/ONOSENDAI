@@ -20,5 +20,10 @@ export const shardData = {
     1, 0, 1,  // blue
     0, 0, 1,  // yellow
     1, 0, 1   // magenta
-  ]
+  ],
+  position: { // in the sector
+    x: 1,
+    y: 2,
+    z: 3
+  }
 }

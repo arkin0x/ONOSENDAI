@@ -1,35 +1,30 @@
-import React, { useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const Shard = ({ shardData }) => {
+
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    
-    // Add vertices
     geo.setAttribute('position', new THREE.Float32BufferAttribute(shardData.vertices, 3));
-    
-    // Add colors
     geo.setAttribute('color', new THREE.Float32BufferAttribute(shardData.colors, 3));
-    
-    // Add faces
     geo.setIndex(shardData.indices);
-    
     geo.computeVertexNormals();
     return geo;
   }, [shardData]);
 
-  return (
-    <mesh geometry={geometry}>
-      <meshPhongMaterial vertexColors={true} side={THREE.DoubleSide} />
-    </mesh>
-  );
-};
+  const position = useMemo(() => {
+    const x = parseInt(shardData.position.x);
+    const y = parseInt(shardData.position.y);
+    const z = parseInt(shardData.position.z);
+    return new THREE.Vector3(x, y, z);
+  }, [shardData.position]);
 
-const ShardViewer = ({ shardData }) => {
   return (
-      <Shard shardData={shardData} />
-  )
+      <mesh geometry={geometry} position={position}>
+        <meshPhongMaterial vertexColors={true} side={THREE.DoubleSide} />
+      </mesh>
+    )
 }
 
-export default ShardViewer
+export default Shard

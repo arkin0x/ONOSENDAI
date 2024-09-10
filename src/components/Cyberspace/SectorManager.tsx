@@ -14,6 +14,7 @@ import { Avatar } from './Avatar'
 import Hyperjump from './Hyperjump'
 import { IdentityContextType } from '../../types/IdentityType'
 import { IdentityContext } from '../../providers/IdentityProvider'
+import { generateSectorName } from '../../libraries/SectorName'
 
 interface SectorManagerProps {
   adjacentLayers?: number
@@ -177,7 +178,7 @@ const Sector = memo(({
         rotation={[0,-Math.PI,0]} 
         frustumCulled={true}
         color={COLORS.DARK_PURPLE} >
-        SECTOR {id}
+        SECTOR {generateSectorName(id).toUpperCase()}
       </Text> : null }
     </group>
   )

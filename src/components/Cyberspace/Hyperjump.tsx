@@ -4,7 +4,7 @@ import { CyberspaceCoordinate, cyberspaceCoordinateFromHexString } from '../../l
 import COLORS from '../../data/Colors'
 import { useMemo } from 'react'
 import { shardData } from '../../data/ShardData'
-import ShardViewer from './Shard'
+import Shard from './Shard'
 
 interface HyperjumpProps {
   event: Event
@@ -26,7 +26,7 @@ function Hyperjump({event}: HyperjumpProps) {
   const material = useMemo(() => {
     return new PointsMaterial({
       color: 0x000000,//0xff9900,
-      size: 0,
+      size: 1,
       sizeAttenuation: false
     })
   }, [size])
@@ -40,9 +40,9 @@ function Hyperjump({event}: HyperjumpProps) {
       {/* <mesh>
         <boxGeometry args={[size, size, size]} />
         <meshBasicMaterial color={COLORS.YELLOW} />
-      </mesh>
-      <points geometry={geometry} material={material} /> */}
-      <ShardViewer shardData={shardData} />
+      </mesh> */}
+      <points geometry={geometry} material={material} />
+      <Shard shardData={shardData} />
     </group>
   )
 }

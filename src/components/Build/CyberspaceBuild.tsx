@@ -18,9 +18,9 @@ const CyberspaceBuild: React.FC = () => {
   }, [currentShard, shards, addShard]);
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: "#222222" }}>
       <div style={{ flex: 1 }}>
-        <Canvas camera={{ position: [0, 5, 10] }}>
+        <Canvas camera={{ position: [0, 5, 10], far: 2**30 }}>
           <ambientLight intensity={2} />
           <pointLight position={[10, 10, 10]} />
           <Grid />
@@ -28,14 +28,14 @@ const CyberspaceBuild: React.FC = () => {
           <OrbitControls />
         </Canvas>
       </div>
-      <div style={{ width: '300px', padding: '20px', background: '#f0f0f0' }}>
+      <div style={{ width: '300px', padding: '20px', background: '#444444' }}>
         <ControlPanel
           selectedTool={selectedTool}
           setSelectedTool={setSelectedTool}
         />
         <ShardList
           shards={shards}
-          currentShardId={currentShard?.id}
+          currentShardId={currentShard?.id ?? null}
           onSelectShard={(id) => setCurrentShard(id)}
         />
       </div>

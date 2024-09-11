@@ -1,30 +1,45 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useThree, ThreeEvent } from '@react-three/fiber';
-import { Shard, useBuilderStore } from '../../store/BuilderStore';
+import { Shard as ShardType, useBuilderStore } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
 import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three';
-import { Text } from '@react-three/drei';
+import { OrbitControls, Text } from '@react-three/drei';
 import VertexSelectionIndicator from './VertexSelectionIndicator';
+import Shard from '../Cyberspace/Shard'
 
 interface ShardEditorProps {
-  shard: Shard;
+  shard: ShardType;
   selectedTool: 'vertex' | 'face';
 }
 
 const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
-  const { addVertex, updateVertex, removeVertex, addFace } = useBuilderStore();
+  const { addVertex, updateVertex, removeVertex, addFace, removeFace } = useBuilderStore();
   const { scene, camera } = useThree();
   const [hoveredVertex, setHoveredVertex] = useState<string | null>(null);
   const [selectedVertices, setSelectedVertices] = useState<string[]>([]);
   const [draggedVertex, setDraggedVertex] = useState<string | null>(null);
+  const [planeDown, setPlaneDown] = useState(false);
+  const [dragCancelCreateVertex, setDragCancelCreateVertex] = useState(false);
   const [dragAxis, setDragAxis] = useState<'x' | 'y' | 'z' | null>(null);
+  const [faceCreated, setFaceCreated] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const planeRef = useRef<THREE.Mesh>(null);
+
+  useEffect(() => {
+    console.log('planeDown', planeDown, 'dragCancel', dragCancelCreateVertex)
+  },[dragCancelCreateVertex])
 
   const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
-    if (selectedTool === 'vertex' && !draggedVertex) {
-      const { point } = event.intersections[0];
+    if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current) {
+      console.log(event.intersections)
+      const { point } = event.intersections.sort((a,b) => b.distance-a.distance)[0]
       addVertex([point.x, point.y, point.z], [1, 1, 1]);
+    } else if (selectedTool === 'face' && selectedVertices.length === 3) {
+      setSelectedVertices([]);
+      setFaceCreated(false);
     }
+    setDragCancelCreateVertex(false);
+    setPlaneDown(false);
   };
 
   const handleVertexRightClick = (event: ThreeEvent<MouseEvent>, id: string) => {
@@ -34,11 +49,14 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
 
   const handleVertexDragStart = (event: ThreeEvent<MouseEvent>, id: string, axis: 'x' | 'y' | 'z') => {
     event.stopPropagation();
+    console.log('drag start', id, axis);
     setDraggedVertex(id);
     setDragAxis(axis);
+    document.addEventListener('pointermove', handleVertexDrag);
+    document.addEventListener('pointerup', handleVertexDragEnd);
   };
 
-  const handleVertexDrag = (event: ThreeEvent<MouseEvent>) => {
+  const handleVertexDrag = (event) => {
     if (draggedVertex && dragAxis) {
       const vertex = shard.vertices.find(v => v.id === draggedVertex);
       if (vertex) {
@@ -65,6 +83,8 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   const handleVertexDragEnd = () => {
     setDraggedVertex(null);
     setDragAxis(null);
+    document.removeEventListener('pointermove', handleVertexDrag);
+    document.removeEventListener('pointerup', handleVertexDragEnd);
   };
 
   const handleVertexClick = (event: ThreeEvent<MouseEvent>, id: string) => {
@@ -77,7 +97,8 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           const newSelected = [...prev, id];
           if (newSelected.length === 3) {
             addFace(newSelected);
-            return [];
+            setFaceCreated(true);
+            return newSelected; // Keep the selection
           }
           return newSelected;
         }
@@ -98,33 +119,36 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     } else {
       hoverTimeoutRef.current = setTimeout(() => {
         setHoveredVertex(null);
-      }, 300); // 300ms delay before hiding XYZ controls
+      }, 750); // 300ms delay before hiding XYZ controls
     }
   };
 
-  const selectedFaceGeometry = useMemo(() => {
-    if (selectedVertices.length < 2) return null;
-
-    const geometry = new BufferGeometry();
-    const positions = selectedVertices.flatMap(id => {
-      const vertex = shard.vertices.find(v => v.id === id);
-      return vertex ? vertex.position : [0, 0, 0];
-    });
-
-    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
-
-    if (selectedVertices.length === 2) {
-      geometry.setIndex([0, 1]);
-    } else if (selectedVertices.length === 3) {
-      geometry.setIndex([0, 1, 2]);
+  const handlePlaneDown = (event: ThreeEvent<MouseEvent>) => {
+    if (event.button === 0) {
+      setPlaneDown(true);
     }
+  }
 
-    return geometry;
-  }, [selectedVertices, shard.vertices]);
+  const handlePlaneDrag = () => {
+    if (planeDown && !dragCancelCreateVertex) {
+      setDragCancelCreateVertex(true);
+    }
+  }
+
+  const shardData = useMemo(() => {
+    return {
+      vertices: shard.vertices.flatMap(v => v.position),
+      colors: shard.vertices.flatMap(v => v.color),
+      indices: shard.faces.flatMap(f => f.vertices),
+      position: { x: 0, y: 0, z: 0 },
+      display: "solid" as const,
+    };
+  }, [shard.vertices, shard.faces]);
 
   return (
-    <group>
-      <mesh onClick={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
+    <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd}>
+      { draggedVertex ? null : <OrbitControls /> } 
+      <mesh ref={planeRef} onPointerDown={handlePlaneDown} onPointerMove={handlePlaneDrag} onPointerUp={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
         <planeGeometry args={[100, 100]} />
         <meshBasicMaterial visible={false} />
       </mesh>
@@ -155,6 +179,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
               <arrowHelper args={[new Vector3(0, 0, 1), new Vector3(...vertex.position), 0.5, COLORS.BLUE]} />
               <mesh position={[vertex.position[0] + 0.25, vertex.position[1], vertex.position[2]]} onPointerDown={(e) => handleVertexDragStart(e, vertex.id, 'x')}>
                 <boxGeometry args={[0.1, 0.1, 0.1]} />
+
                 <meshBasicMaterial color={COLORS.RED} />
               </mesh>
               <mesh position={[vertex.position[0], vertex.position[1] + 0.25, vertex.position[2]]} onPointerDown={(e) => handleVertexDragStart(e, vertex.id, 'y')}>
@@ -169,30 +194,8 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           )}
         </group>
       ))}
-      {shard.faces.map((face) => (
-        <mesh key={face.id}>
-          <bufferGeometry>
-            <bufferAttribute
-              attachObject={['attributes', 'position']}
-              array={new Float32Array(face.vertices.flatMap((id) => {
-                const vertex = shard.vertices.find((v) => v.id === id);
-                return vertex ? vertex.position : [0, 0, 0];
-              }))}
-              itemSize={3}
-              count={face.vertices.length}
-            />
-          </bufferGeometry>
-          <meshBasicMaterial color={COLORS.ORANGE} wireframe />
-        </mesh>
-      ))}
-      {selectedFaceGeometry && (
-        <line>
-          <bufferGeometry attach="geometry" {...selectedFaceGeometry} />
-          <lineBasicMaterial attach="material" color={COLORS.ORANGE} linewidth={2} />
-        </line>
-      )}
-      <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd} />
-      { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} /> : null }
+      <Shard shardData={shardData} />
+      { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} faceCreated={faceCreated} /> : null }
     </group>
   );
 };

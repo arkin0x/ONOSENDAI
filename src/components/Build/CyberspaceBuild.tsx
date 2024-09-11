@@ -25,7 +25,6 @@ const CyberspaceBuild: React.FC = () => {
         <Grid />
         {currentShard && <ShardEditor shard={currentShard} selectedTool={selectedTool} />}
         <ControlPanel selectedTool={selectedTool} setSelectedTool={setSelectedTool} />
-        <OrbitControls />
         <EffectComposer>
           <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
         </EffectComposer>

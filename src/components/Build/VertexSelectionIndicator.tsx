@@ -5,16 +5,16 @@ import COLORS from '../../data/Colors';
 
 interface VertexSelectionIndicatorProps {
   selectedVertices: string[];
+  faceCreated: boolean;
 }
 
-const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ selectedVertices }) => {
+const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ selectedVertices, faceCreated }) => {
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
 
   useFrame(() => {
     if (groupRef.current) {
       const cameraPosition = camera.position.clone();
-      // const offset = new Vector3(1.25, -2.25, -5);
       const offset = new Vector3(.04, -.09, -.2);
       offset.applyQuaternion(camera.quaternion);
       groupRef.current.position.copy(cameraPosition.add(offset));
@@ -22,8 +22,6 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
       const SCALAR = 0.03
       const scale = new Vector3(SCALAR, SCALAR, SCALAR)
       groupRef.current.scale.copy(scale);
-      // Rotate 90 degrees counterclockwise on the Z axis
-      // groupRef.current.rotation.z += Math.PI / 2
     }
   });
 
@@ -36,7 +34,7 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
           0
         ]}>
           <sphereGeometry args={[0.1, 32, 32]} />
-          <meshBasicMaterial color={i < selectedVertices.length ? COLORS.ORANGE : COLORS.BLACK} />
+          <meshBasicMaterial color={(i < selectedVertices.length || (faceCreated && selectedVertices.length === 3)) ? COLORS.ORANGE : COLORS.BLACK} />
         </mesh>
       ))}
     </group>

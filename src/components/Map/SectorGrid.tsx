@@ -65,7 +65,7 @@ export const SectorGrid = () => {
       // console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
-      return { sectorId, position, color, genesis: color.getHex() === GENESIS_COLOR }
+      return { sectorId, position, color, genesis: sectorState[sectorId]?.isGenesis }
     }).filter(Boolean) as SectorData[]
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
@@ -158,7 +158,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
           rotation={[0,0,0]} 
           frustumCulled={true}
           renderOrder={-1}
-          color={color} >
+          color={GENESIS_COLOR} >
           GENESIS
         </Text>
       : null}

@@ -30,7 +30,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   },[dragCancelCreateVertex])
 
   const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
-    if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current) {
+    if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
       console.log(event.intersections)
       const { point } = event.intersections.sort((a,b) => b.distance-a.distance)[0]
       addVertex([point.x, point.y, point.z], [1, 1, 1]);
@@ -154,7 +154,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       </mesh>
       {shard.vertices.map((vertex) => (
         <group key={vertex.id}>
-          <mesh
+          <mesh // actual vertex mesh
             position={vertex.position}
             onPointerOver={() => handleVertexHover(vertex.id)}
             onPointerOut={() => handleVertexHover(null)}
@@ -164,7 +164,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
             <sphereGeometry args={[0.1, 32, 32]} />
             <meshPhongMaterial color={selectedVertices.includes(vertex.id) ? COLORS.ORANGE : COLORS.PURPLE} />
           </mesh>
-          <mesh
+          <mesh // invisible mesh to capture hover events
             position={vertex.position}
             onPointerOver={() => handleVertexHover(vertex.id)}
             onPointerOut={() => handleVertexHover(null)}

@@ -14,10 +14,16 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
   useFrame(() => {
     if (groupRef.current) {
       const cameraPosition = camera.position.clone();
-      const offset = new Vector3(0, 1, -2);
+      // const offset = new Vector3(1.25, -2.25, -5);
+      const offset = new Vector3(.04, -.09, -.2);
       offset.applyQuaternion(camera.quaternion);
       groupRef.current.position.copy(cameraPosition.add(offset));
       groupRef.current.quaternion.copy(camera.quaternion);
+      const SCALAR = 0.03
+      const scale = new Vector3(SCALAR, SCALAR, SCALAR)
+      groupRef.current.scale.copy(scale);
+      // Rotate 90 degrees counterclockwise on the Z axis
+      // groupRef.current.rotation.z += Math.PI / 2
     }
   });
 
@@ -30,7 +36,7 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
           0
         ]}>
           <sphereGeometry args={[0.1, 32, 32]} />
-          <meshBasicMaterial color={i < selectedVertices.length ? COLORS.ORANGE : COLORS.PURPLE} />
+          <meshBasicMaterial color={i < selectedVertices.length ? COLORS.ORANGE : COLORS.BLACK} />
         </mesh>
       ))}
     </group>

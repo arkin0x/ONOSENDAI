@@ -192,7 +192,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
         </line>
       )}
       <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd} />
-      <VertexSelectionIndicator selectedVertices={selectedVertices} />
+      { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} /> : null }
     </group>
   );
 };

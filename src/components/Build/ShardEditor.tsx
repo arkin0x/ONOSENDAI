@@ -1,6 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useThree, ThreeEvent } from '@react-three/fiber';
 import { Shard, useBuilderStore } from '../../store/BuilderStore'
+import COLORS from '../../data/Colors';
 
 interface ShardEditorProps {
   shard: Shard;
@@ -30,7 +31,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
 
   return (
     <group>
-      <mesh onClick={handlePlaneClick}>
+      <mesh onClick={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]} rot>
         <planeGeometry args={[100, 100]} />
         <meshBasicMaterial visible={false} />
       </mesh>
@@ -46,7 +47,8 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           }}
         >
           <sphereGeometry args={[0.1, 32, 32]} />
-          <meshBasicMaterial color={`rgb(${vertex.color.join(',')})`} />
+          {/* <meshBasicMaterial color={`rgb(${vertex.color.join(',')})`} /> */}
+          <meshPhongMaterial color={COLORS.ORANGE} />
         </mesh>
       ))}
       {shard.faces.map((face) => (

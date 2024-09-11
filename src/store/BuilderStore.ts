@@ -27,6 +27,7 @@ interface BuilderState {
   setCurrentShard: (shardId: string | null) => void;
   addVertex: (position: [number, number, number], color: [number, number, number]) => void;
   updateVertex: (id: string, position: [number, number, number], color: [number, number, number]) => void;
+  removeVertex: (id: string) => void;
   addFace: (vertices: string[]) => void;
   setGridSize: (size: number) => void;
   calculateShardSize: (shard: Shard) => number;
@@ -73,6 +74,19 @@ export const useBuilderStore = create<BuilderState>()(
           vertices: state.currentShard.vertices.map((v) =>
             v.id === id ? { ...v, position, color } : v
           ),
+        };
+        return {
+          currentShard: updatedShard,
+          shards: state.shards.map((s) => (s.id === updatedShard.id ? updatedShard : s)),
+        };
+      }),
+
+      removeVertex: (id) => set((state) => {
+        if (!state.currentShard) return state;
+        const updatedShard = {
+          ...state.currentShard,
+          vertices: state.currentShard.vertices.filter((v) => v.id !== id),
+          faces: state.currentShard.faces.filter((f) => !f.vertices.includes(id)),
         };
         return {
           currentShard: updatedShard,

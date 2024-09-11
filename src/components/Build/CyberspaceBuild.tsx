@@ -19,24 +19,18 @@ const CyberspaceBuild: React.FC = () => {
   }, [currentShard, shards, addShard]);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: "#14071f" }}>
-      <div style={{ flex: 1 }}>
-        <Canvas camera={{ position: [0, 5, 10], far: 2**30 }}>
-          <ambientLight intensity={2} />
-          {/* <pointLight position={[10, 10, 10]} intensity={200} /> */}
-          <Grid />
-          {currentShard && <ShardEditor shard={currentShard} selectedTool={selectedTool} />}
-          <OrbitControls />
-          <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
-          </EffectComposer>
-        </Canvas>
-      </div>
-      <div style={{ width: '300px', padding: '20px', background: '#0a030f', color: "#ffffff" }}>
-        <ControlPanel
-          selectedTool={selectedTool}
-          setSelectedTool={setSelectedTool}
-        />
+    <div style={{ height: '100vh', backgroundColor: "#14071f" }}>
+      <Canvas camera={{ position: [0, 5, 10], far: 2**30 }}>
+        <ambientLight intensity={2} />
+        <Grid />
+        {currentShard && <ShardEditor shard={currentShard} selectedTool={selectedTool} />}
+        <ControlPanel selectedTool={selectedTool} setSelectedTool={setSelectedTool} />
+        <OrbitControls />
+        <EffectComposer>
+          <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
+        </EffectComposer>
+      </Canvas>
+      <div style={{ position: 'absolute', top: 0, right: 0, width: '200px', padding: '20px', background: '#0a030f', color: "#ffffff" }}>
         <ShardList
           shards={shards}
           currentShardId={currentShard?.id ?? null}
@@ -47,4 +41,4 @@ const CyberspaceBuild: React.FC = () => {
   );
 };
 
-export default CyberspaceBuild
+export default CyberspaceBuild;

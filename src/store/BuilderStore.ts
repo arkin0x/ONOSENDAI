@@ -9,7 +9,7 @@ interface Vertex {
 
 interface Face {
   id: string;
-  vertices: string[];
+  vertices: number[];
 }
 
 interface Shard {
@@ -94,9 +94,32 @@ export const useBuilderStore = create<BuilderState>()(
         };
       }),
 
-      addFace: (vertices) => set((state) => {
+      // addFace: (vertices) => set((state) => {
+      //   if (!state.currentShard) return state;
+      //   const newFace: Face = { id: Date.now().toString(), vertices };
+      //   const updatedShard = {
+      //     ...state.currentShard,
+      //     faces: [...state.currentShard.faces, newFace],
+      //   };
+      //   return {
+      //     currentShard: updatedShard,
+      //     shards: state.shards.map((s) => (s.id === updatedShard.id ? updatedShard : s)),
+      //   };
+      // }),
+
+      addFace: (vertexIds) => set((state) => {
         if (!state.currentShard) return state;
-        const newFace: Face = { id: Date.now().toString(), vertices };
+
+        // Convert vertex IDs to indices
+        const vertexIndices = vertexIds.map(id => {
+          const index = state.currentShard.vertices.findIndex(v => v.id === id);
+          if (index === -1) {
+            throw new Error(`Vertex ID ${id} not found in vertices array`);
+          }
+          return index;
+        });
+
+        const newFace: Face = { id: Date.now().toString(), vertices: vertexIndices };
         const updatedShard = {
           ...state.currentShard,
           faces: [...state.currentShard.faces, newFace],

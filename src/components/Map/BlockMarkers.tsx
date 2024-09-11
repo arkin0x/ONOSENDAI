@@ -16,7 +16,7 @@ export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
 
   useEffect(() => {
     if (!ndk) return
-    if (blocks.length > 10) return // abritrary limit that should be replaced with good caching.
+    if (blocks.length > 100) return // abritrary limit that should be replaced with good caching.
 
     const fetchNextBlock = async () => {
       let filter: NDKFilter
@@ -95,7 +95,7 @@ const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale })
 
   const material = useMemo(() => {
     return new LineBasicMaterial({
-      color: COLORS.YELLOW,
+      color: 0x999900,//COLORS.YELLOW,
       opacity: 0.5,
       linewidth: 1,
     })

@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Text } from '@react-three/drei';
 import { useBuilderStore } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
+import { useFrame, useThree } from '@react-three/fiber';
+import { Group, Vector3 } from 'three';
 
 interface ControlPanelProps {
   selectedTool: 'vertex' | 'face';
@@ -10,9 +12,21 @@ interface ControlPanelProps {
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTool }) => {
   const { gridSize, setGridSize } = useBuilderStore();
+  const groupRef = useRef<Group>(null);
+  const { camera } = useThree();
+
+  useFrame(() => {
+    if (groupRef.current) {
+      const cameraPosition = camera.position.clone();
+      const offset = new Vector3(-1.5, 1, -2);
+      offset.applyQuaternion(camera.quaternion);
+      groupRef.current.position.copy(cameraPosition.add(offset));
+      groupRef.current.quaternion.copy(camera.quaternion);
+    }
+  });
 
   return (
-    <group position={[-1.5, 0, 0]}>
+    <group ref={groupRef}>
       <Text position={[0, 0.5, 0]} color={COLORS.ORANGE} fontSize={0.15}>
         Tools
       </Text>

@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useThree, ThreeEvent } from '@react-three/fiber';
 import { Shard, useBuilderStore } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
-import { ArrowHelper, Vector3 } from 'three';
+import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three';
 import { Text } from '@react-three/drei';
+import VertexSelectionIndicator from './VertexSelectionIndicator';
 
 interface ShardEditorProps {
   shard: Shard;
@@ -17,6 +18,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   const [selectedVertices, setSelectedVertices] = useState<string[]>([]);
   const [draggedVertex, setDraggedVertex] = useState<string | null>(null);
   const [dragAxis, setDragAxis] = useState<'x' | 'y' | 'z' | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
     if (selectedTool === 'vertex' && !draggedVertex) {
@@ -41,7 +43,20 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       const vertex = shard.vertices.find(v => v.id === draggedVertex);
       if (vertex) {
         const newPosition = [...vertex.position];
-        newPosition[dragAxis === 'x' ? 0 : dragAxis === 'y' ? 1 : 2] += event.movementX * 0.01;
+        const movementScale = 0.01;
+        
+        switch (dragAxis) {
+          case 'x':
+            newPosition[0] += event.movementX * movementScale;
+            break;
+          case 'y':
+            newPosition[1] -= event.movementY * movementScale;
+            break;
+          case 'z':
+            newPosition[2] += event.movementX * movementScale;
+            break;
+        }
+        
         updateVertex(draggedVertex, newPosition as [number, number, number], vertex.color);
       }
     }
@@ -73,6 +88,40 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     }
   };
 
+  const handleVertexHover = (id: string | null) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+
+    if (id) {
+      setHoveredVertex(id);
+    } else {
+      hoverTimeoutRef.current = setTimeout(() => {
+        setHoveredVertex(null);
+      }, 300); // 300ms delay before hiding XYZ controls
+    }
+  };
+
+  const selectedFaceGeometry = useMemo(() => {
+    if (selectedVertices.length < 2) return null;
+
+    const geometry = new BufferGeometry();
+    const positions = selectedVertices.flatMap(id => {
+      const vertex = shard.vertices.find(v => v.id === id);
+      return vertex ? vertex.position : [0, 0, 0];
+    });
+
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+
+    if (selectedVertices.length === 2) {
+      geometry.setIndex([0, 1]);
+    } else if (selectedVertices.length === 3) {
+      geometry.setIndex([0, 1, 2]);
+    }
+
+    return geometry;
+  }, [selectedVertices, shard.vertices]);
+
   return (
     <group>
       <mesh onClick={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
@@ -83,13 +132,21 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
         <group key={vertex.id}>
           <mesh
             position={vertex.position}
-            onPointerOver={() => setHoveredVertex(vertex.id)}
-            onPointerOut={() => setHoveredVertex(null)}
+            onPointerOver={() => handleVertexHover(vertex.id)}
+            onPointerOut={() => handleVertexHover(null)}
             onClick={(e) => handleVertexClick(e, vertex.id)}
             onContextMenu={(e) => handleVertexRightClick(e, vertex.id)}
           >
             <sphereGeometry args={[0.1, 32, 32]} />
             <meshPhongMaterial color={selectedVertices.includes(vertex.id) ? COLORS.ORANGE : COLORS.PURPLE} />
+          </mesh>
+          <mesh
+            position={vertex.position}
+            onPointerOver={() => handleVertexHover(vertex.id)}
+            onPointerOut={() => handleVertexHover(null)}
+          >
+            <sphereGeometry args={[0.3, 32, 32]} />
+            <meshBasicMaterial visible={false} />
           </mesh>
           {hoveredVertex === vertex.id && (
             <>
@@ -128,17 +185,14 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           <meshBasicMaterial color={COLORS.ORANGE} wireframe />
         </mesh>
       ))}
-      {selectedTool === 'face' && (
-        <group position={[0, 2, 0]}>
-          {[0, 1, 2].map((i) => (
-            <mesh key={i} position={[i * 0.5 - 0.5, 0, 0]}>
-              <sphereGeometry args={[0.1, 32, 32]} />
-              <meshBasicMaterial color={i < selectedVertices.length ? COLORS.ORANGE : COLORS.PURPLE} />
-            </mesh>
-          ))}
-        </group>
+      {selectedFaceGeometry && (
+        <line>
+          <bufferGeometry attach="geometry" {...selectedFaceGeometry} />
+          <lineBasicMaterial attach="material" color={COLORS.ORANGE} linewidth={2} />
+        </line>
       )}
       <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd} />
+      <VertexSelectionIndicator selectedVertices={selectedVertices} />
     </group>
   );
 };

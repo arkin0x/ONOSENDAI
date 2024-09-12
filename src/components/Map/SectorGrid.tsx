@@ -19,12 +19,10 @@ interface SectorData {
   genesis?: boolean
 }
 
-const GENESIS_COLOR = COLORS.PINK
-
 function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
   // console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
-  if (sectorState[sectorId]?.isGenesis) return new Color(GENESIS_COLOR)
+  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.GENESIS)
   if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) {
     if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
@@ -158,8 +156,22 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
           rotation={[0,0,0]} 
           frustumCulled={true}
           renderOrder={-1}
-          color={GENESIS_COLOR} >
+          color={COLORS.GENESIS} >
           GENESIS
+        </Text>
+      : null}
+      { hyperjump ?
+        <Text 
+          textAlign='right'
+          fontSize={0.15}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          anchorX={'right'}
+          position={genesisTextPosition} 
+          rotation={[0,0,0]} 
+          frustumCulled={true}
+          renderOrder={-1}
+          color={COLORS.HYPERJUMP} >
+          HYPERJUMP 
         </Text>
       : null}
     </group>

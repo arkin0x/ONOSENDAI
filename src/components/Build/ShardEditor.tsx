@@ -33,7 +33,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
       console.log(event.intersections)
       const { point } = event.intersections.sort((a,b) => b.distance-a.distance)[0]
-      addVertex([point.x, point.y, point.z], [1, 1, 1]);
+      addVertex([point.x, point.y, point.z], [0, 0, 0]);
     } else if (selectedTool === 'face' && selectedVertices.length === 3) {
       setSelectedVertices([]);
       setFaceCreated(false);

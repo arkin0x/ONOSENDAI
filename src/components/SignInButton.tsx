@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { IdentityContextType } from "../types/IdentityType"
 import { IdentityContext } from "../providers/IdentityProvider"
 import { getPublicKey } from "../libraries/NIP-07"
+import { Text } from '@react-three/drei'
+import COLORS from '../data/Colors'
 
 export const SignInButton = () => {
-  const { setIdentity, profileLoaded } = useContext<IdentityContextType>(IdentityContext)
+  const { setIdentity } = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
 
   const signIn = async () => {
@@ -20,18 +22,18 @@ export const SignInButton = () => {
       // trigger "key not set up yet" dialog
     }
   }
-  if (profileLoaded()) {
-    return (
-      <div className="column">
-      You're already logged in!
-      <br/>
-      <br/>
-      <button type='button' onClick={() => navigate('/login')}>Go Yondar</button>
-      </div>
-    )
-  } else {
-    return (
-      <button type='button' onClick={signIn}>Sign in with Extension</button>
-    )
-  }
+
+  return (
+    <group onClick={signIn}>
+      <mesh
+        position={[-0.3, 0, 0]}
+      >
+        <boxGeometry args={[0.5, 0.2, 0.1]} />
+        <meshBasicMaterial color={COLORS.ORANGE } />
+      </mesh>
+      <Text position={[-0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+       SIGN IN 
+      </Text>
+    </group>
+  )
 }

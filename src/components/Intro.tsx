@@ -1,11 +1,12 @@
 import { ReactNode, useEffect, useRef } from 'react'
 import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { CyberspacePlane } from '../libraries/Cyberspace.ts'
 import { TextureLoader, Vector3 } from 'three'
+import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors.ts'
 import logo from '../assets/logo-cropped.png'
+import { SignInButton } from './SignInButton.tsx'
 
 export function Intro() {
 
@@ -25,6 +26,21 @@ export function Intro() {
           <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />
           <meshBasicMaterial attach="material" map={texture} transparent={true} />
         </mesh>
+      <group position={[0,-1, 0]}>
+        <Text position={[0, 0.25, 0]} color={COLORS.ORANGE} fontSize={0.15} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+          WELCOME TO CYBERSPACE 
+        </Text>
+        <SignInButton/>
+        <mesh
+          position={[0.3, 0, 0]}
+        >
+          <boxGeometry args={[0.5, 0.2, 0.1]} />
+          <meshBasicMaterial color={COLORS.ORANGE} />
+        </mesh>
+        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+          NEW ID
+        </Text>
+      </group>
       </Canvas>
     </div>
   )

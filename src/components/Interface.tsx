@@ -1,28 +1,26 @@
 import { OrbitControls, Text } from "@react-three/drei"
 import { useSpring, animated } from '@react-spring/three'
-import { useCallback, useContext, useState } from "react"
+import { useCallback, useState } from "react"
 import { UIState } from "../types/UI"
-import { UIContext } from "../providers/UIProvider"
 import CyberspaceViewer from "./Cyberspace/CyberspaceViewer"
 import { useNavigate } from "react-router-dom"
 import CyberspaceMap from "./Map/CyberspaceMap"
-import "../scss/Interface.scss"
-import "../scss/Dashboard.scss"
 import CyberspaceGlobal from "./Global/CyberspaceGlobal"
 import { Canvas, useThree } from "@react-three/fiber"
-import { BufferGeometry, Camera, Float32BufferAttribute, LineBasicMaterial, MeshBasicMaterial, Shape, ShapeGeometry, Vector3 } from "three"
+import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial, MeshBasicMaterial, Shape, ShapeGeometry, Vector3 } from "three"
 import COLORS from "../data/Colors"
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import CyberspaceBuild from "./Build/CyberspaceBuild"
+import { useUIStore } from "../store/UIStore"
 
-export const Interface = () => {
+export function Interface(){
   const navigate = useNavigate()
 
   const logOut = () => {
     navigate("/logout")
   }
 
-  const { uiState, setUIState } = useContext(UIContext)
+  const { uiState, setUIState } = useUIStore()
 
   const getInterface = useCallback(() => {
     switch (uiState) {

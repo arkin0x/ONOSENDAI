@@ -105,6 +105,13 @@ export const useActionChain = (pubkey: string) => {
     // the latest action and all new actions will arrive here
     latestAction.on('event', onReceiveLatestAction)
 
+    latestAction.on('eose', () => {
+      if (!actionState[pubkey]) {
+        console.log('no actions found for pubkey', pubkey)
+        // engine handles this -- just press a key to create a genesis event.
+      }
+    })
+
     // Clean up any subscriptions or resources in the cleanup function
     return () => {
       // Pseudocode: Clean up any subscriptions or resources

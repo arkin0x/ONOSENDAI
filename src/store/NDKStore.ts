@@ -23,8 +23,8 @@ interface NDKState {
   getNDK: () => NDK
   unlockLocalKeySigner: () => void
   lockLocalKeySigner: () => void
-  initLocalKeyUser: () => Promise<void>
-  initExtensionUser: () => Promise<void>
+  initLocalKeyUser: (callback: () => void) => Promise<void>
+  initExtensionUser: (callback: () => void) => Promise<void>
   resetUser: () => void
   fetchUserProfile: () => Promise<void>
   getUser: () => NDKUser | undefined
@@ -102,15 +102,18 @@ const useNDKStore = create<NDKState>((set, get) => ({
     set({ ndk })
   },
 
-  initLocalKeyUser: async () => {
+  initLocalKeyUser: async (callback=function(){}) => {
+    console.log('INITLOCAL')
     const ndk = get().getNDK()
     initializeIdentity() // sets up a newly generated identity if one doesn't exist
     ndk.activeUser = new NDKUser({npub: loadNpub()})
     ndk.activeUser.ndk = ndk
     set({ isUserLoaded: true, ndk });
+    callback()
   },
 
-  initExtensionUser: async () => {
+  initExtensionUser: async (callback=function(){}) => {
+    console.log('INITEXTENSION')
     const ndk = get().getNDK()
     let signer
     try {
@@ -120,6 +123,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
       ndk.activeUser.ndk = ndk
       ndk.signer = signer
       set({ isUserLoaded: true, ndk });
+      callback()
     } catch (e) {
       alert("Extension prompt was cancelled. Refresh the page to try again.")
       window.location.reload()
@@ -187,5 +191,11 @@ const useNDKStore = create<NDKState>((set, get) => ({
   },
   // Add more NDK methods and state as needed
 }));
+
+// init immediately
+useNDKStore.getState().initNDK({
+  relayUrls: defaultRelays,
+  useExtension: !!localStorage.getItem('useExtension')
+})
 
 export default useNDKStore;

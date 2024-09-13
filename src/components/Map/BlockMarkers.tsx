@@ -4,6 +4,7 @@ import { BufferGeometry, Vector3, LineBasicMaterial } from 'three'
 import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString, cyberspaceCoordinateFromHexStringAndDecimal } from '../../libraries/Cyberspace'
 import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 import COLORS from '../../data/Colors'
+import useNDKStore from '../../store/NDKStore'
 
 interface BlocksProps {
   scale: number

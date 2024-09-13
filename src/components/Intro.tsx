@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useRef } from 'react'
-import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { ReactNode, useEffect, useRef, useState } from 'react'
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { CyberspacePlane } from '../libraries/Cyberspace.ts'
 import { TextureLoader, Vector3 } from 'three'
@@ -8,10 +8,23 @@ import COLORS from '../data/Colors.ts'
 import logo from '../assets/logo-cropped.png'
 import { SignInButton } from './SignInButton.tsx'
 import { SignUpButton } from './SignUpButton.tsx'
+import Loading from './Loading.tsx'
 
 export function Intro() {
+  const [texture, setTexture] = useState<THREE.Texture | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  const texture = useLoader(TextureLoader, logo)
+  useEffect(() => {
+    const loader = new TextureLoader()
+    loader.load(logo, (loadedTexture) => {
+      setTexture(loadedTexture)
+      setLoading(false)
+    })
+  }, [])
+
+  if (loading) {
+    return <Loading/>
+  }
 
   return (
     <div id="home">

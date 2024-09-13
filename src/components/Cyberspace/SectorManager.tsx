@@ -31,6 +31,8 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
     addHyperjump 
   } = useSectorStore()
 
+  console.log("Sector Manager: userCurrentSectorId", userCurrentSectorId)
+
   // Functions 
 
   const subscribeToSectorObjects = (sectorId: string, ndk: NDK): NDKSubscription => {

@@ -1,14 +1,20 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors'
 import useNDKStore from '../store/NDKStore'
+import { useNavigate } from 'react-router-dom'
 
 export const SignInButton = () => {
   const { initExtensionUser } = useNDKStore()
   const [color, setColor] = useState(COLORS.ORANGE)
+  const navigate = useNavigate()
+
+  const init = useCallback(() => {
+    initExtensionUser(() => navigate('/interface'))
+  },[initExtensionUser, navigate])
 
   return (
-    <group onClick={initExtensionUser}>
+    <group onClick={init}>
       <mesh
         position={[-0.3, 0, 0]}
         onPointerOver={() => setColor(COLORS.GREEN)}

@@ -10,10 +10,5 @@ export const Logout = () => {
     window.location.href='/'
   }, [])
 
-  return (
-    <div id="login">
-      <h1>Logging Out...</h1>
-      <Loading/>
-    </div>
-  )
+  return <Loading/>
 }

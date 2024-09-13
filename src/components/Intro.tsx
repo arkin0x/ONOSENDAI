@@ -35,9 +35,9 @@ export function Intro() {
           position={[0.3, 0, 0]}
         >
           <boxGeometry args={[0.5, 0.2, 0.1]} />
-          <meshBasicMaterial color={COLORS.ORANGE} />
+          <meshBasicMaterial color={COLORS.DARK_PURPLE} />
         </mesh>
-        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.09} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
           NEW ID
         </Text>
       </group>

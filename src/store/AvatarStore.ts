@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { CyberspaceAction, CyberspaceVirtualAction, CyberspaceVirtualActionTemplate, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
-import { getTag } from '../libraries/Nostr'
+import { getTag } from '../libraries/NostrUtils'
 
 type AvatarActionState = {
   [pubkey: string]: CyberspaceAction[]

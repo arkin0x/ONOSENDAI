@@ -1,8 +1,6 @@
-import { useContext, useEffect } from 'react'
+import { useEffect } from 'react'
 import { Canvas, useThree } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
 import { MapControls } from './MapControls'
 import { Fog } from 'three'
 // import { BlockMarkers } from './BlockMarkers'
@@ -10,7 +8,7 @@ import { Fog } from 'three'
 // import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
-import { OrbitControls, Text } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 // import SectorCrawler from './SectorCrawler'
 
@@ -19,7 +17,6 @@ export type CyberspaceViewerProps = {
 }
 
 const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
   const { centerSectorId } = useMapCenterSectorStore()
 
   // const orbitCameraTarget = sectorIdToMapCoord(centerSectorId).toVector3()
@@ -33,7 +30,6 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           {/* <BlockMarkers scale={MAP_SIZE} /> */}
           {/* <Constructs scale={MAP_SIZE} /> */}
-          {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           <SectorGrid />
           <OrbitControls target={[0,0,0]} />
           <MapCamera />

@@ -1,18 +1,16 @@
-import React, { useEffect, useState, useContext, useMemo } from 'react'
-import { NDKContext } from '../../providers/NDKProvider'
+import React, { useEffect, useState, useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
 import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { ConstructGeometryEdges, ConstructMaterialEdges } from '../../data/ConstructModel'
-import { Event, SimplePool } from 'nostr-tools'
-import { defaultRelays, getRelayList } from '../../libraries/Nostr'
+import useNDKStore from '../../store/NDKStore'
 
 interface ConstructsProps {
   scale: number
 }
 
 export const ObjectMarkers: React.FC<ConstructsProps> = ({ scale }) => {
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   const [constructs, setConstructs] = useState<NDKEvent[]>([])
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
 

@@ -10,7 +10,7 @@ interface BlocksProps {
 }
 
 export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
   const [fetchCounter, setFetchCounter] = useState(0)
 

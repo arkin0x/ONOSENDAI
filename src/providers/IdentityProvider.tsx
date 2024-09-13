@@ -1,41 +1,42 @@
-/* eslint-disable @typescript-eslint/no-empty-function */
-import { createContext } from 'react'
-import { IdentityType, IdentityContextType } from '../types/IdentityType.tsx'
-import usePersistedState from '../hooks/usePersistedState'
-import { RelayObject } from '../types/NostrRelay'
-import { defaultRelays } from '../libraries/Nostr.ts'
+import Loading from "../components/Loading"
+import useNDKStore from "../store/NDKStore"
+import { useEffect } from "react"
 
-const STALE_PROFILE = 1000 * 60 * 60 * 24 * 7
+export function IdentityProvider({ children }: { children: React.ReactNode }) {
+  const { initLocalKeyUser, initExtensionUser, fetchUserProfile, isUserLoaded, isProfileLoaded, getUser } = useNDKStore()
 
-const defaultIdentityContext: IdentityContextType = {
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  identity: null!,
-  setIdentity: () => {},
-  profileLoaded: () => {},
-  relays: defaultRelays,
-  setRelays: () => {},
-}
+  const userType = localStorage.getItem('useExtension') === 'true' ? 'extension' : 'local'
 
-export const IdentityContext = createContext<IdentityContextType>(defaultIdentityContext)
-
-type IdentityProviderProps = {
-  children: React.ReactNode
-}
-
-export const IdentityProvider: React.FC<IdentityProviderProps> = ({children})=> {
-  const [identity, setIdentity] = usePersistedState<IdentityType>('identity')
-  const [relays, setRelays] = usePersistedState<RelayObject>('relays', defaultRelays)
-
-  const profileLoaded = (): boolean => {
-    if (identity && identity.pubkey && identity.created_at && identity.npub) {
-      return true 
+  useEffect(() => {
+    async function loadUser() {
+      if (userType === 'extension') {
+        console.log('INIT EXTENSION USER')
+        await initExtensionUser()
+      } else {
+        console.log('INIT LOCAL KEY USER')
+        await initLocalKeyUser()
+      }
     }
-    return false
+    loadUser()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+      
+
+  useEffect(() => {
+    if (isProfileLoaded) return
+    if (isUserLoaded) {
+      console.log('USER LOADED')
+      fetchUserProfile()
+    } else {
+      console.log('USER NOT LOADED YET')
+    }
+  }, [fetchUserProfile, isProfileLoaded, isUserLoaded])
+
+  if (!isUserLoaded) {
+    return <Loading/>
+  } else {
+    console.log('IdentityProvider: isUserLoaded', isUserLoaded, getUser() )
   }
 
-  return (
-    <IdentityContext.Provider value={{identity, setIdentity, profileLoaded: profileLoaded, relays, setRelays}}>
-      {children}
-    </IdentityContext.Provider>
-  )
+  return children
 }

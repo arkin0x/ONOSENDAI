@@ -1,18 +1,17 @@
 import type { Event } from 'nostr-tools'
-import { useContext, useState } from 'react'
+import { useState } from 'react'
 import '../../scss/Telemetry.scss'
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
 import { isGenesisAction } from '../../libraries/Cyberspace'
 import { countLeadingZeroesHex } from '../../libraries/Hash'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { DebugLocal } from '../DebugLocal'
+import useNDKStore from '../../store/NDKStore'
 
 // this dashboard is to visualize the nostr action chain.
 export const TelemetryDashboard = () => {
-
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const pubkey = identity.pubkey
+  const { getUser } = useNDKStore()
+  const identity = getUser()
+  const pubkey = identity!.pubkey
   const {actionState} = useAvatarStore()
 
   const actions = actionState[pubkey]

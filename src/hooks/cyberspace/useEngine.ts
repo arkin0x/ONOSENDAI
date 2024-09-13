@@ -6,6 +6,7 @@ import { deserializeEvent, getNonceBounds, serializeEvent } from '../../librarie
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { NDKContext } from '../../providers/NDKProvider'
 import { useAvatarStore } from '../../store/AvatarStore'
+import useNDKStore from '../../store/NDKStore'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -23,7 +24,7 @@ export function useEngine(pubkey: string): EngineControls {
   const {dispatchActionState} = useAvatarStore()
   const [genesis, setGenesis] = useState<CyberspaceAction|null>(null)
   const [latest, setLatest] = useState<CyberspaceAction|null>(null)
-  const {publishEvent} = useContext(NDKContext)
+  const {publish} = useNDKStore()
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
@@ -87,7 +88,7 @@ export function useEngine(pubkey: string): EngineControls {
 
   async function newGenesis() {
     const genesisAction = createUnsignedGenesisAction(pubkey)
-    const genesisActionPublished = await publishEvent(genesisAction)
+    const genesisActionPublished = await publish(genesisAction)
     const rawGenesis = genesisActionPublished && genesisActionPublished.rawEvent() as Event
     if (!rawGenesis) {
       throw new Error('Engine.drift: failed to publish genesis action')
@@ -177,7 +178,7 @@ export function useEngine(pubkey: string): EngineControls {
   }
 
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
-    const publishedAction = await publishEvent(action) // FIXME we would normally pass in `relays` here
+    const publishedAction = await publish(action) // FIXME we would normally pass in `relays` here
     if (!publishedAction) {
       console.error('Engine: publishMovementAction: failed to publish action')
       return

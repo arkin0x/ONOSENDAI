@@ -1,14 +1,13 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { Avatar } from './Avatar'
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
 import SectorManager from './SectorManager'
 import { Controls } from './Controls'
 import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
+import useNDKStore from '../../store/NDKStore'
 // import SpeedLines from './Hud/SpeedLines'
 
 export type CyberspaceViewerProps = {
@@ -16,9 +15,9 @@ export type CyberspaceViewerProps = {
 }
 
 const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
-
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const viewerRef = useRef<HTMLDivElement>(null)
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
 
   // toggle telemetry view
   const [showTelemetry, setShowTelemetry] = useState(false)
@@ -42,7 +41,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <SectorManager adjacentLayers={1} />
-          <Avatar pubkey={identity.pubkey} />
+          <Avatar pubkey={identity!.pubkey} />
           <Controls />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />

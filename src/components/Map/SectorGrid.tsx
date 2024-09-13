@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useEffect, useContext } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, BackSide, RGBA_ASTC_10x10_Format, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
@@ -8,9 +8,8 @@ import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
 import { ThreeAvatarMarker } from './ThreeAvatarMarker'
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
 import { generateSectorName } from '../../libraries/SectorName'
+import useNDKStore from '../../store/NDKStore'
 
 interface SectorData {
   sectorId: string
@@ -36,7 +35,8 @@ function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sect
 }
 
 export const SectorGrid = () => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { sectorState, userCurrentSectorId } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const [follow, setFollow] = useState<"user"|"roam">("user")
@@ -45,7 +45,7 @@ export const SectorGrid = () => {
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
-  const pubkey = identity?.pubkey
+  const pubkey = identity!.pubkey
 
   useEffect(() => {
     if (follow === "user" && userCurrentSectorId) {

@@ -1,31 +1,14 @@
-import { useContext, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { IdentityContextType } from "../types/IdentityType"
-import { IdentityContext } from "../providers/IdentityProvider"
-import { getPublicKey } from "../libraries/NIP-07"
+import { useState } from 'react'
 import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors'
+import useNDKStore from '../store/NDKStore'
 
 export const SignInButton = () => {
+  const { initExtensionUser } = useNDKStore()
   const [color, setColor] = useState(COLORS.ORANGE)
-  const { setIdentity } = useContext<IdentityContextType>(IdentityContext)
-  const navigate = useNavigate()
-
-  const signIn = async () => {
-    // trigger sign in with extension
-    const success = await getPublicKey()
-    if (success) {
-      // store pubkey in identity provider
-      setIdentity({pubkey: success})
-      // redirect to account page
-      navigate('/login')
-    } else {
-      // trigger "key not set up yet" dialog
-    }
-  }
 
   return (
-    <group onClick={signIn}>
+    <group onClick={initExtensionUser}>
       <mesh
         position={[-0.3, 0, 0]}
         onPointerOver={() => setColor(COLORS.GREEN)}

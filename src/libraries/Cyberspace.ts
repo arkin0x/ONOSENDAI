@@ -1,7 +1,7 @@
 import { Quaternion } from "three"
 import { Decimal } from 'decimal.js'
 import { DecimalVector3 } from "./DecimalVector3"
-import { getTag, getTagValue } from "./Nostr"
+import { getTag, getTagMark } from "./NostrUtils"
 import type { Event, UnsignedEvent } from "nostr-tools"
 import { countLeadingZeroesHex } from "./Hash"
 
@@ -732,7 +732,7 @@ export function simulateNextEvent(startEvent: CyberspaceAction, toTime: Time): C
   const POW = countLeadingZeroesHex(startEvent.id)
 
   // add proof of work to velocity if the startEvent was a drift action.
-  if (startEvent.tags.find(getTagValue('A','drift'))) {
+  if (startEvent.tags.find(getTagMark('A','drift'))) {
     let velocityPOW = Math.pow(2, POW-10) //+ 2**17 // tweak POW for testing
     if (velocityPOW <= ZERO_VELOCITY) {
       // POW=0 will result in zero velocity.

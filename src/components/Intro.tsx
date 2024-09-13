@@ -7,6 +7,7 @@ import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors.ts'
 import logo from '../assets/logo-cropped.png'
 import { SignInButton } from './SignInButton.tsx'
+import { SignUpButton } from './SignUpButton.tsx'
 
 export function Intro() {
 
@@ -23,6 +24,7 @@ export function Intro() {
           <Bloom mipmapBlur levels={1} intensity={4} luminanceThreshold={0.001} luminanceSmoothing={0} />
         </EffectComposer>
         <mesh position={[0, 0, -2]}>
+          {/* logo */}
           <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />
           <meshBasicMaterial attach="material" map={texture} transparent={true} />
         </mesh>
@@ -31,15 +33,7 @@ export function Intro() {
           WELCOME TO CYBERSPACE 
         </Text>
         <SignInButton/>
-        <mesh
-          position={[0.3, 0, 0]}
-        >
-          <boxGeometry args={[0.5, 0.2, 0.1]} />
-          <meshBasicMaterial color={COLORS.DARK_PURPLE} />
-        </mesh>
-        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.09} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-          NEW ID
-        </Text>
+        <SignUpButton/>
       </group>
       </Canvas>
     </div>

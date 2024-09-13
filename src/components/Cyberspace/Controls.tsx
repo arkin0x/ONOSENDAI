@@ -1,7 +1,5 @@
-import React, { useContext, useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useCallback, useState } from 'react'
 import { useThrottleStore } from '../../store/ThrottleStore.ts'
-import { IdentityContext } from '../../providers/IdentityProvider.tsx'
-import { IdentityContextType } from '../../types/IdentityType.tsx'
 import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
 import { Quaternion, Vector3 } from 'three'
 import { useAvatarStore } from '../../store/AvatarStore.ts'
@@ -9,10 +7,12 @@ import { useFrame } from '@react-three/fiber'
 import { useControlStore } from '../../store/ControlStore.ts'
 import { useRotationStore } from '../../store/RotationStore.ts'
 import { extractCyberspaceActionState } from '../../libraries/Cyberspace.ts'
+import useNDKStore from '../../store/NDKStore.ts'
 
 export const Controls: React.FC = () => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
-  const pubkey = identity.pubkey
+  const { getUser } = useNDKStore()
+  const identity = getUser()
+  const pubkey = identity!.pubkey
   const engine = useEngine(pubkey)
   const { actionState, getSimulatedState, getLatest } = useAvatarStore()
   const actions = actionState[pubkey]

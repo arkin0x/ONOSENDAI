@@ -1,9 +1,7 @@
 import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
-import { useContext, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { Vector3 } from "three"
-import { IdentityContextType } from "../../types/IdentityType"
-import { IdentityContext } from "../../providers/IdentityProvider"
 import { cyberspaceVelocityToMAG, extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
@@ -11,17 +9,19 @@ import { useRotationStore } from "../../store/RotationStore"
 import { useAvatarStore } from "../../store/AvatarStore"
 import COLORS from "../../data/Colors"
 import { generateSectorName } from "../../libraries/SectorName"
+import useNDKStore from "../../store/NDKStore"
 
 
 export const Hud = () => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { actionState, getSimulatedState } = useAvatarStore()
   const [simulatedState, setSimulatedState] = useState<ExtractedCyberspaceActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
   const { rotation } = useRotationStore()
 
-  const pubkey = identity.pubkey
+  const pubkey = identity!.pubkey
   const actionsRef = useRef(actionState[pubkey])
 
   useFrame(() => {

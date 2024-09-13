@@ -1,64 +1,26 @@
-import type { UnsignedEvent } from 'nostr-tools'
-import { useState, useEffect, createContext } from "react"
-import NDK, { NDKEvent, NDKNip07Signer, NostrEvent } from '@nostr-dev-kit/ndk'
-import { defaultRelays, getRelayList } from '../libraries/Nostr'
-// import { defaultRelays, getRelayList } from "../libraries/Nostr"
+"use client"
+import { useEffect } from "react";
+import useNDKStore, { NDKStoreConfig, defaultRelays } from "../store/NDKStore";
+import Loading from "../components/Loading";
 
-type NDKContextType = {
-  ndk?: NDK,
-  publishEvent: (event: UnsignedEvent) => Promise<false | NDKEvent>
-}
+// const redisURL = "https://localhost:6379"
 
-const defaultNDKContext: NDKContextType = {
-  ndk: undefined,
-  publishEvent: async () => false
-}
-
-export const NDKContext = createContext<NDKContextType>(defaultNDKContext)
-
-type NDKProviderProps = {
-  children: React.ReactNode
-}
-
-export const NDKProvider: React.FC<NDKProviderProps> = ({ children }) => {
-  const [ndk, setNDK] = useState<NDK>()
+export default function NDKProvider({ children }: { children: React.ReactNode }) {
+  const { initNDK, isConnected } = useNDKStore();
 
   useEffect(() => {
-    const setupNDK = async () => {
-      const signer = new NDKNip07Signer(3000)
-      const ndkRef = new NDK({
-        signer,
-        explicitRelayUrls: getRelayList(defaultRelays),
-        enableOutboxModel: false,
-        autoConnectUserRelays: false,
-      })
-      ndkRef.connect()
-      setNDK(ndkRef)
+    const opts: NDKStoreConfig = {
+      relayUrls: defaultRelays,
+      // redisUrl: redisURL,
+      useExtension: !!localStorage.getItem('useExtension')
     }
-    setupNDK()
-  }, [])
 
-  async function publishEvent(event: UnsignedEvent): Promise<NDKEvent|false> {
-    if (ndk) {
-      const ndkEvent = new NDKEvent(ndk, event as NostrEvent)
-      ndkEvent.sign()
-      const pubs = await ndkEvent.publish()
-      // check if pubs is a set of 0
-      if (pubs.size === 0) {
-        console.warn(`publishEvent: Could not publish event because no relays were available.`, ndk, event)
-        return false
-      }
-      console.log('Published NDKEvent: ', ndkEvent, 'to relays', pubs)
-      return ndkEvent
-    } else {
-      console.warn(`publishEvent: Could not publish event because NDK is not ready.`, ndk, event)
-      return false
-    }
+    initNDK(opts)//, redisURL);
+  }, [initNDK]);
+
+  if (!isConnected) {
+    return <Loading/>
   }
 
-  return (
-    <NDKContext.Provider value={{ndk, publishEvent}}>
-      {children}
-    </NDKContext.Provider>
-  )
+  return children
 }

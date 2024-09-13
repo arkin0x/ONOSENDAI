@@ -1,33 +1,19 @@
-import { useContext, useEffect } from "react"
-import { useNavigate } from 'react-router-dom'
-import { IdentityContext } from "../providers/IdentityProvider"
-import { IdentityContextType } from "../types/IdentityType"
-import { Spinner } from './Spinner'
-import { localStorageKey } from '../libraries/EncryptAndStoreLocal'
+import { useEffect } from "react"
+import useNDKStore from "../store/NDKStore"
+import Loading from "./Loading"
 
 export const Logout = () => {
-  const {identity, setIdentity, setRelays} = useContext<IdentityContextType>(IdentityContext)
-  const navigate = useNavigate()
+  const { resetUser } = useNDKStore()
 
   useEffect(() => {
-    const wipe = async () => {
-      localStorage.removeItem('identity')
-      localStorage.removeItem('decryptedSecret')
-      localStorage.removeItem('relays')
-      localStorage.removeItem('contacts')
-      localStorage.removeItem('draftPlace')
-      localStorage.removeItem(localStorageKey)
-      localStorage.removeItem(localStorageKey+'v')
-      localStorage.removeItem(localStorageKey+'s')
-      window.location.href='/'
-    }
-    wipe()
-  }, [navigate, identity, setIdentity, setRelays])
+    resetUser()
+    window.location.href='/'
+  }, [])
 
   return (
     <div id="login">
       <h1>Logging Out...</h1>
-      <Spinner/>
+      <Loading/>
     </div>
   )
 }

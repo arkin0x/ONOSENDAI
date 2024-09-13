@@ -12,9 +12,10 @@ import { CyberspaceKinds } from "../../libraries/Cyberspace"
 import { isGenesisAction } from "../../libraries/Cyberspace"
 // import { validateActionChain } from "./validateActionChain"
 import { useAvatarStore, AvatarActionDispatched } from "../../store/AvatarStore"
+import useNDKStore from "../../store/NDKStore"
 
 export const useActionChain = (pubkey: string) => {
-  const {ndk} = useContext(NDKContext)
+  const {ndk} = useNDKStore()
   const {actionState, dispatchActionState} = useAvatarStore()
   const [genesisId, setGenesisId] = useState<string|null>(null)
   const actionChainState = actionState[pubkey]

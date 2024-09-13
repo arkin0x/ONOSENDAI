@@ -1,11 +1,11 @@
 import { ReactNode, useEffect, useRef } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { CyberspacePlane } from '../libraries/Cyberspace.ts'
-import { Vector3 } from 'three'
+import { TextureLoader, Vector3 } from 'three'
 import COLORS from '../data/Colors.ts'
-import logo from '../assets/logo-cropped.png'
+import logo from '../assets/logo-cropped-inv.png'
 
 export function Intro() {
 
@@ -29,6 +29,10 @@ function CameraFlight() {
   const CAMERA_END = new Vector3(0, 0, -SCALE)
   const CAMERA_PROGRESS_REF = useRef(1)
 
+  const logoRef = useRef<THREE.Mesh>(null)
+  const texture = useLoader(TextureLoader, logo)
+  const logoDistance = 5
+
   useEffect(() => {
     CAMERA_PROGRESS_REF.current = 1
     camera.far = 2**30 
@@ -44,23 +48,41 @@ function CameraFlight() {
     if (CAMERA_PROGRESS_REF.current <= -1) {
       CAMERA_PROGRESS_REF.current = 1
     }
+
+    if( logoRef.current ) {
+      // Calculate the position in front of the camera
+      const direction = new Vector3()
+      camera.getWorldDirection(direction)
+      direction.multiplyScalar(logoDistance)
+      // Set the position of the plane
+      logoRef.current.position.copy(camera.position).add(direction)
+        
+      // Make the plane face the camera
+      logoRef.current.quaternion.copy(camera.quaternion)
+    }
   })
 
   return (
     <>
-      <ambientLight intensity={2.0} />
-      <OrbitControls target={[0,0,SCALE]} />
-      <group position={[-SCALE/2, 0, -SCALE]}>
-        <IntroGrid scale={SCALE} plane={CyberspacePlane.ISpace}>
-        </IntroGrid>
-      </group>
-      <group position={[-SCALE/2, 0, 0]} rotation={[0,0,0]}>
-        <IntroGrid scale={SCALE} plane={CyberspacePlane.ISpace}>
-        </IntroGrid>
-      </group>
-      <EffectComposer>
-        <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.001} luminanceSmoothing={0} />
-      </EffectComposer>
+      <mesh ref={logoRef}>
+        <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />
+        <meshBasicMaterial attach="material" map={texture} transparent={true} />
+      </mesh>
+      <group>
+        <ambientLight intensity={2.0} />
+        <OrbitControls target={[0,0,SCALE]}/>
+        <group position={[-SCALE/2, 0, -SCALE]}>
+          <IntroGrid scale={SCALE} plane={CyberspacePlane.ISpace}>
+          </IntroGrid>
+        </group>
+        <group position={[-SCALE/2, 0, 0]} rotation={[0,0,0]}>
+          <IntroGrid scale={SCALE} plane={CyberspacePlane.ISpace}>
+          </IntroGrid>
+        </group>
+        <EffectComposer>
+          <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.001} luminanceSmoothing={0} />
+        </EffectComposer>
+    </group>
     </>
   )
 }

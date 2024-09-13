@@ -19,7 +19,7 @@ export function Intro() {
       </Canvas>
       <Canvas style={{height: "100svh"}}>
         <EffectComposer>
-          <Bloom mipmapBlur levels={2} intensity={1} luminanceThreshold={0.001} luminanceSmoothing={0} />
+          <Bloom mipmapBlur levels={1} intensity={4} luminanceThreshold={0.001} luminanceSmoothing={0} />
         </EffectComposer>
         <mesh position={[0, 0, -2]}>
           <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />

@@ -49,6 +49,7 @@ function CameraFlight() {
     camera.far = 2**30 
     camera.near = 0.01
     camera.position.copy(CAMERA_START)
+    camera.lookAt(new Vector3(0,0,SCALE))
     camera.updateProjectionMatrix()
   },[])
 
@@ -77,7 +78,7 @@ function CameraFlight() {
     <>
       <group>
         <ambientLight intensity={2.0} />
-        <OrbitControls target={[0,0,SCALE]}/>
+        {/* <OrbitControls target={[0,0,SCALE]}/> */}
         <group position={[-SCALE/2, 0, -SCALE]}>
           <IntroGrid scale={SCALE} plane={CyberspacePlane.ISpace}>
           </IntroGrid>

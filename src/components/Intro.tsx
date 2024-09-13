@@ -5,14 +5,26 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { CyberspacePlane } from '../libraries/Cyberspace.ts'
 import { TextureLoader, Vector3 } from 'three'
 import COLORS from '../data/Colors.ts'
-import logo from '../assets/logo-cropped-inv.png'
+import logo from '../assets/logo-cropped.png'
 
 export function Intro() {
 
+  const texture = useLoader(TextureLoader, logo)
+
   return (
     <div id="home">
-      <Canvas style={{height: "100svh"}}>
+      {/* <img src={logo} alt="logo" style={{position: "absolute", width: "70svw", top: "40svh", zIndex: 999}}/> */}
+      <Canvas style={{height: "100svh", position: "absolute"}}>
         <CameraFlight />
+      </Canvas>
+      <Canvas style={{height: "100svh"}}>
+        <EffectComposer>
+          <Bloom mipmapBlur levels={2} intensity={1} luminanceThreshold={0.001} luminanceSmoothing={0} />
+        </EffectComposer>
+        <mesh position={[0, 0, -2]}>
+          <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />
+          <meshBasicMaterial attach="material" map={texture} transparent={true} />
+        </mesh>
       </Canvas>
     </div>
   )
@@ -30,7 +42,6 @@ function CameraFlight() {
   const CAMERA_PROGRESS_REF = useRef(1)
 
   const logoRef = useRef<THREE.Mesh>(null)
-  const texture = useLoader(TextureLoader, logo)
   const logoDistance = 5
 
   useEffect(() => {
@@ -64,10 +75,6 @@ function CameraFlight() {
 
   return (
     <>
-      <mesh ref={logoRef}>
-        <planeGeometry attach="geometry" args={[5.28531073446328, 1]} />
-        <meshBasicMaterial attach="material" map={texture} transparent={true} />
-      </mesh>
       <group>
         <ambientLight intensity={2.0} />
         <OrbitControls target={[0,0,SCALE]}/>
@@ -80,7 +87,7 @@ function CameraFlight() {
           </IntroGrid>
         </group>
         <EffectComposer>
-          <Bloom mipmapBlur levels={9} intensity={50} luminanceThreshold={0.001} luminanceSmoothing={0} />
+          <Bloom mipmapBlur levels={2} intensity={50} luminanceThreshold={0.001} luminanceSmoothing={0} />
         </EffectComposer>
     </group>
     </>
@@ -94,11 +101,11 @@ export function IntroGrid({children, scale, plane = CyberspacePlane.DSpace}: {ch
   return (
     <>
       <gridHelper // Top Grid
-        args={[scale, GRIDLINES, COLORS.GRID_CROSS, plane === CyberspacePlane.DSpace ? 0x3B0097 : COLORS.SKY]}
+        args={[scale, GRIDLINES, COLORS.SKY, COLORS.SKY]}
         position={[scale/2, 5, scale/2]} // all coordinates are positive, so the top left corner of the grid should be x0 z0.
       />
       <gridHelper // Bottom Grid
-        args={[scale, GRIDLINES, COLORS.GRID_CROSS, plane === CyberspacePlane.DSpace ? 0x3A0C40 : COLORS.GROUND]}
+        args={[scale, GRIDLINES, COLORS.GROUND, COLORS.GROUND]}
         position={[scale/2, -5, scale/2]} // all coordinates are positive, so the top left corner of the grid should be x0 z0.
       />
       {children}

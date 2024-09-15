@@ -21,13 +21,13 @@ export function Grid({children, scale, plane = CyberspacePlane.DSpace}: {childre
         args={[scale, GRIDLINES, COLORS.GRID_CROSS, plane === CyberspacePlane.DSpace ? 0x3A0C40 : COLORS.GROUND]}
         position={[scale/2, 0, scale/2]} // all coordinates are positive, so the top left corner of the grid should be x0 z0.
       />
-      { plane === CyberspacePlane.ISpace ? <mesh // Black Sun
+      <mesh // Black Sun
         position={[scale/2, scale/2, -scale/2]}
         renderOrder={-1}
       >
         <circleGeometry args={[scale/4]} />
         <meshBasicMaterial color={COLORS.BLACK_SUN} />
-      </mesh> : null }
+      </mesh>
 
       {/* display Earth in d-space */}
       { plane === CyberspacePlane.DSpace ? 

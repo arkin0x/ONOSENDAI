@@ -6,8 +6,16 @@ import './scss/Home.scss'
 import { Logout } from './components/Logout.tsx'
 import { Intro } from './components/Intro.tsx'
 import { Interface } from './components/Interface.tsx'
+import useNDKStore from './store/NDKStore.ts'
+import Loading from './components/Loading.tsx'
 
 function App() {
+
+  const { isConnected } = useNDKStore()
+
+  if (!isConnected) {
+    return <Loading/>
+  }
 
   return (
     <div id="app">

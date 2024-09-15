@@ -108,6 +108,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
     initializeIdentity() // sets up a newly generated identity if one doesn't exist
     ndk.activeUser = new NDKUser({npub: loadNpub()})
     ndk.activeUser.ndk = ndk
+    localStorage.removeItem('useExtension')
     set({ isUserLoaded: true, ndk });
     callback()
   },
@@ -122,6 +123,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
       ndk.activeUser = await signer.user()
       ndk.activeUser.ndk = ndk
       ndk.signer = signer
+      localStorage.setItem('useExtension', 'true')
       set({ isUserLoaded: true, ndk });
       callback()
     } catch (e) {

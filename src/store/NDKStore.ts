@@ -198,6 +198,9 @@ const useNDKStore = create<NDKState>((set, get) => ({
 useNDKStore.getState().initNDK({
   relayUrls: defaultRelays,
   useExtension: !!localStorage.getItem('useExtension')
+}).then(() => {
+  if (localStorage.getItem('useExtension')) useNDKStore.getState().initExtensionUser(() => {})
+    else useNDKStore.getState().initLocalKeyUser(() => {})
 })
 
 export default useNDKStore;

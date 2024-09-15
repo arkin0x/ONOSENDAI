@@ -11,9 +11,9 @@ import Loading from './components/Loading.tsx'
 
 function App() {
 
-  const { isConnected } = useNDKStore()
+  const { isConnected, isUserLoaded } = useNDKStore()
 
-  if (!isConnected) {
+  if (!isConnected || !isUserLoaded) {
     return <Loading/>
   }
 

@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { incrementNonceBuffer, setNonceBuffer } from "../libraries/Miner"
-import { countLeadingZeroesBin } from "../libraries/Hash"
+import { countLeadingZeroesBin, uint8ToHex } from "../libraries/Hash"
 
 let threadID = undefined
 let threadCountNum = 0
@@ -59,7 +59,8 @@ function initiateMining(data) {
 
       if (POW === targetPOW) {
         // console.log('worker',threadID, 'pow',POW)
-        postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, currentNonce, POW, chainHeight })
+        const id = uint8ToHex(digest)
+        postMessage({ thread: threadID, status: 'pow-target-found', action, nonceBounds, digest, id, currentNonce, POW, chainHeight })
         active = false
         return
       }
@@ -73,7 +74,7 @@ function initiateMining(data) {
       return
 
     } else if (!active) {
-      // console.log('worker',threadID,'stopped')
+      console.log('worker',threadID,'stopped')
     }
 
     if (currentNonce > nonceEndValue) {

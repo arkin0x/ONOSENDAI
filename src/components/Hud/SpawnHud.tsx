@@ -6,7 +6,7 @@ import COLORS from "../../data/Colors"
 import { useSectorStore } from "../../store/SectorStore"
 
 
-export const HyperjumpHud = () => {
+export const SpawnHud = () => {
   const { userCurrentSectorId, sectorState } = useSectorStore()
   const [genesis, setGenesis] = useState<boolean>()
 

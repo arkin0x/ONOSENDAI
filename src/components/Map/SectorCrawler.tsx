@@ -72,7 +72,7 @@ const workerUrl = URL.createObjectURL(workerBlob)
 const SectorCrawler: React.FC = () => {
   const { sectorState, mountSector, addAvatar, addConstruct, addHyperjump } = useSectorStore()
   const { centerSectorId } = useMapCenterSectorStore()
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   
   const workerRef = useRef<Worker | null>(null)
   const queueRef = useRef<string[]>([])

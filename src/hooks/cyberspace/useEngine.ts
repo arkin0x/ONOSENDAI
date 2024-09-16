@@ -6,6 +6,8 @@ import { deserializeEvent, getNonceBounds, serializeEvent } from '../../librarie
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { NDKContext } from '../../providers/NDKProvider'
 import { useAvatarStore } from '../../store/AvatarStore'
+import useNDKStore from '../../store/NDKStore'
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 
 // New version of Engine.ts
 const NONCE_OFFSET = 1_000_000
@@ -20,10 +22,11 @@ type EngineControls = {
 }
 
 export function useEngine(pubkey: string): EngineControls {
+  const { getNDK } = useNDKStore()
   const {dispatchActionState} = useAvatarStore()
   const [genesis, setGenesis] = useState<CyberspaceAction|null>(null)
   const [latest, setLatest] = useState<CyberspaceAction|null>(null)
-  const {publishEvent} = useContext(NDKContext)
+  const {publish} = useNDKStore()
   const throttleRef = useRef<number | null>(null)
   const quaternionRef = useRef<Quaternion | null>(null)
   const chainHeight = useRef<number>(0)
@@ -87,8 +90,9 @@ export function useEngine(pubkey: string): EngineControls {
 
   async function newGenesis() {
     const genesisAction = createUnsignedGenesisAction(pubkey)
-    const genesisActionPublished = await publishEvent(genesisAction)
-    const rawGenesis = genesisActionPublished && genesisActionPublished.rawEvent() as Event
+    const genesisActionNDK = new NDKEvent(getNDK(), genesisAction)
+    const genesisActionPublished = await publish(genesisActionNDK)
+    const rawGenesis = genesisActionPublished && genesisActionNDK.rawEvent() as Event
     if (!rawGenesis) {
       throw new Error('Engine.drift: failed to publish genesis action')
     } else {
@@ -177,12 +181,13 @@ export function useEngine(pubkey: string): EngineControls {
   }
 
   async function publishMovementAction(action: UnsignedEvent): Promise<void> {
-    const publishedAction = await publishEvent(action) // FIXME we would normally pass in `relays` here
+    const actionNDK = new NDKEvent(getNDK(), action)
+    const publishedAction = await publish(actionNDK) // FIXME we would normally pass in `relays` here
     if (!publishedAction) {
       console.error('Engine: publishMovementAction: failed to publish action')
       return
     }
-    const convertedAction = publishedAction.rawEvent() as Event as CyberspaceAction
+    const convertedAction = actionNDK.rawEvent() as Event as CyberspaceAction
     setLatestAction(convertedAction)
     // save the action to the AvatarContext
     dispatchActionState({type: 'push', actions: [convertedAction], pubkey: action.pubkey})

@@ -1,17 +1,14 @@
 import { useContext, useEffect, useState } from "react"
 import { useNavigate } from 'react-router-dom'
-import { IdentityContext } from "../providers/IdentityProvider"
 import { IdentityContextType } from "../types/IdentityType"
 import { Spinner } from './Spinner'
-import { NDKContext } from "../providers/NDKProvider"
-import { defaultRelays } from "../libraries/Nostr"
 import { NDKUser } from "@nostr-dev-kit/ndk"
+import useNDKStore, { defaultRelays } from "../store/NDKStore"
 
 export const Login = () => {
   const [loading, setLoading] = useState(false)
-  const {identity, setIdentity, profileLoaded, setRelays} = useContext<IdentityContextType>(IdentityContext)
   const navigate = useNavigate()
-  const {ndk} = useContext(NDKContext)
+  const {ndk} = useNDKStore()
 
   useEffect(() => {
     if (!ndk) return

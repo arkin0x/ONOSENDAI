@@ -1,37 +1,31 @@
-import { useContext } from 'react'
+import { useCallback, useState } from 'react'
+import { Text } from '@react-three/drei'
+import COLORS from '../data/Colors'
+import useNDKStore from '../store/NDKStore'
 import { useNavigate } from 'react-router-dom'
-import { IdentityContextType } from "../types/IdentityType"
-import { IdentityContext } from "../providers/IdentityProvider"
-import { getPublicKey } from "../libraries/NIP-07"
 
 export const SignInButton = () => {
-  const { setIdentity, profileLoaded } = useContext<IdentityContextType>(IdentityContext)
+  const { initExtensionUser } = useNDKStore()
+  const [color, setColor] = useState(COLORS.ORANGE)
   const navigate = useNavigate()
 
-  const signIn = async () => {
-    // trigger sign in with extension
-    const success = await getPublicKey()
-    if (success) {
-      // store pubkey in identity provider
-      setIdentity({pubkey: success})
-      // redirect to account page
-      navigate('/login')
-    } else {
-      // trigger "key not set up yet" dialog
-    }
-  }
-  if (profileLoaded()) {
-    return (
-      <div className="column">
-      You're already logged in!
-      <br/>
-      <br/>
-      <button type='button' onClick={() => navigate('/login')}>Go Yondar</button>
-      </div>
-    )
-  } else {
-    return (
-      <button type='button' onClick={signIn}>Sign in with Extension</button>
-    )
-  }
+  const init = useCallback(() => {
+    initExtensionUser(() => navigate('/interface'))
+  },[initExtensionUser, navigate])
+
+  return (
+    <group onClick={init}>
+      <mesh
+        position={[-0.3, 0, 0]}
+        onPointerOver={() => setColor(COLORS.GREEN)}
+        onPointerOut={() => setColor(COLORS.ORANGE)}
+      >
+        <boxGeometry args={[0.5, 0.2, 0.1]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+      <Text position={[-0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.09} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+       SIGN IN 
+      </Text>
+    </group>
+  )
 }

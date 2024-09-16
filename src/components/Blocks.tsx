@@ -11,7 +11,7 @@ interface BlocksProps {
 }
 
 export const Blocks: React.FC<BlocksProps> = ({ sectorId }) => {
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
 
   useEffect(() => {

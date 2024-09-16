@@ -1,19 +1,19 @@
 import { useFrame } from "@react-three/fiber"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
-import { useContext, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useAvatarStore } from "../../store/AvatarStore"
 import { extractCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useSectorStore } from "../../store/SectorStore"
-import { IdentityContextType } from "../../types/IdentityType"
-import { IdentityContext } from "../../providers/IdentityProvider"
 import { Vector3 } from "three"
+import useNDKStore from "../../store/NDKStore"
 
 interface ThreeAvatarMarkerProps {
   position: Vector3
 }
 
 export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { getSimulatedState } = useAvatarStore()
   const { updateUserCurrentSectorId } = useSectorStore()
   const [frameSectorId, setFrameSectorId] = useState<string>()
@@ -21,7 +21,7 @@ export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {
 
   // get simulated sectorPosition and velocity each frame
   useFrame(() => {
-    const simulatedEvent = getSimulatedState(identity?.pubkey)
+    const simulatedEvent = getSimulatedState(identity!.pubkey)
     if (simulatedEvent) {
       const { sector } = extractCyberspaceActionState(simulatedEvent)
       if (frameSectorId !== sector.id) {

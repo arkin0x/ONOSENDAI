@@ -1,26 +1,27 @@
 import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
-import { useContext, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { Vector3 } from "three"
-import { IdentityContextType } from "../../types/IdentityType"
-import { IdentityContext } from "../../providers/IdentityProvider"
-import { extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
+import { cyberspaceVelocityToMAG, extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
 import { useAvatarStore } from "../../store/AvatarStore"
 import COLORS from "../../data/Colors"
+import { generateSectorName } from "../../libraries/SectorName"
+import useNDKStore from "../../store/NDKStore"
 
 
 export const Hud = () => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { actionState, getSimulatedState } = useAvatarStore()
   const [simulatedState, setSimulatedState] = useState<ExtractedCyberspaceActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
   const { rotation } = useRotationStore()
 
-  const pubkey = identity.pubkey
+  const pubkey = identity!.pubkey
   const actionsRef = useRef(actionState[pubkey])
 
   useFrame(() => {
@@ -57,11 +58,13 @@ export const Hud = () => {
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.localCoordinate.vector.z.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.localCoordinate.vector.y.toFixed(2)} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.localCoordinate.vector.x.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ' + simulatedState.sector.id} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={generateSectorName(simulatedState.sector.id).toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ID ' + simulatedState.sector.id} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.coordinate.raw.toUpperCase()} align="left" />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
       <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedState.velocity.x.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`MAG ${cyberspaceVelocityToMAG(simulatedState.velocity).toFixed(2)}`} align="left" color={COLORS.ORANGE} />
 
       { rotation && <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'QUATERNION ' + rotation.x.toFixed(2) + '/' + rotation.y.toFixed(2) + '/' + rotation.z.toFixed(2) + '/' + rotation.w.toFixed(2)} align="left" color={COLORS.ORANGE} /> }
 

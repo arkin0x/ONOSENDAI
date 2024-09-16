@@ -1,5 +1,4 @@
-import { memo, useContext, useEffect, useMemo } from 'react'
-import { NDKContext } from '../../providers/NDKProvider'
+import { memo, useEffect, useMemo } from 'react'
 import { CYBERSPACE_SECTOR, cyberspaceCoordinateFromHexString, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import { CyberspaceKinds } from "../../libraries/Cyberspace"
@@ -8,21 +7,20 @@ import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Text } from "@react-three/drei"
-import { Blocks } from '../Blocks'
 import { useSectorStore } from '../../store/SectorStore'
 import COLORS from '../../data/Colors'
 import { Avatar } from './Avatar'
 import Hyperjump from './Hyperjump'
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
+import { generateSectorName } from '../../libraries/SectorName'
+import useNDKStore from '../../store/NDKStore'
 
 interface SectorManagerProps {
   adjacentLayers?: number
 }
 
 function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|null {
-  const { ndk } = useContext(NDKContext)
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { ndk, getUser } = useNDKStore()
+  const identity = getUser()
   const { 
     userCurrentSectorId, 
     sectorState, 
@@ -32,6 +30,8 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
     addConstruct, 
     addHyperjump 
   } = useSectorStore()
+
+  console.log("Sector Manager: userCurrentSectorId", userCurrentSectorId)
 
   // Functions 
 
@@ -47,8 +47,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
   // determine the user's genesis sector
   useEffect(() => {
-    if (!identity.pubkey) return
-    const coord = cyberspaceCoordinateFromHexString(identity.pubkey)
+    const coord = cyberspaceCoordinateFromHexString(identity!.pubkey)
     const genesisSector = coord.sector.id
     if (genesisSector) {
       mountSector(genesisSector, true)
@@ -177,20 +176,9 @@ const Sector = memo(({
         // position={[0, -halfSize - 2**25, halfSize]} 
         rotation={[0,-Math.PI,0]} 
         frustumCulled={true}
-        color={COLORS.ORANGE} >
-        SECTOR {id}
+        color={COLORS.DARK_PURPLE} >
+        SECTOR {generateSectorName(id).toUpperCase()}
       </Text> : null }
-      {/* { current ? <Text 
-        textAlign='center'
-        fontSize={2**28}
-        font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
-        anchorX={'center'}
-        position={[0, 0, halfSize]} 
-        rotation={[0,-Math.PI,0]} 
-        frustumCulled={true}
-        color={COLORS.ORANGE} >
-        //////
-      </Text> : null } */}
     </group>
   )
 })

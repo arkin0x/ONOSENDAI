@@ -12,9 +12,10 @@ import { CyberspaceKinds } from "../../libraries/Cyberspace"
 import { isGenesisAction } from "../../libraries/Cyberspace"
 // import { validateActionChain } from "./validateActionChain"
 import { useAvatarStore, AvatarActionDispatched } from "../../store/AvatarStore"
+import useNDKStore from "../../store/NDKStore"
 
 export const useActionChain = (pubkey: string) => {
-  const {ndk} = useContext(NDKContext)
+  const {ndk} = useNDKStore()
   const {actionState, dispatchActionState} = useAvatarStore()
   const [genesisId, setGenesisId] = useState<string|null>(null)
   const actionChainState = actionState[pubkey]
@@ -103,6 +104,13 @@ export const useActionChain = (pubkey: string) => {
 
     // the latest action and all new actions will arrive here
     latestAction.on('event', onReceiveLatestAction)
+
+    latestAction.on('eose', () => {
+      if (!actionState[pubkey]) {
+        console.log('no actions found for pubkey', pubkey)
+        // engine handles this -- just press a key to create a genesis event.
+      }
+    })
 
     // Clean up any subscriptions or resources in the cleanup function
     return () => {

@@ -4,13 +4,14 @@ import { BufferGeometry, Vector3, LineBasicMaterial } from 'three'
 import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString, cyberspaceCoordinateFromHexStringAndDecimal } from '../../libraries/Cyberspace'
 import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 import COLORS from '../../data/Colors'
+import useNDKStore from '../../store/NDKStore'
 
 interface BlocksProps {
   scale: number
 }
 
 export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   const [blocks, setBlocks] = useState<NDKEvent[]>([])
   const [fetchCounter, setFetchCounter] = useState(0)
 
@@ -95,7 +96,7 @@ const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale })
 
   const material = useMemo(() => {
     return new LineBasicMaterial({
-      color: COLORS.YELLOW,
+      color: 0x999900,//COLORS.YELLOW,
       opacity: 0.5,
       linewidth: 1,
     })

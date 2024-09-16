@@ -1,30 +1,29 @@
 import { Routes, Route } from 'react-router-dom'
-import { IdentityProvider } from './providers/IdentityProvider.tsx'
-import { Login } from './components/Login'
-import { ModalProvider } from './providers/ModalProvider.tsx'
-import { Home } from './components/Home.tsx'
 import './scss/App.scss'
-import { UIProvider } from './providers/UIProvider.tsx'
+import "./scss/Interface.scss"
+import "./scss/Dashboard.scss"
+import './scss/Home.scss'
 import { Logout } from './components/Logout.tsx'
-import { NDKProvider } from './providers/NDKProvider.tsx'
+import { Intro } from './components/Intro.tsx'
+import { Interface } from './components/Interface.tsx'
+import useNDKStore from './store/NDKStore.ts'
+import Loading from './components/Loading.tsx'
 
 function App() {
 
+  const { isConnected, isUserLoaded } = useNDKStore()
+
+  if (!isConnected || !isUserLoaded) {
+    return <Loading/>
+  }
+
   return (
     <div id="app">
-      <NDKProvider>
-        <IdentityProvider>
-          <UIProvider>
-            <ModalProvider>
-              <Routes>
-                <Route path="/" element={<Home/>}/>
-                <Route path="/login" element={<Login/>}/>
-                <Route path="/logout" element={<Logout/>}/>
-              </Routes>
-            </ModalProvider>
-          </UIProvider>
-        </IdentityProvider>
-      </NDKProvider>
+      <Routes>
+        <Route path="/" element={<Intro/>}/>
+        <Route path="/interface" element={<Interface/>}/>
+        <Route path="/logout" element={<Logout/>}/>
+      </Routes>
     </div>
   )
 }

@@ -1,27 +1,26 @@
 import { OrbitControls, Text } from "@react-three/drei"
 import { useSpring, animated } from '@react-spring/three'
-import { useCallback, useContext, useState } from "react"
+import { useCallback, useState } from "react"
 import { UIState } from "../types/UI"
-import { UIContext } from "../providers/UIProvider"
 import CyberspaceViewer from "./Cyberspace/CyberspaceViewer"
 import { useNavigate } from "react-router-dom"
 import CyberspaceMap from "./Map/CyberspaceMap"
-import "../scss/Interface.scss"
-import "../scss/Dashboard.scss"
 import CyberspaceGlobal from "./Global/CyberspaceGlobal"
 import { Canvas, useThree } from "@react-three/fiber"
-import { BufferGeometry, Camera, Float32BufferAttribute, LineBasicMaterial, MeshBasicMaterial, Shape, ShapeGeometry, Vector3 } from "three"
+import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial, MeshBasicMaterial, Shape, ShapeGeometry, Vector3 } from "three"
 import COLORS from "../data/Colors"
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
+import CyberspaceBuild from "./Build/CyberspaceBuild"
+import { useUIStore } from "../store/UIStore"
 
-export const Interface = () => {
+export function Interface(){
   const navigate = useNavigate()
 
   const logOut = () => {
     navigate("/logout")
   }
 
-  const { uiState, setUIState } = useContext(UIContext)
+  const { uiState, setUIState } = useUIStore()
 
   const getInterface = useCallback(() => {
     switch (uiState) {
@@ -31,6 +30,8 @@ export const Interface = () => {
         return <CyberspaceMap />
       case UIState.global:
         return <CyberspaceGlobal />
+      case UIState.build:
+        return <CyberspaceBuild />
       default:
         break
     }
@@ -47,7 +48,8 @@ export const Interface = () => {
             <NavText text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)} current={uiState === UIState.cyberspace}/>
             <NavText text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
             <NavText text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
-            <NavText text="LOGOUT" position={{x: 125, y: 0, z: 0}} align="center" color={0xBA005D} onClick={logOut}/>
+            <NavText text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.PINK} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
+            <NavText text="LOGOUT" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGOUT} onClick={logOut}/>
           </group>
           <EffectComposer>
             <Bloom mipmapBlur levels={5} intensity={5} luminanceThreshold={-1} luminanceSmoothing={0} />

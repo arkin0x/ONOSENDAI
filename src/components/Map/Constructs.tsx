@@ -10,7 +10,7 @@ interface ConstructsProps {
 }
 
 export const Constructs: React.FC<ConstructsProps> = ({ scale }) => {
-  const { ndk } = useContext(NDKContext)
+  const { ndk } = useNDKStore()
   const [constructs, setConstructs] = useState<NDKEvent[]>([])
 
   // TODO: 

@@ -8,6 +8,7 @@ const CURSOR_YELLOW = 0xffff00
 const BITCOIN = 0xff9123
 const RED = 0xff2323
 const DARK_PURPLE = 0x2b0c40
+const LOGOUT = 0xBA005D
 const PINK = 0xff3377
 const GREEN = 0x4bc9a7
 
@@ -19,6 +20,8 @@ const GROUND = LOGO_PURPLE
 const GRID_CROSS = LIGHT_PURPLE
 const BLACK_SUN = DARK_PURPLE
 const DSPACE = GREEN
+const HYPERJUMP = CURSOR_YELLOW
+const GENESIS = PINK
 
 const COLORS = {
   PINK,
@@ -31,6 +34,7 @@ const COLORS = {
   LIGHT_PURPLE,
   PURPLE: LOGO_PURPLE,
   DARK_PURPLE,
+  BLACK: 0x000000,
 
   AVATAR,
   BITCOIN,
@@ -40,6 +44,9 @@ const COLORS = {
   GRID_CROSS,
   BLACK_SUN,
   DSPACE,
+  LOGOUT,
+  HYPERJUMP,
+  GENESIS,
 
   LOGO_PURPLE,
   LOGO_BLUE,

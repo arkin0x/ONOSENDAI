@@ -1,28 +1,31 @@
-import { useContext } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { IdentityContextType } from "../types/IdentityType"
-import { IdentityContext } from "../providers/IdentityProvider"
-import { generatePrivateKey, getPublicKey } from 'nostr-tools'
-import { encryptAndStorePrivateKey } from '../libraries/EncryptAndStoreLocal'
+import { useCallback, useState } from 'react'
+import { Text } from '@react-three/drei'
+import COLORS from '../data/Colors'
+import useNDKStore from '../store/NDKStore'
+import { useNavigate } from "react-router-dom"
 
 export const SignUpButton = () => {
-  const { identity, setIdentity } = useContext<IdentityContextType>(IdentityContext)
+  const { initLocalKeyUser } = useNDKStore()
+  const [color, setColor] = useState(COLORS.ORANGE)
   const navigate = useNavigate()
 
-  const newIdentity = async () => {
-    const sk = generatePrivateKey() // `sk` is a hex string
-    const pk = getPublicKey(sk) // `pk` is a hex string
-    const proceed = await encryptAndStorePrivateKey(sk)
-    if (proceed === false) return
-    setIdentity({pubkey: pk})
-    navigate('/login')
-  }
+  const init = useCallback(() => {
+    initLocalKeyUser(() => navigate('/interface'))
+  },[initLocalKeyUser, navigate])
 
-  if (identity) {
-    return null
-  } else {
-    return (
-      <button type='button' onClick={newIdentity}>Create new identity</button>
-    )
-  }
+  return (
+    <group onClick={init}>
+      <mesh
+        position={[0.3, 0, 0]}
+        onPointerOver={() => setColor(COLORS.GREEN)}
+        onPointerOut={() => setColor(COLORS.ORANGE)}
+      >
+        <boxGeometry args={[0.5, 0.2, 0.1]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+      <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.09} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+        NEW ID
+      </Text>
+    </group>
+  )
 }

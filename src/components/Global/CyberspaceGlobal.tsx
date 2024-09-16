@@ -1,25 +1,19 @@
 import { useContext, useEffect, useState } from 'react'
 import { Canvas, useThree } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
-import { MapControls } from './MapControls'
 import { Fog, Vector3 } from 'three'
 // import { BlockMarkers } from './BlockMarkers'
 // import { Constructs } from './Constructs'
 // import { ObjectMarkers } from './ObjectMarkers'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
-import SectorGrid from './SectorGrid'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { Grid } from '../Map/Grid'
 import { BlockMarkers } from '../Map/BlockMarkers'
-import SectorMarkers from '../Map/SectorMarkers'
 import { ThreeAvatarMarker } from '../Map/ThreeAvatarMarker'
-import { ObjectMarkers } from '../Map/ObjectMarkers'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { CYBERSPACE_AXIS, extractCyberspaceActionState } from '../../libraries/Cyberspace'
-import { Constructs } from '../Map/Constructs'
+import useNDKStore from '../../store/NDKStore'
 // import SectorCrawler from './SectorCrawler'
 
 const MAP_SIZE = 100
@@ -29,13 +23,14 @@ export type CyberspaceViewerProps = {
 }
 
 const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { getSimulatedState } = useAvatarStore()
   const { centerSectorId } = useMapCenterSectorStore()
 
   const [avatarPosition, setAvatarPosition] = useState(new Vector3(0,0,0))
 
-  const pubkey = identity?.pubkey
+  const pubkey = identity!.pubkey
 
   useEffect(() => {
     const simulatedEvent = getSimulatedState(pubkey)
@@ -55,7 +50,6 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
             <BlockMarkers scale={MAP_SIZE} />
             {/* <Constructs scale={MAP_SIZE} /> */}
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
-            {/* <SectorMarkers pubkey={identity?.pubkey} scale={MAP_SIZE} /> */}
           </Grid>
           <OrbitControls target={avatarPosition} />
           <EffectComposer>

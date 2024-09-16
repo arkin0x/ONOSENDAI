@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useEffect, useContext } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, BackSide, RGBA_ASTC_10x10_Format, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
@@ -8,8 +8,8 @@ import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
 import { ThreeAvatarMarker } from './ThreeAvatarMarker'
-import { IdentityContextType } from '../../types/IdentityType'
-import { IdentityContext } from '../../providers/IdentityProvider'
+import { generateSectorName } from '../../libraries/SectorName'
+import useNDKStore from '../../store/NDKStore'
 
 interface SectorData {
   sectorId: string
@@ -18,12 +18,10 @@ interface SectorData {
   genesis?: boolean
 }
 
-const GENESIS_COLOR = COLORS.PINK
-
 function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
   // console.log('getSectorColor', sectorState[sectorId], sectorState)
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
-  if (sectorState[sectorId]?.isGenesis) return new Color(GENESIS_COLOR)
+  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.GENESIS)
   if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)
   if (sectorState[sectorId]?.avatars.length > 0) {
     if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
@@ -37,7 +35,8 @@ function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sect
 }
 
 export const SectorGrid = () => {
-  const { identity } = useContext<IdentityContextType>(IdentityContext)
+  const { getUser } = useNDKStore()
+  const identity = getUser()
   const { sectorState, userCurrentSectorId } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const [follow, setFollow] = useState<"user"|"roam">("user")
@@ -46,7 +45,7 @@ export const SectorGrid = () => {
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
-  const pubkey = identity?.pubkey
+  const pubkey = identity!.pubkey
 
   useEffect(() => {
     if (follow === "user" && userCurrentSectorId) {
@@ -64,7 +63,7 @@ export const SectorGrid = () => {
       // console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
-      return { sectorId, position, color, genesis: color.getHex() === GENESIS_COLOR }
+      return { sectorId, position, color, genesis: sectorState[sectorId]?.isGenesis }
     }).filter(Boolean) as SectorData[]
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
@@ -144,7 +143,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
           frustumCulled={true}
           renderOrder={-1}
           color={color} >
-          SECTOR {sectorId}
+          SECTOR {generateSectorName(sectorId).toUpperCase()}
         </Text>
       : null }
       { genesis ?
@@ -157,8 +156,22 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
           rotation={[0,0,0]} 
           frustumCulled={true}
           renderOrder={-1}
-          color={color} >
+          color={COLORS.GENESIS} >
           GENESIS
+        </Text>
+      : null}
+      { hyperjump ?
+        <Text 
+          textAlign='right'
+          fontSize={0.15}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          anchorX={'right'}
+          position={genesisTextPosition} 
+          rotation={[0,0,0]} 
+          frustumCulled={true}
+          renderOrder={-1}
+          color={COLORS.HYPERJUMP} >
+          HYPERJUMP 
         </Text>
       : null}
     </group>

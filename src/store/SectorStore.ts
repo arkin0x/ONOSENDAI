@@ -16,21 +16,30 @@ export type SectorData = {
 type SectorStore = {
   userCurrentSectorId: string | null
   sectorState: SectorState
+  globalHyperjumps: Set<Event>
+  globalConstructs: Set<Event>
+  globalAvatars: Set<string>
   updateUserCurrentSectorId: (id: string) => void
   mountSector: (sectorId: string, isGenesis?: boolean) => void
   unmountSector: (sectorId: string) => void
   addAvatar: (sectorId: string, pubkey: string) => void
   removeAvatar: (sectorId: string, pubkey: string) => void
-  addConstruct: (sectorId: string, event: Event) => void // NOTE: we do not store NDKEvents! Just raw events!
-  addHyperjump: (sectorId: string, event: Event) => void // NOTE: we do not store NDKEvents! Just raw events! Convert to NDKEvent in the component with `new NDKEvent(ndk, rawevent)`
+  addConstruct: (sectorId: string, event: Event) => void
+  addHyperjump: (sectorId: string, event: Event) => void
   scanSector: (sectorId: string) => void
+  getGlobalHyperjumps: () => Event[]
+  getGlobalConstructs: () => Event[]
+  getGlobalAvatars: () => string[]
 }
 
 export const useSectorStore = create<SectorStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       userCurrentSectorId: null,
       sectorState: {},
+      globalHyperjumps: new Set<Event>(),
+      globalConstructs: new Set<Event>(),
+      globalAvatars: new Set<string>(),
       updateUserCurrentSectorId: (id) => set({ userCurrentSectorId: id }),
       mountSector: (sectorId, isGenesis = false) => set((state) => ({
         sectorState: {
@@ -43,38 +52,55 @@ export const useSectorStore = create<SectorStore>()(
         delete newState[sectorId]
         return { sectorState: newState }
       }),
-      addAvatar: (sectorId, pubkey) => set((state) => ({
-        sectorState: {
-          ...state.sectorState,
-          [sectorId]: {
-            ...state.sectorState[sectorId],
-            avatars: [...new Set([...state.sectorState[sectorId].avatars, pubkey])]
-          }
+      addAvatar: (sectorId, pubkey) => set((state) => {
+        const newGlobalAvatars = new Set(state.globalAvatars)
+        newGlobalAvatars.add(pubkey)
+        return {
+          sectorState: {
+            ...state.sectorState,
+            [sectorId]: {
+              ...state.sectorState[sectorId],
+              avatars: [...new Set([...state.sectorState[sectorId].avatars, pubkey])]
+            }
+          },
+          globalAvatars: newGlobalAvatars
         }
-      })),
-      removeAvatar: (sectorId, pubkey) => set((state) => ({
-        sectorState: {
-          ...state.sectorState,
-          [sectorId]: {
-            ...state.sectorState[sectorId],
-            avatars: state.sectorState[sectorId].avatars.filter(avatar => avatar !== pubkey)
-          }
+      }),
+      removeAvatar: (sectorId, pubkey) => set((state) => {
+        const newGlobalAvatars = new Set(state.globalAvatars)
+        newGlobalAvatars.delete(pubkey)
+        return {
+          sectorState: {
+            ...state.sectorState,
+            [sectorId]: {
+              ...state.sectorState[sectorId],
+              avatars: state.sectorState[sectorId].avatars.filter(avatar => avatar !== pubkey)
+            }
+          },
+          globalAvatars: newGlobalAvatars
         }
-      })),
-      addConstruct: (sectorId, event) => set((state) => ({
-        sectorState: {
-          ...state.sectorState,
-          [sectorId]: {
-            ...state.sectorState[sectorId],
-            constructs: [...new Set([...state.sectorState[sectorId].constructs, event])]
-          }
+      }),
+      addConstruct: (sectorId, event) => set((state) => {
+        const newGlobalConstructs = new Set(state.globalConstructs)
+        newGlobalConstructs.add(event)
+        return {
+          sectorState: {
+            ...state.sectorState,
+            [sectorId]: {
+              ...state.sectorState[sectorId],
+              constructs: [...new Set([...state.sectorState[sectorId].constructs, event])]
+            }
+          },
+          globalConstructs: newGlobalConstructs
         }
-      })),
+      }),
       addHyperjump: (sectorId, event) => set((state) => {
         const currentHyperjumps = state.sectorState[sectorId]?.hyperjumps || [];
         const hyperjumpExists = currentHyperjumps.some(hyperjump => hyperjump.id === event.id);
         
         if (!hyperjumpExists) {
+          const newGlobalHyperjumps = new Set(state.globalHyperjumps)
+          newGlobalHyperjumps.add(event)
           return {
             sectorState: {
               ...state.sectorState,
@@ -82,7 +108,8 @@ export const useSectorStore = create<SectorStore>()(
                 ...state.sectorState[sectorId],
                 hyperjumps: [...currentHyperjumps, event]
               }
-            }
+            },
+            globalHyperjumps: newGlobalHyperjumps
           };
         }
         return state
@@ -95,12 +122,20 @@ export const useSectorStore = create<SectorStore>()(
             isScanned: true
           }
         }
-      }))
+      })),
+      getGlobalHyperjumps: () => Array.from(get().globalHyperjumps),
+      getGlobalConstructs: () => Array.from(get().globalConstructs),
+      getGlobalAvatars: () => Array.from(get().globalAvatars),
     }),
     {
       name: 'sector-storage',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ sectorState: state.sectorState }),
+      partialize: (state) => ({ 
+        sectorState: state.sectorState,
+        globalHyperjumps: Array.from(state.globalHyperjumps),
+        globalConstructs: Array.from(state.globalConstructs),
+        globalAvatars: Array.from(state.globalAvatars),
+      }),
     }
   )
 )

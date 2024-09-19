@@ -48,7 +48,7 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE} plane={avatarPlane}>
             <ThreeAvatarMarker position={avatarPosition} />
-            <Hyperjumps scale={MAP_SIZE} />
+            {/* <Hyperjumps scale={MAP_SIZE} /> */}
             {/* <Constructs scale={MAP_SIZE} /> */}
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           </Grid>

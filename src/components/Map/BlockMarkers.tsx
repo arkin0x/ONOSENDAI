@@ -1,84 +1,75 @@
-import React, { useEffect, useState, useContext, useMemo } from 'react'
-import { NDKContext } from '../../providers/NDKProvider'
-import { BufferGeometry, Vector3, LineBasicMaterial } from 'three'
-import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString, cyberspaceCoordinateFromHexStringAndDecimal } from '../../libraries/Cyberspace'
-import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
+import React, { useEffect, useState, useMemo } from 'react'
+import { BufferGeometry, Vector3, LineBasicMaterial, Float32BufferAttribute, PointsMaterial } from 'three'
+import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
-import useNDKStore from '../../store/NDKStore'
+import { useSectorStore } from '../../store/SectorStore'
+import { Event } from 'nostr-tools'
 
-interface BlocksProps {
+interface HyperjumpsProps {
   scale: number
 }
 
-export const BlockMarkers: React.FC<BlocksProps> = ({ scale }) => {
-  const { ndk } = useNDKStore()
-  const [blocks, setBlocks] = useState<NDKEvent[]>([])
-  const [fetchCounter, setFetchCounter] = useState(0)
+export const Hyperjumps: React.FC<HyperjumpsProps> = ({ scale }) => {
+  const { getGlobalHyperjumps } = useSectorStore()
+  const hyperjumpsSize = useSectorStore(state => state.globalHyperjumps.size)
+  const [hyperjumps, setHyperjumps] = useState<Event[]>([])
 
   useEffect(() => {
-    if (!ndk) return
-    if (blocks.length > 10) return // abritrary limit that should be replaced with good caching.
-
-    const fetchNextBlock = async () => {
-      let filter: NDKFilter
-
-      if (blocks.length === 0) {
-        filter = {
-          kinds: [321],
-          limit: 1,
-          "#P": ["0000000000000000000000000000000000000000000000000000000000000000"]
-        }
-      } else {
-        const nextBlockHash = blocks[blocks.length - 1].tags.find(tag => tag[0] === 'N')?.[1]
-        if (!nextBlockHash) {
-          console.error('Block event is missing N tag')
-          return
-        }
-        filter = {
-          kinds: [321],
-          limit: 1,
-          "#H": [nextBlockHash]
-        }
-      }
-
-      try {
-        const event = await ndk.fetchEvent(filter)
-        if (event) {
-          console.log(event)
-          setBlocks(prevBlocks => [...prevBlocks, event])
-          setTimeout(() => setFetchCounter(prev => prev + 1), 100)
-        } else {
-          console.log('No more blocks to fetch')
-        }
-      } catch (error) {
-        console.error('Failed to fetch block:', error)
-      }
-    }
-
-    fetchNextBlock()
-  }, [ndk, blocks, fetchCounter])
+    setHyperjumps(getGlobalHyperjumps())
+  }, [getGlobalHyperjumps, hyperjumpsSize])
 
   return (
     <>
-      {blocks.map((block, index) => (
-        <BlockLine 
-          key={index} 
-          currentBlock={block} 
-          nextBlock={blocks[index + 1]} 
-          scale={scale} 
-        />
+      {hyperjumps.map((hyperjump, index) => (
+        <React.Fragment key={hyperjump.id}>
+          <Block 
+            event={hyperjump} 
+            scale={scale} 
+          />
+          <BlockConnection 
+            currentBlock={hyperjump} 
+            nextBlock={hyperjumps[index + 1]} 
+            scale={scale} 
+          />
+        </React.Fragment>
       ))}
     </>
   )
 }
 
-interface BlockLineProps {
-  currentBlock: NDKEvent
-  nextBlock?: NDKEvent
+interface BlockProps {
+  event: Event
   scale: number
 }
 
-const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale }) => {
+const Block: React.FC<BlockProps> = ({ event, scale }) => {
+  const position = getBlockPosition(event, scale)
+  const size = 2
+
+  const geometry = useMemo(() => {
+    const geo = new BufferGeometry()
+    geo.setAttribute('position', new Float32BufferAttribute([position.x, position.y, position.z], 3))
+    return geo
+  }, [position])
+
+  const material = useMemo(() => {
+    return new PointsMaterial({
+      color: 0xff9900,
+      size: size,
+      sizeAttenuation: false
+    })
+  }, [size])
+
+  return <points geometry={geometry} material={material} />
+}
+
+interface BlockConnectionProps {
+  currentBlock: Event
+  nextBlock?: Event
+  scale: number
+}
+
+const BlockConnection: React.FC<BlockConnectionProps> = ({ currentBlock, nextBlock, scale }) => {
   const startPosition = useMemo(() => getBlockPosition(currentBlock, scale), [currentBlock, scale])
   const endPosition = useMemo(() => nextBlock ? getBlockPosition(nextBlock, scale) : null, [nextBlock, scale])
 
@@ -96,7 +87,7 @@ const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale })
 
   const material = useMemo(() => {
     return new LineBasicMaterial({
-      color: 0x999900,//COLORS.YELLOW,
+      color: COLORS.YELLOW,
       opacity: 0.5,
       linewidth: 1,
     })
@@ -114,7 +105,7 @@ const BlockLine: React.FC<BlockLineProps> = ({ currentBlock, nextBlock, scale })
   )
 }
 
-function getBlockPosition(event: NDKEvent, scale: number): Vector3 {
+function getBlockPosition(event: Event, scale: number): Vector3 {
   const cTag = event.tags.find(tag => tag[0] === 'C')
   if (!cTag || cTag.length < 2) {
     console.error('Block event is missing C tag:', event)

@@ -27,7 +27,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
 
   // get simulated sectorPosition and velocity each frame
   useFrame(() => {
-    const simulatedEvent = getSimulatedState(pubkey)
+    const simulatedEvent = getSimulatedState(pubkey, true)
     if (simulatedEvent) {
       const { localCoordinate, velocity, sector } = extractCyberspaceActionState(simulatedEvent)
       

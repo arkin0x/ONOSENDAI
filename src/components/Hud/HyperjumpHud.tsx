@@ -4,12 +4,12 @@ import { useEffect, useState } from "react"
 import { Vector3 } from "three"
 import COLORS from "../../data/Colors"
 import { useSectorStore } from "../../store/SectorStore"
-import { Event } from 'nostr-tools'
+import { NDKEvent } from "@nostr-dev-kit/ndk"
 
 
 export const HyperjumpHud = () => {
   const { userCurrentSectorId, sectorState } = useSectorStore()
-  const [hyperjump, setHyperjump] = useState<Event[]>([])
+  const [hyperjump, setHyperjump] = useState<NDKEvent[]>([])
 
   useEffect(() => {
     if (userCurrentSectorId) {
@@ -24,7 +24,7 @@ export const HyperjumpHud = () => {
   const divisor = Math.max(4, Math.floor(windowWidth / 600))
   const r = -Math.PI / divisor // rotation
 
-  let line = 0
+  let line = 2
 
   const nextLine = () => {
     line += 2
@@ -38,7 +38,7 @@ export const HyperjumpHud = () => {
   return (
     <>
     <group>
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'✨ LOCAL HYPERJUMP '} align="right" color={COLORS.YELLOW} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'LOCAL HYPERJUMP '} align="right" color={COLORS.YELLOW} />
     </group>
     </>
   )

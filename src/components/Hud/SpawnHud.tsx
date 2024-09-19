@@ -37,7 +37,7 @@ export const SpawnHud = () => {
   return (
     <>
     <group>
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'⭐ GENESIS SECTOR'} align="right" color={COLORS.PINK} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'GENESIS SECTOR'} align="right" color={COLORS.PINK} />
     </group>
     </>
   )

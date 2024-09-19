@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { CyberspaceAction, CyberspaceVirtualAction, CyberspaceVirtualActionTemplate, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/NostrUtils'
@@ -80,35 +81,44 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   return newState
 }
 
-export const useAvatarStore = create<AvatarStore>((set, get) => ({
-  actionState: {},
-  dispatchActionState: (action: AvatarActionDispatched) => set(state => ({
-    actionState: avatarActionStateReducer(state.actionState, action)
-  })),
-  getSimulatedState: function(pubkey: string) {
-    const actions = get().actionState[pubkey]
-    if (actions && actions.length > 0) {
-      const mostRecentAction = actions[actions.length - 1]
-      const now = getTime()
-      return simulateNextEvent(mostRecentAction, now)
+export const useAvatarStore = create<AvatarStore>()(
+  persist(
+    (set, get) => ({
+      actionState: {},
+      dispatchActionState: (action: AvatarActionDispatched) => set(state => ({
+        actionState: avatarActionStateReducer(state.actionState, action)
+      })),
+      getSimulatedState: function(pubkey: string) {
+        const actions = get().actionState[pubkey]
+        if (actions && actions.length > 0) {
+          const mostRecentAction = actions[actions.length - 1]
+          const now = getTime()
+          return simulateNextEvent(mostRecentAction, now)
+        }
+        return null
+      },
+      getGenesis: (pubkey: string) => get().actionState[pubkey]?.[0] ?? null,
+      getLatest: (pubkey: string) => {
+        const actions = get().actionState[pubkey]
+        return actions ? actions[actions.length - 1] : null
+      },
+      getGenesisSectorId: (pubkey: string) => {
+        const genesis = get().getGenesis(pubkey)
+        return genesis ? genesis.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+      getLatestSectorId: (pubkey: string) => {
+        const latest = get().getLatest(pubkey)
+        return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+      getSimulatedSectorId: (pubkey: string) => {
+        const latest = get().getSimulatedState(pubkey)
+        return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+    }),
+    {
+      name: 'avatar-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ actionState: state.actionState }),
     }
-    return null
-  },
-  getGenesis: (pubkey: string) => get().actionState[pubkey]?.[0] ?? null,
-  getLatest: (pubkey: string) => {
-    const actions = get().actionState[pubkey]
-    return actions ? actions[actions.length - 1] : null
-  },
-  getGenesisSectorId: (pubkey: string) => {
-    const genesis = get().getGenesis(pubkey)
-    return genesis ? genesis.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-  getLatestSectorId: (pubkey: string) => {
-    const latest = get().getLatest(pubkey)
-    return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-  getSimulatedSectorId: (pubkey: string) => {
-    const latest = get().getSimulatedState(pubkey)
-    return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-}))
+  )
+)

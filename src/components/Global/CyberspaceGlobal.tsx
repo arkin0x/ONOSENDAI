@@ -9,7 +9,7 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { Grid } from '../Map/Grid'
-import { Hyperjumps } from '../Map/BlockMarkers'
+import { Hyperjumps } from '../Map/Hyperjumps'
 import { ThreeAvatarMarker } from '../Map/ThreeAvatarMarker'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { CYBERSPACE_AXIS, CyberspacePlane, extractCyberspaceActionState } from '../../libraries/Cyberspace'
@@ -48,7 +48,7 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <ambientLight intensity={2.0} />
           <Grid scale={MAP_SIZE} plane={avatarPlane}>
             <ThreeAvatarMarker position={avatarPosition} />
-            {/* <Hyperjumps scale={MAP_SIZE} /> */}
+            <Hyperjumps scale={MAP_SIZE} />
             {/* <Constructs scale={MAP_SIZE} /> */}
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           </Grid>

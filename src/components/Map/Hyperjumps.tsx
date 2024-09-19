@@ -60,7 +60,15 @@ const Block: React.FC<BlockProps> = ({ event, scale }) => {
     })
   }, [size])
 
-  return <points geometry={geometry} material={material} />
+  return (
+    <>
+      <mesh position={position}>
+        <boxGeometry args={[0.1,0.1,0.1]} />
+        <meshBasicMaterial color={COLORS.ORANGE} />
+      </mesh>
+      <points geometry={geometry} material={material} />
+    </>
+  )
 }
 
 interface BlockConnectionProps {
@@ -87,9 +95,9 @@ const BlockConnection: React.FC<BlockConnectionProps> = ({ currentBlock, nextBlo
 
   const material = useMemo(() => {
     return new LineBasicMaterial({
-      color: COLORS.YELLOW,
+      color: COLORS.ORANGE,
       opacity: 0.5,
-      linewidth: 1,
+      linewidth: 0.1,
     })
   }, [])
 

@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo } from 'react'
 import { CYBERSPACE_SECTOR, cyberspaceCoordinateFromHexString, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 import { CyberspaceKinds } from "../../libraries/Cyberspace"
-import NDK, { NDKSubscription } from '@nostr-dev-kit/ndk'
+import NDK, { NDKEvent, NDKSubscription } from '@nostr-dev-kit/ndk'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
@@ -56,13 +56,13 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
   }, [])
 
   useEffect(() => {
-    const handleEvent = (event: Event, sectorId: string) => {
+    const handleEvent = (event: NDKEvent, sectorId: string) => {
       if (event.kind === CyberspaceKinds.Action) {
         addAvatar(sectorId, event.pubkey)
       } else if (event.kind === CyberspaceKinds.Construct) {
-        addConstruct(sectorId, event)
+        addConstruct(sectorId, event.rawEvent() as Event)
       } else if (event.kind === CyberspaceKinds.Hyperjump) {
-        addHyperjump(sectorId, event)
+        addHyperjump(sectorId, event.rawEvent() as Event)
       }
     }
 
@@ -76,7 +76,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
         mountSector(sectorId)
       }
       const subscription = subscribeToSectorObjects(sectorId, ndk)
-      subscription.on('event', (event: Event) => handleEvent(event, sectorId))
+      subscription.on('event', (event: NDKEvent) => handleEvent(event, sectorId))
       subscriptions.push(subscription)
     })
 

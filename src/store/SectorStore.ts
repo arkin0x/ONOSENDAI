@@ -21,8 +21,8 @@ type SectorStore = {
   unmountSector: (sectorId: string) => void
   addAvatar: (sectorId: string, pubkey: string) => void
   removeAvatar: (sectorId: string, pubkey: string) => void
-  addConstruct: (sectorId: string, event: Event) => void
-  addHyperjump: (sectorId: string, event: Event) => void
+  addConstruct: (sectorId: string, event: Event) => void // NOTE: we do not store NDKEvents! Just raw events!
+  addHyperjump: (sectorId: string, event: Event) => void // NOTE: we do not store NDKEvents! Just raw events! Convert to NDKEvent in the component with `new NDKEvent(ndk, rawevent)`
   scanSector: (sectorId: string) => void
 }
 
@@ -85,7 +85,7 @@ export const useSectorStore = create<SectorStore>()(
             }
           };
         }
-        return state;
+        return state
       }),
       scanSector: (sectorId) => set((state) => ({
         sectorState: {

@@ -31,7 +31,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
     addHyperjump 
   } = useSectorStore()
 
-  console.log("Sector Manager: userCurrentSectorId", userCurrentSectorId)
+  // console.log("Sector Manager: userCurrentSectorId", userCurrentSectorId)
 
   // Functions 
 
@@ -126,7 +126,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
     })
   }, [userCurrentSectorId, sectorState])
 
-  console.log('sectorsToRender', sectorsToRender?.length)
+  // console.log('sectorsToRender', sectorsToRender?.length)
 
   return (
     <>

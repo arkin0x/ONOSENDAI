@@ -8,7 +8,7 @@ import { Vector3 } from "three"
 import useNDKStore from "../../store/NDKStore"
 
 interface ThreeAvatarMarkerProps {
-  position: Vector3
+  position?: Vector3
 }
 
 export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {

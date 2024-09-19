@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
-import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, BackSide, RGBA_ASTC_10x10_Format, FrontSide } from 'three'
+import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
 import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
@@ -16,22 +16,6 @@ interface SectorData {
   position: Vector3
   color: Color
   genesis?: boolean
-}
-
-function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
-  // console.log('getSectorColor', sectorState[sectorId], sectorState)
-  if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
-  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.GENESIS)
-  if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)
-  if (sectorState[sectorId]?.avatars.length > 0) {
-    if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
-      // there are other avatars in this sector
-      return new Color(COLORS.RED)
-    }
-    // it's just our trail in this sector
-    return new Color(COLORS.LIGHT_PURPLE)
-  }
-  return new Color(COLORS.DARK_PURPLE)
 }
 
 export const SectorGrid = () => {
@@ -177,4 +161,20 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
     </group>
   )
 
+}
+
+function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
+  // console.log('getSectorColor', sectorState[sectorId], sectorState)
+  if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
+  if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.GENESIS)
+  if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)
+  if (sectorState[sectorId]?.avatars.length > 0) {
+    if (sectorState[sectorId]?.avatars.length === 1 && !sectorState[sectorId].avatars.includes(pubkey) || sectorState[sectorId]?.avatars.length > 1) {
+      // there are other avatars in this sector
+      return new Color(COLORS.RED)
+    }
+    // it's just our trail in this sector
+    return new Color(COLORS.LIGHT_PURPLE)
+  }
+  return new Color(COLORS.DARK_PURPLE)
 }

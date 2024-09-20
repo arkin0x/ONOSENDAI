@@ -21,7 +21,7 @@ interface SectorData {
 export const SectorGrid = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
-  const { sectorState, userCurrentSectorId } = useSectorStore()
+  const { sectorState, userCurrentSectorId, currentScanArea } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const [follow, setFollow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
@@ -77,6 +77,51 @@ export const SectorGrid = () => {
     }
   })
 
+  const scanAreaBox = useMemo(() => {
+    if (!currentScanArea || !centerSectorId) return null
+
+    const { anchorSectorId, boundaries } = currentScanArea
+    const [ax, ay, az] = anchorSectorId.split('-').map(Number)
+    const { xMin, xMax, yMin, yMax, zMin, zMax } = boundaries
+
+    // const center = new Vector3(
+    //   Math.floor((xMin + xMax) / 2) * MAP_SECTOR_SIZE,
+    //   Math.floor((yMin + yMax) / 2) * MAP_SECTOR_SIZE,
+    //   Math.floor((zMin + zMax) / 2) * MAP_SECTOR_SIZE
+    // )
+
+    const size = new Vector3(
+      (xMax - xMin + 1),
+      (yMax - yMin + 1),
+      (zMax - zMin + 1)
+    )
+
+    const anchorDiff = relativeSectorIndex(centerSectorId, anchorSectorId)
+    const anchorPosition = anchorDiff.multiplyScalar(MAP_SECTOR_SIZE).toVector3().subScalar(0.5)
+
+
+    return (
+      <group position={anchorPosition}>
+        <lineSegments renderOrder={0}>
+          <edgesGeometry args={[new BoxGeometry(size.x, size.y, size.z)]} />
+          <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={1}/>
+        </lineSegments>
+        <Text 
+          textAlign='center'
+          fontSize={1}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          anchorX={'center'}
+          position={new Vector3(0, 0, 0)} 
+          rotation={[0,0,0]} 
+          frustumCulled={true}
+          renderOrder={0}
+          color={COLORS.ORANGE} >
+          SCAN AREA
+          </Text>
+      </group>
+    )
+  }, [currentScanArea?.boundaries, centerSectorId])
+
   return (
     <>
       {sectorData.map(({ sectorId, position, color, genesis }, i) => (
@@ -90,6 +135,7 @@ export const SectorGrid = () => {
           genesis={genesis}
         />
       ))}
+      {scanAreaBox}
     </>
   )
 }
@@ -110,7 +156,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
   const visited = color.getHex() === COLORS.LIGHT_PURPLE
   const hyperjump = color.getHex() === COLORS.YELLOW
 
-  const solid = avatar || genesis || visited || hyperjump
+  const solid = avatar || genesis || hyperjump || visited
 
   const opacity = solid ? 1 : 0.2
   
@@ -118,7 +164,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
     <group position={position}>
       <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={opacity}/>
+        <lineBasicMaterial color={COLORS.RED} linewidth={1} transparent={true} opacity={opacity}/>
       </lineSegments>
       { solid ? <mesh>
         <boxGeometry args={[1,1,1]} />

@@ -11,12 +11,12 @@ interface HyperjumpsProps {
 
 export const Hyperjumps: React.FC<HyperjumpsProps> = ({ scale }) => {
   const { getGlobalHyperjumps } = useSectorStore()
-  const hyperjumpsSize = useSectorStore(state => state.globalHyperjumps.size)
+  const hyperjumpCount = useSectorStore(state => state.globalHyperjumps.size)
   const [hyperjumps, setHyperjumps] = useState<Event[]>([])
 
   useEffect(() => {
     setHyperjumps(getGlobalHyperjumps())
-  }, [getGlobalHyperjumps, hyperjumpsSize])
+  }, [getGlobalHyperjumps, hyperjumpCount])
 
   return (
     <>

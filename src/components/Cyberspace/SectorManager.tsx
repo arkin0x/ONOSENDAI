@@ -19,77 +19,12 @@ interface SectorManagerProps {
 }
 
 function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|null {
-  const { ndk, getUser } = useNDKStore()
-  const identity = getUser()
   const { 
     userCurrentSectorId, 
     sectorState, 
-    mountSector, 
-    unmountSector, 
-    addAvatar, 
-    addConstruct, 
-    addHyperjump 
   } = useSectorStore()
 
-  // console.log("Sector Manager: userCurrentSectorId", userCurrentSectorId)
-
-  // Functions 
-
-  const subscribeToSectorObjects = (sectorId: string, ndk: NDK): NDKSubscription => {
-    const filter = {
-      kinds: [CyberspaceKinds.Action, CyberspaceKinds.Construct, CyberspaceKinds.Hyperjump] as CyberspaceNDKKinds[],
-      '#S': [sectorId]
-    }
-    return ndk.subscribe(filter, { closeOnEose: false })
-  }
-
   // Effects
-
-  // determine the user's genesis sector
-  useEffect(() => {
-    const coord = cyberspaceCoordinateFromHexString(identity!.pubkey)
-    const genesisSector = coord.sector.id
-    if (genesisSector) {
-      mountSector(genesisSector, true)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    const handleEvent = (event: NDKEvent, sectorId: string) => {
-      if (event.kind === CyberspaceKinds.Action) {
-        addAvatar(sectorId, event.pubkey)
-      } else if (event.kind === CyberspaceKinds.Construct) {
-        addConstruct(sectorId, event.rawEvent() as Event)
-      } else if (event.kind === CyberspaceKinds.Hyperjump) {
-        addHyperjump(sectorId, event.rawEvent() as Event)
-      }
-    }
-
-    if (!userCurrentSectorId || !ndk) return
-
-    const sectorsToLoad = getSectorsToLoad(userCurrentSectorId, adjacentLayers)
-    const subscriptions: NDKSubscription[] = []
-
-    sectorsToLoad.forEach(sectorId => {
-      if (!sectorState[sectorId]) {
-        mountSector(sectorId)
-      }
-      const subscription = subscribeToSectorObjects(sectorId, ndk)
-      subscription.on('event', (event: NDKEvent) => handleEvent(event, sectorId))
-      subscriptions.push(subscription)
-    })
-
-    return () => {
-      subscriptions.forEach(sub => sub.stop())
-      Object.keys(sectorState).forEach(sectorId => {
-        if (!sectorsToLoad.includes(sectorId)) {
-          // unmountSector(sectorId)
-        }
-      })
-    }
-  // }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState])
-  }, [userCurrentSectorId, adjacentLayers, ndk, mountSector, unmountSector, sectorState, addAvatar, addConstruct, addHyperjump])
 
   const renderAvatars = () => {
     return null
@@ -125,8 +60,6 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
       )
     })
   }, [userCurrentSectorId, sectorState])
-
-  // console.log('sectorsToRender', sectorsToRender?.length)
 
   return (
     <>

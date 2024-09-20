@@ -109,7 +109,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
     <group position={position}>
       { <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={color} linewidth={1} transparent={true} opacity={opacity}/>
+        <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={opacity}/>
       </lineSegments> }
       { solid ? <mesh>
         <boxGeometry args={[1,1,1]} />

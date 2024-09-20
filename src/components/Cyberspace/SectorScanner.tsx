@@ -7,9 +7,9 @@ import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 import { CyberspaceKinds } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 
-const SCAN_INTERVAL = 10000 // 5 seconds
+const SCAN_INTERVAL = 10000 // 10 seconds
 
-const getAdjacentSectorIds = (sectorId: string, radius: number): string[] => {
+const getShellSectorIds = (sectorId: string, radius: number): string[] => {
   const [x, y, z] = sectorId.split('-').map(Number)
   const sectorIds: string[] = []
   for (let dx = -radius; dx <= radius; dx++) {
@@ -30,7 +30,10 @@ const SectorScanner: React.FC = () => {
     addConstruct, 
     addHyperjump, 
     addAvatar,
-    sectorState
+    sectorState,
+    scannedSectors,
+    lastScanRadius,
+    updateLastScanRadius
   } = useSectorStore()
   const { fetchEvents, getUser } = useNDKStore()
   const identity = getUser()
@@ -40,13 +43,13 @@ const SectorScanner: React.FC = () => {
 
   const scanSectors = async () => {
     if (!pubkey) return
-    const currentSectorId = getSimulatedSectorId(pubkey) // Assuming 'self' is the current user's pubkey
+    const currentSectorId = getSimulatedSectorId(pubkey)
     if (!currentSectorId) return
 
-    const radius = 2 // This gives us a 5x5x5 cube (125 sectors)
-    const sectorIds = getAdjacentSectorIds(currentSectorId, radius)
-
-    console.log('Scanning sectors:', sectorIds)
+    const nextRadius = lastScanRadius + 1
+    const sectorIds = getShellSectorIds(currentSectorId, nextRadius)
+    
+    console.log(`Scanning sectors at radius ${nextRadius}:`, sectorIds)
 
     // Mount sectors that aren't already in the store
     sectorIds.forEach(sectorId => {
@@ -55,9 +58,20 @@ const SectorScanner: React.FC = () => {
       }
     })
 
+    // Ensure scannedSectors is always a Set
+    const scannedSectorsSet = scannedSectors instanceof Set ? scannedSectors : new Set(scannedSectors)
+
+    const unscannedSectorIds = sectorIds.filter(id => !scannedSectorsSet.has(id))
+
+    if (unscannedSectorIds.length === 0) {
+      console.log(`All sectors at radius ${nextRadius} have been scanned. Moving to next radius.`)
+      updateLastScanRadius(nextRadius)
+      return
+    }
+
     const filter: NDKFilter = {
-      kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Shard as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds, CyberspaceKinds.Hyperjump as CyberspaceNDKKinds], // Avatar action, Construct, Hyperjump
-      '#S': sectorIds,
+      kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Shard as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds, CyberspaceKinds.Hyperjump as CyberspaceNDKKinds],
+      '#S': unscannedSectorIds,
     }
 
     try {
@@ -66,7 +80,6 @@ const SectorScanner: React.FC = () => {
       events.forEach((event: NDKEvent) => {
         const sectorId = event.tags.find(tag => tag[0] === 'S')?.[1]
         if (sectorId) {
-          // Determine the event type and add it to the appropriate store
           if (event.kind === CyberspaceKinds.Action) {
             addAvatar(sectorId, event.pubkey)
           } else if (event.kind === CyberspaceKinds.Construct) {
@@ -75,10 +88,14 @@ const SectorScanner: React.FC = () => {
             addHyperjump(sectorId, event.rawEvent() as Event)
           }
 
-          // Mark the sector as scanned
           scanSector(sectorId)
         }
       })
+
+      // Mark all sectors in this shell as scanned, even if no events were found
+      unscannedSectorIds.forEach(sectorId => scanSector(sectorId))
+
+      updateLastScanRadius(nextRadius)
     } catch (error) {
       console.error('Error scanning sectors:', error)
     }

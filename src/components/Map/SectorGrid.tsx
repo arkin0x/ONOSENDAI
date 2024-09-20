@@ -1,8 +1,8 @@
-import React, { useRef, useMemo } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, FrontSide } from 'three'
 import { Text } from "@react-three/drei"
-import { useSectorStore, SectorId } from '../../store/SectorStore'
+import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
@@ -12,27 +12,37 @@ import { generateSectorName } from '../../libraries/SectorName'
 import useNDKStore from '../../store/NDKStore'
 
 interface SectorData {
-  sectorId: SectorId;
-  position: Vector3;
-  color: Color;
-  genesis?: boolean;
+  sectorId: string
+  position: Vector3
+  color: Color
+  genesis?: boolean
 }
 
-export const SectorGrid: React.FC = () => {
+export const SectorGrid = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
-  const { sectorState, userCurrentSectorId, currentScanArea } = useSectorStore()
+  const { sectorState, userCurrentSectorId } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
+  const [follow, setFollow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
+  const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
   const pubkey = identity!.pubkey
 
-  const sectorData: SectorData[] = useMemo(() => {
-    if (!centerSectorId || !currentScanArea) return []
+  useEffect(() => {
+    if (follow === "user" && userCurrentSectorId) {
+      setCenter(userCurrentSectorId)
+    }
+    if (follow === "roam" && centerSectorId) {
+      setCenter(centerSectorId)
+    }
+  }, [userCurrentSectorId, centerSectorId, setCenter, follow])
 
-    return Array.from(currentScanArea.sectors).map((sectorId) => {
+  const sectorData: SectorData[] = useMemo(() => {
+    return Object.entries(sectorState).map(([sectorId, sectorData]) => {
+      if (!centerSectorId) return false // no focus sector, can't do diff
       const diff = relativeSectorIndex(centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
@@ -40,52 +50,36 @@ export const SectorGrid: React.FC = () => {
         sectorId, 
         position, 
         color, 
-        genesis: sectorState[sectorId]?.isGenesis,
+        genesis: sectorData.isGenesis,
       }
-    })
-  }, [centerSectorId, currentScanArea, sectorState, userCurrentSectorId, pubkey])
+    }).filter(Boolean) as SectorData[]
+  }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
+
+  useEffect(() => {
+    if (meshRef.current && edgesRef.current) {
+      sectorData.forEach(({ position, color }, i) => {
+        const matrix = new Matrix4().setPosition(position)
+        meshRef.current!.setMatrixAt(i, matrix)
+        meshRef.current!.setColorAt(i, color)
+        edgesRef.current!.setMatrixAt(i, matrix)
+      })
+      meshRef.current.instanceMatrix.needsUpdate = true
+      meshRef.current.instanceColor!.needsUpdate = true
+      edgesRef.current.instanceMatrix.needsUpdate = true
+    }
+  }, [sectorData])
 
   useFrame(() => {
     if (meshRef.current) {
       raycaster.setFromCamera(pointer, camera)
-      raycaster.intersectObject(meshRef.current)
+      const intersects = raycaster.intersectObject(meshRef.current)
+      setHovered(intersects.length > 0 ? intersects[0].instanceId : undefined)
     }
   })
 
-  const scanAreaBox = useMemo(() => {
-    if (!currentScanArea || !centerSectorId) return null
-
-    const { anchorSectorId, boundaries } = currentScanArea
-    const [ax, ay, az] = anchorSectorId.split('-').map(Number)
-    const { xMin, xMax, yMin, yMax, zMin, zMax } = boundaries
-
-    const center = new Vector3(
-      (xMin + xMax) / 2 * MAP_SECTOR_SIZE,
-      (yMin + yMax) / 2 * MAP_SECTOR_SIZE,
-      (zMin + zMax) / 2 * MAP_SECTOR_SIZE
-    )
-
-    const size = new Vector3(
-      (xMax - xMin + 1) * MAP_SECTOR_SIZE,
-      (yMax - yMin + 1) * MAP_SECTOR_SIZE,
-      (zMax - zMin + 1) * MAP_SECTOR_SIZE
-    )
-
-    const anchorDiff = relativeSectorIndex(centerSectorId, anchorSectorId)
-    const anchorPosition = anchorDiff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
-
-    return (
-      <mesh position={anchorPosition.add(center)}>
-        <boxGeometry args={[size.x, size.y, size.z]} />
-        <meshBasicMaterial color={COLORS.LIGHT_BLUE} transparent opacity={0.1} />
-      </mesh>
-    )
-  }, [currentScanArea, centerSectorId])
-
   return (
     <>
-      {scanAreaBox}
-      {sectorData.map(({ sectorId, position, color, genesis }) => (
+      {sectorData.map(({ sectorId, position, color, genesis }, i) => (
         <SectorMarker 
           key={sectorId} 
           sectorId={sectorId} 
@@ -100,15 +94,17 @@ export const SectorGrid: React.FC = () => {
   )
 }
 
-const SectorMarker: React.FC<{ 
-  sectorId: SectorId, 
+export default SectorGrid
+
+function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: { 
+  sectorId: string, 
   selected: boolean, 
   avatar: boolean, 
   position: Vector3, 
   color: Color, 
   genesis?: boolean,
-}> = ({ sectorId, selected, avatar, position, color, genesis }) => {
-  const textPosition = position.clone().add(new Vector3(0.6, 0, 0))
+}) {
+  const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
   const genesisTextPosition = new Vector3(-0.6, 0, 0)
 
   const visited = color.getHex() === COLORS.LIGHT_PURPLE
@@ -122,16 +118,14 @@ const SectorMarker: React.FC<{
     <group position={position}>
       <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent opacity={opacity}/>
+        <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={opacity}/>
       </lineSegments>
-      { solid && (
-        <mesh>
-          <boxGeometry args={[1,1,1]} />
-          <meshLambertMaterial side={FrontSide} color={color} opacity={0.1} transparent/>
-        </mesh>
-      )}
-      { avatar && <ThreeAvatarMarker /> }
-      { selected && (
+      { solid ? <mesh>
+        <boxGeometry args={[1,1,1]} />
+        <meshLambertMaterial side={FrontSide} color={color} opacity={0.1} transparent/>
+      </mesh> : null }
+      { avatar ? <ThreeAvatarMarker /> : null }
+      { selected ? 
         <Text 
           textAlign='left'
           fontSize={0.15}
@@ -144,8 +138,8 @@ const SectorMarker: React.FC<{
           color={color} >
           SECTOR {generateSectorName(sectorId).toUpperCase()}
         </Text>
-      )}
-      { genesis && (
+      : null }
+      { genesis ?
         <Text 
           textAlign='right'
           fontSize={0.15}
@@ -158,8 +152,8 @@ const SectorMarker: React.FC<{
           color={COLORS.GENESIS} >
           GENESIS
         </Text>
-      )}
-      { hyperjump && (
+      : null}
+      { hyperjump ?
         <Text 
           textAlign='right'
           fontSize={0.15}
@@ -172,15 +166,15 @@ const SectorMarker: React.FC<{
           color={COLORS.HYPERJUMP} >
           HYPERJUMP 
         </Text>
-      )}
+      : null}
     </group>
   )
 }
 
 function getSectorColor(
-  sectorId: SectorId, 
-  userCurrentSectorId: SectorId | null, 
-  sectorState: Record<SectorId, { avatars: string[], hyperjumps: any[], isGenesis: boolean }>, 
+  sectorId: string, 
+  userCurrentSectorId: string|null, 
+  sectorState: SectorState, 
   pubkey: string
 ): Color {
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
@@ -196,5 +190,3 @@ function getSectorColor(
   }
   return new Color(COLORS.DARK_PURPLE)
 }
-
-export default SectorGrid

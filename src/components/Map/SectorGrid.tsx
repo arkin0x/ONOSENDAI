@@ -23,9 +23,11 @@ export const SectorGrid = () => {
   const identity = getUser()
   const { sectorState, userCurrentSectorId, getCurrentScanArea, scanAreas } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [follow, setFollow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
@@ -82,7 +84,6 @@ export const SectorGrid = () => {
     if (!currentScanArea || !centerSectorId) return null
 
     const { anchorSectorId, boundaries } = currentScanArea
-    const [ax, ay, az] = anchorSectorId.split('-').map(Number)
     const { xMin, xMax, yMin, yMax, zMin, zMax } = boundaries
 
     const anchorDiff = relativeSectorIndex(centerSectorId, anchorSectorId)
@@ -123,7 +124,7 @@ export const SectorGrid = () => {
 
   return (
     <>
-      {sectorData.map(({ sectorId, position, color, genesis }, i) => (
+      {sectorData.map(({ sectorId, position, color, genesis }) => (
         <SectorMarker 
           key={sectorId} 
           sectorId={sectorId} 

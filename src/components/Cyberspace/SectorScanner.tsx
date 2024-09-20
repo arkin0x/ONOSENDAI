@@ -7,7 +7,8 @@ import { NDKEvent, NDKFilter } from '@nostr-dev-kit/ndk'
 import { cyberspaceCoordinateFromHexString, CyberspaceKinds } from '../../libraries/Cyberspace'
 import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 
-const SCAN_INTERVAL = 10000 // 10 seconds
+// TODO: this could be a control like Throttle someday and have a HUD
+const SCAN_INTERVAL = 2000 // 10 seconds
 
 const SectorScanner: React.FC = () => {
   const getSimulatedSectorId = useAvatarStore((state) => state.getSimulatedSectorId)

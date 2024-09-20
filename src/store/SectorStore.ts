@@ -40,7 +40,7 @@ type SectorStore = {
   globalHyperjumps: Set<Event>;
   globalAvatars: Set<string>;
   scanAreas: ScanArea[];
-  currentScanArea: ScanArea | null;
+  currentScanAreaIndex: number;
   updateUserCurrentSectorId: (id: SectorId) => void;
   mountSector: (sectorId: SectorId, isGenesis?: boolean) => void;
   unmountSector: (sectorId: SectorId) => void;
@@ -54,7 +54,8 @@ type SectorStore = {
   createScanArea: (anchorSectorId: SectorId) => void;
   getNextScanSet: () => SectorId[];
   updateScanArea: (scannedSectors: SectorId[]) => void;
-  isPointInScanArea: (sectorId: SectorId, scanArea: ScanArea) => boolean;
+  isPointInScanArea: (sectorId: SectorId, scanAreaIndex: number) => boolean;
+  getCurrentScanArea: () => ScanArea | null;
 };
 
 const MAX_SCAN_SET_SIZE = 225;
@@ -68,19 +69,19 @@ export const useSectorStore = create<SectorStore>()(
       globalHyperjumps: new Set<Event>(),
       globalAvatars: new Set<string>(),
       scanAreas: [],
-      currentScanArea: null,
+      currentScanAreaIndex: -1,
 
       updateUserCurrentSectorId: (id) => {
         set({ userCurrentSectorId: id });
         const { scanAreas, createScanArea, isPointInScanArea } = get();
-        const currentScanArea = scanAreas.find(area => isPointInScanArea(id, area));
+        const currentScanAreaIndex = scanAreas.findIndex(area => isPointInScanArea(id, scanAreas.indexOf(area)));
         
-        if (!currentScanArea) {
-          if (scanAreas.length === 0 || !isPointInScanArea(id, scanAreas[scanAreas.length - 1])) {
+        if (currentScanAreaIndex === -1) {
+          if (scanAreas.length === 0 || !isPointInScanArea(id, scanAreas.length - 1)) {
             createScanArea(id);
           }
         } else {
-          set({ currentScanArea });
+          set({ currentScanAreaIndex });
         }
       },
 
@@ -190,23 +191,25 @@ export const useSectorStore = create<SectorStore>()(
         };
         return { 
           scanAreas: [...state.scanAreas, newScanArea],
-          currentScanArea: newScanArea
+          currentScanAreaIndex: state.scanAreas.length
         };
       }),
 
       getNextScanSet: () => {
         const state = get();
-        if (!state.currentScanArea) return [];
+        const currentScanArea = state.scanAreas[state.currentScanAreaIndex];
+        if (!currentScanArea) return [];
 
-        const { anchorSectorId, boundaries, nextScanDirection, partialScanSet } = state.currentScanArea;
+        const { anchorSectorId, boundaries, nextScanDirection, partialScanSet } = currentScanArea;
 
         if (partialScanSet.length > 0) {
           const nextSet = partialScanSet.slice(0, MAX_SCAN_SET_SIZE);
           set(state => ({
-            currentScanArea: {
-              ...state.currentScanArea!,
-              partialScanSet: state.currentScanArea!.partialScanSet.slice(MAX_SCAN_SET_SIZE)
-            }
+            scanAreas: state.scanAreas.map((area, index) => 
+              index === state.currentScanAreaIndex
+                ? { ...area, partialScanSet: area.partialScanSet.slice(MAX_SCAN_SET_SIZE) }
+                : area
+            )
           }));
           return nextSet;
         }
@@ -218,10 +221,11 @@ export const useSectorStore = create<SectorStore>()(
           nextSet = [anchorSectorId];
           const newDirection = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'][Math.floor(Math.random() * 6)] as ScanDirection;
           set(state => ({
-            currentScanArea: {
-              ...state.currentScanArea!,
-              nextScanDirection: newDirection
-            }
+            scanAreas: state.scanAreas.map((area, index) => 
+              index === state.currentScanAreaIndex
+                ? { ...area, nextScanDirection: newDirection }
+                : area
+            )
           }));
         } else {
           const { xMin, xMax, yMin, yMax, zMin, zMax } = boundaries;
@@ -273,10 +277,11 @@ export const useSectorStore = create<SectorStore>()(
 
         if (nextSet.length > MAX_SCAN_SET_SIZE) {
           set(state => ({
-            currentScanArea: {
-              ...state.currentScanArea!,
-              partialScanSet: nextSet.slice(MAX_SCAN_SET_SIZE)
-            }
+            scanAreas: state.scanAreas.map((area, index) => 
+              index === state.currentScanAreaIndex
+                ? { ...area, partialScanSet: nextSet.slice(MAX_SCAN_SET_SIZE) }
+                : area
+            )
           }));
           return nextSet.slice(0, MAX_SCAN_SET_SIZE);
         }
@@ -285,9 +290,10 @@ export const useSectorStore = create<SectorStore>()(
       },
 
       updateScanArea: (scannedSectors) => set((state) => {
-        if (!state.currentScanArea) return state;
+        if (state.currentScanAreaIndex === -1) return state;
 
-        const { anchorSectorId, boundaries, sectors, nextScanDirection } = state.currentScanArea;
+        const currentScanArea = state.scanAreas[state.currentScanAreaIndex];
+        const { anchorSectorId, boundaries, sectors, nextScanDirection } = currentScanArea;
         const [ax, ay, az] = anchorSectorId.split('-').map(x => new Decimal(x));
         
         const newSectors = new Set([...sectors, ...scannedSectors]);
@@ -305,21 +311,29 @@ export const useSectorStore = create<SectorStore>()(
         });
 
         let newNextScanDirection = nextScanDirection;
-        if (state.currentScanArea.partialScanSet.length === 0) {
+        if (currentScanArea.partialScanSet.length === 0) {
           newNextScanDirection = ['X-', 'X+', 'Y-', 'Y+', 'Z-', 'Z+'][Math.floor(Math.random() * 6)] as ScanDirection;
         }
 
         return {
-          currentScanArea: {
-            ...state.currentScanArea,
-            boundaries: newBoundaries,
-            sectors: newSectors,
-            nextScanDirection: newNextScanDirection
-          }
+          scanAreas: state.scanAreas.map((area, index) => 
+            index === state.currentScanAreaIndex
+              ? {
+                  ...area,
+                  boundaries: newBoundaries,
+                  sectors: newSectors,
+                  nextScanDirection: newNextScanDirection
+                }
+              : area
+          )
         };
       }),
 
-      isPointInScanArea: (sectorId, scanArea) => {
+      isPointInScanArea: (sectorId, scanAreaIndex) => {
+        const state = get();
+        if (scanAreaIndex < 0 || scanAreaIndex >= state.scanAreas.length) return false;
+
+        const scanArea = state.scanAreas[scanAreaIndex];
         const [x, y, z] = sectorId.split('-').map(x => new Decimal(x))
         const [ax, ay, az] = scanArea.anchorSectorId.split('-').map(x => new Decimal(x))
         const { xMin, xMax, yMin, yMax, zMin, zMax } = scanArea.boundaries;
@@ -329,6 +343,11 @@ export const useSectorStore = create<SectorStore>()(
           y.gte(ay.add(yMin)) && y.lte(ay.add(yMax)) &&
           z.gte(az.add(zMin)) && z.lte(az.add(zMax))
         )
+      },
+
+      getCurrentScanArea: () => {
+        const state = get();
+        return state.currentScanAreaIndex !== -1 ? state.scanAreas[state.currentScanAreaIndex] : null;
       },
     }),
     {
@@ -343,10 +362,7 @@ export const useSectorStore = create<SectorStore>()(
           ...area,
           sectors: Array.from(area.sectors)
         })),
-        currentScanArea: state.currentScanArea ? {
-          ...state.currentScanArea,
-          sectors: Array.from(state.currentScanArea.sectors)
-        } : null,
+        currentScanAreaIndex: state.currentScanAreaIndex,
       }),
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
@@ -358,10 +374,7 @@ export const useSectorStore = create<SectorStore>()(
           ...area,
           sectors: new Set(area.sectors)
         })),
-        currentScanArea: persistedState.currentScanArea ? {
-          ...persistedState.currentScanArea,
-          sectors: new Set(persistedState.currentScanArea.sectors)
-        } : null,
+        currentScanAreaIndex: persistedState.currentScanAreaIndex ?? -1,
       }),
     }
   )

@@ -21,7 +21,7 @@ interface SectorData {
 export const SectorGrid = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
-  const { sectorState, userCurrentSectorId, currentScanArea } = useSectorStore()
+  const { sectorState, userCurrentSectorId, getCurrentScanArea, scanAreas } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   const [follow, setFollow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
@@ -78,6 +78,7 @@ export const SectorGrid = () => {
   })
 
   const scanAreaBox = useMemo(() => {
+    const currentScanArea = getCurrentScanArea()
     if (!currentScanArea || !centerSectorId) return null
 
     const { anchorSectorId, boundaries } = currentScanArea
@@ -86,12 +87,6 @@ export const SectorGrid = () => {
 
     const anchorDiff = relativeSectorIndex(centerSectorId, anchorSectorId)
     const anchorPosition = anchorDiff.multiplyScalar(MAP_SECTOR_SIZE).toVector3().subScalar(0.5)
-
-    // const center = new Vector3(
-    //   (xMax - xMin + 1) / 2,
-    //   (yMax - yMin + 1) / 2,
-    //   (zMax - zMin + 1) / 2
-    // )
 
     const center = new Vector3( xMin+xMax, yMin+yMax, zMin+zMax ).divideScalar(2)
 
@@ -111,19 +106,20 @@ export const SectorGrid = () => {
         </lineSegments>
         <Text 
           textAlign='center'
-          fontSize={1}
+          fontSize={Math.log(size.x+size.y+size.z/3)/10}
           font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
           anchorX={'center'}
-          position={new Vector3(0, 0, 0)} 
+          position={new Vector3(0, 0, -size.z/2)} 
           rotation={[0,0,0]} 
           frustumCulled={true}
-          renderOrder={0}
+          renderOrder={-1}
           color={COLORS.ORANGE} >
           SCAN AREA
           </Text>
       </group>
     )
-  }, [currentScanArea?.boundaries, centerSectorId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getCurrentScanArea, centerSectorId, scanAreas]) // scanAreas isn't a dep but we need it to trigger a re-calculation
 
   return (
     <>
@@ -167,7 +163,7 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
     <group position={position}>
       <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
-        <lineBasicMaterial color={COLORS.RED} linewidth={1} transparent={true} opacity={opacity}/>
+        <lineBasicMaterial color={color} linewidth={1} transparent={true} opacity={opacity}/>
       </lineSegments>
       { solid ? <mesh>
         <boxGeometry args={[1,1,1]} />

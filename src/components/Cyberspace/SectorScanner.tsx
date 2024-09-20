@@ -18,7 +18,7 @@ const SectorScanner: React.FC = () => {
     addAvatar,
     getNextScanSet,
     updateScanArea,
-    currentScanArea,
+    getCurrentScanArea,
     updateUserCurrentSectorId
   } = useSectorStore()
   const { fetchEvents, getUser } = useNDKStore()
@@ -71,6 +71,7 @@ const SectorScanner: React.FC = () => {
 
         updateScanArea(sectorIds)
 
+        const currentScanArea = getCurrentScanArea()
         console.log(`Scanned ${events.size} events for ${sectorIds.length} sectors`)
         console.log('Current scan area:', currentScanArea?.boundaries, currentScanArea?.nextScanDirection)
       } catch (error) {
@@ -86,7 +87,7 @@ const SectorScanner: React.FC = () => {
         clearInterval(scanIntervalRef.current)
       }
     }
-  }, [addAvatar, addConstruct, addHyperjump, currentScanArea?.boundaries, currentScanArea?.nextScanDirection, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea])
+  }, [addAvatar, addConstruct, addHyperjump, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea, getCurrentScanArea])
 
   return null // This component doesn't render anything
 }

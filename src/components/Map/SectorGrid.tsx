@@ -84,24 +84,27 @@ export const SectorGrid = () => {
     const [ax, ay, az] = anchorSectorId.split('-').map(Number)
     const { xMin, xMax, yMin, yMax, zMin, zMax } = boundaries
 
-    // const center = new Vector3(
-    //   Math.floor((xMin + xMax) / 2) * MAP_SECTOR_SIZE,
-    //   Math.floor((yMin + yMax) / 2) * MAP_SECTOR_SIZE,
-    //   Math.floor((zMin + zMax) / 2) * MAP_SECTOR_SIZE
-    // )
-
-    const size = new Vector3(
-      (xMax - xMin + 1),
-      (yMax - yMin + 1),
-      (zMax - zMin + 1)
-    )
-
     const anchorDiff = relativeSectorIndex(centerSectorId, anchorSectorId)
     const anchorPosition = anchorDiff.multiplyScalar(MAP_SECTOR_SIZE).toVector3().subScalar(0.5)
 
+    // const center = new Vector3(
+    //   (xMax - xMin + 1) / 2,
+    //   (yMax - yMin + 1) / 2,
+    //   (zMax - zMin + 1) / 2
+    // )
+
+    const center = new Vector3( xMin+xMax, yMin+yMax, zMin+zMax ).divideScalar(2)
+
+    const centerPosition = anchorPosition.clone().add(center).addScalar(0.5)
+
+    const size = new Vector3(
+      (xMax - xMin) * MAP_SECTOR_SIZE + 1,
+      (yMax - yMin) * MAP_SECTOR_SIZE + 1,
+      (zMax - zMin) * MAP_SECTOR_SIZE + 1
+    )
 
     return (
-      <group position={anchorPosition}>
+      <group position={centerPosition}>
         <lineSegments renderOrder={0}>
           <edgesGeometry args={[new BoxGeometry(size.x, size.y, size.z)]} />
           <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={1}/>

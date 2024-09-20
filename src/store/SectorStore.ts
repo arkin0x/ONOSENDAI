@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { Event } from 'nostr-tools'
+import Decimal from 'decimal.js';
 
 export type SectorId = string;
 
@@ -210,7 +211,7 @@ export const useSectorStore = create<SectorStore>()(
           return nextSet;
         }
 
-        const [ax, ay, az] = anchorSectorId.split('-').map(Number);
+        const [ax, ay, az] = anchorSectorId.split('-').map( x => new Decimal(x));
         let nextSet: SectorId[] = [];
 
         if (nextScanDirection === 0) {
@@ -228,42 +229,42 @@ export const useSectorStore = create<SectorStore>()(
             case 'X+':
               for (let y = yMin; y <= yMax; y++) {
                 for (let z = zMin; z <= zMax; z++) {
-                  nextSet.push(`${ax + xMax + 1}-${ay + y}-${az + z}`);
+                  nextSet.push(`${ax.add(xMax+1)}-${ay.add(y)}-${az.add(z)}`);
                 }
               }
               break;
             case 'X-':
               for (let y = yMin; y <= yMax; y++) {
                 for (let z = zMin; z <= zMax; z++) {
-                  nextSet.push(`${ax + xMin - 1}-${ay + y}-${az + z}`);
+                  nextSet.push(`${ax.add(xMin-1)}-${ay.add(y)}-${az.add(z)}`);
                 }
               }
               break;
             case 'Y+':
               for (let x = xMin; x <= xMax; x++) {
                 for (let z = zMin; z <= zMax; z++) {
-                  nextSet.push(`${ax + x}-${ay + yMax + 1}-${az + z}`);
+                  nextSet.push(`${ax.add(x)}-${ay.add(yMax+1)}-${az.add(z)}`);
                 }
               }
               break;
             case 'Y-':
               for (let x = xMin; x <= xMax; x++) {
                 for (let z = zMin; z <= zMax; z++) {
-                  nextSet.push(`${ax + x}-${ay + yMin - 1}-${az + z}`);
+                  nextSet.push(`${ax.add(x)}-${ay.add(yMin-1)}-${az.add(z)}`);
                 }
               }
               break;
             case 'Z+':
               for (let x = xMin; x <= xMax; x++) {
                 for (let y = yMin; y <= yMax; y++) {
-                  nextSet.push(`${ax + x}-${ay + y}-${az + zMax + 1}`);
+                  nextSet.push(`${ax.add(x)}-${ay.add(y)}-${az.add(zMax+1)}`);
                 }
               }
               break;
             case 'Z-':
               for (let x = xMin; x <= xMax; x++) {
                 for (let y = yMin; y <= yMax; y++) {
-                  nextSet.push(`${ax + x}-${ay + y}-${az + zMin - 1}`);
+                  nextSet.push(`${ax.add(x)}-${ay.add(y)}-${az.add(zMin-1)}`);
                 }
               }
               break;
@@ -287,20 +288,20 @@ export const useSectorStore = create<SectorStore>()(
         if (!state.currentScanArea) return state;
 
         const { anchorSectorId, boundaries, sectors, nextScanDirection } = state.currentScanArea;
-        const [ax, ay, az] = anchorSectorId.split('-').map(Number);
+        const [ax, ay, az] = anchorSectorId.split('-').map(x => new Decimal(x));
         
         const newSectors = new Set([...sectors, ...scannedSectors]);
-        let newBoundaries = { ...boundaries };
+        const newBoundaries = { ...boundaries };
 
         scannedSectors.forEach(sectorId => {
-          const [x, y, z] = sectorId.split('-').map(Number);
-          const relX = x - ax, relY = y - ay, relZ = z - az;
-          newBoundaries.xMin = Math.min(newBoundaries.xMin, relX);
-          newBoundaries.xMax = Math.max(newBoundaries.xMax, relX);
-          newBoundaries.yMin = Math.min(newBoundaries.yMin, relY);
-          newBoundaries.yMax = Math.max(newBoundaries.yMax, relY);
-          newBoundaries.zMin = Math.min(newBoundaries.zMin, relZ);
-          newBoundaries.zMax = Math.max(newBoundaries.zMax, relZ);
+          const [x, y, z] = sectorId.split('-').map(x => new Decimal(x));
+          const relX = x.sub(ax), relY = y.sub(ay), relZ = z.sub(az);
+          newBoundaries.xMin = Math.min(newBoundaries.xMin, relX.toNumber());
+          newBoundaries.xMax = Math.max(newBoundaries.xMax, relX.toNumber());
+          newBoundaries.yMin = Math.min(newBoundaries.yMin, relY.toNumber());
+          newBoundaries.yMax = Math.max(newBoundaries.yMax, relY.toNumber());
+          newBoundaries.zMin = Math.min(newBoundaries.zMin, relZ.toNumber());
+          newBoundaries.zMax = Math.max(newBoundaries.zMax, relZ.toNumber());
         });
 
         let newNextScanDirection = nextScanDirection;
@@ -319,15 +320,15 @@ export const useSectorStore = create<SectorStore>()(
       }),
 
       isPointInScanArea: (sectorId, scanArea) => {
-        const [x, y, z] = sectorId.split('-').map(Number);
-        const [ax, ay, az] = scanArea.anchorSectorId.split('-').map(Number);
+        const [x, y, z] = sectorId.split('-').map(x => new Decimal(x))
+        const [ax, ay, az] = scanArea.anchorSectorId.split('-').map(x => new Decimal(x))
         const { xMin, xMax, yMin, yMax, zMin, zMax } = scanArea.boundaries;
-        
+
         return (
-          x >= ax + xMin && x <= ax + xMax &&
-          y >= ay + yMin && y <= ay + yMax &&
-          z >= az + zMin && z <= az + zMax
-        );
+          x.gte(ax.add(xMin)) && x.lte(ax.add(xMax)) &&
+          y.gte(ay.add(yMin)) && y.lte(ay.add(yMax)) &&
+          z.gte(az.add(zMin)) && z.lte(az.add(zMax))
+        )
       },
     }),
     {
@@ -338,8 +339,14 @@ export const useSectorStore = create<SectorStore>()(
         globalConstructs: Array.from(state.globalConstructs),
         globalHyperjumps: Array.from(state.globalHyperjumps),
         globalAvatars: Array.from(state.globalAvatars),
-        scanAreas: state.scanAreas,
-        currentScanArea: state.currentScanArea,
+        scanAreas: state.scanAreas.map(area => ({
+          ...area,
+          sectors: Array.from(area.sectors)
+        })),
+        currentScanArea: state.currentScanArea ? {
+          ...state.currentScanArea,
+          sectors: Array.from(state.currentScanArea.sectors)
+        } : null,
       }),
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
@@ -347,8 +354,14 @@ export const useSectorStore = create<SectorStore>()(
         globalConstructs: new Set(persistedState.globalConstructs || []),
         globalHyperjumps: new Set(persistedState.globalHyperjumps || []),
         globalAvatars: new Set(persistedState.globalAvatars || []),
-        scanAreas: persistedState.scanAreas || [],
-        currentScanArea: persistedState.currentScanArea || null,
+        scanAreas: (persistedState.scanAreas || []).map((area: any) => ({
+          ...area,
+          sectors: new Set(area.sectors)
+        })),
+        currentScanArea: persistedState.currentScanArea ? {
+          ...persistedState.currentScanArea,
+          sectors: new Set(persistedState.currentScanArea.sectors)
+        } : null,
       }),
     }
   )

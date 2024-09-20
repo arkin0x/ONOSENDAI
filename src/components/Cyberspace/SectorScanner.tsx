@@ -16,7 +16,6 @@ const SectorScanner: React.FC = () => {
     addConstruct, 
     addHyperjump, 
     addAvatar,
-    updateUserCurrentSectorId,
     getNextScanSet,
     updateScanArea,
     currentScanArea
@@ -35,8 +34,6 @@ const SectorScanner: React.FC = () => {
     const sectorIds = getNextScanSet()
     
     if (sectorIds.length === 0) return
-
-    console.log(`Scanning sectors:`, sectorIds)
 
     const filter: NDKFilter = {
       kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Shard as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds, CyberspaceKinds.Hyperjump as CyberspaceNDKKinds],

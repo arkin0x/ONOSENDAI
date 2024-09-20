@@ -41,13 +41,17 @@ export const SectorGrid = () => {
   }, [userCurrentSectorId, centerSectorId, setCenter, follow])
 
   const sectorData: SectorData[] = useMemo(() => {
-    return Object.entries(sectorState).map(([sectorId]) => {
+    return Object.entries(sectorState).map(([sectorId, sectorData]) => {
       if (!centerSectorId) return false // no focus sector, can't do diff
       const diff = relativeSectorIndex(centerSectorId, sectorId)
-      // console.log('diff', diff.toArray(0), centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
       const color = getSectorColor(sectorId, userCurrentSectorId, sectorState, pubkey)
-      return { sectorId, position, color, genesis: sectorState[sectorId]?.isGenesis }
+      return { 
+        sectorId, 
+        position, 
+        color, 
+        genesis: sectorData.isGenesis,
+      }
     }).filter(Boolean) as SectorData[]
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
@@ -72,19 +76,19 @@ export const SectorGrid = () => {
       setHovered(intersects.length > 0 ? intersects[0].instanceId : undefined)
     }
   })
-  
-  // const handleClick = () => {
-  //   if (hovered !== null) {
-  //     // @TODO: this is broken
-  //     // const newCenterSectorId = new DecimalVector3().fromArray(sectorData[hovered].position.toArray())
-  //     setCenter(newCenterSectorId)
-  //   }
-  // }
 
   return (
     <>
       {sectorData.map(({ sectorId, position, color, genesis }, i) => (
-        <SectorMarker key={sectorId} sectorId={sectorId} selected={sectorId === centerSectorId} position={position} color={color} avatar={sectorId === userCurrentSectorId} genesis={genesis} />
+        <SectorMarker 
+          key={sectorId} 
+          sectorId={sectorId} 
+          selected={sectorId === centerSectorId} 
+          position={position} 
+          color={color} 
+          avatar={sectorId === userCurrentSectorId} 
+          genesis={genesis}
+        />
       ))}
     </>
   )
@@ -92,12 +96,17 @@ export const SectorGrid = () => {
 
 export default SectorGrid
 
-function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: { sectorId: string, selected: boolean, avatar: boolean, position: Vector3, color: Color, genesis?: boolean }) {
-
+function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: { 
+  sectorId: string, 
+  selected: boolean, 
+  avatar: boolean, 
+  position: Vector3, 
+  color: Color, 
+  genesis?: boolean,
+}) {
   const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
   const genesisTextPosition = new Vector3(-0.6, 0, 0)
 
-  // FIXME: using the colors like this is a bit of a hack
   const visited = color.getHex() === COLORS.LIGHT_PURPLE
   const hyperjump = color.getHex() === COLORS.YELLOW
 
@@ -107,10 +116,10 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
   
   return (
     <group position={position}>
-      { <lineSegments renderOrder={selected ? -1 : 0}>
+      <lineSegments renderOrder={selected ? -1 : 0}>
         <edgesGeometry args={[new BoxGeometry(1,1,1)]} />
         <lineBasicMaterial color={COLORS.ORANGE} linewidth={1} transparent={true} opacity={opacity}/>
-      </lineSegments> }
+      </lineSegments>
       { solid ? <mesh>
         <boxGeometry args={[1,1,1]} />
         <meshLambertMaterial side={FrontSide} color={color} opacity={0.1} transparent/>
@@ -160,11 +169,14 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
       : null}
     </group>
   )
-
 }
 
-function getSectorColor(sectorId: string, userCurrentSectorId: string|null, sectorState: SectorState, pubkey: string): Color {
-  // console.log('getSectorColor', sectorState[sectorId], sectorState)
+function getSectorColor(
+  sectorId: string, 
+  userCurrentSectorId: string|null, 
+  sectorState: SectorState, 
+  pubkey: string
+): Color {
   if (sectorId === userCurrentSectorId) return new Color(COLORS.ORANGE)
   if (sectorState[sectorId]?.isGenesis) return new Color(COLORS.GENESIS)
   if (sectorState[sectorId]?.hyperjumps.length > 0) return new Color(COLORS.YELLOW)

@@ -9,7 +9,6 @@ export type SectorData = {
   avatars: string[]
   constructs: Event[]
   hyperjumps: Event[]
-  isScanned: boolean
   isGenesis: boolean
 }
 
@@ -19,8 +18,6 @@ type SectorStore = {
   globalHyperjumps: Set<Event>
   globalConstructs: Set<Event>
   globalAvatars: Set<string>
-  scannedSectors: Set<string>
-  lastScanRadius: number
   updateUserCurrentSectorId: (id: string) => void
   mountSector: (sectorId: string, isGenesis?: boolean) => void
   unmountSector: (sectorId: string) => void
@@ -28,11 +25,9 @@ type SectorStore = {
   removeAvatar: (sectorId: string, pubkey: string) => void
   addConstruct: (sectorId: string, event: Event) => void
   addHyperjump: (sectorId: string, event: Event) => void
-  scanSector: (sectorId: string) => void
   getGlobalHyperjumps: () => Event[]
   getGlobalConstructs: () => Event[]
   getGlobalAvatars: () => string[]
-  updateLastScanRadius: (radius: number) => void
 }
 
 export const useSectorStore = create<SectorStore>()(
@@ -43,13 +38,11 @@ export const useSectorStore = create<SectorStore>()(
       globalHyperjumps: new Set<Event>(),
       globalConstructs: new Set<Event>(),
       globalAvatars: new Set<string>(),
-      scannedSectors: new Set<string>(),
-      lastScanRadius: 0,
       updateUserCurrentSectorId: (id) => set({ userCurrentSectorId: id }),
       mountSector: (sectorId, isGenesis = false) => set((state) => ({
         sectorState: {
           ...state.sectorState,
-          [sectorId]: { avatars: [], constructs: [], hyperjumps: [], isScanned: false, isGenesis }
+          [sectorId]: { avatars: [], constructs: [], hyperjumps: [], isGenesis }
         }
       })),
       unmountSector: (sectorId) => set((state) => {
@@ -119,20 +112,9 @@ export const useSectorStore = create<SectorStore>()(
         }
         return state
       }),
-      scanSector: (sectorId) => set((state) => ({
-        sectorState: {
-          ...state.sectorState,
-          [sectorId]: {
-            ...state.sectorState[sectorId],
-            isScanned: true
-          }
-        },
-        scannedSectors: new Set(state.scannedSectors).add(sectorId)
-      })),
       getGlobalHyperjumps: () => Array.from(get().globalHyperjumps),
       getGlobalConstructs: () => Array.from(get().globalConstructs),
       getGlobalAvatars: () => Array.from(get().globalAvatars),
-      updateLastScanRadius: (radius) => set({ lastScanRadius: radius }),
     }),
     {
       name: 'sector-storage',
@@ -142,8 +124,6 @@ export const useSectorStore = create<SectorStore>()(
         globalHyperjumps: Array.from(state.globalHyperjumps),
         globalConstructs: Array.from(state.globalConstructs),
         globalAvatars: Array.from(state.globalAvatars),
-        scannedSectors: Array.from(state.scannedSectors),
-        lastScanRadius: state.lastScanRadius,
       }),
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
@@ -151,7 +131,6 @@ export const useSectorStore = create<SectorStore>()(
         globalHyperjumps: new Set(persistedState.globalHyperjumps || []),
         globalConstructs: new Set(persistedState.globalConstructs || []),
         globalAvatars: new Set(persistedState.globalAvatars || []),
-        scannedSectors: new Set(persistedState.scannedSectors || []),
       }),
     }
   )

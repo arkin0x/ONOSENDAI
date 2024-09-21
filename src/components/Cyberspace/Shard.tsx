@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { Shard3DData } from '../Build/Shards';
 
-const Shard = ({ shardData }) => {
+export function Shard({ shardData }: { shardData: Shard3DData}) {
   
   useEffect(() => {
     console.log('shardData', shardData)

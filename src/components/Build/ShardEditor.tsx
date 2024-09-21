@@ -1,15 +1,16 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useThree, ThreeEvent } from '@react-three/fiber';
-import { Shard as ShardType, useBuilderStore } from '../../store/BuilderStore';
+import { Face, CyberspaceShard as ShardType, useBuilderStore, Vertex } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
 import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three';
 import { OrbitControls, Text } from '@react-three/drei';
 import VertexSelectionIndicator from './VertexSelectionIndicator';
 import Shard from '../Cyberspace/Shard'
+import { Shard3DData, shardStateDataTo3DData } from './Shards';
 
 interface ShardEditorProps {
   shard: ShardType;
-  selectedTool: 'vertex' | 'face';
+  selectedTool: 'vertex' | 'face' | 'color';
 }
 
 const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
@@ -25,9 +26,22 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const planeRef = useRef<THREE.Mesh>(null);
 
-  useEffect(() => {
-    console.log('planeDown', planeDown, 'dragCancel', dragCancelCreateVertex)
-  },[dragCancelCreateVertex])
+  const shard3DData = useMemo(() => {
+    if (!shard) return null;
+    return {
+      vertices: shard.vertices.flatMap((v: Vertex) => v.position),
+      colors: shard.vertices.flatMap((v: Vertex) => v.color),
+      indices: shard.faces.flatMap((f: Face) => f.vertices as number[]),
+      position: { x: 0, y: 0, z: 0 },
+      display: "solid" as const,
+    } as Shard3DData
+  }, [shard])
+
+  if (!shard3DData) return (
+    <Text color={COLORS.RED} fontSize={0.5} position={[0, 0, 0]}>
+      No shard data
+    </Text>
+  ) 
 
   const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
     if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
@@ -61,7 +75,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       const vertex = shard.vertices.find(v => v.id === draggedVertex);
       if (vertex) {
         const newPosition = [...vertex.position];
-        const movementScale = 0.01;
+        const movementScale = 0.1;
         
         switch (dragAxis) {
           case 'x':
@@ -135,16 +149,6 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     }
   }
 
-  const shardData = useMemo(() => {
-    return {
-      vertices: shard.vertices.flatMap(v => v.position),
-      colors: shard.vertices.flatMap(v => v.color),
-      indices: shard.faces.flatMap(f => f.vertices),
-      position: { x: 0, y: 0, z: 0 },
-      display: "solid" as const,
-    };
-  }, [shard.vertices, shard.faces]);
-
   return (
     <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd}>
       { draggedVertex ? null : <OrbitControls /> } 
@@ -194,7 +198,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           )}
         </group>
       ))}
-      <Shard shardData={shardData} />
+      <Shard shardData={shard3DData} />
       { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} faceCreated={faceCreated} /> : null }
     </group>
   );

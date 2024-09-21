@@ -7,6 +7,7 @@ import { OrbitControls, Text } from '@react-three/drei';
 import VertexSelectionIndicator from './VertexSelectionIndicator';
 import Shard from '../Cyberspace/Shard'
 import { Shard3DData, shardStateDataTo3DData } from './Shards';
+import { b, g } from 'vitest/dist/suite-ynYMzeLu.js';
 
 interface ShardEditorProps {
   shard: ShardType;
@@ -23,8 +24,21 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   const [dragCancelCreateVertex, setDragCancelCreateVertex] = useState(false);
   const [dragAxis, setDragAxis] = useState<'x' | 'y' | 'z' | null>(null);
   const [faceCreated, setFaceCreated] = useState(false);
+  const [colorPickerVertex, setColorPickerVertex] = useState<string | null>(null);
+  const [colorPickerPosition, setColorPickerPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
+  const [currentColor, setCurrentColor] = useState<{ r: number, g: number, b: number }>({ r: 255, g: 255, b: 255 });
+  const [currentVertexId, setCurrentVertexId] = useState<string | null>(null);
+  const [draggingColor, setDraggingColor] = useState<'r' | 'g' | 'b' | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const planeRef = useRef<THREE.Mesh>(null);
+
+  useEffect(() => {
+    setColorPickerVertex(null)
+  }, [selectedTool])
+
+  useEffect(() => {
+    console.log(currentColor)
+  }, [currentColor])
 
   const shard3DData = useMemo(() => {
     if (!shard) return null;
@@ -102,14 +116,14 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     document.removeEventListener('pointerup', handleVertexDragEnd);
   };
 
-  const handleVertexClick = (event: ThreeEvent<MouseEvent>, id: string) => {
+  const handleVertexClick = (event: ThreeEvent<MouseEvent>, vertex: Vertex) => {
     event.stopPropagation();
     if (selectedTool === 'face') {
       setSelectedVertices(prev => {
-        if (prev.includes(id)) {
-          return prev.filter(v => v !== id);
+        if (prev.includes(vertex.id)) {
+          return prev.filter(v => v !== vertex.id);
         } else {
-          const newSelected = [...prev, id];
+          const newSelected = [...prev, vertex.id];
           if (newSelected.length === 3) {
             addFace(newSelected);
             setFaceCreated(true);
@@ -120,11 +134,24 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       });
     } else if (selectedTool === 'vertex') {
       // Open color picker (not implemented in this example)
-      console.log('Open color picker for vertex', id);
+      console.log('Open color picker for vertex', vertex.id);
+    } else if (selectedTool === 'color') {
+      // Open color picker
+      setColorPickerVertex(vertex.id)
+      setColorPickerPosition({ x: event.clientX, y: event.clientY });
+      setCurrentVertexId(vertex.id);
+      const color = {
+        r: vertex.color[0],
+        g: vertex.color[1],
+        b: vertex.color[2],
+      }
+      setCurrentColor(color);
+ 
     }
   };
 
   const handleVertexHover = (id: string | null) => {
+    if (selectedTool !== 'move') return
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
     }
@@ -150,9 +177,38 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     }
   }
 
+  // const handleColorChange = (color: { r: number, g: number, b: number }) => {
+  //   setCurrentColor(color);
+  //   if (currentVertexId) {
+  //     updateVertex(currentVertexId, vertex.position, [color.r, color.g, color.b]);
+  //   }
+  // };
+
+  const handleColorBoxMouseDown = (event: ThreeEvent<MouseEvent>, color: 'r' | 'g' | 'b') => {
+    event.stopPropagation();
+    setDraggingColor(color);
+  };
+
+  const handleColorBoxMouseMove = (event: ThreeEvent<MouseEvent>, vertex: Vertex) => {
+    if (!draggingColor || !currentVertexId) return;
+
+    const boxHeight = 2; // Height of the color box
+    const mouseY = event.point.y; // Mouse Y position in world coordinates
+    const colorValue = Math.max(0, Math.min(1, (mouseY + boxHeight / 2) / boxHeight)); // Normalize to [0, 1]
+
+    const newColor = { ...currentColor };
+    newColor[draggingColor] = colorValue
+    setCurrentColor(newColor);
+    updateVertex(currentVertexId, vertex.position, [newColor.r, newColor.g, newColor.b]);
+  };
+
+  const handleColorBoxMouseUp = () => {
+    setDraggingColor(null);
+  };
+
   return (
     <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd}>
-      { draggedVertex ? null : <OrbitControls /> } 
+      { draggedVertex || draggingColor ? null : <OrbitControls /> } 
       <mesh ref={planeRef} onPointerDown={handlePlaneDown} onPointerMove={handlePlaneDrag} onPointerUp={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
         <planeGeometry args={[100, 100]} />
         <meshBasicMaterial visible={false} />
@@ -163,7 +219,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
             position={vertex.position}
             onPointerOver={() => handleVertexHover(vertex.id)}
             onPointerOut={() => handleVertexHover(null)}
-            onClick={(e) => handleVertexClick(e, vertex.id)}
+            onClick={(e) => handleVertexClick(e, vertex)}
             onContextMenu={(e) => handleVertexRightClick(e, vertex.id)}
           >
             <sphereGeometry args={[0.1, 32, 32]} />
@@ -196,6 +252,22 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
                 <meshBasicMaterial color={COLORS.BLUE} />
               </mesh>
             </>
+          )}
+          {selectedTool === 'color' && colorPickerVertex === vertex.id && (
+            <group position={vertex.position}>
+              <mesh key={0} position={[-.2, 0, .2]} onPointerDown={(e) => handleColorBoxMouseDown(e, 'r')} onPointerMove={(e) => handleColorBoxMouseMove(e, vertex)} onPointerUp={handleColorBoxMouseUp} onPointerLeave={handleColorBoxMouseUp}>
+                <boxGeometry args={[0.1, 2, 0.1]} />
+                <meshBasicMaterial color={`rgb(${Math.round(currentColor.r * 255)}, 0, 0)`} />
+              </mesh>
+              <mesh key={1} position={[0, 0, .2]} onPointerDown={(e) => handleColorBoxMouseDown(e, 'g')} onPointerMove={(e) => handleColorBoxMouseMove(e, vertex)} onPointerUp={handleColorBoxMouseUp} onPointerLeave={handleColorBoxMouseUp}>
+                <boxGeometry args={[0.1, 2, 0.1]} />
+                <meshBasicMaterial color={`rgb(0, ${Math.round(currentColor.g * 255)}, 0)`} />
+              </mesh>
+              <mesh key={2} position={[.2, 0, .2]} onPointerDown={(e) => handleColorBoxMouseDown(e, 'b')} onPointerMove={(e) => handleColorBoxMouseMove(e, vertex)} onPointerUp={handleColorBoxMouseUp} onPointerLeave={handleColorBoxMouseUp}>
+                <boxGeometry args={[0.1, 2, 0.1]} />
+                <meshBasicMaterial color={`rgb(0, 0, ${Math.round(currentColor.b * 255)})`} />
+              </mesh>
+            </group>
           )}
         </group>
       ))}

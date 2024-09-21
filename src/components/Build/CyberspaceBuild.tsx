@@ -13,7 +13,7 @@ import { shardStateDataTo3DData } from './Shards';
 
 const CyberspaceBuild: React.FC = () => {
   const { addShard, shardIndex, setCurrentShard, shards } = useBuilderStore();
-  const [selectedTool, setSelectedTool] = useState<'vertex' | 'face'>('vertex');
+  const [selectedTool, setSelectedTool] = useState<'vertex' | 'face' | 'color' | 'move'>('vertex');
 
   useEffect(() => {
     if (!shardIndex && shards.length === 0) {

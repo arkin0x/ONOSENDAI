@@ -10,7 +10,7 @@ import { Shard3DData, shardStateDataTo3DData } from './Shards';
 
 interface ShardEditorProps {
   shard: ShardType;
-  selectedTool: 'vertex' | 'face' | 'color';
+  selectedTool: 'vertex' | 'face' | 'color' | 'move';
 }
 
 const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
@@ -62,6 +62,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   };
 
   const handleVertexDragStart = (event: ThreeEvent<MouseEvent>, id: string, axis: 'x' | 'y' | 'z') => {
+    if (selectedTool !== 'move') return
     event.stopPropagation();
     console.log('drag start', id, axis);
     setDraggedVertex(id);

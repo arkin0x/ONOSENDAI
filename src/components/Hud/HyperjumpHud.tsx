@@ -1,21 +1,61 @@
 import { Text } from "@react-three/drei"
 import { useThree } from "@react-three/fiber"
 import { useEffect, useState } from "react"
-import { Vector3 } from "three"
+import { Quaternion, Vector3 } from "three"
 import COLORS from "../../data/Colors"
 import { useSectorStore } from "../../store/SectorStore"
-import { NDKEvent } from "@nostr-dev-kit/ndk"
+import { Event } from 'nostr-tools'
+import { useAvatarStore } from "../../store/AvatarStore"
+import useNDKStore from "../../store/NDKStore"
+import { cyberspaceCoordinateFromHexString, CyberspaceLocalCoordinate, extractCyberspaceActionState } from "../../libraries/Cyberspace"
+import { getTag } from "../../libraries/NostrUtils"
+import { useRotationStore } from "../../store/RotationStore"
 
 
 export const HyperjumpHud = () => {
   const { userCurrentSectorId, sectorState } = useSectorStore()
-  const [hyperjump, setHyperjump] = useState<NDKEvent[]>([])
+  const { getSimulatedState } = useAvatarStore()
+  const { getUser } = useNDKStore()
+  const identity = getUser()
+  const pubkey = identity!.pubkey
+  const [hyperjump, setHyperjump] = useState<[Event,CyberspaceLocalCoordinate]>()
+  const [pointDirection, setPointDirection] = useState<Quaternion>()
+  const { rotation } = useRotationStore()
 
+  // Effect: get closest hyperjump to avatar
   useEffect(() => {
-    if (userCurrentSectorId) {
-      setHyperjump(sectorState[userCurrentSectorId].hyperjumps)
-    }
-  }, [userCurrentSectorId, sectorState])
+    const interval = setInterval(() => {
+      if (userCurrentSectorId && sectorState[userCurrentSectorId].hyperjumps.length > 0) {
+        // get avatar local position
+        const avatarSimState = getSimulatedState(pubkey)
+        if (!avatarSimState) return
+        const avatarCoord = extractCyberspaceActionState(avatarSimState).localCoordinate
+        const hyperjumpCoords: [Event,CyberspaceLocalCoordinate][] = []
+        // get hyperjumps local positions
+        for (const hyperjump of sectorState[userCurrentSectorId].hyperjumps) {
+          try {
+            const hyperjumpHex = hyperjump.tags.find(getTag('C'))![1]
+            const hyperjumpCoord = cyberspaceCoordinateFromHexString(hyperjumpHex).local
+            hyperjumpCoords.push([hyperjump, hyperjumpCoord])
+          } catch (e) {
+            console.error(e)
+          }
+        }
+        // sort hyperjumps by distance to avatar
+        hyperjumpCoords.sort((a,b) => b[1].vector.toVector3().distanceTo(avatarCoord.vector.toVector3()) - a[1].vector.toVector3().distanceTo(avatarCoord.vector.toVector3()))
+        // set the closest hyperjump to the state
+        setHyperjump(hyperjumpCoords[0])
+        // calculate the quaternion for the cone's rotation to point from the avatar position toward the closest hyperjump
+        const direction = hyperjumpCoords[0][1].vector.toVector3().sub(avatarCoord.vector.toVector3()).normalize()
+        const defaultDirection = new Vector3(0, 1, 0) // Assuming the cone points along the z-axis by default
+        const quat = new Quaternion().setFromUnitVectors(defaultDirection, direction);
+        const combinedQuat = new Quaternion().multiplyQuaternions(rotation, quat)
+        setPointDirection(combinedQuat)
+      }
+    }, 50) // check every 5 seconds
+
+    return () => clearInterval(interval)
+  }, [userCurrentSectorId, sectorState, getSimulatedState, pubkey, rotation])
 
   const x = 99
   // const r = Math.PI / 5 // rotation
@@ -24,23 +64,45 @@ export const HyperjumpHud = () => {
   const divisor = Math.max(4, Math.floor(windowWidth / 600))
   const r = -Math.PI / divisor // rotation
 
-  let line = 2
+  let line = 20
 
   const nextLine = () => {
     line += 2
     return line
   }
 
-  if (hyperjump.length === 0) {
+  // no hyperjump info to display
+  if (!hyperjump) {
     return null
   }
 
   return (
     <>
     <group>
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'LOCAL HYPERJUMP '} align="right" color={COLORS.YELLOW} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'LOCAL HYPERJUMP'} align="right" color={COLORS.YELLOW} />
+      {pointDirection && <DirectionCone x={90} y={nextLine()} rotation={[0, r, 0]} pointDirection={pointDirection} />}
     </group>
     </>
+  )
+}
+
+function DirectionCone({ x, y, rotation, pointDirection }: { x: number, y: number, rotation: [number, number, number], pointDirection: Quaternion }) {
+  const { viewport } = useThree()
+
+  const _x = viewport.width * (x/100)
+  const _y = viewport.height * (y/100)
+
+  // Calculate position based on viewport dimensions
+  const position = new Vector3(-viewport.width / 2 + _x, -viewport.height / 2 + _y, 0)
+  return (
+    <group rotation={rotation} position={position}>
+      <mesh 
+        quaternion={pointDirection}
+      >
+        <coneGeometry args={[0.1, 1, 8]} />
+        <meshBasicMaterial color={COLORS.ORANGE} wireframe />
+      </mesh>
+    </group>
   )
 }
 

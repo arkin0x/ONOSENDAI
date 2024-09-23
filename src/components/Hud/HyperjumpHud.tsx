@@ -30,7 +30,7 @@ export const HyperjumpHud = () => {
 
   // Effect: get closest hyperjump to avatar
   useEffect(() => {
-    if (userCurrentSectorId && sectorState[userCurrentSectorId].hyperjumps.length > 0) {
+    if (userCurrentSectorId && sectorState[userCurrentSectorId] && sectorState[userCurrentSectorId]?.hyperjumps?.length > 0) {
       // get avatar local position
       const avatarSimState = getSimulatedState(pubkey)
       if (!avatarSimState) return

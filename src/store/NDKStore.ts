@@ -46,8 +46,7 @@ export interface NDKStoreConfig {
 
 export const defaultRelays = [
   'wss://relay.fanfares.io',
-  'wss://cyberspace.nostr1.com',
-  'wss://straylight.cafe/relay',
+  'wss://cyberspace.nostr1.com'
 ]
 
 const useNDKStore = create<NDKState>((set, get) => ({
@@ -77,7 +76,8 @@ const useNDKStore = create<NDKState>((set, get) => ({
       explicitRelayUrls: opts.relayUrls,
       autoConnectUserRelays: false,
       signer,
-    });
+      clientName: 'ONOSENDAI',
+    })
     await ndk.connect();
     set({ ndk, isConnected: true, relays: opts.relayUrls || defaultRelays });
     // DEBUG

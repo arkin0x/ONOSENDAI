@@ -5,7 +5,7 @@ import * as THREE from 'three';
 const Shard = ({ shardData }) => {
   
   useEffect(() => {
-    console.log('shardData', shardData)
+    // console.log('shardData', shardData)
   }, [shardData])
 
   const geometry = useMemo(() => {

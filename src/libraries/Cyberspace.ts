@@ -508,7 +508,7 @@ export function convertVirtualActionToVirtualActionTemplate(action: CyberspaceVi
 export function validateCyberspaceAction(action: Event|UnsignedEvent): CyberspaceAction|false {
 
   // check kind
-  console.log('validateCyberspaceAction', action)
+  // console.log('validateCyberspaceAction', action)
   if (action.kind !== CyberspaceKinds.Action) {
     console.log('kind invalid')
     return false
@@ -613,7 +613,7 @@ export function validateCyberspaceAction(action: Event|UnsignedEvent): Cyberspac
   // NDK should handle signature checking already
 
   // if we get here, the action is valid
-  console.log('action is valid')
+  // console.log('action is valid')
 
   return action as CyberspaceAction
 }

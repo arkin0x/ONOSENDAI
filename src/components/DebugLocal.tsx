@@ -82,7 +82,7 @@ export function DebugLocal() {
 
   /// TEST
   const _coord = cyberspaceCoordinateFromHexString("e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a")
-  console.log('spawn', _coord.local.vector.toVector3())
+  // console.log('spawn', _coord.local.vector.toVector3())
   _coord.local.vector.z = _coord.local.vector.z.add(1000) as CyberspaceLocalCoordinateDimension
   const _newVector = factoryCyberspaceLocalCoordinateVector(_coord.local.vector.x, _coord.local.vector.y, _coord.local.vector.z)
   const _newRaw = cyberspaceEncodeSectorPartialToRaw(_coord.sector.id, _newVector, CyberspacePlane.DSpace)

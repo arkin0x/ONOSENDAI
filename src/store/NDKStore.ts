@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import NDK, { NDKEvent, NDKFilter, NDKPrivateKeySigner, NDKRelay, NDKUser, NDKUserProfile, NDKSubscriptionOptions, NDKNip07Signer } from '@nostr-dev-kit/ndk';
 // import NDKRedisCacheAdapter from '@nostr-dev-kit/ndk-cache-redis'
 import { initializeIdentity, loadNpub, unlockKeyForSigning } from '../libraries/LocalIdentity';
-import { nip19 } from 'nostr-tools';
+import { nip19, UnsignedEvent } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils'
 
 // This declaration allows us to access window.nostr without TS errors.
@@ -33,6 +33,8 @@ interface NDKState {
   fetchEvent: (filter: NDKFilter) => Promise<NDKEvent | null>
   fetchEvents: (filter: NDKFilter) => Promise<Set<NDKEvent>>
   exportPrivkey: () => string | undefined
+  rawEventToNDKEvent: (rawEvent: UnsignedEvent) => NDKEvent
+  publishRaw: (rawEvent: UnsignedEvent) => Promise<Set<NDKRelay>>
   publish: (event: NDKEvent) => Promise<Set<NDKRelay>>
 }
 
@@ -185,6 +187,16 @@ const useNDKStore = create<NDKState>((set, get) => ({
     return await ndk.fetchEvents(filter);
   },
 
+  rawEventToNDKEvent: (rawEvent: UnsignedEvent): NDKEvent => {
+    const ndk = get().getNDK()
+    const ndkEvent = new NDKEvent(ndk, rawEvent)
+    return ndkEvent
+  },
+
+  publishRaw: async (rawEvent: UnsignedEvent) => {
+    return await get().publish(get().rawEventToNDKEvent(rawEvent))
+  },
+
   publish: async (event: NDKEvent) => {
     const ndk = get().getNDK()
     if (!event.ndk) event.ndk = ndk
@@ -192,7 +204,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
     return await event.publish()
   },
   // Add more NDK methods and state as needed
-}));
+}))
 
 // init immediately
 useNDKStore.getState().initNDK({

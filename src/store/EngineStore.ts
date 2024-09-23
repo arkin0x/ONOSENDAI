@@ -1,4 +1,4 @@
-import create from 'zustand'
+import { create } from 'zustand'
 import { Quaternion, Vector3 } from 'three'
 import { CyberspaceAction, createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction, validateCyberspaceAction } from '../libraries/Cyberspace'
 import { setWorkerCallback, workzone } from '../libraries/WorkerManager'
@@ -7,23 +7,21 @@ import { Event, UnsignedEvent } from 'nostr-tools'
 import { useThrottleStore } from './ThrottleStore'
 import { useRotationStore } from './RotationStore'
 import { useAvatarStore } from './AvatarStore'
-
-type PublishEventFunction = (event: UnsignedEvent) => Promise<Event | null>
+import useNDKStore from './NDKStore'
 
 type EngineState = {
   pubkey: string | null
   chainHeight: number
-  publishEvent: PublishEventFunction | null
   lastActionTime: number
   workersActive: boolean
   lastLatestActionId: string | null
   lastQuaternion: Quaternion | null
   lastThrottle: number | null
   setPubkey: (pubkey: string) => void
-  setPublishEvent: (publishEvent: PublishEventFunction) => void
   drift: () => Promise<void>
-  freeze: () => Promise<void>
   stop: () => void
+  freeze: () => Promise<void>
+  hop: () => Promise<void>
   respawn: () => Promise<void>
 }
 
@@ -40,7 +38,6 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   lastThrottle: null,
 
   setPubkey: (pubkey) => set({ pubkey }),
-  setPublishEvent: (publishEvent) => set({ publishEvent }),
 
   drift: async () => {
     const { pubkey, lastActionTime, workersActive, lastLatestActionId, lastQuaternion, lastThrottle } = get()
@@ -94,25 +91,31 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     console.log('Freeze action not implemented yet')
   },
 
+  hop: async () => {
+    // Implement hop logic here
+    // This could involve creating a hop action and triggering workers
+    console.log('Hop action not implemented yet')
+  },
+
   stop: () => {
     stopMovementWorkers()
     set({ workersActive: false })
   },
 
   respawn: async () => {
-    const { pubkey, publishEvent } = get()
-    if (!pubkey || !publishEvent) return
+    const { pubkey } = get()
+    const { publishRaw } = useNDKStore.getState()
+
+    if (!pubkey) return
 
     get().stop()
 
     const genesisAction = createUnsignedGenesisAction(pubkey)
-    // TODO: determine action ID and dispatch to store before publishing
-    const rawGenesis = await publishEvent(genesisAction)
+    useAvatarStore.getState().dispatchActionState({ type: 'reset', pubkey })
+    useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [genesisAction], pubkey })
+    const rawGenesis = await publishRaw(genesisAction)
     if (!rawGenesis) {
-      throw new Error('Engine.drift: failed to publish genesis action')
-    } else {
-      useAvatarStore.getState().dispatchActionState({ type: 'reset', pubkey })
-      useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [rawGenesis], pubkey })
+      throw new Error('Engine.respawn: failed to publish genesis action')
     }
     console.log('new genesis:', rawGenesis)
   }
@@ -165,30 +168,33 @@ function movementWorkerMessage(msg: MessageEvent) {
     useEngineStore.getState().stop()
     const actionBinary = msg.data.action
     const actionSerialized = new TextDecoder().decode(actionBinary)
-    const action = deserializeEvent(actionSerialized) as Event
+    const action = deserializeEvent(actionSerialized) as Event // it's actually an UnsignedEvent but UnsignedEvent type doesn't support the id property
+    // add ID 
     action.id = msg.data.id
-    const validated = validateCyberspaceAction(action)
-    if (validated) {
-      publishMovementAction(action)
-    } else {
-      console.error('Engine: movementWorkerMessage: action validation failed')
-    }
+    // Dispatch the action to AvatarStore first
+    useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [action], pubkey: action.pubkey })
+    // Then attempt to publish
+    publishAction(action)
   }
 }
 
 setWorkerCallback('movement', movementWorkerMessage)
 
-async function publishMovementAction(action: UnsignedEvent): Promise<void> {
+async function publishAction(action: Event): Promise<void> {
   const publishEvent = useEngineStore.getState().publishEvent
   if (!publishEvent) {
     console.error('Engine: publishMovementAction: publishEvent function is not set')
     return
   }
-  const publishedAction = await publishEvent(action)
-  if (!publishedAction) {
-    console.error('Engine: publishMovementAction: failed to publish action')
-    return
+  try {
+    const publishedAction = await publishEvent(action)
+    if (!publishedAction) {
+      console.warn('Engine: publishMovementAction: failed to publish action, but it remains valid locally')
+    } else {
+      console.log('Engine: publishMovementAction: action published successfully')
+    }
+  } catch (error) {
+    console.error('Engine: publishMovementAction: error while publishing action', error)
+    console.warn('Engine: publishMovementAction: action remains valid locally despite publish failure')
   }
-  const convertedAction = publishedAction as CyberspaceAction
-  useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [convertedAction], pubkey: action.pubkey })
 }

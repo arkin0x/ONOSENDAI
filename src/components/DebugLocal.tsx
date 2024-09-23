@@ -97,20 +97,8 @@ export function DebugLocal() {
   /// END TEST
 
   return (
-    <>
-      <h2>Debug</h2>
-      e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a
-      + z1000
-      = {_newRaw}
-      <br/>
-      sector: {_sector}
-
-      <br/>
-      <br/>
-      e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a
-      - 1 sector Z
-      = {_newRaw2}
-      <br/>
-    </>
+    <ul style={{marginTop: '4em'}}>
+      <li>Debug Hyperjumps Active</li>
+    </ul>
   )
 }

@@ -54,11 +54,15 @@
       overflow-wrap: break-word;
     }
   }
-  .genesis {
+  .genesis, .sig {
     position: absolute;
     // top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+  }
+  .sig {
+    font-size: 10px;
+    transform: translate(90%, -350%);
   }
 }
 

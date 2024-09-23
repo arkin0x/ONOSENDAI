@@ -1,11 +1,10 @@
 import { create } from 'zustand'
-import { Quaternion, Vector3 } from 'three'
-import { CyberspaceAction, createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction, validateCyberspaceAction } from '../libraries/Cyberspace'
+import { Quaternion } from 'three'
+import { createUnsignedDriftAction, createUnsignedGenesisAction, nowIsAfterLatestAction } from '../libraries/Cyberspace'
 import { setWorkerCallback, workzone } from '../libraries/WorkerManager'
 import { deserializeEvent, getNonceBounds, serializeEvent } from '../libraries/Miner'
 import { Event, UnsignedEvent } from 'nostr-tools'
 import { useThrottleStore } from './ThrottleStore'
-import { useRotationStore } from './RotationStore'
 import { useAvatarStore } from './AvatarStore'
 import useNDKStore from './NDKStore'
 
@@ -18,7 +17,7 @@ type EngineState = {
   lastQuaternion: Quaternion | null
   lastThrottle: number | null
   setPubkey: (pubkey: string) => void
-  drift: () => Promise<void>
+  drift: (quaternion: Quaternion) => Promise<void>
   stop: () => void
   freeze: () => Promise<void>
   hop: () => Promise<void>
@@ -39,14 +38,13 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   setPubkey: (pubkey) => set({ pubkey }),
 
-  drift: async () => {
+  drift: async (quaternion: Quaternion) => {
     const { pubkey, lastActionTime, workersActive, lastLatestActionId, lastQuaternion, lastThrottle } = get()
     const currentTime = Date.now()
 
     if (!pubkey) return
 
     const throttle = useThrottleStore.getState().throttle
-    const quaternion = useRotationStore.getState().rotation
     const avatarStore = useAvatarStore.getState()
     const latest = avatarStore.getLatest(pubkey)
 
@@ -174,27 +172,8 @@ function movementWorkerMessage(msg: MessageEvent) {
     // Dispatch the action to AvatarStore first
     useAvatarStore.getState().dispatchActionState({ type: 'push', actions: [action], pubkey: action.pubkey })
     // Then attempt to publish
-    publishAction(action)
+    useNDKStore.getState().publishRaw(action)
   }
 }
 
 setWorkerCallback('movement', movementWorkerMessage)
-
-async function publishAction(action: Event): Promise<void> {
-  const publishEvent = useEngineStore.getState().publishEvent
-  if (!publishEvent) {
-    console.error('Engine: publishMovementAction: publishEvent function is not set')
-    return
-  }
-  try {
-    const publishedAction = await publishEvent(action)
-    if (!publishedAction) {
-      console.warn('Engine: publishMovementAction: failed to publish action, but it remains valid locally')
-    } else {
-      console.log('Engine: publishMovementAction: action published successfully')
-    }
-  } catch (error) {
-    console.error('Engine: publishMovementAction: error while publishing action', error)
-    console.warn('Engine: publishMovementAction: action remains valid locally despite publish failure')
-  }
-}

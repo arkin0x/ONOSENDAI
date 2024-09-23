@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react'
 import { useThrottleStore } from '../../store/ThrottleStore.ts'
-import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
 import { Quaternion, Vector3 } from 'three'
 import { useAvatarStore } from '../../store/AvatarStore.ts'
 import { useFrame } from '@react-three/fiber'
@@ -16,8 +15,7 @@ export const Controls: React.FC = () => {
   const pubkey = identity!.pubkey
   // const engine = useEngine(pubkey)
   const { setPubkey, respawn, drift, freeze, hop } = useEngineStore()
-  setPubkey(pubkey)
-  const { actionState, getSimulatedState, getLatest } = useAvatarStore()
+  const { getSimulatedState, getLatest } = useAvatarStore()
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
   const { setRotation } = useRotationStore()
@@ -30,6 +28,10 @@ export const Controls: React.FC = () => {
   const latestAction = getLatest(pubkey)
   const isHopping = useRef<boolean>(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    setPubkey(pubkey)
+  }, [pubkey])
 
   // get the current direction of travel from the latest action for cruise control
   useEffect(() => {
@@ -290,7 +292,7 @@ export const Controls: React.FC = () => {
       }
     } else {
       // If no movement, stop drifting
-      // engine.stopDrift()
+      stop()
     }
 
     // Handle freeze

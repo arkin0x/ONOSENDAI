@@ -25,7 +25,7 @@ export const Controls: React.FC = () => {
   const [yaw, setYaw] = useState(0)
   const [, setCurrentDirection] = useState<Quaternion>(new Quaternion())
   const [cruiseDirection, setCruiseDirection] = useState<Quaternion>(new Quaternion())
-  const simulatedEvent = getSimulatedState(pubkey)
+  const simulatedEvent = getSimulatedState(pubkey, true)
   const latestAction = getLatest(pubkey)
 
 

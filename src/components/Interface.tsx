@@ -12,6 +12,7 @@ import COLORS from "../data/Colors"
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import CyberspaceBuild from "./Build/CyberspaceBuild"
 import { useUIStore } from "../store/UIStore"
+import SectorScanner from "./Cyberspace/SectorScanner"
 
 export function Interface(){
   const navigate = useNavigate()
@@ -39,6 +40,7 @@ export function Interface(){
 
   return (
     <div id="interface">
+      <SectorScanner />
       <div id="interface-body">{getInterface()}</div>
       <div id="interface-header">
         <Canvas style={{height: "10svh"}} camera={{ fov: 90, position: [0,0,20] }}>

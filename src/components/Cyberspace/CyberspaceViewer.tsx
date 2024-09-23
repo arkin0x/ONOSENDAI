@@ -8,6 +8,8 @@ import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import useNDKStore from '../../store/NDKStore'
+import { HyperjumpHud } from '../Hud/HyperjumpHud'
+import { SpawnHud } from '../Hud/SpawnHud'
 // import SpeedLines from './Hud/SpeedLines'
 
 export type CyberspaceViewerProps = {
@@ -51,7 +53,8 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <Hud/>
-          {/* <SpeedLines/> */}
+          <HyperjumpHud/>
+          <SpawnHud/>
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
           </EffectComposer>

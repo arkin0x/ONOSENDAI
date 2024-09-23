@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import { Event, UnsignedEvent } from 'nostr-tools'
-import { CyberspaceAction, CyberspaceVirtualAction, CyberspaceVirtualActionTemplate, getTime, simulateNextEvent, validateCyberspaceAction } from "../libraries/Cyberspace"
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { Event } from 'nostr-tools'
+import { CyberspaceAction, CyberspaceVirtualActionTemplate, getTime, simulateNextEvent, Time, validateCyberspaceAction } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/NostrUtils'
 
 type AvatarActionState = {
@@ -13,8 +14,9 @@ export type AvatarActionDispatched =
 
 interface AvatarStore {
   actionState: AvatarActionState
+  simulatedStates: { [pubkey: string]: { state: CyberspaceVirtualActionTemplate | null, timestamp: Time } }
   dispatchActionState: (action: AvatarActionDispatched) => void
-  getSimulatedState: (pubkey: string) => CyberspaceVirtualActionTemplate | null
+  getSimulatedState: (pubkey: string, skipCache?: boolean) => CyberspaceVirtualActionTemplate | null
   getGenesis: (pubkey: string) => CyberspaceAction | null
   getLatest: (pubkey: string) => CyberspaceAction | null
   getGenesisSectorId: (pubkey: string) => string | null
@@ -23,7 +25,6 @@ interface AvatarStore {
 }
 
 const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
-  console.log('avatarActionStateReducer', state, action)
   const newState = {...state} as AvatarActionState
 
   if (newState[action.pubkey] === undefined) {
@@ -37,14 +38,10 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     return newState
   }
 
-  console.log('check 1')
-
   const newActions = action.actions.map(validateCyberspaceAction).filter(Boolean)
   if (newActions.length === 0) {
     return state
   }
-
-  console.log('check 2')
 
   if (action.type === 'unshift') {
     newState[action.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
@@ -75,40 +72,71 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     return acc
   }, [] as CyberspaceAction[])
 
-  console.log('final newState', newState)
-
   return newState
 }
 
-export const useAvatarStore = create<AvatarStore>((set, get) => ({
-  actionState: {},
-  dispatchActionState: (action: AvatarActionDispatched) => set(state => ({
-    actionState: avatarActionStateReducer(state.actionState, action)
-  })),
-  getSimulatedState: function(pubkey: string) {
-    const actions = get().actionState[pubkey]
-    if (actions && actions.length > 0) {
-      const mostRecentAction = actions[actions.length - 1]
-      const now = getTime()
-      return simulateNextEvent(mostRecentAction, now)
+const SIMULATED_STATE_CACHE_TIME = 250 // ms
+
+export const useAvatarStore = create<AvatarStore>()(
+  persist(
+    (set, get) => ({
+      actionState: {},
+      simulatedStates: {},
+      dispatchActionState: (action: AvatarActionDispatched) => set(state => {
+        const newActionState = avatarActionStateReducer(state.actionState, action)
+        return {
+          actionState: newActionState,
+          simulatedStates: {} // Clear cached simulated states when action state changes
+        }
+      }),
+      getSimulatedState: (pubkey: string, skipCache: boolean = false) => {
+        const now = getTime()
+        const cachedState = get().simulatedStates[pubkey]
+        if (skipCache === false) {
+          if (cachedState && now.ms_timestamp - cachedState.timestamp.ms_timestamp < SIMULATED_STATE_CACHE_TIME) {
+            return cachedState.state
+          }
+        }
+        const actions = get().actionState[pubkey]
+        if (actions && actions.length > 0) {
+          const mostRecentAction = actions[actions.length - 1]
+          const simulatedState = simulateNextEvent(mostRecentAction, now)
+          if (skipCache === true) {
+            if (cachedState && now.ms_timestamp - cachedState.timestamp.ms_timestamp < SIMULATED_STATE_CACHE_TIME) {
+              set(state => ({
+                simulatedStates: {
+                  ...state.simulatedStates,
+                  [pubkey]: { state: simulatedState, timestamp: now }
+                }
+              }))
+            }
+          }
+          return simulatedState
+        }
+        return null
+      },
+      getGenesis: (pubkey: string) => get().actionState[pubkey]?.[0] ?? null,
+      getLatest: (pubkey: string) => {
+        const actions = get().actionState[pubkey]
+        return actions ? actions[actions.length - 1] : null
+      },
+      getGenesisSectorId: (pubkey: string) => {
+        const genesis = get().getGenesis(pubkey)
+        return genesis ? genesis.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+      getLatestSectorId: (pubkey: string) => {
+        const latest = get().getLatest(pubkey)
+        return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+      getSimulatedSectorId: (pubkey: string) => {
+        const latest = get().getSimulatedState(pubkey)
+        return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
+      },
+    }),
+    {
+      name: 'avatar-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ actionState: state.actionState }),
     }
-    return null
-  },
-  getGenesis: (pubkey: string) => get().actionState[pubkey]?.[0] ?? null,
-  getLatest: (pubkey: string) => {
-    const actions = get().actionState[pubkey]
-    return actions ? actions[actions.length - 1] : null
-  },
-  getGenesisSectorId: (pubkey: string) => {
-    const genesis = get().getGenesis(pubkey)
-    return genesis ? genesis.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-  getLatestSectorId: (pubkey: string) => {
-    const latest = get().getLatest(pubkey)
-    return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-  getSimulatedSectorId: (pubkey: string) => {
-    const latest = get().getSimulatedState(pubkey)
-    return latest ? latest.tags.find(getTag('S'))?.[1] ?? null : null
-  },
-}))
+  )
+)

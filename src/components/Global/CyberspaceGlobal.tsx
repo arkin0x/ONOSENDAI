@@ -9,10 +9,10 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { Grid } from '../Map/Grid'
-import { BlockMarkers } from '../Map/BlockMarkers'
+import { Hyperjumps } from '../Map/Hyperjumps'
 import { ThreeAvatarMarker } from '../Map/ThreeAvatarMarker'
 import { useAvatarStore } from '../../store/AvatarStore'
-import { CYBERSPACE_AXIS, extractCyberspaceActionState } from '../../libraries/Cyberspace'
+import { CYBERSPACE_AXIS, CyberspacePlane, extractCyberspaceActionState } from '../../libraries/Cyberspace'
 import useNDKStore from '../../store/NDKStore'
 // import SectorCrawler from './SectorCrawler'
 
@@ -27,15 +27,16 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const identity = getUser()
   const { getSimulatedState } = useAvatarStore()
   const { centerSectorId } = useMapCenterSectorStore()
-
   const [avatarPosition, setAvatarPosition] = useState(new Vector3(0,0,0))
+  const [avatarPlane, setAvatarPlane] = useState<CyberspacePlane>(CyberspacePlane.DSpace)
 
   const pubkey = identity!.pubkey
 
   useEffect(() => {
     const simulatedEvent = getSimulatedState(pubkey)
     if (!simulatedEvent) return
-    const { coordinate } = extractCyberspaceActionState(simulatedEvent)
+    const { coordinate, plane } = extractCyberspaceActionState(simulatedEvent)
+    setAvatarPlane(plane)
     const avatarPosition = coordinate.vector.divideScalar(CYBERSPACE_AXIS).multiplyScalar(MAP_SIZE).toVector3()
     setAvatarPosition(avatarPosition)
   }, [pubkey, getSimulatedState])
@@ -45,9 +46,9 @@ const CyberspaceGlobal = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="global">
         <Canvas style={style} camera={{position: [MAP_SIZE/2,MAP_SIZE*.9,MAP_SIZE]}}>
           <ambientLight intensity={2.0} />
-          <Grid scale={MAP_SIZE}>
+          <Grid scale={MAP_SIZE} plane={avatarPlane}>
             <ThreeAvatarMarker position={avatarPosition} />
-            <BlockMarkers scale={MAP_SIZE} />
+            <Hyperjumps scale={MAP_SIZE} />
             {/* <Constructs scale={MAP_SIZE} /> */}
             {/* <ObjectMarkers scale={MAP_SIZE} /> */}
           </Grid>

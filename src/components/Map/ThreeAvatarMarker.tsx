@@ -8,7 +8,7 @@ import { Vector3 } from "three"
 import useNDKStore from "../../store/NDKStore"
 
 interface ThreeAvatarMarkerProps {
-  position: Vector3
+  position?: Vector3
 }
 
 export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {
@@ -21,7 +21,7 @@ export function ThreeAvatarMarker({ position }: ThreeAvatarMarkerProps) {
 
   // get simulated sectorPosition and velocity each frame
   useFrame(() => {
-    const simulatedEvent = getSimulatedState(identity!.pubkey)
+    const simulatedEvent = getSimulatedState(identity!.pubkey, true)
     if (simulatedEvent) {
       const { sector } = extractCyberspaceActionState(simulatedEvent)
       if (frameSectorId !== sector.id) {

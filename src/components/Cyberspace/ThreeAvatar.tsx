@@ -6,7 +6,7 @@ import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel
 import { useSectorStore } from "../../store/SectorStore"
 import COLORS from "../../data/Colors"
 import { useAvatarStore } from "../../store/AvatarStore"
-import { Fog, Quaternion, Vector3 } from "three"
+import { Fog, LineBasicMaterial, Quaternion, Vector3 } from "three"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()
@@ -66,8 +66,23 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
   const conePosition = velocity.normalize()
 
+  function renderGrid () {
+    const gridCount = 1
+    const grids = []
+    for (let i = 0; i < gridCount; i++) {
+      const gridPos = new Vector3().fromArray(position.clone().toArray().map((v) => Math.floor(v) + 0.5))
+      gridPos.setY(gridPos.y - Math.floor(gridCount/2) + i)
+      // gridPos.setY(position.y)
+      const gridMaterial = new LineBasicMaterial({
+        color: COLORS.DARK_PURPLE,
+        transparent: true,
+        opacity: 1 * Math.abs(i - gridCount/2)
+      })
+      grids.push(<gridHelper position={gridPos} args={[13, 13]} material={gridMaterial} />)
+    }
 
-  const gridPos = new Vector3().fromArray(position.clone().toArray().map((v) => Math.floor(v) + 0.5))
+    return grids
+  }
 
 
   return (
@@ -86,7 +101,9 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
         </mesh>
       </group>
     </group>
-    <gridHelper position={gridPos} args={[13, 13]} />
+    <group>
+      {renderGrid()}
+    </group>
     </>
   )
 }

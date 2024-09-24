@@ -1,66 +1,42 @@
 import { useMemo } from 'react'
-import { Line } from '@react-three/drei'
-import { extractCyberspaceActionState, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
+import { BufferGeometry, Float32BufferAttribute, Line, LineBasicMaterial } from 'three'
+import { cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
-import { useAvatarStore } from '../../store/AvatarStore'
-import { useSectorStore } from '../../store/SectorStore'
+import { useAsyncTrailPoints } from '../../hooks/useAsyncTrailPoints'
 
 interface ThreeAvatarTrailProps {
   pubkey: string
 }
 
 export function ThreeAvatarTrail({ pubkey }: ThreeAvatarTrailProps) {
-  const { actionState } = useAvatarStore()
-  const { userCurrentSectorId } = useSectorStore()
-  // const [simulatedState, setSimulatedState] = useState<ExtractedActionState | null>(null)
+  const { trailPoints, isReady } = useAsyncTrailPoints(pubkey)
 
   const coord = cyberspaceCoordinateFromHexString(pubkey)
   const spawnPosition = coord.local.vector.toVector3()
 
-  const trailPoints = useMemo(() => {
-    const actions = actionState[pubkey] || []
-    if (actions.length < 2) return [] // We need at least 2 points to draw a line
+  const trailObject = useMemo<[BufferGeometry, LineBasicMaterial] | null>(() => {
+    if (!isReady || trailPoints.length < 6) return null // We need at least 2 points (6 values) to draw a line
 
-    const acts = [...actions]
+    const startTime = performance.now()
+    console.log('gonna make a buffer')
 
-    const lines = acts.map(action => {
-      const { localCoordinate, sector } = extractCyberspaceActionState(action)
-      const sectorId = sector.id
-      const sectorPosition = localCoordinate.vector
-      if (sectorId !== userCurrentSectorId) {
-        // console.log('omitting action from different sector', sectorId, userCurrentSectorId, action)
-        return null
-      }
-      // I need to subtract the spawn position to get the relative position
-      const newVec = sectorPosition.toVector3().sub(spawnPosition)
-      return newVec
-    }).filter(Boolean) as THREE.Vector3[]
-    // if (simulatedState) {
-    //   const pos = simulatedState.sectorPosition.toVector3().sub(spawnPosition)
-    //   lines.push(pos)
-    // }
-    return lines
-  }, [actionState, pubkey, spawnPosition, userCurrentSectorId])
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(trailPoints, 3))
 
-  // uncomment this for trail to current position
-  // useFrame(() => {
-  // const simulated = getSimulatedState(pubkey)
-  //   if (simulated) {
-  //     setSimulatedState(extractActionState(simulated))
-  //   }
-  // })
+    const endTime = performance.now()
+    console.log('made a buffer', `Elapsed time: ${endTime - startTime} ms`)
+    
+    
+    const material = new LineBasicMaterial({ color: COLORS.RED, linewidth: 1 })
+    
+    return [geometry, material]
+  }, [trailPoints, isReady])
 
-  if (trailPoints.length < 2) {
-    return null // Don't render anything if there are not enough trail points
+  if (!trailObject) {
+    return null // Don't render anything if there are not enough trail points or if it's not ready
   }
 
   return (
-    <group position={spawnPosition}>
-      <Line
-        points={trailPoints}
-        color={COLORS.RED}
-        lineWidth={1}
-      />
-    </group>
+    <primitive object={new Line(trailObject[0], trailObject[1])} position={spawnPosition} />
   )
 }

@@ -1,15 +1,22 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { Event } from 'nostr-tools'
-import { CyberspaceAction, CyberspaceVirtualActionTemplate, getTime, simulateNextEvent, Time, validateCyberspaceAction } from "../libraries/Cyberspace"
+import { Event, UnsignedEvent } from 'nostr-tools'
+import { CyberspaceAction, CyberspaceVirtualAction, CyberspaceVirtualActionTemplate, getMillisecondsTimestampFromAction, getTime, simulateNextEvent, Time, validateCyberspaceAction } from "../libraries/Cyberspace"
 import { getTag } from '../libraries/NostrUtils'
 
+/**
+ * The CyberspaceAction[] array is a list of actions with the genesis action at index 0 and the latest action at the end.
+ */
 type AvatarActionState = {
   [pubkey: string]: CyberspaceAction[]
 }
 
+/**
+ * Events or UnsignedEvents with an event id go in. They are validated and come out in state as CyberspaceActions. 
+ * If you put an Event in it will replace its UnsignedEvent counterpart in state.
+ */
 export type AvatarActionDispatched = 
-  | { type: 'unshift' | 'push'; pubkey: string; actions: Event[] }
+  | { type: 'unshift' | 'push'; pubkey: string; actions: (Event|UnsignedEvent)[] }
   | { type: 'reset'; pubkey: string }
 
 interface AvatarStore {
@@ -27,22 +34,30 @@ interface AvatarStore {
 const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
   const newState = {...state} as AvatarActionState
 
+  // Initialize the action array for this pubkey if it doesn't exist
   if (newState[action.pubkey] === undefined) {
     newState[action.pubkey] = [] as CyberspaceAction[]
   }
 
+  // Get all existing actions for this pubkey
   const avatarActions: CyberspaceAction[] = newState[action.pubkey]
 
+  // Reset the action array for this pubkey
   if (action.type === 'reset'){
     newState[action.pubkey] = [] as CyberspaceAction[]
     return newState
   }
 
+  // Validate the new actions
   const newActions = action.actions.map(validateCyberspaceAction).filter(Boolean)
+
+
+  // Do nothing if the new actions failed validation
   if (newActions.length === 0) {
     return state
   }
 
+  // Add the new actions to the existing actions
   if (action.type === 'unshift') {
     newState[action.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
   }
@@ -50,25 +65,28 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
     newState[action.pubkey] = [...avatarActions, ...newActions] as CyberspaceAction[]
   }
 
+  // Sort all actions by millisecond timestamp
   newState[action.pubkey].sort((a, b) => {
-    const aMs = a.tags.find(tag => tag[0] === 'ms')
-    const bMs = b.tags.find(tag => tag[0] === 'ms')
-    const aTs = a.created_at * 1000 + (aMs ? parseInt(aMs[1]) : 0)
-    const bTs = b.created_at * 1000 + (bMs ? parseInt(bMs[1]) : 0)
-    return aTs - bTs
+    const aMs = getMillisecondsTimestampFromAction(a)
+    const bMs = getMillisecondsTimestampFromAction(b)
+    return aMs - bMs
   })
 
+  // Remove duplicate actions and favor ones with a signature
   newState[action.pubkey] = newState[action.pubkey].reduce((acc, currentAction) => {
     const existingAction = acc.find((action) => action.id === currentAction.id)
 
+    // no duplicate
     if (!existingAction) {
       return [...acc, currentAction]
     }
 
+    // keep the action with the signature only
     if (currentAction.sig && !existingAction.sig) {
       return [...acc.filter((action) => action.id !== currentAction.id), currentAction]
     }
 
+    // skip adding duplicate
     return acc
   }, [] as CyberspaceAction[])
 

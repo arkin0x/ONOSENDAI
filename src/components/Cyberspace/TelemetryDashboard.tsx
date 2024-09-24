@@ -68,6 +68,7 @@ const ActionDOM = ({action, select}: ActionDOMProps) => {
         <span className="pow">{countLeadingZeroesHex(action.id)}</span>
       </div>
       {isGenesis ? <label className="genesis">GENESIS</label> : null}
+      {action.sig ? <label className="sig">🔏</label> : null}
     </div>
   )
 }

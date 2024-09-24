@@ -33,7 +33,7 @@ function Hyperjump({event}: HyperjumpProps) {
 
   // return 
 
-  console.log('hyperjump', position)
+  // console.log('hyperjump', position)
 
   return (
     <group position={position}>
@@ -55,10 +55,10 @@ function getBlockPosition(event: Event): Vector3 {
   }
 
   const coordinate = cTag[1]
-  console.log('ctag', coordinate, event)
+  // console.log('ctag', coordinate, event)
   const coord: CyberspaceCoordinate = cyberspaceCoordinateFromHexString(coordinate)
   const localVector = coord.local.vector.toVector3()
-  console.log('localVector', localVector)
+  // console.log('localVector', localVector)
   return localVector
 }
 

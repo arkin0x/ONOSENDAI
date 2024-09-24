@@ -73,8 +73,8 @@ const SectorScanner: React.FC = () => {
         updateScanArea(sectorIds)
 
         const currentScanArea = getCurrentScanArea()
-        console.log(`Scanned ${events.size} events for ${sectorIds.length} sectors`)
-        console.log('Current scan area:', currentScanArea?.boundaries, currentScanArea?.nextScanDirection)
+        // console.log(`Scanned ${events.size} events for ${sectorIds.length} sectors`)
+        // console.log('Current scan area:', currentScanArea?.boundaries, currentScanArea?.nextScanDirection)
       } catch (error) {
         console.error('Error scanning sectors:', error)
       }

@@ -1,48 +1,7 @@
-import { Text } from "@react-three/drei"
 import { useThree } from "@react-three/fiber"
-import { useEffect, useState } from "react"
 import { Vector3 } from "three"
+import { Text } from '@react-three/drei'
 import COLORS from "../../data/Colors"
-import { useSectorStore } from "../../store/SectorStore"
-import { NDKEvent } from "@nostr-dev-kit/ndk"
-
-
-export const HyperjumpHud = () => {
-  const { userCurrentSectorId, sectorState } = useSectorStore()
-  const [hyperjump, setHyperjump] = useState<NDKEvent[]>([])
-
-  useEffect(() => {
-    if (userCurrentSectorId) {
-      setHyperjump(sectorState[userCurrentSectorId].hyperjumps)
-    }
-  }, [userCurrentSectorId, sectorState])
-
-  const x = 99
-  // const r = Math.PI / 5 // rotation
-  // Calculate the divisor based on window width
-  const windowWidth = window.innerWidth
-  const divisor = Math.max(4, Math.floor(windowWidth / 600))
-  const r = -Math.PI / divisor // rotation
-
-  let line = 2
-
-  const nextLine = () => {
-    line += 2
-    return line
-  }
-
-  if (hyperjump.length === 0) {
-    return null
-  }
-
-  return (
-    <>
-    <group>
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'LOCAL HYPERJUMP '} align="right" color={COLORS.YELLOW} />
-    </group>
-    </>
-  )
-}
 
 type CoordinateTextProps = {
   position: {
@@ -66,7 +25,6 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
   const position = new Vector3(-viewport.width / 2 + x, -viewport.height / 2 + y, 0)
 
   return (
-    <>
     <Text
       anchorX={props.align || 'center'}
       anchorY="bottom"
@@ -85,6 +43,5 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
     >
       {props.text}
     </Text>
-    </>
   )
 }

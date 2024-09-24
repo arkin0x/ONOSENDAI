@@ -3,7 +3,9 @@ import { Decimal } from 'decimal.js'
 import { DecimalVector3 } from "./DecimalVector3"
 import { getTag, getTagMark } from "./NostrUtils"
 import type { Event, UnsignedEvent } from "nostr-tools"
-import { countLeadingZeroesHex } from "./Hash"
+import { countLeadingZeroesHex, uint8ToHex } from "./Hash"
+import { serializeEvent } from "./Miner"
+import { sha256 } from '@noble/hashes/sha256'
 
 // CONSTANTS
 
@@ -408,8 +410,13 @@ export type Time = {
   ms_padded: MillisecondsPadded 
 }
 
+/**
+ * This method assumes a valid action with an 'ms' tag.
+ */
 export const getMillisecondsTimestampFromAction = (action: CyberspaceAction | CyberspaceVirtualAction | CyberspaceVirtualActionTemplate): MillisecondsTimestamp => {
-  return action.created_at * 1000 + parseInt(action.tags.find(getTag('ms'))![1]) as MillisecondsTimestamp
+  const ms = action.tags.find(getTag('ms'))
+  const sec = action.created_at * 1000 + (ms ? parseInt(ms[1]) : 0) as MillisecondsTimestamp
+  return sec 
 }
 
 export const getTime = (action?: CyberspaceAction | CyberspaceVirtualAction | CyberspaceVirtualActionTemplate): Time => {
@@ -459,7 +466,7 @@ export type CyberspaceAction = Event & {
   readonly __brand: unique symbol
 }
 // A CyberspaceVirtualAction is an unsigned Event that was created through
-// simulation. It will be used for mining or for projecting simulated state.
+// simulation or the result of mining. It will be used for mining or for projecting simulated state.
 // Its tags will be valid for a CyberspaceAction.
 export type CyberspaceVirtualAction = UnsignedEvent & { 
   tags: CyberspaceVirtualActionTag[]
@@ -501,7 +508,7 @@ export function convertVirtualActionToVirtualActionTemplate(action: CyberspaceVi
 export function validateCyberspaceAction(action: Event|UnsignedEvent): CyberspaceAction|false {
 
   // check kind
-  console.log('validateCyberspaceAction', action)
+  // console.log('validateCyberspaceAction', action)
   if (action.kind !== CyberspaceKinds.Action) {
     console.log('kind invalid')
     return false
@@ -606,7 +613,7 @@ export function validateCyberspaceAction(action: Event|UnsignedEvent): Cyberspac
   // NDK should handle signature checking already
 
   // if we get here, the action is valid
-  console.log('action is valid')
+  // console.log('action is valid')
 
   return action as CyberspaceAction
 }
@@ -622,12 +629,20 @@ export type CyberspaceActionTypes =
   | 'stealth'
   | 'noop'
 
+export function deriveActionID(action: UnsignedEvent): Hex256Bit {
+  const actionCopySerialized = serializeEvent(action)
+  const actionBinary = new TextEncoder().encode(actionCopySerialized)
+  const idBinary = sha256(actionBinary)
+  const idHex = uint8ToHex(idBinary)
+  return factoryHex256Bit(idHex)
+}
+
 export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
   const {created_at, ms_padded} = getTime()
   const coordinate = cyberspaceCoordinateFromHexString(pubkey)
   const sector = coordinate.sector
   const sectorId = sector.id
-  return {
+  const event = {
     pubkey, 
     kind: CyberspaceKinds.Action,
     created_at,
@@ -642,7 +657,17 @@ export const createUnsignedGenesisAction = (pubkey: string): UnsignedEvent => {
       ['A', 'noop'],
       ['version', '1'],
     ]
-  } as UnsignedEvent
+  }
+  /**
+   * Note: we add the event id here because the genesis does not require POW;
+   * it is meant to be published right away.
+   */
+  const id = deriveActionID(event as UnsignedEvent)
+  const unsignedEvent = {
+    ...event,
+    id
+  }
+  return unsignedEvent as UnsignedEvent
 }
 
 export const createUnsignedDriftAction = async (pubkey: string, throttle: number, _quaternion: Quaternion, genesisAction: CyberspaceAction, latestAction: CyberspaceAction): Promise<UnsignedEvent> => {

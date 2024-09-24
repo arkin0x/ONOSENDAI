@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react'
 import { useThrottleStore } from '../../store/ThrottleStore.ts'
-import { useEngine } from '../../hooks/cyberspace/useEngine.ts'
 import { Quaternion, Vector3 } from 'three'
 import { useAvatarStore } from '../../store/AvatarStore.ts'
 import { useFrame } from '@react-three/fiber'
@@ -8,14 +7,15 @@ import { useControlStore } from '../../store/ControlStore.ts'
 import { useRotationStore } from '../../store/RotationStore.ts'
 import { extractCyberspaceActionState } from '../../libraries/Cyberspace.ts'
 import useNDKStore from '../../store/NDKStore.ts'
+import { useEngineStore } from '../../store/EngineStore.ts'
 
 export const Controls: React.FC = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
   const pubkey = identity!.pubkey
-  const engine = useEngine(pubkey)
-  const { actionState, getSimulatedState, getLatest } = useAvatarStore()
-  const actions = actionState[pubkey]
+  // const engine = useEngine(pubkey)
+  const { setPubkey, respawn, drift, freeze, hop, stop } = useEngineStore()
+  const { getSimulatedState, getLatest } = useAvatarStore()
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
   const { setRotation } = useRotationStore()
@@ -23,11 +23,15 @@ export const Controls: React.FC = () => {
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
-  const [, setCurrentDirection] = useState<Quaternion>(new Quaternion())
   const [cruiseDirection, setCruiseDirection] = useState<Quaternion>(new Quaternion())
   const simulatedEvent = getSimulatedState(pubkey, true)
   const latestAction = getLatest(pubkey)
+  const isHopping = useRef<boolean>(false)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
+  useEffect(() => {
+    setPubkey(pubkey)
+  }, [pubkey])
 
   // get the current direction of travel from the latest action for cruise control
   useEffect(() => {
@@ -35,28 +39,6 @@ export const Controls: React.FC = () => {
     const { rotation } = extractCyberspaceActionState(latestAction)
     setCruiseDirection(rotation)
   }, [latestAction])
-
-  useEffect(() => {
-    if (simulatedEvent) {
-      const { velocity } = extractCyberspaceActionState(simulatedEvent)
-      const currentDirection = new Quaternion().setFromUnitVectors(
-        new Vector3(0, 1, 0), // Default up vector
-        velocity.toVector3().normalize() // Normalized velocity vector
-      )
-      setCurrentDirection(currentDirection)
-    }
-
-  }, [simulatedEvent])
-
-  const isHopping = useRef<boolean>(false)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    if (actions && actions.length > 0) {
-      engine.setGenesisAction(actions[0])
-      engine.setLatestAction(actions[actions.length - 1])
-    }
-  }, [actions, engine])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     switch (e.code) {
@@ -238,7 +220,7 @@ export const Controls: React.FC = () => {
   
   useFrame(() => {
     if (controlState.respawn) {
-      engine.respawn()
+      respawn()
       resetControlState()
       setPitch(0)
       setYaw(0)
@@ -303,20 +285,20 @@ export const Controls: React.FC = () => {
         const movementQuaternion = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), moveVector)
         // console.log("movequat", movementQuaternion.toArray().map((x) => x.toFixed(2)))
         if (controlState.cruise) {
-          engine.drift(throttle, cruiseDirection)
+          drift(cruiseDirection)
         } else {
-          engine.drift(throttle, movementQuaternion)
+          drift(movementQuaternion)
         }
       }
     } else {
       // If no movement, stop drifting
-      // engine.stopDrift()
+      stop()
     }
 
     // Handle freeze
-    if (controlState.freeze) {
-      engine.freeze()
-    }
+    // if (controlState.freeze) {
+    //   freeze()
+    // }
   })
   
 

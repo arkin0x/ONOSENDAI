@@ -6,7 +6,7 @@ import { Shard3DData } from '../Build/Shards';
 export function Shard({ shardData }: { shardData: Shard3DData}) {
   
   useEffect(() => {
-    console.log('shardData', shardData)
+    // console.log('shardData', shardData)
   }, [shardData])
 
   const geometry = useMemo(() => {

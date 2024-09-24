@@ -110,8 +110,8 @@ export const SectorGrid = () => {
           fontSize={Math.log(size.x+size.y+size.z/3)/10}
           font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
           anchorX={'center'}
-          position={new Vector3(0, 0, -size.z/2)} 
-          rotation={[0,0,0]} 
+          position={new Vector3(0, -size.y/2, 0)} 
+          rotation={[-Math.PI/2,0,0]} 
           frustumCulled={true}
           renderOrder={-1}
           color={COLORS.ORANGE} >

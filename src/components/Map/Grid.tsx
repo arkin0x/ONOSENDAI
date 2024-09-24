@@ -1,13 +1,33 @@
 import { ReactNode } from "react"
-import { Euler } from "three"
+import { BufferGeometry, EdgesGeometry, Euler, Float32BufferAttribute, LineBasicMaterial, RingGeometry, Shape, ShapeGeometry } from "three"
 import COLORS from "../../data/Colors"
 import { CyberspacePlane } from "../../libraries/Cyberspace"
+import { Text } from "@react-three/drei"
 
 const GRIDLINES = 8
 const EARTH_SCALE = 0.13264 // Proportion of Earth's diameter to D-Space axis
 
 export function Grid({children, scale, plane = CyberspacePlane.DSpace}: {children?: ReactNode, scale: number, plane: CyberspacePlane}) {
   const earthRadius = (scale * EARTH_SCALE) / 2
+
+  // Create the ring geometry
+  const equatorGeometry = new RingGeometry(earthRadius * 1.1, earthRadius * 1.1, 64)
+  const meridianGeometry = new RingGeometry(earthRadius * 1.1, earthRadius * 1.1, 64)
+  meridianGeometry.setDrawRange(0, 192)
+  const lineMaterial = new LineBasicMaterial({ color: COLORS.GREEN, linewidth: 2 })
+
+  // // Create the rectangle geometry
+  // const rectangleGeometry = new BufferGeometry()
+  // const vertices = new Float32Array([
+  //   -1, -1, 0, // bottom left
+  //   -1,  1, 0,
+  //    1,  1, 0, // bottom right
+  //    1, -1, 0, // top right
+  //   -1, -1, 0  // top left
+  // ])
+  // rectangleGeometry.setAttribute('position', new Float32BufferAttribute(vertices,3))
+  // const rectangleMaterial = new LineBasicMaterial({ color: COLORS.GREEN})
+
   return (
     <group
       rotation={new Euler(0, 0, 0)}
@@ -40,6 +60,34 @@ export function Grid({children, scale, plane = CyberspacePlane.DSpace}: {childre
             <icosahedronGeometry args={[earthRadius, 1]} />
             <lineBasicMaterial color={COLORS.BLUE } />
           </lineSegments>
+          {/* equator and meridian */}
+          {/* equator ring */}
+          <lineLoop geometry={equatorGeometry} material={lineMaterial} position={[scale/2, scale/2, scale/2]} rotation={[Math.PI/2, 0, 0]} />
+          <Text
+            font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+            position={[scale/2, scale/2,earthRadius * 1.25 + scale/2]}
+            fontSize={1}
+            color={COLORS.GREEN}
+            anchorX="center"
+            anchorY="middle"
+            rotation={[-Math.PI/2,0,0]}
+          >
+            EQUATOR
+          </Text>
+          {/* meridian rectangle */}
+          <lineLoop geometry={meridianGeometry} material={lineMaterial} position={[scale/2, scale/2, scale/2]} rotation={[0, 0, -Math.PI/2]} />
+          {/* <lineLoop geometry={rectangleGeometry} material={rectangleMaterial} position={[earthRadius * .8 + scale/2, scale/2, scale/2]} scale={[earthRadius * .8, earthRadius * 1.3, 1]} /> */}
+          <Text
+            font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+            position={[earthRadius * 1.2 + scale/2, scale/2, scale/2]}
+            fontSize={1}
+            color={COLORS.GREEN}
+            anchorX="center"
+            anchorY="middle"
+            rotation={[0,0,-Math.PI/2]}
+          >
+            PRIME MERIDIAN
+          </Text>
         </>
       : null }
 

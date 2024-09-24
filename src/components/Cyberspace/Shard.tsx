@@ -1,8 +1,17 @@
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
+import { ThreeEvent } from '@react-three/fiber'
 import { Shard3DData } from '../Build/Shards'
+import { Face } from '../../store/BuilderStore'
 
-export function Shard({ shardData }: { shardData: Shard3DData}) {
+interface ShardProps {
+  shardData: Shard3DData
+  onFaceRightClick: (event: ThreeEvent<MouseEvent>, faceId: string) => void
+  selectedTool: 'vertex' | 'face' | 'color' | 'move'
+  faces: Face[]
+}
+
+export function Shard({ shardData, onFaceRightClick, selectedTool, faces }: ShardProps) {
   
   useEffect(() => {
     // console.log('shardData', shardData)
@@ -24,26 +33,56 @@ export function Shard({ shardData }: { shardData: Shard3DData}) {
     return new THREE.Vector3(x, y, z)
   }, [shardData.position])
 
+  const handleHover = (event: ThreeEvent<MouseEvent>) => {
+    console.log('faceIndex', event.faceIndex)
+  }
+
+  const handleRightClick = (event: ThreeEvent<MouseEvent>) => {
+    if (selectedTool === 'face') {
+      event.stopPropagation()
+      const face = faces[event.faceIndex!]
+      if (face) {
+        onFaceRightClick(event, face.id)
+      }
+    }
+  }
+
   if (shardData.display === "solid") {
     return (
-      <mesh geometry={geometry} position={position}>
+      <mesh 
+        geometry={geometry} 
+        position={position}
+        onContextMenu={handleRightClick}
+        onPointerOver={handleHover}
+      >
         <meshPhongMaterial vertexColors={true} side={THREE.DoubleSide} />
       </mesh>
     )
   } else if (shardData.display === "wireframe") {
     return (
-      <lineSegments geometry={geometry} position={position}>
+      <lineSegments 
+        geometry={geometry} 
+        position={position}
+        onContextMenu={handleRightClick}
+        onPointerOver={handleHover}
+      >
         <lineBasicMaterial vertexColors={true} />
       </lineSegments>
     )
   } else if (shardData.display === "points") {
     return (
-      <points geometry={geometry} position={position}>
+      <points 
+        geometry={geometry} 
+        position={position}
+        onContextMenu={handleRightClick}
+        onPointerOver={handleHover}
+      >
         <pointsMaterial vertexColors={true} size={0.1} />
       </points>
     )
   }
 
+  return null
 }
 
 export default Shard

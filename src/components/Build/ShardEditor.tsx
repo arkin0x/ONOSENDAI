@@ -55,7 +55,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     </Text>
   ) 
 
-    const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
+  const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
     if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
       console.log(event.intersections)
       const { point } = event.intersections.sort((a, b) => b.distance - a.distance)[0]
@@ -82,6 +82,12 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     removeVertex(id)
   }
 
+  const handleFaceRightClick = (event: ThreeEvent<MouseEvent>, faceId: string) => {
+    event.stopPropagation()
+    if (selectedTool !== 'face') return
+    removeFace(faceId)
+  }
+
   const handleVertexDragStart = (event: ThreeEvent<MouseEvent>, id: string, axis: 'x' | 'y' | 'z') => {
     if (selectedTool !== 'move') return
     event.stopPropagation()
@@ -92,7 +98,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     document.addEventListener('pointerup', handleVertexDragEnd)
   }
 
-  const handleVertexDrag = (event) => {
+  const handleVertexDrag = (event: PointerEvent) => {
     if (draggedVertex && dragAxis) {
       const vertex = shard.vertices.find(v => v.id === draggedVertex)
       if (vertex) {
@@ -151,7 +157,6 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
         b: vertex.color[2],
       }
       setCurrentColor(color)
- 
     }
   }
 
@@ -205,7 +210,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   }
 
   return (
-    <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd}>
+    <group onPointerMove={(event: ThreeEvent<PointerEvent>) => handleVertexDrag(event.nativeEvent)} onPointerUp={handleVertexDragEnd}>
       <OrbitControls enabled={!(draggedVertex || draggingColor)} />
       <mesh ref={planeRef} onPointerDown={handlePlaneDown} onPointerMove={handlePlaneDrag} onPointerUp={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
         <planeGeometry args={[100, 100]} />
@@ -238,7 +243,6 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
               <arrowHelper args={[new Vector3(0, 0, 1), new Vector3(...vertex.position), 0.5, COLORS.BLUE]} />
               <mesh position={[vertex.position[0] + 0.25, vertex.position[1], vertex.position[2]]} onPointerDown={(e) => handleVertexDragStart(e, vertex.id, 'x')}>
                 <boxGeometry args={[0.1, 0.1, 0.1]} />
-
                 <meshBasicMaterial color={COLORS.RED} />
               </mesh>
               <mesh position={[vertex.position[0], vertex.position[1] + 0.25, vertex.position[2]]} onPointerDown={(e) => handleVertexDragStart(e, vertex.id, 'y')}>
@@ -269,7 +273,12 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
           )}
         </group>
       ))}
-      <Shard shardData={shard3DData} />
+      <Shard 
+        shardData={shard3DData} 
+        onFaceRightClick={handleFaceRightClick}
+        selectedTool={selectedTool}
+        faces={shard.faces}
+      />
       { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} faceCreated={faceCreated} /> : null }
     </group>
   )

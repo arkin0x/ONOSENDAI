@@ -106,7 +106,18 @@ export const useBuilderStore = create<BuilderState>()(
 
         console.log('Removing faces:', facesToRemove)
 
+        // remove faces referencing the deleted vertex
         const remainingFaces = shard.faces.filter((_, i) => !facesToRemove.includes(i));
+
+        // update face indices
+        for (let i = 0; i < remainingFaces.length; i++) {
+          const face = remainingFaces[i]
+          const updatedFace = {
+            ...face,
+            vertices: face.vertices.map((v) => v > vertexIndex ? v - 1 : v)
+          }
+          remainingFaces[i] = updatedFace
+        }
 
         console.log(shard.faces, remainingFaces)
 

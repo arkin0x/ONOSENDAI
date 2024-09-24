@@ -76,7 +76,6 @@ const useNDKStore = create<NDKState>((set, get) => ({
       explicitRelayUrls: opts.relayUrls,
       autoConnectUserRelays: false,
       signer,
-      clientName: 'ONOSENDAI',
     })
     await ndk.connect();
     set({ ndk, isConnected: true, relays: opts.relayUrls || defaultRelays });

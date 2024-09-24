@@ -2,7 +2,7 @@ import { Text } from "@react-three/drei"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useRef, useState } from "react"
 import { Vector3 } from "three"
-import { cyberspaceVelocityToMAG, extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
+import { CyberspacePlane, cyberspaceVelocityToMAG, extractCyberspaceActionState, ExtractedCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
 import { useControlStore } from "../../store/ControlStore"
 import { useRotationStore } from "../../store/RotationStore"
@@ -16,19 +16,18 @@ export const Hud = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
   const { actionState, getSimulatedState } = useAvatarStore()
-  const [simulatedState, setSimulatedState] = useState<ExtractedCyberspaceActionState | null>(null)
   const { throttle } = useThrottleStore()
   const { controlState } = useControlStore()
   const { rotation } = useRotationStore()
 
   const pubkey = identity!.pubkey
   const actionsRef = useRef(actionState[pubkey])
+  const simulatedStateRef = useRef<ExtractedCyberspaceActionState>()
 
   useFrame(() => {
   const simulated = getSimulatedState(pubkey)
-  // console.log('simulated', simulated)
     if (simulated) {
-      setSimulatedState(extractCyberspaceActionState(simulated))
+      simulatedStateRef.current = extractCyberspaceActionState(simulated)
     }
     actionsRef.current = actionState[pubkey]
   })
@@ -47,24 +46,24 @@ export const Hud = () => {
     return line
   }
 
-  if (!simulatedState) return null
+  if (!simulatedStateRef.current) return null
   if (!actionsRef.current) return null
 
   return (
     <>
     <group>
       {/* <Axes position={[-6,-0.75,-1]} rotation={rotation.clone().invert()} /> */}
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedState.plane.toUpperCase()} align="left" color={COLORS.DSPACE} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedState.localCoordinate.vector.z.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedState.localCoordinate.vector.y.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedState.localCoordinate.vector.x.toFixed(2)} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={generateSectorName(simulatedState.sector.id).toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ID ' + simulatedState.sector.id} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedState.coordinate.raw.toUpperCase()} align="left" />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedState.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedState.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedState.velocity.x.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
-      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`MAG ${cyberspaceVelocityToMAG(simulatedState.velocity).toFixed(2)}`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedStateRef.current.plane.toUpperCase()} align="left" color={simulatedStateRef.current.plane === CyberspacePlane.DSpace ? COLORS.DSPACE : COLORS.ISPACE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Z: ' + simulatedStateRef.current.localCoordinate.vector.z.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'Y: ' + simulatedStateRef.current.localCoordinate.vector.y.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'X: ' + simulatedStateRef.current.localCoordinate.vector.x.toFixed(2)} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={generateSectorName(simulatedStateRef.current.sector.id).toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'SECTOR ID ' + simulatedStateRef.current.sector.id} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'COORD ' + simulatedStateRef.current.coordinate.raw.toUpperCase()} align="left" />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Z VELOCITY ${simulatedStateRef.current.velocity.z.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`Y VELOCITY ${simulatedStateRef.current.velocity.y.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`X VELOCITY ${simulatedStateRef.current.velocity.x.mul(60).toFixed(2)} G/s`} align="left" color={COLORS.ORANGE} />
+      <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={`MAG ${cyberspaceVelocityToMAG(simulatedStateRef.current.velocity).toFixed(2)}`} align="left" color={COLORS.ORANGE} />
 
       { rotation && <CoordinateText position={{x, y: nextLine()}} rotation={[0, r, 0]} text={'QUATERNION ' + rotation.x.toFixed(2) + '/' + rotation.y.toFixed(2) + '/' + rotation.z.toFixed(2) + '/' + rotation.w.toFixed(2)} align="left" color={COLORS.ORANGE} /> }
 

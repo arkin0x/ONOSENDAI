@@ -11,8 +11,8 @@ export const SpawnHud = () => {
   const [genesis, setGenesis] = useState<boolean>()
 
   useEffect(() => {
-    if (userCurrentSectorId) {
-      setGenesis(sectorState[userCurrentSectorId].isGenesis)
+    if (userCurrentSectorId && sectorState[userCurrentSectorId]) {
+      setGenesis(sectorState[userCurrentSectorId]?.isGenesis)
     }
   }, [userCurrentSectorId, sectorState])
 

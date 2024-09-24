@@ -10,11 +10,10 @@ import { Shard } from '../Cyberspace/Shard';
 interface ShardListProps {
   shards: CyberspaceShard[]
   currentShardId: number
-  onSelectShard: (id: string | null) => void
 }
 
-function ShardList({shards, onSelectShard}: ShardListProps) {
-  const { gridSize, setGridSize, setCurrentShard } = useBuilderStore();
+function ShardList({shards}: ShardListProps) {
+  const { addShard, setGridSize, setCurrentShard } = useBuilderStore();
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
 
@@ -36,28 +35,48 @@ function ShardList({shards, onSelectShard}: ShardListProps) {
   });
 
   function shardList() {
-    const position = new Vector3(1,0,0)
-    return shards.map((shard) => (
-      <group position={position} key={shard.id} onClick={() => setCurrentShard(shard.id)}>
+    const position = new Vector3(5, 0.5, 0)
+    const positionOffset = new Vector3(0, -5, 0)
+    function incrementPosition () {
+      return position.add(positionOffset).clone()
+    }
+    const list = shards.map((shard) => (
+      <group rotation={[Math.PI/4, 0, 0]} position={incrementPosition()} key={shard.id} onClick={() => setCurrentShard(shard.id)}>
         <Shard shardData={shardStateDataTo3DData(shard)}/>
         <Text 
           color={COLORS.ORANGE} 
           fontSize={0.5} 
           font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
           textAlign='center'
-          anchorX={'center'}
-          position={[0, -0.5, 0]} 
+          anchorX={'right'}
+          position={[-shard.gridSize/2, 0, 0]} 
+          rotation={[-Math.PI/4, 0, 0]}
         >
           SHARD {shard.id}
         </Text>
+        <gridHelper args={[shard.gridSize, shard.gridSize, COLORS.ORANGE, COLORS.PURPLE]} />
       </group>
     ))
+    list.push((
+      <group scale={[10,10,10]} position={incrementPosition()}>
+        <mesh
+          position={[0, 0, 0]}
+          onClick={() => addShard()}
+        >
+          <boxGeometry args={[0.5, 0.2, 0.1]} />
+          <meshBasicMaterial color={COLORS.ORANGE} />
+        </mesh>
+        <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+          CREATE
+        </Text>
+      </group>
+    ))
+    return list
   }
 
 
   return (
-    <group ref={groupRef}>
-      <gridHelper args={[gridSize, gridSize, COLORS.ORANGE, COLORS.PURPLE]} />
+    <group ref={groupRef} rotation={[Math.PI/4, 0, 0]}>
       {shardList()}
     </group>
   );

@@ -26,7 +26,7 @@ interface BuilderState {
   shards: CyberspaceShard[]
   shardIndex: number | null
   gridSize: number
-  addShard: () => void
+  addShard: (switchToNew?: boolean) => void
   updateShard: (shard: CyberspaceShard) => void
   setCurrentShard: (shardId: string | null) => void
   addVertex: (position: [number, number, number], color: [number, number, number]) => void
@@ -39,14 +39,19 @@ interface BuilderState {
 
 export const useBuilderStore = create<BuilderState>()(
   persist(
-    (set, get) => ({
+    (set/*,get*/) => ({
       shards: [],
       shardIndex: null,
       gridSize: 3,
 
-      addShard: () => set((state) => {
-        const newShard: CyberspaceShard = { id: Date.now().toString(), vertices: [], faces: [], gridSize: 3, display: "solid" }
-        return { shards: [...state.shards, newShard], shardIndex: state.shards.length }
+      addShard: (switchToNew) => set((state) => {
+        const newId = Date.now().toString()
+        const newShard: CyberspaceShard = { id: newId, vertices: [], faces: [], gridSize: 3, display: "solid" }
+        const newState = { shards: [...state.shards, newShard], shardIndex: state.shards.length }
+        if (switchToNew) {
+          newState.shardIndex = state.shards.length
+        }
+        return newState
       }),
 
       updateShard: (shard) => set((state) => ({
@@ -55,7 +60,10 @@ export const useBuilderStore = create<BuilderState>()(
 
       setCurrentShard: (shardId) => set((state) => {
         const shardIndex = state.shards.findIndex((s) => s.id === shardId);
-        return { shardIndex: shardIndex !== -1 ? shardIndex : null };
+        return { 
+          shardIndex: shardIndex !== -1 ? shardIndex : null, 
+          gridSize: shardIndex !== -1 ? state.shards[shardIndex].gridSize : 3
+        };
       }),
 
       addVertex: (position, color) => set((state) => {

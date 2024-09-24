@@ -80,6 +80,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
 
   const handleVertexRightClick = (event: ThreeEvent<MouseEvent>, id: string) => {
     event.stopPropagation();
+    if (selectedTool !== 'vertex') return
     removeVertex(id);
   };
 

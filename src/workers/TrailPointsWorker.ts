@@ -23,7 +23,8 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     }
   })
 
-  self.postMessage(points)
+  self.postMessage({ type: 'points', data: points })
+  self.postMessage({ type: 'calculationComplete' })
 }
 
 export {} // This is needed to make TypeScript treat this as a module

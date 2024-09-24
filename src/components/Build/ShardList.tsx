@@ -13,7 +13,7 @@ interface ShardListProps {
 }
 
 function ShardList({shards}: ShardListProps) {
-  const { addShard, setGridSize, setCurrentShard } = useBuilderStore();
+  const { addShard, setGridSize, setCurrentShard, deleteShard} = useBuilderStore();
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
 
@@ -34,6 +34,19 @@ function ShardList({shards}: ShardListProps) {
     }
   });
 
+  function handleClick(event, shard) {
+    event.stopPropagation();
+    if (event.button === 0) {
+      setCurrentShard(shard.id)
+    }
+    if (event.button === 2) {
+      const shouldDelete = confirm('Delete this shard?')
+      if (shouldDelete) {
+        deleteShard(shard.id)
+      }
+    }
+  }
+
   function shardList() {
     const position = new Vector3(5, 0.5, 0)
     const positionOffset = new Vector3(0, -5, 0)
@@ -41,7 +54,7 @@ function ShardList({shards}: ShardListProps) {
       return position.add(positionOffset).clone()
     }
     const list = shards.map((shard) => (
-      <group rotation={[Math.PI/4, 0, 0]} position={incrementPosition()} key={shard.id} onClick={() => setCurrentShard(shard.id)}>
+      <group rotation={[Math.PI/4, 0, 0]} position={incrementPosition()} key={shard.id} onClick={(e) => handleClick(e, shard)} onContextMenu={(e) => handleClick(e, shard)}>
         <Shard shardData={shardStateDataTo3DData(shard)}/>
         <Text 
           color={COLORS.ORANGE} 

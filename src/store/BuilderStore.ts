@@ -33,8 +33,10 @@ interface BuilderState {
   updateVertex: (id: string, position: [number, number, number], color: [number, number, number]) => void
   removeVertex: (id: string) => void
   addFace: (vertices: string[]) => void
+  removeFace: (id: string) => void
   setGridSize: (size: number) => void
   calculateShardSize: (shard: CyberspaceShard) => number
+  deleteShard: (shardId: string) => void
 }
 
 export const useBuilderStore = create<BuilderState>()(
@@ -164,6 +166,19 @@ export const useBuilderStore = create<BuilderState>()(
         }
       }),
 
+      removeFace: (id) => set((state) => {
+        if (!state.shardIndex) return state
+        const shard = state.shards[state.shardIndex]
+        const updatedShard = {
+          ...shard,
+          faces: shard.faces.filter((face) => face.id !== id),
+        }
+        return {
+          shardIndex: state.shardIndex,
+          shards: state.shards.map((s) => (s.id === updatedShard.id ? updatedShard : s)),
+        }
+      }),
+
       setGridSize: (size) => set((state) => {
         if (!state.shardIndex) return state
         const updatedShard = {
@@ -182,6 +197,31 @@ export const useBuilderStore = create<BuilderState>()(
           return sum + Math.abs(vertex.position[0]) + Math.abs(vertex.position[1]) + Math.abs(vertex.position[2])
         }, 0)
       },
+
+      deleteShard: (shardId) => set((state) => {
+        const shardIndex = state.shards.findIndex((s) => s.id === shardId);
+        if (shardIndex === -1) return state;
+
+        const newShards = state.shards.filter((s) => s.id !== shardId);
+        let newShardIndex = state.shardIndex;
+
+        // Adjust the current shard index if necessary
+        if (newShardIndex !== null) {
+          if (shardIndex === newShardIndex) {
+            // If the deleted shard was the current one, set to null or the last shard
+            newShardIndex = newShards.length > 0 ? newShards.length - 1 : null;
+          } else if (shardIndex < newShardIndex) {
+            // If the deleted shard was before the current one, decrement the index
+            newShardIndex--;
+          }
+        }
+
+        return {
+          shards: newShards,
+          shardIndex: newShardIndex,
+          gridSize: newShardIndex !== null ? newShards[newShardIndex].gridSize : 3
+        };
+      }),
     }),
     {
       name: 'builder-storage',

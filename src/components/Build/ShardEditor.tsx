@@ -16,7 +16,6 @@ interface ShardEditorProps {
 
 const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   const { addVertex, updateVertex, removeVertex, addFace, removeFace } = useBuilderStore()
-  const { scene, camera } = useThree()
   const [hoveredVertex, setHoveredVertex] = useState<string | null>(null)
   const [selectedVertices, setSelectedVertices] = useState<string[]>([])
   const [draggedVertex, setDraggedVertex] = useState<string | null>(null)

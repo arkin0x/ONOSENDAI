@@ -17,6 +17,7 @@ type AvatarProps = {
  */
 export const Avatar = memo(({pubkey}: AvatarProps) => {
   const [inGenesisSector, setInGenesisSector] = useState<boolean>(false)
+  const [showTrail, setShowTrail] = useState<boolean>(false)
 
   useActionChain(pubkey)
 
@@ -24,6 +25,19 @@ export const Avatar = memo(({pubkey}: AvatarProps) => {
   const { userCurrentSectorId } = useSectorStore()
 
   const { actionState, getSimulatedSectorId, getGenesisSectorId } = useAvatarStore()
+
+  useEffect(() => {
+    // set up keyboard listeners to activate telemetry panel
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'h') {
+        setShowTrail(!showTrail)
+      }
+    }
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [showTrail])
 
   useEffect(() => {
     const simulatedSectorId = getSimulatedSectorId(pubkey)
@@ -34,6 +48,6 @@ export const Avatar = memo(({pubkey}: AvatarProps) => {
   return <>
     <ThreeAvatar pubkey={pubkey} />
     { inGenesisSector ? <SpawnModel pubkey={pubkey} /> : null }
-    <ThreeAvatarTrail pubkey={pubkey}/>
+    { showTrail && <ThreeAvatarTrail pubkey={pubkey}/> }
   </>
 })

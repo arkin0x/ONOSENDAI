@@ -11,18 +11,19 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
   const coord = cyberspaceCoordinateFromHexString(pubkey)
   const spawnPosition = coord.local.vector.toVector3()
 
-  const trailPoints = actions.map((action: CyberspaceAction) => {
+  const points: number[] = []
+
+  actions.forEach((action: CyberspaceAction) => {
     const { localCoordinate, sector } = extractCyberspaceActionState(action)
     const sectorId = sector.id
     const sectorPosition = localCoordinate.vector
-    if (sectorId !== userCurrentSectorId) {
-      return null
+    if (sectorId === userCurrentSectorId) {
+      const newVec = sectorPosition.toVector3().sub(spawnPosition)
+      points.push(newVec.x, newVec.y, newVec.z)
     }
-    const newVec = sectorPosition.toVector3().sub(spawnPosition)
-    return [newVec.x, newVec.y, newVec.z]
-  }).filter(Boolean)
+  })
 
-  self.postMessage(trailPoints)
+  self.postMessage(points)
 }
 
 export {} // This is needed to make TypeScript treat this as a module

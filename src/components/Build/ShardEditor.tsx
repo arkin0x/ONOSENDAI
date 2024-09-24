@@ -1,47 +1,46 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { useThree, ThreeEvent } from '@react-three/fiber';
-import { Face, CyberspaceShard as ShardType, useBuilderStore, Vertex } from '../../store/BuilderStore';
-import COLORS from '../../data/Colors';
-import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three';
-import { OrbitControls, Text } from '@react-three/drei';
-import VertexSelectionIndicator from './VertexSelectionIndicator';
+import React, { useRef, useState, useMemo, useEffect } from 'react'
+import { useThree, ThreeEvent } from '@react-three/fiber'
+import { Face, CyberspaceShard as ShardType, useBuilderStore, Vertex } from '../../store/BuilderStore'
+import COLORS from '../../data/Colors'
+import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three'
+import { OrbitControls, Text } from '@react-three/drei'
+import VertexSelectionIndicator from './VertexSelectionIndicator'
 import Shard from '../Cyberspace/Shard'
-import { Shard3DData, shardStateDataTo3DData } from './Shards';
-import { b, g } from 'vitest/dist/suite-ynYMzeLu.js';
+import { Shard3DData, shardStateDataTo3DData } from './Shards'
+import { b, g } from 'vitest/dist/suite-ynYMzeLu.js'
 
 interface ShardEditorProps {
-  shard: ShardType;
-  selectedTool: 'vertex' | 'face' | 'color' | 'move';
+  shard: ShardType
+  selectedTool: 'vertex' | 'face' | 'color' | 'move'
 }
 
 const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
-  const { addVertex, updateVertex, removeVertex, addFace, removeFace } = useBuilderStore();
-  const { scene, camera } = useThree();
-  const [hoveredVertex, setHoveredVertex] = useState<string | null>(null);
-  const [selectedVertices, setSelectedVertices] = useState<string[]>([]);
-  const [draggedVertex, setDraggedVertex] = useState<string | null>(null);
-  const [planeDown, setPlaneDown] = useState(false);
-  const [dragCancelCreateVertex, setDragCancelCreateVertex] = useState(false);
-  const [dragAxis, setDragAxis] = useState<'x' | 'y' | 'z' | null>(null);
-  const [faceCreated, setFaceCreated] = useState(false);
-  const [colorPickerVertex, setColorPickerVertex] = useState<string | null>(null);
-  const [colorPickerPosition, setColorPickerPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
-  const [currentColor, setCurrentColor] = useState<{ r: number, g: number, b: number }>({ r: 255, g: 255, b: 255 });
-  const [currentVertexId, setCurrentVertexId] = useState<string | null>(null);
-  const [draggingColor, setDraggingColor] = useState<'r' | 'g' | 'b' | null>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const planeRef = useRef<THREE.Mesh>(null);
+  const { addVertex, updateVertex, removeVertex, addFace, removeFace } = useBuilderStore()
+  const { scene, camera } = useThree()
+  const [hoveredVertex, setHoveredVertex] = useState<string | null>(null)
+  const [selectedVertices, setSelectedVertices] = useState<string[]>([])
+  const [draggedVertex, setDraggedVertex] = useState<string | null>(null)
+  const [planeDown, setPlaneDown] = useState(false)
+  const [dragCancelCreateVertex, setDragCancelCreateVertex] = useState(false)
+  const [dragAxis, setDragAxis] = useState<'x' | 'y' | 'z' | null>(null)
+  const [faceCreated, setFaceCreated] = useState(false)
+  const [colorPickerVertex, setColorPickerVertex] = useState<string | null>(null)
+  const [currentColor, setCurrentColor] = useState<{ r: number, g: number, b: number }>({ r: 255, g: 255, b: 255 })
+  const [currentVertexId, setCurrentVertexId] = useState<string | null>(null)
+  const [draggingColor, setDraggingColor] = useState<'r' | 'g' | 'b' | null>(null)
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const planeRef = useRef<THREE.Mesh>(null)
 
   useEffect(() => {
     setColorPickerVertex(null)
   }, [selectedTool])
 
   useEffect(() => {
-    console.log(currentColor)
+    // console.log(currentColor)
   }, [currentColor])
 
   const shard3DData = useMemo(() => {
-    if (!shard) return null;
+    if (!shard) return null
     return {
       vertices: shard.vertices.flatMap((v: Vertex) => v.position),
       colors: shard.vertices.flatMap((v: Vertex) => v.color),
@@ -59,160 +58,152 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
 
     const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
     if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
-      console.log(event.intersections);
-      const { point } = event.intersections.sort((a, b) => b.distance - a.distance)[0];
+      console.log(event.intersections)
+      const { point } = event.intersections.sort((a, b) => b.distance - a.distance)[0]
   
       // Snap the point to the nearest 0.1
       const snappedPoint = {
         x: Math.round(point.x * 10) / 10,
         y: Math.round(point.y * 10) / 10,
         z: Math.round(point.z * 10) / 10,
-      };
+      }
   
-      addVertex([snappedPoint.x, snappedPoint.y, snappedPoint.z], [0, 0, 0]);
+      addVertex([snappedPoint.x, snappedPoint.y, snappedPoint.z], [0, 0, 0])
     } else if (selectedTool === 'face' && selectedVertices.length === 3) {
-      setSelectedVertices([]);
-      setFaceCreated(false);
+      setSelectedVertices([])
+      setFaceCreated(false)
     }
-    setDragCancelCreateVertex(false);
-    setPlaneDown(false);
-  };
+    setDragCancelCreateVertex(false)
+    setPlaneDown(false)
+  }
 
   const handleVertexRightClick = (event: ThreeEvent<MouseEvent>, id: string) => {
-    event.stopPropagation();
+    event.stopPropagation()
     if (selectedTool !== 'vertex') return
-    removeVertex(id);
-  };
+    removeVertex(id)
+  }
 
   const handleVertexDragStart = (event: ThreeEvent<MouseEvent>, id: string, axis: 'x' | 'y' | 'z') => {
     if (selectedTool !== 'move') return
-    event.stopPropagation();
-    console.log('drag start', id, axis);
-    setDraggedVertex(id);
-    setDragAxis(axis);
-    document.addEventListener('pointermove', handleVertexDrag);
-    document.addEventListener('pointerup', handleVertexDragEnd);
-  };
+    event.stopPropagation()
+    console.log('drag start', id, axis)
+    setDraggedVertex(id)
+    setDragAxis(axis)
+    document.addEventListener('pointermove', handleVertexDrag)
+    document.addEventListener('pointerup', handleVertexDragEnd)
+  }
 
   const handleVertexDrag = (event) => {
     if (draggedVertex && dragAxis) {
-      const vertex = shard.vertices.find(v => v.id === draggedVertex);
+      const vertex = shard.vertices.find(v => v.id === draggedVertex)
       if (vertex) {
-        const newPosition = [...vertex.position];
-        const movementScale = 0.1;
+        const newPosition = [...vertex.position]
+        const movementScale = 0.1
         
         switch (dragAxis) {
           case 'x':
-            newPosition[0] += Math.sign(event.movementX) * movementScale;
-            break;
+            newPosition[0] += Math.sign(event.movementX) * movementScale
+            break
           case 'y':
-            newPosition[1] -= Math.sign(event.movementY) * movementScale;
-            break;
+            newPosition[1] -= Math.sign(event.movementY) * movementScale
+            break
           case 'z':
-            newPosition[2] += Math.sign(event.movementX) * movementScale;
-            break;
+            newPosition[2] += Math.sign(event.movementX) * movementScale
+            break
         }
         
-        updateVertex(draggedVertex, newPosition as [number, number, number], vertex.color);
+        updateVertex(draggedVertex, newPosition as [number, number, number], vertex.color)
       }
     }
-  };
+  }
 
   const handleVertexDragEnd = () => {
-    setDraggedVertex(null);
-    setDragAxis(null);
-    document.removeEventListener('pointermove', handleVertexDrag);
-    document.removeEventListener('pointerup', handleVertexDragEnd);
-  };
+    setDraggedVertex(null)
+    setDragAxis(null)
+    document.removeEventListener('pointermove', handleVertexDrag)
+    document.removeEventListener('pointerup', handleVertexDragEnd)
+  }
 
   const handleVertexClick = (event: ThreeEvent<MouseEvent>, vertex: Vertex) => {
-    event.stopPropagation();
+    event.stopPropagation()
     if (selectedTool === 'face') {
       setSelectedVertices(prev => {
         if (prev.includes(vertex.id)) {
-          return prev.filter(v => v !== vertex.id);
+          return prev.filter(v => v !== vertex.id)
         } else {
-          const newSelected = [...prev, vertex.id];
+          const newSelected = [...prev, vertex.id]
           if (newSelected.length === 3) {
-            addFace(newSelected);
-            setFaceCreated(true);
-            return newSelected; // Keep the selection
+            addFace(newSelected)
+            setFaceCreated(true)
+            return newSelected // Keep the selection
           }
-          return newSelected;
+          return newSelected
         }
-      });
+      })
     } else if (selectedTool === 'vertex') {
       // no op
     } else if (selectedTool === 'color') {
       // Open color picker
       setColorPickerVertex(vertex.id)
-      setColorPickerPosition({ x: event.clientX, y: event.clientY });
-      setCurrentVertexId(vertex.id);
+      setCurrentVertexId(vertex.id)
       const color = {
         r: vertex.color[0],
         g: vertex.color[1],
         b: vertex.color[2],
       }
-      setCurrentColor(color);
+      setCurrentColor(color)
  
     }
-  };
+  }
 
   const handleVertexHover = (id: string | null) => {
     if (selectedTool !== 'move') return
     if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
+      clearTimeout(hoverTimeoutRef.current)
     }
 
     if (id) {
-      setHoveredVertex(id);
+      setHoveredVertex(id)
     } else {
       hoverTimeoutRef.current = setTimeout(() => {
-        setHoveredVertex(null);
-      }, 750); // 300ms delay before hiding XYZ controls
+        setHoveredVertex(null)
+      }, 2000) // ms delay before hiding XYZ controls
     }
-  };
+  }
 
   const handlePlaneDown = (event: ThreeEvent<MouseEvent>) => {
     if (event.button === 0) {
-      setPlaneDown(true);
+      setPlaneDown(true)
     }
   }
 
   const handlePlaneDrag = () => {
     if (planeDown && !dragCancelCreateVertex) {
-      setDragCancelCreateVertex(true);
+      setDragCancelCreateVertex(true)
     }
   }
 
-  // const handleColorChange = (color: { r: number, g: number, b: number }) => {
-  //   setCurrentColor(color);
-  //   if (currentVertexId) {
-  //     updateVertex(currentVertexId, vertex.position, [color.r, color.g, color.b]);
-  //   }
-  // };
-
   const handleColorBoxMouseDown = (event: ThreeEvent<MouseEvent>, color: 'r' | 'g' | 'b') => {
-    event.stopPropagation();
-    setDraggingColor(color);
-  };
+    event.stopPropagation()
+    setDraggingColor(color)
+  }
 
   const handleColorBoxMouseMove = (event: ThreeEvent<MouseEvent>, vertex: Vertex) => {
-    if (!draggingColor || !currentVertexId) return;
+    if (!draggingColor || !currentVertexId) return
 
-    const boxHeight = 2; // Height of the color box
-    const mouseY = event.point.y; // Mouse Y position in world coordinates
-    const colorValue = Math.max(0, Math.min(1, (mouseY + boxHeight / 2) / boxHeight)); // Normalize to [0, 1]
-
-    const newColor = { ...currentColor };
-    newColor[draggingColor] = colorValue
-    setCurrentColor(newColor);
-    updateVertex(currentVertexId, vertex.position, [newColor.r, newColor.g, newColor.b]);
-  };
+    const boxPosition = new Vector3()
+    event.object.getWorldPosition(boxPosition)
+    const colorValue = (event.point.y - boxPosition.y + 0.5)
+    const normColorValue = Math.min(1, Math.max(0, colorValue))
+    const newColor = { ...currentColor }
+    newColor[draggingColor] = normColorValue
+    setCurrentColor(newColor)
+    updateVertex(currentVertexId, vertex.position, [newColor.r, newColor.g, newColor.b])
+  }
 
   const handleColorBoxMouseUp = () => {
-    setDraggingColor(null);
-  };
+    setDraggingColor(null)
+  }
 
   return (
     <group onPointerMove={handleVertexDrag} onPointerUp={handleVertexDragEnd}>
@@ -282,7 +273,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       <Shard shardData={shard3DData} />
       { selectedTool === 'face' ? <VertexSelectionIndicator selectedVertices={selectedVertices} faceCreated={faceCreated} /> : null }
     </group>
-  );
-};
+  )
+}
 
-export default ShardEditor;
+export default ShardEditor

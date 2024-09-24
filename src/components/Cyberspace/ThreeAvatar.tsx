@@ -1,27 +1,27 @@
 import { useFrame, useThree } from "@react-three/fiber"
 import React, { useEffect, useState } from "react"
-import * as THREE from "three"
 import { CYBERSPACE_SECTOR, extractCyberspaceActionState } from "../../libraries/Cyberspace"
 import { useRotationStore } from "../../store/RotationStore"
 import { AvatarGeometryEdges, AvatarMaterialEdges } from "../../data/AvatarModel"
 import { useSectorStore } from "../../store/SectorStore"
 import COLORS from "../../data/Colors"
 import { useAvatarStore } from "../../store/AvatarStore"
+import { Fog, Quaternion, Vector3 } from "three"
 
 export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const { scene, camera } = useThree()
   const { getSimulatedState } = useAvatarStore()
   const { rotation } = useRotationStore()
   const { updateUserCurrentSectorId } = useSectorStore()
-  const [position, setPosition] = useState(() => new THREE.Vector3(0, 0, 0))
-  const [velocity, setVelocity] = useState(() => new THREE.Vector3(0, 0, 0))
+  const [position, setPosition] = useState(() => new Vector3(0, 0, 0))
+  const [velocity, setVelocity] = useState(() => new Vector3(0, 0, 0))
   const [frameSectorId, setFrameSectorId] = useState<string>()
 
   // Set fog on the scene
   const fogColor = 0x000000 // Color of the fog
   const near = 1 // Start distance of the fog
   const far = CYBERSPACE_SECTOR.toNumber() * 2 // End distance of the fog
-  scene.fog = new THREE.Fog(fogColor, near, far)
+  scene.fog = new Fog(fogColor, near, far)
 
   camera.far = 2**30
 
@@ -48,7 +48,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   useFrame(() => {
     const radius = 5
     const oppositeRotation = rotation.clone()
-    const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
+    const cameraDirection = new Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
     const cameraPosition = position.clone().add(cameraDirection.multiplyScalar(radius))
     camera.position.copy(cameraPosition)
     camera.lookAt(position)
@@ -56,8 +56,8 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   })
 
   // Calculate the quaternion for the cone's rotation based on the velocity vector
-  const coneQuaternion = new THREE.Quaternion().setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0), // Default up vector
+  const coneQuaternion = new Quaternion().setFromUnitVectors(
+    new Vector3(0, 1, 0), // Default up vector
     velocity.normalize() // Normalized velocity vector
   )
 
@@ -66,9 +66,12 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const coneLength = Math.max(0.2, Math.min(0.8, velocityMagnitude))
   const conePosition = velocity.normalize()
 
-  // console.log(position, camera.position)
+
+  const gridPos = new Vector3().fromArray(position.clone().toArray().map((v) => Math.floor(v) + 0.5))
+
 
   return (
+    <>
     <group position={position}>
       {/* default avatar represented by dodecahedron */}
       <lineSegments scale={[1,1,1]} geometry={AvatarGeometryEdges} material={AvatarMaterialEdges} />
@@ -83,5 +86,7 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
         </mesh>
       </group>
     </group>
+    <gridHelper position={gridPos} args={[13, 13]} />
+    </>
   )
 }

@@ -6,9 +6,9 @@ import { Face } from '../../store/BuilderStore'
 
 interface ShardProps {
   shardData: Shard3DData
-  onFaceRightClick: (event: ThreeEvent<MouseEvent>, faceId: string) => void
-  selectedTool: 'vertex' | 'face' | 'color' | 'move'
-  faces: Face[]
+  onFaceRightClick?: (event: ThreeEvent<MouseEvent>, faceId: string) => void
+  selectedTool?: 'vertex' | 'face' | 'color' | 'move'
+  faces?: Face[]
 }
 
 export function Shard({ shardData, onFaceRightClick, selectedTool, faces }: ShardProps) {
@@ -38,6 +38,8 @@ export function Shard({ shardData, onFaceRightClick, selectedTool, faces }: Shar
   }
 
   const handleRightClick = (event: ThreeEvent<MouseEvent>) => {
+    if (!onFaceRightClick) return
+    if (!faces) return
     if (selectedTool === 'face') {
       event.stopPropagation()
       const face = faces[event.faceIndex!]

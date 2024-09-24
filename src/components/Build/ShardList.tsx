@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Text } from '@react-three/drei';
 import { CyberspaceShard, useBuilderStore } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
@@ -47,6 +47,20 @@ function ShardList({shards}: ShardListProps) {
     }
   }
 
+  function renderVertices(shard) {
+    return shard.vertices.map((vertex) => (
+      <group key={vertex.id}>
+        <mesh // actual vertex mesh
+          position={vertex.position}
+        >
+          <sphereGeometry args={[0.1, 32, 32]} />
+          <meshPhongMaterial color={COLORS.PURPLE} />
+        </mesh>
+      </group>
+    ))
+  }
+
+
   function shardList() {
     const position = new Vector3(5, 0.5, 0)
     const positionOffset = new Vector3(0, -5, 0)
@@ -56,6 +70,7 @@ function ShardList({shards}: ShardListProps) {
     const list = shards.map((shard) => (
       <group rotation={[Math.PI/4, 0, 0]} position={incrementPosition()} key={shard.id} onClick={(e) => handleClick(e, shard)} onContextMenu={(e) => handleClick(e, shard)}>
         <Shard shardData={shardStateDataTo3DData(shard)}/>
+        {renderVertices(shard)}
         <Text 
           color={COLORS.ORANGE} 
           fontSize={0.5} 

@@ -9,7 +9,7 @@ export interface Vertex {
 
 export interface Face {
   id: string
-  vertices: number[]
+  vertices: number[] 
 }
 
 export type ShardDisplayTypes = "solid" | "wireframe" | "points"
@@ -87,29 +87,39 @@ export const useBuilderStore = create<BuilderState>()(
 
       removeVertex: (id) => set((state) => {
         if (!state.shardIndex) return state
+        const shard = state.shards[state.shardIndex]
+        const vertexIndex = shard.vertices.findIndex((v) => v.id === id);
+
+        if (vertexIndex === -1) return state;
+
+        console.log('Removing vertex', vertexIndex)
+
+        const facesToRemove: number[] = []
+
+        for (let i = 0; i < shard.faces.length; i++) {
+          const vertexInFace = shard.faces[i].vertices.indexOf(vertexIndex)
+          if (vertexInFace > -1) {
+            // remove whole face
+            facesToRemove.push(i)
+          }
+        }
+
+        console.log('Removing faces:', facesToRemove)
+
+        const remainingFaces = shard.faces.filter((_, i) => !facesToRemove.includes(i));
+
+        console.log(shard.faces, remainingFaces)
+
         const updatedShard = {
-          ...state.shards[state.shardIndex],
-          vertices: state.shards[state.shardIndex].vertices.filter((v) => v.id !== id),
-          faces: state.shards[state.shardIndex].faces.filter((f) => !f.vertices.includes(id)),
+          ...shard,
+          vertices: shard.vertices.filter((v) => v.id !== id),
+          faces: remainingFaces,
         }
         return {
           shardIndex: state.shardIndex,
           shards: state.shards.map((s) => (s.id === updatedShard.id ? updatedShard : s)),
         }
       }),
-
-      // addFace: (vertices) => set((state) => {
-      //   if (!state.currentShard) return state
-      //   const newFace: Face = { id: Date.now().toString(), vertices }
-      //   const updatedShard = {
-      //     ...state.currentShard,
-      //     faces: [...state.currentShard.faces, newFace],
-      //   }
-      //   return {
-      //     currentShard: updatedShard,
-      //     shards: state.shards.map((s) => (s.id === updatedShard.id ? updatedShard : s)),
-      //   }
-      // }),
 
       addFace: (vertexIds) => set((state) => {
         if (state.shardIndex === null) return state

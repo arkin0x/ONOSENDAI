@@ -57,11 +57,19 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     </Text>
   ) 
 
-  const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
+    const handlePlaneClick = (event: ThreeEvent<MouseEvent>) => {
     if (selectedTool === 'vertex' && !dragCancelCreateVertex && event.button === 0 && event.object === planeRef.current && event.intersections.length < 3) {
-      console.log(event.intersections)
-      const { point } = event.intersections.sort((a,b) => b.distance-a.distance)[0]
-      addVertex([point.x, point.y, point.z], [0, 0, 0]);
+      console.log(event.intersections);
+      const { point } = event.intersections.sort((a, b) => b.distance - a.distance)[0];
+  
+      // Snap the point to the nearest 0.1
+      const snappedPoint = {
+        x: Math.round(point.x * 10) / 10,
+        y: Math.round(point.y * 10) / 10,
+        z: Math.round(point.z * 10) / 10,
+      };
+  
+      addVertex([snappedPoint.x, snappedPoint.y, snappedPoint.z], [0, 0, 0]);
     } else if (selectedTool === 'face' && selectedVertices.length === 3) {
       setSelectedVertices([]);
       setFaceCreated(false);
@@ -94,13 +102,13 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
         
         switch (dragAxis) {
           case 'x':
-            newPosition[0] += event.movementX * movementScale;
+            newPosition[0] += Math.sign(event.movementX) * movementScale;
             break;
           case 'y':
-            newPosition[1] -= event.movementY * movementScale;
+            newPosition[1] -= Math.sign(event.movementY) * movementScale;
             break;
           case 'z':
-            newPosition[2] += event.movementX * movementScale;
+            newPosition[2] += Math.sign(event.movementX) * movementScale;
             break;
         }
         
@@ -133,8 +141,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
         }
       });
     } else if (selectedTool === 'vertex') {
-      // Open color picker (not implemented in this example)
-      console.log('Open color picker for vertex', vertex.id);
+      // no op
     } else if (selectedTool === 'color') {
       // Open color picker
       setColorPickerVertex(vertex.id)

@@ -45,7 +45,6 @@ export interface NDKStoreConfig {
 }
 
 export const defaultRelays = [
-  'wss://relay.fanfares.io',
   'wss://cyberspace.nostr1.com'
 ]
 

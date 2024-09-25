@@ -24,7 +24,7 @@ export function Spinner({position, scale}: SpinnerProps) {
   return (
     <group position={position} scale={scale}>
       <lineLoop ref={ref} geometry={ringGeometry} material={lineMaterial}/>
-      <Text position={[0, -4, 0.07]} color={COLORS.ORANGE} fontSize={.8} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+      <Text position={[0, -4.5, 0.07]} color={COLORS.ORANGE} fontSize={.9} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
         MINING
       </Text>
     </group>

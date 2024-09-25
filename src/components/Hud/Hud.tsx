@@ -136,6 +136,7 @@ export const Hud = () => {
         }
 
         <CoordinateText position={{x: 1, y: 95}} rotation={[0, r, 0]} text={'PRESS T FOR TELEMETRY'} align="left" color={COLORS.PURPLE} fontSize={0.10} /> 
+        <CoordinateText position={{x: 1, y: 93}} rotation={[0, r, 0]} text={'PRESS H FOR HISTORY'} align="left" color={COLORS.PURPLE} fontSize={0.10} /> 
 
         {/* Right-side HUD items */}
         {genesis && (

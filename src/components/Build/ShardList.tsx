@@ -160,7 +160,7 @@ function ShardList({create, deploy}: ShardListProps) {
       </group>
     ))
     deploy && isMining && list.push((
-      <Spinner progress={progress} position={incrementPosition()} scale={[1,1,1]}/>
+      <Spinner position={incrementPosition()} scale={[.7,.7,.7]}/>
     ))
     return list
   }

@@ -1,19 +1,20 @@
 import { useEffect, useRef } from 'react';
 import { Text } from '@react-three/drei';
-import { CyberspaceShard, useBuilderStore } from '../../store/BuilderStore';
+import { useBuilderStore } from '../../store/BuilderStore';
 import COLORS from '../../data/Colors';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Group, Vector3 } from 'three';
 import { shardStateDataTo3DData } from './Shards';
 import { Shard } from '../Cyberspace/Shard';
+import { Selector } from './Selector';
 
 interface ShardListProps {
-  shards: CyberspaceShard[]
-  currentShardId: number
+  create?: boolean
+  deploy?: boolean
 }
 
-function ShardList({shards}: ShardListProps) {
-  const { addShard, setGridSize, setCurrentShard, deleteShard} = useBuilderStore();
+function ShardList({create, deploy}: ShardListProps) {
+  const { addShard, setGridSize, setCurrentShard, deleteShard, shards, shardIndex} = useBuilderStore();
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
 
@@ -83,9 +84,14 @@ function ShardList({shards}: ShardListProps) {
           SHARD {shard.id}
         </Text>
         <gridHelper args={[shard.gridSize, shard.gridSize, COLORS.ORANGE, COLORS.PURPLE]} />
+        { shardIndex !== null && shards[shardIndex] === shard ? 
+          <group position={[-9,0,0]} rotation={[-Math.PI/4,0,-Math.PI/2]} scale={[.5,.5,.5]}>
+            <Selector />
+          </group> 
+        : null }
       </group>
     ))
-    list.push((
+    create && list.push((
       <group scale={[10,10,10]} position={incrementPosition()}>
         <mesh
           position={[0, 0, 0]}

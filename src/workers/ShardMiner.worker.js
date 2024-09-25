@@ -36,9 +36,12 @@ function initiateMining(data) {
       let digest = sha256(shardEvent)
       let POW = countLeadingZeroesBin(digest)
 
+      console.log('POW', POW, 'targetPOW', targetPOW)
+
       if (POW >= targetPOW) {
+        console.log('POW found', POW, 'targetPOW', targetPOW)
         const id = uint8ToHex(digest)
-        postMessage({ status: 'pow-target-found', shardEvent, nonceBounds, digest, id, currentNonce, POW })
+        self.postMessage({ status: 'pow-target-found', shardEvent, nonceBounds, digest, id, currentNonce, POW })
         active = false
         return
       }
@@ -47,11 +50,13 @@ function initiateMining(data) {
       shardEvent = incrementNonceBuffer(shardEvent, nonceBounds[0], nonceBounds[1])
       setTimeout(mine, 0)
     } else if (!active) {
-      postMessage({ status: 'stopped' })
+      self.postMessage({ status: 'stopped' })
     } else {
-      postMessage({ status: 'batch-complete', currentNonce })
+      self.postMessage({ status: 'batch-complete', currentNonce })
     }
   }
 
   mine()
 }
+
+export {} // This line is necessary to make it a module

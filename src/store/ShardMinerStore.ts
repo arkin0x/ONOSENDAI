@@ -4,6 +4,8 @@ import { createUnsignedShardEvent } from '../libraries/ShardUtils'
 import { serializeEvent, deserializeEvent, getNonceBounds } from '../libraries/Miner'
 import { cyberspaceCoordinateFromHexString } from '../libraries/Cyberspace'
 import useNDKStore from './NDKStore'
+import { workzone, setWorkerCallback } from '../libraries/WorkerManager'
+
 
 type ShardMinerState = {
   isMining: boolean
@@ -22,40 +24,36 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
     const unsignedEvent = createUnsignedShardEvent(shard, pubkey, coordinate)
     const serializedEvent = serializeEvent(unsignedEvent)
     const nonceBounds = getNonceBounds(serializedEvent)
+    const shardBinary = new TextEncoder().encode(serializedEvent)
     const targetPOW = get().calculateShardSize(shard)
 
-    console.log('Starting mining', shard, 'target POW:', targetPOW)
-
-    const worker = new Worker(new URL('../workers/ShardMiner.worker.js', import.meta.url))
-
-    worker.onmessage = (event) => {
-      if (event.data.status === 'pow-target-found') {
-        const minedEvent = deserializeEvent(event.data.shardEvent)
-        minedEvent.id = event.data.id
-        useNDKStore.getState().publishRaw(minedEvent)
-        set({ isMining: false, progress: 100 })
-        worker.terminate()
-      } else if (event.data.status === 'batch-complete') {
-        set({ progress: (event.data.currentNonce / (2 ** 32)) * 100 })
-      }
+    const workers = workzone['shardMining']
+    if (workers.length === 0) {
+      console.error('No shard mining workers available')
+      return
     }
 
-    worker.postMessage({
-      command: 'start',
-      data: {
-        shardEvent: serializedEvent,
-        nonceBounds,
-        nonceStartValue: 0,
-        nonceEndValue: 2 ** 32 - 1,
-        targetPOW,
-      }
+    workers.forEach((worker, index) => {
+      worker.postMessage({
+        command: 'start',
+        data: {
+          shardEvent: shardBinary,
+          nonceBounds,
+          nonceStartValue: index * (2 ** 32 / workers.length),
+          nonceEndValue: (index + 1) * (2 ** 32 / workers.length) - 1,
+          targetPOW,
+        }
+      })
     })
 
     set({ isMining: true, progress: 0 })
   },
 
   stopMining: () => {
-    // Logic to stop the worker
+    const workers = workzone['shardMining']
+    workers.forEach(worker => {
+      worker.postMessage({ command: 'stop' })
+    })
     set({ isMining: false, progress: 0 })
   },
 
@@ -68,3 +66,21 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
   },
 
 }))
+
+function handleShardMinerMessage(event: MessageEvent) {
+  const { status, data } = event.data
+  console.log('shard miner message:', status, data)
+  if (status === 'pow-target-found') {
+    const minedEvent = deserializeEvent(data.shardEvent)
+    minedEvent.id = data.id
+    useNDKStore.getState().publishRaw(minedEvent)
+    useShardMinerStore.getState().stopMining()
+  } else if (status === 'batch-complete') {
+    const progress = (data.currentNonce / (2 ** 32)) * 100
+    useShardMinerStore.setState({ progress })
+  } else if (status === 'stopped') {
+    console.log('shard miner stopped')
+  }
+}
+
+setWorkerCallback('shardMining', handleShardMinerMessage)

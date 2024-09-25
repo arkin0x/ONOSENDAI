@@ -73,7 +73,7 @@ function ShardList({create, deploy}: ShardListProps) {
     if (event.button === 0) {
       setCurrentShard(shard.id)
     }
-    if (event.button === 2) {
+    if (event.button === 2 && create) {
       const shouldDelete = confirm('Delete this shard?')
       if (shouldDelete) {
         deleteShard(shard.id)

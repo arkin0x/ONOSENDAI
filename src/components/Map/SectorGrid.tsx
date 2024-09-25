@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState, useEffect } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
-import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, FrontSide } from 'three'
+import { Vector3, InstancedMesh, Matrix4, Color, BoxGeometry, FrontSide, Mesh } from 'three'
 import { Text } from "@react-three/drei"
 import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
@@ -16,6 +16,9 @@ interface SectorData {
   position: Vector3
   color: Color
   genesis?: boolean
+  hasAvatars: boolean
+  hasHyperjumps: boolean
+  hasShards: boolean
 }
 
 export const SectorGrid = () => {
@@ -53,6 +56,9 @@ export const SectorGrid = () => {
         position, 
         color, 
         genesis: sectorData.isGenesis,
+        hasAvatars: sectorData.avatars.length > 0,
+        hasShards: sectorData.shards.length > 0,
+        hasHyperjumps: sectorData.hyperjumps.length > 0,
       }
     }).filter(Boolean) as SectorData[]
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
@@ -124,15 +130,12 @@ export const SectorGrid = () => {
 
   return (
     <>
-      {sectorData.map(({ sectorId, position, color, genesis }) => (
+      {sectorData.map((data) => (
         <SectorMarker 
-          key={sectorId} 
-          sectorId={sectorId} 
-          selected={sectorId === centerSectorId} 
-          position={position} 
-          color={color} 
-          avatar={sectorId === userCurrentSectorId} 
-          genesis={genesis}
+          key={data.sectorId} 
+          data={data}
+          selected={data.sectorId === centerSectorId} 
+          avatar={data.sectorId === userCurrentSectorId} 
         />
       ))}
       {scanAreaBox}
@@ -142,23 +145,35 @@ export const SectorGrid = () => {
 
 export default SectorGrid
 
-function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: { 
-  sectorId: string, 
-  selected: boolean, 
-  avatar: boolean, 
-  position: Vector3, 
-  color: Color, 
-  genesis?: boolean,
-}) {
+interface SectorMarkerProps {
+  data: SectorData
+  selected: boolean
+  avatar: boolean
+}
+
+function SectorMarker({ data, selected, avatar }: SectorMarkerProps) {
+  const hyperjumpRef = useRef<Mesh>(null)
+  const { position, color, genesis, sectorId, hasShards } = data
   const textPosition = new Vector3().fromArray(position.toArray()).add(new Vector3(0.6, 0, 0))
+  const hyperjumpTextPosition = new Vector3(-0.6, .3, -.3)
   const genesisTextPosition = new Vector3(-0.6, 0, 0)
 
   const visited = color.getHex() === COLORS.LIGHT_PURPLE
-  const hyperjump = color.getHex() === COLORS.YELLOW
+  const hyperjump = data.hasHyperjumps
 
   const solid = avatar || genesis || hyperjump || visited
 
   const opacity = solid ? 1 : 0.2
+
+  useFrame(() => {
+    if (hyperjumpRef.current) {
+      hyperjumpRef.current.rotation.y += 0.01
+      hyperjumpRef.current.rotation.x += 0.01
+    }
+  })
+  
+  const shardPosition = new Vector3(.3, -.3, .3)
+  const hyperjumpPosition = new Vector3(-.3, .3, -.3)
   
   return (
     <group position={position}>
@@ -200,19 +215,32 @@ function SectorMarker({ sectorId, selected, avatar, position, color, genesis }: 
         </Text>
       : null}
       { hyperjump ?
-        <Text 
-          textAlign='right'
-          fontSize={0.15}
-          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
-          anchorX={'right'}
-          position={genesisTextPosition} 
-          rotation={[0,0,0]} 
-          frustumCulled={true}
-          renderOrder={-1}
-          color={COLORS.HYPERJUMP} >
-          HYPERJUMP 
-        </Text>
+        <group>
+          <Text 
+            textAlign='right'
+            fontSize={0.15}
+            font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+            anchorX={'right'}
+            position={hyperjumpTextPosition} 
+            rotation={[0,0,0]} 
+            frustumCulled={true}
+            renderOrder={-1}
+            color={COLORS.HYPERJUMP} >
+            HYPERJUMP 
+          </Text>
+          <mesh ref={hyperjumpRef} position={hyperjumpPosition}>
+            <boxGeometry args={[.2, .2, .2]} />
+            <meshBasicMaterial color={COLORS.ORANGE} />
+          </mesh>
+        </group>
       : null}
+      { hasShards ? 
+        <mesh position={shardPosition}>
+          <coneGeometry args={[.125, .25, 7]} />
+          <meshBasicMaterial color={COLORS.GREEN} wireframe />
+        </mesh>
+        : null
+      }
     </group>
   )
 }

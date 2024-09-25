@@ -5,9 +5,11 @@ import { CyberspaceShard, Vertex, Face } from "../store/BuilderStore"
 export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string, coordinate: CyberspaceCoordinate): UnsignedEvent {
   const { created_at, ms_padded } = getTime()
 
-  const vertices = shard.vertices.flatMap((v: Vertex) => v.position).join(',')
-  const colors = shard.vertices.flatMap((v: Vertex) => v.color).join(',')
-  const indices = shard.faces.flatMap((f: Face) => f.vertices).join(',')
+  const limitDecimals = (n: number) => parseFloat(n.toFixed(8)).toString();
+
+  const vertices = shard.vertices.flatMap((v: Vertex) => v.position).map(limitDecimals).join(',')
+  const colors = shard.vertices.flatMap((v: Vertex) => v.color).map(limitDecimals).join(',')
+  const indices = shard.faces.flatMap((f: Face) => f.vertices).map(limitDecimals).join(',')
   
   const event: UnsignedEvent = {
     kind: CyberspaceKinds.Shard,
@@ -22,7 +24,7 @@ export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string,
       ["vertices", vertices],
       ["colors", colors],
       ["indices", indices],
-      ["position", `${coordinate.x.toString()},${coordinate.y.toString()},${coordinate.z.toString()}`],
+      ["position", `${coordinate.local.x.toString()},${coordinate.local.y.toString()},${coordinate.local.z.toString()}`],
       ["display", shard.display],
       ["nonce", "0000000000000000"],
     ],

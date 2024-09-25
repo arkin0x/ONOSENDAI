@@ -24,6 +24,8 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
     const nonceBounds = getNonceBounds(serializedEvent)
     const targetPOW = get().calculateShardSize(shard)
 
+    console.log('Starting mining', shard, 'target POW:', targetPOW)
+
     const worker = new Worker(new URL('../workers/ShardMiner.worker.js', import.meta.url))
 
     worker.onmessage = (event) => {

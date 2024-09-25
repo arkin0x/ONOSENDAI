@@ -26,10 +26,7 @@ const CyberspaceBuild: React.FC = () => {
         {shardIndex !== null && shards[shardIndex] && (
           <>
             <ShardEditor shard={shards[shardIndex]} selectedTool={selectedTool} />
-            <ShardList
-              shards={shards}
-              currentShardId={shardIndex}
-            />
+            <ShardList create/>
           </>
         )}
         <ControlPanel selectedTool={selectedTool} setSelectedTool={setSelectedTool} />

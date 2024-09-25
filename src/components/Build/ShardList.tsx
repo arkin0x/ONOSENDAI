@@ -102,31 +102,38 @@ function ShardList({create, deploy}: ShardListProps) {
     function incrementPosition () {
       return position.add(positionOffset).clone()
     }
-    const list = shards.map((shard) => (
+    const list = shards.map((shard) => {
+      const scale = 1 / (Math.log2(shard.gridSize) * 2)
+      const scaleShard = new Vector3(scale, scale, scale)
+      const adjustUI = -Math.log(shard.gridSize)
+      return (
       <group rotation={[Math.PI/4, 0, 0]} position={incrementPosition()} key={shard.id} onClick={(e) => handleClick(e, shard)} onContextMenu={(e) => handleClick(e, shard)}>
-        <Shard shardData={shardStateDataTo3DData(shard)}/>
-        {renderVertices(shard)}
+        <group scale={scaleShard}>
+          <Shard shardData={shardStateDataTo3DData(shard)}/>
+          {renderVertices(shard)}
+          <gridHelper args={[shard.gridSize, shard.gridSize, COLORS.ORANGE, COLORS.PURPLE]} />
+        </group>
         <Text 
           color={COLORS.ORANGE} 
           fontSize={0.5} 
           font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
           textAlign='center'
           anchorX={'right'}
-          position={[-shard.gridSize/2, 0, 0]} 
+          position={[adjustUI, 0, 0]} 
           rotation={[-Math.PI/4, 0, 0]}
         >
           SHARD {shard.id}
         </Text>
-        <gridHelper args={[shard.gridSize, shard.gridSize, COLORS.ORANGE, COLORS.PURPLE]} />
         { shardIndex !== null && shards[shardIndex] === shard ? 
-          <group position={[-9,0,0]} rotation={[-Math.PI/4,0,-Math.PI/2]} scale={[.5,.5,.5]}>
+          <group position={[adjustUI -7,0,0]} rotation={[-Math.PI/4,0,-Math.PI/2]} scale={[.5,.5,.5]}>
             <Selector />
           </group> 
         : null }
       </group>
-    ))
+      )
+    })
     create && list.push((
-      <group scale={[10,10,10]} position={incrementPosition()}>
+      <group scale={[10,10,10]} key={'create'} position={incrementPosition()}>
         <mesh
           position={[0, 0, 0]}
           onClick={() => addShard()}
@@ -140,7 +147,7 @@ function ShardList({create, deploy}: ShardListProps) {
       </group>
     ))
     deploy && readyToMine && !isMining && list.push((
-      <group scale={[10,10,10]} position={incrementPosition()}>
+      <group scale={[10,10,10]} key={'deploy'} position={incrementPosition()}>
         <mesh
           position={[0, 0, 0]}
           onClick={() => startMiningShard()}

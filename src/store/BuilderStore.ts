@@ -69,7 +69,7 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       addVertex: (position, color) => set((state) => {
-        if (!state.shardIndex) return state
+        if (state.shardIndex === null) return state
         const newVertex: Vertex = { id: Date.now().toString(), position, color }
         const updatedShard = {
           ...state.shards[state.shardIndex],
@@ -82,7 +82,7 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       updateVertex: (id, position, color) => set((state) => {
-        if (!state.shardIndex) return state
+        if (state.shardIndex === null) return state
         const updatedShard = {
           ...state.shards[state.shardIndex],
           vertices: state.shards[state.shardIndex].vertices.map((v) =>
@@ -96,7 +96,7 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       removeVertex: (id) => set((state) => {
-        if (!state.shardIndex) return state
+        if (state.shardIndex === null) return state
         const shard = state.shards[state.shardIndex]
         const vertexIndex = shard.vertices.findIndex((v) => v.id === id);
 
@@ -167,7 +167,7 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       removeFace: (id) => set((state) => {
-        if (!state.shardIndex) return state
+        if (state.shardIndex === null) return state
         const shard = state.shards[state.shardIndex]
         const updatedShard = {
           ...shard,
@@ -180,7 +180,7 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       setGridSize: (size) => set((state) => {
-        if (!state.shardIndex) return state
+        if (state.shardIndex === null) return state
         const updatedShard = {
           ...state.shards[state.shardIndex],
           gridSize: size,

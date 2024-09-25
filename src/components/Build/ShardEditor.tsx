@@ -217,7 +217,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     <group onPointerMove={(event: ThreeEvent<MouseEvent>) => handleVertexDrag(event)} onPointerUp={handleVertexDragEnd}>
       <OrbitControls enabled={!(draggedVertex || draggingColor)} />
       <mesh ref={planeRef} onPointerDown={handlePlaneDown} onPointerMove={handlePlaneDrag} onPointerUp={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
-        <planeGeometry args={[100, 100]} />
+        <planeGeometry args={[shard.gridSize, shard.gridSize]} />
         <meshBasicMaterial visible={false} />
       </mesh>
       {shard.vertices.map((vertex) => (

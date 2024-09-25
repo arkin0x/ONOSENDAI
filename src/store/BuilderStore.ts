@@ -35,7 +35,6 @@ interface BuilderState {
   addFace: (vertices: string[]) => void
   removeFace: (id: string) => void
   setGridSize: (size: number) => void
-  calculateShardSize: (shard: CyberspaceShard) => number
   deleteShard: (shardId: string) => void
 }
 
@@ -191,12 +190,6 @@ export const useBuilderStore = create<BuilderState>()(
           gridSize: size
         }
       }),
-
-      calculateShardSize: (shard) => {
-        return shard.vertices.reduce((sum, vertex) => {
-          return sum + Math.abs(vertex.position[0]) + Math.abs(vertex.position[1]) + Math.abs(vertex.position[2])
-        }, 0)
-      },
 
       deleteShard: (shardId) => set((state) => {
         const shardIndex = state.shards.findIndex((s) => s.id === shardId);

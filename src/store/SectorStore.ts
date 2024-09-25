@@ -28,6 +28,7 @@ export type SectorData = {
   avatars: string[]
   constructs: Event[]
   hyperjumps: Event[]
+  shards: Event[]
   isGenesis: boolean
 }
 
@@ -36,9 +37,10 @@ export type SectorState = Record<SectorId, SectorData>
 type SectorStore = {
   userCurrentSectorId: SectorId | null
   sectorState: SectorState
+  globalAvatars: Set<string>
   globalConstructs: Set<Event>
   globalHyperjumps: Set<Event>
-  globalAvatars: Set<string>
+  globalShards: Set<Event>
   scanAreas: ScanArea[]
   currentScanAreaIndex: number
   updateUserCurrentSectorId: (id: SectorId) => void
@@ -46,11 +48,13 @@ type SectorStore = {
   unmountSector: (sectorId: SectorId) => void
   addAvatar: (sectorId: SectorId, pubkey: string) => void
   removeAvatar: (sectorId: SectorId, pubkey: string) => void
+  addShard: (sectorId: SectorId, event: Event) => void
   addConstruct: (sectorId: SectorId, event: Event) => void
   addHyperjump: (sectorId: SectorId, event: Event) => void
-  getGlobalHyperjumps: () => Event[]
-  getGlobalConstructs: () => Event[]
   getGlobalAvatars: () => string[]
+  getGlobalConstructs: () => Event[]
+  getGlobalHyperjumps: () => Event[]
+  getGlobalShards: () => Event[]
   createScanArea: (anchorSectorId: SectorId) => void
   getNextScanSet: () => SectorId[]
   updateScanArea: (scannedSectors: SectorId[]) => void
@@ -65,9 +69,10 @@ export const useSectorStore = create<SectorStore>()(
     (set, get) => ({
       userCurrentSectorId: null,
       sectorState: {},
+      globalAvatars: new Set<string>(),
       globalConstructs: new Set<Event>(),
       globalHyperjumps: new Set<Event>(),
-      globalAvatars: new Set<string>(),
+      globalShards: new Set<Event>(),
       scanAreas: [],
       currentScanAreaIndex: -1,
 
@@ -90,7 +95,7 @@ export const useSectorStore = create<SectorStore>()(
           return {
             sectorState: {
               ...state.sectorState,
-              [sectorId]: { avatars: [], constructs: [], hyperjumps: [], isGenesis }
+              [sectorId]: { avatars: [], constructs: [], hyperjumps: [], shards: [], isGenesis }
             } 
           }
         } else {
@@ -109,7 +114,8 @@ export const useSectorStore = create<SectorStore>()(
         newGlobalAvatars.add(pubkey)
         // Ensure the sectorId exists in sectorState
         if (!state.sectorState[sectorId]) {
-          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], isGenesis: false }
+          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], shards: [], isGenesis: false }
+
         }
         return {
           sectorState: {
@@ -138,12 +144,32 @@ export const useSectorStore = create<SectorStore>()(
         }
       }),
 
+      addShard: (sectorId, event) => set((state) => {
+        const newGlobalShards = new Set(state.globalShards)
+        newGlobalShards.add(event)
+        // Ensure the sectorId exists in sectorState
+        if (!state.sectorState[sectorId]) {
+          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], shards: [], isGenesis: false }
+        }
+        
+        return {
+          sectorState: {
+            ...state.sectorState,
+            [sectorId]: {
+              ...state.sectorState[sectorId],
+              shards: [...new Set([...state.sectorState[sectorId].shards, event])]
+            }
+          },
+          globalShards: newGlobalShards
+        }
+      }),
+
       addConstruct: (sectorId, event) => set((state) => {
         const newGlobalConstructs = new Set(state.globalConstructs)
         newGlobalConstructs.add(event)
         // Ensure the sectorId exists in sectorState
         if (!state.sectorState[sectorId]) {
-          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], isGenesis: false }
+          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], shards: [], isGenesis: false }
         }
         return {
           sectorState: {
@@ -162,7 +188,7 @@ export const useSectorStore = create<SectorStore>()(
         newGlobalHyperjumps.add(event)
         // Ensure the sectorId exists in sectorState
         if (!state.sectorState[sectorId]) {
-          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], isGenesis: false }
+          state.sectorState[sectorId] = { avatars: [], constructs: [], hyperjumps: [], shards: [], isGenesis: false }
         }
         
         return {
@@ -177,9 +203,11 @@ export const useSectorStore = create<SectorStore>()(
         }
       }),
 
+      getGlobalAvatars: () => Array.from(get().globalAvatars),
       getGlobalConstructs: () => Array.from(get().globalConstructs),
       getGlobalHyperjumps: () => Array.from(get().globalHyperjumps),
-      getGlobalAvatars: () => Array.from(get().globalAvatars),
+      getGlobalShards: () => Array.from(get().globalShards),
+
 
       createScanArea: (anchorSectorId) => set((state) => {
         const newScanArea: ScanArea = {
@@ -352,9 +380,10 @@ export const useSectorStore = create<SectorStore>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ 
         sectorState: state.sectorState,
+        globalAvatars: Array.from(state.globalAvatars),
         globalConstructs: Array.from(state.globalConstructs),
         globalHyperjumps: Array.from(state.globalHyperjumps),
-        globalAvatars: Array.from(state.globalAvatars),
+        globalShards: Array.from(state.globalShards),
         scanAreas: state.scanAreas.map(area => ({
           ...area,
         })),
@@ -363,9 +392,10 @@ export const useSectorStore = create<SectorStore>()(
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
         ...persistedState,
+        globalAvatars: new Set(persistedState.globalAvatars || []),
         globalConstructs: new Set(persistedState.globalConstructs || []),
         globalHyperjumps: new Set(persistedState.globalHyperjumps || []),
-        globalAvatars: new Set(persistedState.globalAvatars || []),
+        globalShards: new Set(persistedState.globalShards || []),
         scanAreas: (persistedState.scanAreas || []).map((area: any) => ({
           ...area,
           sectors: new Set(area.sectors)

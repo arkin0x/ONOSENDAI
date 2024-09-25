@@ -15,7 +15,7 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
   useFrame(() => {
     if (groupRef.current) {
       const cameraPosition = camera.position.clone();
-      const offset = new Vector3(.04, -.09, -.2);
+      const offset = new Vector3(.07, -.09, -.2);
       offset.applyQuaternion(camera.quaternion);
       groupRef.current.position.copy(cameraPosition.add(offset));
       groupRef.current.quaternion.copy(camera.quaternion);

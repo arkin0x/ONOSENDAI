@@ -1,8 +1,5 @@
-import { memo, useEffect, useMemo } from 'react'
-import { CYBERSPACE_SECTOR, cyberspaceCoordinateFromHexString, relativeSectorIndex } from '../../libraries/Cyberspace'
-import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
-import { CyberspaceKinds } from "../../libraries/Cyberspace"
-import NDK, { NDKEvent, NDKSubscription } from '@nostr-dev-kit/ndk'
+import { memo, useMemo } from 'react'
+import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
 import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
@@ -12,7 +9,7 @@ import COLORS from '../../data/Colors'
 import { Avatar } from './Avatar'
 import Hyperjump from './Hyperjump'
 import { generateSectorName } from '../../libraries/SectorName'
-import useNDKStore from '../../store/NDKStore'
+import ShardRenderer from '../ShardRenderer'
 
 interface SectorManagerProps {
   adjacentLayers?: number
@@ -25,6 +22,16 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
   } = useSectorStore()
 
   // Effects
+
+  // Functions
+
+  function renderShards() {
+    if (!userCurrentSectorId) return null
+    if (!sectorState[userCurrentSectorId]) return null
+    return sectorState[userCurrentSectorId].shards.map((event, index) => 
+      <ShardRenderer key={`${event.id}-${index}`} event={event} />
+    )
+  }
 
   const renderAvatars = () => {
     return null
@@ -67,6 +74,7 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
       {renderAvatars()}
       {renderConstructs()}
       {renderHyperjumps()}
+      {renderShards()}
     </>
   )
 }

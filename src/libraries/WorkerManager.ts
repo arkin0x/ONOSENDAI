@@ -1,9 +1,9 @@
 import ObservationWorker from '../workers/Miner.worker?worker'
 import ActionWorker from '../workers/Miner.worker?worker'
 import MovementWorker from '../workers/Miner.worker?worker'
-import { HashpowerAllocation, HashpowerAllocationTarget } from './HashpowerManager'
+import ShardMinerWorker from '../workers/ShardMiner.worker?worker'
 
-export type HashpowerAllocationTarget = 'observation' | 'movement' | 'action'
+export type HashpowerAllocationTarget = 'observation' | 'movement' | 'action' | 'shardMining'
 
 export type HashpowerAllocation = {
   [key in HashpowerAllocationTarget]: number
@@ -17,6 +17,7 @@ const workerTypes: WorkerTypes = {
   'observation': ObservationWorker,
   'movement': MovementWorker,
   'action': ActionWorker,
+  'shardMining': ShardMinerWorker,
 }
 
 type Workzone = {
@@ -28,6 +29,7 @@ export const workzone: Workzone = {
   'observation': [],
   'movement': [],
   'action': [],
+  'shardMining': [],
 }
 
 type WorkerCallbacks = {
@@ -38,14 +40,15 @@ const workerCallbacks: WorkerCallbacks = {
   'observation': () => {},
   'movement': () => {},
   'action': () => {},
+  'shardMining': () => {},
 }
 
 const hashpowerAllocation: HashpowerAllocation = {
   'observation': 0,
-  'movement': 10,
+  'movement': 9,
   'action': 0,
+  'shardMining': 1,
 }
-
 
 // Dispose and Spawn workers according to the hashpower allocation
 export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
@@ -74,7 +77,6 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
       const numWorkersToSpawn = targetAllocation - numWorkers
       for (let i = 0; i < numWorkersToSpawn; i++) {
         const worker = new workerTypes[target]()
-        // set up worker.onmessage here to listen for messages from the worker
         worker.onmessage = workerCallbacks[target]
         workers.push(worker)
       }
@@ -85,6 +87,10 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
 // use this to set what happens when a movement worker sends a message
 export function setWorkerCallback(target: HashpowerAllocationTarget, callback: (event: MessageEvent) => void) {
   workerCallbacks[target] = callback
+   // Apply the new callback to existing workers
+  workzone[target].forEach(worker => {
+    worker.onmessage = callback
+  })
   adjustLabor(hashpowerAllocation) // reassigns the callbacks to the workers
 }
 

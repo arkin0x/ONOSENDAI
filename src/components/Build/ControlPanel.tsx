@@ -6,8 +6,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Group, Vector3 } from 'three';
 
 interface ControlPanelProps {
-  selectedTool: 'vertex' | 'face';
-  setSelectedTool: (tool: 'vertex' | 'face') => void;
+  selectedTool: 'vertex' | 'face' | 'color' | 'move';
+  setSelectedTool: (tool: 'vertex' | 'face' | 'color' | 'move') => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTool }) => {
@@ -38,30 +38,57 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTo
         TOOLS
       </Text>
       <group position={[0, 0.2, 0]}>
+
         <mesh
-          position={[-0.3, 0, 0]}
+          position={[-0.9, 0, 0]}
           onClick={() => setSelectedTool('vertex')}
         >
           <boxGeometry args={[0.5, 0.2, 0.1]} />
           <meshBasicMaterial color={selectedTool === 'vertex' ? COLORS.ORANGE : COLORS.PURPLE} />
         </mesh>
-        <Text position={[-0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+        <Text position={[-0.9, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
           VERTEX
         </Text>
+
+        <mesh
+          position={[-0.3, 0, 0]}
+          onClick={() => setSelectedTool('move')}
+        >
+          <boxGeometry args={[0.5, 0.2, 0.1]} />
+          <meshBasicMaterial color={selectedTool === 'move' ? COLORS.ORANGE : COLORS.PURPLE} />
+        </mesh>
+        <Text position={[-0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+          MOVE 
+        </Text>
+
         <mesh
           position={[0.3, 0, 0]}
+          onClick={() => setSelectedTool('color')}
+        >
+          <boxGeometry args={[0.5, 0.2, 0.1]} />
+          <meshBasicMaterial color={selectedTool === 'color' ? COLORS.ORANGE : COLORS.PURPLE} />
+        </mesh>
+        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+          COLOR 
+        </Text>
+
+        <mesh
+          position={[0.9, 0, 0]}
           onClick={() => setSelectedTool('face')}
         >
           <boxGeometry args={[0.5, 0.2, 0.1]} />
           <meshBasicMaterial color={selectedTool === 'face' ? COLORS.ORANGE : COLORS.PURPLE} />
         </mesh>
-        <Text position={[0.3, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+        <Text position={[0.9, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
           FACE
         </Text>
+
       </group>
+
       <Text position={[0, -0.3, 0]} color={COLORS.ORANGE} fontSize={0.15} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
         GRID SIZE: {gridSize.toFixed(1)}
       </Text>
+
       <group position={[0, -.6, 0]}>
         <group position={[-0.15, 0, 0]}>
           <mesh

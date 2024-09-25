@@ -1,4 +1,6 @@
-export const shardData = {
+import { Shard3DData } from "../components/Build/Shards";
+
+export const shardData: Shard3DData = {
   vertices: [
     0, 1, 0,    // top point
     -1, -1, 1,  // base point 1

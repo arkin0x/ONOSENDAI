@@ -14,9 +14,10 @@ const SectorScanner: React.FC = () => {
   const getSimulatedSectorId = useAvatarStore((state) => state.getSimulatedSectorId)
   const { 
     mountSector, 
+    addAvatar,
     addConstruct, 
     addHyperjump, 
-    addAvatar,
+    addShard,
     getNextScanSet,
     updateScanArea,
     getCurrentScanArea,
@@ -50,7 +51,12 @@ const SectorScanner: React.FC = () => {
       if (sectorIds.length === 0) return
 
       const filter: NDKFilter = {
-        kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds, CyberspaceKinds.Shard as CyberspaceNDKKinds, CyberspaceKinds.Construct as CyberspaceNDKKinds, CyberspaceKinds.Hyperjump as CyberspaceNDKKinds],
+        kinds: [
+          CyberspaceKinds.Action as CyberspaceNDKKinds,
+          CyberspaceKinds.Construct as CyberspaceNDKKinds,
+          CyberspaceKinds.Hyperjump as CyberspaceNDKKinds,
+          CyberspaceKinds.Shard as CyberspaceNDKKinds,
+        ],
         '#S': sectorIds,
       }
 
@@ -58,6 +64,7 @@ const SectorScanner: React.FC = () => {
         const events = await fetchEvents(filter)
 
         events.forEach((event: NDKEvent) => {
+          // console.log('scan event', event)
           const sectorId = event.tags.find(tag => tag[0] === 'S')?.[1]
           if (sectorId) {
             if (event.kind === CyberspaceKinds.Action) {
@@ -66,13 +73,15 @@ const SectorScanner: React.FC = () => {
               addConstruct(sectorId, event.rawEvent() as Event)
             } else if (event.kind === CyberspaceKinds.Hyperjump) {
               addHyperjump(sectorId, event.rawEvent() as Event)
+            } else if (event.kind === CyberspaceKinds.Shard) {
+              addShard(sectorId, event.rawEvent() as Event)
             }
           }
         })
 
         updateScanArea(sectorIds)
 
-        const currentScanArea = getCurrentScanArea()
+        // const currentScanArea = getCurrentScanArea()
         // console.log(`Scanned ${events.size} events for ${sectorIds.length} sectors`)
         // console.log('Current scan area:', currentScanArea?.boundaries, currentScanArea?.nextScanDirection)
       } catch (error) {
@@ -88,7 +97,7 @@ const SectorScanner: React.FC = () => {
         clearInterval(scanIntervalRef.current)
       }
     }
-  }, [addAvatar, addConstruct, addHyperjump, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea, getCurrentScanArea])
+  }, [addAvatar, addConstruct, addHyperjump, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea, getCurrentScanArea, addShard])
 
   return null // This component doesn't render anything
 }

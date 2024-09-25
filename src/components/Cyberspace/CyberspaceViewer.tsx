@@ -8,9 +8,9 @@ import { Hud } from '../Hud/Hud'
 import { TelemetryDashboard } from './TelemetryDashboard'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import useNDKStore from '../../store/NDKStore'
-import { HyperjumpHud } from '../Hud/HyperjumpHud'
-import { SpawnHud } from '../Hud/SpawnHud'
-// import SpeedLines from './Hud/SpeedLines'
+import ShardList from '../Build/ShardList'
+import { Button3D } from '../Button3D'
+import COLORS from '../../data/Colors'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -23,6 +23,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
 
   // toggle telemetry view
   const [showTelemetry, setShowTelemetry] = useState(false)
+  const [showShardList, setShowShardList] = useState(false)
 
   useEffect(() => {
     // set up keyboard listeres to activate telemetry panel
@@ -52,7 +53,10 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       </div>
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
+          <ambientLight intensity={2.0} />
           <Hud/>
+          <Button3D text={"SHARDS"} buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} display='wireframe' position={[0, -3.25, 0]} rotation={[-Math.PI/4,0,0]} onClick={() => setShowShardList(!showShardList)} />
+          { showShardList ? <ShardList deploy/> : null}
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
           </EffectComposer>

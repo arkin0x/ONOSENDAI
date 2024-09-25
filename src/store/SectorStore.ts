@@ -392,6 +392,7 @@ export const useSectorStore = create<SectorStore>()(
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
         ...persistedState,
+        sectorState: persistedState.sectorState || {}, // Add this line
         globalAvatars: new Set(persistedState.globalAvatars || []),
         globalConstructs: new Set(persistedState.globalConstructs || []),
         globalHyperjumps: new Set(persistedState.globalHyperjumps || []),

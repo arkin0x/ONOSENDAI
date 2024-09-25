@@ -41,7 +41,7 @@ function initiateMining(data) {
       if (POW >= targetPOW) {
         console.log('POW found', POW, 'targetPOW', targetPOW)
         const id = uint8ToHex(digest)
-        self.postMessage({ status: 'pow-target-found', shardEvent, nonceBounds, digest, id, currentNonce, POW })
+        self.postMessage({ status: 'pow-target-found', data: { shardEvent, nonceBounds, digest, id, currentNonce, POW }})
         active = false
         return
       }
@@ -52,7 +52,7 @@ function initiateMining(data) {
     } else if (!active) {
       self.postMessage({ status: 'stopped' })
     } else {
-      self.postMessage({ status: 'batch-complete', currentNonce })
+      self.postMessage({ status: 'batch-complete', data: { currentNonce }})
     }
   }
 

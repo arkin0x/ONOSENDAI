@@ -4,13 +4,13 @@ import { createUnsignedShardEvent } from '../libraries/ShardUtils'
 import { serializeEvent, deserializeEvent, getNonceBounds } from '../libraries/Miner'
 import { cyberspaceCoordinateFromHexString } from '../libraries/Cyberspace'
 import useNDKStore from './NDKStore'
-import { workzone, setWorkerCallback } from '../libraries/WorkerManager'
+import { workzone, setWorkerCallback, updateHashpowerAllocation } from '../libraries/WorkerManager'
 
 
 type ShardMinerState = {
   isMining: boolean
   progress: number
-  startMining: (shard: CyberspaceShard, pubkey: string, coordinateHex: string) => void
+  startMining: (shard: CyberspaceShard, coordinateHex: string) => void
   stopMining: () => void
   calculateShardSize: (shard: CyberspaceShard) => number
 }
@@ -19,11 +19,21 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
   isMining: false,
   progress: 0,
 
-  startMining: (shard, pubkey, coordinateHex) => {
+  startMining: (shard, coordinateHex) => {
+    updateHashpowerAllocation()
+    const identity = useNDKStore.getState().getUser()
+    const pubkey = identity?.pubkey
+    if (!pubkey) {
+      console.error('No pubkey found')
+      return
+    }
+    console.log('pubkey', pubkey)
     const coordinate = cyberspaceCoordinateFromHexString(coordinateHex)
     const unsignedEvent = createUnsignedShardEvent(shard, pubkey, coordinate)
     const serializedEvent = serializeEvent(unsignedEvent)
+    console.log('serialized Event', serializedEvent)
     const nonceBounds = getNonceBounds(serializedEvent)
+    console.log('nonceBounds', nonceBounds)
     const shardBinary = new TextEncoder().encode(serializedEvent)
     const targetPOW = get().calculateShardSize(shard)
 
@@ -71,7 +81,9 @@ function handleShardMinerMessage(event: MessageEvent) {
   const { status, data } = event.data
   console.log('shard miner message:', status, data)
   if (status === 'pow-target-found') {
-    const minedEvent = deserializeEvent(data.shardEvent)
+    console.log()
+    const shardEventDecoded = new TextDecoder().decode(data.shardEvent)
+    const minedEvent = deserializeEvent(shardEventDecoded)
     minedEvent.id = data.id
     useNDKStore.getState().publishRaw(minedEvent)
     useShardMinerStore.getState().stopMining()

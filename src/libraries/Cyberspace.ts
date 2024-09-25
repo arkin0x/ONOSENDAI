@@ -58,9 +58,9 @@ export type Sha256Hash = Hex256Bit & { readonly __brand: unique symbol }
 // NOSTR KINDS
 export enum CyberspaceKinds {
   Hyperjump = 321,
-  Shard = 330,
+  Shard = 3330,
   Construct = 331,
-  Prism = 332,
+  Prism = 3332,
   Action = 3333
 }
 

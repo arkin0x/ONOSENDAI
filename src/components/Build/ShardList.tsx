@@ -65,7 +65,7 @@ function ShardList({create, deploy}: ShardListProps) {
     const latestAction = getLatest(pubkey!)
     const actionState = extractCyberspaceActionState(latestAction!)
     const coordRaw = actionState.coordinate.raw
-    startMining(shards[shardIndex!], pubkey!, coordRaw)
+    startMining(shards[shardIndex!], coordRaw)
     setIsMining(true)
   }
 

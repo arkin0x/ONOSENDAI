@@ -77,7 +77,6 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
       const numWorkersToSpawn = targetAllocation - numWorkers
       for (let i = 0; i < numWorkersToSpawn; i++) {
         const worker = new workerTypes[target]()
-        // set up worker.onmessage here to listen for messages from the worker
         worker.onmessage = workerCallbacks[target]
         workers.push(worker)
       }
@@ -88,6 +87,10 @@ export const adjustLabor = (hashpowerAllocation: HashpowerAllocation) => {
 // use this to set what happens when a movement worker sends a message
 export function setWorkerCallback(target: HashpowerAllocationTarget, callback: (event: MessageEvent) => void) {
   workerCallbacks[target] = callback
+   // Apply the new callback to existing workers
+  workzone[target].forEach(worker => {
+    worker.onmessage = callback
+  })
   adjustLabor(hashpowerAllocation) // reassigns the callbacks to the workers
 }
 

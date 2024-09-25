@@ -60,9 +60,11 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
   },
 
   calculateShardSize: (shard) => {
-    return shard.vertices.reduce((sum, vertex) => {
+    const sum = shard.vertices.reduce((sum, vertex) => {
       return sum + Math.abs(vertex.position[0]) + Math.abs(vertex.position[1]) + Math.abs(vertex.position[2])
     }, 0)
+    const pow = Math.ceil( Math.sqrt(sum) )
+    return pow
   },
 
 }))

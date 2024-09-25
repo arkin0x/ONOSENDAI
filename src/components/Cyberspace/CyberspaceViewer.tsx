@@ -55,7 +55,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
           <Hud/>
-          <Button3D text={"SHARDS"} buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} position={[0, -3, 0]} onClick={() => setShowShardList(!showShardList)} />
+          <Button3D text={"SHARDS"} buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} display='wireframe' position={[0, -3.25, 0]} rotation={[-Math.PI/4,0,0]} onClick={() => setShowShardList(!showShardList)} />
           { showShardList ? <ShardList deploy/> : null}
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />

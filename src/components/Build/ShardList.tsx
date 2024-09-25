@@ -11,6 +11,7 @@ import { useShardMinerStore } from '../../store/ShardMinerStore'
 import useNDKStore from '../../store/NDKStore'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { extractCyberspaceActionState } from '../../libraries/Cyberspace'
+import { Spinner } from '../Spinner'
 
 interface ShardListProps {
   create?: boolean
@@ -19,12 +20,11 @@ interface ShardListProps {
 
 function ShardList({create, deploy}: ShardListProps) {
   const { addShard, setGridSize, setCurrentShard, deleteShard, shards, shardIndex} = useBuilderStore()
-  const { startMining } = useShardMinerStore()
+  const { startMining, isMining, progress} = useShardMinerStore()
   const { getUser } = useNDKStore()
   const identity = getUser()
   const { getLatest } = useAvatarStore()
   const [readyToMine, setReadyToMine] = useState(false)
-  const [isMining, setIsMining] = useState(false)
   const groupRef = useRef<Group>(null)
   const { camera } = useThree()
 
@@ -66,7 +66,6 @@ function ShardList({create, deploy}: ShardListProps) {
     const actionState = extractCyberspaceActionState(latestAction!)
     const coordRaw = actionState.coordinate.raw
     startMining(shards[shardIndex!], coordRaw)
-    setIsMining(true)
   }
 
   function handleClick(event, shard) {
@@ -159,6 +158,9 @@ function ShardList({create, deploy}: ShardListProps) {
           DEPLOY 
         </Text>
       </group>
+    ))
+    deploy && isMining && list.push((
+      <Spinner progress={progress} position={incrementPosition()} scale={[1,1,1]}/>
     ))
     return list
   }

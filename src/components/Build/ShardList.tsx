@@ -97,7 +97,7 @@ function ShardList({create, deploy}: ShardListProps) {
 
   function shardList() {
     const position = new Vector3(5, 0.5, 0)
-    const positionOffset = new Vector3(0, -5, 0)
+    const positionOffset = new Vector3(0, -3, 0)
     function incrementPosition () {
       return position.add(positionOffset).clone()
     }

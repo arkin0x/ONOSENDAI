@@ -3,7 +3,7 @@ import { useThree, ThreeEvent } from '@react-three/fiber'
 import { Face, CyberspaceShard as ShardType, useBuilderStore, Vertex } from '../../store/BuilderStore'
 import COLORS from '../../data/Colors'
 import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three'
-import { OrbitControls, Text } from '@react-three/drei'
+import { Line, OrbitControls, Text } from '@react-three/drei'
 import VertexSelectionIndicator from './VertexSelectionIndicator'
 import Shard from '../Cyberspace/Shard'
 import { Shard3DData, shardStateDataTo3DData } from './Shards'
@@ -94,17 +94,21 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
     console.log('drag start', id, axis)
     setDraggedVertex(id)
     setDragAxis(axis)
-    document.addEventListener('pointermove', handleVertexDrag)
+    document.addEventListener('pointermove', handleVertexDragMove)
     document.addEventListener('pointerup', handleVertexDragEnd)
   }
-
-  const handleVertexDrag = (event: PointerEvent) => {
+  
+  const handleVertexDragMove = (event: MouseEvent) => {
+    handleVertexDrag(event as unknown as ThreeEvent<MouseEvent>)
+  }
+  
+  const handleVertexDrag = (event: ThreeEvent<MouseEvent>) => {
     if (draggedVertex && dragAxis) {
       const vertex = shard.vertices.find(v => v.id === draggedVertex)
       if (vertex) {
         const newPosition = [...vertex.position]
         const movementScale = 0.1
-        
+  
         switch (dragAxis) {
           case 'x':
             newPosition[0] += Math.sign(event.movementX) * movementScale
@@ -116,16 +120,16 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
             newPosition[2] += Math.sign(event.movementX) * movementScale
             break
         }
-        
+  
         updateVertex(draggedVertex, newPosition as [number, number, number], vertex.color)
       }
     }
   }
-
+  
   const handleVertexDragEnd = () => {
     setDraggedVertex(null)
     setDragAxis(null)
-    document.removeEventListener('pointermove', handleVertexDrag)
+    document.removeEventListener('pointermove', handleVertexDragMove)
     document.removeEventListener('pointerup', handleVertexDragEnd)
   }
 
@@ -210,7 +214,7 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
   }
 
   return (
-    <group onPointerMove={(event: ThreeEvent<PointerEvent>) => handleVertexDrag(event.nativeEvent)} onPointerUp={handleVertexDragEnd}>
+    <group onPointerMove={(event: ThreeEvent<MouseEvent>) => handleVertexDrag(event)} onPointerUp={handleVertexDragEnd}>
       <OrbitControls enabled={!(draggedVertex || draggingColor)} />
       <mesh ref={planeRef} onPointerDown={handlePlaneDown} onPointerMove={handlePlaneDrag} onPointerUp={handlePlaneClick} rotation={[-Math.PI/2, 0, 0]}>
         <planeGeometry args={[100, 100]} />
@@ -218,6 +222,13 @@ const ShardEditor: React.FC<ShardEditorProps> = ({ shard, selectedTool }) => {
       </mesh>
       {shard.vertices.map((vertex) => (
         <group key={vertex.id}>
+          { selectedTool === 'move' &&
+            <group position={vertex.position}>
+              <Line points={[shard.gridSize, 0, 0, -shard.gridSize, 0, 0]} color={COLORS.DARK_PURPLE} />
+              <Line points={[0, shard.gridSize, 0, 0, -shard.gridSize, 0]} color={COLORS.DARK_PURPLE} />
+              <Line points={[0, 0, shard.gridSize, 0, 0, -shard.gridSize]} color={COLORS.DARK_PURPLE} />
+            </group>
+          }
           <mesh // actual vertex mesh
             position={vertex.position}
             onPointerOver={() => handleVertexHover(vertex.id)}

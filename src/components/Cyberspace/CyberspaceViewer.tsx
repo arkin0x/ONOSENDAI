@@ -9,8 +9,8 @@ import { TelemetryDashboard } from './TelemetryDashboard'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import useNDKStore from '../../store/NDKStore'
 import ShardList from '../Build/ShardList'
-import { Button3D } from '../Button3D'
 import COLORS from '../../data/Colors'
+import { NavText } from '../Interface'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -54,8 +54,11 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
+          <group position={[0,-150,-180]}>
+            <NavText text={"SHARDS"} position={{x: -11, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)}/> 
+            <NavText text={"TELEMETRY"} position={{x: 25, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2}/> 
+          </group>
           <Hud/>
-          <Button3D text={"SHARDS"} buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} display='wireframe' position={[0, -3.25, 0]} rotation={[-Math.PI/4,0,0]} onClick={() => setShowShardList(!showShardList)} />
           { showShardList ? <ShardList deploy/> : null}
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />

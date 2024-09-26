@@ -79,9 +79,10 @@ type CoordinateTextProps = {
   fontSize?: number
   onClick?: () => void
   current?: boolean
+  customWidth?: number
 }
 
-const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
+export const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
   const { viewport } = useThree()
   const [hover, setHover] = useState(false)
 
@@ -100,11 +101,12 @@ const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
 
   // Define vertices for the rhombus
   const w = 6
+  const customWidth = props.customWidth || 0
   const vertices = new Float32Array([
-    -w, -1, 0, // left
-    -w/2, 1, 0,  // top
-    w, 1, 0,  // right
-    w/2, -1, 0 // bottom
+    -w -customWidth, -1, 0, // left
+    -w/2 -customWidth, 1, 0,  // top
+    w + customWidth, 1, 0,  // right
+    w/2 + customWidth, -1, 0 // bottom
   ])
 
   // Create BufferGeometry and set the vertices

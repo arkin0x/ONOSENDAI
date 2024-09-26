@@ -1,18 +1,16 @@
 import { Event } from 'nostr-tools'
-import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3 } from 'three'
+import { BufferGeometry, Float32BufferAttribute, Mesh, PointsMaterial, Vector3, Group } from 'three'
 import { CyberspaceCoordinate, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
-import { useMemo } from 'react'
-import { shardData } from '../../data/ShardData'
-import Shard from './Shard'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 
 interface HyperjumpProps {
   event: Event
 }
 
-const BLOCK_SIZE = 1
-
 function Hyperjump({event}: HyperjumpProps) {
+  const hyperjumpRef = useRef<Group>(null)
 
   const position = getBlockPosition(event)
   const size = 1// BLOCK_SIZE
@@ -25,24 +23,26 @@ function Hyperjump({event}: HyperjumpProps) {
 
   const material = useMemo(() => {
     return new PointsMaterial({
-      color: 0x000000,//0xff9900,
-      size: 1,
+      color: COLORS.HYPERJUMP,
+      size: 3,
       sizeAttenuation: false
     })
-  }, [size])
+  }, [])
 
-  // return 
-
-  // console.log('hyperjump', position)
+  useFrame(() => {
+    if (hyperjumpRef.current) {
+      hyperjumpRef.current.rotation.y += 0.01
+      hyperjumpRef.current.rotation.x += 0.01
+    }
+  })
 
   return (
-    <group position={position}>
-      {/* <mesh>
+    <group ref={hyperjumpRef} position={position}>
+      <mesh>
         <boxGeometry args={[size, size, size]} />
         <meshBasicMaterial color={COLORS.YELLOW} />
-      </mesh> */}
+      </mesh>
       <points geometry={geometry} material={material} />
-      <Shard shardData={shardData} />
     </group>
   )
 }

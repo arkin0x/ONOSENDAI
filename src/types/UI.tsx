@@ -5,6 +5,6 @@ export enum UIState {
   "build",
   "telemetry",
   "settings",
-  "about",
+  "info",
   "testing"
 }

@@ -13,6 +13,7 @@ import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import CyberspaceBuild from "./Build/CyberspaceBuild"
 import { useUIStore } from "../store/UIStore"
 import SectorScanner from "./Cyberspace/SectorScanner"
+import CyberspaceInfo from "./Info/CyberspaceInfo"
 
 export function Interface(){
   const navigate = useNavigate()
@@ -33,6 +34,8 @@ export function Interface(){
         return <CyberspaceGlobal />
       case UIState.build:
         return <CyberspaceBuild />
+      case UIState.info:
+        return <CyberspaceInfo />
       default:
         break
     }
@@ -47,11 +50,12 @@ export function Interface(){
           <OrbitControls enablePan={false} enableZoom={false} enableRotate={false} />
           <ambientLight intensity={2.0} />
           <group>
-            <NavText text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)} current={uiState === UIState.cyberspace}/>
-            <NavText text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
-            <NavText text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
-            <NavText text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.PINK} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
-            <NavText text="LOGOUT" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGOUT} onClick={logOut}/>
+            <NavText key={'local'} text="LOCAL" position={{x: 20, y: 0}} align="center" color={0xcebe00} onClick={() => setUIState(UIState.cyberspace)} current={uiState === UIState.cyberspace}/>
+            <NavText key={'sector'} text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
+            <NavText key={'global'} text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
+            <NavText key={'build'} text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.PINK} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
+            <NavText key={'info'} text="INFO" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGO_BLUE} onClick={() => setUIState(UIState.info)}/>
+            <NavText key={'logout'} text="LOGOUT" position={{x: 195, y: 0, z: 0}} align="center" color={COLORS.LOGOUT} onClick={logOut}/>
           </group>
           <EffectComposer>
             <Bloom mipmapBlur levels={5} intensity={5} luminanceThreshold={-1} luminanceSmoothing={0} />

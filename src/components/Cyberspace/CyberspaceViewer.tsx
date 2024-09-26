@@ -11,6 +11,7 @@ import useNDKStore from '../../store/NDKStore'
 import ShardList from '../Build/ShardList'
 import COLORS from '../../data/Colors'
 import { NavText } from '../Interface'
+import { useControlStore } from '../../store/ControlStore'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -20,13 +21,15 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const { getUser } = useNDKStore()
   const identity = getUser()
   const viewerRef = useRef<HTMLDivElement>(null)
+  const { controlState, setControlState } = useControlStore()
 
   // toggle telemetry view
   const [showShardList, setShowShardList] = useState(false)
   const [showTelemetry, setShowTelemetry] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [showSector, setShowSector] = useState(false)
 
-  const x = 0 // x center
+  const x = 4 // x center
 
 
   return (
@@ -46,11 +49,13 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
           <group position={[0,-150,-180]}>
-            <NavText text={"TELEMETRY"} position={{x: x - 40, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2}/> 
+            <NavText text={"CRUISE"} position={{x: x - 75, y: 0}} align="center" color={controlState.cruise ? COLORS.ORANGE : COLORS.PINK} onClick={() => setControlState({ cruise: !controlState.cruise})}/> 
+            <NavText text={"TELEMETRY"} position={{x: x - 38, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2}/> 
             <NavText text={"SHARDS"} position={{x: x, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)}/> 
-            <NavText text={"PATH"} position={{x: x + 40, y: 0}} align="center" color={showHistory ? COLORS.ORANGE : COLORS.RED} onClick={() => setShowHistory(!showHistory)}/> 
+            <NavText text={"PATH"} position={{x: x + 32, y: 0}} align="center" color={showHistory ? COLORS.ORANGE : COLORS.RED} onClick={() => setShowHistory(!showHistory)}/> 
+            <NavText text={"SECTOR"} position={{x: x + 64, y: 0}} align="center" color={showSector ? COLORS.ORANGE : COLORS.LIGHT_PURPLE} onClick={() => setShowSector(!showSector)}/> 
           </group>
-          <Hud/>
+          <Hud showSectorInfo={showSector}/>
           { showShardList ? <ShardList deploy/> : null}
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />

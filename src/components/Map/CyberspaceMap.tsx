@@ -5,6 +5,7 @@ import { MapControls } from './MapControls'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import SectorGrid from './SectorGrid'
 import { OrbitControls } from '@react-three/drei'
+import { SimpleHud } from '../Hud/SimpleHud'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -19,6 +20,7 @@ const CyberspaceMap = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
           <MapControls />
           <SectorGrid />
           <OrbitControls target={[0,0,0]} />
+          <SimpleHud showSectorInfo={true} />
           <MapCamera />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />

@@ -26,7 +26,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const [showShardList, setShowShardList] = useState(false)
 
   useEffect(() => {
-    // set up keyboard listeres to activate telemetry panel
+    // set up keyboard listeners to activate telemetry panel
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key === 't') {
         setShowTelemetry(!showTelemetry)
@@ -46,19 +46,18 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
           <SectorManager adjacentLayers={1} />
           <Avatar pubkey={identity!.pubkey} />
           <Controls />
-          <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
-          </EffectComposer>
-        </Canvas>
-      </div>
-      <div id="cyberspace-hud">
-        <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
-          <ambientLight intensity={2.0} />
-          <Hud/>
-          <Button3D text={"SHARDS"} buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} display='wireframe' position={[0, -3.25, 0]} rotation={[-Math.PI/4,0,0]} onClick={() => setShowShardList(!showShardList)} />
+          <Hud showFullHud={true} />
+          <Button3D 
+            text={"SHARDS"} 
+            buttonColor={showShardList ? COLORS.ORANGE : COLORS.PURPLE} 
+            display='wireframe' 
+            position={[0, -3.25, 0]} 
+            rotation={[-Math.PI/4,0,0]} 
+            onClick={() => setShowShardList(!showShardList)} 
+          />
           { showShardList ? <ShardList deploy/> : null}
           <EffectComposer>
-            <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
+            <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>
         </Canvas>
       </div>

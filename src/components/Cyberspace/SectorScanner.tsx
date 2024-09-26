@@ -21,9 +21,10 @@ const SectorScanner: React.FC = () => {
     getNextScanSet,
     updateScanArea,
     getCurrentScanArea,
-    updateUserCurrentSectorId
+    updateUserCurrentSectorId,
+    userCurrentSectorId
   } = useSectorStore()
-  const { fetchEvents, getUser } = useNDKStore()
+  const { fetchEvents, getUser, subscribe } = useNDKStore()
   const identity = getUser()
   const pubkey = identity?.pubkey
 
@@ -39,6 +40,40 @@ const SectorScanner: React.FC = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // subscribe to current sector changess
+  useEffect(() => {
+    if (!userCurrentSectorId) return
+    const filter: NDKFilter = {
+      kinds: [
+        CyberspaceKinds.Action as CyberspaceNDKKinds,
+        CyberspaceKinds.Construct as CyberspaceNDKKinds,
+        CyberspaceKinds.Hyperjump as CyberspaceNDKKinds,
+        CyberspaceKinds.Shard as CyberspaceNDKKinds,
+      ],
+      '#S': [userCurrentSectorId],
+    }
+    const sub = subscribe(filter, {
+      closeOnEose: false,
+      groupable: false,
+    })
+    sub.on('event',(event: NDKEvent) => {
+      const sectorId = event.tags.find(tag => tag[0] === 'S')?.[1]
+      if (!sectorId) return
+      if (event.kind === CyberspaceKinds.Action) {
+        addAvatar(sectorId, event.pubkey)
+      } else if (event.kind === CyberspaceKinds.Construct) {
+        addConstruct(sectorId, event.rawEvent() as Event)
+      } else if (event.kind === CyberspaceKinds.Hyperjump) {
+        addHyperjump(sectorId, event.rawEvent() as Event)
+      } else if (event.kind === CyberspaceKinds.Shard) {
+        addShard(sectorId, event.rawEvent() as Event)
+      }
+    })
+    return () => {
+      sub.stop()
+    }
+  }, [userCurrentSectorId])
 
   useEffect(() => {
     const scanSectors = async () => {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import NDK, { NDKEvent, NDKFilter, NDKPrivateKeySigner, NDKRelay, NDKUser, NDKUserProfile, NDKSubscriptionOptions, NDKNip07Signer } from '@nostr-dev-kit/ndk';
+import NDK, { NDKEvent, NDKFilter, NDKPrivateKeySigner, NDKRelay, NDKUser, NDKUserProfile, NDKSubscriptionOptions, NDKNip07Signer, NDKRelaySet, NDKSubscription } from '@nostr-dev-kit/ndk';
 // import NDKRedisCacheAdapter from '@nostr-dev-kit/ndk-cache-redis'
 import { initializeIdentity, loadNpub, unlockKeyForSigning } from '../libraries/LocalIdentity';
 import { nip19, UnsignedEvent } from 'nostr-tools';
@@ -23,8 +23,8 @@ interface NDKState {
   getNDK: () => NDK
   unlockLocalKeySigner: () => void
   lockLocalKeySigner: () => void
-  initLocalKeyUser: (callback: () => void) => Promise<void>
-  initExtensionUser: (callback: () => void) => Promise<void>
+  initLocalKeyUser: (callback?: () => void) => Promise<void>
+  initExtensionUser: (callback?: () => void) => Promise<void>
   resetUser: () => void
   fetchUserProfile: () => Promise<void>
   getUser: () => NDKUser | undefined
@@ -36,6 +36,8 @@ interface NDKState {
   rawEventToNDKEvent: (rawEvent: UnsignedEvent) => NDKEvent
   publishRaw: (rawEvent: UnsignedEvent) => Promise<Set<NDKRelay>>
   publish: (event: NDKEvent) => Promise<Set<NDKRelay>>
+  subscribe: (filter: NDKFilter, options: NDKSubscriptionOptions, relays?: string[]) => NDKSubscription
+  createNDKRelaySet: (relays: string[]) => NDKRelaySet
 }
 
 export interface NDKStoreConfig {
@@ -105,7 +107,8 @@ const useNDKStore = create<NDKState>((set, get) => ({
   initLocalKeyUser: async (callback=function(){}) => {
     console.log('INITLOCAL')
     const ndk = get().getNDK()
-    initializeIdentity() // sets up a newly generated identity if one doesn't exist
+    const signer = initializeIdentity() // sets up a newly generated identity if one doesn't exist
+    ndk.signer = signer
     ndk.activeUser = new NDKUser({npub: loadNpub()})
     ndk.activeUser.ndk = ndk
     localStorage.removeItem('useExtension')
@@ -201,6 +204,21 @@ const useNDKStore = create<NDKState>((set, get) => ({
     if (!ndk.signer) get().unlockLocalKeySigner()
     return await event.publish()
   },
+
+  subscribe: (filter: NDKFilter, options: NDKSubscriptionOptions, relays?: string[]) => {
+    const ndk = get().getNDK()
+    const relaySet = get().createNDKRelaySet(relays || defaultRelays)
+    return ndk.subscribe(filter, options, relaySet)
+  },
+
+  createNDKRelaySet(relays: string[]): NDKRelaySet {
+    const ndk = get().getNDK()
+    const newSet = new Set<NDKRelay>()
+    relays.forEach(relay => {
+      newSet.add(new NDKRelay(relay))
+    })
+    return new NDKRelaySet(newSet, ndk)
+  }
   // Add more NDK methods and state as needed
 }))
 
@@ -213,4 +231,4 @@ useNDKStore.getState().initNDK({
     else useNDKStore.getState().initLocalKeyUser(() => {})
 })
 
-export default useNDKStore;
+export default useNDKStore

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-type ControlState = {
+export type ControlState = {
   forward: boolean
   backward: boolean
   left: boolean

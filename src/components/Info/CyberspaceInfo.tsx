@@ -48,8 +48,36 @@ const CyberspaceInfo = ({style = {height: "100svh"}}: CyberspaceViewerProps) => 
             <Terminal 
               animate={messageIncrement === 3}
               text={"NOSTR is the underlying decentralized\nmessaging layer of cyberspace. Each NOSTR\nidentity can act as an avatar in cyberspace;\nits home coordinate is its hex pubkey."} 
-              position={{x: 1, y: 25}} 
+              position={{x: 30, y: 25}} 
               color={COLORS.LIGHT_PURPLE}
+              callback={nextMessage} 
+            />
+          }
+          { messageIncrement > 3 && 
+            <Terminal 
+              animate={messageIncrement === 4}
+              text={"ONOSENDAI is the first implementation of the\ncyberspace protocol which was founded on the\nkey insight that proof of work is the only\nmechanism that can make a metaverse more than\na glorified video game. Nothing happens in\ncyberspace unless real energy is expended in\nthe real world. Nobody controls cyberspace\nbecause it is simply a protocol that derives\na state from NOSTR events broadcast across\nan ever-shifting mesh of global relays.\nThere is no authority or privilege in this\nmetaverse. All that matters is proof of work.\nActions in cyberspace are consequential.\nTerritory is finite. Act accordingly."} 
+              position={{x: 1, y: 10}} 
+              color={COLORS.LOGO_TEAL}
+              callback={nextMessage} 
+            />
+          }
+          { messageIncrement > 4 && 
+            <Terminal 
+              animate={messageIncrement === 5}
+              text={"This is the fulfillment of the SF visionaries\nwho foresaw not a game but a new meaningful\nworld only accessible through technology. It\nis a digital world where the rules are\nenforced by the laws of physics. In my humble\nopinion, it is a world that is not meant to\ncompete with the real world, but to extend it,\nand by doing so, extend our freedoms and\ncapabilities as humans."} 
+              position={{x: 30, y: -25}} 
+              color={COLORS.RED}
+              callback={nextMessage} 
+            />
+          }
+          { messageIncrement > 5 && 
+            <Terminal 
+              animate={messageIncrement === 6}
+              text={"Welcome to cyberspace!\n\n\n\narkinox\n\nblock 862903"} 
+              position={{x: 1, y: -50}} 
+              color={COLORS.GRID_CROSS}
+              callback={nextMessage} 
             />
           }
           <EffectComposer>

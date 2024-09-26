@@ -83,6 +83,35 @@ const CyberspaceInfo = ({style = {height: "100svh"}}: CyberspaceViewerProps) => 
                 text={"Welcome to cyberspace!\n\n\n\narkinox\n\nblock 862903"} 
                 position={{x: 1, y: -55}} 
                 color={COLORS.GRID_CROSS}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 6 && 
+              <Terminal 
+                animate={messageIncrement === 7}
+                text={"INFO:\n"} 
+                position={{x: 1, y: -76}} 
+                color={COLORS.ORANGE}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 7 && 
+              <Terminal 
+                onClick={() => window.open('https://straylight.cafe', '_blank')}
+                animate={messageIncrement === 8}
+                text={"> Official ONOSENDAI and futurism community:\n\nhttps://straylight.cafe     (click here)\n\nWe are abandoning the ONOSENDAI Telegram group\nin favor of a Ditto instance powered by NOSTR\nand hosted by arkinox. Come share your cyberspace\nexperiences and ask questions!"} 
+                position={{x: 1, y: -85}} 
+                color={COLORS.ORANGE}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 8 && 
+              <Terminal 
+                animate={messageIncrement === 9}
+                text={"> Official cyberspace protocol website:\n\nhttps://cyberspace.international\n\nProliferation, outreach, onboarding, and resources.\nComing soon."} 
+                position={{x: 1, y: -105}} 
+                color={COLORS.ORANGE}
+                callback={nextMessage} 
               />
             }
           </group>
@@ -106,10 +135,11 @@ type TerminalProps = {
   }
   color?: string | number
   align?: "left" | "center" | "right"
+  onClick?: () => void
   callback?: () => void
 }
 
-function Terminal({ animate, text, position, color, align, callback }: TerminalProps) {
+function Terminal({ animate, text, position, color, align, onClick, callback }: TerminalProps) {
   const cursorOnChar = '>'
   const cursorOffChar = '\u00A0'
   const cursorBlinkRate = 30
@@ -151,13 +181,15 @@ function Terminal({ animate, text, position, color, align, callback }: TerminalP
   })
 
   return (
-    <CoordinateText
-      position={position || { x: 50, y: 50 }}
-      color={color || COLORS.ORANGE}
-      text={`${displayedTextRef.current}${animate ? cursor : ''}`}
-      align={align || "left"}
-      anchorY={"top"}
-      maxWidth={50}
-    />
+    <group onClick={onClick}>
+      <CoordinateText
+        position={position || { x: 50, y: 50 }}
+        color={color || COLORS.ORANGE}
+        text={`${displayedTextRef.current}${animate ? cursor : ''}`}
+        align={align || "left"}
+        anchorY={"top"}
+        maxWidth={50}
+      />
+    </group>
   )
 }

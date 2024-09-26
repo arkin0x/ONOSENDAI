@@ -64,7 +64,7 @@ const SectorScanner: React.FC = () => {
         addAvatar(sectorId, event.pubkey)
       } else if (event.kind === CyberspaceKinds.Construct) {
         addConstruct(sectorId, event.rawEvent() as Event)
-      } else if (event.kind === CyberspaceKinds.Hyperjump) {
+      } else if (event.kind === CyberspaceKinds.Hyperjump && event.pubkey === "811ccc1b997eb22662065700502169644e2d30b2944b56ee846a8874cc286d3f") { // NTH official pubkey. I trust it because I made it.
         addHyperjump(sectorId, event.rawEvent() as Event)
       } else if (event.kind === CyberspaceKinds.Shard) {
         addShard(sectorId, event.rawEvent() as Event)

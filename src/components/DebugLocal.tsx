@@ -29,7 +29,7 @@ export function DebugLocal() {
           ],
           [
             "N",
-            "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000001"
           ],
           [
             "B",
@@ -42,22 +42,58 @@ export function DebugLocal() {
         "sig": "ba7cc8ab8ecbbe612ee1f6cda1bf82e46a610d12df6333783353c7d16c7f0d32ed1f5adcc73b6fee1b6b29f88341a30295f3024694aab06d2dacdcd70596ca0c"
       }
     )
-    addHyperjump("22493668282275762-30865482130737919-22684969844795303", 
+    addHyperjump("22302181039602187-34090414272272904-1411266363892683", 
       {
         "created_at": 1725657526,
         "content": "Block -2 TEST",
         "tags": [
           [
             "C",
-            "e8ed3798c6ffebffa08501ac39e271662bef5f27d88f94c45d692d8767dd345a"
+            "c96b3813657d123d701173466b1a1fd761c920716eae7abb625cabe07a299f2e"
           ],
           [
             "S",
-            "22493668282275762-30865482130737919-22684969844795303"
+            "22302181039602187-34090414272272904-1411266363892683"
           ],
           [
             "H",
-            "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000001"
+          ],
+          [
+            "P",
+            "0000000000000000000081730d842e2a0bbaa65d507713be09610d0494ae7349"
+          ],
+          [
+            "N",
+            "0000000000000000000000000000000000000000000000000000000000000002"
+          ],
+          [
+            "B",
+            "-1"
+          ]
+        ],
+        "kind": 321,
+        "pubkey": "811ccc1b997eb22662065700502169644e2d30b2944b56ee846a8874cc286d3f",
+        "id": "6cdfd44606a473ad656a8933c71d757cab03386a89f0ccc2822f8eeaf4170e81",
+        "sig": "ba7cc8ab8ecbbe612ee1f6cda1bf82e46a610d12df6333783353c7d16c7f0d32ed1f5adcc73b6fee1b6b29f88341a30295f3024694aab06d2dacdcd70596ca0c"
+      }
+    )
+    addHyperjump("35777443461358763-24870783318878850-26600430141198110", 
+      {
+        "created_at": 1725657526,
+        "content": "Block -2 TEST",
+        "tags": [
+          [
+            "C",
+            "f3fb614361b3f5a8687b2618b6c812f83ace10d3e7e0ecc8e5e8f9c850710e3e"
+          ],
+          [
+            "S",
+            "35777443461358763-24870783318878850-26600430141198110"
+          ],
+          [
+            "H",
+            "0000000000000000000000000000000000000000000000000000000000000002"
           ],
           [
             "P",
@@ -80,29 +116,39 @@ export function DebugLocal() {
     )
   }, [])
 
-  /// TEST
-  const _coord = cyberspaceCoordinateFromHexString("e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a")
+  /// TEST HYPERJUMPS
+  const hj0 = cyberspaceCoordinateFromHexString("e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a")
   // console.log('spawn', _coord.local.vector.toVector3())
-  _coord.local.vector.z = _coord.local.vector.z.add(1000) as CyberspaceLocalCoordinateDimension
-  const _newVector = factoryCyberspaceLocalCoordinateVector(_coord.local.vector.x, _coord.local.vector.y, _coord.local.vector.z)
-  const _newRaw = cyberspaceEncodeSectorPartialToRaw(_coord.sector.id, _newVector, CyberspacePlane.DSpace)
-  const _sector = _coord.sector.id
+  hj0.local.vector.z = hj0.local.vector.z.add(1000) as CyberspaceLocalCoordinateDimension
+  const hj0_vector = factoryCyberspaceLocalCoordinateVector(hj0.local.vector.x, hj0.local.vector.y, hj0.local.vector.z)
+  const hj0_raw = cyberspaceEncodeSectorPartialToRaw(hj0.sector.id, hj0_vector, CyberspacePlane.DSpace)
 
   // TEST 2
-  const _coord2 = cyberspaceCoordinateFromHexString("e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a")
-  _coord2.vector.y = _coord2.vector.y.sub(CYBERSPACE_SECTOR.mul(5)) as CyberspaceCoordinateDimension
-  _coord2.vector.x = _coord2.vector.x.sub(CYBERSPACE_SECTOR.mul(5)) as CyberspaceCoordinateDimension
-  const _newRaw2 = cyberspaceEncodePartialToRaw(_coord2.vector, _coord2.plane)
-  const _newCoord2 = cyberspaceCoordinateFromHexString(_newRaw2)
+  const hj1 = cyberspaceCoordinateFromHexString("c96b3813657d123d701173466b1a1fd761c920716eae7abb625cabe07a299f2e")
 
+  // TEST 2
+  const hj2 = cyberspaceCoordinateFromHexString("f3fb614361b3f5a8687b2618b6c812f83ace10d3e7e0ecc8e5e8f9c850710e3e")
 
   /// END TEST
 
   return (
+    <>
     <ul style={{marginTop: '4em'}}>
       <li>Debug Hyperjumps Active</li>
-      <li>{_newRaw2}</li>
-      <li>{_newCoord2.sector.id}</li>
     </ul>
+    <p style={{whiteSpace: "pre-wrap"}}>
+      test hyperjump 0<br/>
+      {hj0_raw}<br/>
+      {hj0.sector.id}<br/>
+      <br/><br/>
+      test hyperjump 1<br/>
+      {hj1.raw}<br/>
+      {hj1.sector.id}<br/>
+      <br/><br/>
+      test hyperjump 2<br/>
+      {hj2.raw}<br/>
+      {hj2.sector.id}<br/>
+    </p>
+    </>
   )
 }

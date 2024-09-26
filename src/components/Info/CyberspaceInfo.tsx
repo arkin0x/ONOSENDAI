@@ -12,74 +12,80 @@ export type CyberspaceViewerProps = {
 
 const CyberspaceInfo = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
   const [messageIncrement, setMessageIncrement] = useState(0)
+
   function nextMessage() {
     setMessageIncrement(messageIncrement + 1)
   }
+
+  // after last message, rotate the group of terminals and bring in more help/info
+  // to hopefully answer questions about cyberspace
+
   return (
     <div className="cyberspace-info">
       <div id="info">
         <Canvas style={style} onClick={nextMessage}>
           <ambientLight intensity={2.0} />
           <OrbitControls />
-          <Terminal 
-            animate={messageIncrement === 0}
-            text={"Cyberspace.\nA consensual hallucination experienced daily\nby billions of legitimate operators, in every\nnation, by children being taught mathematical\nconcepts... A graphic representation of data\nabstracted from banks of every computer in the\nhuman system. Unthinkable complexity.\nLines of light ranged in the nonspace of the\nmind, clusters and constellations of data.\nLike city lights, receding...\n\n- Neuromancer, William Gibson (1984)"} 
-            position={{x: 1, y: 90}} 
-            callback={nextMessage} 
-          /> 
-          { messageIncrement > 0 && 
+          <group>
             <Terminal 
-              animate={messageIncrement === 1}
-              text={"In the metaverse, it's always night.\n\n- Snow Crash, Neal Stephenson (1992)"} 
-              position={{x: 30, y: 60}} 
+              animate={messageIncrement === 0}
+              text={"Cyberspace.\nA consensual hallucination experienced daily\nby billions of legitimate operators, in every\nnation, by children being taught mathematical\nconcepts... A graphic representation of data\nabstracted from banks of every computer in the\nhuman system. Unthinkable complexity.\nLines of light ranged in the nonspace of the\nmind, clusters and constellations of data.\nLike city lights, receding...\n\n- Neuromancer, William Gibson (1984)"} 
+              position={{x: 1, y: 90}} 
               callback={nextMessage} 
-            />
-          }
-          { messageIncrement > 1 && 
-            <Terminal 
-              animate={messageIncrement === 2}
-              text={"Cyberspace is not the internet.\nIt is a 256 bit coordinate system which may\nonly be interacted with via proof of work.\nThe thermodynamic protocol ensures that\nchanges to the system are verifiable and may\nbe enacted by anyone without a central\nauthority."} 
-              position={{x: 1, y: 45}} 
-              color={COLORS.LOGO_BLUE}
-              callback={nextMessage} 
-            />
-          }
-          { messageIncrement > 2 && 
-            <Terminal 
-              animate={messageIncrement === 3}
-              text={"NOSTR is the underlying decentralized\nmessaging layer of cyberspace. Each NOSTR\nidentity can act as an avatar in cyberspace;\nits home coordinate is its hex pubkey."} 
-              position={{x: 30, y: 25}} 
-              color={COLORS.LIGHT_PURPLE}
-              callback={nextMessage} 
-            />
-          }
-          { messageIncrement > 3 && 
-            <Terminal 
-              animate={messageIncrement === 4}
-              text={"ONOSENDAI is the first implementation of the\ncyberspace protocol which was founded on the\nkey insight that proof of work is the only\nmechanism that can make a metaverse more than\na glorified video game. Nothing happens in\ncyberspace unless real energy is expended in\nthe real world. Nobody controls cyberspace\nbecause it is simply a protocol that derives\na state from NOSTR events broadcast across\nan ever-shifting mesh of global relays.\nThere is no authority or privilege in this\nmetaverse. All that matters is proof of work.\nActions in cyberspace are consequential.\nTerritory is finite. Act accordingly."} 
-              position={{x: 1, y: 10}} 
-              color={COLORS.LOGO_TEAL}
-              callback={nextMessage} 
-            />
-          }
-          { messageIncrement > 4 && 
-            <Terminal 
-              animate={messageIncrement === 5}
-              text={"This is the fulfillment of the SF visionaries\nwho foresaw not a game but a new meaningful\nworld only accessible through technology. It\nis a digital world where the rules are\nenforced by the laws of physics. In my humble\nopinion, it is a world that is not meant to\ncompete with the real world, but to extend it,\nand by doing so, extend our freedoms and\ncapabilities as humans."} 
-              position={{x: 30, y: -25}} 
-              color={COLORS.RED}
-              callback={nextMessage} 
-            />
-          }
-          { messageIncrement > 5 && 
-            <Terminal 
-              animate={messageIncrement === 6}
-              text={"Welcome to cyberspace!\n\n\n\narkinox\n\nblock 862903"} 
-              position={{x: 1, y: -50}} 
-              color={COLORS.GRID_CROSS}
-              callback={nextMessage} 
-            />
-          }
+            /> 
+            { messageIncrement > 0 && 
+              <Terminal 
+                animate={messageIncrement === 1}
+                text={"In the metaverse, it's always night.\n\n- Snow Crash, Neal Stephenson (1992)"} 
+                position={{x: 30, y: 60}} 
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 1 && 
+              <Terminal 
+                animate={messageIncrement === 2}
+                text={"Cyberspace is not the internet.\nIt is a 256 bit coordinate system which may\nonly be interacted with via proof of work.\nThe thermodynamic protocol ensures that\nchanges to the system are verifiable and may\nbe enacted by anyone without a central\nauthority."} 
+                position={{x: 1, y: 45}} 
+                color={COLORS.LOGO_BLUE}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 2 && 
+              <Terminal 
+                animate={messageIncrement === 3}
+                text={"NOSTR is the underlying decentralized\nmessaging layer of cyberspace. Each NOSTR\nidentity can act as an avatar in cyberspace;\nits home coordinate is its hex pubkey.\nOperators direct their avatar and ONOSENDAI\ngenerates NOSTR events containing proof of\nwork which are then signed and broadcast to\nupdate the state of cyberspace."} 
+                position={{x: 30, y: 25}} 
+                color={COLORS.LIGHT_PURPLE}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 3 && 
+              <Terminal 
+                animate={messageIncrement === 4}
+                text={"ONOSENDAI is the first implementation of the\ncyberspace protocol which was founded on the\nkey insight that proof of work is the only\nmechanism that can make a metaverse more than\na glorified video game. Nothing happens in\ncyberspace unless real energy is expended in\nthe real world. Nobody controls cyberspace\nbecause it is simply a protocol that derives\na state from NOSTR events broadcast across\nan ever-shifting mesh of global relays.\nThere is no authority or privilege in this\nmetaverse. All that matters is proof of work.\nActions in cyberspace are consequential.\nTerritory is finite. Act accordingly."} 
+                position={{x: 1, y: 3}} 
+                color={COLORS.LOGO_TEAL}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 4 && 
+              <Terminal 
+                animate={messageIncrement === 5}
+                text={"This is the fulfillment of the SF visionaries\nwho foresaw not a game but a new meaningful\nworld only accessible through technology. It\nis a digital world where the rules are\nenforced by the laws of physics. In my humble\nopinion, it is a world that is not meant to\ncompete with the real world, but to extend it,\nand by doing so, extend our freedoms and\ncapabilities as humans."} 
+                position={{x: 30, y: -32}} 
+                color={COLORS.RED}
+                callback={nextMessage} 
+              />
+            }
+            { messageIncrement > 5 && 
+              <Terminal 
+                animate={messageIncrement === 6}
+                text={"Welcome to cyberspace!\n\n\n\narkinox\n\nblock 862903"} 
+                position={{x: 1, y: -55}} 
+                color={COLORS.GRID_CROSS}
+              />
+            }
+          </group>
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
           </EffectComposer>

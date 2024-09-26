@@ -22,21 +22,12 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const viewerRef = useRef<HTMLDivElement>(null)
 
   // toggle telemetry view
-  const [showTelemetry, setShowTelemetry] = useState(false)
   const [showShardList, setShowShardList] = useState(false)
+  const [showTelemetry, setShowTelemetry] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
-  useEffect(() => {
-    // set up keyboard listeres to activate telemetry panel
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key === 't') {
-        setShowTelemetry(!showTelemetry)
-      }
-    }
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [showTelemetry])
+  const x = 0 // x center
+
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
@@ -44,7 +35,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
           <SectorManager adjacentLayers={1} />
-          <Avatar pubkey={identity!.pubkey} />
+          <Avatar pubkey={identity!.pubkey} showHistory={showHistory} />
           <Controls />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />
@@ -55,8 +46,9 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
           <group position={[0,-150,-180]}>
-            <NavText text={"SHARDS"} position={{x: -11, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)}/> 
-            <NavText text={"TELEMETRY"} position={{x: 25, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2}/> 
+            <NavText text={"TELEMETRY"} position={{x: x - 40, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2}/> 
+            <NavText text={"SHARDS"} position={{x: x, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)}/> 
+            <NavText text={"PATH"} position={{x: x + 40, y: 0}} align="center" color={showHistory ? COLORS.ORANGE : COLORS.RED} onClick={() => setShowHistory(!showHistory)}/> 
           </group>
           <Hud/>
           { showShardList ? <ShardList deploy/> : null}

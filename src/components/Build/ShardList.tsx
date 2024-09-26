@@ -141,7 +141,7 @@ function ShardList({create, deploy}: ShardListProps) {
           <meshBasicMaterial color={COLORS.ORANGE} />
         </mesh>
         <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-          CREATE
+          NEW
         </Text>
       </group>
     ))

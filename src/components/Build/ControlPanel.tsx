@@ -35,7 +35,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTo
   return (
     <group ref={groupRef}>
       <Text position={[0, 0.5, 0]} color={COLORS.ORANGE} fontSize={0.15} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-        TOOLS
+        SHARD TOOLS
       </Text>
       <group position={[0, 0.2, 0]}>
 
@@ -86,7 +86,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTo
       </group>
 
       <Text position={[0, -0.3, 0]} color={COLORS.ORANGE} fontSize={0.15} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-        GRID SIZE: {gridSize.toFixed(1)}
+        GRID SIZE {gridSize.toFixed(1)}
       </Text>
 
       <group position={[0, -.6, 0]}>

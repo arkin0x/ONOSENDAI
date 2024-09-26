@@ -267,8 +267,8 @@ export const Controls: React.FC = () => {
     if (controlState.backward) moveVector.z += 1
     if (controlState.left) moveVector.x -= 1
     if (controlState.right) moveVector.x += 1
-    if (controlState.up) moveVector.y += 1
-    if (controlState.down) moveVector.y -= 1
+    if (controlState.up) moveVector.y -= 1
+    if (controlState.down) moveVector.y += 1
 
     // Handle drift/hop
     if (moveVector.lengthSq() > 0) {

@@ -54,7 +54,7 @@ export function Interface(){
             <NavText key={'sector'} text="SECTOR" position={{x: 55, y: 0 }} align="center" color={COLORS.ORANGE} onClick={() => setUIState(UIState.map)} current={uiState === UIState.map}/>
             <NavText key={'global'} text="GLOBAL" position={{x: 90, y: 0}} align="center" color={COLORS.RED} onClick={() => setUIState(UIState.global)} current={uiState === UIState.global}/>
             <NavText key={'build'} text="BUILD" position={{x: 125, y: 0}} align="center" color={COLORS.PINK} onClick={() => setUIState(UIState.build)} current={uiState === UIState.build}/>
-            <NavText key={'info'} text="INFO" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGO_BLUE} onClick={() => setUIState(UIState.info)}/>
+            <NavText key={'info'} text="INFO" position={{x: 160, y: 0, z: 0}} align="center" color={COLORS.LOGO_BLUE} onClick={() => setUIState(UIState.info)} current={uiState === UIState.info}/>
             <NavText key={'logout'} text="LOGOUT" position={{x: 195, y: 0, z: 0}} align="center" color={COLORS.LOGOUT} onClick={logOut}/>
           </group>
           <EffectComposer>

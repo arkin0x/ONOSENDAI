@@ -11,8 +11,10 @@ type CoordinateTextProps = {
   rotation?: [number, number, number],
   text: string,
   align?: "left" | "center" | "right"
+  anchorY?: number | "top" | "bottom" | "top-baseline" | "middle" | "bottom-baseline" | undefined
   color?: string | number
   fontSize?: number
+  maxWidth?: number
 }
 
 export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateTextProps) => {
@@ -27,7 +29,7 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
   return (
     <Text
       anchorX={props.align || 'center'}
-      anchorY="bottom"
+      anchorY={props.anchorY || "bottom"}
       color={ props.color || COLORS.BITCOIN}
       font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
       fontSize={ props.fontSize || 0.15}
@@ -35,11 +37,11 @@ export const CoordinateText: React.FC<CoordinateTextProps> = (props: CoordinateT
       letterSpacing={0.02}
       lineHeight={1}
       material-toneMapped={false}
-      maxWidth={300}
+      maxWidth={props.maxWidth || 300}
       position={position}
       rotation={props.rotation || [0, 0, 0]}
       scale={[1, 1, 1]}
-      textAlign="center"
+      textAlign={props.align || 'center'}
     >
       {props.text}
     </Text>

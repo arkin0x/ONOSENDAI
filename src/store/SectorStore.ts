@@ -385,21 +385,24 @@ export const useSectorStore = create<SectorStore>()(
         globalHyperjumps: Array.from(state.globalHyperjumps),
         globalShards: Array.from(state.globalShards),
         scanAreas: state.scanAreas.map(area => ({
-          ...area,
+          anchorSectorId: area.anchorSectorId,
+          boundaries: area.boundaries,
+          nextScanDirection: area.nextScanDirection,
+          // Omit partialScanSet from localStorage
         })),
         currentScanAreaIndex: state.currentScanAreaIndex,
       }),
       merge: (persistedState: any, currentState: SectorStore) => ({
         ...currentState,
         ...persistedState,
-        sectorState: persistedState.sectorState || {}, // Add this line
+        sectorState: persistedState.sectorState || {},
         globalAvatars: new Set(persistedState.globalAvatars || []),
         globalConstructs: new Set(persistedState.globalConstructs || []),
         globalHyperjumps: new Set(persistedState.globalHyperjumps || []),
         globalShards: new Set(persistedState.globalShards || []),
         scanAreas: (persistedState.scanAreas || []).map((area: any) => ({
           ...area,
-          sectors: new Set(area.sectors)
+          partialScanSet: [], // Initialize partialScanSet as an empty array
         })),
         currentScanAreaIndex: persistedState.currentScanAreaIndex ?? -1,
       }),

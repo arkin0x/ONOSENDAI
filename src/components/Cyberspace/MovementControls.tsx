@@ -1,5 +1,5 @@
 import COLORS from "../../data/Colors"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ControlState, useControlStore } from "../../store/ControlStore"
 import { Text } from '@react-three/drei'
 
@@ -8,12 +8,13 @@ export function MovementControls() {
   function renderControlUnit() {
     return (
       <group>
-        <ButtonBox text={'BACK'} position={[-2, -.5, 0]} activate={{backward: true}}/>
-        <ButtonBox text={'FORWARD'} position={[-2, .5, 0]} activate={{forward: true}}/>
-        <ButtonBox text={'UP'} position={[0, .5, 0]} activate={{up: true}}/>
-        <ButtonBox text={'DOWN'} position={[0, -.5, 0]} activate={{down: true}}/>
-        <ButtonBox text={'RIGHT'} position={[1, 0, 0]} activate={{right: true}}/>
-        <ButtonBox text={'LEFT'} position={[-1, 0, 0]} activate={{left: true}}/>
+        <ButtonBox text={'FOLLOW'} position={[-2, 1.5, 0]} activate={{resetView: true}} down/>
+        <ButtonBox text={'BACK'} position={[-2, -.5, 0]} activate={{backward: true}} down up/>
+        <ButtonBox text={'FORWARD'} position={[-2, .5, 0]} activate={{forward: true}} down up/>
+        <ButtonBox text={'UP'} position={[0, .5, 0]} activate={{up: true}} down up/>
+        <ButtonBox text={'DOWN'} position={[0, -.5, 0]} activate={{down: true}} down up/>
+        <ButtonBox text={'RIGHT'} position={[1, 0, 0]} activate={{right: true}} down up/>
+        <ButtonBox text={'LEFT'} position={[-1, 0, 0]} activate={{left: true}} down up/>
         <pointLight position={[0, 5, 1]} intensity={500} color={COLORS.RED} />
       </group>
     )
@@ -26,19 +27,33 @@ export function MovementControls() {
   )
 }
 
-function ButtonBox({text, position, activate}: {text: string, position: [number, number, number], activate: Partial<ControlState>}) {
-  const { setControlState } = useControlStore()
+function ButtonBox({text, position, activate, down, up}: {text: string, position: [number, number, number], activate: Partial<ControlState>, down?: boolean, up?: boolean}) {
+  const { controlState, setControlState } = useControlStore()
   const [color, setColor] = useState(COLORS.DARK_PURPLE)
+
   const boxSize = 0.8
+  const key = Object.keys(activate)[0] as keyof ControlState
+
   function go() {
+    if (!down) return
     setControlState(activate)
     setColor(COLORS.RED)
   }
+
   function stop() {
-    const key = Object.keys(activate)[0]
+    if (!up) return
     setControlState({[key]: false})
     setColor(COLORS.DARK_PURPLE)
   }
+
+  useEffect(() => {
+    if (controlState[key]) {
+      setColor(COLORS.RED)
+    } else {
+      setColor(COLORS.DARK_PURPLE)
+    }
+  }, [controlState, key])
+
   return (
     <mesh position={position} 
       onPointerOver={() => setColor(COLORS.ORANGE)}

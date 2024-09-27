@@ -23,38 +23,15 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
 
   // Effects
 
-  // Functions
-
-  function renderShards() {
-    if (!userCurrentSectorId) return null
-    if (!sectorState[userCurrentSectorId]) return null
-    return sectorState[userCurrentSectorId].shards.map((event, index) => 
-      <ShardRenderer key={`${event.id}-${index}`} event={event} />
-    )
-  }
-
-  const renderAvatars = () => {
-    return null
-    return data.avatars.map(pubkey => <Avatar key={pubkey} pubkey={pubkey} /> )
-  }
-
-  const renderConstructs = () => {
-    // TODO:
-    // render construct with the highest POW
-    // keep in mind the minimum size of a construct is 1 sector
-    // how to visualize it when you're in it?
-    return null
-  }
-
-  const renderHyperjumps = () => {
-    if (!userCurrentSectorId) return null
-    if (!sectorState[userCurrentSectorId]) return null
-    return sectorState[userCurrentSectorId].hyperjumps.map((event, index) => <Hyperjump key={`${event.id}-${index}`} event={event} /> )
-  }
+  const sectorsToLoad: string[] = useMemo(() => {
+    if (!userCurrentSectorId) return []
+    return getSectorsToLoad(userCurrentSectorId, adjacentLayers)
+  }, [userCurrentSectorId, adjacentLayers])
 
   const sectorsToRender = useMemo(() => {
     if (!userCurrentSectorId) return null
-    return getSectorsToLoad(userCurrentSectorId, adjacentLayers).map(groupSectorId => {
+    if (sectorsToLoad.length === 0) return null
+    return sectorsToLoad.map(groupSectorId => {
       if (!sectorState[groupSectorId]) return null
       const idx = relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()
       return (
@@ -66,7 +43,47 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
           data={sectorState[groupSectorId]} />
       )
     })
-  }, [userCurrentSectorId, sectorState])
+  }, [sectorsToLoad, sectorState, userCurrentSectorId])
+
+  // Functions
+
+  function renderShards() {
+    return sectorsToLoad.map( (sectorId) => {
+      if (!sectorState[sectorId]) return null
+      if (!sectorState[sectorId].shards) return null
+      return sectorState[sectorId].shards.map((event, index) => 
+        <ShardRenderer key={`${event.id}-${index}`} event={event} />
+      )
+    })
+  }
+
+  const renderAvatars = () => {
+    return sectorsToLoad.map( (sectorId) => {
+      if (!sectorState[sectorId]) return null
+      if (!sectorState[sectorId].avatars) return null
+      return sectorState[sectorId].avatars.map((pubkey, index) => 
+        <Avatar key={`${pubkey}-${index}`} pubkey={pubkey} showHistory={false} /> 
+      )
+    })
+  }
+
+  const renderConstructs = () => {
+    // TODO:
+    // render construct with the highest POW
+    // keep in mind the minimum size of a construct is 1 sector
+    // how to visualize it when you're in it?
+    return null
+  }
+
+  const renderHyperjumps = () => {
+    return sectorsToLoad.map( (sectorId) => {
+      if (!sectorState[sectorId]) return null
+      if (!sectorState[sectorId].hyperjumps) return null
+      return sectorState[sectorId].hyperjumps.map((event, index) => 
+        <Hyperjump key={`${event.id}-${index}`} event={event} />
+      )
+    })
+  }
 
   return (
     <>

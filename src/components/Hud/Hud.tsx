@@ -1,4 +1,4 @@
-import { useFrame } from "@react-three/fiber"
+import { useFrame, useThree } from "@react-three/fiber"
 import { useRef, useState, useEffect } from "react"
 import { CyberspacePlane, extractCyberspaceActionState, ExtractedCyberspaceActionState, cyberspaceCoordinateFromHexString, CyberspaceLocalCoordinate } from "../../libraries/Cyberspace"
 import { useThrottleStore } from "../../store/ThrottleStore"
@@ -13,12 +13,16 @@ import { CoordinateText } from "./CoordinateText"
 import { Event } from 'nostr-tools'
 import { getTag } from "../../libraries/NostrUtils"
 import { convertSeconds } from "../../libraries/utils"
+import { Vector3 } from "three"
+import { Text } from "@react-three/drei"
+import { DerezzWarning } from "../DerezzWarning"
 
 interface HudProps {
   showSectorInfo?: boolean
 }
 
 export function Hud({showSectorInfo}: HudProps) {
+  const { viewport } = useThree()
   const { getUser } = useNDKStore()
   const identity = getUser()
   const { actionState, getSimulatedState } = useAvatarStore()
@@ -28,16 +32,43 @@ export function Hud({showSectorInfo}: HudProps) {
   const { userCurrentSectorId, sectorState } = useSectorStore()
   const [genesis, setGenesis] = useState<boolean>(false)
   const [hyperjump, setHyperjump] = useState<[Event, CyberspaceLocalCoordinate] | undefined>()
+  const [showDerezzWarn, setShowDerezzWarn] = useState(false)
   const [, setForceUpdate] = useState({}) // State to force re-render
 
+  // Variables
   const pubkey = identity!.pubkey
   const actionsRef = useRef(actionState[pubkey])
-
+    // Calculate rotation relative to window width to fit hud display
   const windowWidth = window.innerWidth
   const divisor = Math.max(4, Math.floor(windowWidth / 600))
   const r = Math.PI / divisor // rotation
+    // Variables for distance to hyperjump
   const simulatedStateRef = useRef<ExtractedCyberspaceActionState>()
   const distanceRef = useRef<number>(0)
+    // Calculate position of buttons based on viewport dimensions
+  let lineHeightLeft = 0
+  let lineHeightRight = 0
+
+  // Functions
+
+  const nextLineLeft = (n = 0) => {
+    lineHeightLeft += 2 + n
+    return lineHeightLeft
+  }
+
+  const nextLineRight = (n = 0) => {
+    lineHeightRight += 2 + n
+    return lineHeightRight
+  }
+
+  function getPositionFromXY(x: number, y: number, z: number = 0) {
+    const _x = viewport.width * (x/100)
+    const _y = viewport.height * (y/100)
+    const position = new Vector3(-viewport.width / 2 + _x, -viewport.height / 2 + _y, z)
+    return position
+  }
+
+  // Effects
 
   useFrame(() => {
     const simulated = getSimulatedState(pubkey)
@@ -88,21 +119,12 @@ export function Hud({showSectorInfo}: HudProps) {
     }
   }, [userCurrentSectorId, sectorState, getSimulatedState, pubkey])
 
-  let lineHeightLeft = 0
-  let lineHeightRight = 0
-
-  const nextLineLeft = (n = 0) => {
-    lineHeightLeft += 2 + n
-    return lineHeightLeft
-  }
-
-  const nextLineRight = (n = 0) => {
-    lineHeightRight += 2 + n
-    return lineHeightRight
-  }
+  // Bail outs
 
   if (!simulatedStateRef.current) return null
   if (!actionsRef.current) return null
+
+  // Bail in calculations
 
   const speed = 
     simulatedStateRef.current.velocity.x.mul(60).pow(2)
@@ -132,7 +154,34 @@ export function Hud({showSectorInfo}: HudProps) {
           </>
           : <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
         }
+        <group position={getPositionFromXY(3, 88)} onClick={() => setShowDerezzWarn(!showDerezzWarn)}>
+          <mesh position={[0, .05, -0.1]}>
+            <planeGeometry args={[1, .4]} />
+            <meshPhongMaterial transparent={true} opacity={0} />
+          </mesh>
+          <mesh rotation={[0,0,Math.PI/4]} position={ showDerezzWarn ? [0, .05, 0] : [0,0,0]}>
+            <boxGeometry args={[.2, .05, .05]} />
+            <meshBasicMaterial color={COLORS.RED} />
+          </mesh>
+          <mesh rotation={[0,0,-Math.PI/4]} position={ showDerezzWarn ? [0, -.05, 0] : [0,0,0]}>
+            <boxGeometry args={[.2, .05, .05]} />
+            <meshBasicMaterial color={COLORS.RED} />
+          </mesh>
+          <Text
+            position={[0.15,0,0]}
+            anchorX={'left'}
+            color={COLORS.RED}
+            font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+            fontSize={0.1}
+            letterSpacing={0.02}
+            lineHeight={1}
+            textAlign={'left'}
+          >{ showDerezzWarn ? "CANCEL" : "DEREZZ"}</Text>
+        </group>
 
+        { showDerezzWarn && (
+          <DerezzWarning callback={() => setShowDerezzWarn(false)} />
+        )}
 
         { showSectorInfo && (
           <group>

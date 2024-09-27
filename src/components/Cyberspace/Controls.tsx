@@ -40,14 +40,14 @@ export const Controls: React.FC = () => {
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     switch (e.code) {
-      case "KeyQ":
-        setControlState({ rollLeft: true, rollLeftCompleted: false })
+      case "KeyQ": // down
+        setControlState({ down: true })
         break
       case "KeyW":
         setControlState({ forward: true })
         break
       case "KeyE":
-        setControlState({ rollRight: true, rollRightCompleted: false })
+        setControlState({ up: true })
         break
       case "KeyA":
         setControlState({ left: true })
@@ -59,24 +59,18 @@ export const Controls: React.FC = () => {
         setControlState({ right: true })
         break
       case "KeyX":
-        isHopping.current = !isHopping.current
-        console.log(isHopping.current ? "Hopping mode enabled" : "Drifting mode enabled")
+        // isHopping.current = !isHopping.current
+        // console.log(isHopping.current ? "Hopping mode enabled" : "Drifting mode enabled")
         break
       case "KeyC":
-        setControlState({ cruise: !controlState.cruise })
         break
       case "Space":
-        setControlState({ up: true })
+        setControlState({ freeze: true })
         break
       case "ShiftLeft":
       case "ShiftRight":
-        setControlState({ down: true })
         break
       case "AltLeft":
-        setControlState({ freeze: true })
-        break
-      case "Backspace":
-        setControlState({ respawn: true })
         break
       case "Escape":
         setControlState({ resetView: !controlState.resetView})
@@ -87,13 +81,13 @@ export const Controls: React.FC = () => {
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
     switch (e.code) {
       case "KeyQ":
-        setControlState({ rollLeft: false, rollLeftCompleted: false })
+        setControlState({ down: false })
         break
       case "KeyW":
         setControlState({ forward: false })
         break
       case "KeyE":
-        setControlState({ rollRight: false, rollRightCompleted: false })
+        setControlState({ up: false })
         break
       case "KeyA":
         setControlState({ left: false })
@@ -105,17 +99,12 @@ export const Controls: React.FC = () => {
         setControlState({ right: false })
         break
       case "Space":
-        setControlState({ up: false })
+        setControlState({ freeze: false })
         break
       case "ShiftLeft":
       case "ShiftRight":
-        setControlState({ down: false })
         break
       case "AltLeft":
-        setControlState({ freeze: false })
-        break
-      case "Backspace":
-        setControlState({ respawn: false })
         break
     }
   }, [setControlState])

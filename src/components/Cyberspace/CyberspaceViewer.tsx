@@ -12,6 +12,7 @@ import ShardList from '../Build/ShardList'
 import COLORS from '../../data/Colors'
 import { NavText } from '../Interface'
 import { useControlStore } from '../../store/ControlStore'
+import { isTouchDevice } from '../../libraries/utils'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -52,7 +53,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
-          <group position={[0,-150,-180]}>
+          <group position={ isTouchDevice() ? [0,-150,-180] : [0, -200, 280]}>
             <NavText text={"CRUISE"} position={{x: x - 75, y: 0}} align="center" color={controlState.cruise ? COLORS.ORANGE : COLORS.PINK} onClick={() => setControlState({ cruise: !controlState.cruise})} current={controlState.cruise} /> 
             <NavText text={"TELEMETRY"} position={{x: x - 38, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2} current={showTelemetry} /> 
             <NavText text={"SHARDS"} position={{x: x, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)} current={showShardList} /> 

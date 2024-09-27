@@ -24,3 +24,12 @@ export function convertSeconds(totalSeconds: number) {
     seconds: seconds.toString().padStart(2, '0')
   };
 }
+
+export function isTouchDevice() {
+  const width = window.innerWidth < 992
+  const touchStart = 'ontouchstart' in window
+  const touchPoints = navigator.maxTouchPoints > 0
+  // @ts-expect-error: Ignore TypeScript error for backwards compatibility
+  const compatTouchPoints = navigator.msMaxTouchPoints > 0
+  return (width || touchStart || touchPoints || compatTouchPoints)
+}

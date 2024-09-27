@@ -12,10 +12,11 @@ import useNDKStore from "../../store/NDKStore"
 import { CoordinateText } from "./CoordinateText"
 import { Event } from 'nostr-tools'
 import { getTag } from "../../libraries/NostrUtils"
-import { convertSeconds } from "../../libraries/utils"
+import { convertSeconds, isTouchDevice } from "../../libraries/utils"
 import { Vector3 } from "three"
 import { Text } from "@react-three/drei"
 import { DerezzWarning } from "../DerezzWarning"
+import { MovementControls } from "../Cyberspace/MovementControls"
 
 interface HudProps {
   showSectorInfo?: boolean
@@ -209,6 +210,14 @@ export function Hud({showSectorInfo}: HudProps) {
             <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'LOCAL HYPERJUMP'} align="right" color={COLORS.YELLOW} />
           </>
         )}
+
+        { isTouchDevice() ? 
+          <group 
+            position={getPositionFromXY(-40,10, -10)} 
+            rotation={[0,r,0]}>
+            <MovementControls />
+          </group>
+        : null }
       </group>
     </>
   )

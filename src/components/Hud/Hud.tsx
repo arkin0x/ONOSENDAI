@@ -156,6 +156,17 @@ export function Hud({showControls, showSectorInfo}: HudProps) {
           </>
           : <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
         }
+
+        { showControls ? 
+          <group 
+            position={getPositionFromXY(6,nextLineLeft(), 0)} 
+            rotation={[0,r,0]}
+            scale={[0.4, 0.4, 0.4]}
+          >
+            <MovementControls />
+          </group>
+        : null }
+
         <group 
           position={getPositionFromXY(6, 88)} 
           rotation={[0,r,0]}
@@ -216,15 +227,6 @@ export function Hud({showControls, showSectorInfo}: HudProps) {
           </>
         )}
 
-        { showControls ? 
-          <group 
-            position={getPositionFromXY(6,40, 0)} 
-            rotation={[0,r,0]}
-            scale={[0.4, 0.4, 0.4]}
-          >
-            <MovementControls />
-          </group>
-        : null }
       </group>
     </>
   )

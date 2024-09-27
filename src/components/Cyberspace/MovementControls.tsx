@@ -7,15 +7,16 @@ export function MovementControls() {
 
   function renderControlUnit() {
     return (
-      <group>
-        <ButtonBox text={'FOLLOW'} position={[0, 1.5, 0]} activate={{resetView: true}} down/>
+      <group position={[0,3,0]}>
+        <ButtonBox text={'FOLLOW'} position={[0, -1.5, 0]} activate={{resetView: true}} toggle/>
         <ButtonBox text={'BACK'} position={[0, -.5, 0]} activate={{backward: true}} down up/>
         <ButtonBox text={'FORWARD'} position={[0, .5, 0]} activate={{forward: true}} down up/>
+        <ButtonBox text={'CRUISE'} position={[0, 1.5, 0]} activate={{cruise: true}} toggle/>
         <ButtonBox text={'UP'} position={[2, .5, 0]} activate={{up: true}} down up/>
         <ButtonBox text={'DOWN'} position={[2, -.5, 0]} activate={{down: true}} down up/>
         <ButtonBox text={'RIGHT'} position={[3, 0, 0]} activate={{right: true}} down up/>
         <ButtonBox text={'LEFT'} position={[1, 0, 0]} activate={{left: true}} down up/>
-        <pointLight position={[0, 8, 1]} intensity={500} color={COLORS.RED} />
+        <pointLight position={[0, 8, 1]} intensity={100} color={COLORS.RED} />
       </group>
     )
   }
@@ -27,7 +28,7 @@ export function MovementControls() {
   )
 }
 
-function ButtonBox({text, position, activate, down, up}: {text: string, position: [number, number, number], activate: Partial<ControlState>, down?: boolean, up?: boolean}) {
+function ButtonBox({text, position, activate, down, up, toggle}: {text: string, position: [number, number, number], activate: Partial<ControlState>, down?: boolean, up?: boolean, toggle?: boolean}) {
   const { controlState, setControlState } = useControlStore()
   const [color, setColor] = useState(COLORS.DARK_PURPLE)
 
@@ -40,17 +41,21 @@ function ButtonBox({text, position, activate, down, up}: {text: string, position
   }
 
   function go() {
-    if (!down) return
+    if (toggle) {
+      setControlState({ [key]: !controlState[key] })
+      setColor(controlState[key] ? COLORS.DARK_PURPLE : COLORS.RED)
+    } else if (down) {
     setControlState(activate)
     setColor(COLORS.RED)
+    }
   }
 
   function stop() {
-    if (!up) {
-      return
-    }
-    setControlState({[key]: false})
+    if (toggle) return
+    if (up) {
+      setControlState({ [key]: false })
     setColor(COLORS.DARK_PURPLE)
+    }
   }
 
   useEffect(() => {
@@ -69,19 +74,10 @@ function ButtonBox({text, position, activate, down, up}: {text: string, position
       onPointerOut={stop}
     >
       <meshPhysicalMaterial color={color} opacity={0.5} transparent={true}/>
-      <boxGeometry args={[boxSize, boxSize, boxSize]} />
-      <Text position={[0, 0, boxSize]} color={COLORS.RED} fontSize={0.17} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
+      <boxGeometry args={[boxSize, boxSize, .2]} />
+      <Text position={[0, 0, .21]} color={color === COLORS.DARK_PURPLE ? COLORS.RED : COLORS.BLACK} fontSize={0.17} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
         {text}
       </Text>
-      {/* <coneGeometry args={[boxSize, boxSize*2, 8]} /> */}
-      {/* <lineSegments>
-        <edgesGeometry args={[new BoxGeometry(boxSize, boxSize, boxSize)]} />
-        <lineBasicMaterial color={color} linewidth={1} transparent={true} opacity={.8}/>
-      </lineSegments> */}
-      {/* <lineSegments
-        geometry={new EdgesGeometry(new BoxGeometry(boxSize, boxSize, boxSize))}
-        material={new LineBasicMaterial({ color: color, linewidth: 1, fog: true, opacity: 0.8 })}
-      /> */}
     </mesh>
   )
 }

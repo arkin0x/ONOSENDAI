@@ -33,7 +33,9 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
       
       setPosition(localCoordinate.vector.toVector3())
       setVelocity(velocity.toVector3())
-      setFrameSectorId(sector.id)
+      if (sector.id !== frameSectorId) {
+        setFrameSectorId(sector.id)
+      }
     }
   })
 

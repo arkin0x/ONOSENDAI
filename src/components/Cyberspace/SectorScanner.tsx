@@ -21,7 +21,6 @@ const SectorScanner: React.FC = () => {
     getNextScanSet,
     updateScanArea,
     getCurrentScanArea,
-    updateUserCurrentSectorId,
     userCurrentSectorId
   } = useSectorStore()
   const { fetchEvents, getUser, subscribe } = useNDKStore()
@@ -32,14 +31,21 @@ const SectorScanner: React.FC = () => {
 
   // bootstrap the user's genesis sector
   useEffect(() => {
-    const coord = cyberspaceCoordinateFromHexString(identity!.pubkey)
-    const genesisSector = coord.sector.id
-    updateUserCurrentSectorId(genesisSector)
-    if (genesisSector) {
-      mountSector(genesisSector, true)
+    if (!pubkey) return
+    let coord
+    try {
+      coord = cyberspaceCoordinateFromHexString(pubkey)
+    } catch (error) {
+      console.error('Error bootstrapping user sector:', error)
+      return
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (coord && coord.sector && coord.sector.id) {
+      const genesisSector = coord.sector.id
+      if (genesisSector) {
+        mountSector(genesisSector, true)
+      }
+    }
+  }, [pubkey, mountSector])
 
   // subscribe to current sector changess
   useEffect(() => {

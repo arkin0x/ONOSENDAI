@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { Avatar } from './Avatar'

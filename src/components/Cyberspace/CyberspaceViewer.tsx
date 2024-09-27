@@ -20,6 +20,7 @@ export type CyberspaceViewerProps = {
 const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) => {
   const { getUser } = useNDKStore()
   const identity = getUser()
+  const pubkey = identity?.pubkey
   const viewerRef = useRef<HTMLDivElement>(null)
   const { controlState, setControlState } = useControlStore()
 
@@ -31,14 +32,17 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
 
   const x = 4 // x center
 
+  if (!pubkey) {
+    return null
+  }
 
   return (
     <div className="cyberspace-viewer" ref={viewerRef}>
       <div id="cyberspace">
         <Canvas style={style}>
           <ambientLight intensity={2.0} />
-          <SectorManager adjacentLayers={1} />
-          <Avatar pubkey={identity!.pubkey} showHistory={showHistory} />
+          <SectorManager adjacentLayers={1} pubkey={pubkey} />
+          <Avatar pubkey={pubkey} showHistory={showHistory} />
           <Controls />
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={20} luminanceThreshold={0.001} luminanceSmoothing={0} />

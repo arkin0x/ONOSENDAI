@@ -27,13 +27,12 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
       console.error('No pubkey found')
       return
     }
-    console.log('pubkey', pubkey)
+    // console.log('pubkey', pubkey)
     const coordinate = cyberspaceCoordinateFromHexString(coordinateHex)
     const unsignedEvent = createUnsignedShardEvent(shard, pubkey, coordinate)
     const serializedEvent = serializeEvent(unsignedEvent)
     console.log('serialized Event', serializedEvent)
     const nonceBounds = getNonceBounds(serializedEvent)
-    console.log('nonceBounds', nonceBounds)
     const shardBinary = new TextEncoder().encode(serializedEvent)
     const targetPOW = get().calculateShardSize(shard)
 

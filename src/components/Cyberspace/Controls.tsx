@@ -15,30 +15,28 @@ export const Controls: React.FC = () => {
   const pubkey = identity!.pubkey
   // const engine = useEngine(pubkey)
   const { setPubkey, respawn, drift, freeze, hop, stop } = useEngineStore()
-  const { getSimulatedState, getLatest } = useAvatarStore()
+  const { getSimulatedState } = useAvatarStore()
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()
-  const { setRotation } = useRotationStore()
+  const { rotation, setRotation } = useRotationStore()
   const [isDragging, setIsDragging] = useState(false)
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number, y: number } | null>(null)
   const [pitch, setPitch] = useState(0)
   const [yaw, setYaw] = useState(0)
   const [cruiseDirection, setCruiseDirection] = useState<Quaternion>(new Quaternion())
   const simulatedEvent = getSimulatedState(pubkey, true)
-  const latestAction = getLatest(pubkey)
   const isHopping = useRef<boolean>(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
     setPubkey(pubkey)
-  }, [pubkey])
+  }, [pubkey, setPubkey])
 
-  // get the current direction of travel from the latest action for cruise control
+  // When cruise is activated, it goes in the direction the camera is facing when cruise is activated.
   useEffect(() => {
-    if (!latestAction) return
-    const { rotation } = extractCyberspaceActionState(latestAction)
+    if (controlState.cruise) return
     setCruiseDirection(rotation)
-  }, [latestAction])
+  }, [controlState.cruise, rotation])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     switch (e.code) {

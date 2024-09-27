@@ -12,10 +12,11 @@ import { generateSectorName } from '../../libraries/SectorName'
 import ShardRenderer from '../ShardRenderer'
 
 interface SectorManagerProps {
+  pubkey: string
   adjacentLayers?: number
 }
 
-function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|null {
+function SectorManager({ adjacentLayers = 0, pubkey }: SectorManagerProps): JSX.Element|null {
   const { 
     userCurrentSectorId, 
     sectorState, 
@@ -61,9 +62,10 @@ function SectorManager({ adjacentLayers = 0 }: SectorManagerProps): JSX.Element|
     return sectorsToLoad.map( (sectorId) => {
       if (!sectorState[sectorId]) return null
       if (!sectorState[sectorId].avatars) return null
-      return sectorState[sectorId].avatars.map((pubkey, index) => 
-        <Avatar key={`${pubkey}-${index}`} pubkey={pubkey} showHistory={false} /> 
-      )
+      return sectorState[sectorId].avatars.map((avatarPubkey, index) => { 
+        if (avatarPubkey === pubkey) return null
+        return <Avatar key={`${avatarPubkey}-${index}`} pubkey={avatarPubkey} showHistory={false} /> 
+      }).filter(Boolean)
     })
   }
 

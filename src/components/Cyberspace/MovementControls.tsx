@@ -8,14 +8,14 @@ export function MovementControls() {
   function renderControlUnit() {
     return (
       <group>
-        <ButtonBox text={'FOLLOW'} position={[-2, 1.5, 0]} activate={{resetView: true}} down/>
-        <ButtonBox text={'BACK'} position={[-2, -.5, 0]} activate={{backward: true}} down up/>
-        <ButtonBox text={'FORWARD'} position={[-2, .5, 0]} activate={{forward: true}} down up/>
-        <ButtonBox text={'UP'} position={[0, .5, 0]} activate={{up: true}} down up/>
-        <ButtonBox text={'DOWN'} position={[0, -.5, 0]} activate={{down: true}} down up/>
-        <ButtonBox text={'RIGHT'} position={[1, 0, 0]} activate={{right: true}} down up/>
-        <ButtonBox text={'LEFT'} position={[-1, 0, 0]} activate={{left: true}} down up/>
-        <pointLight position={[0, 5, 1]} intensity={500} color={COLORS.RED} />
+        <ButtonBox text={'FOLLOW'} position={[0, 1.5, 0]} activate={{resetView: true}} down/>
+        <ButtonBox text={'BACK'} position={[0, -.5, 0]} activate={{backward: true}} down up/>
+        <ButtonBox text={'FORWARD'} position={[0, .5, 0]} activate={{forward: true}} down up/>
+        <ButtonBox text={'UP'} position={[2, .5, 0]} activate={{up: true}} down up/>
+        <ButtonBox text={'DOWN'} position={[2, -.5, 0]} activate={{down: true}} down up/>
+        <ButtonBox text={'RIGHT'} position={[3, 0, 0]} activate={{right: true}} down up/>
+        <ButtonBox text={'LEFT'} position={[1, 0, 0]} activate={{left: true}} down up/>
+        <pointLight position={[0, 8, 1]} intensity={500} color={COLORS.RED} />
       </group>
     )
   }
@@ -34,6 +34,11 @@ function ButtonBox({text, position, activate, down, up}: {text: string, position
   const boxSize = 0.8
   const key = Object.keys(activate)[0] as keyof ControlState
 
+  function over() {
+    if (controlState[key]) return
+    setColor(COLORS.ORANGE)
+  }
+
   function go() {
     if (!down) return
     setControlState(activate)
@@ -41,7 +46,9 @@ function ButtonBox({text, position, activate, down, up}: {text: string, position
   }
 
   function stop() {
-    if (!up) return
+    if (!up) {
+      return
+    }
     setControlState({[key]: false})
     setColor(COLORS.DARK_PURPLE)
   }
@@ -56,14 +63,14 @@ function ButtonBox({text, position, activate, down, up}: {text: string, position
 
   return (
     <mesh position={position} 
-      onPointerOver={() => setColor(COLORS.ORANGE)}
+      onPointerOver={over}
       onPointerDown={go} 
       onPointerUp={stop}
       onPointerOut={stop}
     >
       <meshPhysicalMaterial color={color} opacity={0.5} transparent={true}/>
-      <boxGeometry args={[boxSize, boxSize, .3]} />
-      <Text position={[0, 0, .3]} color={COLORS.RED} fontSize={0.17} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
+      <boxGeometry args={[boxSize, boxSize, boxSize]} />
+      <Text position={[0, 0, boxSize]} color={COLORS.RED} fontSize={0.17} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
         {text}
       </Text>
       {/* <coneGeometry args={[boxSize, boxSize*2, 8]} /> */}

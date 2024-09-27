@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Canvas } from "@react-three/fiber"
+import { Canvas, useThree } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { Avatar } from './Avatar'
 import SectorManager from './SectorManager'
@@ -13,6 +13,7 @@ import COLORS from '../../data/Colors'
 import { NavText } from '../Interface'
 import { useControlStore } from '../../store/ControlStore'
 import { isTouchDevice } from '../../libraries/utils'
+import { Vector3 } from 'three'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -23,13 +24,14 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const identity = getUser()
   const pubkey = identity?.pubkey
   const viewerRef = useRef<HTMLDivElement>(null)
-  const { controlState, setControlState } = useControlStore()
+  const { controlState } = useControlStore()
 
   // toggle telemetry view
   const [showShardList, setShowShardList] = useState(false)
   const [showTelemetry, setShowTelemetry] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showSector, setShowSector] = useState(false)
+  const [showControls, setShowControls] = useState(isTouchDevice())
 
   const x = 4 // x center
 
@@ -53,15 +55,27 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
       <div id="cyberspace-hud">
         <Canvas style={{ position: 'absolute', top: 0 }} camera={{ near: 0.1, far: 1000, fov: 70 }}>
           <ambientLight intensity={2.0} />
-          <group position={ isTouchDevice() ? [0,-150,-180] : [0, -200, 280]}>
-            <NavText text={"CRUISE"} position={{x: x - 75, y: 0}} align="center" color={controlState.cruise ? COLORS.ORANGE : COLORS.PINK} onClick={() => setControlState({ cruise: !controlState.cruise})} current={controlState.cruise} /> 
+          <group 
+            position={ isTouchDevice() ? [0, -215, -280] : [0,-150,-180]}
+            scale={ isTouchDevice() ? [0.8, 0.8, 0.8] : [1,1,1]}
+          >
+
+            <NavText text={"YOKE"} position={{x: x - 75, y: 0}} align="center" color={showControls ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowControls(!showControls)} current={showControls} /> 
+
             <NavText text={"TELEMETRY"} position={{x: x - 38, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2} current={showTelemetry} /> 
-            <NavText text={"SHARDS"} position={{x: x, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowShardList(!showShardList)} current={showShardList} /> 
+
+            <NavText text={"SHARDS"} position={{x: x, y: 0}} align="center" color={showShardList ? COLORS.ORANGE : COLORS.PINK} onClick={() => setShowShardList(!showShardList)} current={showShardList} /> 
+
             <NavText text={"PATH"} position={{x: x + 32, y: 0}} align="center" color={showHistory ? COLORS.ORANGE : COLORS.RED} onClick={() => setShowHistory(!showHistory)} current={showHistory} /> 
+
             <NavText text={"SECTOR"} position={{x: x + 64, y: 0}} align="center" color={showSector ? COLORS.ORANGE : COLORS.LIGHT_PURPLE} onClick={() => setShowSector(!showSector)} current={showSector} /> 
+
           </group>
-          <Hud showSectorInfo={showSector}/>
-          { showShardList ? <ShardList deploy/> : null}
+
+          <Hud showSectorInfo={showSector} showControls={showControls} />
+
+          { showShardList ? <ShardList deploy/> : null }
+
           <EffectComposer>
             <Bloom mipmapBlur levels={9} intensity={5} luminanceThreshold={0} luminanceSmoothing={0} />
           </EffectComposer>

@@ -12,17 +12,18 @@ import useNDKStore from "../../store/NDKStore"
 import { CoordinateText } from "./CoordinateText"
 import { Event } from 'nostr-tools'
 import { getTag } from "../../libraries/NostrUtils"
-import { convertSeconds, isTouchDevice } from "../../libraries/utils"
+import { convertSeconds } from "../../libraries/utils"
 import { Vector3 } from "three"
 import { Text } from "@react-three/drei"
 import { DerezzWarning } from "../DerezzWarning"
 import { MovementControls } from "../Cyberspace/MovementControls"
 
 interface HudProps {
+  showControls?: boolean
   showSectorInfo?: boolean
 }
 
-export function Hud({showSectorInfo}: HudProps) {
+export function Hud({showControls, showSectorInfo}: HudProps) {
   const { viewport } = useThree()
   const { getUser } = useNDKStore()
   const identity = getUser()
@@ -155,7 +156,11 @@ export function Hud({showSectorInfo}: HudProps) {
           </>
           : <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
         }
-        <group position={getPositionFromXY(3, 88)} onClick={() => setShowDerezzWarn(!showDerezzWarn)}>
+        <group 
+          position={getPositionFromXY(6, 88)} 
+          rotation={[0,r,0]}
+          onClick={() => setShowDerezzWarn(!showDerezzWarn)}
+        >
           <mesh position={[0, .05, -0.1]}>
             <planeGeometry args={[1, .4]} />
             <meshPhongMaterial transparent={true} opacity={0} />
@@ -181,7 +186,7 @@ export function Hud({showSectorInfo}: HudProps) {
         </group>
 
         { showDerezzWarn && (
-          <DerezzWarning callback={() => setShowDerezzWarn(false)} />
+          <DerezzWarning chainLength={actionsRef.current.length} callback={() => setShowDerezzWarn(false)} />
         )}
 
         { showSectorInfo && (
@@ -211,10 +216,12 @@ export function Hud({showSectorInfo}: HudProps) {
           </>
         )}
 
-        { isTouchDevice() ? 
+        { showControls ? 
           <group 
-            position={getPositionFromXY(-40,10, -10)} 
-            rotation={[0,r,0]}>
+            position={getPositionFromXY(6,40, 0)} 
+            rotation={[0,r,0]}
+            scale={[0.4, 0.4, 0.4]}
+          >
             <MovementControls />
           </group>
         : null }

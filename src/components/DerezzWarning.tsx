@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { TextureLoader } from 'three'
+import { BoxGeometry, EdgesGeometry, LineBasicMaterial, TextureLoader } from 'three'
 import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors.ts'
 import panel from '../assets/warning-bg.png'
 import { Spinner } from './Spinner.tsx'
 import { useControlStore } from '../store/ControlStore.ts'
 
-export function DerezzWarning({callback}: {callback: () => void}) {
+export function DerezzWarning({chainLength, callback}: {chainLength: number, callback: () => void}) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
   const [loading, setLoading] = useState(true)
   const { setControlState } = useControlStore()
@@ -32,18 +32,25 @@ export function DerezzWarning({callback}: {callback: () => void}) {
       </mesh>
       <group position={[0, 0, 2.1]}>
         <Text position={[0, .1, 0]} color={COLORS.RED} fontSize={0.077} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
-          {"DISCARD CURRENT ACTION CHAIN\nAND REZ AT SPAWN COORDINATE?\n(THIS CANNOT BE UNDONE)"}
+          {`DISCARD CURRENT POW CHAIN\nOF ${chainLength} EVENTS AND\nREZ AT PUBKEY COORDINATE?\n(THIS CANNOT BE UNDONE)`}
         </Text>
         <Text position={[0, -.2, 0]} color={COLORS.RED} fontSize={0.04} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
           {"TO AVOID INJURY OR BRAIN DEATH,\nPLEASE REMOVE NEUROACTIVE INTERFACES BEFORE CONTINUING"}
         </Text>
-        <mesh position={[0, -.7, 0]} onPointerUp={() => {
-          setControlState({respawn: true}) 
-          callback()
-        }}>
-          <boxGeometry args={[0.5, 0.2, 0.1]} />
-          <meshBasicMaterial color={COLORS.BLACK} />
-        </mesh>
+        <group position={[0, -.7, 0]}>
+          <mesh onPointerUp={() => {
+            setControlState({respawn: true}) 
+            callback()
+          }}>
+            <boxGeometry args={[0.5, 0.2, 0.1]} />
+            <meshBasicMaterial color={COLORS.BLACK} />
+          </mesh>
+          <lineSegments
+            scale={[1, 1, 1]}
+            geometry={new EdgesGeometry(new BoxGeometry(0.5, 0.2, 0.1))}
+            material={new LineBasicMaterial({ color: COLORS.RED, linewidth: 1 })}
+          />
+        </group>
         <Text position={[0, -.7, .1]} color={COLORS.RED} fontSize={0.06} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
           {"DEREZZ NOW"}
         </Text>

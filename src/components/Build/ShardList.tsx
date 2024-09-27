@@ -20,44 +20,22 @@ interface ShardListProps {
 
 function ShardList({create, deploy}: ShardListProps) {
   const { addShard, setGridSize, setCurrentShard, deleteShard, shards, shardIndex} = useBuilderStore()
-  const { startMining, isMining, progress} = useShardMinerStore()
+  const { startMining, isMining } = useShardMinerStore()
   const { getUser } = useNDKStore()
   const identity = getUser()
   const { getLatest } = useAvatarStore()
   const [readyToMine, setReadyToMine] = useState(false)
   const groupRef = useRef<Group>(null)
-  const { camera } = useThree()
+  const { camera, viewport } = useThree()
 
-  useEffect(() => {
-    setGridSize(3)
-  }, [setGridSize])
+  // Functions
 
-  useEffect(() => {
-    if (shardIndex === null || shards.length === 0) return
-    const pubkey = identity?.pubkey
-
-    if (!pubkey) return
-
-    const latestAction = getLatest(pubkey)
-
-    if (!latestAction) return
-
-    setReadyToMine(true)
-
-  }, [getLatest, identity, shardIndex, shards, startMining])
-
-  useFrame(() => {
-    if (groupRef.current) {
-      const cameraPosition = camera.position.clone()
-      const offset = new Vector3(0.125, .1, -.2)
-      offset.applyQuaternion(camera.quaternion)
-      groupRef.current.position.copy(cameraPosition.add(offset))
-      groupRef.current.quaternion.copy(camera.quaternion)
-      const SCALAR = 0.005
-      const scale = new Vector3(SCALAR, SCALAR, SCALAR)
-      groupRef.current.scale.copy(scale)
-    }
-  })
+  function getPositionFromXY(x: number, y: number, z: number = 0) {
+    const _x = viewport.width * (x/100)
+    const _y = viewport.height * (y/100)
+    const position = new Vector3(-viewport.width / 2 + _x, -viewport.height / 2 + _y, z)
+    return position
+  }
 
   function startMiningShard() {
     if (!readyToMine) return false
@@ -94,6 +72,38 @@ function ShardList({create, deploy}: ShardListProps) {
     ))
   }
 
+  // Effects
+
+  useEffect(() => {
+    setGridSize(3)
+  }, [setGridSize])
+
+  useEffect(() => {
+    if (shardIndex === null || shards.length === 0) return
+    const pubkey = identity?.pubkey
+
+    if (!pubkey) return
+
+    const latestAction = getLatest(pubkey)
+
+    if (!latestAction) return
+
+    setReadyToMine(true)
+
+  }, [getLatest, identity, shardIndex, shards, startMining])
+
+  useFrame(() => {
+    if (create && groupRef.current) {
+      const cameraPosition = camera.position.clone()
+      const offset = new Vector3(0.125, .1, -.2)
+      offset.applyQuaternion(camera.quaternion)
+      groupRef.current.position.copy(cameraPosition.add(offset))
+      groupRef.current.quaternion.copy(camera.quaternion)
+      const SCALAR = 0.005
+      const scale = new Vector3(SCALAR, SCALAR, SCALAR)
+      groupRef.current.scale.copy(scale)
+    }
+  })
 
   function shardList() {
     const position = new Vector3(5, 0.5, 0)
@@ -132,7 +142,7 @@ function ShardList({create, deploy}: ShardListProps) {
       )
     })
     create && list.push((
-      <group scale={[10,10,10]} key={'create'} position={incrementPosition()}>
+      <group scale={[8,8,8]} key={'create'} position={incrementPosition()}>
         <mesh
           position={[0, 0, 0]}
           onClick={() => addShard()}
@@ -146,7 +156,7 @@ function ShardList({create, deploy}: ShardListProps) {
       </group>
     ))
     deploy && readyToMine && !isMining && list.push((
-      <group scale={[10,10,10]} key={'deploy'} position={incrementPosition()}>
+      <group scale={[8,8,8]} key={'deploy'} position={incrementPosition()}>
         <mesh
           position={[0, 0, 0]}
           onClick={() => startMiningShard()}
@@ -160,17 +170,30 @@ function ShardList({create, deploy}: ShardListProps) {
       </group>
     ))
     deploy && isMining && list.push((
-      <Spinner position={incrementPosition()} scale={[.7,.7,.7]}/>
+      <Spinner text={"MINING"} position={incrementPosition()} scale={[.7,.7,.7]}/>
     ))
     return list
   }
 
+  // layout for LOCAL uses getPositionFromXY since it's part of the hud layer
+  if (deploy) {
+    return (
+      <group
+        position={getPositionFromXY(290, 355, -30)}
+      >
+        {shardList()}
+      </group>
+    )
+  }
 
-  return (
-    <group ref={groupRef} rotation={[Math.PI/4, 0, 0]}>
-      {shardList()}
-    </group>
-  )
+  // layout for BUILD uses useFrame to position it relative to the camera
+  if (create) {
+    return (
+      <group ref={groupRef}>
+        {shardList()}
+      </group>
+    )
+  }
 }
 
 export default ShardList

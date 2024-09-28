@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Canvas, useThree } from "@react-three/fiber"
+import { useRef, useState } from 'react'
+import { Canvas } from "@react-three/fiber"
 import "../../scss/CyberspaceViewer.scss"
 import { Avatar } from './Avatar'
 import SectorManager from './SectorManager'
@@ -11,9 +11,7 @@ import useNDKStore from '../../store/NDKStore'
 import ShardList from '../Build/ShardList'
 import COLORS from '../../data/Colors'
 import { NavText } from '../Interface'
-import { useControlStore } from '../../store/ControlStore'
 import { isTouchDevice } from '../../libraries/utils'
-import { Vector3 } from 'three'
 
 export type CyberspaceViewerProps = {
   style?: React.CSSProperties,
@@ -24,7 +22,6 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
   const identity = getUser()
   const pubkey = identity?.pubkey
   const viewerRef = useRef<HTMLDivElement>(null)
-  const { controlState } = useControlStore()
 
   // toggle telemetry view
   const [showShardList, setShowShardList] = useState(false)
@@ -60,7 +57,7 @@ const CyberspaceViewer = ({style = {height: "100svh"}}: CyberspaceViewerProps) =
             scale={ isTouchDevice() ? [0.8, 0.8, 0.8] : [1,1,1]}
           >
 
-            <NavText text={"YOKE"} position={{x: x - 75, y: 0}} align="center" color={showControls ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowControls(!showControls)} current={showControls} /> 
+            <NavText text={"DECK"} position={{x: x - 75, y: 0}} align="center" color={showControls ? COLORS.ORANGE : COLORS.PURPLE} onClick={() => setShowControls(!showControls)} current={showControls} /> 
 
             <NavText text={"TELEMETRY"} position={{x: x - 38, y: 0}} align="center" color={showTelemetry ? COLORS.ORANGE : COLORS.DARK_PURPLE} onClick={() => setShowTelemetry(!showTelemetry)} customWidth={2} current={showTelemetry} /> 
 

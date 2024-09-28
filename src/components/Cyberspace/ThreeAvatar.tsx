@@ -22,12 +22,11 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
   const near = 1 // Start distance of the fog
   const far = CYBERSPACE_SECTOR.toNumber() * 2 // End distance of the fog
   scene.fog = new THREE.Fog(fogColor, near, far)
-
   camera.far = 2**30
 
-  // get simulated sectorPosition and velocity each frame
   useFrame(() => {
-    const simulatedEvent = getSimulatedState(pubkey, true)
+    // get simulated sectorPosition and velocity each frame
+    const simulatedEvent = getSimulatedState(pubkey)
     if (simulatedEvent) {
       const { localCoordinate, velocity, sector } = extractCyberspaceActionState(simulatedEvent)
       
@@ -35,17 +34,8 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
       setVelocity(velocity.toVector3())
       setFrameSectorId(sector.id)
     }
-  })
-
-  // "Memoize" updateSectorId call
-  useEffect(() => {
-    if (frameSectorId) {
-      updateUserCurrentSectorId(frameSectorId)
-    }
-  }, [frameSectorId, updateUserCurrentSectorId])
-
-  // update camera each frame
-  useFrame(() => {
+    
+    // update camera each frame
     const radius = 5
     const oppositeRotation = rotation.clone()
     const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(oppositeRotation)
@@ -54,6 +44,13 @@ export const ThreeAvatar: React.FC<{ pubkey: string }> = ({ pubkey }) => {
     camera.lookAt(position)
     camera.updateProjectionMatrix()
   })
+
+  // "Memoize" updateSectorId call
+  useEffect(() => {
+    if (frameSectorId) {
+      updateUserCurrentSectorId(frameSectorId)
+    }
+  }, [frameSectorId, updateUserCurrentSectorId])
 
   // Calculate the quaternion for the cone's rotation based on the velocity vector
   const coneQuaternion = new THREE.Quaternion().setFromUnitVectors(

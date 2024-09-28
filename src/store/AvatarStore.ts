@@ -165,7 +165,7 @@ export const useAvatarStore = create<AvatarStore>()(
     {
       name: 'avatar-storage',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ actionState: state.actionState }),
+      partialize: (state) => ({ actionState: state.actionState, userHistoryComplete: state.userHistoryComplete }),
     }
   )
 )

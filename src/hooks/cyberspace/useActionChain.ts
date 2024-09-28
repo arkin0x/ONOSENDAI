@@ -6,6 +6,7 @@ import { CyberspaceKinds, factoryHex256Bit } from "../../libraries/Cyberspace"
 import { isGenesisAction } from "../../libraries/Cyberspace"
 import { useAvatarStore } from "../../store/AvatarStore"
 import useNDKStore from "../../store/NDKStore"
+import { useEngineStore } from "../../store/EngineStore"
 
 export const useActionChain = (pubkey: string) => {
 
@@ -13,11 +14,13 @@ export const useActionChain = (pubkey: string) => {
   const {ndk, getUser} = useNDKStore()
   const identity = getUser()
   const userPubkey = identity!.pubkey // SectorManager can't load unless we have a user pubkey, so we can assume it's here.
-  const {actionState, dispatchActionState, setUserHistoryComplete} = useAvatarStore()
+  const {actionState, dispatchActionState, userHistoryComplete, setUserHistoryComplete} = useAvatarStore()
   const actions = actionState[pubkey]
 
   // State
   const [latestAction, setLatestAction] = useState<Event | null>(null)
+  const [minimumHistoryComplete, setMinimumHistoryComplete] = useState(false)
+  const [currentIndex, setCurrentIndex] = useState(0)
 
   // Functions
   const completeUserHistory = useCallback(() => {
@@ -25,6 +28,8 @@ export const useActionChain = (pubkey: string) => {
     if (userPubkey === pubkey) {
       setUserHistoryComplete(true)
     }
+    // trigger event replacement routine
+    setMinimumHistoryComplete(true)
   }, [userPubkey, pubkey, setUserHistoryComplete])
 
   function resetMalformedChain(e: unknown) {
@@ -35,6 +40,53 @@ export const useActionChain = (pubkey: string) => {
   }
 
   // Effects
+useEffect(() => {
+    if (!ndk) return
+    if (!minimumHistoryComplete) return
+    if (!actions || actions.length === 0) return
+
+    if (currentIndex >= actions.length) {
+      console.log('restarting search for signed events')
+      setCurrentIndex(0)
+      return
+    }
+
+    console.log('replacing events with signed versions')
+
+    const interval = setInterval(async () => {
+      const chunk = actions.slice(currentIndex, currentIndex + 20)
+      const unsignedActions = chunk.filter(action => !action.sig)
+
+      console.log('unsigned actions', unsignedActions)
+
+      if (unsignedActions.length > 0) {
+        const ids = unsignedActions.map(action => action.id)
+        const filter: NDKFilter = {
+          kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds],
+          ids,
+        }
+
+        // Query the Nostr network with the filter
+        const results = await ndk.fetchEvents(filter)
+
+        // Process the results
+        // convert results to an array
+        const resultsArray = Array.from(results).map(event => event.rawEvent() as Event)
+
+        console.log('replacing events', resultsArray)
+
+        dispatchActionState({type: 'push', pubkey, actions: resultsArray})
+      }
+
+      setCurrentIndex(prevIndex => prevIndex + 20)
+
+      if (currentIndex >= actions.length) {
+        clearInterval(interval)
+      }
+    }, 5000) // Adjust the interval time as needed
+
+    return () => clearInterval(interval)
+  }, [actions, minimumHistoryComplete, currentIndex, ndk, dispatchActionState, pubkey])
 
   // get most recent action for pubkey
   useEffect(() => {
@@ -46,21 +98,22 @@ export const useActionChain = (pubkey: string) => {
         limit: 1
       }
       const latestAction = await ndk.fetchEvent(latestActionFilter, {closeOnEose: true})
+      console.log('latest action', latestAction?.rawEvent())
       if (latestAction) {
         setLatestAction(latestAction.rawEvent() as Event)
       } else {
         // we couldn't find any actions for this pubkey. This is a new user (or we're having an unlucky networking issue)
         // the combination of userHistoryComplete=true and no actions means the user is new.
+        console.log('no actions found; respawning')
+        useEngineStore.getState().respawn()
         completeUserHistory()
       }
     }
     getLatestAction()
-
   }, [completeUserHistory, dispatchActionState, ndk, pubkey])
 
   // determine slice of history to query for between latest local state and latest action received.
   useEffect(() => {
-    if (!actions) return
     async function fetchActionHistory(filters: NDKFilter[]){
       const actionHistory = await ndk?.fetchEvents(filters)
       const actionArray = Array.from(actionHistory ?? []).map(event => event.rawEvent() as Event)
@@ -80,6 +133,7 @@ export const useActionChain = (pubkey: string) => {
       }
       if (isLatestActionGenesis) {
         // the latest action is a genesis action. We don't need to query for history. Reset the history and replace with the genesis action.
+        console.log('latest action is genesis')
         dispatchActionState({type: 'reset', pubkey, actions: [latestAction]})
         completeUserHistory()
         return
@@ -95,7 +149,7 @@ export const useActionChain = (pubkey: string) => {
         return
       }
       const until = latestAction.created_at
-      if (actions.length > 0) {
+      if (actions && actions.length > 0) {
         // get most recent action in store for pubkey
         const latestStateAction = actions[actions.length - 1]
         // check that they share the same genesis event id
@@ -136,9 +190,10 @@ export const useActionChain = (pubkey: string) => {
         authors: [pubkey],
         ids: [latestGenesisId]
       }
+      console.log('fetching rest of action history', actionHistoryFilter, genesisFilter)
       fetchActionHistory([actionHistoryFilter, genesisFilter])
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actions, latestAction, pubkey]) // don't include actions in the dependency array. This would cause unnecessary re-renders.
+  }, [latestAction, pubkey]) // don't include actions in the dependency array. This would cause unnecessary re-renders.
 
 }

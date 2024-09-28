@@ -32,10 +32,10 @@ export function DerezzWarning({chainLength, callback}: {chainLength: number, cal
       </mesh>
       <group position={[0, 0, 2.1]}>
         <Text position={[0, .1, 0]} color={COLORS.RED} fontSize={0.077} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
-          {`DISCARD CURRENT POW CHAIN\nOF ${chainLength} EVENTS AND\nREZ AT PUBKEY COORDINATE?\n(THIS CANNOT BE UNDONE)`}
+          {`DISCARD CURRENT POW CHAIN\nOF ${chainLength} ACTIONS AND\nREZ AT PUBKEY COORDINATE?\n(THIS CANNOT BE UNDONE)`}
         </Text>
-        <Text position={[0, -.2, 0]} color={COLORS.RED} fontSize={0.04} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
-          {"TO AVOID INJURY OR BRAIN DEATH,\nPLEASE REMOVE NEUROACTIVE INTERFACES BEFORE CONTINUING"}
+        <Text position={[0, -.22, 0]} color={COLORS.RED} fontSize={0.04} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'} anchorX={'center'} textAlign='center'>
+          {"TO AVOID INJURY OR BRAIN DEATH,\nPLEASE REMOVE NEUROACTIVE INTERFACES\nBEFORE CONTINUING"}
         </Text>
         <group position={[0, -.7, 0]}>
           <mesh onPointerUp={() => {

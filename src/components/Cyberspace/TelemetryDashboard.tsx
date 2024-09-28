@@ -20,6 +20,7 @@ export const TelemetryDashboard = () => {
 
 
   const renderActions = () => {
+    if (!actions) return null
     return actions.map((action) => {
       return <ActionDOM key={action.id} action={action} select={setSelectedAction}/>
     }).reverse()

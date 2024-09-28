@@ -6,7 +6,6 @@ import { SectorState, useSectorStore } from '../../store/SectorStore'
 import { useMapCenterSectorStore } from '../../store/MapCenterSectorStore'
 import { relativeSectorIndex } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
-import { MAP_SECTOR_SIZE } from '../../libraries/CyberspaceMap'
 import { ThreeAvatarMarker } from './ThreeAvatarMarker'
 import { generateSectorName } from '../../libraries/SectorName'
 import useNDKStore from '../../store/NDKStore'
@@ -21,17 +20,19 @@ interface SectorData {
   hasShards: boolean
 }
 
+const MAP_SECTOR_SIZE = 1.1
+
 export const SectorGrid = () => {
   const { getUser } = useNDKStore()
   const identity = getUser()
   const { sectorState, userCurrentSectorId, getCurrentScanArea, scanAreas } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [follow, setFollow] = useState<"user"|"roam">("user")
+  const [follow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [hovered, setHovered] = useState<number>()
+  // const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 
   const pubkey = identity!.pubkey
@@ -80,8 +81,8 @@ export const SectorGrid = () => {
   useFrame(() => {
     if (meshRef.current) {
       raycaster.setFromCamera(pointer, camera)
-      const intersects = raycaster.intersectObject(meshRef.current)
-      setHovered(intersects.length > 0 ? intersects[0].instanceId : undefined)
+      // const intersects = raycaster.intersectObject(meshRef.current)
+      // setHovered(intersects.length > 0 ? intersects[0].instanceId : undefined)
     }
   })
 

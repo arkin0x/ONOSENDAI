@@ -8,7 +8,7 @@ import { Shard3DData } from '../components/Build/Shards'
 export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string, coordinate: CyberspaceCoordinate): UnsignedEvent {
   const { created_at, ms_padded } = getTime()
 
-  const limitDecimals = (n: number) => parseFloat(n.toFixed(8)).toString();
+  const limitDecimals = (n: number) => parseFloat(n.toFixed(8)).toString()
 
   const vertices = shard.vertices.flatMap((v: Vertex) => v.position).map(limitDecimals).join(',')
   const colors = shard.vertices.flatMap((v: Vertex) => v.color).map(limitDecimals).join(',')

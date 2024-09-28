@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { CyberspacePlane } from '../libraries/Cyberspace.ts'
 import { TextureLoader, Vector3 } from 'three'
@@ -60,21 +60,20 @@ function CameraFlight() {
 
   const { camera } = useThree()
 
-  const CAMERA_START = new Vector3(0, 0, 0)
-  const CAMERA_END = new Vector3(0, 0, -SCALE)
   const CAMERA_PROGRESS_REF = useRef(1)
 
   const logoRef = useRef<THREE.Mesh>(null)
   const logoDistance = 5
 
   useEffect(() => {
+    const CAMERA_START = new Vector3(0, 0, 0)
     CAMERA_PROGRESS_REF.current = 1
     camera.far = 2**30 
     camera.near = 0.01
     camera.position.copy(CAMERA_START)
     camera.lookAt(new Vector3(0,0,SCALE))
     camera.updateProjectionMatrix()
-  },[])
+  },[camera])
 
   useFrame(() => {
     // camera.position.copy(camera.position.lerp(CAMERA_END, CAMERA_PROGRESS_REF.current))
@@ -118,7 +117,7 @@ function CameraFlight() {
   )
 }
 
-export function IntroGrid({children, scale, plane = CyberspacePlane.DSpace}: {children?: ReactNode, scale: number, plane: CyberspacePlane}) {
+export function IntroGrid({children, scale}: {children?: ReactNode, scale: number, plane: CyberspacePlane}) {
 
   const GRIDLINES = 100
 

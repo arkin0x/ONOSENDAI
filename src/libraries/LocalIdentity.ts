@@ -1,7 +1,7 @@
 import { decrypt, encrypt } from 'nostr-tools/nip49'
-import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk';
-import { getPublicKey, nip19 } from 'nostr-tools';
-import { hexToBytes } from '@noble/hashes/utils'
+import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
+import { getPublicKey, nip19 } from 'nostr-tools'
+import { hexToBytes, bytesToHex } from '@noble/hashes/utils'
 
 const LOGN = 16
 
@@ -11,7 +11,7 @@ export function initializeIdentity() {
   console.log('Initializing identity')
 
   if (!localStorage.getItem('nip49')) {
-    return createEncryptedKey();
+    return createEncryptedKey()
   }
 }
 
@@ -38,7 +38,7 @@ function savePublicKey(privateKey: Uint8Array) {
 
 function setRandomDefaultPassword(length: number) {
   const bytes = window.crypto.getRandomValues(new Uint8Array(length))
-  const hexString = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const hexString = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
   localStorage.setItem('nip49-default', hexString)
 }
 
@@ -62,7 +62,7 @@ export function removeDefaultPassword(newPassword: string) {
 
 function loadEncryptedKey(): string|null {
   // check if a key exists in local storage
-  const localEncryptedKey = localStorage.getItem('nip49');
+  const localEncryptedKey = localStorage.getItem('nip49')
   return localEncryptedKey
 }
 
@@ -101,6 +101,7 @@ export function unlockKeyForSigning() {
     return
   }
   const rawPrivateKeyBytes = decrypt(encryptedPrivateKey, password)
-  const signer = new NDKPrivateKeySigner(rawPrivateKeyBytes)
+  const key = bytesToHex(rawPrivateKeyBytes)
+  const signer = new NDKPrivateKeySigner(key)
   return signer
 }

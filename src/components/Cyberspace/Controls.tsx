@@ -14,7 +14,7 @@ export const Controls: React.FC = () => {
   const identity = getUser()
   const pubkey = identity!.pubkey
   // const engine = useEngine(pubkey)
-  const { setPubkey, respawn, drift, freeze, hop, stop } = useEngineStore()
+  const { setPubkey, respawn, drift, stop } = useEngineStore()
   const { getSimulatedState } = useAvatarStore()
   const { throttle, setThrottle } = useThrottleStore()
   const { controlState, setControlState, resetControlState } = useControlStore()

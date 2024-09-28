@@ -1,13 +1,12 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react'
-import { useThree, ThreeEvent } from '@react-three/fiber'
+import { ThreeEvent } from '@react-three/fiber'
 import { Face, CyberspaceShard, useBuilderStore, Vertex } from '../../store/BuilderStore'
 import COLORS from '../../data/Colors'
-import { ArrowHelper, Vector3, BufferGeometry, BufferAttribute } from 'three'
+import { Vector3 } from 'three'
 import { Line, OrbitControls, Text } from '@react-three/drei'
 import VertexSelectionIndicator from './VertexSelectionIndicator'
 import Shard from '../Cyberspace/Shard'
-import { Shard3DData, shardStateDataTo3DData } from './Shards'
-import { b, g } from 'vitest/dist/suite-ynYMzeLu.js'
+import { Shard3DData } from './Shards'
 
 interface ShardEditorProps {
   shard: CyberspaceShard

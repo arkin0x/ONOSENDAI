@@ -60,11 +60,11 @@ export const useBuilderStore = create<BuilderState>()(
       })),
 
       setCurrentShard: (shardId) => set((state) => {
-        const shardIndex = state.shards.findIndex((s) => s.id === shardId);
+        const shardIndex = state.shards.findIndex((s) => s.id === shardId)
         return { 
           shardIndex: shardIndex !== -1 ? shardIndex : null, 
           gridSize: shardIndex !== -1 ? state.shards[shardIndex].gridSize : 3
-        };
+        }
       }),
 
       addVertex: (position, color) => set((state) => {
@@ -97,9 +97,9 @@ export const useBuilderStore = create<BuilderState>()(
       removeVertex: (id) => set((state) => {
         if (state.shardIndex === null) return state
         const shard = state.shards[state.shardIndex]
-        const vertexIndex = shard.vertices.findIndex((v) => v.id === id);
+        const vertexIndex = shard.vertices.findIndex((v) => v.id === id)
 
-        if (vertexIndex === -1) return state;
+        if (vertexIndex === -1) return state
 
         console.log('Removing vertex', vertexIndex)
 
@@ -116,7 +116,7 @@ export const useBuilderStore = create<BuilderState>()(
         console.log('Removing faces:', facesToRemove)
 
         // remove faces referencing the deleted vertex
-        const remainingFaces = shard.faces.filter((_, i) => !facesToRemove.includes(i));
+        const remainingFaces = shard.faces.filter((_, i) => !facesToRemove.includes(i))
 
         // update face indices
         for (let i = 0; i < remainingFaces.length; i++) {
@@ -192,20 +192,20 @@ export const useBuilderStore = create<BuilderState>()(
       }),
 
       deleteShard: (shardId) => set((state) => {
-        const shardIndex = state.shards.findIndex((s) => s.id === shardId);
-        if (shardIndex === -1) return state;
+        const shardIndex = state.shards.findIndex((s) => s.id === shardId)
+        if (shardIndex === -1) return state
 
-        const newShards = state.shards.filter((s) => s.id !== shardId);
-        let newShardIndex = state.shardIndex;
+        const newShards = state.shards.filter((s) => s.id !== shardId)
+        let newShardIndex = state.shardIndex
 
         // Adjust the current shard index if necessary
         if (newShardIndex !== null) {
           if (shardIndex === newShardIndex) {
             // If the deleted shard was the current one, set to null or the last shard
-            newShardIndex = newShards.length > 0 ? newShards.length - 1 : null;
+            newShardIndex = newShards.length > 0 ? newShards.length - 1 : null
           } else if (shardIndex < newShardIndex) {
             // If the deleted shard was before the current one, decrement the index
-            newShardIndex--;
+            newShardIndex--
           }
         }
 
@@ -213,7 +213,7 @@ export const useBuilderStore = create<BuilderState>()(
           shards: newShards,
           shardIndex: newShardIndex,
           gridSize: newShardIndex !== null ? newShards[newShardIndex].gridSize : 3
-        };
+        }
       }),
     }),
     {

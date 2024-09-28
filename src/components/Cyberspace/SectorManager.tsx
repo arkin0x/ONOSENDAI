@@ -110,7 +110,6 @@ const Sector = memo(({
   position, 
   current, 
   id, 
-  data 
 }: SectorProps): JSX.Element => {
   const sectorSize = CYBERSPACE_SECTOR.toNumber()
 

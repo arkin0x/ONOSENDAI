@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "building-blocks/Beacon.tsx", "building-blocks/Construct.tsx", "building-blocks/Cursor.tsx", "building-blocks/FancyButton.tsx", "building-blocks/MapPin.tsx", "building-blocks/MinerController.tsx", "building-blocks/Me.tsx", "building-blocks/MyConstructs.tsx", "building-blocks/MapPlaces.tsx", "building-blocks/ThreeConstruct.tsx", "building-blocks/WavyText.tsx", "building-blocks/ThreeOperator.tsx", "building-blocks/YondarMap.tsx"],
+  "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

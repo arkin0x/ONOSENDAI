@@ -1,5 +1,5 @@
 import { Event } from 'nostr-tools'
-import { BufferGeometry, Float32BufferAttribute, Mesh, PointsMaterial, Vector3, Group } from 'three'
+import { BufferGeometry, Float32BufferAttribute, PointsMaterial, Vector3, Group } from 'three'
 import { CyberspaceCoordinate, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useMemo, useRef } from 'react'
@@ -19,7 +19,7 @@ function Hyperjump({event}: HyperjumpProps) {
     const geo = new BufferGeometry()
     geo.setAttribute('position', new Float32BufferAttribute([0,0,0], 3))
     return geo
-  }, [position])
+  }, [])
 
   const material = useMemo(() => {
     return new PointsMaterial({

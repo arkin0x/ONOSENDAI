@@ -1,8 +1,7 @@
-import { extractCyberspaceActionState, getMillisecondsTimestampFromAction, getCyberspacePlaneFromAction, simulateNextEvent } from "../../libraries/Cyberspace"
-import { getTag, getTagValue } from "../../libraries/Nostr"
-import { Event } from "nostr-tools"
+import { extractCyberspaceActionState, getMillisecondsTimestampFromAction, getCyberspacePlaneFromAction, simulateNextEvent, CyberspaceAction } from "../../libraries/Cyberspace"
+import { getTag, getTagMark } from "../../libraries/NostrUtils"
 
-export const actionChainIsValid = (actions: Event[]): boolean => {
+export const actionChainIsValid = (actions: CyberspaceAction[]): boolean => {
   const tests = []
 
   // wrap the whole thing in a try; any errors will invalidate the chain, although this could lead to false invalidations if the code is wrong but the chain is right... 🤔 #TODO
@@ -31,7 +30,7 @@ export const actionChainIsValid = (actions: Event[]): boolean => {
 
       // check if the next action (previous chronologically) is referenced in the current action
       const nextAction = testHashChainState[index + 1]
-      if (action.tags.find(getTagValue('e',nextAction.id))) {
+      if (action.tags.find(getTagMark('e',nextAction.id))) {
         return true
       }
       console.warn('invalid hash chain', action.id, nextAction.id)

@@ -1,8 +1,8 @@
-import { create } from 'zustand';
-import NDK, { NDKEvent, NDKFilter, NDKPrivateKeySigner, NDKRelay, NDKUser, NDKUserProfile, NDKSubscriptionOptions, NDKNip07Signer, NDKRelaySet, NDKSubscription } from '@nostr-dev-kit/ndk';
+import { create } from 'zustand'
+import NDK, { NDKEvent, NDKFilter, NDKPrivateKeySigner, NDKRelay, NDKUser, NDKUserProfile, NDKSubscriptionOptions, NDKNip07Signer, NDKRelaySet, NDKSubscription } from '@nostr-dev-kit/ndk'
 // import NDKRedisCacheAdapter from '@nostr-dev-kit/ndk-cache-redis'
-import { initializeIdentity, loadNpub, unlockKeyForSigning } from '../libraries/LocalIdentity';
-import { nip19, UnsignedEvent } from 'nostr-tools';
+import { initializeIdentity, loadNpub, unlockKeyForSigning } from '../libraries/LocalIdentity'
+import { nip19, UnsignedEvent } from 'nostr-tools'
 import { hexToBytes } from '@noble/hashes/utils'
 
 // This declaration allows us to access window.nostr without TS errors.
@@ -78,21 +78,21 @@ const useNDKStore = create<NDKState>((set, get) => ({
       autoConnectUserRelays: false,
       signer,
     })
-    await ndk.connect();
-    set({ ndk, isConnected: true, relays: opts.relayUrls || defaultRelays });
+    await ndk.connect()
+    set({ ndk, isConnected: true, relays: opts.relayUrls || defaultRelays })
     // DEBUG
-    window.ndk = ndk;
+    window.ndk = ndk
   },
 
   getNDK: function() {
     // use this function to get the NDK instance so that all the check logic can be in one spot.
-    const { ndk, isConnected } = get();
-    if (!isConnected || !ndk) throw new Error('NDK not initialized');
-    return ndk;
+    const { ndk, isConnected } = get()
+    if (!isConnected || !ndk) throw new Error('NDK not initialized')
+    return ndk
   },
 
   unlockLocalKeySigner: function() {
-    const ndk = get().getNDK();
+    const ndk = get().getNDK()
     const signer = unlockKeyForSigning()
     ndk.signer = signer
     set({ ndk })
@@ -112,7 +112,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
     ndk.activeUser = new NDKUser({npub: loadNpub()})
     ndk.activeUser.ndk = ndk
     localStorage.removeItem('useExtension')
-    set({ isUserLoaded: true, ndk });
+    set({ isUserLoaded: true, ndk })
     callback()
   },
 
@@ -127,7 +127,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
       ndk.activeUser.ndk = ndk
       ndk.signer = signer
       localStorage.setItem('useExtension', 'true')
-      set({ isUserLoaded: true, ndk });
+      set({ isUserLoaded: true, ndk })
       callback()
     } catch (e) {
       alert("Extension prompt was cancelled. Refresh the page to try again.")
@@ -139,7 +139,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
     const ndk = get().getNDK()
     ndk.activeUser = undefined
     // this also resets activeUser.profile in the process.
-    set({ isUserLoaded: false, isProfileLoaded: false, ndk });
+    set({ isUserLoaded: false, isProfileLoaded: false, ndk })
   },
 
   fetchUserProfile: async () => {
@@ -180,12 +180,12 @@ const useNDKStore = create<NDKState>((set, get) => ({
 
   fetchEvent: async (filter: NDKFilter) => {
     const ndk = get().getNDK()
-    return await ndk.fetchEvent(filter);
+    return await ndk.fetchEvent(filter)
   },
 
   fetchEvents: async (filter: NDKFilter) => {
     const ndk = get().getNDK()
-    return await ndk.fetchEvents(filter);
+    return await ndk.fetchEvents(filter)
   },
 
   rawEventToNDKEvent: (rawEvent: UnsignedEvent): NDKEvent => {

@@ -1,22 +1,22 @@
-import React, { useEffect, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useEffect, useState } from 'react'
+import { Canvas } from '@react-three/fiber'
 import { useBuilderStore } from '../../store/BuilderStore'
 import Grid from './Grid'
-import ShardEditor from './ShardEditor';
-import ControlPanel from './ControlPanel';
-import ShardList from './ShardList';
+import ShardEditor from './ShardEditor'
+import ControlPanel from './ControlPanel'
+import ShardList from './ShardList'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 
 const CyberspaceBuild: React.FC = () => {
-  const { addShard, shardIndex, shards } = useBuilderStore();
-  const [selectedTool, setSelectedTool] = useState<'vertex' | 'face' | 'color' | 'move'>('vertex');
+  const { addShard, shardIndex, shards } = useBuilderStore()
+  const [selectedTool, setSelectedTool] = useState<'vertex' | 'face' | 'color' | 'move'>('vertex')
 
   useEffect(() => {
     if (shardIndex === null && shards.length === 0) {
       console.log('no shards!')
       addShard()
     }
-  }, [shardIndex, shards, addShard]);
+  }, [shardIndex, shards, addShard])
 
   return (
     <div style={{ height: '100vh', backgroundColor: "#14071f" }}>
@@ -35,7 +35,7 @@ const CyberspaceBuild: React.FC = () => {
         </EffectComposer>
       </Canvas>
     </div>
-  );
-};
+  )
+}
 
-export default CyberspaceBuild;
+export default CyberspaceBuild

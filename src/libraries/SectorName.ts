@@ -11,19 +11,19 @@ const suffixes = [
   'Lambda', 'Mu', 'Nu', 'Xi', 'Omicron', 'Pi', 'Rho', 'Sigma', 'Tau', 'Upsilon'
 ]
 
-export function generateSectorName(sectorId) {
-  const [x, y, z] = sectorId.split('-').map(BigInt);
+export function generateSectorName(sectorId: string) {
+  const [x, y, z] = sectorId.split('-').map(BigInt)
   
-  const adjIndex = Number(x % BigInt(adjectives.length));
-  const nounIndex = Number(y % BigInt(nouns.length));
-  const suffixIndex = Number(z % BigInt(suffixes.length));
+  const adjIndex = Number(x % BigInt(adjectives.length))
+  const nounIndex = Number(y % BigInt(nouns.length))
+  const suffixIndex = Number(z % BigInt(suffixes.length))
   
-  const name = `${adjectives[adjIndex]} ${nouns[nounIndex]} ${suffixes[suffixIndex]}`;
+  const name = `${adjectives[adjIndex]} ${nouns[nounIndex]} ${suffixes[suffixIndex]}`
   
   // Generate a short numeric code based on the last few digits of each coordinate
-  const shortCode = sectorId.split('-').map(coord => coord.slice(-4)).join('-');
+  const shortCode = sectorId.split('-').map(coord => coord.slice(-4)).join('-')
   
-  return `${name} (${shortCode})`;
+  return `${name} (${shortCode})`
 }
 
 // Example usage

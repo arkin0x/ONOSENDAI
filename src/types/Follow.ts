@@ -1,1 +1,0 @@
-export type FollowTarget = "USER" | "BEACON" | "WORLD" | null

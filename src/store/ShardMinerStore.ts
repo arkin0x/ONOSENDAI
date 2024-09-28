@@ -5,6 +5,7 @@ import { serializeEvent, deserializeEvent, getNonceBounds } from '../libraries/M
 import { cyberspaceCoordinateFromHexString } from '../libraries/Cyberspace'
 import useNDKStore from './NDKStore'
 import { workzone, setWorkerCallback, updateHashpowerAllocation } from '../libraries/WorkerManager'
+import { UnsignedEvent } from 'nostr-tools'
 
 
 type ShardMinerState = {
@@ -83,8 +84,11 @@ function handleShardMinerMessage(event: MessageEvent) {
     console.log()
     const shardEventDecoded = new TextDecoder().decode(data.shardEvent)
     const minedEvent = deserializeEvent(shardEventDecoded)
-    minedEvent.id = data.id
-    useNDKStore.getState().publishRaw(minedEvent)
+    const minedEventWithId = {
+      ...minedEvent,
+      id: data.id,
+    }
+    useNDKStore.getState().publishRaw(minedEventWithId as UnsignedEvent)
     useShardMinerStore.getState().stopMining()
   } else if (status === 'batch-complete') {
     const progress = (data.currentNonce / (2 ** 32)) * 100

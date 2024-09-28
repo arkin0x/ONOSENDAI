@@ -1,4 +1,4 @@
-import { Shard3DData } from "../components/Build/Shards";
+import { Shard3DData } from "../components/Build/Shards"
 
 export const shardData: Shard3DData = {
   vertices: [

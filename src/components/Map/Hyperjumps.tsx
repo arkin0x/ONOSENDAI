@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { BufferGeometry, Vector3, LineBasicMaterial, Float32BufferAttribute, PointsMaterial } from 'three'
+import { BufferGeometry, Vector3, LineBasicMaterial, Float32BufferAttribute, PointsMaterial, Line } from 'three'
 import { CYBERSPACE_AXIS, cyberspaceCoordinateFromHexString } from '../../libraries/Cyberspace'
 import COLORS from '../../data/Colors'
 import { useSectorStore } from '../../store/SectorStore'
@@ -108,7 +108,7 @@ const BlockConnection: React.FC<BlockConnectionProps> = ({ currentBlock, nextBlo
 
   return (
     <mesh>
-      <line geometry={geometry} material={material} />
+      <primitive object={new Line(geometry, material)} />
     </mesh>
   )
 }

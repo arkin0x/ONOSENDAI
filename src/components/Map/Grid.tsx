@@ -1,5 +1,5 @@
 import { ReactNode } from "react"
-import { BufferGeometry, EdgesGeometry, Euler, Float32BufferAttribute, LineBasicMaterial, RingGeometry, Shape, ShapeGeometry } from "three"
+import { Euler, LineBasicMaterial, RingGeometry } from "three"
 import COLORS from "../../data/Colors"
 import { CyberspacePlane } from "../../libraries/Cyberspace"
 import { Text } from "@react-three/drei"
@@ -15,18 +15,6 @@ export function Grid({children, scale, plane = CyberspacePlane.DSpace}: {childre
   const meridianGeometry = new RingGeometry(earthRadius * 1.1, earthRadius * 1.1, 64)
   meridianGeometry.setDrawRange(0, 192)
   const lineMaterial = new LineBasicMaterial({ color: COLORS.GREEN, linewidth: 2 })
-
-  // // Create the rectangle geometry
-  // const rectangleGeometry = new BufferGeometry()
-  // const vertices = new Float32Array([
-  //   -1, -1, 0, // bottom left
-  //   -1,  1, 0,
-  //    1,  1, 0, // bottom right
-  //    1, -1, 0, // top right
-  //   -1, -1, 0  // top left
-  // ])
-  // rectangleGeometry.setAttribute('position', new Float32BufferAttribute(vertices,3))
-  // const rectangleMaterial = new LineBasicMaterial({ color: COLORS.GREEN})
 
   return (
     <group

@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { CYBERSPACE_SECTOR, CyberspaceCoordinateDimension, cyberspaceCoordinateFromHexString, cyberspaceEncodePartialToRaw, cyberspaceEncodeSectorPartialToRaw, CyberspaceLocalCoordinateDimension, CyberspacePlane, factoryCyberspaceLocalCoordinateVector } from "../libraries/Cyberspace"
+import { cyberspaceCoordinateFromHexString, cyberspaceEncodeSectorPartialToRaw, CyberspaceLocalCoordinateDimension, CyberspacePlane, factoryCyberspaceLocalCoordinateVector } from "../libraries/Cyberspace"
 import { useSectorStore } from "../store/SectorStore"
 
 export function DebugLocal() {
@@ -114,7 +114,7 @@ export function DebugLocal() {
         "sig": "ba7cc8ab8ecbbe612ee1f6cda1bf82e46a610d12df6333783353c7d16c7f0d32ed1f5adcc73b6fee1b6b29f88341a30295f3024694aab06d2dacdcd70596ca0c"
       }
     )
-  }, [])
+  }, [addHyperjump])
 
   /// TEST HYPERJUMPS
   const hj0 = cyberspaceCoordinateFromHexString("e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a")

@@ -1,7 +1,7 @@
-import React, { useRef } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
-import { Group, Vector3 } from 'three';
-import COLORS from '../../data/Colors';
+import React, { useRef } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
+import { Group, Vector3 } from 'three'
+import COLORS from '../../data/Colors'
 
 interface VertexSelectionIndicatorProps {
   selectedVertices: string[];
@@ -9,21 +9,21 @@ interface VertexSelectionIndicatorProps {
 }
 
 const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ selectedVertices, faceCreated }) => {
-  const groupRef = useRef<Group>(null);
-  const { camera } = useThree();
+  const groupRef = useRef<Group>(null)
+  const { camera } = useThree()
 
   useFrame(() => {
     if (groupRef.current) {
-      const cameraPosition = camera.position.clone();
-      const offset = new Vector3(.07, -.09, -.2);
-      offset.applyQuaternion(camera.quaternion);
-      groupRef.current.position.copy(cameraPosition.add(offset));
-      groupRef.current.quaternion.copy(camera.quaternion);
+      const cameraPosition = camera.position.clone()
+      const offset = new Vector3(.07, -.09, -.2)
+      offset.applyQuaternion(camera.quaternion)
+      groupRef.current.position.copy(cameraPosition.add(offset))
+      groupRef.current.quaternion.copy(camera.quaternion)
       const SCALAR = 0.03
       const scale = new Vector3(SCALAR, SCALAR, SCALAR)
-      groupRef.current.scale.copy(scale);
+      groupRef.current.scale.copy(scale)
     }
-  });
+  })
 
   return (
     <group ref={groupRef}>
@@ -38,7 +38,7 @@ const VertexSelectionIndicator: React.FC<VertexSelectionIndicatorProps> = ({ sel
         </mesh>
       ))}
     </group>
-  );
-};
+  )
+}
 
-export default VertexSelectionIndicator;
+export default VertexSelectionIndicator

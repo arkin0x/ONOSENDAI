@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Text } from '@react-three/drei'
-import { useBuilderStore } from '../../store/BuilderStore'
+import { CyberspaceShard, useBuilderStore } from '../../store/BuilderStore'
 import COLORS from '../../data/Colors'
 import { useFrame, useThree } from '@react-three/fiber'
+import { ThreeEvent } from '@react-three/fiber'
 import { Group, Vector3 } from 'three'
 import { shardStateDataTo3DData } from './Shards'
 import { Shard } from '../Cyberspace/Shard'
@@ -46,7 +47,7 @@ function ShardList({create, deploy}: ShardListProps) {
     startMining(shards[shardIndex!], coordRaw)
   }
 
-  function handleClick(event, shard) {
+  function handleClick(event: ThreeEvent<MouseEvent>, shard: CyberspaceShard) {
     event.stopPropagation()
     if (event.button === 0) {
       setCurrentShard(shard.id)
@@ -59,7 +60,7 @@ function ShardList({create, deploy}: ShardListProps) {
     }
   }
 
-  function renderVertices(shard) {
+  function renderVertices(shard: CyberspaceShard) {
     return shard.vertices.map((vertex) => (
       <group key={vertex.id}>
         <mesh // actual vertex mesh

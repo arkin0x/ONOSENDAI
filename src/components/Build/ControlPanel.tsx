@@ -1,9 +1,9 @@
-import React, { useEffect, useRef } from 'react';
-import { Text } from '@react-three/drei';
-import { useBuilderStore } from '../../store/BuilderStore';
-import COLORS from '../../data/Colors';
-import { useFrame, useThree } from '@react-three/fiber';
-import { Group, Vector3 } from 'three';
+import React, { useEffect, useRef } from 'react'
+import { Text } from '@react-three/drei'
+import { useBuilderStore } from '../../store/BuilderStore'
+import COLORS from '../../data/Colors'
+import { useFrame, useThree } from '@react-three/fiber'
+import { Group, Vector3 } from 'three'
 
 interface ControlPanelProps {
   selectedTool: 'vertex' | 'face' | 'color' | 'move';
@@ -11,9 +11,9 @@ interface ControlPanelProps {
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTool }) => {
-  const { gridSize, setGridSize } = useBuilderStore();
-  const groupRef = useRef<Group>(null);
-  const { camera } = useThree();
+  const { gridSize, setGridSize } = useBuilderStore()
+  const groupRef = useRef<Group>(null)
+  const { camera } = useThree()
 
   useEffect(() => {
     setGridSize(3)
@@ -21,16 +21,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTo
 
   useFrame(() => {
     if (groupRef.current) {
-      const cameraPosition = camera.position.clone();
-      const offset = new Vector3(0, -.1, -.2);
-      offset.applyQuaternion(camera.quaternion);
-      groupRef.current.position.copy(cameraPosition.add(offset));
-      groupRef.current.quaternion.copy(camera.quaternion);
+      const cameraPosition = camera.position.clone()
+      const offset = new Vector3(0, -.1, -.2)
+      offset.applyQuaternion(camera.quaternion)
+      groupRef.current.position.copy(cameraPosition.add(offset))
+      groupRef.current.quaternion.copy(camera.quaternion)
       const SCALAR = 0.05
       const scale = new Vector3(SCALAR, SCALAR, SCALAR)
-      groupRef.current.scale.copy(scale);
+      groupRef.current.scale.copy(scale)
     }
-  });
+  })
 
   return (
     <group ref={groupRef}>
@@ -116,7 +116,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ selectedTool, setSelectedTo
         </group>
       </group>
     </group>
-  );
-};
+  )
+}
 
-export default ControlPanel;
+export default ControlPanel

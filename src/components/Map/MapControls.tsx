@@ -3,7 +3,6 @@ import { useZoomStore } from '../../store/ZoomStore.ts'
 import { Quaternion, Vector3 } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useRotationStore } from '../../store/RotationStore.ts'
-import { Plane } from '@react-three/drei'
 
 export const MapControls: React.FC = () => {
   const { zoom, setZoom, ZOOM_MAX } = useZoomStore()
@@ -73,7 +72,7 @@ export const MapControls: React.FC = () => {
 
   const handleWheel = useCallback((e: WheelEvent) => {
     setZoom(Math.max(0, Math.min(ZOOM_MAX, zoom + (e.deltaY > 0 ? 1 : -1))))
-  }, [setZoom, zoom])
+  }, [ZOOM_MAX, setZoom, zoom])
 
   const handleContextMenu = useCallback((e: MouseEvent) => {
     e.preventDefault() // Prevent the default context menu

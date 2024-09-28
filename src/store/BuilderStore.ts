@@ -1,5 +1,5 @@
-import create from 'zustand'
-import { persist } from 'zustand/middleware'
+import { create } from 'zustand'
+import { createJSONStorage, persist, PersistStorage } from 'zustand/middleware'
 
 export interface Vertex {
   id: string
@@ -218,7 +218,7 @@ export const useBuilderStore = create<BuilderState>()(
     }),
     {
       name: 'builder-storage',
-      getStorage: () => localStorage,
+      storage: createJSONStorage(() => localStorage),
     }
   )
 )

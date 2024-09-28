@@ -60,6 +60,7 @@ export const useActionChain = (pubkey: string) => {
 
   // determine slice of history to query for between latest local state and latest action received.
   useEffect(() => {
+    if (!actions) return
     async function fetchActionHistory(filters: NDKFilter[]){
       const actionHistory = await ndk?.fetchEvents(filters)
       const actionArray = Array.from(actionHistory ?? []).map(event => event.rawEvent() as Event)
@@ -138,6 +139,6 @@ export const useActionChain = (pubkey: string) => {
       fetchActionHistory([actionHistoryFilter, genesisFilter])
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestAction, pubkey]) // don't include actions in the dependency array. This would cause unnecessary re-renders.
+  }, [actions, latestAction, pubkey]) // don't include actions in the dependency array. This would cause unnecessary re-renders.
 
 }

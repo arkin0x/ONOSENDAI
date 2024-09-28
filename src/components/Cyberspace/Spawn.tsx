@@ -14,7 +14,7 @@ type GLTFResult = GLTF & {
 export function SpawnModel({ pubkey }: { pubkey: string }) {
   const coord = cyberspaceCoordinateFromHexString(pubkey)
   const position = coord.local.vector.toVector3()
-  const { nodes, materials } = useGLTF('/src/assets/spawn.glb') as GLTFResult
+  const { nodes, materials } = useGLTF('/spawn.glb') as GLTFResult
 
   return (
     <group position={position} scale={[3,3,3]} dispose={null}>
@@ -65,4 +65,4 @@ export function SpawnModel({ pubkey }: { pubkey: string }) {
   )
 }
 
-useGLTF.preload('/src/assets/spawn.glb')
+useGLTF.preload('/spawn.glb')

@@ -1,4 +1,4 @@
-import logo from '../assets/logo-cropped.png'
+import logo from '/logo-cropped.png'
 
 function Loading() {
   return (

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, TextureLoader } from 'three'
 import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors.ts'
-import panel from '../assets/warning-bg.png'
+import panel from '/warning-bg.png'
 import { Spinner } from './Spinner.tsx'
 import { useControlStore } from '../store/ControlStore.ts'
 

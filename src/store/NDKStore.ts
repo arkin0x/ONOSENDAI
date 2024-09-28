@@ -139,6 +139,10 @@ const useNDKStore = create<NDKState>((set, get) => ({
     const ndk = get().getNDK()
     ndk.activeUser = undefined
     // this also resets activeUser.profile in the process.
+    localStorage.removeItem('avatar-storage')
+    localStorage.removeItem('ui-storage')
+    localStorage.removeItem('sector-storage')
+    localStorage.removeItem('useExtension')
     set({ isUserLoaded: false, isProfileLoaded: false, ndk })
   },
 

@@ -8,7 +8,7 @@ export const Logout = () => {
   useEffect(() => {
     resetUser()
     window.location.href='/'
-  }, [])
+  }, [resetUser])
 
   return <Loading/>
 }

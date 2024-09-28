@@ -133,8 +133,8 @@ useEffect(() => {
       }
       if (isLatestActionGenesis) {
         // the latest action is a genesis action. We don't need to query for history. Reset the history and replace with the genesis action.
-        console.log('latest action is genesis')
-        dispatchActionState({type: 'reset', pubkey, actions: [latestAction]})
+        console.log('latest action is genesis', latestAction)
+        dispatchActionState({type: 'push', pubkey, actions: [latestAction]})
         completeUserHistory()
         return
       }

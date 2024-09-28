@@ -8,14 +8,14 @@ export function MovementControls() {
   function renderControlUnit() {
     return (
       <group position={[0,3,0]}>
-        <ButtonBox text={'FOLLOW'} position={[0, -1.5, 0]} activate={{resetView: true}} toggle/>
-        <ButtonBox text={'BACK'} position={[0, -.5, 0]} activate={{backward: true}} down up/>
-        <ButtonBox text={'FORWARD'} position={[0, .5, 0]} activate={{forward: true}} down up/>
+        <ButtonBox text={'FOLLOW\nESC'} position={[0, -1.5, 0]} activate={{resetView: true}} toggle/>
+        <ButtonBox text={'BACK\nS'} position={[0, -.5, 0]} activate={{backward: true}} down up/>
+        <ButtonBox text={'FORWARD\nW'} position={[0, .5, 0]} activate={{forward: true}} down up/>
         <ButtonBox text={'CRUISE'} position={[0, 1.5, 0]} activate={{cruise: true}} toggle/>
-        <ButtonBox text={'UP'} position={[2, .5, 0]} activate={{up: true}} down up/>
-        <ButtonBox text={'DOWN'} position={[2, -.5, 0]} activate={{down: true}} down up/>
-        <ButtonBox text={'RIGHT'} position={[3, 0, 0]} activate={{right: true}} down up/>
-        <ButtonBox text={'LEFT'} position={[1, 0, 0]} activate={{left: true}} down up/>
+        <ButtonBox text={'UP\nE'} position={[2, .5, 0]} activate={{up: true}} down up/>
+        <ButtonBox text={'DOWN\nQ'} position={[2, -.5, 0]} activate={{down: true}} down up/>
+        <ButtonBox text={'RIGHT\nD'} position={[3, 0, 0]} activate={{right: true}} down up/>
+        <ButtonBox text={'LEFT\nA'} position={[1, 0, 0]} activate={{left: true}} down up/>
         <pointLight position={[0, 8, 1]} intensity={100} color={COLORS.RED} />
       </group>
     )

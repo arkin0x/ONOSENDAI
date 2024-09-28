@@ -1,8 +1,11 @@
 {
+  "routes": [
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/interface", "dest": "/" },
+    { "src": "/logout", "dest": "/" },
+    { "src": "/(.*)", "dest": "/$1" }
+  ],
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/"
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

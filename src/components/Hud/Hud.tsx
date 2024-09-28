@@ -138,7 +138,6 @@ export function Hud({showControls, showSectorInfo}: HudProps) {
   const etaParts = convertSeconds(eta || Infinity)
 
   return (
-    <>
       <group>
         <CoordinateText position={{x: 1, y: nextLineLeft()}} rotation={[0, r, 0]} text={'PLANE ' + simulatedStateRef.current.plane.toUpperCase()} align="left" color={simulatedStateRef.current.plane === CyberspacePlane.DSpace ? COLORS.DSPACE : COLORS.ISPACE} />
         <CoordinateText position={{x: 1, y: nextLineLeft()}} rotation={[0, r, 0]} text={simulatedStateRef.current.coordinate.raw.toUpperCase()} align="left" />
@@ -149,12 +148,10 @@ export function Hud({showControls, showSectorInfo}: HudProps) {
         <CoordinateText position={{x: 1, y: nextLineLeft()}} rotation={[0, r, 0]} text={'THROTTLE ' + throttle + ' ' + '▶'.repeat(throttle) + ' +' + (throttle === 0 ? 0 : Math.pow(2, throttle-10) * 60) + ' G/s'} align="left" color={COLORS.RED} />
         <CoordinateText position={{x: 1, y: nextLineLeft()}} rotation={[0, r, 0]} text={`${speed.toFixed(2)} G/s`} align="left" color={COLORS.RED} fontSize={0.34} />
         { controlState.cruise 
-          ? 
-          <>
+          ? <>
             <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CRUISE ENGAGED'} align="left" color={COLORS.PINK} /> 
             <CoordinateText position={{x: 1, y: nextLineLeft()}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
-          </>
-          : <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
+          </> : <CoordinateText position={{x: 1, y: nextLineLeft(5)}} rotation={[0, r, 0]} text={'CHAIN LENGTH ' + actionsRef.current.length} align="left" color={COLORS.PURPLE} />
         }
 
         { showControls ? 
@@ -196,38 +193,32 @@ export function Hud({showControls, showSectorInfo}: HudProps) {
           >{ showDerezzWarn ? "CANCEL" : "DEREZZ"}</Text>
         </group>
 
-        { showDerezzWarn && (
-          <DerezzWarning chainLength={actionsRef.current.length} callback={() => setShowDerezzWarn(false)} />
-        )}
+        { showDerezzWarn ? <DerezzWarning chainLength={actionsRef.current.length} callback={() => setShowDerezzWarn(false)} /> : null }
 
-        { showSectorInfo && (
+        { showSectorInfo ? 
           <group>
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'Z ' + simulatedStateRef.current.localCoordinate.vector.z.toFixed(2) + ' G'} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'Y ' + simulatedStateRef.current.localCoordinate.vector.y.toFixed(2) + ' G'} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'X ' + simulatedStateRef.current.localCoordinate.vector.x.toFixed(2) + ' G'} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`SECTOR POSITION`} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'Z ' + simulatedStateRef.current.localCoordinate.vector.z.toFixed(2) + ' G'} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'Y ' + simulatedStateRef.current.localCoordinate.vector.y.toFixed(2) + ' G'} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'X ' + simulatedStateRef.current.localCoordinate.vector.x.toFixed(2) + ' G'} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`SECTOR POSITION`} align="right" />
 
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`${generateSectorName(simulatedStateRef.current.sector.id).toUpperCase()}`} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`${generateSectorName(simulatedStateRef.current.sector.id).toUpperCase()}`} align="right" />
 
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`SECTOR NAME`} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[2]} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[1]} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[0]} align="right" />
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'SECTOR ID'} align="right" />
-          </group>
-        )}
-        {genesis && (
-          <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'GENESIS SECTOR'} align="right" color={COLORS.PINK} />
-        )}
-        {hyperjump && (
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`SECTOR NAME`} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[2]} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[1]} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={simulatedStateRef.current.sector.id.split('-')[0]} align="right" />
+            <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'SECTOR ID'} align="right" />
+          </group> : null
+        }
+        {genesis ? <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'GENESIS SECTOR'} align="right" color={COLORS.PINK} /> : null}
+        {hyperjump ? 
           <>
-            {eta && <CoordinateText position={{x: 99, y: nextLineRight(5)}} rotation={[0, -r, 0]} text={`${etaParts.days}d ${etaParts.hours}h ${etaParts.minutes}m ${etaParts.seconds}s`} align="right" color={COLORS.ORANGE} />}
+            {eta ? <CoordinateText position={{x: 99, y: nextLineRight(5)}} rotation={[0, -r, 0]} text={`${etaParts.days}d ${etaParts.hours}h ${etaParts.minutes}m ${etaParts.seconds}s`} align="right" color={COLORS.ORANGE} /> : null}
             <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={`${distanceRef.current.toFixed(speed > 1000 ? 0 : 2)} Gibsons`} align="right" color={COLORS.YELLOW} />
             <CoordinateText position={{x: 99, y: nextLineRight()}} rotation={[0, -r, 0]} text={'LOCAL HYPERJUMP'} align="right" color={COLORS.YELLOW} />
           </>
-        )}
-
+        : null}
       </group>
-    </>
   )
 }

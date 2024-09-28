@@ -1,5 +1,4 @@
 import { OrbitControls, Text } from "@react-three/drei"
-import { useSpring, animated } from '@react-spring/three'
 import { useCallback, useState } from "react"
 import { UIState } from "../types/UI"
 import CyberspaceViewer from "./Cyberspace/CyberspaceViewer"
@@ -86,16 +85,6 @@ export const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProp
   const { viewport } = useThree()
   const [hover, setHover] = useState(false)
 
-  // const x = viewport.width * props.position.x
-  // const y = viewport.height * props.position.y
-  // Use spring for smooth animation
-  const { x } = useSpring({
-    x: (hover ? 2 : 0 ),
-    y: (hover ? 2 : 0 ),
-    config: { tension: 500, friction: 30 } // Adjust the animation config as needed
-  })
-
-
   // Calculate position based on viewport dimensions
   const position = new Vector3(-viewport.width / 2 + props.position.x, -viewport.height / 2 + props.position.y + 32, 0)
 
@@ -128,9 +117,7 @@ export const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProp
   const shapeGeometry = new ShapeGeometry(shape)
 
   return (
-    <animated.group 
-      position-x={x} // Use the animated y value
-    >
+    <group>
       {/* Clickable shape behind the text */}
       <mesh
         onPointerOver={() => setHover(true)}
@@ -167,6 +154,6 @@ export const NavText: React.FC<CoordinateTextProps> = (props: CoordinateTextProp
       </Text>
       { hover || props.current ? <lineLoop geometry={geometry} material={material} position={position.clone().add(new Vector3(0,3, 0))} scale={3} /> : null }
       
-    </animated.group>
+    </group>
   )
 }

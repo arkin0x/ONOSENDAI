@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useAvatarStore } from '../../store/AvatarStore'
 import { useSectorStore } from '../../store/SectorStore'
 import useNDKStore from '../../store/NDKStore'
@@ -10,8 +10,8 @@ import { CyberspaceNDKKinds } from '../../types/CyberspaceNDK'
 // TODO: this could be a control like Throttle someday and have a HUD
 const SCAN_INTERVAL = 2000 // 10 seconds
 
-const SectorScanner: React.FC = () => {
-  const getSimulatedSectorId = useAvatarStore((state) => state.getSimulatedSectorId)
+function SectorScanner() {
+  const { getSimulatedSectorId, userHistoryComplete } = useAvatarStore()
   const { 
     mountSector, 
     addAvatar,
@@ -44,6 +44,7 @@ const SectorScanner: React.FC = () => {
   // subscribe to current sector changess
   useEffect(() => {
     if (!userCurrentSectorId) return
+    if (!userHistoryComplete) return // don't tie up NDK until we have the user's history
     const filter: NDKFilter = {
       kinds: [
         CyberspaceKinds.Action as CyberspaceNDKKinds,
@@ -73,9 +74,11 @@ const SectorScanner: React.FC = () => {
     return () => {
       sub.stop()
     }
-  }, [userCurrentSectorId])
+  }, [addAvatar, addConstruct, addHyperjump, addShard, subscribe, userCurrentSectorId, userHistoryComplete])
 
+  // scan sectors in an ever-increasing area around the user.
   useEffect(() => {
+    if (!userHistoryComplete) return // don't tie up NDK until we have the user's history
     const scanSectors = async () => {
       if (!pubkey) return
       const currentSectorId = getSimulatedSectorId(pubkey)

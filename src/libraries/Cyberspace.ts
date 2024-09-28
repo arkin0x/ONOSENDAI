@@ -39,7 +39,7 @@ type Hex256Bit = `${
 }{64}`
 
 // Factory function to create a Hex256Bit from a string
-function factoryHex256Bit(hex: string): Hex256Bit {
+export function factoryHex256Bit(hex: string): Hex256Bit {
   // Check if the input string is exactly 64 hex characters
   if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
     throw new Error('Invalid Hex256Bit string: must be exactly 64 hex characters')

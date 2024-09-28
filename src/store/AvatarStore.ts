@@ -16,12 +16,18 @@ type AvatarActionState = {
  * If you put an Event in it will replace its UnsignedEvent counterpart in state.
  */
 export type AvatarActionDispatched = 
-  | { type: 'unshift' | 'push'; pubkey: string; actions: (Event|UnsignedEvent)[] }
-  | { type: 'reset'; pubkey: string }
+  | { type: 'unshift' | 'push'; 
+      pubkey: string; 
+      actions: (Event|UnsignedEvent)[] }
+  | { type: 'reset'; 
+      pubkey: string 
+      actions?: (Event|UnsignedEvent)[] }
 
 interface AvatarStore {
+  userHistoryComplete: boolean
   actionState: AvatarActionState
   simulatedStates: { [pubkey: string]: { state: CyberspaceVirtualActionTemplate | null, timestamp: Time } }
+  setUserHistoryComplete: (complete: boolean) => void
   dispatchActionState: (action: AvatarActionDispatched) => void
   getSimulatedState: (pubkey: string, skipCache?: boolean) => CyberspaceVirtualActionTemplate | null
   getGenesis: (pubkey: string) => CyberspaceAction | null
@@ -31,25 +37,28 @@ interface AvatarStore {
   getSimulatedSectorId: (pubkey: string) => string | null
 }
 
-const avatarActionStateReducer = (state: AvatarActionState, action: AvatarActionDispatched): AvatarActionState => {
+const avatarActionStateReducer = (state: AvatarActionState, data: AvatarActionDispatched): AvatarActionState => {
   const newState = {...state} as AvatarActionState
 
   // Initialize the action array for this pubkey if it doesn't exist
-  if (newState[action.pubkey] === undefined) {
-    newState[action.pubkey] = [] as CyberspaceAction[]
+  if (newState[data.pubkey] === undefined) {
+    newState[data.pubkey] = [] as CyberspaceAction[]
   }
 
   // Get all existing actions for this pubkey
-  const avatarActions: CyberspaceAction[] = newState[action.pubkey]
+  const avatarActions: CyberspaceAction[] = newState[data.pubkey]
 
   // Reset the action array for this pubkey
-  if (action.type === 'reset'){
-    newState[action.pubkey] = [] as CyberspaceAction[]
-    return newState
+  if (data.type === 'reset'){
+    newState[data.pubkey] = [] as CyberspaceAction[]
+    if (!data.actions) {
+      // If no actions are provided, return the new empty state. Otherwise, continue to add the new actions.
+      return newState
+    }
   }
 
   // Validate the new actions
-  const newActions = action.actions.map(validateCyberspaceAction).filter(Boolean)
+  const newActions = data.actions!.map(validateCyberspaceAction).filter(Boolean)
 
 
   // Do nothing if the new actions failed validation
@@ -58,22 +67,22 @@ const avatarActionStateReducer = (state: AvatarActionState, action: AvatarAction
   }
 
   // Add the new actions to the existing actions
-  if (action.type === 'unshift') {
-    newState[action.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
+  if (data.type === 'unshift') {
+    newState[data.pubkey] = [...newActions, ...avatarActions] as CyberspaceAction[]
   }
-  if (action.type === 'push') {
-    newState[action.pubkey] = [...avatarActions, ...newActions] as CyberspaceAction[]
+  if (data.type === 'push') {
+    newState[data.pubkey] = [...avatarActions, ...newActions] as CyberspaceAction[]
   }
 
   // Sort all actions by millisecond timestamp
-  newState[action.pubkey].sort((a, b) => {
+  newState[data.pubkey].sort((a, b) => {
     const aMs = getMillisecondsTimestampFromAction(a)
     const bMs = getMillisecondsTimestampFromAction(b)
     return aMs - bMs
   })
 
   // Remove duplicate actions and favor ones with a signature
-  newState[action.pubkey] = newState[action.pubkey].reduce((acc, currentAction) => {
+  newState[data.pubkey] = newState[data.pubkey].reduce((acc, currentAction) => {
     const existingAction = acc.find((action) => action.id === currentAction.id)
 
     // no duplicate
@@ -98,8 +107,10 @@ const SIMULATED_STATE_CACHE_TIME = 250 // ms
 export const useAvatarStore = create<AvatarStore>()(
   persist(
     (set, get) => ({
+      userHistoryComplete: false,
       actionState: {},
       simulatedStates: {},
+      setUserHistoryComplete: (complete: boolean) => set({ userHistoryComplete: complete }),
       dispatchActionState: (action: AvatarActionDispatched) => set(state => {
         const newActionState = avatarActionStateReducer(state.actionState, action)
         return {

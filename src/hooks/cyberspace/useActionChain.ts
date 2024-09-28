@@ -1,195 +1,143 @@
-/**
- * useActionChain.ts
- * 
- * @description Automatically assembles action chain for a given pubkey, stores in global context, valides the history and simulates the future.
- */
-import { useContext, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Event } from 'nostr-tools'
-import { NDKEvent, NDKFilter } from "@nostr-dev-kit/ndk"
-import { NDKContext } from "../../providers/NDKProvider"
+import { NDKFilter } from "@nostr-dev-kit/ndk"
 import { CyberspaceNDKKinds } from "../../types/CyberspaceNDK"
-import { CyberspaceKinds } from "../../libraries/Cyberspace"
+import { CyberspaceKinds, factoryHex256Bit } from "../../libraries/Cyberspace"
 import { isGenesisAction } from "../../libraries/Cyberspace"
-// import { validateActionChain } from "./validateActionChain"
-import { useAvatarStore, AvatarActionDispatched } from "../../store/AvatarStore"
+import { useAvatarStore } from "../../store/AvatarStore"
 import useNDKStore from "../../store/NDKStore"
 
 export const useActionChain = (pubkey: string) => {
-  const {ndk} = useNDKStore()
-  const {actionState, dispatchActionState} = useAvatarStore()
-  const [genesisId, setGenesisId] = useState<string|null>(null)
-  const actionChainState = actionState[pubkey]
-  const runInitializeOnceRef = useRef(false)
-  
-  // When historyComplete is true, the existing actionChain is complete from genesis to present and is ready for validation
-  const [historyComplete, setHistoryComplete] = useState<boolean>(false)
 
-  // Reset: if actionChainState is empty, we need to reset other variables.
-  // useEffect(() => {
-  //   if (actionChainState && actionChainState.length === 0) {
-  //     setRunInitializeOnce(false)
-  //     setGenesisId(null)
-  //     setHistoryComplete(false)
-  //   }
-  // }, [actionChainState])
+  // Stores
+  const {ndk, getUser} = useNDKStore()
+  const identity = getUser()
+  const userPubkey = identity!.pubkey // SectorManager can't load unless we have a user pubkey, so we can assume it's here.
+  const {actionState, dispatchActionState, setUserHistoryComplete} = useAvatarStore()
+  const actions = actionState[pubkey]
 
-  // Initialize: set up subscription for latest action and get genesisId from it.
+  // State
+  const [latestAction, setLatestAction] = useState<Event | null>(null)
+
+  // Functions
+  const completeUserHistory = useCallback(() => {
+    // we only care to do this if it's the user.
+    if (userPubkey === pubkey) {
+      setUserHistoryComplete(true)
+    }
+  }, [userPubkey, pubkey, setUserHistoryComplete])
+
+  function resetMalformedChain(e: unknown) {
+    console.error('Malformed action event.', e)
+    // reset chain
+    dispatchActionState({type: 'reset', pubkey})
+    completeUserHistory()
+  }
+
+  // Effects
+
+  // get most recent action for pubkey
   useEffect(() => {
-    if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    if (runInitializeOnceRef.current) return // this effect should only run once
-    runInitializeOnceRef.current = true
-
-    console.log('initialize action chain for avatar ', pubkey)
-
-    console.log('ndk', ndk)
-    
-    // if (!actionChainState || actionChainState.length === 0) {
-    //   dispatchActionState({type: 'reset', pubkey: pubkey})
-    // }
-
-    // define subscription for latest action only.
-    const latestActionFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], authors: [pubkey], limit: 1}
-    const latestAction = ndk.subscribe(latestActionFilter, {closeOnEose: false})
-      
-    /**
-     * Pass in an event to extract the genesis event ID from the tags
-     * @param latestAction the most recent action for the pubkey
-     * @returns the genesis event ID of the action chain for the most recent event
-     */
-    const getGenesisId = (latestAction: Event) => {
-      try {
-        const isGen = isGenesisAction(latestAction) // check if the action is a genesis action
-        if(isGen) setGenesisId(latestAction.id) // if it is, set the genesisId
-        else {
-          // the action is not a genesis action. Check if it refers to a genesis tag.
-          const g = latestAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1]
-          if (g) {
-            // we got a genesis event id
-            // is the current genesisId null?
-            if (genesisId !== g) {
-              // the genesisId changed. This triggers a re-initialization of the avatar because genesisId is a dependency of this useEffect.
-              setGenesisId(g)
-            } else {
-              // the genesisId is the same. noop.
-            }
-            return g // return the id
-          } else {
-            // FIXME: recover from this error
-            return null // failed to get genesis ID
-          }
-        }
-      } catch (e) {
-        console.error('Error getting genesis tag', e)
-        // FIXME: recover from this error
-        return null
+    async function getLatestAction() {
+      if (!ndk) return
+      const latestActionFilter: NDKFilter = {
+        kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds],
+        authors: [pubkey],
+        limit: 1
       }
-    }
-
-    /**
-     * Callback for when an action is received from NDK
-     * @param latestAction an action received from NDK
-     */
-    const onReceiveLatestAction = (latestAction: NDKEvent) => {
-      console.log('Receive action:', latestAction, latestAction.id, 'for pubkey:', pubkey)
-      const event = latestAction.rawEvent() as Event
-      // 2. on receive, get genesis id from action
-      const action = {
-        type: 'push',
-        pubkey: pubkey,
-        actions: [event] as Event[],
-      } as AvatarActionDispatched 
-      dispatchActionState(action)
-      getGenesisId(event)
-    }
-
-    // the latest action and all new actions will arrive here
-    latestAction.on('event', onReceiveLatestAction)
-
-    latestAction.on('eose', () => {
-      if (!actionState[pubkey]) {
-        console.log('no actions found for pubkey', pubkey)
-        // engine handles this -- just press a key to create a genesis event.
-      }
-    })
-
-    // Clean up any subscriptions or resources in the cleanup function
-    return () => {
-      // Pseudocode: Clean up any subscriptions or resources
-      latestAction.stop()
-    }
-  // we only want to run this once.
-  }, [actionChainState, dispatchActionState, genesisId, ndk, pubkey])
-
-  /** 
-   * Gather action history for genesisId once it is set by the previous useEffect.
-  */
-  useEffect(() => {
-    if (!ndk) return // wait until ndk is ready; this effect will run again when ndk is ready
-    if (genesisId){
-      // Query all actions for genesisId (except genesis event itself because it does not have the 'e' tag referencing the genesis event)
-      const fullActionHistoryFilter: NDKFilter = {kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds], '#e': [genesisId]}
-      const fullActionHistory = ndk.subscribe(fullActionHistoryFilter, {closeOnEose: false})
-
-      /**
-       * Callback for when an action is received from NDK
-       * @param receivedAction an action received from NDK
-       */
-      const onReceiveActions = (receivedAction: NDKEvent) => {
-        const event = receivedAction.rawEvent() as Event
-        // 4. on receive, store each action in some kind of state
-        const action = {
-          type: 'unshift',
-          pubkey: pubkey,
-          actions: [event] as Event[],
-        } as AvatarActionDispatched 
-        dispatchActionState(action)
-      }
-
-      const getGenesisEvent = () => {
-        // get genesis event
-        ndk.fetchEvent(genesisId).then(genesisEvent => {
-          if (!genesisEvent) {
-            // TODO: give option to restart action chain or refresh page to try again.
-            throw new Error('Failed to get genesis event.')
-          }
-          const event = genesisEvent.rawEvent() as Event
-          const action = {
-            type: 'unshift',
-            pubkey: pubkey,
-            actions: [event] as Event[],
-          } as AvatarActionDispatched
-          dispatchActionState(action)
-          setHistoryComplete(true)
-          console.log('Received all actions for current chain.')
-        })
-      }
-
-      // all actions from present back to the genesis event will arrive here
-      fullActionHistory.on('event', onReceiveActions)
-      // on historical EOSE, now get Genesis Event 
-      fullActionHistory.on('eose', getGenesisEvent)
-
-      // Clean up any subscriptions or resources in the cleanup function
-      return () => {
-        // Pseudocode: Clean up any subscriptions or resources
-        fullActionHistory.stop()
-      }
-    }
-  }, [ndk, genesisId, pubkey, dispatchActionState])
-
-  /**
-   * Once history is assembled in previous useEffect, validate the action chain.
-  */
-  useEffect(() => {
-    if (historyComplete){
-      // TODO: 
-      const isValid = true//validateActionChain(actionChainState)
-      if (isValid) {
-        // console.log('action chain is valid')
+      const latestAction = await ndk.fetchEvent(latestActionFilter, {closeOnEose: true})
+      if (latestAction) {
+        setLatestAction(latestAction.rawEvent() as Event)
       } else {
-        // console.error('action chain is invalid')
-        // TODO: publish a new genesis event.
+        // we couldn't find any actions for this pubkey. This is a new user (or we're having an unlucky networking issue)
+        // the combination of userHistoryComplete=true and no actions means the user is new.
+        completeUserHistory()
       }
     }
-  }, [historyComplete, actionChainState])
+    getLatestAction()
+
+  }, [completeUserHistory, dispatchActionState, ndk, pubkey])
+
+  // determine slice of history to query for between latest local state and latest action received.
+  useEffect(() => {
+    async function fetchActionHistory(filters: NDKFilter[]){
+      const actionHistory = await ndk?.fetchEvents(filters)
+      const actionArray = Array.from(actionHistory ?? []).map(event => event.rawEvent() as Event)
+      if (actionArray.length > 0) {
+        dispatchActionState({type: 'push', pubkey, actions: actionArray})
+      }
+      completeUserHistory()
+    }
+    let since = 0
+    if (latestAction) {
+      let isLatestActionGenesis 
+      try {
+        isLatestActionGenesis = isGenesisAction(latestAction)
+      } catch (e) {
+        resetMalformedChain(e)
+        return 
+      }
+      if (isLatestActionGenesis) {
+        // the latest action is a genesis action. We don't need to query for history. Reset the history and replace with the genesis action.
+        dispatchActionState({type: 'reset', pubkey, actions: [latestAction]})
+        completeUserHistory()
+        return
+      }
+      // the latest action is not a genesis action. We need to query for history.
+      let latestGenesisId
+      try {
+        const tag = latestAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1]
+        if (!tag) throw new Error('No genesis tag found.')
+        latestGenesisId = factoryHex256Bit(tag) // will throw if genesis id is malformed
+      } catch (e) {
+        resetMalformedChain(e)
+        return
+      }
+      const until = latestAction.created_at
+      if (actions.length > 0) {
+        // get most recent action in store for pubkey
+        const latestStateAction = actions[actions.length - 1]
+        // check that they share the same genesis event id
+        try {
+          if (latestStateAction.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')?.[1] !== latestGenesisId) {
+            // the genesis event ids do not match. Reset our local events. We will re-query the entire history.
+            dispatchActionState({type: 'reset', pubkey})
+            completeUserHistory()
+            return
+          } else {
+            // genesis event ids match.
+            // set since to the latest action in the store.
+            since = latestStateAction.created_at
+          }
+        } catch (e) {
+          resetMalformedChain(e)
+          return
+        }
+      }
+      if (since > until) {
+        // the latest action in the store is newer than the latest action received.
+        // did we get a random action from the relay that isn't the newest? oh well.
+        // simply push the latest action to the store and set history complete.
+        // if it's a duplicate it will be filtered out of state.
+        dispatchActionState({type: 'push', pubkey, actions: [latestAction]})
+        return
+      }
+      // determine the genesis event id and limit the scope of the query to that.
+      const actionHistoryFilter: NDKFilter = {
+        kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds],
+        authors: [pubkey],
+        since: since,
+        until: until,
+        "#e": [latestGenesisId]
+      }
+      const genesisFilter: NDKFilter = {
+        kinds: [CyberspaceKinds.Action as CyberspaceNDKKinds],
+        authors: [pubkey],
+        ids: [latestGenesisId]
+      }
+      fetchActionHistory([actionHistoryFilter, genesisFilter])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestAction, pubkey]) // don't include actions in the dependency array. This would cause unnecessary re-renders.
+
 }

@@ -14,7 +14,7 @@ export const useActionChain = (pubkey: string) => {
   const {ndk, getUser} = useNDKStore()
   const identity = getUser()
   const userPubkey = identity!.pubkey // SectorManager can't load unless we have a user pubkey, so we can assume it's here.
-  const {actionState, dispatchActionState, userHistoryComplete, setUserHistoryComplete} = useAvatarStore()
+  const {actionState, dispatchActionState, setUserHistoryComplete} = useAvatarStore()
   const actions = actionState[pubkey]
 
   // State

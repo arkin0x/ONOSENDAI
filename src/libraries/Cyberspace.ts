@@ -689,10 +689,14 @@ export const createUnsignedDriftAction = async (pubkey: string, throttle: number
 }
 
 export const isGenesisAction = (action: Event): boolean => {
-  const hasPubkeyCoordinate = action.pubkey === action.tags.find(tag => tag[0] === 'C')![1] 
-  const hasNoETags = !action.tags.find(tag => tag[0] === 'e')
-  const hasZeroVelocity = action.tags.find(tag => tag[0] === 'velocity')!.slice(1).join('') === "000"
-  return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
+  try {
+    const hasPubkeyCoordinate = action.pubkey === action.tags.find(tag => tag[0] === 'C')![1] 
+    const hasNoETags = !action.tags.find(tag => tag[0] === 'e')
+    const hasZeroVelocity = action.tags.find(tag => tag[0] === 'velocity')!.slice(1).map(x => parseFloat(x)).reduce((a, c) => a+c, 0) === 0
+    return hasPubkeyCoordinate && hasNoETags && hasZeroVelocity
+  } catch (e) {
+    return false // it isn't a genesis action because it isn't valid!
+  }
 }
 
 export type ExtractedCyberspaceActionState = {
@@ -702,7 +706,9 @@ export type ExtractedCyberspaceActionState = {
   sector: CyberspaceSector
   velocity: CyberspaceVelocity
   rotation: Quaternion
-  time: Time
+  time: Time,
+  genesisId: NostrEventId | null
+  isGenesis: boolean
 }
 // get the state from a cyberspace action
 // note: type CyberspaceAction are events that have been validated so we don't need to handle missing tags.
@@ -723,6 +729,15 @@ export function extractCyberspaceActionState(action: CyberspaceAction | Cyberspa
     rotation = new Quaternion().fromArray(quaternionTag.slice(1,5).map(parseFloat))
   }
   const time = getTime(action)
+
+  let genesisId = null
+  const genesisTag = action.tags.find(tag => tag[0] === 'e' && tag[3] === 'genesis')
+  if (genesisTag && genesisTag[1]) {
+    genesisId = factoryHex256Bit(genesisTag[1]) as NostrEventId
+  }
+
+  const isGenesis = isGenesisAction(action as Event)
+
   return {
     coordinate,
     localCoordinate,
@@ -731,6 +746,8 @@ export function extractCyberspaceActionState(action: CyberspaceAction | Cyberspa
     velocity,
     rotation,
     time,
+    genesisId,
+    isGenesis,
   }
 }
 

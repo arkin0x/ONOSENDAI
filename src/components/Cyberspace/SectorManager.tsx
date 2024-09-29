@@ -1,6 +1,5 @@
 import { memo, useMemo } from 'react'
 import { CYBERSPACE_SECTOR, relativeSectorIndex } from '../../libraries/Cyberspace'
-import { Event } from 'nostr-tools'
 import Decimal from 'decimal.js'
 import { BoxGeometry, EdgesGeometry, LineBasicMaterial, Vector3 } from 'three'
 import { Text } from "@react-three/drei"
@@ -33,7 +32,6 @@ function SectorManager({ adjacentLayers = 0, pubkey }: SectorManagerProps): JSX.
     if (!userCurrentSectorId) return null
     if (sectorsToLoad.length === 0) return null
     return sectorsToLoad.map(groupSectorId => {
-      if (!sectorState[groupSectorId]) return null
       const idx = relativeSectorIndex(userCurrentSectorId, groupSectorId).toVector3()
       return (
         <Sector 
@@ -41,7 +39,7 @@ function SectorManager({ adjacentLayers = 0, pubkey }: SectorManagerProps): JSX.
           current={userCurrentSectorId === groupSectorId} 
           key={groupSectorId} 
           id={groupSectorId} 
-          data={sectorState[groupSectorId]} />
+        />
       )
     })
   }, [sectorsToLoad, sectorState, userCurrentSectorId])
@@ -102,7 +100,7 @@ interface SectorProps {
   position: Vector3
   current: boolean
   id: string
-  data: { avatars: string[]; constructs: Event[], hyperjumps: Event[] }
+  // data: { avatars: string[]; constructs: Event[], hyperjumps: Event[] }
 }
 
 // SECTOR COMPONENT

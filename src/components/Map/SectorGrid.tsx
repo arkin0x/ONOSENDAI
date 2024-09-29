@@ -47,7 +47,7 @@ export const SectorGrid = () => {
   }, [userCurrentSectorId, centerSectorId, setCenter, follow])
 
   const sectorData: SectorData[] = useMemo(() => {
-    return Object.entries(sectorState).map(([sectorId, sectorData]) => {
+    const data = Object.entries(sectorState).map(([sectorId, sectorData]) => {
       if (!centerSectorId) return false // no focus sector, can't do diff
       const diff = relativeSectorIndex(centerSectorId, sectorId)
       const position = diff.multiplyScalar(MAP_SECTOR_SIZE).toVector3()
@@ -62,6 +62,18 @@ export const SectorGrid = () => {
         hasHyperjumps: sectorData.hyperjumps.length > 0,
       }
     }).filter(Boolean) as SectorData[]
+    // check if the user's current sector is in the data
+    if (userCurrentSectorId && !data.find(d => d.sectorId === userCurrentSectorId)) {
+      data.push({
+        sectorId: userCurrentSectorId!,
+        position: new Vector3(0,0,0),
+        color: new Color(COLORS.ORANGE),
+        hasAvatars: true,
+        hasShards: false,
+        hasHyperjumps: false,
+      })
+    }
+    return data
   }, [centerSectorId, pubkey, sectorState, userCurrentSectorId])
 
   useEffect(() => {

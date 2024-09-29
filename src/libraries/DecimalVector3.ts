@@ -106,6 +106,17 @@ export class DecimalVector3 {
     return this
   }
 
+  length(): Decimal {
+    return Decimal.sqrt(
+      this.x.pow(2).plus(this.y.pow(2)).plus(this.z.pow(2))
+    )
+  }
+
+  // method for efficiency in some calculations
+  lengthSq(): Decimal {
+    return this.x.pow(2).plus(this.y.pow(2)).plus(this.z.pow(2))
+  }
+
   multiplyScalar (scalar: number|Decimal) {
     this.x = this.x.times(scalar)
     this.y = this.y.times(scalar)

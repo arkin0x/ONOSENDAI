@@ -32,6 +32,8 @@ export const IDENTITY_QUATERNION = [0, 0, 0, 1] // mostly so I don't forget
 
 // TYPES
 
+export type Gibsons = Decimal & { readonly __brand: unique symbol }
+
 // Base type for all 256-bit hex strings
 type Hex256Bit = `${
   | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' 

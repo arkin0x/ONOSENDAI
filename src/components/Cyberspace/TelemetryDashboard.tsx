@@ -48,7 +48,7 @@ export const TelemetryDashboard = () => {
         }
       </div>
       <div id="debug">
-          <DebugLocal/>
+          {/* <DebugLocal/> */}
       </div>
     </div>
   )

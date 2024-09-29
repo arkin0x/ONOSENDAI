@@ -11,7 +11,7 @@ import { UnsignedEvent } from 'nostr-tools'
 type ShardMinerState = {
   isMining: boolean
   progress: number
-  startMining: (shard: CyberspaceShard, coordinateHex: string) => void
+  startMining: (shard: CyberspaceShard, coordinateHex: string, actionId: string) => void
   stopMining: () => void
   calculateShardSize: (shard: CyberspaceShard) => number
 }
@@ -20,7 +20,7 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
   isMining: false,
   progress: 0,
 
-  startMining: (shard, coordinateHex) => {
+  startMining: (shard, coordinateHex, actionId) => {
     updateHashpowerAllocation()
     const identity = useNDKStore.getState().getUser()
     const pubkey = identity?.pubkey
@@ -30,7 +30,7 @@ export const useShardMinerStore = create<ShardMinerState>((set, get) => ({
     }
     // console.log('pubkey', pubkey)
     const coordinate = cyberspaceCoordinateFromHexString(coordinateHex)
-    const unsignedEvent = createUnsignedShardEvent(shard, pubkey, coordinate)
+    const unsignedEvent = createUnsignedShardEvent(shard, pubkey, coordinate, actionId)
     const serializedEvent = serializeEvent(unsignedEvent)
     console.log('serialized Event', serializedEvent)
     const nonceBounds = getNonceBounds(serializedEvent)

@@ -4,8 +4,7 @@ import { CyberspaceShard, Vertex, Face } from "../store/BuilderStore"
 import { Event } from 'nostr-tools'
 import { Shard3DData } from '../components/Build/Shards'
 
-
-export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string, coordinate: CyberspaceCoordinate): UnsignedEvent {
+export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string, coordinate: CyberspaceCoordinate, actionId: string): UnsignedEvent {
   const { created_at, ms_padded } = getTime()
 
   const limitDecimals = (n: number) => parseFloat(n.toFixed(8)).toString()
@@ -30,6 +29,7 @@ export function createUnsignedShardEvent(shard: CyberspaceShard, pubkey: string,
       ["position", `${coordinate.local.x.toString()},${coordinate.local.y.toString()},${coordinate.local.z.toString()}`],
       ["display", shard.display],
       ["nonce", "0000000000000000"],
+      ["e", actionId],
     ],
     content: "",
   }

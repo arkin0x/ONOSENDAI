@@ -39,12 +39,13 @@ function ShardList({create, deploy}: ShardListProps) {
   }
 
   function startMiningShard() {
-    if (!readyToMine) return false
+    if (!readyToMine) return
     const pubkey = identity?.pubkey
     const latestAction = getLatest(pubkey!)
-    const actionState = extractCyberspaceActionState(latestAction!)
+    if (!latestAction) return
+    const actionState = extractCyberspaceActionState(latestAction)
     const coordRaw = actionState.coordinate.raw
-    startMining(shards[shardIndex!], coordRaw)
+    startMining(shards[shardIndex!], coordRaw, latestAction.id)
   }
 
   function handleClick(event: ThreeEvent<MouseEvent>, shard: CyberspaceShard) {

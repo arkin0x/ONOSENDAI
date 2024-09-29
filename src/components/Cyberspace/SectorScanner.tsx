@@ -135,7 +135,7 @@ function SectorScanner() {
         clearInterval(scanIntervalRef.current)
       }
     }
-  }, [addAvatar, addConstruct, addHyperjump, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea, getCurrentScanArea, addShard])
+  }, [addAvatar, addConstruct, addHyperjump, fetchEvents, getNextScanSet, getSimulatedSectorId, pubkey, updateScanArea, getCurrentScanArea, addShard, userHistoryComplete])
 
   return null // This component doesn't render anything
 }

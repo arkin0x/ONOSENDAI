@@ -42,7 +42,7 @@ function SectorManager({ adjacentLayers = 0, pubkey }: SectorManagerProps): JSX.
         />
       )
     })
-  }, [sectorsToLoad, sectorState, userCurrentSectorId])
+  }, [sectorsToLoad, userCurrentSectorId])
 
   // Functions
 

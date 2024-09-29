@@ -4,7 +4,7 @@ import '../../scss/Telemetry.scss'
 import { isGenesisAction } from '../../libraries/Cyberspace'
 import { countLeadingZeroesHex } from '../../libraries/Hash'
 import { useAvatarStore } from '../../store/AvatarStore'
-import { DebugLocal } from '../DebugLocal'
+// import { DebugLocal } from '../DebugLocal'
 import useNDKStore from '../../store/NDKStore'
 
 // this dashboard is to visualize the nostr action chain.

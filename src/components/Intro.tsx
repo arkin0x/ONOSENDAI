@@ -6,13 +6,12 @@ import { TextureLoader, Vector3 } from 'three'
 import { Text } from '@react-three/drei'
 import COLORS from '../data/Colors.ts'
 import logo from '/logo-cropped.png'
-import { SignInButton } from './SignInButton.tsx'
-import { SignUpButton } from './SignUpButton.tsx'
 import Loading from './Loading.tsx'
 
 export function Intro() {
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
   const [loading, setLoading] = useState(true)
+  const openExternal = (url: string) => () => window.open(url, '_blank', 'noopener,noreferrer')
 
   useEffect(() => {
     const loader = new TextureLoader()
@@ -43,10 +42,51 @@ export function Intro() {
         </mesh>
       <group position={[0,-1, 0]}>
         <Text position={[0, 0.25, 0]} color={COLORS.ORANGE} fontSize={0.15} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-          WELCOME TO CYBERSPACE 
+          WE&apos;LL BE BACK
         </Text>
-        <SignInButton/>
-        <SignUpButton/>
+        <Text
+          position={[0, 0, 0]}
+          color={COLORS.SKY}
+          fontSize={0.09}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          maxWidth={6}
+          textAlign={'center'}
+        >
+          ONOSENDAI IS TEMPORARILY OFFLINE WHILE THE CYBERSPACE PROTOCOL IS UPGRADED.
+        </Text>
+        <Text
+          position={[0, -0.32, 0]}
+          color={COLORS.BITCOIN}
+          fontSize={0.09}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          maxWidth={6}
+          textAlign={'center'}
+          onClick={openExternal('https://straylight.cafe')}
+        >
+          have a coffee while you wait?
+        </Text>
+        <Text
+          position={[0, -0.45, 0]}
+          color={COLORS.SKY}
+          fontSize={0.07}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          maxWidth={6}
+          textAlign={'center'}
+          onClick={openExternal('https://straylight.cafe')}
+        >
+          visit straylight.cafe community hub
+        </Text>
+        <Text
+          position={[0, -0.7, 0]}
+          color={COLORS.LOGO_BLUE}
+          fontSize={0.08}
+          font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}
+          maxWidth={6}
+          textAlign={'center'}
+          onClick={openExternal('https://github.com/arkin0x/cyberspace')}
+        >
+          See the new protocol spec at github.com/arkin0x/cyberspace
+        </Text>
       </group>
       </Canvas>
     </div>

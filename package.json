@@ -6,6 +6,9 @@
   "repository": "https://github.com/arkin0x/ONOSENDAI.git",
   "author": "arkin0x <arkinox+onosendai@pm.me>",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "vite",
     "test": "vitest",

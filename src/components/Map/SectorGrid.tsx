@@ -27,11 +27,9 @@ export const SectorGrid = () => {
   const identity = getUser()
   const { sectorState, userCurrentSectorId, getCurrentScanArea, scanAreas } = useSectorStore()
   const { centerSectorId, setCenter } = useMapCenterSectorStore()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [follow] = useState<"user"|"roam">("user")
   const meshRef = useRef<InstancedMesh>(null)
   const edgesRef = useRef<InstancedMesh>(null)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   // const [hovered, setHovered] = useState<number>()
   const { raycaster, camera, pointer } = useThree()
 

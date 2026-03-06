@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/ban-types */
+import type { Dispatch, SetStateAction } from 'react'
 import { RelayObject } from './NostrRelay'
 
 export type IdentityType = {
@@ -22,8 +22,8 @@ export type IdentityType = {
 
 export type IdentityContextType = {
   identity: IdentityType,
-  setIdentity: Function,
-  profileLoaded: Function,
+  setIdentity: Dispatch<SetStateAction<IdentityType>>,
+  profileLoaded: () => void,
   relays: RelayObject,
-  setRelays: Function,
+  setRelays: Dispatch<SetStateAction<RelayObject>>,
 }

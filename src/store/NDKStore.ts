@@ -68,7 +68,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
         signer = new NDKNip07Signer()
         await signer.blockUntilReady()
       }
-    } catch (e) {
+    } catch {
       alert("Extension prompt was cancelled. Refresh the page to try again.")
     }
 
@@ -129,7 +129,7 @@ const useNDKStore = create<NDKState>((set, get) => ({
       localStorage.setItem('useExtension', 'true')
       set({ isUserLoaded: true, ndk })
       callback()
-    } catch (e) {
+    } catch {
       alert("Extension prompt was cancelled. Refresh the page to try again.")
       window.location.reload()
     }

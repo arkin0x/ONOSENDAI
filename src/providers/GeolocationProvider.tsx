@@ -1,12 +1,10 @@
-/* eslint-disable @typescript-eslint/ban-types */
-/* eslint-disable @typescript-eslint/no-empty-function */
-import { createContext, useState } from 'react'
+import { createContext, type Dispatch, type SetStateAction, useState } from 'react'
 import { useGeolocation } from '../hooks/useGeolocation'
 
 type GeolocationContextType = {
   position: GeolocationPosition | null
   cursorPosition: CursorPositionType
-  setCursorPosition: Function
+  setCursorPosition: Dispatch<SetStateAction<CursorPositionType>>
 }
 
 export type CursorPositionType = {
@@ -17,7 +15,7 @@ export type CursorPositionType = {
 const defaultGeolocationContext: GeolocationContextType = {
   position: null,
   cursorPosition: null,
-  setCursorPosition: () => {},
+  setCursorPosition: () => undefined,
 }
 
 export const GeolocationContext = createContext<GeolocationContextType>(defaultGeolocationContext)
@@ -29,7 +27,7 @@ type GeolocationProviderProps = {
 
 export const GeolocationProvider: React.FC<GeolocationProviderProps> = ({ children, trigger }) => {
   const [position] = useGeolocation(trigger)
-  const [cursorPosition, setCursorPosition] = useState(null)
+  const [cursorPosition, setCursorPosition] = useState<CursorPositionType>(null)
 
   return (
     <GeolocationContext.Provider value={{ position, cursorPosition, setCursorPosition }}>

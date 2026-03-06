@@ -143,37 +143,43 @@ function ShardList({create, deploy}: ShardListProps) {
       </group>
       )
     })
-    create && list.push((
-      <group scale={[8,8,8]} key={'create'} position={incrementPosition()}>
-        <mesh
-          position={[0, 0, 0]}
-          onClick={() => addShard()}
-        >
-          <boxGeometry args={[0.5, 0.2, 0.1]} />
-          <meshBasicMaterial color={COLORS.ORANGE} />
-        </mesh>
-        <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-          NEW
-        </Text>
-      </group>
-    ))
-    deploy && readyToMine && !isMining && list.push((
-      <group scale={[8,8,8]} key={'deploy'} position={incrementPosition()}>
-        <mesh
-          position={[0, 0, 0]}
-          onClick={() => startMiningShard()}
-        >
-          <boxGeometry args={[0.5, 0.2, 0.1]} />
-          <meshBasicMaterial color={COLORS.ORANGE} />
-        </mesh>
-        <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
-          DEPLOY 
-        </Text>
-      </group>
-    ))
-    deploy && isMining && list.push((
-      <Spinner text={"MINING"} position={incrementPosition()} scale={[.7,.7,.7]}/>
-    ))
+    if (create) {
+      list.push((
+        <group scale={[8,8,8]} key={'create'} position={incrementPosition()}>
+          <mesh
+            position={[0, 0, 0]}
+            onClick={() => addShard()}
+          >
+            <boxGeometry args={[0.5, 0.2, 0.1]} />
+            <meshBasicMaterial color={COLORS.ORANGE} />
+          </mesh>
+          <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+            NEW
+          </Text>
+        </group>
+      ))
+    }
+    if (deploy && readyToMine && !isMining) {
+      list.push((
+        <group scale={[8,8,8]} key={'deploy'} position={incrementPosition()}>
+          <mesh
+            position={[0, 0, 0]}
+            onClick={() => startMiningShard()}
+          >
+            <boxGeometry args={[0.5, 0.2, 0.1]} />
+            <meshBasicMaterial color={COLORS.ORANGE} />
+          </mesh>
+          <Text position={[0, 0, 0.07]} color={COLORS.BLACK} fontSize={0.08} font={'/fonts/MonaspaceKrypton-ExtraLight.otf'}>
+            DEPLOY 
+          </Text>
+        </group>
+      ))
+    }
+    if (deploy && isMining) {
+      list.push((
+        <Spinner text={"MINING"} position={incrementPosition()} scale={[.7,.7,.7]}/>
+      ))
+    }
     return list
   }
 

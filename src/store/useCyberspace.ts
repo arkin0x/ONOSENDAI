@@ -16,6 +16,7 @@ import {
 import {
   MAX_SCALE_EXP,
   alignTo,
+  canonicalQuaternion,
   clampAxis,
   rotateView,
   stepFor,
@@ -76,6 +77,7 @@ interface CyberspaceState {
   rotate: (dir: RotateDirection) => void
   popView: () => void
   resetView: () => void
+  canonicalView: () => void
   togglePlane: () => void
   applyProofMessage: (msg: ProofResponse) => void
 
@@ -150,6 +152,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   resetView: () => {
     const { view, viewHistory } = get()
     set({ view: topDownQuaternion(), viewHistory: [...viewHistory, view.clone()] })
+  },
+
+  // Required preset per CYBERSPACE_V2.md section 11.3.
+  canonicalView: () => {
+    const { view, viewHistory } = get()
+    set({ view: canonicalQuaternion(), viewHistory: [...viewHistory, view.clone()] })
   },
 
   togglePlane: () => {

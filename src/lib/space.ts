@@ -109,7 +109,11 @@ export function subCellFraction(value: bigint, scaleExp: number): number {
 // ---------- View orientation ----------
 
 /**
- * Build a quaternion from an explicit world-space camera basis.
+ * Build a quaternion from an explicit render-space camera basis.
+ *
+ * The basis must be right-handed (right x up === back). A left-handed triple
+ * does not describe a rotation, and Quaternion.setFromRotationMatrix would
+ * silently return a wrong result rather than fail.
  */
 function basisQuaternion(right: Vector3, up: Vector3, back: Vector3): Quaternion {
   const m = new Matrix4().makeBasis(right, up, back)
@@ -117,8 +121,54 @@ function basisQuaternion(right: Vector3, up: Vector3, back: Vector3): Quaternion
 }
 
 /**
- * The default view: top-down, looking along -Y at the X/Z plane.
- * Screen right is +X, screen up is -Z, so W travels "away" along -Z.
+ * Cyberspace is a LEFT-handed coordinate system.
+ *
+ * Section 9.4 defines it as ECEF with two axes swapped: X_cs = X_ecef,
+ * Y_cs = Z_ecef, Z_cs = Y_ecef. ECEF is right-handed, and swapping two axes
+ * inverts handedness. That is why section 11.1's convention (+X screen-right,
+ * +Y up, +Z forward *into* the screen) is self-consistent for the protocol but
+ * impossible to reproduce in three.js, which is right-handed, by camera
+ * placement alone.
+ *
+ * Section 11.4 requires resolving this with a render-space transform rather
+ * than by mirroring or re-labelling axes. We do it in exactly one place:
+ * negating Z converts between the two handednesses. The map is its own inverse.
+ *
+ * Skipping this does not produce an obviously broken picture. It produces a
+ * mirrored one, which looks fine in isolation and silently disagrees with every
+ * other viewer about which way is left.
+ */
+export function flipHandedness(v: Vector3): Vector3 {
+  return new Vector3(v.x, v.y, -v.z)
+}
+
+/**
+ * The canonical view required by CYBERSPACE_V2.md section 11.3, "facing the
+ * black sun": view direction +Z_cs, up +Y_cs, screen-right +X_cs.
+ *
+ * This is the orientation the spec's left/right/above/below/ahead/behind
+ * language is defined against, so it is the reference every viewer must agree
+ * on. Section 11.1 binds the axis semantics only when oriented this way.
+ */
+export function canonicalQuaternion(): Quaternion {
+  // Once handedness is converted, this is simply three.js's default camera
+  // orientation: +X screen-right, +Y up, looking along render -Z, which is
+  // cyberspace +Z. That it comes out as the identity is a good sign the
+  // transform is placed correctly.
+  return basisQuaternion(
+    new Vector3(1, 0, 0),
+    new Vector3(0, 1, 0),
+    new Vector3(0, 0, 1),
+  )
+}
+
+/**
+ * The map view: top-down, looking along -Y at the X/Z ground plane.
+ *
+ * Y_cs is the vertical axis (it is Z_ecef, the north pole, per section 9.4), so
+ * looking along -Y is a true overhead map. With handedness converted this comes
+ * out as the intuitive map orientation: +X to the right and +Z, the forward /
+ * black sun direction, up the screen.
  */
 export function topDownQuaternion(): Quaternion {
   return basisQuaternion(
@@ -170,13 +220,19 @@ export interface ViewAxes {
 }
 
 /**
- * Derive which world axes are currently mapped to screen directions.
+ * Derive which *cyberspace* axes are currently mapped to screen directions.
+ *
+ * The quaternion lives in render space, so each camera basis vector is
+ * converted back through flipHandedness before being named. Everything
+ * downstream (movement, terrain sampling, the HUD readout) consumes cyberspace
+ * axes, so this is the boundary where render space stops.
  */
 export function viewAxes(q: Quaternion): ViewAxes {
+  const toCs = (v: Vector3) => snapToAxis(flipHandedness(v.applyQuaternion(q)))
   return {
-    right: snapToAxis(new Vector3(1, 0, 0).applyQuaternion(q)),
-    up: snapToAxis(new Vector3(0, 1, 0).applyQuaternion(q)),
-    out: snapToAxis(new Vector3(0, 0, 1).applyQuaternion(q)),
+    right: toCs(new Vector3(1, 0, 0)),
+    up: toCs(new Vector3(0, 1, 0)),
+    out: toCs(new Vector3(0, 0, 1)),
   }
 }
 

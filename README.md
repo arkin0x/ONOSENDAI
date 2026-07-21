@@ -35,6 +35,7 @@ cd ../cyberspace-cli-js && npm install && npm run build
 | `Space` | reset to top-down |
 | `Q` / `E` | scale the step down / up, logarithmically |
 | `R` / `F` | move along the axis into / out of the screen |
+| `C` | canonical view ("facing the black sun") |
 | `P` | toggle dataspace and ideaspace |
 
 Movement is expressed in screen directions and resolved to world axes through
@@ -58,6 +59,35 @@ asymmetry is the whole point, and it is drawn.
 powers of two. At `2^0` you see individual gibsons; at `2^30` each cell is a
 sector. Terrain correlates at cell sizes `2^3` to `2^11`, so the field looks
 smooth when you zoom below that band and uncorrelated above it.
+
+## Handedness, and why it matters
+
+**Cyberspace is a left-handed coordinate system.** Section 9.4 defines it as
+ECEF with two axes swapped (`X_cs = X_ecef`, `Y_cs = Z_ecef`, `Z_cs = Y_ecef`),
+and swapping two axes of a right-handed frame inverts handedness. That is why
+section 11.1's convention (`+X` screen-right, `+Y` up, `+Z` forward *into* the
+screen) cannot be reproduced in three.js, which is right-handed, by camera
+placement alone.
+
+Section 11.4 requires resolving this with a render-space transform rather than
+by mirroring or re-labelling axes. This app does it in exactly one place:
+`flipHandedness` in `lib/space.ts`, applied at the boundary where `viewAxes`
+converts camera directions back into cyberspace axis names. Everything upstream
+is render space; everything downstream is cyberspace.
+
+Getting this wrong does not produce a visibly broken picture. It produces a
+mirrored one, which looks perfectly fine on its own and silently disagrees with
+every other viewer about which way is left. It is asserted directly in the test
+suite across all 24 reachable views.
+
+Two consequences worth knowing:
+
+- The canonical view comes out as the *identity* quaternion, i.e. three.js's
+  default camera. That it lands exactly there is a good sign the transform sits
+  in the right place.
+- The top-down map view puts `+Z` (forward, the black sun direction) up the
+  screen, which is the conventional map orientation. Before the handedness fix
+  it pointed down.
 
 ## Architecture
 

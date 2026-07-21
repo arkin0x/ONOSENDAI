@@ -54,6 +54,13 @@ export function useKeyboard(): void {
         return
       }
 
+      // The spec-canonical "facing the black sun" orientation (section 11.3).
+      if (event.code === 'KeyC') {
+        event.preventDefault()
+        store.canonicalView()
+        return
+      }
+
       if (event.code === 'KeyP') {
         event.preventDefault()
         store.togglePlane()

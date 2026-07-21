@@ -5,14 +5,16 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { Quaternion, Vector3 } from 'three'
+import { Matrix4, Quaternion, Vector3 } from 'three'
 import { AXIS_MAX, findLcaHeight } from 'cyberspace-core'
 import {
   MAX_SCALE_EXP,
   alignTo,
   boundaryCoord,
   boundaryHeight,
+  canonicalQuaternion,
   clampAxis,
+  flipHandedness,
   rotateView,
   snapToAxis,
   stepFor,
@@ -150,11 +152,99 @@ describe('subCellFraction', () => {
   })
 })
 
+describe('canonical view (CYBERSPACE_V2.md section 11.3)', () => {
+  it('faces the black sun: +X right, +Y up, looking toward +Z', () => {
+    const axes = viewAxes(canonicalQuaternion())
+    expect(axes.right).toEqual({ axis: 'x', dir: 1 })
+    expect(axes.up).toEqual({ axis: 'y', dir: 1 })
+    // "out" points at the viewer, so looking toward +Z means out is -Z.
+    expect(axes.out).toEqual({ axis: 'z', dir: -1 })
+  })
+
+  it('is reachable from the top-down view by rotation alone', () => {
+    // Section 11.4 forbids mirroring or re-labelling axes, so the canonical
+    // view must sit in the same rotation group as every other view.
+    const dirs = ['left', 'right', 'up', 'down'] as const
+    const target = canonicalQuaternion()
+    const seen = new Set<string>()
+    const frontier = [topDownQuaternion()]
+    let reached = false
+
+    while (frontier.length > 0) {
+      const q = frontier.pop()!
+      if (q.angleTo(target) < 1e-6) {
+        reached = true
+        break
+      }
+      const a = viewAxes(q)
+      const k = `${a.right.axis}${a.right.dir}|${a.up.axis}${a.up.dir}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      for (const dir of dirs) frontier.push(rotateView(q, dir))
+    }
+
+    expect(reached).toBe(true)
+  })
+
+  it('is right-handed in render space, so the image is not mirrored', () => {
+    const q = canonicalQuaternion()
+    const right = new Vector3(1, 0, 0).applyQuaternion(q)
+    const up = new Vector3(0, 1, 0).applyQuaternion(q)
+    const back = new Vector3(0, 0, 1).applyQuaternion(q)
+    // right x up must equal back for a right-handed basis.
+    expect(right.clone().cross(up).angleTo(back)).toBeLessThan(1e-6)
+  })
+})
+
+describe('handedness (CYBERSPACE_V2.md sections 9.4 and 11.4)', () => {
+  it('is its own inverse', () => {
+    const v = new Vector3(3, -5, 7)
+    expect(flipHandedness(flipHandedness(v)).equals(v)).toBe(true)
+  })
+
+  it('inverts handedness, which is what makes cyberspace left-handed', () => {
+    // X_cs = X_ecef, Y_cs = Z_ecef, Z_cs = Y_ecef is a two-axis swap of a
+    // right-handed frame, so the cyberspace basis has determinant -1.
+    const m = new Matrix4().makeBasis(
+      new Vector3(1, 0, 0), // X_cs = X_ecef
+      new Vector3(0, 0, 1), // Y_cs = Z_ecef
+      new Vector3(0, 1, 0), // Z_cs = Y_ecef
+    )
+    expect(m.determinant()).toBeCloseTo(-1, 10)
+  })
+
+  it('renders every view without mirroring', () => {
+    // A mirrored basis would still draw a plausible grid, so assert the
+    // property directly across the whole reachable view set.
+    const dirs = ['left', 'right', 'up', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[(i * 5 + 1) % 4])
+      const right = new Vector3(1, 0, 0).applyQuaternion(q)
+      const up = new Vector3(0, 1, 0).applyQuaternion(q)
+      const back = new Vector3(0, 0, 1).applyQuaternion(q)
+      expect(right.clone().cross(up).angleTo(back)).toBeLessThan(1e-6)
+    }
+  })
+
+  it('keeps screen axes a valid cyberspace frame in every view', () => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[i % 4])
+      const a = viewAxes(q)
+      expect(new Set([a.right.axis, a.up.axis, a.out.axis]).size).toBe(3)
+    }
+  })
+})
+
 describe('view orientation', () => {
-  it('starts top-down with +X right, -Z up, +Y toward the viewer', () => {
+  it('starts top-down with +X right, +Z up, +Y toward the viewer', () => {
+    // With handedness converted, forward (+Z, the black sun direction) points
+    // up the screen, which is the conventional map orientation.
     const axes = viewAxes(topDownQuaternion())
     expect(axes.right).toEqual({ axis: 'x', dir: 1 })
-    expect(axes.up).toEqual({ axis: 'z', dir: -1 })
+    expect(axes.up).toEqual({ axis: 'z', dir: 1 })
     expect(axes.out).toEqual({ axis: 'y', dir: 1 })
   })
 

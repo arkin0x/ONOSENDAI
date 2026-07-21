@@ -1,19 +1,20 @@
-import { Routes, Route } from 'react-router-dom'
-import './scss/App.scss'
-import "./scss/Interface.scss"
-import "./scss/Dashboard.scss"
-import './scss/Home.scss'
-import { Intro } from './components/Intro.tsx'
+import { Hud } from './hud/Hud'
+import { Scene } from './scene/Scene'
+import { useKeyboard } from './hooks/useKeyboard'
+import { useProofListener } from './hooks/useProofListener'
 
-function App() {
+export default function App(): JSX.Element {
+  useKeyboard()
+  useProofListener()
 
   return (
-    <div id="app">
-      <Routes>
-        <Route path="*" element={<Intro/>}/>
-      </Routes>
+    <div className="app">
+      <Scene />
+      <Hud />
+      <header className="brand">
+        <h1>ONOSENDAI<span>V2</span></h1>
+        <p>Cyberspace Protocol v2 spatial explorer</p>
+      </header>
     </div>
   )
 }
-
-export default App

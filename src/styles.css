@@ -1,0 +1,371 @@
+/* ONOSENDAI V2 — terminal-adjacent HUD over a dark spatial canvas. */
+
+:root {
+  --bg: #05070d;
+  --fg: #c8f5ff;
+  --dim: #5b7d8f;
+  --accent: #00e5ff;
+  --warn: #ffb020;
+  --danger: #ff3b6b;
+  --ok: #52e39f;
+  --panel: rgba(6, 14, 22, 0.82);
+  --border: rgba(0, 229, 255, 0.22);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.app canvas {
+  display: block;
+}
+
+/* ---------- Brand ---------- */
+
+.brand {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.34em;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.brand h1 span {
+  color: var(--accent);
+  margin-left: 0.34em;
+}
+
+.brand p {
+  margin: 4px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ---------- HUD layout ---------- */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px;
+  gap: 16px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.hud__col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.hud__col--right {
+  align-items: stretch;
+}
+
+/* ---------- Panels ---------- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px 12px 12px;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.14);
+  padding-bottom: 6px;
+}
+
+.panel__head h2 {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ---------- Stats ---------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  margin: 0;
+}
+
+.stats > div {
+  min-width: 0;
+}
+
+.stats dt {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.stats dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stats--axes {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ---------- Tags ---------- */
+
+.plane,
+.status,
+.scale-exp {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 2px 6px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.plane--0 {
+  color: var(--accent);
+}
+
+.plane--1 {
+  color: #c07dff;
+}
+
+.scale-exp {
+  color: var(--fg);
+  border-color: rgba(200, 245, 255, 0.3);
+}
+
+.status--idle {
+  color: var(--dim);
+}
+
+.status--computing {
+  color: var(--warn);
+}
+
+.status--done {
+  color: var(--ok);
+}
+
+.status--infeasible {
+  color: var(--danger);
+}
+
+/* ---------- Progress bar ---------- */
+
+.bar {
+  height: 3px;
+  background: rgba(0, 229, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.bar__fill {
+  height: 100%;
+  width: 0;
+  transition: width 90ms linear;
+  background: var(--accent);
+}
+
+.bar__fill--computing {
+  background: var(--warn);
+}
+
+.bar__fill--done {
+  background: var(--ok);
+}
+
+.bar__fill--infeasible {
+  background: var(--danger);
+}
+
+/* ---------- Hashes ---------- */
+
+.hash {
+  margin-top: 10px;
+}
+
+.hash__label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 3px;
+}
+
+.hash code {
+  display: block;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  margin: 10px 0 0;
+  padding: 7px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: rgba(255, 59, 107, 0.08);
+  border-left: 2px solid var(--danger);
+}
+
+/* ---------- Legend ---------- */
+
+.legend__row {
+  margin-bottom: 10px;
+}
+
+.legend__label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+.swatches {
+  display: flex;
+  gap: 2px;
+}
+
+.swatch {
+  flex: 1;
+  height: 10px;
+  border-radius: 1px;
+}
+
+.swatch--line {
+  background: #4dd7ff;
+}
+
+.legend__ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+}
+
+.legend__ends em {
+  font-size: 9px;
+  font-style: normal;
+  color: var(--dim);
+}
+
+.legend__note {
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+/* ---------- Controls ---------- */
+
+.keys {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.keys > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.keys dt {
+  flex: 0 0 116px;
+}
+
+.keys dd {
+  margin: 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+kbd {
+  display: inline-block;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 5px;
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  border-radius: 2px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.06);
+  white-space: nowrap;
+}
+
+/* ---------- Narrow viewports ---------- */
+
+@media (max-width: 900px) {
+  .hud {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .hud__col {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+}

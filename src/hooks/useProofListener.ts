@@ -1,18 +1,17 @@
 /**
- * useProofListener.ts — pipes proof worker messages into the store.
+ * useProofListener.ts - pipes proof worker messages into the store.
+ *
+ * Registers a handler rather than listening on the worker instance, because
+ * cancellation terminates and respawns the worker; the registry survives that.
  */
 
 import { useEffect } from 'react'
-import { getProofWorker, type ProofResponse } from '../lib/workers'
+import { setProofHandler } from '../lib/workers'
 import { useCyberspace } from '../store/useCyberspace'
 
 export function useProofListener(): void {
   useEffect(() => {
-    const worker = getProofWorker()
-    const onMessage = (event: MessageEvent<ProofResponse>) => {
-      useCyberspace.getState().applyProofMessage(event.data)
-    }
-    worker.addEventListener('message', onMessage)
-    return () => worker.removeEventListener('message', onMessage)
+    setProofHandler((msg) => useCyberspace.getState().applyProofMessage(msg))
+    return () => setProofHandler(null)
   }, [])
 }

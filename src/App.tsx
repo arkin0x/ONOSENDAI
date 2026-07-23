@@ -11,10 +11,6 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       <Hud />
-      <header className="brand">
-        <h1>ONOSENDAI<span>V2</span></h1>
-        <p>Cyberspace Protocol v2 spatial explorer</p>
-      </header>
     </div>
   )
 }

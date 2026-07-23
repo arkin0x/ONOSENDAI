@@ -13,6 +13,8 @@ import {
   boundaryCoord,
   boundaryHeight,
   canonicalQuaternion,
+  cellDelta,
+  cellOffset,
   clampAxis,
   flipHandedness,
   rotateView,
@@ -149,6 +151,30 @@ describe('subCellFraction', () => {
       expect(f).toBeGreaterThanOrEqual(0)
       expect(f).toBeLessThan(1)
     }
+  })
+})
+
+describe('cellDelta / cellOffset', () => {
+  it('measures signed distance from an origin, in cells', () => {
+    expect(cellDelta(1034n, 1024n, 0)).toBe(10)
+    expect(cellDelta(512n, 1024n, 10)).toBeCloseTo(-0.5, 3)
+  })
+
+  it('survives steps larger than 2^53, where float division would collapse', () => {
+    const origin = 1n << 84n
+    expect(cellDelta(origin + (1n << 83n), origin, 84)).toBeCloseTo(0.5, 3)
+  })
+
+  it('mirrors screen offsets when the axis points left or down', () => {
+    // A point 1/4 into the avatar's cell renders 1/4 from the low edge, and
+    // the low edge swaps sides when the axis is flipped.
+    expect(cellOffset(1024n + 256n, 1024n, 10, 1)).toBeCloseTo(-0.25, 3)
+    expect(cellOffset(1024n + 256n, 1024n, 10, -1)).toBeCloseTo(0.25, 3)
+  })
+
+  it('reaches into neighbouring cells for cursor endpoints', () => {
+    // Three cells to the right of the aligned origin, dead centre.
+    expect(cellOffset(1024n * 4n + 512n, 1024n, 10, 1)).toBeCloseTo(3, 3)
   })
 })
 

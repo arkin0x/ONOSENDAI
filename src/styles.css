@@ -46,30 +46,17 @@ body {
 /* ---------- Brand ---------- */
 
 .brand {
-  position: absolute;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
   pointer-events: none;
-  z-index: 2;
 }
 
-.brand h1 {
-  margin: 0;
-  font-size: 18px;
-  letter-spacing: 0.34em;
-  font-weight: 500;
-  color: var(--fg);
-}
-
-.brand h1 span {
-  color: var(--accent);
-  margin-left: 0.34em;
+.brand img {
+  display: block;
+  width: 100%;
+  max-width: 290px;
 }
 
 .brand p {
-  margin: 4px 0 0;
+  margin: 7px 0 0;
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -170,13 +157,23 @@ body {
 
 .plane,
 .status,
-.scale-exp {
+.scale-exp,
+.tag {
   font-size: 9px;
   letter-spacing: 0.14em;
   padding: 2px 6px;
   border-radius: 2px;
   border: 1px solid currentColor;
   white-space: nowrap;
+}
+
+.tag {
+  color: var(--fg);
+  border-color: rgba(200, 245, 255, 0.3);
+}
+
+.tag--ephemeral {
+  color: var(--warn);
 }
 
 .plane--0 {
@@ -194,6 +191,10 @@ body {
 
 .status--idle {
   color: var(--dim);
+}
+
+.status--uncommitted {
+  color: var(--warn);
 }
 
 .status--computing {

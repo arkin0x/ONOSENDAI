@@ -16,6 +16,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainField } from '../hooks/useTerrainField'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
+import { Cursor } from './Cursor'
 import { TerrainField } from './TerrainField'
 import { ViewRig } from './ViewRig'
 
@@ -28,6 +29,7 @@ function World(): JSX.Element {
     <group quaternion={view}>
       <TerrainField field={field} />
       <BoundaryGrid axes={axes} />
+      <Cursor axes={axes} />
       <Avatar axes={axes} />
     </group>
   )

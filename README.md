@@ -8,8 +8,8 @@ movement cost is set by *which power-of-two boundary you cross*, not by how far
 you travel. This makes that visible: bright gridlines are expensive crossings,
 and the terrain underneath shows where the temporal work is concentrated.
 
-> Status: MVP. The rendering has not yet been verified in a browser by an
-> automated test; the protocol maths and view geometry are covered by unit tests.
+> Status: MVP. Rendering verified manually in a real browser; the protocol
+> maths and view geometry are covered by unit tests.
 
 ## Running it
 
@@ -29,18 +29,32 @@ cd ../cyberspace-cli-js && npm install && npm run build
 
 | Key | Action |
 | --- | --- |
-| `W` `A` `S` `D` | move one step in a screen direction |
+| `W` `A` `S` `D` | move the cursor one step in a screen direction |
+| `Space` | commit the cursor's hop and compute its proof |
+| `X` | cancel an in-flight proof, or recall the cursor |
 | `Shift` + `W` `A` `S` `D` | rotate the view 90 degrees |
 | `Tab` | return to the previous view |
-| `Space` | reset to top-down |
+| `Esc` | reset to top-down |
 | `Q` / `E` | scale the step down / up, logarithmically |
-| `R` / `F` | move along the axis into / out of the screen |
+| `R` / `F` | cursor along the axis into / out of the screen |
 | `C` | canonical view ("facing the black sun") |
 | `P` | toggle dataspace and ideaspace |
 
 Movement is expressed in screen directions and resolved to world axes through
 the current view, so `W` is always "away from you" in any of the 24 reachable
 axis-aligned orientations.
+
+**Movement is two-phase.** WASD noodles a free cursor; nothing is computed
+until `Space` commits the hop. While the cursor is away from the avatar the
+proof panel live-previews what committing would cost (the estimate is
+closed-form, so it never blocks), the dashed tether shows the hop being lined
+up, and both turn red when the hop is beyond the compute ceiling. Position
+only advances when a committed proof completes, so the movement chain shown in
+the HUD is contiguous by construction.
+
+**You spawn at your pubkey.** Each session generates an ephemeral keypair, and
+per spec section 8.3 the spawn coordinate IS the pubkey: the 256-bit key
+decodes directly to x / y / z / plane.
 
 ## What you are looking at
 
@@ -98,7 +112,7 @@ src/
   lib/workers.ts      worker singletons
   store/              zustand store: position, scale, view, proof telemetry
   workers/            proof and terrain sampling, off the main thread
-  scene/              R3F: camera rig, terrain field, boundary grid, avatar
+  scene/              R3F: camera rig, terrain field, boundary grid, avatar, cursor
   hud/                overlay panels
 ```
 

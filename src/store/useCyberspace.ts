@@ -1,13 +1,20 @@
 /**
- * useCyberspace.ts — the single source of truth for where you are, how big a
- * step is, which way you are looking, and what the last proof cost.
+ * useCyberspace.ts - the single source of truth for who you are, where you
+ * are, where your uncommitted cursor is, and what the movement chain has cost.
+ *
+ * Movement is two-phase: WASD noodles a free cursor, Space commits the hop.
+ * Only a commit computes a proof, and position advances only when that proof
+ * lands, so the prevEventId chain stays contiguous: every position the avatar
+ * has ever occupied is covered by a completed proof.
  */
 
 import { create } from 'zustand'
 import { Quaternion } from 'three'
+import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
 import {
-  AXIS_CENTER,
   coordToHex,
+  coordToXyz,
+  hexToCoord,
   sectorTag,
   xyzToCoord,
   xyzToSectorId,
@@ -27,7 +34,7 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
-import { postProof, type ProofResponse } from '../lib/workers'
+import { cancelProof, postProof, type ProofResponse } from '../lib/workers'
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 const MAX_COMPUTE_HEIGHT = 20
@@ -61,8 +68,22 @@ const IDLE_PROOF: ProofState = {
   message: null,
 }
 
+export interface ChainStats {
+  /** Completed hops. The chain is contiguous by construction. */
+  hops: number
+  /** Cumulative Cantor pairings across all completed hops. */
+  totalOps: number
+  /** Cumulative proof compute time. */
+  totalMs: number
+}
+
 interface CyberspaceState {
+  identity: { pubkey: string; npub: string }
   position: Position
+  /** Where the next hop would land. Free to noodle; costs nothing until committed. */
+  cursor: Position
+  /** Destination of the in-flight proof; null when nothing is computing. */
+  pendingTarget: Position | null
   plane: Plane
   scaleExp: number
   view: Quaternion
@@ -70,9 +91,11 @@ interface CyberspaceState {
   proof: ProofState
   /** Chained from the previous hop, mirroring the protocol's prev-event link. */
   prevEventId: string
-  moveCount: number
+  chain: ChainStats
 
-  move: (dir: AxisDirection) => void
+  moveCursor: (dir: AxisDirection) => void
+  commit: () => void
+  cancel: () => void
   adjustScale: (delta: number) => void
   rotate: (dir: RotateDirection) => void
   popView: () => void
@@ -86,46 +109,78 @@ interface CyberspaceState {
   sector: () => string
 }
 
-/** Start at the centre of the axis, which is where the interesting boundaries are. */
-const START: Position = { x: AXIS_CENTER, y: AXIS_CENTER, z: AXIS_CENTER }
+/**
+ * Spawn identity: an ephemeral session keypair. Per spec section 8.3 the spawn
+ * coordinate IS the pubkey: the 256-bit key decodes directly to x/y/z/plane.
+ */
+const secretKey = generateSecretKey()
+const pubkeyHex = getPublicKey(secretKey)
+const SPAWN = coordToXyz(hexToCoord(pubkeyHex))
+
+// Reserved for signing spawn/hop events when publishing lands.
+void secretKey
 
 let requestId = 0
 
 export const useCyberspace = create<CyberspaceState>((set, get) => ({
-  position: START,
-  plane: 0,
+  identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
+  position: { x: SPAWN.x, y: SPAWN.y, z: SPAWN.z },
+  cursor: { x: SPAWN.x, y: SPAWN.y, z: SPAWN.z },
+  pendingTarget: null,
+  plane: SPAWN.plane,
   scaleExp: 0,
   view: topDownQuaternion(),
   viewHistory: [],
   proof: IDLE_PROOF,
   prevEventId: ZERO_EVENT_ID,
-  moveCount: 0,
+  chain: { hops: 0, totalOps: 0, totalMs: 0 },
 
-  move: (dir) => {
-    const { position, scaleExp, plane, prevEventId } = get()
+  moveCursor: (dir) => {
+    const { cursor, scaleExp } = get()
     const step = stepFor(scaleExp) * BigInt(dir.dir)
 
-    const to: Position = { ...position }
-    to[dir.axis] = clampAxis(position[dir.axis] + step)
+    const next: Position = { ...cursor }
+    next[dir.axis] = clampAxis(cursor[dir.axis] + step)
 
-    // Clamped against the axis wall: nothing moved, so there is nothing to prove.
-    if (to[dir.axis] === position[dir.axis]) return
+    // Clamped against the axis wall: nowhere to go.
+    if (next[dir.axis] === cursor[dir.axis]) return
+    set({ cursor: next })
+  },
+
+  commit: () => {
+    const { position, cursor, plane, prevEventId, proof } = get()
+    // One proof at a time. X cancels a commit you regret.
+    if (proof.status === 'computing') return
+    if (samePosition(position, cursor)) return
 
     const id = ++requestId
     set({
-      position: to,
-      moveCount: get().moveCount + 1,
+      pendingTarget: { ...cursor },
       proof: { ...IDLE_PROOF, status: 'computing' },
     })
 
     postProof({
       id,
       from: position,
-      to,
+      to: cursor,
       plane,
       prevEventId,
       maxComputeHeight: MAX_COMPUTE_HEIGHT,
     })
+  },
+
+  cancel: () => {
+    const { proof, position } = get()
+    if (proof.status === 'computing') {
+      // A Cantor proof is one synchronous computation, so cancelling means
+      // killing the worker thread. Position never moved; the chain is intact.
+      cancelProof()
+      requestId++
+      set({ pendingTarget: null, proof: IDLE_PROOF })
+      return
+    }
+    // Not computing: recall the cursor to where you actually stand.
+    set({ cursor: { ...position } })
   },
 
   adjustScale: (delta) => {
@@ -161,11 +216,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   },
 
   togglePlane: () => {
+    // A plane flip mid-proof would desync the in-flight terrain K.
+    if (get().proof.status === 'computing') return
     set({ plane: get().plane === 0 ? 1 : 0, proof: IDLE_PROOF })
   },
 
   applyProofMessage: (msg) => {
-    // Stale responses from a superseded move must not overwrite fresh state.
+    // Stale responses from a cancelled commit must not overwrite fresh state.
     if (msg.id !== requestId) return
 
     if (msg.type === 'progress') {
@@ -177,6 +234,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
     if (msg.type === 'error') {
       set({
+        pendingTarget: null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
@@ -187,7 +245,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       return
     }
 
+    const { pendingTarget, position, chain } = get()
     set({
+      // The proof covers exactly position -> pendingTarget, so only now does
+      // the avatar arrive.
+      position: pendingTarget ?? position,
+      pendingTarget: null,
       proof: {
         status: 'done',
         progress: 1,
@@ -200,6 +263,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
         message: null,
       },
       prevEventId: msg.proofHash,
+      chain: {
+        hops: chain.hops + 1,
+        totalOps: chain.totalOps + msg.totalOps,
+        totalMs: chain.totalMs + msg.elapsedMs,
+      },
     })
   },
 
@@ -215,6 +283,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     return sectorTag(xyzToSectorId(position.x, position.y, position.z))
   },
 }))
+
+/** Positions are equal when all three axes match. */
+export function samePosition(a: Position, b: Position): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
 
 /**
  * The aligned origin of the cell the avatar occupies at the current scale.

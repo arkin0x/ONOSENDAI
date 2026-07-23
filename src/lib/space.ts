@@ -94,16 +94,37 @@ export function boundaryCoord(
 }
 
 /**
- * Sub-cell position along an axis as a 0..1 fraction.
+ * Signed distance from `origin` to `value` along an axis, in cells at this
+ * scale.
  *
- * Uses fixed-point bigint division: `Number(offset) / Number(step)` would lose
- * the offset entirely once step exceeds 2^53.
+ * Uses fixed-point bigint division: `Number(diff) / Number(step)` would lose
+ * the difference entirely once step exceeds 2^53.
+ */
+export function cellDelta(value: bigint, origin: bigint, scaleExp: number): number {
+  const step = stepFor(scaleExp)
+  return Number(((value - origin) * 10_000n) / step) / 10_000
+}
+
+/**
+ * Sub-cell position along an axis as a 0..1 fraction.
  */
 export function subCellFraction(value: bigint, scaleExp: number): number {
-  const step = stepFor(scaleExp)
-  if (step === 1n) return 0
-  const offset = value - alignTo(value, scaleExp)
-  return Number((offset * 10_000n) / step) / 10_000
+  return cellDelta(value, alignTo(value, scaleExp), scaleExp)
+}
+
+/**
+ * Screen offset, in cells, of an absolute axis value, where the avatar's
+ * aligned cell spans [-0.5, +0.5]. Mirrors when the axis points left or down
+ * on screen, matching how BoundaryGrid lays cells out along a flipped axis.
+ */
+export function cellOffset(
+  value: bigint,
+  origin: bigint,
+  scaleExp: number,
+  dir: number,
+): number {
+  const delta = cellDelta(value, origin, scaleExp)
+  return dir === 1 ? delta - 0.5 : 0.5 - delta
 }
 
 // ---------- View orientation ----------

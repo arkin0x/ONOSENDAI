@@ -1,10 +1,11 @@
 /**
- * Hud.tsx — the overlay: where you are, how far a keypress takes you, and
- * which way the world is turned.
+ * Hud.tsx - the overlay: who you are, where you are, what the pending hop
+ * would cost, and what the chain has cost so far.
  */
 
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { ChainPanel } from './ChainPanel'
 import { Legend } from './Legend'
 import { ProofPanel } from './ProofPanel'
 
@@ -12,6 +13,38 @@ const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
 function signed(axis: string, dir: number): string {
   return `${dir === 1 ? '+' : '-'}${AXIS_LABEL[axis]}`
+}
+
+function Brand(): JSX.Element {
+  return (
+    <header className="brand">
+      <img src="/logo.png" alt="ONOSENDAI" />
+      <p>Cyberspace Protocol v2 spatial explorer</p>
+    </header>
+  )
+}
+
+function IdentityPanel(): JSX.Element {
+  const identity = useCyberspace((s) => s.identity)
+
+  return (
+    <section className="panel">
+      <header className="panel__head">
+        <h2>Identity</h2>
+        <span className="tag tag--ephemeral">EPHEMERAL</span>
+      </header>
+
+      <div className="hash">
+        <span className="hash__label">npub</span>
+        <code>{identity.npub}</code>
+      </div>
+
+      <p className="legend__note">
+        Spawned at this key's coordinate: the 256-bit pubkey decodes directly
+        to x / y / z / plane (spec section 8.3).
+      </p>
+    </section>
+  )
 }
 
 function PositionPanel(): JSX.Element {
@@ -58,7 +91,6 @@ function PositionPanel(): JSX.Element {
 
 function ScalePanel(): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const moveCount = useCyberspace((s) => s.moveCount)
   const axes = useCyberspace((s) => s.axes())
 
   return (
@@ -72,10 +104,6 @@ function ScalePanel(): JSX.Element {
         <div>
           <dt>Step</dt>
           <dd>{formatStep(scaleExp)}</dd>
-        </div>
-        <div>
-          <dt>Hops</dt>
-          <dd>{moveCount}</dd>
         </div>
         <div>
           <dt>Screen right</dt>
@@ -97,13 +125,15 @@ function ScalePanel(): JSX.Element {
 
 function Controls(): JSX.Element {
   const rows: Array<[string, string]> = [
-    ['W A S D', 'move one step'],
+    ['W A S D', 'move cursor one step'],
+    ['Space', 'commit hop (compute proof)'],
+    ['X', 'cancel proof / recall cursor'],
     ['Shift + W A S D', 'rotate view 90°'],
     ['Tab', 'previous view'],
-    ['Space', 'reset to top-down map'],
+    ['Esc', 'reset to top-down map'],
     ['C', 'canonical view (facing the black sun)'],
     ['Q / E', 'scale step down / up'],
-    ['R / F', 'move along depth axis'],
+    ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
   ]
 
@@ -130,11 +160,14 @@ export function Hud(): JSX.Element {
   return (
     <div className="hud">
       <div className="hud__col hud__col--left">
+        <Brand />
+        <IdentityPanel />
         <PositionPanel />
         <ScalePanel />
       </div>
       <div className="hud__col hud__col--right">
         <ProofPanel />
+        <ChainPanel />
         <Legend />
         <Controls />
       </div>

@@ -9,8 +9,8 @@
 import { useMemo } from 'react'
 import { EdgesGeometry, PlaneGeometry } from 'three'
 import { ACCENT } from '../lib/palette'
-import { subCellFraction, type ViewAxes } from '../lib/space'
-import { useCyberspace } from '../store/useCyberspace'
+import { cellOffset, type ViewAxes } from '../lib/space'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
   axes: ViewAxes
@@ -21,12 +21,11 @@ export function Avatar({ axes }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const [ax, ay] = useMemo(() => {
-    const fx = subCellFraction(position[axes.right.axis], scaleExp)
-    const fy = subCellFraction(position[axes.up.axis], scaleExp)
-    // Screen offset runs backwards when the axis points left or down.
-    const sx = axes.right.dir === 1 ? fx : 1 - fx
-    const sy = axes.up.dir === 1 ? fy : 1 - fy
-    return [sx - 0.5, sy - 0.5]
+    const origin = alignedOrigin(position, scaleExp)
+    return [
+      cellOffset(position[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
+      cellOffset(position[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
+    ]
   }, [position, scaleExp, axes])
 
   const cellOutline = useMemo(() => new EdgesGeometry(new PlaneGeometry(1, 1)), [])

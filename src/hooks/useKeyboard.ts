@@ -1,9 +1,10 @@
 /**
- * useKeyboard.ts — the whole control scheme.
+ * useKeyboard.ts - the whole control scheme.
  *
- * Movement is expressed in *screen* directions and resolved to world axes
- * through the current view, so W is always "away from you" no matter which of
- * the 24 axis-aligned orientations you are in.
+ * Movement keys drive the *cursor*, expressed in screen directions and
+ * resolved to world axes through the current view, so W is always "away from
+ * you" in any of the 24 axis-aligned orientations. Nothing costs a proof
+ * until Space commits the hop.
  */
 
 import { useEffect } from 'react'
@@ -48,9 +49,23 @@ export function useKeyboard(): void {
         return
       }
 
-      if (event.code === 'Space') {
+      if (event.code === 'Escape') {
         event.preventDefault()
         store.resetView()
+        return
+      }
+
+      // Commit the cursor's hop: the only key that costs a proof.
+      if (event.code === 'Space') {
+        event.preventDefault()
+        store.commit()
+        return
+      }
+
+      // Cancel an in-flight proof, or recall the cursor when idle.
+      if (event.code === 'KeyX') {
+        event.preventDefault()
+        store.cancel()
         return
       }
 
@@ -77,7 +92,7 @@ export function useKeyboard(): void {
       // otherwise unreachable without rotating the view first.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
-        store.move(event.code === 'KeyR' ? axes.out : invert(axes.out))
+        store.moveCursor(event.code === 'KeyR' ? axes.out : invert(axes.out))
         return
       }
 
@@ -95,16 +110,16 @@ export function useKeyboard(): void {
 
       switch (screenDir) {
         case 'up':
-          store.move(axes.up)
+          store.moveCursor(axes.up)
           break
         case 'down':
-          store.move(invert(axes.up))
+          store.moveCursor(invert(axes.up))
           break
         case 'right':
-          store.move(axes.right)
+          store.moveCursor(axes.right)
           break
         case 'left':
-          store.move(invert(axes.right))
+          store.moveCursor(invert(axes.right))
           break
       }
     }

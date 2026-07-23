@@ -15,6 +15,8 @@ export const FG = '#c8f5ff'
 export const ACCENT = '#00e5ff'
 export const WARN = '#ffb020'
 export const DANGER = '#ff3b6b'
+/** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
+export const SIDESTEP = '#c07dff'
 export const DIM = '#3a5566'
 
 /**

@@ -7,6 +7,7 @@
   --accent: #00e5ff;
   --warn: #ffb020;
   --danger: #ff3b6b;
+  --sidestep: #c07dff;
   --ok: #52e39f;
   --panel: rgba(6, 14, 22, 0.82);
   --border: rgba(0, 229, 255, 0.22);
@@ -195,6 +196,17 @@ body {
 
 .status--uncommitted {
   color: var(--warn);
+}
+
+.status--sidestep-ready,
+.status--hashing {
+  color: var(--sidestep);
+}
+
+.notice--sidestep {
+  color: var(--sidestep);
+  background: rgba(192, 125, 255, 0.08);
+  border-left-color: var(--sidestep);
 }
 
 .status--computing {

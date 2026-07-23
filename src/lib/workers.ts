@@ -7,7 +7,7 @@
  * with its message handler re-wired at spawn time.
  */
 
-import type { ProofRequest, ProofResponse } from '../workers/proof.worker'
+import type { ProofMode, ProofRequest, ProofResponse } from '../workers/proof.worker'
 import type { TerrainRequest, TerrainResponse } from '../workers/terrain.worker'
 
 let proofWorker: Worker | null = null
@@ -56,4 +56,4 @@ export function postTerrain(request: TerrainRequest): void {
   getTerrainWorker().postMessage(request)
 }
 
-export type { ProofRequest, ProofResponse, TerrainRequest, TerrainResponse }
+export type { ProofMode, ProofRequest, ProofResponse, TerrainRequest, TerrainResponse }

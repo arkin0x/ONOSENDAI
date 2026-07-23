@@ -126,7 +126,7 @@ function ScalePanel(): JSX.Element {
 function Controls(): JSX.Element {
   const rows: Array<[string, string]> = [
     ['W A S D', 'move cursor one step'],
-    ['Space', 'commit hop (compute proof)'],
+    ['Space', 'commit hop or sidestep (compute proof)'],
     ['X', 'cancel proof / recall cursor'],
     ['Shift + W A S D', 'rotate view 90°'],
     ['Tab', 'previous view'],

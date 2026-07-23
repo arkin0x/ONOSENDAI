@@ -14,8 +14,11 @@ import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
 import {
   coordToHex,
   coordToXyz,
+  estimateHopCost,
+  findLcaHeight,
   hexToCoord,
   sectorTag,
+  sidestepLanding,
   xyzToCoord,
   xyzToSectorId,
   type Plane,
@@ -34,10 +37,10 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
-import { cancelProof, postProof, type ProofResponse } from '../lib/workers'
+import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
-const MAX_COMPUTE_HEIGHT = 20
+export const MAX_COMPUTE_HEIGHT = 20
 
 const ZERO_EVENT_ID = '0'.repeat(64)
 
@@ -45,6 +48,8 @@ export type ProofStatus = 'idle' | 'computing' | 'done' | 'infeasible'
 
 export interface ProofState {
   status: ProofStatus
+  /** Which primitive the last/current commit used. */
+  mode: ProofMode
   /** 0..1 while computing. */
   progress: number
   elapsedMs: number
@@ -52,12 +57,14 @@ export interface ProofState {
   regionN: string | null
   terrainK: number | null
   lca: { x: number; y: number; z: number } | null
+  /** Cantor pairings for hops; SHA-256 evaluations for sidesteps. */
   totalOps: number | null
   message: string | null
 }
 
 const IDLE_PROOF: ProofState = {
   status: 'idle',
+  mode: 'hop',
   progress: 0,
   elapsedMs: 0,
   proofHash: null,
@@ -71,8 +78,12 @@ const IDLE_PROOF: ProofState = {
 export interface ChainStats {
   /** Completed hops. The chain is contiguous by construction. */
   hops: number
+  /** Completed Merkle sidesteps. */
+  sidesteps: number
   /** Cumulative Cantor pairings across all completed hops. */
   totalOps: number
+  /** Cumulative SHA-256 evaluations across all completed sidesteps. */
+  totalHashes: number
   /** Cumulative proof compute time. */
   totalMs: number
 }
@@ -133,7 +144,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   viewHistory: [],
   proof: IDLE_PROOF,
   prevEventId: ZERO_EVENT_ID,
-  chain: { hops: 0, totalOps: 0, totalMs: 0 },
+  chain: { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 },
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
@@ -153,16 +164,31 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     if (proof.status === 'computing') return
     if (samePosition(position, cursor)) return
 
+    // Route by feasibility: a hop straight to the cursor when the Cantor tree
+    // fits, otherwise a Merkle sidestep across the blocking wall(s). The
+    // sidestep lands 1 gibson past the boundary, not at the cursor; the
+    // cursor keeps the rest of the journey for the next commit.
+    const estimate = estimateHopCost(
+      position.x, position.y, position.z,
+      cursor.x, cursor.y, cursor.z,
+      plane,
+      MAX_COMPUTE_HEIGHT,
+    )
+    const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
+    const to = mode === 'sidestep' ? sidestepTarget(position, cursor) : { ...cursor }
+    if (samePosition(position, to)) return
+
     const id = ++requestId
     set({
-      pendingTarget: { ...cursor },
-      proof: { ...IDLE_PROOF, status: 'computing' },
+      pendingTarget: to,
+      proof: { ...IDLE_PROOF, status: 'computing', mode },
     })
 
     postProof({
       id,
+      mode,
       from: position,
-      to: cursor,
+      to,
       plane,
       prevEventId,
       maxComputeHeight: MAX_COMPUTE_HEIGHT,
@@ -253,6 +279,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       pendingTarget: null,
       proof: {
         status: 'done',
+        mode: msg.mode,
         progress: 1,
         elapsedMs: msg.elapsedMs,
         proofHash: msg.proofHash,
@@ -264,8 +291,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       },
       prevEventId: msg.proofHash,
       chain: {
-        hops: chain.hops + 1,
-        totalOps: chain.totalOps + msg.totalOps,
+        hops: chain.hops + (msg.mode === 'hop' ? 1 : 0),
+        sidesteps: chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
+        totalOps: chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
+        totalHashes: chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
         totalMs: chain.totalMs + msg.elapsedMs,
       },
     })
@@ -287,6 +316,21 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 /** Positions are equal when all three axes match. */
 export function samePosition(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
+/**
+ * Where a sidestep commit toward `cursor` actually lands: each axis whose
+ * crossing is beyond the Cantor ceiling steps 1 gibson past its wall; every
+ * other axis stays put, because a spec-valid sidestep only crosses walls.
+ */
+export function sidestepTarget(position: Position, cursor: Position): Position {
+  const land = (p: bigint, c: bigint): bigint =>
+    findLcaHeight(p, c) > MAX_COMPUTE_HEIGHT ? sidestepLanding(p, c) : p
+  return {
+    x: land(position.x, cursor.x),
+    y: land(position.y, cursor.y),
+    z: land(position.z, cursor.z),
+  }
 }
 
 /**

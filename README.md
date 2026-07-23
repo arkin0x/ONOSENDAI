@@ -129,10 +129,15 @@ higher scales a single keypress is real work. Proofs and terrain sampling both
 run in workers, and the proof worker streams progress so the HUD shows genuine
 elapsed cost rather than a spinner.
 
-When a hop's LCA height exceeds the Cantor compute ceiling the HUD reports
-`SIDESTEP REQUIRED` rather than failing. That is not an error state: it is the
-protocol saying this boundary should be crossed with a Merkle sidestep instead.
-Sidesteps are not implemented in this MVP.
+When a hop's LCA height exceeds the Cantor compute ceiling, Space commits a
+**Merkle sidestep** instead (spec section 6): a Merkle hash tree over the same
+LCA subtree, which has no storage wall and costs purely time (2^(h+1) SHA-256
+evaluations per crossing axis). A sidestep lands exactly 1 gibson past the
+blocking boundary, not at the cursor: crossing the mountain drops you at the
+pass, and the rest of the journey is the next commit. The tether shows this as
+two legs: purple to the landing, then amber (or red, if another wall stands)
+for the remainder. The proof panel previews the hash count and a rough
+wall-clock estimate before you pay; X cancels mid-hash.
 
 ## Relationship to v1
 

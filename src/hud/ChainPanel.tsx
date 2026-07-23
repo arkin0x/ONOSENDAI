@@ -11,20 +11,33 @@ import { useCyberspace } from '../store/useCyberspace'
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
   const prevEventId = useCyberspace((s) => s.prevEventId)
+  const actions = chain.hops + chain.sidesteps
 
   return (
     <section className="panel">
       <header className="panel__head">
         <h2>Proof chain</h2>
         <span className="tag">
-          {chain.hops} HOP{chain.hops === 1 ? '' : 'S'}
+          {actions} ACTION{actions === 1 ? '' : 'S'}
         </span>
       </header>
 
       <dl className="stats">
         <div>
+          <dt>Hops</dt>
+          <dd>{chain.hops}</dd>
+        </div>
+        <div>
+          <dt>Sidesteps</dt>
+          <dd>{chain.sidesteps}</dd>
+        </div>
+        <div>
           <dt>Cantor ops</dt>
           <dd>{formatOps(chain.totalOps)}</dd>
+        </div>
+        <div>
+          <dt>SHA-256 hashes</dt>
+          <dd>{formatOps(chain.totalHashes)}</dd>
         </div>
         <div>
           <dt>Compute time</dt>
@@ -34,7 +47,7 @@ export function ChainPanel(): JSX.Element {
 
       <div className="hash">
         <span className="hash__label">chain head</span>
-        <code>{chain.hops === 0 ? 'spawn (no hops committed yet)' : prevEventId}</code>
+        <code>{actions === 0 ? 'spawn (nothing committed yet)' : prevEventId}</code>
       </div>
 
       <p className="legend__note">

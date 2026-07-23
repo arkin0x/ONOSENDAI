@@ -3,22 +3,26 @@
  *
  * The point of this panel is that movement in Cyberspace is not free and not
  * uniform. While the cursor is away from the avatar it previews what the
- * uncommitted hop would cost (the estimate is closed-form, so it is live);
- * once committed it streams the real computation; and when a hop is beyond
- * the Cantor compute ceiling it says so explicitly rather than failing
- * quietly.
+ * uncommitted action would cost, live: a Cantor hop when the tree fits, a
+ * Merkle sidestep across the wall when it does not. Once committed it streams
+ * the real computation.
  */
 
 import { useMemo } from 'react'
-import { estimateHopCost } from 'cyberspace-core'
+import { estimateHopCost, estimateSidestepCost } from 'cyberspace-core'
 import { formatMs, formatOps } from '../lib/space'
-import { samePosition, useCyberspace } from '../store/useCyberspace'
+import { samePosition, sidestepTarget, useCyberspace } from '../store/useCyberspace'
+
+/** Rough single-thread JS hash rate, for the pre-commit wall-clock hint. */
+const HASHES_PER_SECOND = 1_500_000
 
 function StatusLabel({ status }: { status: string }): JSX.Element {
   const label: Record<string, string> = {
     idle: 'IDLE',
     uncommitted: 'UNCOMMITTED',
+    'sidestep-ready': 'SIDESTEP READY',
     computing: 'COMPUTING',
+    hashing: 'HASHING',
     done: 'PROVEN',
     infeasible: 'SIDESTEP REQUIRED',
   }
@@ -31,19 +35,31 @@ export function ProofPanel(): JSX.Element {
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
 
-  // Live preview of the hop the cursor is lining up. Closed-form, so cheap
-  // enough to run on every noodle.
-  const estimate = useMemo(() => {
+  // Live preview of the action the cursor is lining up. Both estimates are
+  // closed-form, so cheap enough to run on every noodle.
+  const preview = useMemo(() => {
     if (samePosition(position, cursor)) return null
-    return estimateHopCost(
+    const hop = estimateHopCost(
       position.x, position.y, position.z,
       cursor.x, cursor.y, cursor.z,
       plane,
     )
+    if (!hop.exceedsLimit) return { hop, sidestep: null }
+    const landing = sidestepTarget(position, cursor)
+    const sidestep = estimateSidestepCost(
+      position.x, position.y, position.z,
+      landing.x, landing.y, landing.z,
+    )
+    return { hop, sidestep }
   }, [position, cursor, plane])
 
-  const previewing = estimate !== null && proof.status !== 'computing'
-  const status = previewing ? 'uncommitted' : proof.status
+  const previewing = preview !== null && proof.status !== 'computing'
+  const status =
+    proof.status === 'computing'
+      ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
+      : previewing
+        ? preview.sidestep ? 'sidestep-ready' : 'uncommitted'
+        : proof.status
 
   return (
     <section className="panel panel--proof">
@@ -59,52 +75,69 @@ export function ProofPanel(): JSX.Element {
         />
       </div>
 
-      {previewing ? (
+      {previewing && preview.sidestep ? (
+        <>
+          <dl className="stats">
+            <div>
+              <dt>Wall height</dt>
+              <dd>2^{preview.sidestep.maxHeight}</dd>
+            </div>
+            <div>
+              <dt>Est. SHA-256 hashes</dt>
+              <dd>{formatOps(preview.sidestep.totalHashes)}</dd>
+            </div>
+            <div>
+              <dt>LCA x / y / z</dt>
+              <dd>{`${preview.sidestep.lcaX} / ${preview.sidestep.lcaY} / ${preview.sidestep.lcaZ}`}</dd>
+            </div>
+            <div>
+              <dt>Rough time</dt>
+              <dd>~{formatMs((preview.sidestep.totalHashes / HASHES_PER_SECOND) * 1000)}</dd>
+            </div>
+          </dl>
+          <p className="notice notice--sidestep">
+            Beyond the 2^20 Cantor ceiling: the pairing tree would not fit in
+            memory. Space commits a Merkle SIDESTEP instead, landing 1 gibson
+            past the wall; the cursor keeps the rest of the journey for the
+            next commit. X cancels mid-hash.
+          </p>
+        </>
+      ) : previewing ? (
         <>
           <dl className="stats">
             <div>
               <dt>Est. Cantor ops</dt>
-              <dd>{formatOps(estimate.totalOps)}</dd>
+              <dd>{formatOps(preview.hop.totalOps)}</dd>
             </div>
             <div>
               <dt>Max LCA h</dt>
-              <dd>{estimate.maxHeight}</dd>
+              <dd>{preview.hop.maxHeight}</dd>
             </div>
             <div>
               <dt>LCA x / y / z</dt>
-              <dd>{`${estimate.lcaX} / ${estimate.lcaY} / ${estimate.lcaZ}`}</dd>
+              <dd>{`${preview.hop.lcaX} / ${preview.hop.lcaY} / ${preview.hop.lcaZ}`}</dd>
             </div>
             <div>
               <dt>Terrain K</dt>
-              <dd>{estimate.terrainK}</dd>
+              <dd>{preview.hop.terrainK}</dd>
             </div>
           </dl>
-
-          {estimate.exceedsLimit ? (
-            <p className="notice">
-              Beyond the compute ceiling: this hop would need ~2^
-              {estimate.maxHeight} pairings. The protocol crosses boundaries
-              this large with a Merkle sidestep. Walk the cursor back or scale
-              down.
-            </p>
-          ) : (
-            <p className="legend__note">Space commits this hop. X recalls the cursor.</p>
-          )}
+          <p className="legend__note">Space commits this hop. X recalls the cursor.</p>
         </>
       ) : (
         <>
           <dl className="stats">
             <div>
+              <dt>Type</dt>
+              <dd>{proof.status === 'idle' ? '—' : proof.mode}</dd>
+            </div>
+            <div>
               <dt>Elapsed</dt>
               <dd>{formatMs(proof.elapsedMs)}</dd>
             </div>
             <div>
-              <dt>Cantor ops</dt>
+              <dt>{proof.mode === 'sidestep' ? 'SHA-256 hashes' : 'Cantor ops'}</dt>
               <dd>{proof.totalOps === null ? '—' : formatOps(proof.totalOps)}</dd>
-            </div>
-            <div>
-              <dt>Terrain K</dt>
-              <dd>{proof.terrainK === null ? '—' : proof.terrainK}</dd>
             </div>
             <div>
               <dt>LCA x / y / z</dt>

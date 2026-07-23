@@ -13,7 +13,9 @@ import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 
 const CAMERA_DISTANCE = 200
-const SLERP_RATE = 9
+// Rotation easing. Was 9; slowed 3x so the 90-degree swing reads spatially
+// rather than as a cut.
+const SLERP_RATE = 3
 
 export function ViewRig(): null {
   const target = useCyberspace((s) => s.view)

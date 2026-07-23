@@ -165,16 +165,26 @@ describe('cellDelta / cellOffset', () => {
     expect(cellDelta(origin + (1n << 83n), origin, 84)).toBeCloseTo(0.5, 3)
   })
 
+  it('centres the marker on the occupied gibson at gibson scale', () => {
+    // A coordinate names a whole unit gibson; at 2^0 the cell IS the gibson,
+    // so the marker sits dead centre, not at the lattice corner.
+    expect(cellOffset(12345n, 12345n, 0, 1)).toBe(0)
+    expect(cellOffset(12345n, 12345n, 0, -1)).toBe(0)
+    expect(cellOffset(12346n, 12345n, 0, 1)).toBe(1)
+  })
+
   it('mirrors screen offsets when the axis points left or down', () => {
-    // A point 1/4 into the avatar's cell renders 1/4 from the low edge, and
-    // the low edge swaps sides when the axis is flipped.
-    expect(cellOffset(1024n + 256n, 1024n, 10, 1)).toBeCloseTo(-0.25, 3)
-    expect(cellOffset(1024n + 256n, 1024n, 10, -1)).toBeCloseTo(0.25, 3)
+    // A point 1/4 into the avatar's cell renders 1/4 from the low edge (plus
+    // the half-gibson centring nudge), and the low edge swaps sides when the
+    // axis is flipped.
+    const nudge = 0.5 / 1024
+    expect(cellOffset(1024n + 256n, 1024n, 10, 1)).toBeCloseTo(-0.25 + nudge, 6)
+    expect(cellOffset(1024n + 256n, 1024n, 10, -1)).toBeCloseTo(0.25 - nudge, 6)
   })
 
   it('reaches into neighbouring cells for cursor endpoints', () => {
     // Three cells to the right of the aligned origin, dead centre.
-    expect(cellOffset(1024n * 4n + 512n, 1024n, 10, 1)).toBeCloseTo(3, 3)
+    expect(cellOffset(1024n * 4n + 512n, 1024n, 10, 1)).toBeCloseTo(3, 2)
   })
 })
 

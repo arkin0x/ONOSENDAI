@@ -113,9 +113,12 @@ export function subCellFraction(value: bigint, scaleExp: number): number {
 }
 
 /**
- * Screen offset, in cells, of an absolute axis value, where the avatar's
- * aligned cell spans [-0.5, +0.5]. Mirrors when the axis points left or down
- * on screen, matching how BoundaryGrid lays cells out along a flipped axis.
+ * Screen offset, in cells, of the gibson at an absolute axis value, where the
+ * avatar's aligned cell spans [-0.5, +0.5]. A coordinate names a whole unit
+ * gibson, not its low corner, so the marker sits at the gibson's centre:
+ * exactly mid-cell at scale 2^0, and vanishingly close to the lattice point at
+ * larger scales. Mirrors when the axis points left or down on screen, matching
+ * how BoundaryGrid lays cells out along a flipped axis.
  */
 export function cellOffset(
   value: bigint,
@@ -123,7 +126,9 @@ export function cellOffset(
   scaleExp: number,
   dir: number,
 ): number {
-  const delta = cellDelta(value, origin, scaleExp)
+  // Number(step) overflows to Infinity past 2^1023, driving the shift to 0,
+  // which is the right limit: a single gibson has no visible width there.
+  const delta = cellDelta(value, origin, scaleExp) + 0.5 / Number(stepFor(scaleExp))
   return dir === 1 ? delta - 0.5 : 0.5 - delta
 }
 

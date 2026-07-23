@@ -71,9 +71,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         transparent: true,
         opacity: 0.9,
         toneMapped: false,
+        // The cursor can sit behind the slice plane (negative depth after a
+        // rotation). It must never vanish there, so it ignores the depth
+        // buffer and draws late.
+        depthTest: false,
       }),
     )
     line.frustumCulled = false
+    line.renderOrder = 10
     return line
   }, [tetherGeometry])
 
@@ -96,14 +101,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       <primitive object={tether} />
 
       {/* The cell Space would land you in */}
-      <lineSegments geometry={cellOutline} position={cellCenter} frustumCulled={false}>
-        <lineBasicMaterial color={color} toneMapped={false} transparent opacity={0.85} />
+      <lineSegments geometry={cellOutline} position={cellCenter} frustumCulled={false} renderOrder={10}>
+        <lineBasicMaterial color={color} toneMapped={false} transparent opacity={0.85} depthTest={false} />
       </lineSegments>
 
       {/* Exact cursor point */}
-      <mesh position={b}>
+      <mesh position={b} renderOrder={10}>
         <ringGeometry args={[0.12, 0.2, 24]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
+        <meshBasicMaterial color={color} toneMapped={false} transparent depthTest={false} />
       </mesh>
     </group>
   )

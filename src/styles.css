@@ -73,7 +73,8 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px;
-  gap: 16px;
+  padding-right: 80px;
+  gap: 24px;
   pointer-events: none;
   z-index: 1;
 }
@@ -89,6 +90,7 @@ body {
 }
 
 .hud__col--right {
+  width: 300px;
   align-items: stretch;
 }
 

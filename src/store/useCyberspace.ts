@@ -138,6 +138,14 @@ export interface CyberspaceState {
  * to x/y/z/plane, so identity IS position (spec section 8.3).
  */
 const STORAGE_KEY = 'onosendai:nsec'
+const CHAIN_KEY = 'onosendai:chain'
+
+interface PersistedState {
+  position: { x: string; y: string; z: string }
+  prevEventId: string
+  chain: ChainStats
+  positionHistory: Array<{ x: string; y: string; z: string }>
+}
 
 function loadOrGenerateKey(): Uint8Array {
   try {
@@ -153,9 +161,55 @@ function loadOrGenerateKey(): Uint8Array {
   return fresh
 }
 
+function positionToStrings(pos: Position): { x: string; y: string; z: string } {
+  return { x: pos.x.toString(), y: pos.y.toString(), z: pos.z.toString() }
+}
+
+function stringsToPosition(s: { x: string; y: string; z: string }): Position {
+  return { x: BigInt(s.x), y: BigInt(s.y), z: BigInt(s.z) }
+}
+
+function loadPersistedState(): {
+  position: Position
+  prevEventId: string
+  chain: ChainStats
+  positionHistory: Position[]
+} | null {
+  try {
+    const raw = localStorage.getItem(CHAIN_KEY)
+    if (!raw) return null
+    const data: PersistedState = JSON.parse(raw)
+    return {
+      position: stringsToPosition(data.position),
+      prevEventId: data.prevEventId,
+      chain: data.chain,
+      positionHistory: data.positionHistory.map(stringsToPosition),
+    }
+  } catch { /* corrupt or missing */ }
+  return null
+}
+
+function savePersistedState(
+  position: Position,
+  prevEventId: string,
+  chain: ChainStats,
+  positionHistory: Position[],
+): void {
+  try {
+    const data: PersistedState = {
+      position: positionToStrings(position),
+      prevEventId,
+      chain,
+      positionHistory: positionHistory.map(positionToStrings),
+    }
+    localStorage.setItem(CHAIN_KEY, JSON.stringify(data))
+  } catch { /* quota exceeded or private mode */ }
+}
+
 const secretKey = loadOrGenerateKey()
 const pubkeyHex = getPublicKey(secretKey)
 const SPAWN = coordToXyz(hexToCoord(pubkeyHex))
+const persisted = loadPersistedState()
 
 // Reserved for signing spawn/hop events when publishing lands.
 void secretKey
@@ -164,17 +218,17 @@ let requestId = 0
 
 export const useCyberspace = create<CyberspaceState>((set, get) => ({
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
-  position: { x: SPAWN.x, y: SPAWN.y, z: SPAWN.z },
-  cursor: { x: SPAWN.x, y: SPAWN.y, z: SPAWN.z },
+  position: persisted?.position ?? SPAWN,
+  cursor: persisted?.position ?? SPAWN,
   pendingTarget: null,
-  plane: SPAWN.plane,
+  plane: 0,
   scaleExp: 0,
   view: topDownQuaternion(),
   viewHistory: [],
   proof: IDLE_PROOF,
-  prevEventId: ZERO_EVENT_ID,
-  chain: { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 },
-  positionHistory: [SPAWN],
+  prevEventId: persisted?.prevEventId ?? ZERO_EVENT_ID,
+  chain: persisted?.chain ?? { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 },
+  positionHistory: persisted?.positionHistory ?? [SPAWN],
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
@@ -350,6 +404,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       },
       positionHistory: [...get().positionHistory, newPosition],
     })
+    
+    // Persist the updated state
+    const updated = get()
+    savePersistedState(
+      updated.position,
+      updated.prevEventId,
+      updated.chain,
+      updated.positionHistory
+    )
   },
 
   axes: () => viewAxes(get().view),

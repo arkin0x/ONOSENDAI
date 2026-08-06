@@ -18,25 +18,35 @@ interface Props {
 
 export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const positionHistory = useCyberspace((s) => s.positionHistory)
-  const viewCenter = useCyberspace((s) => s.viewCenter())
+  const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
 
   const geometry = useMemo(() => {
     if (positionHistory.length < 2) return null
 
+    // Compute viewCenter inline to avoid selector reference issues
+    const viewCenter = position === cursor ? position : cursor
     const origin = alignedOrigin(viewCenter, scaleExp)
     const vertices: number[] = []
 
-    for (let i = 0; i < positionHistory.length; i++) {
-      const pos = positionHistory[i]
-      const x = cellOffset(pos[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
-      const y = cellOffset(pos[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
-      vertices.push(x, y, 0.02) // Slightly above terrain
+    // Build segments: each pair of consecutive positions becomes two vertices
+    for (let i = 0; i < positionHistory.length - 1; i++) {
+      const from = positionHistory[i]
+      const to = positionHistory[i + 1]
+      
+      const x1 = cellOffset(from[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
+      const y1 = cellOffset(from[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
+      vertices.push(x1, y1, 0.02)
+      
+      const x2 = cellOffset(to[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
+      const y2 = cellOffset(to[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
+      vertices.push(x2, y2, 0.02)
     }
 
     const geom = new BufferGeometry()
     geom.setAttribute('position', new Float32BufferAttribute(vertices, 3))
     return geom
-  }, [positionHistory, axes, scaleExp, viewCenter])
+  }, [positionHistory, axes, scaleExp, position, cursor])
 
   if (!geometry) return null
 

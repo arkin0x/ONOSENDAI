@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { EdgesGeometry, PlaneGeometry } from 'three'
 import { ACCENT } from '../lib/palette'
-import { cellOffset, type ViewAxes } from '../lib/space'
+import { cellDelta, cellOffset, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
@@ -21,11 +21,12 @@ export function Avatar({ axes }: Props): JSX.Element {
   const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
-  const [ax, ay] = useMemo(() => {
+  const [ax, ay, depthCells] = useMemo(() => {
     const origin = alignedOrigin(viewCenter, scaleExp)
     return [
       cellOffset(position[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
       cellOffset(position[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
+      cellDelta(position[axes.out.axis], viewCenter[axes.out.axis], scaleExp) * axes.out.dir,
     ]
   }, [position, viewCenter, scaleExp, axes])
 
@@ -33,8 +34,8 @@ export function Avatar({ axes }: Props): JSX.Element {
 
   return (
     <group position={[0, 0, 0.05]}>
-      {/* Occupied cell */}
-      <lineSegments geometry={cellOutline} frustumCulled={false}>
+      {/* Occupied cell — positioned at the avatar's screen offset, not grid centre */}
+      <lineSegments geometry={cellOutline} position={[ax, ay, 0]} frustumCulled={false}>
         <lineBasicMaterial color={ACCENT} toneMapped={false} />
       </lineSegments>
 
@@ -47,6 +48,20 @@ export function Avatar({ axes }: Props): JSX.Element {
         <ringGeometry args={[0.26, 0.32, 32]} />
         <meshBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.5} />
       </mesh>
+
+      {/* Depth indicator: shows when avatar is offset on the axis into/out of screen */}
+      {Math.abs(depthCells) > 0.01 && (
+        <>
+          <mesh position={[ax, ay, -0.01]}>
+            <ringGeometry args={[0.38, 0.44, 32]} />
+            <meshBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.4} depthTest={false} />
+          </mesh>
+          <mesh position={[ax, ay, -0.015]}>
+            <ringGeometry args={[0.48, 0.52, 32]} />
+            <meshBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.2} depthTest={false} />
+          </mesh>
+        </>
+      )}
     </group>
   )
 }

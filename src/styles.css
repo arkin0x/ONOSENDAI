@@ -245,6 +245,47 @@ body {
   text-transform: lowercase;
 }
 
+/* ---------- Compass 3D ---------- */
+
+.compass-3d {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.compass-labels {
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-around;
+  font-size: 10px;
+  font-weight: bold;
+  pointer-events: none;
+}
+
+.compass-label {
+  text-transform: uppercase;
+}
+
+.compass-label--x {
+  color: #ff4444;
+}
+
+.compass-label--y {
+  color: #44ff44;
+}
+
+.compass-label--z {
+  color: #4488ff;
+}
+
 .plane--0 {
   color: var(--accent);
 }

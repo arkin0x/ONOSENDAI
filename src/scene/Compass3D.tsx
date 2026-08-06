@@ -4,17 +4,28 @@
  * Renders a small 3D compass with three colored axes (X=red, Y=green, Z=blue)
  * that rotates opposite to the view so it always shows world-space orientation.
  * The compass uses its own small Canvas instance separate from the main scene.
+ * Text labels are rendered as HTML overlays positioned in 3D space.
  */
 
-import { Canvas, useFrame } from '@react-three/fiber'
-import { useRef } from 'react'
-import { Group, Quaternion } from 'three'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { useRef, useState } from 'react'
+import { Group, Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 
-function CompassAxes(): JSX.Element {
+interface LabelPosition {
+  axis: 'x' | 'y' | 'z'
+  screen: { x: number; y: number }
+}
+
+function CompassAxes({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPosition[]) => void }): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const groupRef = useRef<Group>(null)
   const currentQuaternion = useRef(new Quaternion())
+  const { camera, size } = useThree()
+  
+  const arrowLength = 1.2
+  const arrowThickness = 0.08
+  const labelOffset = 0.15
 
   useFrame(() => {
     if (!groupRef.current) return
@@ -24,10 +35,28 @@ function CompassAxes(): JSX.Element {
     const target = view.clone().invert()
     currentQuaternion.current.slerp(target, 0.15)
     groupRef.current.quaternion.copy(currentQuaternion.current)
-  })
 
-  const arrowLength = 1.2
-  const arrowThickness = 0.08
+    // Project arrow tip positions to screen space
+    const positions = [
+      { axis: 'x' as const, world: new Vector3(arrowLength + labelOffset, 0, 0) },
+      { axis: 'y' as const, world: new Vector3(0, arrowLength + labelOffset, 0) },
+      { axis: 'z' as const, world: new Vector3(0, 0, arrowLength + labelOffset) },
+    ]
+
+    const labels: LabelPosition[] = positions.map(({ axis, world }) => {
+      const transformed = world.clone().applyQuaternion(currentQuaternion.current)
+      const projected = transformed.clone().project(camera)
+      return {
+        axis,
+        screen: {
+          x: (projected.x * 0.5 + 0.5) * size.width,
+          y: (-projected.y * 0.5 + 0.5) * size.height,
+        },
+      }
+    })
+
+    onLabelsUpdate(labels)
+  })
 
   return (
     <group ref={groupRef}>
@@ -71,22 +100,35 @@ function CompassAxes(): JSX.Element {
 }
 
 export function Compass3D(): JSX.Element {
+  const [labels, setLabels] = useState<LabelPosition[]>([])
+
+  const handleLabelsUpdate = (newLabels: LabelPosition[]) => {
+    setLabels(newLabels)
+  }
+
   return (
     <div className="compass-3d">
       <Canvas
-        camera={{ position: [3, 3, 3], fov: 50 }}
+        camera={{ position: [2.5, 3, 3.5], fov: 45 }}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
       >
         <ambientLight intensity={0.6} />
         <pointLight position={[5, 5, 5]} intensity={0.8} />
-        <CompassAxes />
+        <CompassAxes onLabelsUpdate={handleLabelsUpdate} />
       </Canvas>
-      <div className="compass-labels">
-        <span className="compass-label compass-label--x">X</span>
-        <span className="compass-label compass-label--y">Y</span>
-        <span className="compass-label compass-label--z">Z</span>
-      </div>
+      {labels.map(({ axis, screen }) => (
+        <span
+          key={axis}
+          className={`compass-label compass-label--${axis}`}
+          style={{
+            left: `${screen.x}px`,
+            top: `${screen.y}px`,
+          }}
+        >
+          {axis.toUpperCase()}
+        </span>
+      ))}
     </div>
   )
 }

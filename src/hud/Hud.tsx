@@ -116,6 +116,21 @@ function ScalePanel(): JSX.Element {
         </div>
       </dl>
 
+      <div className="axis-legend">
+        <div className="axis-legend-item">
+          <span className="axis-dot axis-dot--x"></span>
+          <span className="axis-name">X axis</span>
+        </div>
+        <div className="axis-legend-item">
+          <span className="axis-dot axis-dot--y"></span>
+          <span className="axis-name">Y axis</span>
+        </div>
+        <div className="axis-legend-item">
+          <span className="axis-dot axis-dot--z"></span>
+          <span className="axis-name">Z axis (forward)</span>
+        </div>
+      </div>
+
       <p className="legend__note">
         Looking along {signed(axes.out.axis, -axes.out.dir)}. R and F travel the
         axis into and out of the screen.

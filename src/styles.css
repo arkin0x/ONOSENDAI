@@ -241,7 +241,7 @@ body {
 
 .scale-bar__name {
   font-size: 9px;
-  color: var(--dim);
+  color: var(--fg);
   text-transform: lowercase;
 }
 

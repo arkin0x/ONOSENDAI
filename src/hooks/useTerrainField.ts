@@ -22,7 +22,7 @@ const EMPTY: TerrainField = { values: null, radius: GRID_RADIUS, elapsedMs: 0 }
 let terrainRequestId = 0
 
 export function useTerrainField(): TerrainField {
-  const position = useCyberspace((s) => s.position)
+  const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
   const view = useCyberspace((s) => s.view)
@@ -34,9 +34,9 @@ export function useTerrainField(): TerrainField {
 
   // Only the aligned cell matters, so sub-cell movement does not re-sample.
   const originKey = useMemo(() => {
-    const o = alignedOrigin(position, scaleExp)
+    const o = alignedOrigin(viewCenter, scaleExp)
     return `${o.x}:${o.y}:${o.z}`
-  }, [position, scaleExp])
+  }, [viewCenter, scaleExp])
 
   useEffect(() => {
     const worker = getTerrainWorker()
@@ -57,9 +57,9 @@ export function useTerrainField(): TerrainField {
     latest.current = id
     postTerrain({
       id,
-      originX: alignTo(position.x, scaleExp),
-      originY: alignTo(position.y, scaleExp),
-      originZ: alignTo(position.z, scaleExp),
+      originX: alignTo(viewCenter.x, scaleExp),
+      originY: alignTo(viewCenter.y, scaleExp),
+      originZ: alignTo(viewCenter.z, scaleExp),
       rightAxis: axes.right.axis,
       rightDir: axes.right.dir,
       upAxis: axes.up.axis,

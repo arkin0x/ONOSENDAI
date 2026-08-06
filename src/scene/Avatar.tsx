@@ -18,15 +18,16 @@ interface Props {
 
 export function Avatar({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.position)
+  const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const [ax, ay] = useMemo(() => {
-    const origin = alignedOrigin(position, scaleExp)
+    const origin = alignedOrigin(viewCenter, scaleExp)
     return [
       cellOffset(position[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
       cellOffset(position[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
     ]
-  }, [position, scaleExp, axes])
+  }, [position, viewCenter, scaleExp, axes])
 
   const cellOutline = useMemo(() => new EdgesGeometry(new PlaneGeometry(1, 1)), [])
 

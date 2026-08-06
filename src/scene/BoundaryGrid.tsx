@@ -29,13 +29,13 @@ interface Props {
 }
 
 export function BoundaryGrid({ axes }: Props): JSX.Element {
-  const position = useCyberspace((s) => s.position)
+  const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const ref = useRef<LineSegments>(null)
   const geometry = useMemo(() => new BufferGeometry(), [])
 
   useLayoutEffect(() => {
-    const origin: Position = alignedOrigin(position, scaleExp)
+    const origin: Position = alignedOrigin(viewCenter, scaleExp)
     const step = stepFor(scaleExp)
     // The cheapest possible crossing at this scale, used as the dark floor.
     const floor = scaleExp + 1
@@ -72,7 +72,7 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
     geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
     geometry.attributes.position.needsUpdate = true
     geometry.attributes.color.needsUpdate = true
-  }, [position, scaleExp, axes, geometry])
+  }, [viewCenter, scaleExp, axes, geometry])
 
   return (
     <lineSegments ref={ref} geometry={geometry} frustumCulled={false} position={[0, 0, 0.01]}>

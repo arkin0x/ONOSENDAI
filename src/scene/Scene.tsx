@@ -12,7 +12,7 @@ import { Canvas } from '@react-three/fiber'
 import { useMemo } from 'react'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS } from '../lib/space'
-import { useCyberspace, samePosition } from '../store/useCyberspace'
+import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainField } from '../hooks/useTerrainField'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
@@ -22,22 +22,11 @@ import { ViewRig } from './ViewRig'
 
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
-  const cursorOffset = useCyberspace((s) => s.cursorOffset())
-  const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
   const field = useTerrainField()
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
-  const cursorActive = !samePosition(position, cursor)
-
-  // When the cursor is away from the avatar, shift the world so the cursor
-  // sits at screen centre. This makes zooming track the cursor rather than
-  // the avatar, which is what you want when inspecting terrain at a target.
-  const pan: [number, number, number] = cursorActive
-    ? [-cursorOffset[0], -cursorOffset[1], -cursorOffset[2]]
-    : [0, 0, 0]
 
   return (
-    <group quaternion={view} position={pan}>
+    <group quaternion={view}>
       <TerrainField field={field} />
       <BoundaryGrid axes={axes} />
       <Cursor axes={axes} />

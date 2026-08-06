@@ -67,7 +67,7 @@ export function TerrainField({ field }: Props): JSX.Element {
       onClick={handleClick}
     >
       <planeGeometry args={[0.96, 0.96]} />
-      <meshBasicMaterial toneMapped={false} />
+      <meshBasicMaterial toneMapped={false} transparent opacity={0.85} />
     </instancedMesh>
   )
 }

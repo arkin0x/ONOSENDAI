@@ -73,7 +73,6 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px;
-  padding-right: 80px;
   gap: 24px;
   pointer-events: none;
   z-index: 1;
@@ -179,50 +178,71 @@ body {
   color: var(--ok);
 }
 
-/* ---------- Scale bar ---------- */
+/* ---------- Scale bar (integrated left edge) ---------- */
 
 .scale-bar {
   position: absolute;
-  right: 16px;
+  left: 16px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  backdrop-filter: blur(6px);
-  pointer-events: auto;
+  gap: 8px;
   z-index: 2;
+  pointer-events: none;
+}
+
+.scale-bar__ruler {
+  position: relative;
+  width: 2px;
 }
 
 .scale-bar__tick {
-  width: 2px;
-  height: 16px;
-  background: var(--accent);
+  position: absolute;
+  left: -3px;
+  width: 8px;
+  height: 1px;
+  background: var(--fg);
   opacity: 0.6;
 }
 
-.scale-bar__body {
-  text-align: center;
+.scale-bar__tick--top {
+  top: 0;
 }
 
-.scale-bar__size {
-  font-size: 14px;
+.scale-bar__tick--bottom {
+  bottom: 0;
+}
+
+.scale-bar__line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--fg);
+  opacity: 0.4;
+}
+
+.scale-bar__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.scale-bar__value {
+  font-size: 11px;
   font-weight: 600;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 
-.scale-bar__label {
+.scale-bar__name {
   font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   color: var(--dim);
-  margin-top: 2px;
+  text-transform: lowercase;
 }
 
 .plane--0 {

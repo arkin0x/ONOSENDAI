@@ -31,7 +31,7 @@ function IdentityPanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Identity</h2>
-        <span className="tag tag--ephemeral">EPHEMERAL</span>
+        <span className="tag tag--local">LOCAL</span>
       </header>
 
       <div className="hash">
@@ -41,7 +41,8 @@ function IdentityPanel(): JSX.Element {
 
       <p className="legend__note">
         Spawned at this key's coordinate: the 256-bit pubkey decodes directly
-        to x / y / z / plane (spec section 8.3).
+        to x / y / z / plane (spec section 8.3). Persisted locally so
+        refreshing keeps your identity and position.
       </p>
     </section>
   )
@@ -132,7 +133,7 @@ function Controls(): JSX.Element {
     ['Tab', 'previous view'],
     ['Esc', 'reset to top-down map'],
     ['C', 'canonical view (facing the black sun)'],
-    ['Q / E', 'scale step down / up'],
+    ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
   ]

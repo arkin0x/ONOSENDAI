@@ -35,7 +35,7 @@ cd ../cyberspace-cli-js && npm install && npm run build
 | `Shift` + `W` `A` `S` `D` | rotate the view 90 degrees |
 | `Tab` | return to the previous view |
 | `Esc` | reset to top-down |
-| `Q` / `E` | scale the step down / up, logarithmically |
+| `Q` / `E` | scale the step up / down, logarithmically |
 | `R` / `F` | cursor along the axis into / out of the screen |
 | `C` | canonical view ("facing the black sun") |
 | `P` | toggle dataspace and ideaspace |

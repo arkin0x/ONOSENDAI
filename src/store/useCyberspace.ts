@@ -27,6 +27,8 @@ import {
   MAX_SCALE_EXP,
   alignTo,
   canonicalQuaternion,
+  cellDelta,
+  cellOffset,
   clampAxis,
   rotateView,
   stepFor,
@@ -88,7 +90,7 @@ export interface ChainStats {
   totalMs: number
 }
 
-interface CyberspaceState {
+export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
   position: Position
   /** Where the next hop would land. Free to noodle; costs nothing until committed. */
@@ -118,13 +120,37 @@ interface CyberspaceState {
   axes: () => ViewAxes
   coordHex: () => string
   sector: () => string
+  /** Which position the view centers on: cursor when active, avatar otherwise. */
+  viewCenter: () => Position
+  /**
+   * Cursor's render-space position relative to the avatar's aligned cell.
+   * Used as the camera pan offset so the cursor stays at screen centre.
+   */
+  cursorOffset: () => [number, number, number]
 }
 
 /**
- * Spawn identity: an ephemeral session keypair. Per spec section 8.3 the spawn
- * coordinate IS the pubkey: the 256-bit key decodes directly to x/y/z/plane.
+ * Spawn identity: persist a keypair in localStorage so refreshing the page
+ * keeps the same location and identity. The 256-bit pubkey decodes directly
+ * to x/y/z/plane, so identity IS position (spec section 8.3).
  */
-const secretKey = generateSecretKey()
+const STORAGE_KEY = 'onosendai:nsec'
+
+function loadOrGenerateKey(): Uint8Array {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      const { data } = nip19.decode(stored)
+      if (data instanceof Uint8Array && data.length === 32) return data
+    }
+  } catch { /* corrupt or missing; fall through to generate */ }
+  const fresh = generateSecretKey()
+  const nsec = nip19.nsecEncode(fresh)
+  try { localStorage.setItem(STORAGE_KEY, nsec) } catch { /* private mode */ }
+  return fresh
+}
+
+const secretKey = loadOrGenerateKey()
 const pubkeyHex = getPublicKey(secretKey)
 const SPAWN = coordToXyz(hexToCoord(pubkeyHex))
 
@@ -310,6 +336,33 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   sector: () => {
     const { position } = get()
     return sectorTag(xyzToSectorId(position.x, position.y, position.z))
+  },
+
+  /**
+   * Which position the camera tracks: the cursor when it is away from the
+   * avatar, the avatar's position otherwise. Centering on the cursor means
+   * zooming keeps the cursor stable on screen, which is what you want when
+   * inspecting terrain at a target.
+   */
+  viewCenter: () => {
+    const { position, cursor } = get()
+    return samePosition(position, cursor) ? position : cursor
+  },
+
+  /**
+   * Cursor's render-space position relative to the avatar's aligned cell.
+   * Negating this gives the world-group translation that puts the cursor at
+   * screen centre, so zooming tracks the cursor instead of the avatar.
+   */
+  cursorOffset: (): [number, number, number] => {
+    const { position, cursor, scaleExp, view } = get()
+    const axes = viewAxes(view)
+    const origin = alignedOrigin(position, scaleExp)
+    return [
+      cellOffset(cursor[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
+      cellOffset(cursor[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
+      cellDelta(cursor[axes.out.axis], position[axes.out.axis], scaleExp) * axes.out.dir,
+    ]
   },
 }))
 

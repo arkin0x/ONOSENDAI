@@ -84,7 +84,7 @@ export function useKeyboard(): void {
 
       if (event.code === 'KeyQ' || event.code === 'KeyE') {
         event.preventDefault()
-        store.adjustScale(event.code === 'KeyE' ? 1 : -1)
+        store.adjustScale(event.code === 'KeyQ' ? 1 : -1)
         return
       }
 

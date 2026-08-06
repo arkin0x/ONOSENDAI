@@ -173,8 +173,8 @@ body {
   border-color: rgba(200, 245, 255, 0.3);
 }
 
-.tag--ephemeral {
-  color: var(--warn);
+.tag--local {
+  color: var(--ok);
 }
 
 .plane--0 {

@@ -177,6 +177,52 @@ body {
   color: var(--ok);
 }
 
+/* ---------- Scale bar ---------- */
+
+.scale-bar {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.scale-bar__tick {
+  width: 2px;
+  height: 16px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.scale-bar__body {
+  text-align: center;
+}
+
+.scale-bar__size {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.scale-bar__label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
 .plane--0 {
   color: var(--accent);
 }

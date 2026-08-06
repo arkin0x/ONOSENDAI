@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@react-three/fiber": "^8.17.10",
-    "cyberspace-core": "file:../cyberspace-cli-js",
+    "cyberspace-core": "git+https://github.com/arkin0x/cyberspace-cli-js.git#master",
     "nostr-tools": "^2.24.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

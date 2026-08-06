@@ -105,6 +105,8 @@ export interface CyberspaceState {
   /** Chained from the previous hop, mirroring the protocol's prev-event link. */
   prevEventId: string
   chain: ChainStats
+  /** History of all committed positions for rendering the path trail. */
+  positionHistory: Position[]
 
   moveCursor: (dir: AxisDirection) => void
   setCursorAtCell: (row: number, col: number) => void
@@ -172,6 +174,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   proof: IDLE_PROOF,
   prevEventId: ZERO_EVENT_ID,
   chain: { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 },
+  positionHistory: [SPAWN],
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
@@ -319,10 +322,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     }
 
     const { pendingTarget, position, chain } = get()
+    const newPosition = pendingTarget ?? position
     set({
       // The proof covers exactly position -> pendingTarget, so only now does
       // the avatar arrive.
-      position: pendingTarget ?? position,
+      position: newPosition,
       pendingTarget: null,
       proof: {
         status: 'done',
@@ -344,6 +348,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
         totalHashes: chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
         totalMs: chain.totalMs + msg.elapsedMs,
       },
+      positionHistory: [...get().positionHistory, newPosition],
     })
   },
 

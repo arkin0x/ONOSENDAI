@@ -182,7 +182,7 @@ body {
 
 .scale-bar {
   position: absolute;
-  left: 16px;
+  /* left is set dynamically based on grid position */
   top: 50%;
   transform: translateY(-50%);
   display: flex;

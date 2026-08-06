@@ -1,5 +1,5 @@
 /**
- * ScaleBar.tsx — integrated scale indicator on the left edge of the viewport.
+ * ScaleBar.tsx — integrated scale indicator on the left edge of the grid.
  *
  * A thin vertical line whose pixel height matches one tile on screen, with
  * the physical measurement and verbose unit name beside it. No panel chrome;
@@ -48,25 +48,36 @@ function formatSize(meters: number): { value: number; symbol: string; name: stri
   return { value: meters, symbol: 'm', name: 'meters' }
 }
 
-function useViewportMin(): number {
-  const [min, setMin] = useState(() => Math.min(window.innerWidth, window.innerHeight))
+function useViewportDimensions(): { width: number; height: number } {
+  const [dims, setDims] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }))
 
   useEffect(() => {
-    const onResize = () => setMin(Math.min(window.innerWidth, window.innerHeight))
+    const onResize = () => setDims({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  return min
+  return dims
 }
 
 export function ScaleBar(): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const viewportMin = useViewportMin()
+  const { width: viewportWidth, height: viewportHeight } = useViewportDimensions()
 
   /** Pixel height of one tile on screen. The orthographic camera zooms so
    *  that GRID_SPAN world units fill the smaller viewport dimension. */
+  const viewportMin = Math.min(viewportWidth, viewportHeight)
   const tilePixels = viewportMin / GRID_SPAN
+
+  /** Position the scale bar at the grid's left edge, not the window edge.
+   *  The grid is centered on screen, spanning (GRID_RADIUS * 2 + 1) cells. */
+  const gridLeftEdge = viewportWidth / 2 - (GRID_RADIUS + 0.5) * tilePixels
 
   const { value, symbol, name } = useMemo(() => {
     const gibsons = 2 ** scaleExp
@@ -75,7 +86,11 @@ export function ScaleBar(): JSX.Element {
   }, [scaleExp])
 
   return (
-    <div className="scale-bar" aria-label="Scale indicator">
+    <div
+      className="scale-bar"
+      aria-label="Scale indicator"
+      style={{ left: `${gridLeftEdge}px` }}
+    >
       <div className="scale-bar__ruler" style={{ height: `${tilePixels}px` }}>
         <div className="scale-bar__tick scale-bar__tick--top" />
         <div className="scale-bar__line" />

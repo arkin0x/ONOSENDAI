@@ -17,11 +17,13 @@ import { useTerrainField } from '../hooks/useTerrainField'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
 import { Cursor } from './Cursor'
+import { PathTrail } from './PathTrail'
 import { TerrainField } from './TerrainField'
 import { ViewRig } from './ViewRig'
 
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
   const field = useTerrainField()
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
@@ -29,6 +31,7 @@ function World(): JSX.Element {
     <group quaternion={view}>
       <TerrainField field={field} />
       <BoundaryGrid axes={axes} />
+      <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />
       <Avatar axes={axes} />
     </group>

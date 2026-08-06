@@ -107,6 +107,7 @@ export interface CyberspaceState {
   chain: ChainStats
 
   moveCursor: (dir: AxisDirection) => void
+  setCursorAtCell: (row: number, col: number) => void
   commit: () => void
   cancel: () => void
   adjustScale: (delta: number) => void
@@ -181,6 +182,26 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
     // Clamped against the axis wall: nowhere to go.
     if (next[dir.axis] === cursor[dir.axis]) return
+    set({ cursor: next })
+  },
+
+  setCursorAtCell: (row, col) => {
+    const { position, scaleExp, view } = get()
+    const axes = viewAxes(view)
+    const origin = alignedOrigin(position, scaleExp)
+    const step = stepFor(scaleExp)
+
+    // Grid row/col are in screen space (row=0 is top, col=0 is left).
+    // Convert to world position by applying offsets along the screen axes.
+    const next: Position = { ...position }
+    next[axes.right.axis] = clampAxis(
+      origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
+    )
+    next[axes.up.axis] = clampAxis(
+      origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
+    )
+    // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
+
     set({ cursor: next })
   },
 

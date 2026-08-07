@@ -21,9 +21,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius: K=0 is small but visible, K=31 is ~80% of avatar size
-const MIN_RADIUS = 0.08
-const MAX_RADIUS = 0.4
+// Sphere radius: K=0 is visible, K=31 is larger than avatar (0.5)
+const MIN_RADIUS = 0.2
+const MAX_RADIUS = 0.8
 
 interface Props {
   field: TerrainFieldData

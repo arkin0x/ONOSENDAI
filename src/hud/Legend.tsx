@@ -5,7 +5,7 @@
 import { boundaryColor, terrainColor } from '../lib/palette'
 import { useCyberspace } from '../store/useCyberspace'
 
-const K_SAMPLES = [2, 4, 6, 8, 10, 12, 14, 16]
+const TERRAIN_SAMPLES = [4, 8, 12, 16, 20, 24, 28]
 const HEIGHT_SAMPLES = [5, 20, 40, 60, 80]
 
 export function Legend(): JSX.Element {
@@ -20,7 +20,7 @@ export function Legend(): JSX.Element {
       <div className="legend__row">
         <span className="legend__label">Terrain K (cell fill)</span>
         <div className="swatches">
-          {K_SAMPLES.map((k) => (
+          {TERRAIN_SAMPLES.map((k) => (
             <span
               key={k}
               className="swatch"

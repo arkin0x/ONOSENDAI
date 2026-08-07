@@ -13,9 +13,9 @@ import { IcosahedronGeometry, EdgesGeometry } from 'three'
 import { cellOffset, GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
-
-const MIN_RADIUS = 0.01
-const MAX_RADIUS = 0.25
+// Match TerrainField sphere radii so avatar sits on top
+const MIN_RADIUS = 0.2
+const MAX_RADIUS = 0.8
 
 interface Props {
   axes: ViewAxes
@@ -45,7 +45,7 @@ export function Avatar({ axes, field }: Props): JSX.Element {
   }, [position, viewCenter, scaleExp, axes, field])
 
   // Calculate sphere radius at avatar position
-  const normalizedK = k === 255 ? 0 : k / 16
+  const normalizedK = k === 255 ? 0 : k / 31
   const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
 
   const avatarGeometry = useMemo(() => {

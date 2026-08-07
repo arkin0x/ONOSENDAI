@@ -85,12 +85,12 @@ function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPositi
         <meshStandardMaterial color="#44ff44" emissive="#44ff44" emissiveIntensity={0.3} />
       </mesh>
 
-      {/* Z axis - blue (cylinder defaults to Y, rotate 90° around X to point along Z) */}
-      <mesh position={[0, 0, ARROW_LENGTH / 2]} rotation={[Math.PI / 2, 0, 0]}>
+      {/* Z axis - blue (cylinder defaults to Y, rotate -90° around X to point along +Z) */}
+      <mesh position={[0, 0, ARROW_LENGTH / 2]} rotation={[-Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[ARROW_THICKNESS, ARROW_THICKNESS, ARROW_LENGTH, 8]} />
         <meshStandardMaterial color="#4488ff" emissive="#4488ff" emissiveIntensity={0.3} />
       </mesh>
-      <mesh position={[0, 0, ARROW_LENGTH]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, ARROW_LENGTH]} rotation={[-Math.PI / 2, 0, 0]}>
         <coneGeometry args={[CONE_RADIUS, CONE_HEIGHT, 8]} />
         <meshStandardMaterial color="#4488ff" emissive="#4488ff" emissiveIntensity={0.3} />
       </mesh>

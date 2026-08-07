@@ -21,9 +21,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius ranges from 0.8 (easy) to 1.2 (costly) - DEBUG: extra visible
-const MIN_RADIUS = 0.8
-const MAX_RADIUS = 1.2
+// Sphere radius: K=1 is nearly invisible (single point), K=16 is 0.25 (half avatar size)
+const MIN_RADIUS = 0.01
+const MAX_RADIUS = 0.25
 
 interface Props {
   field: TerrainFieldData
@@ -53,14 +53,12 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     const speed = 1 / fadeDuration
     if (fadeDirection === 'in') {
       fadeProgress.current = Math.min(1, fadeProgress.current + delta * speed)
-      materialRef.current.opacity = fadeProgress.current * 0.85
       if (fadeProgress.current >= 1) {
         fadeComplete.current = true
         onFadeComplete?.()
       }
     } else if (fadeDirection === 'out') {
       fadeProgress.current = Math.max(0, fadeProgress.current - delta * speed)
-      materialRef.current.opacity = fadeProgress.current * 0.85
       if (fadeProgress.current <= 0) {
         fadeComplete.current = true
         onFadeComplete?.()
@@ -116,8 +114,6 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     useCyberspace.getState().setCursorAtCell(row, col)
   }
 
-  const initialOpacity = fadeDirection === 'in' ? 0 : 0.85
-
   return (
     <instancedMesh
       ref={meshRef}
@@ -129,10 +125,10 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
       <meshStandardMaterial
         ref={materialRef}
         toneMapped={false}
-        transparent
-        opacity={initialOpacity}
-        roughness={0.4}
-        metalness={0.2}
+        roughness={0.3}
+        metalness={0.1}
+        emissive="#ffffff"
+        emissiveIntensity={0.4}
       />
     </instancedMesh>
   )

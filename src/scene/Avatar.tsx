@@ -14,8 +14,8 @@ import { cellOffset, GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
-const MIN_RADIUS = 0.15
-const MAX_RADIUS = 0.45
+const MIN_RADIUS = 0.01
+const MAX_RADIUS = 0.25
 
 interface Props {
   axes: ViewAxes

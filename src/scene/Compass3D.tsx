@@ -1,17 +1,16 @@
 /**
  * Compass3D — 3D compass showing orientation in world space.
  *
- * Uses the exact same structure as the main scene: a fixed camera at
- * [0, 0, distance] with the axes group rotated by the view quaternion.
- * This guarantees the compass always matches the main view because it
- * applies the same transform.
+ * The axes group rotates by the same quaternion as the main scene's world
+ * group, with a fixed camera at [0,0,DIST]. This guarantees the compass
+ * always matches the main view exactly — no gimbal lock, no drift.
  *
  * Text labels project from the rotated arrow tips to screen space.
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useRef, useState } from 'react'
-import { Group, Quaternion, Vector3 } from 'three'
+import { Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 
 interface LabelPosition {
@@ -28,29 +27,27 @@ const LABEL_OFFSET = 0.2
 
 function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPosition[]) => void }): JSX.Element {
   const view = useCyberspace((s) => s.view)
-  const groupRef = useRef<Group>(null)
   const currentQuaternion = useRef(new Quaternion())
   const { camera, size } = useThree()
 
   useFrame(() => {
-    if (!groupRef.current) return
-
-    // Slerp toward target view, then apply to the axes group —
-    // same as <group quaternion={view}> in the main scene.
+    // Smoothly interpolate toward target view
     currentQuaternion.current.slerp(view, 0.15)
-    groupRef.current.quaternion.copy(currentQuaternion.current)
+    
+    // Position camera the same way as ViewRig: rotate [0, 0, distance] by the view quaternion
+    const cameraPos = new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(currentQuaternion.current)
+    camera.position.copy(cameraPos)
+    camera.quaternion.copy(currentQuaternion.current)
 
-    // Project arrow tip positions (after group rotation) to screen space
-    const localTips = [
-      { axis: 'x' as const, pos: new Vector3(ARROW_LENGTH + LABEL_OFFSET, 0, 0) },
-      { axis: 'y' as const, pos: new Vector3(0, ARROW_LENGTH + LABEL_OFFSET, 0) },
-      { axis: 'z' as const, pos: new Vector3(0, 0, ARROW_LENGTH + LABEL_OFFSET) },
+    // Project arrow tip positions to screen space for labels
+    const axisTips = [
+      { axis: 'x' as const, world: new Vector3(ARROW_LENGTH + LABEL_OFFSET, 0, 0) },
+      { axis: 'y' as const, world: new Vector3(0, ARROW_LENGTH + LABEL_OFFSET, 0) },
+      { axis: 'z' as const, world: new Vector3(0, 0, ARROW_LENGTH + LABEL_OFFSET) },
     ]
 
-    const labels: LabelPosition[] = localTips.map(({ axis, pos }) => {
-      // Transform local position through the group's world rotation
-      const worldPos = pos.clone().applyQuaternion(currentQuaternion.current)
-      const projected = worldPos.project(camera)
+    const labels: LabelPosition[] = axisTips.map(({ axis, world }) => {
+      const projected = world.clone().project(camera)
       return {
         axis,
         screen: {
@@ -64,7 +61,7 @@ function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPositi
   })
 
   return (
-    <group ref={groupRef}>
+    <group>
       {/* X axis - red (cylinder defaults to Y, rotate 90° around Z to point along X) */}
       <mesh position={[ARROW_LENGTH / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[ARROW_THICKNESS, ARROW_THICKNESS, ARROW_LENGTH, 8]} />

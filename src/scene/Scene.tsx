@@ -106,6 +106,8 @@ export function Scene(): JSX.Element {
       style={{ background: BG }}
       frameloop="always"
     >
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[10, 10, 10]} intensity={0.8} />
       <ViewRig />
       <World />
     </Canvas>

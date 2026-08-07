@@ -38,8 +38,6 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
   useLayoutEffect(() => {
     const origin: Position = alignedOrigin(viewCenter, scaleExp)
     const step = stepFor(scaleExp)
-    // The cheapest possible crossing at this scale, used as the dark floor.
-    const floor = scaleExp + 1
 
     const vertices: number[] = []
     const colors: number[] = []
@@ -49,8 +47,7 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
       bx: number, by: number,
       height: number,
     ) => {
-      const excess = Math.max(0, height - floor)
-      const color = boundaryColor(excess)
+      const color = boundaryColor(height)
       vertices.push(ax, ay, 0, bx, by, 0)
       colors.push(color.r, color.g, color.b, color.r, color.g, color.b)
     }

@@ -11,7 +11,7 @@
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, Color, Float32BufferAttribute, LineSegments } from 'three'
+import { BufferGeometry, Float32BufferAttribute, LineSegments } from 'three'
 import {
   GRID_RADIUS,
   boundaryCoord,
@@ -20,10 +20,9 @@ import {
   type Position,
   type ViewAxes,
 } from '../lib/space'
-import { boundaryIntensity } from '../lib/palette'
+import { boundaryColor } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
-const LINE_COLOR = new Color('#4dd7ff')
 const EXTENT = GRID_RADIUS + 0.5
 
 interface Props {
@@ -50,12 +49,10 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
       bx: number, by: number,
       height: number,
     ) => {
-      const intensity = boundaryIntensity(height, floor)
-      const r = LINE_COLOR.r * intensity
-      const g = LINE_COLOR.g * intensity
-      const b = LINE_COLOR.b * intensity
+      const excess = Math.max(0, height - floor)
+      const color = boundaryColor(excess)
       vertices.push(ax, ay, 0, bx, by, 0)
-      colors.push(r, g, b, r, g, b)
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b)
     }
 
     for (let i = -GRID_RADIUS; i <= GRID_RADIUS + 1; i++) {

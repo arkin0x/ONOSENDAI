@@ -70,3 +70,41 @@ export function boundaryIntensity(height: number, floor: number): number {
   // Each extra height level doubles cost, so a log-ish ramp reads linearly.
   return Math.min(1, 0.12 + excess / 12)
 }
+
+/**
+ * Colour for an LCA boundary line.
+ *
+ * Uses a three-stop ramp from extremely dark blue (cheap crossings) through
+ * purple (moderate cost) to light purple (expensive crossings). This gives
+ * much stronger visual distinction than brightness alone.
+ *
+ * `excess` is the height above the scale floor (what makes a boundary costly).
+ */
+const LCA_STOPS: Array<[number, string]> = [
+  [0, '#0a0e27'],    // extremely dark blue
+  [4, '#2d1b69'],    // deep purple
+  [12, '#a855f7'],   // bright purple
+]
+
+const lcaCache = new Map<number, Color>()
+
+export function boundaryColor(excess: number): Color {
+  const cached = lcaCache.get(excess)
+  if (cached) return cached
+
+  let lo = LCA_STOPS[0]
+  let hi = LCA_STOPS[LCA_STOPS.length - 1]
+  for (let i = 0; i < LCA_STOPS.length - 1; i++) {
+    if (excess >= LCA_STOPS[i][0] && excess <= LCA_STOPS[i + 1][0]) {
+      lo = LCA_STOPS[i]
+      hi = LCA_STOPS[i + 1]
+      break
+    }
+  }
+
+  const span = hi[0] - lo[0]
+  const t = span === 0 ? 0 : Math.min(1, (excess - lo[0]) / span)
+  const color = new Color(lo[1]).lerp(new Color(hi[1]), t)
+  lcaCache.set(excess, color)
+  return color
+}

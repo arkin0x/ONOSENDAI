@@ -41,9 +41,9 @@ export function Avatar({ axes, field }: Props): JSX.Element {
     return [ax, ay, k]
   }, [position, viewCenter, scaleExp, axes, field])
 
-  // Sphere radius at avatar position: 0.5 * (K/16)
+  // Sphere radius at avatar position: 0.4 * (K/16)
   const normalizedK = k === 255 ? 0 : k / 16
-  const radius = 0.5 * normalizedK
+  const radius = 0.4 * normalizedK
 
   const avatarGeometry = useMemo(() => {
     const geo = new IcosahedronGeometry(0.5, 1)

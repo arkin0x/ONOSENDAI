@@ -84,9 +84,9 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
         const i = row * size + col
         const k = field.values ? field.values[i] : 8
 
-        // K ∈ [0, 16]. radius = 0.5 * (K/16). K=0 invisible, K=1 point, K=16 = half avatar.
+        // K ∈ [0, 16]. radius = 0.4 * (K/16). K=0 invisible, K=1 point, K=16 = half avatar.
         const normalizedK = k === 255 ? 0 : k / 16
-        const radius = 0.5 * normalizedK
+        const radius = 0.4 * normalizedK
 
         // Position sphere at grid cell, elevated by its radius
         dummy.position.set(col - GRID_RADIUS, row - GRID_RADIUS, radius)

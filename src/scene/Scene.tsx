@@ -32,29 +32,27 @@ function World(): JSX.Element {
   const axes = useMemo(() => useCyberspace.getState().axes(), [displayView])
 
   // Track old terrain for fade-out and new terrain for fade-in during rotation.
-  // displayView only changes in finishRotation(), so it is a reliable signal
-  // that a rotation just completed. The terrain worker response arrives later
-  // (async), so we remember the rotation signal and apply it to the next
-  // field change regardless of when that happens.
+  // Use a counter instead of a boolean flag to handle rapid successive rotations.
+  // Each rotation increments the counter; each field change consumes one rotation.
   const [oldField, setOldField] = useState<TerrainFieldData | null>(null)
   const [newFieldFading, setNewFieldFading] = useState(false)
   const prevFieldRef = useRef(field)
   const prevDisplayViewRef = useRef(displayView)
-  const rotationPending = useRef(false)
+  const pendingRotations = useRef(0)
 
-  // A new displayView means finishRotation() just ran. Flag the next field
-  // change as rotation-driven.
+  // A new displayView means finishRotation() just ran. Increment the counter
+  // so the next field change knows it's rotation-driven.
   if (displayView !== prevDisplayViewRef.current) {
-    rotationPending.current = true
+    pendingRotations.current += 1
     prevDisplayViewRef.current = displayView
   }
 
   useEffect(() => {
     if (field !== prevFieldRef.current) {
-      if (rotationPending.current) {
+      if (pendingRotations.current > 0) {
         setOldField(prevFieldRef.current)
         setNewFieldFading(true)
-        rotationPending.current = false
+        pendingRotations.current -= 1
       }
       prevFieldRef.current = field
     }

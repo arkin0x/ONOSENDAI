@@ -81,9 +81,13 @@ export function boundaryIntensity(height: number, floor: number): number {
  * `excess` is the height above the scale floor (what makes a boundary costly).
  */
 const LCA_STOPS: Array<[number, string]> = [
-  [0, '#0a0e27'],    // extremely dark blue
-  [4, '#2d1b69'],    // deep purple
-  [12, '#a855f7'],   // bright purple
+  [0, '#0a0e27'],    // extremely dark blue — cheapest crossings
+  [5, '#1a1a5e'],    // dark indigo
+  [10, '#3b1d8e'],   // deep purple
+  [20, '#7c3aed'],   // vivid purple
+  [40, '#a855f7'],   // bright purple
+  [60, '#c084fc'],   // light purple
+  [85, '#e9d5ff'],   // very light purple — most expensive crossings
 ]
 
 const lcaCache = new Map<number, Color>()

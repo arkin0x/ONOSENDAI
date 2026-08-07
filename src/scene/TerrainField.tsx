@@ -18,10 +18,6 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius: nearly fills the cell. Cell width is 1.0, so radius 0.45 = 90% fill.
-// Subtle size variation by K value for 3D depth cue.
-const MIN_RADIUS = 0.38
-const MAX_RADIUS = 0.46
 
 interface Props {
   field: TerrainFieldData
@@ -88,9 +84,9 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
         const i = row * size + col
         const k = field.values ? field.values[i] : 8
 
-        // K range is [0, 16] (Binomial(16, 0.5))
+        // K ∈ [0, 16]. radius = 0.5 * (K/16). K=0 invisible, K=1 point, K=16 = half avatar.
         const normalizedK = k === 255 ? 0 : k / 16
-        const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
+        const radius = 0.5 * normalizedK
 
         // Position sphere at grid cell, elevated by its radius
         dummy.position.set(col - GRID_RADIUS, row - GRID_RADIUS, radius)

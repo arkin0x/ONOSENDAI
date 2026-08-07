@@ -60,8 +60,8 @@ function CompassAxes({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPositio
 
   return (
     <group ref={groupRef}>
-      {/* X axis - red */}
-      <mesh position={[arrowLength / 2, 0, 0]}>
+      {/* X axis - red (cylinder defaults to Y, rotate 90° around Z to point along X) */}
+      <mesh position={[arrowLength / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[arrowThickness, arrowThickness, arrowLength, 8]} />
         <meshStandardMaterial color="#ff4444" emissive="#ff4444" emissiveIntensity={0.3} />
       </mesh>
@@ -109,7 +109,7 @@ export function Compass3D(): JSX.Element {
   return (
     <div className="compass-3d">
       <Canvas
-        camera={{ position: [2.5, 3, 3.5], fov: 45 }}
+        camera={{ position: [4, 3, 4], fov: 40, up: [0, 1, 0] }}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
       >

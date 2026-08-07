@@ -21,16 +21,17 @@ export const DIM = '#3a5566'
 
 /**
  * Terrain K colour ramp. K is Binomial(31, 0.5), so it clusters hard around 15-16;
- * the ramp goes from dark blue (easy) through orange (mid) to hot pink (costly).
+ * Use non-linear mapping to spread out the clustered values for better visual distinction.
  */
 const TERRAIN_STOPS: Array<[number, string]> = [
   [0, '#0a1628'],    // deep dark blue
-  [6, '#1a3a5c'],    // medium blue
+  [8, '#1a3a5c'],    // medium blue
   [12, '#2d5a87'],   // lighter blue
-  [16, '#d97706'],   // orange
-  [20, '#f59e0b'],   // bright orange
-  [26, '#ec4899'],   // pink
-  [31, '#db2777'],   // hot pink
+  [14, '#d97706'],   // orange
+  [16, '#f59e0b'],   // bright orange
+  [20, '#ec4899'],   // pink
+  [24, '#be185d'],   // hot pink
+  [31, '#831843'],   // dark magenta
 ]
 
 const cache = new Map<number, Color>()

@@ -144,7 +144,7 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
       <sphereGeometry args={[1, 16, 16]} />
       <meshStandardMaterial
         ref={materialRef}
-        vertexColors
+        color="#ffffff"
         transparent
         opacity={initialOpacity}
         roughness={0.3}

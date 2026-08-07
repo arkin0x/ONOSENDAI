@@ -98,7 +98,7 @@ export function Scene(): JSX.Element {
   return (
     <Canvas
       orthographic
-      camera={{ position: [0, 0, 200], near: 0.01, far: 4000, zoom: 16 }}
+      camera={{ position: [0, 0, 200], near: 0.01, far: 4000, zoom: 8 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       style={{ background: BG }}

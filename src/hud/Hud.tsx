@@ -139,6 +139,19 @@ function ScalePanel(): JSX.Element {
   )
 }
 
+function LinksPanel(): JSX.Element {
+  return (
+    <section className="panel panel--links">
+      <a href="https://straylight.cafe" target="_blank" rel="noopener noreferrer">
+        straylight.cafe
+      </a>
+      <a href="https://cyberspace.international" target="_blank" rel="noopener noreferrer">
+        cyberspace.international
+      </a>
+    </section>
+  )
+}
+
 function Controls(): JSX.Element {
   const rows: Array<[string, string]> = [
     ['W A S D', 'move cursor one step'],
@@ -180,6 +193,7 @@ export function Hud(): JSX.Element {
         <IdentityPanel />
         <PositionPanel />
         <ScalePanel />
+        <LinksPanel />
       </div>
       <div className="hud__col hud__col--right">
         <ProofPanel />

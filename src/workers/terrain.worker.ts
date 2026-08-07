@@ -30,6 +30,15 @@ export interface TerrainResponse {
   /** Row-major K values, (2 * radius + 1)^2 entries, row 0 = bottom of screen. */
   values: Uint8Array
   elapsedMs: number
+  /** Echo back request fields for cache management */
+  originX: bigint
+  originY: bigint
+  originZ: bigint
+  rightAxis: 'x' | 'y' | 'z'
+  rightDir: number
+  upAxis: 'x' | 'y' | 'z'
+  upDir: number
+  step: bigint
 }
 
 const AXIS_MAX = (1n << 85n) - 1n
@@ -75,6 +84,14 @@ self.onmessage = (event: MessageEvent<TerrainRequest>) => {
     radius,
     values,
     elapsedMs: performance.now() - started,
+    originX,
+    originY,
+    originZ,
+    rightAxis,
+    rightDir,
+    upAxis,
+    upDir,
+    step,
   }
   self.postMessage(response, [values.buffer])
 }

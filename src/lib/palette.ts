@@ -20,17 +20,17 @@ export const SIDESTEP = '#c07dff'
 export const DIM = '#3a5566'
 
 /**
- * Terrain K colour ramp. K is Binomial(16, 0.5), so it clusters hard around 8;
+ * Terrain K colour ramp. K is Binomial(31, 0.5), so it clusters hard around 15-16;
  * the ramp goes from dark blue (easy) through orange (mid) to hot pink (costly).
  */
 const TERRAIN_STOPS: Array<[number, string]> = [
   [0, '#0a1628'],    // deep dark blue
-  [3, '#1a3a5c'],    // medium blue
-  [6, '#2d5a87'],    // lighter blue
-  [8, '#d97706'],    // orange
-  [10, '#f59e0b'],   // bright orange
-  [13, '#ec4899'],   // pink
-  [16, '#db2777'],   // hot pink
+  [6, '#1a3a5c'],    // medium blue
+  [12, '#2d5a87'],   // lighter blue
+  [16, '#d97706'],   // orange
+  [20, '#f59e0b'],   // bright orange
+  [26, '#ec4899'],   // pink
+  [31, '#db2777'],   // hot pink
 ]
 
 const cache = new Map<number, Color>()

@@ -21,9 +21,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius: K=1 is nearly invisible (single point), K=16 is 0.25 (half avatar size)
-const MIN_RADIUS = 0.01
-const MAX_RADIUS = 0.25
+// Sphere radius: K=0 is small but visible, K=31 is ~80% of avatar size
+const MIN_RADIUS = 0.08
+const MAX_RADIUS = 0.4
 
 interface Props {
   field: TerrainFieldData
@@ -93,8 +93,8 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
         const i = row * size + col
         const k = field.values ? field.values[i] : 8
         
-        // Calculate sphere radius based on K value (0-16 range)
-        const normalizedK = k === 255 ? 0 : k / 16
+        // Calculate sphere radius based on K value (0-31 range, 5 bits)
+        const normalizedK = k === 255 ? 0 : k / 31
         const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
         
         // Position sphere at grid cell, elevated by its radius so it sits on the plane

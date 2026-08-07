@@ -17,6 +17,7 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainField } from '../hooks/useTerrainField'
+import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
 import { Cursor } from './Cursor'
@@ -30,12 +31,12 @@ function World(): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const field = useTerrainField()
   const axes = useMemo(() => useCyberspace.getState().axes(), [displayView])
-  
+
   // Track old terrain for fade-out during rotation
-  const [oldField, setOldField] = useState<typeof field | null>(null)
+  const [oldField, setOldField] = useState<TerrainFieldData | null>(null)
   const [fading, setFading] = useState(false)
   const prevFieldRef = useRef(field)
-  
+
   useEffect(() => {
     // When field changes and we're rotating, capture the old field for fade-out
     if (field !== prevFieldRef.current && isRotating) {
@@ -44,7 +45,7 @@ function World(): JSX.Element {
     }
     prevFieldRef.current = field
   }, [field, isRotating])
-  
+
   const handleFadeComplete = () => {
     setOldField(null)
     setFading(false)
@@ -54,21 +55,21 @@ function World(): JSX.Element {
     <group quaternion={displayView}>
       {/* Old terrain fading out */}
       {oldField && fading && (
-        <TerrainField 
-          field={oldField} 
+        <TerrainField
+          field={oldField}
           fadeDirection="out"
           fadeDuration={0.5}
           onFadeComplete={handleFadeComplete}
         />
       )}
-      
+
       {/* Current terrain */}
       <TerrainField field={field} />
-      
+
       <BoundaryGrid axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />
-      <Avatar axes={axes} />
+      <Avatar axes={axes} field={field} />
     </group>
   )
 }

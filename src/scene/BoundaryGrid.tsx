@@ -6,6 +6,8 @@
  * for the same single gibson. Every gridline here is lit in proportion to what
  * crossing it actually costs, so the expensive walls in the terrain are visible
  * before you walk into them.
+ *
+ * Lines are rendered thicker (width 3) for better visibility.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
@@ -76,7 +78,7 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
 
   return (
     <lineSegments ref={ref} geometry={geometry} frustumCulled={false} position={[0, 0, 0.01]}>
-      <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={0.95} />
+      <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={0.95} linewidth={3} />
     </lineSegments>
   )
 }

@@ -21,17 +21,16 @@ export const DIM = '#3a5566'
 
 /**
  * Terrain K colour ramp. K is Binomial(16, 0.5), so it clusters hard around 8;
- * the ramp is tuned to spread the common 5..11 band rather than the full range.
+ * the ramp goes from dark blue (easy) through orange (mid) to hot pink (costly).
  */
 const TERRAIN_STOPS: Array<[number, string]> = [
-  [0, '#06111c'],
-  [4, '#0b3550'],
-  [6, '#0e5f7a'],
-  [8, '#1c8f7a'],
-  [10, '#8fbf3f'],
-  [12, '#e8a33d'],
-  [14, '#f2653c'],
-  [16, '#ff2e6b'],
+  [0, '#0a1628'],    // deep dark blue
+  [3, '#1a3a5c'],    // medium blue
+  [6, '#2d5a87'],    // lighter blue
+  [8, '#d97706'],    // orange
+  [10, '#f59e0b'],   // bright orange
+  [13, '#ec4899'],   // pink
+  [16, '#db2777'],   // hot pink
 ]
 
 const cache = new Map<number, Color>()

@@ -1,12 +1,13 @@
 /**
- * TerrainField.tsx — the terrain K field as a grid of coloured cells.
+ * TerrainField.tsx — the terrain K field as a lattice of spheres.
  *
  * K is the terrain-derived temporal height for a destination: it sets how much
  * non-cacheable temporal work every hop into that cell costs. Rendering it as
- * ground makes "this region is expensive" a thing you can see and walk around.
+ * spheres makes "this region is expensive" a thing you can see and walk around.
  *
- * Tiles are 3D boxes (not flat planes) so that side faces are visible during
- * camera rotation, giving depth to the gibson structure.
+ * Spheres are sized by K value: more costly terrain = larger sphere. The avatar
+ * will rest centered on top of the sphere at its coordinate. This leaves space
+ * between spheres for better visibility of other elements.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
@@ -20,7 +21,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-const BOX_HEIGHT = 0.15
+// Sphere radius ranges from 0.15 (easy) to 0.45 (costly)
+const MIN_RADIUS = 0.15
+const MAX_RADIUS = 0.45
 
 interface Props {
   field: TerrainFieldData
@@ -34,7 +37,7 @@ interface Props {
 
 export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeComplete }: Props): JSX.Element {
   const meshRef = useRef<InstancedMesh>(null)
-  const materialRef = useRef<THREE.MeshBasicMaterial>(null)
+  const materialRef = useRef<THREE.MeshStandardMaterial>(null)
   const size = GRID_RADIUS * 2 + 1
   const count = size * size
 
@@ -72,11 +75,20 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
         const i = row * size + col
-        dummy.position.set(col - GRID_RADIUS, row - GRID_RADIUS, 0)
+        const k = field.values ? field.values[i] : 8
+        
+        // Calculate sphere radius based on K value (0-16 range)
+        const normalizedK = k === 255 ? 0 : k / 16
+        const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
+        
+        // Position sphere at grid cell, elevated by its radius so it sits on the plane
+        dummy.position.set(col - GRID_RADIUS, row - GRID_RADIUS, radius)
+        
+        // Scale the sphere based on K value
+        dummy.scale.set(radius, radius, radius)
         dummy.updateMatrix()
         mesh.setMatrixAt(i, dummy.matrix)
 
-        const k = field.values ? field.values[i] : 8
         mesh.setColorAt(i, k === 255 ? OUT_OF_BOUNDS : terrainColor(k))
       }
     }
@@ -105,12 +117,14 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
       frustumCulled={false}
       onClick={handleClick}
     >
-      <boxGeometry args={[0.96, 0.96, BOX_HEIGHT]} />
-      <meshBasicMaterial
+      <sphereGeometry args={[1, 16, 16]} />
+      <meshStandardMaterial
         ref={materialRef}
         toneMapped={false}
         transparent
         opacity={initialOpacity}
+        roughness={0.4}
+        metalness={0.2}
       />
     </instancedMesh>
   )

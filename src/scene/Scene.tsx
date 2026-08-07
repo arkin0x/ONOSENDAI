@@ -27,44 +27,66 @@ import { ViewRig } from './ViewRig'
 
 function World(): JSX.Element {
   const displayView = useCyberspace((s) => s.displayView)
-  const isRotating = useCyberspace((s) => s.isRotating)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const field = useTerrainField()
   const axes = useMemo(() => useCyberspace.getState().axes(), [displayView])
 
-  // Track old terrain for fade-out during rotation
+  // Track old terrain for fade-out and new terrain for fade-in during rotation.
+  // displayView only changes in finishRotation(), so it is a reliable signal
+  // that a rotation just completed. The terrain worker response arrives later
+  // (async), so we remember the rotation signal and apply it to the next
+  // field change regardless of when that happens.
   const [oldField, setOldField] = useState<TerrainFieldData | null>(null)
-  const [fading, setFading] = useState(false)
+  const [newFieldFading, setNewFieldFading] = useState(false)
   const prevFieldRef = useRef(field)
+  const prevDisplayViewRef = useRef(displayView)
+  const rotationPending = useRef(false)
+
+  // A new displayView means finishRotation() just ran. Flag the next field
+  // change as rotation-driven.
+  if (displayView !== prevDisplayViewRef.current) {
+    rotationPending.current = true
+    prevDisplayViewRef.current = displayView
+  }
 
   useEffect(() => {
-    // When field changes and we're rotating, capture the old field for fade-out
-    if (field !== prevFieldRef.current && isRotating) {
-      setOldField(prevFieldRef.current)
-      setFading(true)
+    if (field !== prevFieldRef.current) {
+      if (rotationPending.current) {
+        setOldField(prevFieldRef.current)
+        setNewFieldFading(true)
+        rotationPending.current = false
+      }
+      prevFieldRef.current = field
     }
-    prevFieldRef.current = field
-  }, [field, isRotating])
+  }, [field])
 
-  const handleFadeComplete = () => {
+  const handleOldFadeComplete = () => {
     setOldField(null)
-    setFading(false)
+  }
+
+  const handleNewFadeComplete = () => {
+    setNewFieldFading(false)
   }
 
   return (
     <group quaternion={displayView}>
       {/* Old terrain fading out */}
-      {oldField && fading && (
+      {oldField && (
         <TerrainField
           field={oldField}
           fadeDirection="out"
           fadeDuration={0.5}
-          onFadeComplete={handleFadeComplete}
+          onFadeComplete={handleOldFadeComplete}
         />
       )}
 
-      {/* Current terrain */}
-      <TerrainField field={field} />
+      {/* Current terrain — fade in after rotation, full opacity otherwise */}
+      <TerrainField
+        field={field}
+        fadeDirection={newFieldFading ? 'in' : undefined}
+        fadeDuration={0.5}
+        onFadeComplete={newFieldFading ? handleNewFadeComplete : undefined}
+      />
 
       <BoundaryGrid axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />

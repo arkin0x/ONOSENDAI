@@ -42,6 +42,15 @@ export function ViewRig(): null {
     camera.position.copy(
       offset.current.set(0, 0, CAMERA_DISTANCE).applyQuaternion(current.current),
     )
+    
+    // When slerp is close enough, finish the rotation
+    const dot = current.current.dot(target)
+    if (Math.abs(dot) > 0.9999) {
+      const { isRotating, finishRotation } = useCyberspace.getState()
+      if (isRotating) {
+        finishRotation()
+      }
+    }
   })
 
   return null

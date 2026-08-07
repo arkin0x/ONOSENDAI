@@ -25,7 +25,7 @@ export function useTerrainField(): TerrainField {
   const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
-  const view = useCyberspace((s) => s.view)
+  const view = useCyberspace((s) => s.displayView)
 
   const [field, setField] = useState<TerrainField>(EMPTY)
   const latest = useRef(0)

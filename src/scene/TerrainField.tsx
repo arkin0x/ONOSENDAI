@@ -4,10 +4,15 @@
  * K is the terrain-derived temporal height for a destination: it sets how much
  * non-cacheable temporal work every hop into that cell costs. Rendering it as
  * ground makes "this region is expensive" a thing you can see and walk around.
+ *
+ * Tiles are 3D boxes (not flat planes) so that side faces are visible during
+ * camera rotation, giving depth to the gibson structure.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { Color, InstancedMesh, Object3D } from 'three'
+import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS } from '../lib/space'
 import { terrainColor } from '../lib/palette'
@@ -15,17 +20,50 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
+const BOX_HEIGHT = 0.15
 
 interface Props {
   field: TerrainFieldData
+  /** If provided, animate opacity from 0 to this value (fade in) or from this to 0 (fade out). */
+  fadeDirection?: 'in' | 'out'
+  /** Duration of fade animation in seconds. */
+  fadeDuration?: number
+  /** Called when fade animation completes. */
+  onFadeComplete?: () => void
 }
 
-export function TerrainField({ field }: Props): JSX.Element {
+export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeComplete }: Props): JSX.Element {
   const meshRef = useRef<InstancedMesh>(null)
+  const materialRef = useRef<THREE.MeshBasicMaterial>(null)
   const size = GRID_RADIUS * 2 + 1
   const count = size * size
 
   const dummy = useMemo(() => new Object3D(), [])
+  
+  // Fade animation state
+  const fadeProgress = useRef(fadeDirection === 'in' ? 0 : 1)
+  const fadeComplete = useRef(!fadeDirection)
+
+  useFrame((_: any, delta: number) => {
+    if (!materialRef.current || fadeComplete.current) return
+
+    const speed = 1 / fadeDuration
+    if (fadeDirection === 'in') {
+      fadeProgress.current = Math.min(1, fadeProgress.current + delta * speed)
+      materialRef.current.opacity = fadeProgress.current * 0.85
+      if (fadeProgress.current >= 1) {
+        fadeComplete.current = true
+        onFadeComplete?.()
+      }
+    } else if (fadeDirection === 'out') {
+      fadeProgress.current = Math.max(0, fadeProgress.current - delta * speed)
+      materialRef.current.opacity = fadeProgress.current * 0.85
+      if (fadeProgress.current <= 0) {
+        fadeComplete.current = true
+        onFadeComplete?.()
+      }
+    }
+  })
 
   useLayoutEffect(() => {
     const mesh = meshRef.current
@@ -48,16 +86,17 @@ export function TerrainField({ field }: Props): JSX.Element {
   }, [field, size, dummy])
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    // Don't allow clicks on fading-out terrain
+    if (fadeDirection === 'out') return
     event.stopPropagation()
     const point = event.point
-    // Convert intersection point to grid row/col.
-    // Grid cells are centered at integer coordinates, so round to nearest.
     const col = Math.round(point.x + GRID_RADIUS)
     const row = Math.round(point.y + GRID_RADIUS)
-    // Clamp to valid grid range.
     if (row < 0 || row >= size || col < 0 || col >= size) return
     useCyberspace.getState().setCursorAtCell(row, col)
   }
+
+  const initialOpacity = fadeDirection === 'in' ? 0 : 0.85
 
   return (
     <instancedMesh
@@ -66,8 +105,13 @@ export function TerrainField({ field }: Props): JSX.Element {
       frustumCulled={false}
       onClick={handleClick}
     >
-      <planeGeometry args={[0.96, 0.96]} />
-      <meshBasicMaterial toneMapped={false} transparent opacity={0.85} />
+      <boxGeometry args={[0.96, 0.96, BOX_HEIGHT]} />
+      <meshBasicMaterial
+        ref={materialRef}
+        toneMapped={false}
+        transparent
+        opacity={initialOpacity}
+      />
     </instancedMesh>
   )
 }

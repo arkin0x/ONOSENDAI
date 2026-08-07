@@ -65,6 +65,13 @@ export function useTerrainField(): TerrainField {
       if (event.data.id !== latest.current) return
       
       const data = event.data
+      console.log('[Terrain] Buffer received:', {
+        radius: data.radius,
+        totalCells: data.values.length,
+        sampleValues: Array.from(data.values.slice(0, 10)),
+        uniqueValues: new Set(data.values).size,
+      })
+      
       // Cache the buffer grid
       bufferCache.current = {
         centerX: data.originX,
@@ -116,6 +123,15 @@ export function useTerrainField(): TerrainField {
         }
       }
     }
+    
+    console.log('[Terrain] Extracted visible field:', {
+      offsetRight,
+      offsetUp,
+      visibleRadius: GRID_RADIUS,
+      totalCells: visibleValues.length,
+      sampleValues: Array.from(visibleValues.slice(0, 10)),
+      uniqueValues: new Set(visibleValues).size,
+    })
     
     setField({
       values: visibleValues,

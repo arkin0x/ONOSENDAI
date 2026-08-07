@@ -21,9 +21,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius ranges from 0.3 (easy) to 0.6 (costly) - increased for visibility
-const MIN_RADIUS = 0.3
-const MAX_RADIUS = 0.6
+// Sphere radius ranges from 0.8 (easy) to 1.2 (costly) - DEBUG: extra visible
+const MIN_RADIUS = 0.8
+const MAX_RADIUS = 1.2
 
 interface Props {
   field: TerrainFieldData

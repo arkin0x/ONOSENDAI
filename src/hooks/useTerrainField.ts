@@ -117,6 +117,14 @@ export function useTerrainField(): TerrainField {
     const offsetRight = Number(currentRight - cacheRight) / Number(step)
     const offsetUp = Number(currentUp - cacheUp) / Number(step)
     
+    console.log('[Terrain] Extract visible:', {
+      cacheAxes: { right: cache.rightAxis, rightDir: cache.rightDir, up: cache.upAxis, upDir: cache.upDir },
+      currentOrigin: { x: currentOrigin.x.toString(), y: currentOrigin.y.toString(), z: currentOrigin.z.toString() },
+      cacheCenter: { x: cache.centerX.toString(), y: cache.centerY.toString(), z: cache.centerZ.toString() },
+      offsets: { right: offsetRight, up: offsetUp },
+      worldCoords: { currentRight: currentRight.toString(), cacheRight: cacheRight.toString(), currentUp: currentUp.toString(), cacheUp: cacheUp.toString() },
+    })
+    
     // Extract visible portion from buffer
     const visibleValues = new Uint8Array((GRID_RADIUS * 2 + 1) ** 2)
     const bufferSize = BUFFER_RADIUS * 2 + 1

@@ -101,9 +101,17 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     // Don't allow clicks on fading-out terrain
     if (fadeDirection === 'out') return
     event.stopPropagation()
-    const point = event.point
-    const col = Math.round(point.x + GRID_RADIUS)
-    const row = Math.round(point.y + GRID_RADIUS)
+    
+    // Convert world-space click point to the terrain field's local frame.
+    // The field lives inside a rotated group, so event.point (world space)
+    // doesn't match local grid coordinates after rotation.
+    const mesh = meshRef.current
+    if (!mesh) return
+    const localPoint = event.point.clone()
+    mesh.worldToLocal(localPoint)
+    
+    const col = Math.round(localPoint.x + GRID_RADIUS)
+    const row = Math.round(localPoint.y + GRID_RADIUS)
     if (row < 0 || row >= size || col < 0 || col >= size) return
     useCyberspace.getState().setCursorAtCell(row, col)
   }

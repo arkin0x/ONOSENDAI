@@ -5,7 +5,7 @@
 import { boundaryColor, terrainColor } from '../lib/palette'
 import { useCyberspace } from '../store/useCyberspace'
 
-const TERRAIN_SAMPLES = [10, 13, 14, 15, 16, 17, 18, 19, 22]
+const TERRAIN_SAMPLES = [0, 4, 6, 8, 10, 12, 14, 16]
 const HEIGHT_SAMPLES = [5, 20, 40, 60, 80]
 
 export function Legend(): JSX.Element {

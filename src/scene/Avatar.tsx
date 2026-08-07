@@ -45,7 +45,7 @@ export function Avatar({ axes, field }: Props): JSX.Element {
   }, [position, viewCenter, scaleExp, axes, field])
 
   // Calculate sphere radius at avatar position
-  const normalizedK = k === 255 ? 0 : k / 31
+  const normalizedK = k === 255 ? 0 : k / 16
   const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
 
   const avatarGeometry = useMemo(() => {

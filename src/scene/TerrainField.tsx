@@ -5,15 +5,12 @@
  * non-cacheable temporal work every hop into that cell costs. Rendering it as
  * spheres makes "this region is expensive" a thing you can see and walk around.
  *
- * Spheres are sized by K value: more costly terrain = larger sphere. The avatar
- * will rest centered on top of the sphere at its coordinate. This leaves space
- * between spheres for better visibility of other elements.
+ * K is Binomial(16, 0.5), range [0, 16]. The ramp is tuned for that range.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Color, InstancedMesh, Object3D } from 'three'
-import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS } from '../lib/space'
 import { terrainColor } from '../lib/palette'
@@ -21,10 +18,10 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius: nearly fills the cell (diameter ~0.9), with subtle size variation for K
-// Cell width is 1.0, so radius 0.45 = 90% fill
-const MIN_RADIUS = 0.42
-const MAX_RADIUS = 0.48
+// Sphere radius: nearly fills the cell. Cell width is 1.0, so radius 0.45 = 90% fill.
+// Subtle size variation by K value for 3D depth cue.
+const MIN_RADIUS = 0.38
+const MAX_RADIUS = 0.46
 
 interface Props {
   field: TerrainFieldData
@@ -38,12 +35,11 @@ interface Props {
 
 export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeComplete }: Props): JSX.Element {
   const meshRef = useRef<InstancedMesh>(null)
-  const materialRef = useRef<THREE.MeshStandardMaterial>(null)
   const size = GRID_RADIUS * 2 + 1
   const count = size * size
 
   const dummy = useMemo(() => new Object3D(), [])
-  
+
   // Fade animation state — reset when fadeDirection changes.
   const fadeProgress = useRef(1)
   const fadeComplete = useRef(true)
@@ -65,19 +61,17 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
   }
 
   useFrame((_: any, delta: number) => {
-    if (!materialRef.current || fadeComplete.current) return
+    if (fadeComplete.current) return
 
     const speed = 1 / fadeDuration
     if (fadeDirection === 'in') {
       fadeProgress.current = Math.min(1, fadeProgress.current + delta * speed)
-      materialRef.current.opacity = fadeProgress.current
       if (fadeProgress.current >= 1) {
         fadeComplete.current = true
         onFadeComplete?.()
       }
     } else if (fadeDirection === 'out') {
       fadeProgress.current = Math.max(0, fadeProgress.current - delta * speed)
-      materialRef.current.opacity = fadeProgress.current
       if (fadeProgress.current <= 0) {
         fadeComplete.current = true
         onFadeComplete?.()
@@ -89,21 +83,19 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     const mesh = meshRef.current
     if (!mesh) return
 
-    const hadInstanceColor = !!mesh.instanceColor
-
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
         const i = row * size + col
         const k = field.values ? field.values[i] : 8
-        
-        // Calculate sphere radius based on K value (0-31 range, 5 bits)
-        const normalizedK = k === 255 ? 0 : k / 31
+
+        // K range is [0, 16] (Binomial(16, 0.5))
+        const normalizedK = k === 255 ? 0 : k / 16
         const radius = MIN_RADIUS + normalizedK * (MAX_RADIUS - MIN_RADIUS)
-        
-        // Position sphere at grid cell, elevated by its radius so it sits on the plane
+
+        // Position sphere at grid cell, elevated by its radius
         dummy.position.set(col - GRID_RADIUS, row - GRID_RADIUS, radius)
-        
-        // Scale the sphere based on K value
+
+        // Scale the sphere
         dummy.scale.set(radius, radius, radius)
         dummy.updateMatrix()
         mesh.setMatrixAt(i, dummy.matrix)
@@ -113,28 +105,18 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     }
 
     mesh.instanceMatrix.needsUpdate = true
-    if (mesh.instanceColor) {
-      mesh.instanceColor.needsUpdate = true
-      // Force shader recompilation if instance colors were just created
-      if (!hadInstanceColor && materialRef.current) {
-        materialRef.current.needsUpdate = true
-      }
-    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   }, [field, size, dummy])
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    // Don't allow clicks on fading-out terrain
     if (fadeDirection === 'out') return
     event.stopPropagation()
-    
-    // Convert world-space click point to the terrain field's local frame.
-    // The field lives inside a rotated group, so event.point (world space)
-    // doesn't match local grid coordinates after rotation.
+
     const mesh = meshRef.current
     if (!mesh) return
     const localPoint = event.point.clone()
     mesh.worldToLocal(localPoint)
-    
+
     const col = Math.round(localPoint.x + GRID_RADIUS)
     const row = Math.round(localPoint.y + GRID_RADIUS)
     if (row < 0 || row >= size || col < 0 || col >= size) return
@@ -151,13 +133,10 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
       onClick={handleClick}
     >
       <sphereGeometry args={[1, 16, 16]} />
-      <meshStandardMaterial
-        ref={materialRef}
+      <meshBasicMaterial
+        toneMapped={false}
         transparent
         opacity={initialOpacity}
-        roughness={0.3}
-        metalness={0.1}
-        toneMapped={false}
       />
     </instancedMesh>
   )

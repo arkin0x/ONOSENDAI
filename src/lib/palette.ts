@@ -20,24 +20,18 @@ export const SIDESTEP = '#c07dff'
 export const DIM = '#3a5566'
 
 /**
- * Terrain K colour ramp. K is Binomial(31, 0.5), so ~70% of values fall in K=12-19.
- * Stops are concentrated in that band with maximally distinct hues so the
- * common values are visually separable.
+ * Terrain K colour ramp. K is Binomial(16, 0.5), so it clusters hard around 8;
+ * the ramp is tuned to spread the common 5..11 band rather than the full range.
  */
 const TERRAIN_STOPS: Array<[number, string]> = [
-  [0, '#050510'],    // near-black — extremely rare low K
-  [8, '#0a1628'],    // dark blue
-  [12, '#1a6b8a'],   // teal
-  [13, '#22c55e'],   // green
-  [14, '#a3e635'],   // lime
-  [15, '#facc15'],   // yellow
-  [16, '#f97316'],   // orange
-  [17, '#ef4444'],   // red
-  [18, '#d946ef'],   // magenta
-  [19, '#8b5cf6'],   // purple
-  [23, '#6366f1'],   // indigo
-  [27, '#3b82f6'],   // blue
-  [31, '#e0f2fe'],   // ice white — extremely rare high K
+  [0, '#06111c'],
+  [4, '#0b3550'],
+  [6, '#0e5f7a'],
+  [8, '#1c8f7a'],
+  [10, '#8fbf3f'],
+  [12, '#e8a33d'],
+  [14, '#f2653c'],
+  [16, '#ff2e6b'],
 ]
 
 const cache = new Map<number, Color>()

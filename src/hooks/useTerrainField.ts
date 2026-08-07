@@ -41,6 +41,13 @@ interface BufferCache {
   values: Uint8Array
 }
 
+// Helper to get coordinate for a given axis
+const getAxisValue = (origin: { x: bigint; y: bigint; z: bigint }, axis: 'x' | 'y' | 'z'): bigint => {
+  if (axis === 'x') return origin.x
+  if (axis === 'y') return origin.y
+  return origin.z
+}
+
 export function useTerrainField(): TerrainField {
   const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -100,9 +107,15 @@ export function useTerrainField(): TerrainField {
     const currentOrigin = alignedOrigin(viewCenter, scaleExp)
     const step = cache.step
     
-    // Calculate offset from buffer center to current view center in cells
-    const offsetRight = Number(currentOrigin.x - cache.centerX) / Number(step)
-    const offsetUp = Number(currentOrigin.y - cache.centerY) / Number(step)
+    // Calculate offset from buffer center to current view center in cells, using actual mapped axes
+    const cacheCoords = { x: cache.centerX, y: cache.centerY, z: cache.centerZ }
+    const currentRight = getAxisValue(currentOrigin, cache.rightAxis)
+    const cacheRight = getAxisValue(cacheCoords, cache.rightAxis)
+    const currentUp = getAxisValue(currentOrigin, cache.upAxis)
+    const cacheUp = getAxisValue(cacheCoords, cache.upAxis)
+    
+    const offsetRight = Number(currentRight - cacheRight) / Number(step)
+    const offsetUp = Number(currentUp - cacheUp) / Number(step)
     
     // Extract visible portion from buffer
     const visibleValues = new Uint8Array((GRID_RADIUS * 2 + 1) ** 2)
@@ -160,9 +173,15 @@ export function useTerrainField(): TerrainField {
       // View orientation or scale changed
       needsNewBuffer = true
     } else {
-      // Check if we've moved too far from buffer center
-      const offsetRight = Number(currentOrigin.x - cache.centerX) / Number(step)
-      const offsetUp = Number(currentOrigin.y - cache.centerY) / Number(step)
+      // Check if we've moved too far from buffer center, using actual mapped axes
+      const cacheCoords = { x: cache.centerX, y: cache.centerY, z: cache.centerZ }
+      const currentRight = getAxisValue(currentOrigin, cache.rightAxis)
+      const cacheRight = getAxisValue(cacheCoords, cache.rightAxis)
+      const currentUp = getAxisValue(currentOrigin, cache.upAxis)
+      const cacheUp = getAxisValue(cacheCoords, cache.upAxis)
+      
+      const offsetRight = Number(currentRight - cacheRight) / Number(step)
+      const offsetUp = Number(currentUp - cacheUp) / Number(step)
       
       if (Math.abs(offsetRight) > BUFFER_THRESHOLD || Math.abs(offsetUp) > BUFFER_THRESHOLD) {
         needsNewBuffer = true

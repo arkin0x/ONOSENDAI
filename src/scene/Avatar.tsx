@@ -14,8 +14,8 @@ import { cellOffset, GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 // Match TerrainField sphere radii so avatar sits on top
-const MIN_RADIUS = 0.2
-const MAX_RADIUS = 0.8
+const MIN_RADIUS = 0.42
+const MAX_RADIUS = 0.48
 
 interface Props {
   axes: ViewAxes

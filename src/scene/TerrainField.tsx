@@ -21,9 +21,10 @@ import { useCyberspace } from '../store/useCyberspace'
 import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
 
 const OUT_OF_BOUNDS = new Color('#120309')
-// Sphere radius: K=0 is visible, K=31 is larger than avatar (0.5)
-const MIN_RADIUS = 0.2
-const MAX_RADIUS = 0.8
+// Sphere radius: nearly fills the cell (diameter ~0.9), with subtle size variation for K
+// Cell width is 1.0, so radius 0.45 = 90% fill
+const MIN_RADIUS = 0.42
+const MAX_RADIUS = 0.48
 
 interface Props {
   field: TerrainFieldData
@@ -88,6 +89,8 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     const mesh = meshRef.current
     if (!mesh) return
 
+    const hadInstanceColor = !!mesh.instanceColor
+
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
         const i = row * size + col
@@ -110,7 +113,13 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
     }
 
     mesh.instanceMatrix.needsUpdate = true
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    if (mesh.instanceColor) {
+      mesh.instanceColor.needsUpdate = true
+      // Force shader recompilation if instance colors were just created
+      if (!hadInstanceColor && materialRef.current) {
+        materialRef.current.needsUpdate = true
+      }
+    }
   }, [field, size, dummy])
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
@@ -144,7 +153,6 @@ export function TerrainField({ field, fadeDirection, fadeDuration = 0.5, onFadeC
       <sphereGeometry args={[1, 16, 16]} />
       <meshStandardMaterial
         ref={materialRef}
-        color="#ffffff"
         transparent
         opacity={initialOpacity}
         roughness={0.3}

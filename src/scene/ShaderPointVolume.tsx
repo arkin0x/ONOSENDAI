@@ -205,7 +205,7 @@ function buildGeometryFromChunks(
 
   // Per-chunk in-box ranges, computed once so the buffers can be sized exactly
   // and the fill pass touches only the cells it keeps.
-  const visible: Array<{
+  const visibleChunks: Array<{
     chunk: ChunkMap[string]
     baseX: number; baseY: number; baseZ: number
     rx: [number, number]; ry: [number, number]; rz: [number, number]
@@ -225,7 +225,7 @@ function buildGeometryFromChunks(
     if (!rx || !ry || !rz) continue
 
     totalCells += (rx[1] - rx[0] + 1) * (ry[1] - ry[0] + 1) * (rz[1] - rz[0] + 1)
-    visible.push({ chunk, baseX, baseY, baseZ, rx, ry, rz })
+    visibleChunks.push({ chunk, baseX, baseY, baseZ, rx, ry, rz })
   }
 
   const positions = new Float32Array(totalCells * 3)
@@ -236,7 +236,7 @@ function buildGeometryFromChunks(
   const oi = AXIS_INDEX[axes.out.axis], od = axes.out.dir
 
   let vertexIdx = 0
-  for (const { chunk, baseX, baseY, baseZ, rx, ry, rz } of visible) {
+  for (const { chunk, baseX, baseY, baseZ, rx, ry, rz } of visibleChunks) {
     for (let dz = rz[0]; dz <= rz[1]; dz++) {
       const dvz = baseZ + dz
       for (let dy = ry[0]; dy <= ry[1]; dy++) {
@@ -260,6 +260,15 @@ function buildGeometryFromChunks(
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.setAttribute('aK', new Float32BufferAttribute(kValues, 1))
+
+  // Separates "no chunks arrived" from "chunks arrived but nothing survived
+  // the window". Those two look identical on screen and have opposite fixes.
+  let visibleK = 0
+  for (let i = 0; i < kValues.length; i++) if (kValues[i] > 0) visibleK++
+  console.log(
+    `[terrain] chunks=${chunkList.length} inWindow=${visibleChunks.length} ` +
+    `points=${totalCells} withK=${visibleK}`,
+  )
 
   return geometry
 }

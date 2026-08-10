@@ -70,14 +70,25 @@ function chunkKey(
  * entry instead of 27, and a single chunk was ever requested, which is why
  * only one terrain worker had anything to do.
  *
+ * Picks the chunk whose span contains the cell, which is the nearest lattice
+ * point, not the one below it. chunkToWorld puts chunk c at cell 49c and the
+ * worker samples it as 49c plus or minus halfSize, so c spans [49c-24, 49c+24].
+ * Dividing by chunkStep gives floor(cell/49), which for any cell more than 24
+ * into the interval names a chunk that does not contain it: the focus chunk
+ * ended up as much as 24 cells off, so the nearest-first queue was ordered
+ * around the wrong centre and the fill appeared to start from a corner.
+ *
  * Coordinates are unsigned (0 .. 2^85-1), so BigInt truncation is also floor.
  */
 function worldToChunk(
   worldX: bigint, worldY: bigint, worldZ: bigint,
   scaleExp: number,
 ): [bigint, bigint, bigint] {
-  const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)
-  return [worldX / chunkStep, worldY / chunkStep, worldZ / chunkStep]
+  const e = BigInt(scaleExp)
+  const size = BigInt(CHUNK_SIZE)
+  const half = BigInt(Math.floor(CHUNK_SIZE / 2))
+  const toChunk = (w: bigint): bigint => ((w >> e) + half) / size
+  return [toChunk(worldX), toChunk(worldY), toChunk(worldZ)]
 }
 
 /**
@@ -223,6 +234,15 @@ export function useTerrainChunks(): ChunkMap {
         delete chunksRef.current[key]
         evicted++
       }
+    }
+
+    // Drop pending entries we no longer want, so a response that never lands
+    // cannot wedge its key forever. A pending key suppresses re-requests, and
+    // since keys carry the scale, one lost response used to mean that scale
+    // stayed permanently empty on every return to it. Dropping it is safe: a
+    // late arrival is stored and then evicted on the next pass.
+    for (const key of pendingRef.current) {
+      if (!needed.has(key)) pendingRef.current.delete(key)
     }
 
     console.log(

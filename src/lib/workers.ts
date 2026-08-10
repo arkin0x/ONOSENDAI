@@ -55,6 +55,14 @@ export function getTerrainWorkers(): Worker[] {
         terrainIdle[slot] = true
         pumpChunkQueue()
       })
+      // A worker that throws never posts back, so without this its slot stays
+      // busy forever and the queue drains one worker short each time until the
+      // pool wedges completely and no chunk ever arrives again.
+      worker.addEventListener('error', (event) => {
+        console.error(`[workers] terrain worker ${slot} failed:`, event.message)
+        terrainIdle[slot] = true
+        pumpChunkQueue()
+      })
       terrainWorkers.push(worker)
       terrainIdle.push(true)
     }

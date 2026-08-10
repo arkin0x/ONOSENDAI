@@ -13,8 +13,8 @@
 import { useMemo } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import { PlaneGeometry, DoubleSide } from 'three'
-import { cellDelta, GRID_RADIUS, stepFor, type ViewAxes } from '../lib/space'
-import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { GRID_RADIUS, stepFor, type ViewAxes } from '../lib/space'
+import { useCyberspace } from '../store/useCyberspace'
 
 interface Props {
   axes: ViewAxes
@@ -33,24 +33,16 @@ export function ClickPlane({ axes }: Props): JSX.Element {
     // Intersection in the plane's own frame: local X/Y are screen right/up.
     const local = event.object.worldToLocal(event.point.clone())
 
-    const { position, scaleExp } = useCyberspace.getState()
-    const viewCenter = useCyberspace.getState().viewCenter()
+    const scaleExp = useCyberspace.getState().scaleExp
 
-    // The grid is drawn around the view centre, but setCursorAtCell measures
-    // row/col from the avatar's aligned cell. When the cursor is active those
-    // origins differ, so carry the gap across.
-    const viewOrigin = alignedOrigin(viewCenter, scaleExp)
-    const avatarOrigin = alignedOrigin(position, scaleExp)
-
-    // Inverse of cellOffset: it biases by half a cell, minus half a step.
+    // Inverse of cellOffset, which biases by half a cell minus half a step.
+    // The scene is drawn around the avatar's aligned cell, the same origin
+    // setCursorAtCell measures row/col from, so no further correction applies.
     const step = Number(stepFor(scaleExp))
     const bias = 0.5 - 0.5 / step
 
-    const rightGap = cellDelta(viewOrigin[axes.right.axis], avatarOrigin[axes.right.axis], scaleExp)
-    const upGap = cellDelta(viewOrigin[axes.up.axis], avatarOrigin[axes.up.axis], scaleExp)
-
-    const col = Math.round(local.x + axes.right.dir * (bias + rightGap))
-    const row = Math.round(local.y + axes.up.dir * (bias + upGap))
+    const col = Math.round(local.x + axes.right.dir * bias)
+    const row = Math.round(local.y + axes.up.dir * bias)
 
     useCyberspace.getState().setCursorAtCell(
       Math.max(-GRID_RADIUS, Math.min(GRID_RADIUS, row)),

@@ -17,15 +17,17 @@ interface Props {
 
 export function Avatar({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.position)
-  const viewCenter = useCyberspace((s) => s.viewCenter())
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
+  // Anchored to the avatar's own aligned cell, like every other scene element.
+  // This leaves the sub-cell offset within that cell, so the avatar still sits
+  // at its exact coordinate rather than being snapped to the cell centre.
   const [ax, ay] = useMemo(() => {
-    const origin = alignedOrigin(viewCenter, scaleExp)
+    const origin = alignedOrigin(position, scaleExp)
     const ax = cellOffset(position[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
     const ay = cellOffset(position[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
     return [ax, ay]
-  }, [position, viewCenter, scaleExp, axes])
+  }, [position, scaleExp, axes])
 
   const avatarGeometry = useMemo(() => {
     const geo = new IcosahedronGeometry(0.5, 1)

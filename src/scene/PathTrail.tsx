@@ -24,9 +24,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const geometry = useMemo(() => {
     if (positionHistory.length < 2) return null
 
-    // Compute viewCenter inline to avoid selector reference issues
-    const viewCenter = position === cursor ? position : cursor
-    const origin = alignedOrigin(viewCenter, scaleExp)
+    const origin = alignedOrigin(position, scaleExp)
     const vertices: number[] = []
 
     // Build segments: each pair of consecutive positions becomes two vertices

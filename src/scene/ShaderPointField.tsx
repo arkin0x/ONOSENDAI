@@ -39,6 +39,7 @@ const vertexShader = /* glsl */ `
   uniform float uTime;
   uniform float uMinPx;
   uniform float uMaxTileFrac;
+  uniform float uGamma;
   uniform float uZoom;
   uniform float uDpr;
 
@@ -60,7 +61,15 @@ const vertexShader = /* glsl */ `
 
     if (aK >= 1.0) {
       float maxPx = max(uMaxTileFrac * uZoom, uMinPx);
-      px = mix(uMinPx, maxPx, (aK - 1.0) / 15.0);
+
+      // Weighted toward the top of the range. K is Binomial(16, 0.5), so it
+      // piles up around 8 and only about 1% of cells reach 13 or above. A
+      // linear ramp spends most of its width on the values that are everywhere
+      // and leaves the rare expensive terrain looking much like the rest.
+      // Raising t to uGamma keeps 1..10 close to the floor and puts the growth
+      // where the interesting cells are.
+      float t = pow((aK - 1.0) / 15.0, uGamma);
+      px = mix(uMinPx, maxPx, t);
 
       // Pulse for expensive terrain.
       float kFactor = aK / 16.0;
@@ -184,9 +193,10 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
-      // K = 1 is a 6px dot; K = 16 fills half a tile.
-      uMinPx: { value: 6 },
-      uMaxTileFrac: { value: 0.5 },
+      // Small and flat across the common K values, growing sharply at the top.
+      uMinPx: { value: 4 },
+      uMaxTileFrac: { value: 0.9 },
+      uGamma: { value: 3 },
       uZoom: { value: 8 },
       uDpr: { value: 1 },
     },

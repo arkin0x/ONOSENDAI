@@ -214,8 +214,20 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    const camera = state.camera as unknown as { zoom?: number }
-    if (camera.zoom !== undefined) mat.uniforms.uZoom.value = camera.zoom
+    // uZoom is pixels per world unit. For an orthographic camera that is just
+    // its zoom; a perspective camera has a zoom too but it means something else,
+    // so derive it from the field's distance and the vertical field of view.
+    const cam = state.camera as unknown as {
+      zoom?: number; isPerspectiveCamera?: boolean; fov?: number
+      position: { length: () => number }
+    }
+    if (cam.isPerspectiveCamera && cam.fov !== undefined) {
+      const dist = Math.max(1e-3, cam.position.length())
+      mat.uniforms.uZoom.value =
+        state.size.height / (2 * dist * Math.tan((cam.fov * Math.PI) / 360))
+    } else if (cam.zoom !== undefined) {
+      mat.uniforms.uZoom.value = cam.zoom
+    }
     mat.uniforms.uDpr.value = state.gl.getPixelRatio()
   })
 

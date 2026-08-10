@@ -21,7 +21,7 @@ import { useCyberspace } from '../store/useCyberspace'
 
 const CAMERA_DISTANCE = 200
 
-export function ViewRig(): null {
+export function ViewRig({ perspective = false }: { perspective?: boolean } = {}): null {
   const target = useCyberspace((s) => s.view)
   const cursor = useCyberspace((s) => s.cursor)
   const position = useCyberspace((s) => s.position)
@@ -42,15 +42,17 @@ export function ViewRig(): null {
     [cursor, position, scaleExp, target],
   )
 
-  // Keep the whole grid in frame regardless of window shape.
+  // Keep the whole grid in frame regardless of window shape. Orthographic only:
+  // a perspective camera also has a zoom, and writing it wrecks the projection.
   useEffect(() => {
+    if (perspective) return
     const span = GRID_RADIUS * 2 + 2
     const zoom = Math.min(size.width, size.height) / span
     if ('zoom' in camera) {
       camera.zoom = zoom
       camera.updateProjectionMatrix()
     }
-  }, [camera, size])
+  }, [camera, size, perspective])
 
   useFrame(() => {
     // Snap instantly to target orientation

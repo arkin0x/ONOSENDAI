@@ -648,3 +648,35 @@ kbd {
   z-index: 0;
 }
 
+
+
+/* PROTOTYPE (ticket 03) — deliberately ugly so it reads as scaffolding. */
+.proto-switcher {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  font-family: inherit;
+  font-size: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+
+.proto-switcher button {
+  background: #000;
+  color: #fff;
+  border: 0;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}

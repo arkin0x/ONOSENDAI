@@ -36,13 +36,16 @@ export function ClickPlane({ axes }: Props): JSX.Element {
     
     // Get the intersection point in world space
     const worldPoint = event.point
+    console.log('[ClickPlane] Click at world point:', worldPoint.toArray())
     
     // Convert world-space point to local-space by applying inverse rotation
     const localPoint = worldPoint.clone()
     localPoint.applyQuaternion(view.clone().invert())
+    console.log('[ClickPlane] Local point:', localPoint.toArray())
     
     // Get the aligned origin (grid center) in local space
     const origin = alignedOrigin(position, scaleExp)
+    console.log('[ClickPlane] Origin:', origin.x.toString(), origin.y.toString(), origin.z.toString())
     
     // Convert world coordinates to grid row/col
     // The grid is centered on origin, so we need to compute offset
@@ -52,22 +55,26 @@ export function ClickPlane({ axes }: Props): JSX.Element {
     // Get the local-space offset from origin (convert bigint to number)
     const rightOffset = Number(localPoint[rightAxis]) - Number(origin[rightAxis])
     const upOffset = Number(localPoint[upAxis]) - Number(origin[upAxis])
+    console.log('[ClickPlane] Offsets:', { rightOffset, upOffset })
     
     // Convert to cell coordinates
     // Cell size is 2^scaleExp in world space
     const cellSize = Math.pow(2, scaleExp)
+    console.log('[ClickPlane] Cell size:', cellSize)
     
     // Account for axis direction
-    const col = Math.round((rightOffset / cellSize) * axes.right.dir + GRID_RADIUS)
-    const row = Math.round((upOffset / cellSize) * axes.up.dir + GRID_RADIUS)
+    const col = Math.round((rightOffset / cellSize) * axes.right.dir)
+    const row = Math.round((upOffset / cellSize) * axes.up.dir)
+    console.log('[ClickPlane] Raw row/col:', { row, col })
     
     // Clamp to valid range
-    const size = GRID_RADIUS * 2 + 1
-    const clampedRow = Math.max(0, Math.min(size - 1, row))
-    const clampedCol = Math.max(0, Math.min(size - 1, col))
+    const clampedRow = Math.max(-GRID_RADIUS, Math.min(GRID_RADIUS, row))
+    const clampedCol = Math.max(-GRID_RADIUS, Math.min(GRID_RADIUS, col))
+    console.log('[ClickPlane] Clamped row/col:', { clampedRow, clampedCol })
     
     // Set cursor at this cell
     useCyberspace.getState().setCursorAtCell(clampedRow, clampedCol)
+    console.log('[ClickPlane] Set cursor at offset:', { clampedRow, clampedCol })
   }
 
   return (

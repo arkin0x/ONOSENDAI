@@ -186,7 +186,7 @@ function Controls(): JSX.Element {
   )
 }
 
-export function Hud(): JSX.Element {
+export function Hud({ hideTerrainLegend = false }: { hideTerrainLegend?: boolean }): JSX.Element {
   return (
     <div className="hud">
       <div className="hud__col hud__col--left">
@@ -200,7 +200,7 @@ export function Hud(): JSX.Element {
         <ProofPanel />
         <ChainPanel />
         <Legend />
-        <TerrainLegend />
+        {!hideTerrainLegend && <TerrainLegend />}
         <Controls />
       </div>
     </div>

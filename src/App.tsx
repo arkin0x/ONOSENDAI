@@ -13,15 +13,16 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   const [showPanels, setShowPanels] = useState(!isMobile)
 
-  // On mobile, hide ScaleBar and Compass3D when panels are visible
+  // On mobile, hide ScaleBar, Compass3D, and TerrainLegend when panels are visible
   const hideOverlays = isMobile && showPanels
 
   return (
     <div className="app">
       <Scene />
-      {showPanels && <Hud />}
+      {showPanels && <Hud hideTerrainLegend={hideOverlays} />}
       {!hideOverlays && <ScaleBar />}
       {!hideOverlays && <Compass3D />}
+      {isMobile && showPanels && <div className="mobile-overlay" />}
       {isMobile && (
         <button
           className="hamburger-menu"

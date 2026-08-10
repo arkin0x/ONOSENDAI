@@ -621,3 +621,13 @@ kbd {
   transform: translateY(-7px) rotate(-45deg);
 }
 
+/* ---------- Mobile overlay (dims grid when panels are open) ---------- */
+
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 13, 0.75);
+  pointer-events: none;
+  z-index: 0;
+}
+

@@ -4,6 +4,9 @@
  * On mobile, users tap the grid to set the cursor. This component renders an
  * invisible plane at the avatar's depth that captures those taps and converts
  * them to grid coordinates.
+ *
+ * The plane is rendered in the rotated scene group, so we need to convert
+ * world-space click coordinates to local-space to compute grid row/col.
  */
 
 import { useMemo } from 'react'
@@ -19,6 +22,7 @@ interface Props {
 export function ClickPlane({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const view = useCyberspace((s) => s.view)
 
   // Create a plane that covers the visible grid area
   const geometry = useMemo(() => {
@@ -30,10 +34,14 @@ export function ClickPlane({ axes }: Props): JSX.Element {
   const handleClick = (event: any) => {
     event.stopPropagation()
     
-    // Get the intersection point in local space
-    const point = event.point
+    // Get the intersection point in world space
+    const worldPoint = event.point
     
-    // Get the aligned origin (grid center)
+    // Convert world-space point to local-space by applying inverse rotation
+    const localPoint = worldPoint.clone()
+    localPoint.applyQuaternion(view.clone().invert())
+    
+    // Get the aligned origin (grid center) in local space
     const origin = alignedOrigin(position, scaleExp)
     
     // Convert world coordinates to grid row/col
@@ -41,9 +49,9 @@ export function ClickPlane({ axes }: Props): JSX.Element {
     const rightAxis = axes.right.axis
     const upAxis = axes.up.axis
     
-    // Get the world-space offset from origin (convert bigint to number)
-    const rightOffset = Number(point[rightAxis]) - Number(origin[rightAxis])
-    const upOffset = Number(point[upAxis]) - Number(origin[upAxis])
+    // Get the local-space offset from origin (convert bigint to number)
+    const rightOffset = Number(localPoint[rightAxis]) - Number(origin[rightAxis])
+    const upOffset = Number(localPoint[upAxis]) - Number(origin[upAxis])
     
     // Convert to cell coordinates
     // Cell size is 2^scaleExp in world space

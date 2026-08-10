@@ -2,7 +2,7 @@
 
 Type: prototype
 Status: open
-Blocked by: 03, 07
+Blocked by: 03
 
 ## Question
 
@@ -18,10 +18,15 @@ Decide what furniture the world needs, and build it:
 - **The black sun.** §11.2 defines a purple marker at the `+Z_cs` boundary as
   the directional guidepost, and §11.3's canonical view faces it. The app
   implements the view (`canonicalQuaternion`, the `C` key) and renders no marker.
-  Ticket 02 found that §11.2 and §11.3 disagree on whether it is a point or a
-  direction; ticket 07 rules on that first, and the answer changes what you build
-  here. Per 02 it is the *only* absolute reference the protocol defines —
-  everything else on the landmark list is relative.
+  **Ticket 07 ruled it a bearing, not a place**: render it at a fixed `+Z_cs`
+  bearing from wherever you stand, like a sun on the horizon. It is never
+  approached, never parallaxes, has no distance. A literal point cannot serve as
+  a `+Z` bearing — measured at 35° off `+Z` from a typical spawn even after
+  correcting the spec's arithmetic. Per 02 it is the *only* absolute reference
+  the protocol defines; everything else on this list is relative.
+- **What else deserves to be absolute?** Carried over from 07: the origin, the
+  axis extents, the sector lattice. Is one sun the whole of it, or does the space
+  need more fixed reference than a single bearing?
 - **Origin and axis structure.** Is the origin visible? Are the three axes
   perceivable as structure rather than as labels on a compass widget?
 - **Sectors.** A sector is 2^30 gibsons per axis (§10) and is already how the

@@ -58,6 +58,16 @@ for decisions, `/research` for AFK fact-finding.
 
 <!-- one line per closed ticket: gist + link -->
 
+- [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
+  — **A bearing, not a place.** Rendered at a fixed `+Z_cs` bearing from wherever
+  you stand, so §11.3 holds exactly everywhere. Found that §11.2 states two
+  coordinates that are different points — the u85 triple `(0,0,2^84)` puts x and y
+  at the axis *minimum*, while its own km triple maps through §9.7 to x,y at the
+  *centre* and z at the +Z max. Correcting that is not enough: measured over 12
+  real spawns, a literal point sits 35° off `+Z` (82.7° using the stated triple),
+  because the sun is only ~0.24 light-years away and a random spawn is off-axis by
+  a comparable distance. Two corrections to raise upstream.
+
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:
   v1's first-person view was black space plus distant wireframes with effectively

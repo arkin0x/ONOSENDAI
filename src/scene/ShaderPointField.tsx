@@ -194,8 +194,8 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 4 },
-      uMaxTileFrac: { value: 0.9 },
+      uMinPx: { value: 2 },
+      uMaxTileFrac: { value: 0.45 },
       uGamma: { value: 3 },
       uZoom: { value: 8 },
       uDpr: { value: 1 },

@@ -29,16 +29,17 @@ interface Props {
 }
 
 /**
- * Vertex shader: size from K, in cell units scaled by the camera zoom.
+ * Vertex shader: point size in pixels, from K.
  *
- * Radius is proportional to K, matching the tile renderer this replaces, so
- * K = 0 has no radius and disappears. Cells outside the universe never reach
- * here at all, since the CPU skips them.
+ * K = 0 has no size and disappears, as do cells outside the universe, which
+ * arrive as 0. From K = 1 up the size runs between a pixel floor and a
+ * fraction of a tile.
  */
 const vertexShader = /* glsl */ `
   attribute float aK;
   uniform float uTime;
-  uniform float uPointSize;
+  uniform float uMinPx;
+  uniform float uMaxTileFrac;
   uniform float uZoom;
 
   varying float vK;
@@ -46,15 +47,28 @@ const vertexShader = /* glsl */ `
   void main() {
     vK = aK;
 
-    float kFactor = aK / 16.0;
-    float radius = uPointSize * kFactor;
+    // Sized in pixels, between a floor and a fraction of a tile. uZoom is the
+    // orthographic camera's pixels per world unit, and the scene draws one
+    // unit per cell, so uZoom is the tile width on screen.
+    //
+    // K = 0 keeps zero size and disappears, which is also how cells outside
+    // the universe read, since they arrive as 0. Everything from K = 1 up gets
+    // at least uMinPx: scaling straight from zero put the low end at well under
+    // a pixel, so most of the field was invisible rather than merely small.
+    float px = 0.0;
 
-    // Pulse for expensive terrain.
-    if (kFactor > 0.7) {
-      radius *= 1.0 + 0.06 * sin(uTime * 2.5 + float(gl_VertexID) * 0.37);
+    if (aK >= 1.0) {
+      float maxPx = max(uMaxTileFrac * uZoom, uMinPx);
+      px = mix(uMinPx, maxPx, (aK - 1.0) / 15.0);
+
+      // Pulse for expensive terrain.
+      float kFactor = aK / 16.0;
+      if (kFactor > 0.7) {
+        px *= 1.0 + 0.06 * sin(uTime * 2.5 + float(gl_VertexID) * 0.37);
+      }
     }
 
-    gl_PointSize = radius * 2.0 * uZoom;
+    gl_PointSize = px;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
@@ -156,7 +170,9 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
     uniforms: {
       uTexture: { value: circularTexture },
       uTime: { value: 0 },
-      uPointSize: { value: 0.4 },
+      // K = 1 is a 6px dot; K = 16 fills half a tile.
+      uMinPx: { value: 6 },
+      uMaxTileFrac: { value: 0.5 },
       uZoom: { value: 8 },
     },
     transparent: true,

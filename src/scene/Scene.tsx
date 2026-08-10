@@ -22,7 +22,7 @@ import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
-import { TerrainField } from './TerrainField'
+import { ShaderPointField } from './ShaderPointField'
 import { ViewRig } from './ViewRig'
 
 function World(): JSX.Element {
@@ -70,7 +70,7 @@ function World(): JSX.Element {
     <group quaternion={displayView}>
       {/* Old terrain fading out */}
       {oldField && (
-        <TerrainField
+        <ShaderPointField
           field={oldField}
           fadeDirection="out"
           fadeDuration={0.5}
@@ -79,7 +79,7 @@ function World(): JSX.Element {
       )}
 
       {/* Current terrain — fade in after rotation, full opacity otherwise */}
-      <TerrainField
+      <ShaderPointField
         field={field}
         fadeDirection={newFieldFading ? 'in' : undefined}
         fadeDuration={0.5}

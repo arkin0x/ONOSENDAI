@@ -8,6 +8,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ChainPanel } from './ChainPanel'
 import { Legend } from './Legend'
 import { ProofPanel } from './ProofPanel'
+import { TerrainLegend } from './TerrainLegend'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -199,6 +200,7 @@ export function Hud(): JSX.Element {
         <ProofPanel />
         <ChainPanel />
         <Legend />
+        <TerrainLegend />
         <Controls />
       </div>
     </div>

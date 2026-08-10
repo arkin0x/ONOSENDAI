@@ -66,6 +66,7 @@ function setSegment(line: Line, geometry: BufferGeometry, a: number[], b: number
 export function Cursor({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
+  const viewCenter = useCyberspace((s) => s.viewCenter())
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
@@ -95,9 +96,10 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     return { landing, remainderBlocked: remainder.exceedsLimit }
   }, [active, position, target, plane])
 
-  // Screen-space endpoints. Avatar is at origin, cursor offset from it.
+  // Screen-space endpoints. In-plane axes measure from the aligned cell (the
+  // grid's frame); the depth axis measures from the avatar's exact slice.
   const points = useMemo(() => {
-    const origin = alignedOrigin(position, scaleExp)
+    const origin = alignedOrigin(viewCenter, scaleExp)
     const point = (p: Position): [number, number, number] => [
       cellOffset(p[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
       cellOffset(p[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
@@ -114,7 +116,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       landing: plan?.landing ? point(plan.landing) : null,
       targetCell,
     }
-  }, [position, target, plan, scaleExp, axes])
+  }, [position, target, plan, viewCenter, scaleExp, axes])
 
   const leg1Geometry = useMemo(() => new BufferGeometry(), [])
   const leg2Geometry = useMemo(() => new BufferGeometry(), [])

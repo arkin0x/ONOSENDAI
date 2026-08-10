@@ -60,7 +60,7 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <ClickPlane axes={axes} />
       <Cursor axes={axes} />
-      <Avatar />
+      <Avatar axes={axes} />
     </group>
   )
 }

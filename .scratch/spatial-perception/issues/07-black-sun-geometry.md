@@ -49,39 +49,42 @@ exactly, everywhere.
 
 ### Evidence
 
-**Which coordinate is authoritative: the u85 one.** Spec commit `088a7cc`
-("Fix §10.2 black sun position with correct axis extent") established this and
-added an explicit guard:
+**The km figure was correct all along; the u85 triple is the error.** §9.7 maps
+`u = km * 1000 * 2^33 + 2^84`, so `km = 0` sits at u85 `2^84`. The km frame is
+therefore **cube-centred** while u85 is **corner-relative**. Centre plus one
+half-axis (§9.2's ~2.25e12 km) is exactly the `+Z` boundary, so the stated km
+triple already denoted the centre of the `+Z` face — which is what §11.2 says the
+marker marks.
 
-> The GPS→dataspace mapping ... maps GPS coordinates into a GEO-centered region
-> spanning ~48,000 km. The black sun is at the full half-axis extent. **Do not
-> use the `units_per_km` formula for black sun positioning; use the u85
-> coordinate directly.**
+The stated u85 triple `(0, 0, 2^84)` does not: the axis maximum is `2^85 - 1`, so
+`2^84` is the middle of the z axis and `x = y = 0` is the axis minimum. Spec
+commit `088a7cc` introduced it with the words "the maximum u85 value", which is
+where the error entered. That commit also added a guard saying not to convert the
+km figure — but the guard's own premise was the bug, and following it propagates
+the error. The guard has since been dropped from the spec while the km figure
+remains, which is the trap that makes this worth fixing.
 
-**That guard has since been dropped from the spec** (it appears nowhere in the
-current text). The km figure `+2.25×10^12 km` survived without it, which is a
-live trap: convert it through §9.7 and you get `(2^84, 2^84, ~2^85)`, a different
-point from the stated `(0, 0, 2^84)`.
+**Measured, over 2000 pubkey-derived spawns** (12-spawn samples agree within a
+few degrees):
 
-**The real defect.** §11.2 says the marker "MUST" sit on the `+Z_cs` boundary,
-then places it at `z = 2^84`. The axis is 85 bits, so its maximum is `2^85 - 1`:
-`2^84` is the **middle** of the z axis, not its boundary. `x = 0, y = 0` are the
-axis minimum. So the stated point is the centre of the `-X,-Y` edge, not a `+Z`
-boundary marker. Commit `088a7cc`'s own message calls `2^84` "the maximum u85
-value"; the current text calls it "the half-axis extent", which is correct — but
-the coordinate was never updated to match the boundary claim.
+| marker | mean angle off `+Z` | worst | behind the viewer |
+|---|---|---|---|
+| stated `(0, 0, 2^84)` | 90.9° | 175.9° | **51.1%** |
+| km-derived / corrected | 42.1° | 89.9° | 0% |
 
-**Neither reading works as a bearing.** Measured over 12 real pubkey-derived
-spawns, the angle between `+Z_cs` and the bearing to the marker:
+The 51.1% is decisive: the current coordinate puts the `+Z` guidepost *behind
+half of all spawns*. Correcting it removes that and halves the mean error.
 
-- authoritative u85 point `(0, 0, 2^84)`: **82.7°** off `+Z` — essentially
-  perpendicular, the sun sits beside you
-- km-converted point: **35.0°** off `+Z`
-
-The marker is ~0.24 light-years away (§9.2) while a random spawn is off-axis by a
+**But correcting it does not rescue §11.3.** A 42.1° mean remains, because the
+marker is ~0.24 light-years away (§9.2) while a random spawn is off-axis by a
 comparable distance, so it is nowhere near effective infinity. No literal point
-can serve as a `+Z` bearing from an arbitrary coordinate, which is what §11.3
-requires. Hence: a bearing.
+can serve as a `+Z` bearing from an arbitrary coordinate. Hence: a bearing.
+
+**Upstream:** the coordinate fix is
+[arkin0x/cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17), which
+sets `black_sun_u85 = (2^84, 2^84, 2^85 - 1)` and states that the two forms are
+the same point. It deliberately leaves §11.3 untouched and raises point-versus-
+bearing as an open decision for the maintainer.
 
 ### Consequences
 

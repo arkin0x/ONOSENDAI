@@ -59,15 +59,15 @@ for decisions, `/research` for AFK fact-finding.
 <!-- one line per closed ticket: gist + link -->
 
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
-  — **A bearing, not a place.** Rendered at a fixed `+Z_cs` bearing from wherever
-  you stand, so §11.3 holds exactly everywhere. A literal point cannot: measured
-  over 12 real spawns the stated marker sits **82.7° off `+Z`**, because it is
-  only ~0.24 light-years away while a random spawn is off-axis by a comparable
-  distance. Two upstream defects found: §11.2 places the marker at `z = 2^84`
-  while claiming it marks the `+Z_cs` boundary, but the 85-bit axis maximum is
-  `2^85 - 1`, so that is the axis *middle*; and the guard from commit `088a7cc`
-  saying not to convert the km figure through `units_per_km` has been dropped
-  from the spec, leaving a stale physical gloss that yields a different point.
+  — **A bearing, not a place.** Rendered at a fixed `+Z_cs` bearing so §11.3 holds
+  from any coordinate. A literal point cannot: even after correcting the spec it
+  averages 42.1° off `+Z` over 2000 spawns, because the marker is ~0.24
+  light-years away while a random spawn is off-axis by a comparable distance.
+  Found a spec defect worth its own fix — §11.2's u85 triple `(0,0,2^84)` puts the
+  marker at the axis *middle* and the `-X,-Y` corner, leaving the "+Z guidepost"
+  **behind 51.1% of all spawns**. The km figure was correct throughout; the km
+  frame is cube-centred while u85 is corner-relative. Fix upstream in
+  [cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17).
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:

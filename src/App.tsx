@@ -24,7 +24,7 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <Scene />
-      {showPanels && <Hud hideTerrainLegend={hideOverlays} />}
+      {showPanels && <Hud hideTerrainLegend={hideOverlays} menuOpen={hideOverlays} />}
       {!hideOverlays && <ScaleBar />}
       {!hideOverlays && <Compass3D />}
       {isMobile && showPanels && <div className="mobile-overlay" />}

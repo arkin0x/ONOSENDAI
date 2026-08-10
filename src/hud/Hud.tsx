@@ -186,9 +186,15 @@ function Controls(): JSX.Element {
   )
 }
 
-export function Hud({ hideTerrainLegend = false }: { hideTerrainLegend?: boolean }): JSX.Element {
+export function Hud({
+  hideTerrainLegend = false,
+  menuOpen = false,
+}: {
+  hideTerrainLegend?: boolean
+  menuOpen?: boolean
+}): JSX.Element {
   return (
-    <div className="hud">
+    <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
         <Brand />
         <IdentityPanel />

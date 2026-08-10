@@ -538,6 +538,18 @@ kbd {
   }
 }
 
+/*
+ * While the mobile menu is open the HUD is the scroll container, so it has to
+ * receive events across its whole area: .hud is pointer-events: none by
+ * default and only .panel opts back in, which left the gaps between panels
+ * unable to scroll. Scoped to the open menu rather than the 900px media query,
+ * because useIsMobile switches at 768px and a blanket rule would make the HUD
+ * swallow grid clicks on desktop windows between the two widths.
+ */
+.hud--menu {
+  pointer-events: auto;
+}
+
 /* ---------- Links panel ---------- */
 
 .panel--links {

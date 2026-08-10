@@ -11,7 +11,12 @@ export default function App(): JSX.Element {
   useKeyboard()
   useProofListener()
   const isMobile = useIsMobile()
-  const [showPanels, setShowPanels] = useState(!isMobile)
+
+  // Only the mobile toggle is state. Deriving visibility from it keeps the
+  // panels reachable across the breakpoint: the hamburger unmounts on desktop,
+  // so a stored `false` would strand the HUD with no control to restore it.
+  const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false)
+  const showPanels = !isMobile || mobilePanelsOpen
 
   // On mobile, hide ScaleBar, Compass3D, and TerrainLegend when panels are visible
   const hideOverlays = isMobile && showPanels
@@ -26,7 +31,7 @@ export default function App(): JSX.Element {
       {isMobile && (
         <button
           className="hamburger-menu"
-          onClick={() => setShowPanels(!showPanels)}
+          onClick={() => setMobilePanelsOpen((open) => !open)}
           aria-label={showPanels ? 'Hide panels' : 'Show panels'}
         >
           <span className={`hamburger-icon ${showPanels ? 'hamburger-icon--open' : ''}`}>

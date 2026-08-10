@@ -624,11 +624,15 @@ kbd {
 
 /* ---------- Mobile overlay (dims grid when panels are open) ---------- */
 
+/*
+ * Swallows taps so the grid cannot be touched while the panels are open.
+ * Sits below .hud (z-index 1) and .hamburger-menu (100), so both stay live.
+ */
 .mobile-overlay {
   position: fixed;
   inset: 0;
   background: rgba(5, 7, 13, 0.75);
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 0;
 }
 

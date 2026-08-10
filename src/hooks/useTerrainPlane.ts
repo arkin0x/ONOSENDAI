@@ -9,16 +9,19 @@
  * coordinate, so nothing has to be aligned, rounded or tiled, and a move, a
  * rotation and a zoom all reuse whatever they happen to share.
  *
- * Missing cells are requested as contiguous spans along the screen-right axis.
- * Requesting whole rows would be simpler but throws the reuse away: stepping
- * one cell sideways leaves exactly one missing cell in every row, and asking
- * for the full row would resample the entire plane to learn 49 values.
+ * Sampling is per block, not per cell. K is constant across a BLOCK_SIZE cube,
+ * so below that scale one sample serves every cell inside it: at scaleExp 0 a
+ * 2,401 cell plane needs 49 to 64 samples depending on how the window lands
+ * against the block lattice, not 2,401.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GRID_RADIUS, stepFor, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { cacheSize, inflightRuns, onTerrainData, readK, requestRun } from '../lib/terrainCache'
+import {
+  BLOCK_BITS, BLOCK_SIZE, cacheSize, inflightRuns, isPending,
+  onTerrainData, readK, requestRun,
+} from '../lib/terrainCache'
 import { UNKNOWN } from '../workers/terrain.worker'
 import type { Position } from '../lib/space'
 import type { ViewWindow } from './useViewWindow'
@@ -42,6 +45,82 @@ function cellAt(
   p[axes.right.axis] = origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
   p[axes.up.axis] = origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
   return p
+}
+
+/**
+ * Fill what the cache knows about one window, and ask for the rest.
+ *
+ * `values` is optional so the prefetcher can drive the same traversal purely
+ * for its requests. Requests are grouped into runs of consecutive samples so
+ * one message covers a whole row's worth of missing blocks.
+ */
+function scanWindow(
+  origin: Position, axes: ViewAxes, step: bigint, plane: Plane,
+  centreRight: number, centreUp: number,
+  values: Uint8Array | null,
+): void {
+  const R = GRID_RADIUS
+  const N = PLANE_SIZE
+
+  // Below the block size, consecutive cells share a block, so step by the
+  // block instead and let one sample serve them all.
+  const stride = step >= BLOCK_SIZE ? step : BLOCK_SIZE
+
+  // Nearest row first, so the middle of the screen resolves before the edges.
+  const rows = Array.from({ length: N }, (_, i) => i - R)
+    .sort((a, b) => Math.abs(a) - Math.abs(b))
+
+  for (const row of rows) {
+    const samples: bigint[] = []
+    const seenBlocks = new Set<bigint>()
+    let rowCell: Position | null = null
+
+    for (let col = -R; col <= R; col++) {
+      const p = cellAt(origin, axes, step, centreRight + col, centreUp + row)
+
+      const known = readK(p.x, p.y, p.z, plane)
+      if (known !== undefined) {
+        if (values) values[(row + R) * N + (col + R)] = known
+        continue
+      }
+      if (isPending(p.x, p.y, p.z, plane)) continue
+
+      // One sample per block per pass, or a block would be asked for once per
+      // cell it contains while the first answer is still in flight.
+      const block = p[axes.right.axis] >> BLOCK_BITS
+      if (seenBlocks.has(block)) continue
+      seenBlocks.add(block)
+
+      rowCell = p
+      samples.push(block << BLOCK_BITS)
+    }
+
+    if (!rowCell || samples.length === 0) continue
+    samples.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+
+    let start = 0
+    for (let i = 1; i <= samples.length; i++) {
+      if (i === samples.length || samples[i] - samples[i - 1] !== stride) {
+        requestRun({
+          ...axisOrigin(rowCell, axes, samples[start]),
+          axis: axes.right.axis,
+          step: stride,
+          count: i - start,
+          plane,
+        })
+        start = i
+      }
+    }
+  }
+}
+
+/** The row's cell with its right-axis coordinate replaced by `coord`. */
+function axisOrigin(
+  rowCell: Position, axes: ViewAxes, coord: bigint,
+): { originX: bigint; originY: bigint; originZ: bigint } {
+  const p: Position = { ...rowCell }
+  p[axes.right.axis] = coord
+  return { originX: p.x, originY: p.y, originZ: p.z }
 }
 
 export function useTerrainPlane(win: ViewWindow, axes: ViewAxes): TerrainPlane {
@@ -78,33 +157,7 @@ export function useTerrainPlane(win: ViewWindow, axes: ViewAxes): TerrainPlane {
     const origin = alignedOrigin(position, scaleExp)
     const values = new Uint8Array(N * N).fill(UNKNOWN)
 
-    // Nearest row first, so the middle of the screen resolves before the edges.
-    const rows = Array.from({ length: N }, (_, i) => i - R)
-      .sort((a, b) => Math.abs(a + win.up) - Math.abs(b + win.up))
-
-    for (const row of rows) {
-      const r = row + R
-      // Null, not -1: columns run -R..R, so -1 is a legal index and using it
-      // as the sentinel silently dropped every span that began left of centre.
-      let spanStart: number | null = null
-
-      for (let col = -R; col <= R; col++) {
-        const p = cellAt(origin, axes, step, win.right + col, win.up + row)
-        const known = readK(p.x, p.y, p.z, plane)
-
-        if (known !== undefined) {
-          values[r * N + (col + R)] = known
-          if (spanStart !== null) {
-            requestSpan(origin, axes, step, plane, win, row, spanStart, col - 1)
-            spanStart = null
-          }
-        } else if (spanStart === null) {
-          spanStart = col
-        }
-      }
-
-      if (spanStart !== null) requestSpan(origin, axes, step, plane, win, row, spanStart, R)
-    }
+    scanWindow(origin, axes, step, plane, win.right, win.up, values)
 
     if (import.meta.env.DEV) {
       let known = 0
@@ -120,19 +173,4 @@ export function useTerrainPlane(win: ViewWindow, axes: ViewAxes): TerrainPlane {
   }, [originKey, scaleExp, plane, axes, win.right, win.up, dataVersion])
 }
 
-/** Ask for cells [fromCol, toCol] of one row, as a single run. */
-function requestSpan(
-  origin: Position, axes: ViewAxes, step: bigint, plane: Plane,
-  win: ViewWindow, row: number, fromCol: number, toCol: number,
-): void {
-  const start = cellAt(origin, axes, step, win.right + fromCol, win.up + row)
-  requestRun({
-    originX: start.x,
-    originY: start.y,
-    originZ: start.z,
-    axis: axes.right.axis,
-    step: step * BigInt(axes.right.dir),
-    count: toCol - fromCol + 1,
-    plane,
-  })
-}
+export { scanWindow }

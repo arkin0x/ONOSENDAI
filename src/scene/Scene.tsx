@@ -11,6 +11,7 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainPlane } from '../hooks/useTerrainPlane'
+import { usePrefetchWalk } from '../hooks/usePrefetchWalk'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
@@ -27,6 +28,7 @@ function World(): JSX.Element {
 
   const win = useViewWindow()
   const plane = useTerrainPlane(win, axes)
+  usePrefetchWalk(axes)
 
   return (
     <group quaternion={view}>

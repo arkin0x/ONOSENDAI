@@ -49,27 +49,39 @@ exactly, everywhere.
 
 ### Evidence
 
-§11.2 states two coordinates for the black sun, and they are **different points**:
+**Which coordinate is authoritative: the u85 one.** Spec commit `088a7cc`
+("Fix §10.2 black sun position with correct axis extent") established this and
+added an explicit guard:
 
-| | x | y | z |
-|---|---|---|---|
-| Stated u85 triple `(0, 0, 2^84)` | axis minimum | axis minimum | centre |
-| Stated km triple `(0, 0, +2.25e12 km)` via §9.7 | 2^84 (centre) | 2^84 (centre) | 38670165945834066795298816 (≈ the +Z max) |
+> The GPS→dataspace mapping ... maps GPS coordinates into a GEO-centered region
+> spanning ~48,000 km. The black sun is at the full half-axis extent. **Do not
+> use the `units_per_km` formula for black sun positioning; use the u85
+> coordinate directly.**
 
-Only the km-derived point marks the `+Z_cs` boundary, which is what §11.2 says
-the marker does. The u85 triple appears to be centred-frame values — `0, 0,
-half-axis-length` — mislabelled as u85. §9.7's mapping is `u = km * 1000 * 2^33 +
-2^84`, so km `0` is u85 `2^84`, not `0`.
+**That guard has since been dropped from the spec** (it appears nowhere in the
+current text). The km figure `+2.25×10^12 km` survived without it, which is a
+live trap: convert it through §9.7 and you get `(2^84, 2^84, ~2^85)`, a different
+point from the stated `(0, 0, 2^84)`.
 
-Fixing the arithmetic does not rescue §11.3. Measured over 12 real
-pubkey-derived spawns, the angle between `+Z_cs` and the bearing to the marker:
+**The real defect.** §11.2 says the marker "MUST" sit on the `+Z_cs` boundary,
+then places it at `z = 2^84`. The axis is 85 bits, so its maximum is `2^85 - 1`:
+`2^84` is the **middle** of the z axis, not its boundary. `x = 0, y = 0` are the
+axis minimum. So the stated point is the centre of the `-X,-Y` edge, not a `+Z`
+boundary marker. Commit `088a7cc`'s own message calls `2^84` "the maximum u85
+value"; the current text calls it "the half-axis extent", which is correct — but
+the coordinate was never updated to match the boundary claim.
 
-- stated u85 triple: **82.7°** off `+Z` (essentially perpendicular)
-- corrected km-derived point: **35.0°** off `+Z`
+**Neither reading works as a bearing.** Measured over 12 real pubkey-derived
+spawns, the angle between `+Z_cs` and the bearing to the marker:
 
-The black sun is at most ~0.24 light-years away (§9.2) and a random spawn is off
-axis by a comparable distance, so it is nowhere near effective infinity. No
-literal point can serve as a `+Z` bearing from an arbitrary coordinate.
+- authoritative u85 point `(0, 0, 2^84)`: **82.7°** off `+Z` — essentially
+  perpendicular, the sun sits beside you
+- km-converted point: **35.0°** off `+Z`
+
+The marker is ~0.24 light-years away (§9.2) while a random spawn is off-axis by a
+comparable distance, so it is nowhere near effective infinity. No literal point
+can serve as a `+Z` bearing from an arbitrary coordinate, which is what §11.3
+requires. Hence: a bearing.
 
 ### Consequences
 

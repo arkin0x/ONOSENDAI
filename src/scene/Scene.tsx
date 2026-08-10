@@ -1,95 +1,73 @@
 /**
- * Scene.tsx — assembles the spatial view.
+ * Scene.tsx — assembles the spatial view with 3D terrain chunks.
  *
- * Everything lives inside a group oriented by the *display* view quaternion, so
- * the group's local axes are always (screen right, screen up, out of screen).
- * That lets the field, grid and avatar be authored as flat 2D while still
- * occupying real world-space orientation, which is what makes the shift-rotate
- * swing read as genuine 3D rather than a texture swap.
- *
- * During rotation, the old terrain fades out while the new terrain fades in,
- * giving the user visual feedback about the orientation change.
+ * The terrain is now a 3D volume of chunks managed by useTerrainChunks.
+ * During normal viewing, the box culling shows only a thin slab along the
+ * current view plane. During rotation, the box expands to reveal depth layers,
+ * then collapses back when rotation completes.
  */
 
 import { Canvas } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS } from '../lib/space'
+import { GRID_RADIUS, stepFor } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
-import { useTerrainField } from '../hooks/useTerrainField'
-import type { TerrainField as TerrainFieldData } from '../hooks/useTerrainField'
+import { useTerrainChunks } from '../hooks/useTerrainChunks'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
-import { ShaderPointField } from './ShaderPointField'
+import { ShaderPointVolume } from './ShaderPointVolume'
 import { ViewRig } from './ViewRig'
+
+/**
+ * Compute box bounds in local grid space (same units as geometry positions).
+ *
+ * Geometry positions are `(cellIndex - halfSize) * step`, so the box bounds
+ * must match. During normal viewing, depth is ±0.5 step (thin slab).
+ * During rotation, depth expands to ±halfSize * step (full cube).
+ */
+function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
+  const isRotating = useCyberspace((s) => s.isRotating)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+
+  const step = Number(stepFor(scaleExp))
+  const halfGrid = GRID_RADIUS * step
+
+  // Thin slab: only the current plane (±0.5 step in depth).
+  const slabDepth = step * 0.5
+
+  // Full cube: entire grid depth.
+  const cubeDepth = halfGrid
+
+  const depth = isRotating ? cubeDepth : slabDepth
+
+  return {
+    boxMin: [-halfGrid, -halfGrid, -depth],
+    boxMax: [halfGrid, halfGrid, depth],
+  }
+}
 
 function World(): JSX.Element {
   const displayView = useCyberspace((s) => s.displayView)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const field = useTerrainField()
+  const chunks = useTerrainChunks()
   const axes = useMemo(() => useCyberspace.getState().axes(), [displayView])
 
-  // Track old terrain for fade-out and new terrain for fade-in during rotation.
-  // Use a counter instead of a boolean flag to handle rapid successive rotations.
-  // Each rotation increments the counter; each field change consumes one rotation.
-  const [oldField, setOldField] = useState<TerrainFieldData | null>(null)
-  const [newFieldFading, setNewFieldFading] = useState(false)
-  const prevFieldRef = useRef(field)
-  const prevDisplayViewRef = useRef(displayView)
-  const pendingRotations = useRef(0)
-
-  // A new displayView means finishRotation() just ran. Increment the counter
-  // so the next field change knows it's rotation-driven.
-  if (displayView !== prevDisplayViewRef.current) {
-    pendingRotations.current += 1
-    prevDisplayViewRef.current = displayView
-  }
-
-  useEffect(() => {
-    if (field !== prevFieldRef.current) {
-      if (pendingRotations.current > 0) {
-        setOldField(prevFieldRef.current)
-        setNewFieldFading(true)
-        pendingRotations.current -= 1
-      }
-      prevFieldRef.current = field
-    }
-  }, [field])
-
-  const handleOldFadeComplete = () => {
-    setOldField(null)
-  }
-
-  const handleNewFadeComplete = () => {
-    setNewFieldFading(false)
-  }
+  const { boxMin, boxMax } = useBoxBounds()
 
   return (
     <group quaternion={displayView}>
-      {/* Old terrain fading out */}
-      {oldField && (
-        <ShaderPointField
-          field={oldField}
-          fadeDirection="out"
-          fadeDuration={0.5}
-          onFadeComplete={handleOldFadeComplete}
-        />
-      )}
-
-      {/* Current terrain — fade in after rotation, full opacity otherwise */}
-      <ShaderPointField
-        field={field}
-        fadeDirection={newFieldFading ? 'in' : undefined}
-        fadeDuration={0.5}
-        onFadeComplete={newFieldFading ? handleNewFadeComplete : undefined}
+      <ShaderPointVolume
+        chunks={chunks}
+        boxMin={boxMin}
+        boxMax={boxMax}
       />
 
       <BoundaryGrid axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />
-      <Avatar axes={axes} field={field} />
+      <Avatar axes={axes} />
     </group>
   )
 }

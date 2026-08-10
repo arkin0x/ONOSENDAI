@@ -1,78 +1,88 @@
 /**
- * terrain.worker.ts — samples the terrain K field for the visible grid.
+ * terrain.worker.ts — computes terrain K values for 3D chunks.
  *
- * Each cell costs four SHA-256 evaluations, so a 49x49 grid is ~9.6k hashes.
- * That is quick but not free, and it is recomputed on every move, so it stays
- * off the main thread.
+ * Each chunk is a 3D grid of cells (default 49³). The worker maintains a
+ * per-coordinate cache to avoid recomputing K for cells we've already seen.
+ * This is critical because chunks overlap at their boundaries, and the avatar
+ * moves through space incrementally, so most cells are revisited.
+ *
+ * The cache is a Map keyed by "x:y:z:plane" strings. Memory is negligible
+ * (1 byte per cell), and the cache never goes stale because terrain is
+ * deterministic.
  */
 
 import { terrainK, type Plane } from 'cyberspace-core'
 
-export interface TerrainRequest {
+export interface ChunkRequest {
   id: number
-  /** Aligned world coordinate of the centre cell. */
+  chunkX: number
+  chunkY: number
+  chunkZ: number
   originX: bigint
   originY: bigint
   originZ: bigint
-  /** Which world axes map to the screen's right and up directions. */
-  rightAxis: 'x' | 'y' | 'z'
-  rightDir: number
-  upAxis: 'x' | 'y' | 'z'
-  upDir: number
   step: bigint
-  radius: number
   plane: Plane
+  size: number
 }
 
-export interface TerrainResponse {
+export interface ChunkResponse {
   id: number
-  radius: number
-  /** Row-major K values, (2 * radius + 1)^2 entries, row 0 = bottom of screen. */
+  chunkX: number
+  chunkY: number
+  chunkZ: number
   values: Uint8Array
   elapsedMs: number
 }
 
 const AXIS_MAX = (1n << 85n) - 1n
+const terrainCache = new Map<string, number>()
 
-self.onmessage = (event: MessageEvent<TerrainRequest>) => {
+self.onmessage = (event: MessageEvent<ChunkRequest>) => {
   const {
-    id, originX, originY, originZ,
-    rightAxis, rightDir, upAxis, upDir,
-    step, radius, plane,
+    id, chunkX, chunkY, chunkZ,
+    originX, originY, originZ,
+    step, plane, size,
   } = event.data
 
   const started = performance.now()
-  const size = radius * 2 + 1
-  const values = new Uint8Array(size * size)
+  const values = new Uint8Array(size * size * size)
+  const halfSize = Math.floor(size / 2)
 
-  for (let row = 0; row < size; row++) {
-    const upOffset = BigInt(row - radius) * step * BigInt(upDir)
-    for (let col = 0; col < size; col++) {
-      const rightOffset = BigInt(col - radius) * step * BigInt(rightDir)
+  for (let dz = 0; dz < size; dz++) {
+    for (let dy = 0; dy < size; dy++) {
+      for (let dx = 0; dx < size; dx++) {
+        const offsetX = BigInt(chunkX * size + dx - halfSize) * step
+        const offsetY = BigInt(chunkY * size + dy - halfSize) * step
+        const offsetZ = BigInt(chunkZ * size + dz - halfSize) * step
 
-      let x = originX
-      let y = originY
-      let z = originZ
-      if (rightAxis === 'x') x += rightOffset
-      else if (rightAxis === 'y') y += rightOffset
-      else z += rightOffset
-      if (upAxis === 'x') x += upOffset
-      else if (upAxis === 'y') y += upOffset
-      else z += upOffset
+        const x = originX + offsetX
+        const y = originY + offsetY
+        const z = originZ + offsetZ
 
-      // Outside the axis bounds there is no terrain to sample.
-      if (x < 0n || y < 0n || z < 0n || x > AXIS_MAX || y > AXIS_MAX || z > AXIS_MAX) {
-        values[row * size + col] = 255
-        continue
+        const idx = dz * size * size + dy * size + dx
+
+        if (x < 0n || y < 0n || z < 0n || x > AXIS_MAX || y > AXIS_MAX || z > AXIS_MAX) {
+          values[idx] = 255
+          continue
+        }
+
+        const cacheKey = `${x}:${y}:${z}:${plane}`
+        let k = terrainCache.get(cacheKey)
+        if (k === undefined) {
+          k = terrainK(x, y, z, plane)
+          terrainCache.set(cacheKey, k)
+        }
+        values[idx] = k
       }
-
-      values[row * size + col] = terrainK(x, y, z, plane)
     }
   }
 
-  const response: TerrainResponse = {
+  const response: ChunkResponse = {
     id,
-    radius,
+    chunkX,
+    chunkY,
+    chunkZ,
     values,
     elapsedMs: performance.now() - started,
   }

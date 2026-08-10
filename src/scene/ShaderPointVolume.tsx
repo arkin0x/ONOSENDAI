@@ -272,8 +272,8 @@ export function ShaderPointVolume({
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    const cursorOffset = useCyberspace.getState().cursorOffset()
-    mat.uniforms.uFocusPoint.value.set(cursorOffset[0], cursorOffset[1])
+    // Focus point is (0,0) since geometry is centered on avatar position.
+    mat.uniforms.uFocusPoint.value.set(0, 0)
 
     const camera = state.camera as any
     if (camera.zoom !== undefined) {

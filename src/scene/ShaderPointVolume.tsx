@@ -17,7 +17,6 @@ import {
   Float32BufferAttribute,
   Points,
   ShaderMaterial,
-  Vector2,
   Vector3,
 } from 'three'
 import { stepFor, type ViewAxes } from '../lib/space'
@@ -50,7 +49,6 @@ interface Props {
  * Uniforms:
  *   uBoxMin/uBoxMax — visible volume bounds (culls points outside)
  *   uTime — animation clock
- *   uFocusPoint — cursor/position for distance attenuation
  *   uPointSize — base point diameter in world units
  *   uZoom — camera zoom factor
  */
@@ -59,7 +57,6 @@ const vertexShader = /* glsl */ `
   uniform vec3 uBoxMin;
   uniform vec3 uBoxMax;
   uniform float uTime;
-  uniform vec2 uFocusPoint;
   uniform float uPointSize;
   uniform float uZoom;
 
@@ -77,12 +74,16 @@ const vertexShader = /* glsl */ `
 
     vK = aK;
 
+    // Radius is proportional to K, so K = 0 has no radius and disappears.
+    // Out-of-bounds cells arrive as K = 0 and vanish the same way, which is
+    // what makes deep zoom-outs readable: past scaleExp ~80 a step is a large
+    // fraction of the 2^85 axis, so most of the grid lies outside the universe
+    // and must read as nothing rather than as a field of flat dark terrain.
+    //
+    // No distance attenuation. It was a vignette centred on the avatar, which
+    // now dims one side of the view whenever the camera pans to the cursor.
     float kFactor = aK / 16.0;
-    float radius = uPointSize * (0.5 + 0.5 * kFactor);  // Increased base size
-
-    // Distance attenuation from focus point (2D screen projection).
-    float dist = length(position.xy - uFocusPoint);
-    radius *= 1.0 / (1.0 + 0.02 * dist);  // Reduced attenuation
+    float radius = uPointSize * kFactor;
 
     // Pulse for expensive terrain.
     if (kFactor > 0.7) {
@@ -333,7 +334,6 @@ export function ShaderPointVolume({
         uBoxMin:     { value: new Vector3(...boxMin) },
         uBoxMax:     { value: new Vector3(...boxMax) },
         uTime:       { value: 0 },
-        uFocusPoint: { value: new Vector2(0, 0) },
         uPointSize:  { value: 0.4 },
         uZoom:       { value: 8 },
       },
@@ -354,9 +354,6 @@ export function ShaderPointVolume({
     if (!mat.uniforms) return
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
-
-    // Focus point is (0,0) since geometry is centered on avatar position.
-    mat.uniforms.uFocusPoint.value.set(0, 0)
 
     const camera = state.camera as any
     if (camera.zoom !== undefined) {

@@ -18,7 +18,6 @@ import {
   Points,
   ShaderMaterial,
 } from 'three'
-import { createCircularTexture } from '../lib/circularTexture'
 import { PLANE_SIZE, type TerrainPlane } from '../hooks/useTerrainPlane'
 import { UNKNOWN } from '../workers/terrain.worker'
 import type { ViewWindow } from '../hooks/useViewWindow'
@@ -41,8 +40,10 @@ const vertexShader = /* glsl */ `
   uniform float uMinPx;
   uniform float uMaxTileFrac;
   uniform float uZoom;
+  uniform float uDpr;
 
   varying float vK;
+  varying float vPx;
 
   void main() {
     vK = aK;
@@ -68,17 +69,29 @@ const vertexShader = /* glsl */ `
       }
     }
 
-    gl_PointSize = px;
+    // gl_PointSize is in drawing-buffer pixels, but uZoom comes from the
+    // renderer's CSS size, so on a high-DPI display the two disagree and every
+    // dot lands at 1/dpr of its intended size against the tile.
+    vPx = px * uDpr;
+    gl_PointSize = vPx;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
 
-/** Fragment shader: a soft circle, coloured by K. Stops match TERRAIN_STOPS. */
+/**
+ * Fragment shader: a solid disc, coloured by K. Stops match TERRAIN_STOPS.
+ *
+ * The disc is computed from gl_PointCoord rather than sampled from a gradient
+ * texture. The texture faded linearly from the centre, so alpha was already
+ * half at half the radius and the visible dot measured about 4px inside a 9px
+ * sprite. Here the disc is solid to its rim with a fixed ~2px feathered edge,
+ * so what you see is the size that was asked for.
+ */
 const fragmentShader = /* glsl */ `
-  uniform sampler2D uTexture;
   uniform float uTime;
 
   varying float vK;
+  varying float vPx;
 
   vec3 terrainColor(float k) {
     vec3 c0  = vec3(0.024, 0.067, 0.110);
@@ -100,7 +113,12 @@ const fragmentShader = /* glsl */ `
   }
 
   void main() {
-    float alpha = texture2D(uTexture, gl_PointCoord).a;
+    // 0 at the centre, 1 at the sprite's rim.
+    float d = length(gl_PointCoord - vec2(0.5)) * 2.0;
+
+    // Feather a constant couple of pixels, whatever the dot's size.
+    float edge = clamp(2.0 / max(vPx, 1.0), 0.04, 0.5);
+    float alpha = 1.0 - smoothstep(1.0 - edge, 1.0, d);
     if (alpha < 0.01) discard;
 
     vec3 color = terrainColor(vK);
@@ -161,23 +179,20 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => geometry.dispose(), [geometry])
 
-  const circularTexture = useMemo(() => createCircularTexture(64), [])
-  useEffect(() => () => circularTexture.dispose(), [circularTexture])
-
   const material = useMemo(() => new ShaderMaterial({
     vertexShader,
     fragmentShader,
     uniforms: {
-      uTexture: { value: circularTexture },
       uTime: { value: 0 },
       // K = 1 is a 6px dot; K = 16 fills half a tile.
       uMinPx: { value: 6 },
       uMaxTileFrac: { value: 0.5 },
       uZoom: { value: 8 },
+      uDpr: { value: 1 },
     },
     transparent: true,
     depthWrite: false,
-  }), [circularTexture])
+  }), [])
 
   useEffect(() => () => material.dispose(), [material])
 
@@ -191,6 +206,7 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
 
     const camera = state.camera as unknown as { zoom?: number }
     if (camera.zoom !== undefined) mat.uniforms.uZoom.value = camera.zoom
+    mat.uniforms.uDpr.value = state.gl.getPixelRatio()
   })
 
   return (

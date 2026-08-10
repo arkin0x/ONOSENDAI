@@ -15,9 +15,10 @@ import { terrainK, type Plane } from 'cyberspace-core'
 
 export interface ChunkRequest {
   id: number
-  chunkX: number
-  chunkY: number
-  chunkZ: number
+  /** Chunk lattice coordinates. BigInt: at 85-bit positions these exceed 2^53. */
+  chunkX: bigint
+  chunkY: bigint
+  chunkZ: bigint
   originX: bigint
   originY: bigint
   originZ: bigint
@@ -28,9 +29,9 @@ export interface ChunkRequest {
 
 export interface ChunkResponse {
   id: number
-  chunkX: number
-  chunkY: number
-  chunkZ: number
+  chunkX: bigint
+  chunkY: bigint
+  chunkZ: bigint
   values: Uint8Array
   elapsedMs: number
 }

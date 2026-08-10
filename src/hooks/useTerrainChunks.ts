@@ -32,9 +32,9 @@ export const CHUNK_SIZE = GRID_RADIUS * 2 + 1
 const CHUNK_RADIUS = 1
 
 interface ChunkData {
-  chunkX: number
-  chunkY: number
-  chunkZ: number
+  chunkX: bigint
+  chunkY: bigint
+  chunkZ: bigint
   values: Uint8Array
   receivedAt: number
 }
@@ -43,39 +43,39 @@ export interface ChunkMap {
   [key: string]: ChunkData
 }
 
-function chunkKey(cx: number, cy: number, cz: number): string {
+function chunkKey(cx: bigint, cy: bigint, cz: bigint): string {
   return `${cx},${cy},${cz}`
 }
 
 /**
  * Compute chunk coordinates from a world position and scale exponent.
- * Uses BigInt division to avoid precision loss on 85-bit coordinates.
+ *
+ * These stay BigInt all the way through. Collapsing them to Number is what
+ * broke the loader: at a real 85-bit coordinate the quotient lands near 4e23,
+ * where consecutive doubles are ~6.7e7 apart, so every neighbouring chunk
+ * index rounded to the same value. The keys collided, the needed set held one
+ * entry instead of 27, and a single chunk was ever requested, which is why
+ * only one terrain worker had anything to do.
+ *
+ * Coordinates are unsigned (0 .. 2^85-1), so BigInt truncation is also floor.
  */
 function worldToChunk(
   worldX: bigint, worldY: bigint, worldZ: bigint,
   scaleExp: number,
-): [number, number, number] {
+): [bigint, bigint, bigint] {
   const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)
-  return [
-    Math.floor(Number(worldX / chunkStep)),
-    Math.floor(Number(worldY / chunkStep)),
-    Math.floor(Number(worldZ / chunkStep)),
-  ]
+  return [worldX / chunkStep, worldY / chunkStep, worldZ / chunkStep]
 }
 
 /**
  * Compute the world-space origin of a chunk (the position of its center cell).
  */
 function chunkToWorld(
-  cx: number, cy: number, cz: number,
+  cx: bigint, cy: bigint, cz: bigint,
   scaleExp: number,
 ): [bigint, bigint, bigint] {
   const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)
-  return [
-    BigInt(cx) * chunkStep,
-    BigInt(cy) * chunkStep,
-    BigInt(cz) * chunkStep,
-  ]
+  return [cx * chunkStep, cy * chunkStep, cz * chunkStep]
 }
 
 let chunkRequestId = 0
@@ -154,9 +154,9 @@ export function useTerrainChunks(): ChunkMap {
     for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
       for (let dy = -CHUNK_RADIUS; dy <= CHUNK_RADIUS; dy++) {
         for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
-          const cx = focusCX + dx
-          const cy = focusCY + dy
-          const cz = focusCZ + dz
+          const cx = focusCX + BigInt(dx)
+          const cy = focusCY + BigInt(dy)
+          const cz = focusCZ + BigInt(dz)
           const key = chunkKey(cx, cy, cz)
           needed.add(key)
 

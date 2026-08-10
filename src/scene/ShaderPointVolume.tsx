@@ -20,17 +20,19 @@ import {
   Vector2,
   Vector3,
 } from 'three'
-import { stepFor } from '../lib/space'
-import { useCyberspace } from '../store/useCyberspace'
+import { stepFor, type ViewAxes } from '../lib/space'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { createCircularTexture } from '../lib/circularTexture'
 import type { ChunkMap, } from '../hooks/useTerrainChunks'
 import { CHUNK_SIZE } from '../hooks/useTerrainChunks'
 
 interface Props {
   chunks: ChunkMap
-  /** Minimum corner of the visible box in local grid space. */
+  /** Screen-axis mapping for the current view. */
+  axes: ViewAxes
+  /** Minimum corner of the visible box, screen axes, in cell units. */
   boxMin: [number, number, number]
-  /** Maximum corner of the visible box in local grid space. */
+  /** Maximum corner of the visible box, screen axes, in cell units. */
   boxMax: [number, number, number]
   /** Fade animation direction and duration. */
   fadeDirection?: 'in' | 'out'
@@ -152,34 +154,56 @@ function axisRange(base: number, minCell: number, maxCell: number): [number, num
   return lo > hi ? null : [lo, hi]
 }
 
+const AXIS_INDEX = { x: 0, y: 1, z: 2 } as const
+
 /**
  * Flatten the chunk cells that fall inside the box into a single geometry.
  *
- * Only in-box cells are emitted. The shader also culls against the box, but
- * that happens after every vertex has been allocated and uploaded, so it saves
- * nothing on its own: with the default 5³ chunk load and a ±GRID_RADIUS box,
- * roughly 0.8% of the loaded cells are ever visible. Filtering here is what
- * keeps the buffer (and the GPU upload) proportional to what is on screen.
+ * Coordinates follow the same convention as the rest of the scene:
+ *
+ * - **Cell units.** cellDelta divides by step, so BoundaryGrid, Cursor and
+ *   Avatar all draw at one unit per cell. Scaling positions by step instead
+ *   made the terrain diverge from the grid by 2^scaleExp on any zoom.
+ * - **Anchored to the avatar's aligned cell**, not to the chunk lattice point.
+ *   A chunk centre is at cx * CHUNK_SIZE cells while the avatar sits anywhere
+ *   in the 49 cells above it, so centring on the chunk left the avatar drifting
+ *   off the rendered patch once it was more than GRID_RADIUS cells in.
+ * - **Mapped through `axes`.** The world group's quaternion and the camera's
+ *   cancel exactly, so `view` has no geometric effect and rotation is entirely
+ *   the axis remapping every other component applies. Emitting raw x/y/z
+ *   pinned cyberspace X to screen-right through every rotation.
+ *
+ * Only in-box cells are emitted. The shader culls against the box too, but that
+ * happens after every vertex is allocated and uploaded, so it saves nothing on
+ * its own. Filtering here keeps the buffer proportional to what is on screen.
  */
 function buildGeometryFromChunks(
   chunks: ChunkMap,
-  scaleExp: number,
-  focusChunkX: number,
-  focusChunkY: number,
-  focusChunkZ: number,
+  originCell: [bigint, bigint, bigint],
+  axes: ViewAxes,
   boxMin: [number, number, number],
   boxMax: [number, number, number],
 ): BufferGeometry {
   const chunkList = Object.values(chunks)
-  const step = Number(stepFor(scaleExp))
   const halfSize = Math.floor(CHUNK_SIZE / 2)
+  const chunkSizeBI = BigInt(CHUNK_SIZE)
 
-  // Box bounds in cell units, matching the geometry's own units.
-  const minCell = [boxMin[0] / step, boxMin[1] / step, boxMin[2] / step]
-  const maxCell = [boxMax[0] / step, boxMax[1] / step, boxMax[2] / step]
+  // The box is expressed on screen axes; translate it into per-world-axis
+  // bounds on the cell delta, undoing each screen axis's direction flip.
+  const loByAxis = [-Infinity, -Infinity, -Infinity]
+  const hiByAxis = [Infinity, Infinity, Infinity]
+  const screen = [axes.right, axes.up, axes.out]
+  for (let s = 0; s < 3; s++) {
+    const idx = AXIS_INDEX[screen[s].axis]
+    const [lo, hi] = screen[s].dir === 1
+      ? [boxMin[s], boxMax[s]]
+      : [-boxMax[s], -boxMin[s]]
+    loByAxis[idx] = lo
+    hiByAxis[idx] = hi
+  }
 
-  // Per-chunk in-box ranges, computed once so we can size the buffers exactly
-  // and then iterate only the cells we keep.
+  // Per-chunk in-box ranges, computed once so the buffers can be sized exactly
+  // and the fill pass touches only the cells it keeps.
   const visible: Array<{
     chunk: ChunkMap[string]
     baseX: number; baseY: number; baseZ: number
@@ -188,13 +212,15 @@ function buildGeometryFromChunks(
   let totalCells = 0
 
   for (const chunk of chunkList) {
-    const baseX = (chunk.chunkX - focusChunkX) * CHUNK_SIZE - halfSize
-    const baseY = (chunk.chunkY - focusChunkY) * CHUNK_SIZE - halfSize
-    const baseZ = (chunk.chunkZ - focusChunkZ) * CHUNK_SIZE - halfSize
+    // Cell delta of this chunk's first cell from the avatar's aligned cell.
+    // Both terms are huge, their difference is small, so subtract in BigInt.
+    const baseX = Number(chunk.chunkX * chunkSizeBI - originCell[0]) - halfSize
+    const baseY = Number(chunk.chunkY * chunkSizeBI - originCell[1]) - halfSize
+    const baseZ = Number(chunk.chunkZ * chunkSizeBI - originCell[2]) - halfSize
 
-    const rx = axisRange(baseX, minCell[0], maxCell[0])
-    const ry = axisRange(baseY, minCell[1], maxCell[1])
-    const rz = axisRange(baseZ, minCell[2], maxCell[2])
+    const rx = axisRange(baseX, loByAxis[0], hiByAxis[0])
+    const ry = axisRange(baseY, loByAxis[1], hiByAxis[1])
+    const rz = axisRange(baseZ, loByAxis[2], hiByAxis[2])
     if (!rx || !ry || !rz) continue
 
     totalCells += (rx[1] - rx[0] + 1) * (ry[1] - ry[0] + 1) * (rz[1] - rz[0] + 1)
@@ -204,17 +230,24 @@ function buildGeometryFromChunks(
   const positions = new Float32Array(totalCells * 3)
   const kValues = new Float32Array(totalCells)
 
+  const ri = AXIS_INDEX[axes.right.axis], rd = axes.right.dir
+  const ui = AXIS_INDEX[axes.up.axis], ud = axes.up.dir
+  const oi = AXIS_INDEX[axes.out.axis], od = axes.out.dir
+
   let vertexIdx = 0
   for (const { chunk, baseX, baseY, baseZ, rx, ry, rz } of visible) {
     for (let dz = rz[0]; dz <= rz[1]; dz++) {
+      const dvz = baseZ + dz
       for (let dy = ry[0]; dy <= ry[1]; dy++) {
+        const dvy = baseY + dy
         const rowIdx = dz * CHUNK_SIZE * CHUNK_SIZE + dy * CHUNK_SIZE
         for (let dx = rx[0]; dx <= rx[1]; dx++) {
+          const dvx = baseX + dx
           const k = chunk.values[rowIdx + dx]
 
-          positions[vertexIdx * 3]     = (baseX + dx) * step
-          positions[vertexIdx * 3 + 1] = (baseY + dy) * step
-          positions[vertexIdx * 3 + 2] = (baseZ + dz) * step
+          positions[vertexIdx * 3]     = (ri === 0 ? dvx : ri === 1 ? dvy : dvz) * rd
+          positions[vertexIdx * 3 + 1] = (ui === 0 ? dvx : ui === 1 ? dvy : dvz) * ud
+          positions[vertexIdx * 3 + 2] = (oi === 0 ? dvx : oi === 1 ? dvy : dvz) * od
           kValues[vertexIdx] = k === 255 ? 0 : k
 
           vertexIdx++
@@ -232,6 +265,7 @@ function buildGeometryFromChunks(
 
 export function ShaderPointVolume({
   chunks,
+  axes,
   boxMin,
   boxMax,
   fadeDirection,
@@ -242,15 +276,13 @@ export function ShaderPointVolume({
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const position = useCyberspace((s) => s.position)
 
-  // Always anchor geometry to avatar position, not cursor.
-  // Must match useTerrainChunks logic for consistent geometry.
-  const focus = position
-
-  // Compute focus chunk coordinates (for geometry centering).
-  const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)
-  const focusChunkX = Math.floor(Number(focus.x / chunkStep))
-  const focusChunkY = Math.floor(Number(focus.y / chunkStep))
-  const focusChunkZ = Math.floor(Number(focus.z / chunkStep))
+  // Anchor to the avatar's aligned cell, as a cell index per world axis. The
+  // aligned origin is a multiple of step, so the division is exact.
+  const step = stepFor(scaleExp)
+  const origin = alignedOrigin(position, scaleExp)
+  const originX = origin.x / step
+  const originY = origin.y / step
+  const originZ = origin.z / step
 
   // Fade animation state.
   const fadeProgress = useRef(1)
@@ -278,10 +310,10 @@ export function ShaderPointVolume({
   const [bx1, by1, bz1] = boxMax
   const geometry = useMemo(() => {
     return buildGeometryFromChunks(
-      chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ,
+      chunks, [originX, originY, originZ], axes,
       [bx0, by0, bz0], [bx1, by1, bz1],
     )
-  }, [chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ, bx0, by0, bz0, bx1, by1, bz1])
+  }, [chunks, originX, originY, originZ, axes, bx0, by0, bz0, bx1, by1, bz1])
 
   // Three.js buffers live on the GPU and are not garbage collected. Dropping
   // the reference leaks them, so release each geometry when it is replaced.

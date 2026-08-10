@@ -8,7 +8,7 @@
 import { Canvas } from '@react-three/fiber'
 import { useMemo } from 'react'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, stepFor } from '../lib/space'
+import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainChunks } from '../hooks/useTerrainChunks'
 import { Avatar } from './Avatar'
@@ -20,26 +20,17 @@ import { ShaderPointVolume } from './ShaderPointVolume'
 import { ViewRig } from './ViewRig'
 
 /**
- * Compute box bounds in local grid space (same units as geometry positions).
+ * Visible box, on screen axes, in cell units.
  *
- * Geometry positions are `(cellIndex - halfSize) * step`, so the box bounds
- * must match. The box shows the full grid depth.
+ * The scene draws one unit per cell at every scale, so these bounds are the
+ * grid radius directly and do not vary with scaleExp. The box shows the full
+ * grid depth.
  */
 function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
-  const scaleExp = useCyberspace((s) => s.scaleExp)
-
-  return useMemo(() => {
-    const step = Number(stepFor(scaleExp))
-    const halfGrid = GRID_RADIUS * step
-
-    // Full cube: entire grid depth.
-    const cubeDepth = halfGrid
-
-    return {
-      boxMin: [-halfGrid, -halfGrid, -cubeDepth] as [number, number, number],
-      boxMax: [halfGrid, halfGrid, cubeDepth] as [number, number, number],
-    }
-  }, [scaleExp])
+  return useMemo(() => ({
+    boxMin: [-GRID_RADIUS, -GRID_RADIUS, -GRID_RADIUS] as [number, number, number],
+    boxMax: [GRID_RADIUS, GRID_RADIUS, GRID_RADIUS] as [number, number, number],
+  }), [])
 }
 
 function World(): JSX.Element {
@@ -54,6 +45,7 @@ function World(): JSX.Element {
     <group quaternion={view}>
       <ShaderPointVolume
         chunks={chunks}
+        axes={axes}
         boxMin={boxMin}
         boxMax={boxMax}
       />

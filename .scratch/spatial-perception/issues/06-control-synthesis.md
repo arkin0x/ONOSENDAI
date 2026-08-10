@@ -15,6 +15,22 @@ cursor along the invisible out-axis, `C` snaps to canonical, `Tab`/`Esc` for vie
 history. On mobile: tap-to-cursor plus a hamburger for panels. It is precise and
 entirely modal — nothing about it feels like moving through a place.
 
+**Ticket 01 found the root cause, and it reframes this ticket.** v1's precision
+did not fail for want of tuning: **there was never a position command at all.**
+The entire input surface was a *direction* (a quaternion) plus a *throttle* (a
+proof-of-work difficulty exponent on the mouse wheel). Nothing in v1 accepted a
+destination coordinate. Velocity was quantized to powers of two while position
+was continuous, so no throttle value and no combination of them could mean "move
+exactly one gibson", and there was no brake — `freeze()` and `hop()` shipped as
+`console.log` stubs, and the snap-to-rest constant `ZERO_VELOCITY` was only ever
+applied to the increment, never to accumulated velocity.
+
+The sharpest detail: **v1 already had a working raycast-cursor-with-snap**, in
+`Build/ShardEditor.tsx:57-76`, raycasting an invisible plane and snapping to the
+nearest 0.1. It was never connected to navigation. The map's own raycaster exists
+with its `intersectObject` call commented out (`Map/SectorGrid.tsx:93-99`), which
+is why you could see everything on the map and act on none of it.
+
 Decide the control model, given whatever spatial model ticket 03 chose:
 
 - **Is there a traversal mode at all?** Continuous movement is what made v1 feel
@@ -33,6 +49,11 @@ Decide the control model, given whatever spatial model ticket 03 chose:
   model still want discrete rotation?
 - **Mobile.** What survives without a keyboard, and is a phone a first-class
   target or a viewer?
+- **Mode switching.** v1 had five modes, three of them spatial: LOCAL at 1 unit
+  per gibson, SECTOR at ~2^30, GLOBAL at ~3.9e23. You switched by clicking a
+  word, which **unmounted the entire Canvas** — no transition, no shared camera,
+  and 10^9x scale jumps with nothing showing the relationship. If the answer here
+  is multi-modal, the transition is the design problem, not the modes.
 
 Deliverable: decided control scheme, merged and browser-verified. Nothing about
 the existing bindings is sacred; the map's Notes make the whole current interface

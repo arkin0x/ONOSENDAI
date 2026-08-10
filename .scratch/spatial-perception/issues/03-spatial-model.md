@@ -2,7 +2,7 @@
 
 Type: prototype
 Status: open
-Blocked by: 01, 02
+Blocked by: —
 
 ## Question
 
@@ -28,6 +28,17 @@ choose by looking. Candidates, not a closed list:
   transition. v1 had exactly this split (Cyberspace view plus Map view); ticket
   01 reports whether it worked.
 
+**Correction from ticket 01, read this before choosing.** v1's LOCAL first-person
+view was *not* the immersive thing memory says it was: it was black space plus
+sector wireframes, with **effectively no parallax**, because the nearest geometry
+was ~5e8 units away. The sky-grid, ground-grid and Black Sun treatment lived only
+in the GLOBAL map and the intro flight. So v1's embodiment did **not** come from
+perspective projection. It came from bloom over black on line geometry, fog to
+pure black, the sector rendered as a room you are inside, world-scale labels on
+that room's wall, and a visible body. **Perspective is not the variable to test;
+scenery and light are.** A perspective camera with nothing near you is just as
+empty as an orthographic one.
+
 Constraints and traps:
 
 - **The camera rig is orthographic-only today.** The world group's quaternion and
@@ -40,6 +51,18 @@ Constraints and traps:
   count and must be costed before it is chosen, not after.
 - **Precision is non-negotiable.** Whatever wins must still let you land on an
   exact gibson and see exactly what the crossing costs. That is what v1 lost.
+- **Float32 is a hard wall at scale.** v1 put sector wireframe vertices at ±2^29
+  in a Float32Array, where the ULP is **32 gibsons** — the only geometry you could
+  measure yourself against was quantized to 32-gibson steps. Combined with near
+  0.1 / far 2^30 and no `logarithmicDepthBuffer`, one gibson was both sub-pixel
+  and sub-depth-quantum. Any treatment that draws distant structure must keep
+  vertices near the origin (v1's map did this with `relativeSectorIndex`; v2
+  already draws relative to the avatar's aligned cell) and must state its depth
+  buffer plan.
+- **Do not make the camera a rigid slave to the avatar.** v1 hard-set camera
+  position every frame with `copy()` at a fixed 5-unit offset, so there was no
+  independent viewpoint and therefore **no way to look at a place without going
+  there** — which is precisely the affordance a cursor needs.
 - Judge on comprehension *and* style, per the map's Notes.
 
 Deliverable: a decision recorded in the Answer, the winning treatment merged and

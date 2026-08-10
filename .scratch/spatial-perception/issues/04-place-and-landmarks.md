@@ -35,6 +35,14 @@ Decide what furniture the world needs, and build it:
 - **Destination.** When you aim the cursor somewhere, what tells you about the
   place you are aiming at, before you commit?
 
+Ticket 01 found four landmark techniques in v1 worth taking directly: the sector
+name rendered **on the sector wall at world scale** (`fontSize = 2^24 + 2^23`)
+with `generateSectorName` turning an integer triple into something pronounceable;
+the current cell drawn unfogged and full-size while neighbours are fogged and
+shrunk to 0.9, which reads as "inside" without explanation; non-attenuating point
+sprites as beacons visible from anywhere in a billion-unit volume; and a labelled
+wireframe volume showing the extent of what you have already looked at.
+
 Whatever ticket 03 chose constrains the form of all of this — landmarks in a
 flat slice work differently from landmarks in a perspective volume.
 

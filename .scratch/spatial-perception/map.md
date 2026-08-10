@@ -58,6 +58,18 @@ for decisions, `/research` for AFK fact-finding.
 
 <!-- one line per closed ticket: gist + link -->
 
+- [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
+  — Two findings reframe the map. **Embodiment did not come from perspective**:
+  v1's first-person view was black space plus distant wireframes with effectively
+  no parallax, and the sky-grid/Black-Sun imagery lived only in the map and intro.
+  What produced the feeling was bloom over black on line geometry, fog, the sector
+  drawn as a room you are inside, world-scale labels on its wall, and a visible
+  body. **Precision died because there was never a position command**: input was a
+  direction quaternion plus a proof-of-work throttle, velocity was quantized to
+  powers of two while position was continuous, there was no brake, and the
+  working raycast-cursor-with-snap that existed in the shard editor was never
+  wired to navigation. Ends with 17 things to steal and 16 that must not return.
+
 - [02 — What must a spatial client make perceivable?](issues/02-protocol-perception-inventory.md)
   — Ranked inventory of the eight things the protocol needs made perceivable.
   The pick: **aligned-subtree containment, walls with magnitude, and the black

@@ -50,6 +50,11 @@ capped at 16, so ~65,536 pairings or about 100ms, yet it occupies the entire
 visual field, while LCA — the dominant cost by many orders of magnitude — gets
 thin lines. Terrain is over-served relative to its weight.
 
+Ticket 01 notes v1's one good answer here: it showed distance to the nearest
+hyperjump in gibsons **and** a d/h/m/s ETA at current speed. Cost expressed as
+*time* was the only place v1 answered "what does crossing to it cost", and time
+is a unit people already have intuition for.
+
 Resist solving this with a number in a panel; that is the CLI's job and it
 already does it. The test is whether someone who has never read §4.4 can look at
 the screen and correctly predict which of two single-gibson steps costs more.

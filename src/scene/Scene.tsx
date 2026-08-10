@@ -13,6 +13,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainChunks } from '../hooks/useTerrainChunks'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
+import { ClickPlane } from './ClickPlane'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
 import { ShaderPointVolume } from './ShaderPointVolume'
@@ -27,16 +28,18 @@ import { ViewRig } from './ViewRig'
 function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
-  const step = Number(stepFor(scaleExp))
-  const halfGrid = GRID_RADIUS * step
+  return useMemo(() => {
+    const step = Number(stepFor(scaleExp))
+    const halfGrid = GRID_RADIUS * step
 
-  // Full cube: entire grid depth.
-  const cubeDepth = halfGrid
+    // Full cube: entire grid depth.
+    const cubeDepth = halfGrid
 
-  return {
-    boxMin: [-halfGrid, -halfGrid, -cubeDepth],
-    boxMax: [halfGrid, halfGrid, cubeDepth],
-  }
+    return {
+      boxMin: [-halfGrid, -halfGrid, -cubeDepth] as [number, number, number],
+      boxMax: [halfGrid, halfGrid, cubeDepth] as [number, number, number],
+    }
+  }, [scaleExp])
 }
 
 function World(): JSX.Element {
@@ -57,6 +60,7 @@ function World(): JSX.Element {
 
       <BoundaryGrid axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <ClickPlane axes={axes} />
       <Cursor axes={axes} />
       <Avatar axes={axes} />
     </group>

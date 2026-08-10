@@ -528,6 +528,7 @@ kbd {
   .hud {
     flex-direction: column;
     overflow-y: auto;
+    padding-bottom: 100px; /* Clear the hamburger menu button */
   }
 
   .hud__col {
@@ -535,6 +536,18 @@ kbd {
     max-height: none;
     overflow: visible;
   }
+}
+
+/*
+ * While the mobile menu is open the HUD is the scroll container, so it has to
+ * receive events across its whole area: .hud is pointer-events: none by
+ * default and only .panel opts back in, which left the gaps between panels
+ * unable to scroll. Scoped to the open menu rather than the 900px media query,
+ * because useIsMobile switches at 768px and a blanket rule would make the HUD
+ * swallow grid clicks on desktop windows between the two widths.
+ */
+.hud--menu {
+  pointer-events: auto;
 }
 
 /* ---------- Links panel ---------- */
@@ -560,3 +573,78 @@ kbd {
   color: var(--fg);
   text-decoration: underline;
 }
+
+/* ---------- Mobile hamburger menu ---------- */
+
+.hamburger-menu {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(6, 14, 22, 0.85);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: background 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.hamburger-menu:hover {
+  background: rgba(6, 14, 22, 0.95);
+  transform: scale(1.05);
+}
+
+.hamburger-menu:active {
+  transform: scale(0.95);
+}
+
+.hamburger-icon {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 24px;
+  height: 18px;
+  position: relative;
+}
+
+.hamburger-icon span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--fg);
+  border-radius: 1px;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.hamburger-icon--open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+
+.hamburger-icon--open span:nth-child(2) {
+  opacity: 0;
+}
+
+.hamburger-icon--open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* ---------- Mobile overlay (dims grid when panels are open) ---------- */
+
+/*
+ * Swallows taps so the grid cannot be touched while the panels are open.
+ * Sits below .hud (z-index 1) and .hamburger-menu (100), so both stay live.
+ */
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 13, 0.75);
+  pointer-events: auto;
+  z-index: 0;
+}
+

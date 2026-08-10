@@ -20,8 +20,16 @@ import type { Plane } from 'cyberspace-core'
 /** Cells per chunk axis. Matches the visible grid size. */
 export const CHUNK_SIZE = GRID_RADIUS * 2 + 1
 
-/** How many chunks in each direction from the focus chunk to keep loaded. */
-const CHUNK_RADIUS = 2
+/**
+ * How many chunks in each direction from the focus chunk to keep loaded.
+ *
+ * The visible box spans ±GRID_RADIUS cells, so it straddles at most two chunks
+ * per axis; radius 1 (27 chunks) already keeps a full chunk of prefetch in
+ * every direction. Radius 2 is 125 chunks, which is 14.7M cells and ~59M
+ * terrainK evaluations on load for terrain that can never come into view
+ * before eviction. Raise only if movement outruns the loader.
+ */
+const CHUNK_RADIUS = 1
 
 interface ChunkData {
   chunkX: number
@@ -71,6 +79,7 @@ function chunkToWorld(
 }
 
 let chunkRequestId = 0
+let workerIdx = 0
 
 export function useTerrainChunks(): ChunkMap {
   const position = useCyberspace((s) => s.position)
@@ -82,6 +91,7 @@ export function useTerrainChunks(): ChunkMap {
   const chunksRef = useRef<ChunkMap>({})
   const pendingRef = useRef<Set<string>>(new Set())
   const listenersAttached = useRef(false)
+  const flushHandle = useRef<number | null>(null)
 
   // Focus point: always the avatar position, not the cursor.
   // The terrain is anchored to where you stand, not where you're aiming.
@@ -89,6 +99,21 @@ export function useTerrainChunks(): ChunkMap {
 
   // Chunk coordinates of the focus point.
   const [focusCX, focusCY, focusCZ] = worldToChunk(focus.x, focus.y, focus.z, scaleExp)
+
+  // Publish accumulated chunks at most once per frame. Chunks land one message
+  // at a time, and every publish rebuilds the point geometry, so setting state
+  // per arrival rebuilds it once per chunk on load instead of once per frame.
+  const scheduleFlush = () => {
+    if (flushHandle.current !== null) return
+    flushHandle.current = requestAnimationFrame(() => {
+      flushHandle.current = null
+      setChunks({ ...chunksRef.current })
+    })
+  }
+
+  useEffect(() => () => {
+    if (flushHandle.current !== null) cancelAnimationFrame(flushHandle.current)
+  }, [])
 
   // Attach message listeners to all terrain workers once.
   useEffect(() => {
@@ -111,10 +136,8 @@ export function useTerrainChunks(): ChunkMap {
         chunksRef.current[key] = data
         pendingRef.current.delete(key)
 
-        console.log(`[useTerrainChunks] Received chunk (${chunkX}, ${chunkY}, ${chunkZ}), total chunks: ${Object.keys(chunksRef.current).length}`)
-
-        // Trigger re-render with new chunk data.
-        setChunks({ ...chunksRef.current })
+        // Trigger re-render with new chunk data, coalesced to one per frame.
+        scheduleFlush()
       })
     }
   }, [])
@@ -122,7 +145,6 @@ export function useTerrainChunks(): ChunkMap {
   // Request missing chunks and evict distant ones.
   useEffect(() => {
     const workers = getTerrainWorkers()
-    let workerIdx = 0
 
     const needed = new Set<string>()
 
@@ -143,10 +165,12 @@ export function useTerrainChunks(): ChunkMap {
             const id = ++chunkRequestId
             const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
 
-            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIdx % workers.length}`)
+            // Use persistent workerIdx across renders for true round-robin
+            const workerIndex = workerIdx % workers.length
+            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIndex}`)
 
             // Round-robin dispatch across worker pool.
-            workers[workerIdx % workers.length].postMessage({
+            workers[workerIndex].postMessage({
               id,
               chunkX: cx,
               chunkY: cy,

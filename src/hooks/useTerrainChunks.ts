@@ -71,6 +71,7 @@ function chunkToWorld(
 }
 
 let chunkRequestId = 0
+let workerIdx = 0
 
 export function useTerrainChunks(): ChunkMap {
   const position = useCyberspace((s) => s.position)
@@ -125,7 +126,6 @@ export function useTerrainChunks(): ChunkMap {
   // Request missing chunks and evict distant ones.
   useEffect(() => {
     const workers = getTerrainWorkers()
-    let workerIdx = 0
 
     const needed = new Set<string>()
 
@@ -146,10 +146,12 @@ export function useTerrainChunks(): ChunkMap {
             const id = ++chunkRequestId
             const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
 
-            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIdx % workers.length}`)
+            // Use persistent workerIdx across renders for true round-robin
+            const workerIndex = workerIdx % workers.length
+            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIndex}`)
 
             // Round-robin dispatch across worker pool.
-            workers[workerIdx % workers.length].postMessage({
+            workers[workerIndex].postMessage({
               id,
               chunkX: cx,
               chunkY: cy,

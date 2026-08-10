@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Prevent caching: always fetch fresh build -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    
     <title>ONOSENDAI V2 — Cyberspace Explorer</title>
     <meta name="description" content="Spatial explorer for the Cyberspace Protocol v2." />
     
@@ -14,6 +20,17 @@
     <link rel="shortcut icon" href="/favicon.ico?v=1">
     <meta name="msapplication-TileColor" content="#000000">
     <meta name="theme-color" content="#000000">
+    
+    <!-- Unregister any existing service workers -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister();
+          }
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

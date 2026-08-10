@@ -11,6 +11,14 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    // Add build hash to filenames for cache busting
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+      },
+    },
   },
   worker: {
     format: 'es',

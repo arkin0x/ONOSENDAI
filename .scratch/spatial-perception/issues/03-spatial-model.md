@@ -1,7 +1,7 @@
 # 03 — What is the spatial model?
 
 Type: prototype
-Status: open
+Status: claimed
 Blocked by: —
 
 ## Question
@@ -67,3 +67,21 @@ Constraints and traps:
 
 Deliverable: a decision recorded in the Answer, the winning treatment merged and
 browser-verified, and the rejected treatments described with why they lost.
+
+## Prototype
+
+Branch `prototype/03-spatial-model` — three variants on the existing route via
+`?variant=A|B|C`, floating switcher bottom-centre, dev-only. Screenshots at
+`/data/Sync/agents/claude/shots/v03-{A,B,C}.png`.
+
+- **A — light only.** Today's flat ortho slice plus v1's bloom (threshold 0.001,
+  levels 9) and fog to black. No geometry change.
+- **B — rooms.** A plus the aligned-subtree nest as nested wireframe boxes,
+  brightness rising with height above the scale floor via `boundaryIntensity`.
+- **C — perspective room.** B with a perspective rig at 60 units, fov 60.
+
+All three render 2401/2401 terrain with zero page errors.
+
+**Caveat on C:** the camera sits 60 units back, so C tests *perspective from
+outside the structure*, not from within it. v1's was a chase camera close to the
+avatar. C as built does not settle whether an inside-the-room perspective works.

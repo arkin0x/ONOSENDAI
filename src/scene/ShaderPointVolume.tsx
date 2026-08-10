@@ -207,9 +207,13 @@ export function ShaderPointVolume({
   const pointsRef = useRef<Points>(null)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
 
-  // Always anchor geometry to avatar position, not cursor.
-  const focus = position
+  // Focus point: cursor when active, otherwise avatar position.
+  // Must match useTerrainChunks logic for consistent geometry.
+  const samePosition = (a: typeof position, b: typeof position) =>
+    a.x === b.x && a.y === b.y && a.z === b.z
+  const focus = samePosition(cursor, position) ? position : cursor
 
   // Compute focus chunk coordinates (for geometry centering).
   const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)
@@ -272,8 +276,14 @@ export function ShaderPointVolume({
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    // Focus point is (0,0) since geometry is centered on avatar position.
-    mat.uniforms.uFocusPoint.value.set(0, 0)
+    // Focus point: cursor offset when active, otherwise (0,0).
+    const isActive = !samePosition(cursor, position)
+    if (isActive) {
+      const cursorOffset = useCyberspace.getState().cursorOffset()
+      mat.uniforms.uFocusPoint.value.set(cursorOffset[0], cursorOffset[1])
+    } else {
+      mat.uniforms.uFocusPoint.value.set(0, 0)
+    }
 
     const camera = state.camera as any
     if (camera.zoom !== undefined) {

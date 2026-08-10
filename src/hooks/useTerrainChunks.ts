@@ -74,6 +74,7 @@ let chunkRequestId = 0
 
 export function useTerrainChunks(): ChunkMap {
   const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane: Plane = useCyberspace((s) => s.plane)
   const view = useCyberspace((s) => s.view)
@@ -83,9 +84,11 @@ export function useTerrainChunks(): ChunkMap {
   const pendingRef = useRef<Set<string>>(new Set())
   const listenersAttached = useRef(false)
 
-  // Focus point: always the avatar position, not the cursor.
-  // The terrain is anchored to where you stand, not where you're aiming.
-  const focus = position
+  // Focus point: cursor when active, otherwise avatar position.
+  // Load terrain around where the user is looking/aiming.
+  const samePosition = (a: typeof position, b: typeof position) =>
+    a.x === b.x && a.y === b.y && a.z === b.z
+  const focus = samePosition(cursor, position) ? position : cursor
 
   // Chunk coordinates of the focus point.
   const [focusCX, focusCY, focusCZ] = worldToChunk(focus.x, focus.y, focus.z, scaleExp)

@@ -12,7 +12,7 @@
 import { useMemo } from 'react'
 import { PlaneGeometry, DoubleSide } from 'three'
 import { GRID_RADIUS } from '../lib/space'
-import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { useCyberspace } from '../store/useCyberspace'
 import type { ViewAxes } from '../lib/space'
 
 interface Props {
@@ -20,9 +20,6 @@ interface Props {
 }
 
 export function ClickPlane({ axes }: Props): JSX.Element {
-  const position = useCyberspace((s) => s.position)
-  const scaleExp = useCyberspace((s) => s.scaleExp)
-  const view = useCyberspace((s) => s.view)
 
   // Create a plane that covers the visible grid area
   const geometry = useMemo(() => {
@@ -30,41 +27,30 @@ export function ClickPlane({ axes }: Props): JSX.Element {
     return new PlaneGeometry(size, size)
   }, [])
 
-  // Handle click: convert world position to grid row/col
+  // Handle click: convert local position to grid row/col
   const handleClick = (event: any) => {
     event.stopPropagation()
     
-    // Get the intersection point in world space
-    const worldPoint = event.point
-    console.log('[ClickPlane] Click at world point:', worldPoint.toArray())
-    
-    // Convert world-space point to local-space by applying inverse rotation
-    const localPoint = worldPoint.clone()
-    localPoint.applyQuaternion(view.clone().invert())
-    console.log('[ClickPlane] Local point:', localPoint.toArray())
-    
-    // Get the aligned origin (grid center) in local space
-    const origin = alignedOrigin(position, scaleExp)
-    console.log('[ClickPlane] Origin:', origin.x.toString(), origin.y.toString(), origin.z.toString())
+    // Get the intersection point in the mesh's local coordinate system
+    // This is already in the grid's coordinate space (centered on avatar)
+    const localPoint = event.localPoint
+    console.log('[ClickPlane] Click at local point:', localPoint.toArray())
     
     // Convert world coordinates to grid row/col
     // The grid is centered on origin, so we need to compute offset
     const rightAxis = axes.right.axis
     const upAxis = axes.up.axis
     
-    // Get the local-space offset from origin (convert bigint to number)
-    const rightOffset = Number(localPoint[rightAxis]) - Number(origin[rightAxis])
-    const upOffset = Number(localPoint[upAxis]) - Number(origin[upAxis])
+    // Get the local-space offset from origin
+    const rightOffset = localPoint[rightAxis]
+    const upOffset = localPoint[upAxis]
     console.log('[ClickPlane] Offsets:', { rightOffset, upOffset })
     
     // Convert to cell coordinates
-    // Cell size is 2^scaleExp in world space
-    const cellSize = Math.pow(2, scaleExp)
-    console.log('[ClickPlane] Cell size:', cellSize)
-    
+    // Cell size is 1 in local space (already normalized)
     // Account for axis direction
-    const col = Math.round((rightOffset / cellSize) * axes.right.dir)
-    const row = Math.round((upOffset / cellSize) * axes.up.dir)
+    const col = Math.round(rightOffset * axes.right.dir)
+    const row = Math.round(upOffset * axes.up.dir)
     console.log('[ClickPlane] Raw row/col:', { row, col })
     
     // Clamp to valid range

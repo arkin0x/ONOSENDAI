@@ -58,11 +58,23 @@ for decisions, `/research` for AFK fact-finding.
 
 <!-- one line per closed ticket: gist + link -->
 
+- [02 — What must a spatial client make perceivable?](issues/02-protocol-perception-inventory.md)
+  — Ranked inventory of the eight things the protocol needs made perceivable.
+  The pick: **aligned-subtree containment, walls with magnitude, and the black
+  sun**, which compose into one picture — *you are inside a nest of rooms, whose
+  walls are thick in proportion to what they cost, all oriented by one fixed
+  landmark*. Terrain K is over-served and should be scoped *down*; reachability
+  is half CLI work. Also surfaced two client defects and a spec contradiction
+  (now ticket 07).
+
 ## Not yet specified
 
 - **Scale legibility.** `scaleExp` spans 0..84 and zoom is currently an instant
   lattice swap. How does the interface convey where you are in that hierarchy,
-  and that a step at 2^60 is not the same act as a step at 2^0?
+  and that a step at 2^60 is not the same act as a step at 2^0? Ticket 02 rates
+  `ScaleBar` the best comprehension element in the client for *physical size*,
+  and the *hierarchy* entirely absent. Small defect to sweep up here: ScaleBar
+  reports meters in ideaspace, which §9.1 says has no physical mapping.
 - **Path and history.** Where have you been, across scales and rotations, and how
   does the trail stay meaningful when a single step can cross a wall?
 - **Mobile.** Whether whatever spatial model wins survives a phone, one-handed.
@@ -70,11 +82,20 @@ for decisions, `/research` for AFK fact-finding.
   perceptual difference at all.
 - **The HUD's role.** Once the world itself carries meaning, what is left for
   panels, and how much of the current HUD should exist?
-- **Terrain visual language.** Dots are now tunable but arbitrary. What should
-  terrain K actually look like, given it is the temporal cost landscape?
+- **Terrain visual language.** Ticket 02 measured the real hill structure: K is
+  constant across every aligned 2^3 cube, and within an aligned 2^7 cube K spans
+  a 4-wide band against a global range of 2..15 — so the 128-cube sets base
+  elevation and the 8-cube adds roughness. Isolated dots cannot show a plateau,
+  which is why the field reads as noise above scaleExp 3. Rendering the base
+  elevation is the open question — but scoped *down*, per 02's priority
+  inversion finding.
 - **GPS / §9 dataspace bridge.** Mapping dataspace to real places would answer
   "where am I *actually*", which serves place-comprehension — but it is a large,
   consensus-critical workstream with golden vectors. In scope, not yet sharp.
+- **Region primitives are sitting unused.** `deriveRegionN`,
+  `deriveRegionKeyMaterial` and `deriveRegionKeyMaterialScan` are exported by
+  `cyberspace-core` and never called from `src/`. Whatever containment ends up
+  looking like, the maths for it already exists.
 - **The DECKs as navigation.** Hyperjumps (DECK-0001) are a navigation primitive,
   and virtual spawn (PR #15) would allow cheap synthetic avatars for local
   iteration. Both may become navigation/visualization questions later.

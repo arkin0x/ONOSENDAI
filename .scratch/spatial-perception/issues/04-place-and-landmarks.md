@@ -2,7 +2,7 @@
 
 Type: prototype
 Status: open
-Blocked by: 03
+Blocked by: 03, 07
 
 ## Question
 
@@ -15,11 +15,13 @@ world, not in a panel — printing coordinates is the CLI's job.
 
 Decide what furniture the world needs, and build it:
 
-- **The black sun.** §11.2 defines a purple marker at the `+Z_cs` boundary
-  (`x=0, y=0, z=2^84`) as the directional guidepost, and §11.3's canonical view
-  faces it. The app implements the view (`canonicalQuaternion`, the `C` key) and
-  renders no marker. It MUST sit on the `+Z_cs` boundary and be visible in both
-  planes.
+- **The black sun.** §11.2 defines a purple marker at the `+Z_cs` boundary as
+  the directional guidepost, and §11.3's canonical view faces it. The app
+  implements the view (`canonicalQuaternion`, the `C` key) and renders no marker.
+  Ticket 02 found that §11.2 and §11.3 disagree on whether it is a point or a
+  direction; ticket 07 rules on that first, and the answer changes what you build
+  here. Per 02 it is the *only* absolute reference the protocol defines —
+  everything else on the landmark list is relative.
 - **Origin and axis structure.** Is the origin visible? Are the three axes
   perceivable as structure rather than as labels on a compass widget?
 - **Sectors.** A sector is 2^30 gibsons per axis (§10) and is already how the

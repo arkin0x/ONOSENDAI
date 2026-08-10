@@ -16,6 +16,15 @@ across 2^34 requires a tree of 17 billion leaves. And by decomposition
 invariance (§4.8) you cannot dodge it by taking small steps — the wall is real
 and there is no way around it.
 
+**Start by fixing the baseline, or you will evaluate against a broken one.**
+Ticket 02 found `BoundaryGrid.tsx:65,71` passes the *absolute* height to
+`boundaryColor`, whose parameter is documented as *excess over the floor*
+(`palette.ts:96`). At scaleExp `s` the cheapest possible crossing is already
+height `s+1`, so above roughly scaleExp 5 every ordinary gridline saturates and
+the colour ramp carries no information at all. The helper written for exactly
+this, `boundaryIntensity(height, floor)` (`palette.ts:69`), exists and is never
+called. Confirm the degeneracy in a browser before and after.
+
 Today `BoundaryGrid` colours gridlines by crossing height, which is a start, and
 `estimateHopCost` / `estimateSidestepCost` exist in `cyberspace-core` and are
 never called. So you commit a move *before* learning what it costs.
@@ -32,6 +41,14 @@ Make the cost structure perceivable **in the space**:
 - Does terrain K read as the temporal landscape it is — hills you climb — rather
   than as decorative dots?
 - Does the interface distinguish *expensive* from *impossible on this machine*?
+  Note `MAX_COMPUTE_HEIGHT = 20` is a single hard-coded ceiling, and the client
+  will currently offer an h60 sidestep with a bare seconds figure (§6.13-6.14
+  say h60+ is a ~731-year computation).
+
+Ticket 02 also found a **priority inversion** worth correcting here: terrain K is
+capped at 16, so ~65,536 pairings or about 100ms, yet it occupies the entire
+visual field, while LCA — the dominant cost by many orders of magnitude — gets
+thin lines. Terrain is over-served relative to its weight.
 
 Resist solving this with a number in a panel; that is the CLI's job and it
 already does it. The test is whether someone who has never read §4.4 can look at

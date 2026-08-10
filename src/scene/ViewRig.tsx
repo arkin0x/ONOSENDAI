@@ -14,7 +14,7 @@
  */
 
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Vector3 } from 'three'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
@@ -23,9 +23,24 @@ const CAMERA_DISTANCE = 200
 
 export function ViewRig(): null {
   const target = useCyberspace((s) => s.view)
+  const cursor = useCyberspace((s) => s.cursor)
+  const position = useCyberspace((s) => s.position)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
   const camera = useThree((s) => s.camera)
   const size = useThree((s) => s.size)
   const offset = useRef(new Vector3())
+
+  // Resolve the pan during render, not inside useFrame.
+  //
+  // Reading it live meant the camera moved on the next animation frame while
+  // Cursor, which writes its geometry in a layout effect, waited for React to
+  // commit. That left one frame with the camera already at the new cell and
+  // the cursor still drawn at the old one, so the cursor appeared to lag and
+  // then snap. Deriving it here puts both on the same commit.
+  const pan = useMemo(
+    () => useCyberspace.getState().cursorOffset(),
+    [cursor, position, scaleExp, target],
+  )
 
   // Keep the whole grid in frame regardless of window shape.
   useEffect(() => {
@@ -41,14 +56,7 @@ export function ViewRig(): null {
     // Snap instantly to target orientation
     camera.quaternion.copy(target)
 
-    // Pan to the cursor. cursorOffset is the cursor's position in the same
-    // avatar-anchored, screen-axis frame the scene is drawn in, so placing the
-    // camera there lands the cursor dead centre. With the cursor on the avatar
-    // it reduces to the avatar's own sub-cell offset, which is what the Avatar
-    // draws at, so the avatar sits exactly centred until you aim away.
-    // Read live rather than subscribing: this runs per frame anyway, and a
-    // subscription would re-render the rig on every cursor step.
-    const [panRight, panUp, panOut] = useCyberspace.getState().cursorOffset()
+    const [panRight, panUp, panOut] = pan
 
     camera.position.copy(
       offset.current

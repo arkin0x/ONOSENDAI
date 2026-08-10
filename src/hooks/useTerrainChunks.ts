@@ -123,6 +123,9 @@ export function useTerrainChunks(): ChunkMap {
 
     const needed = new Set<string>()
 
+    console.log(`Chunk manager: focus=(${focusCX}, ${focusCY}, ${focusCZ}), scaleExp=${scaleExp}, plane=${plane}`)
+    console.log(`Existing chunks: ${Object.keys(chunksRef.current).length}, pending: ${pendingRef.current.size}`)
+
     for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
       for (let dy = -CHUNK_RADIUS; dy <= CHUNK_RADIUS; dy++) {
         for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
@@ -136,6 +139,8 @@ export function useTerrainChunks(): ChunkMap {
             pendingRef.current.add(key)
             const id = ++chunkRequestId
             const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
+
+            console.log(`Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ})`)
 
             // Round-robin dispatch across worker pool.
             workers[workerIdx % workers.length].postMessage({

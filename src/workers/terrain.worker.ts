@@ -45,16 +45,22 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
     step, plane, size,
   } = event.data
 
+  console.log(`Worker computing chunk (${chunkX}, ${chunkY}, ${chunkZ}), size=${size}, step=${step}`)
+
   const started = performance.now()
   const values = new Uint8Array(size * size * size)
   const halfSize = Math.floor(size / 2)
 
+  let cacheHits = 0
+  let cacheMisses = 0
+
   for (let dz = 0; dz < size; dz++) {
     for (let dy = 0; dy < size; dy++) {
       for (let dx = 0; dx < size; dx++) {
-        const offsetX = BigInt(chunkX * size + dx - halfSize) * step
-        const offsetY = BigInt(chunkY * size + dy - halfSize) * step
-        const offsetZ = BigInt(chunkZ * size + dz - halfSize) * step
+        // Compute offset from chunk center (originX/Y/Z is the world position of chunk center)
+        const offsetX = BigInt(dx - halfSize) * step
+        const offsetY = BigInt(dy - halfSize) * step
+        const offsetZ = BigInt(dz - halfSize) * step
 
         const x = originX + offsetX
         const y = originY + offsetY
@@ -72,11 +78,17 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
         if (k === undefined) {
           k = terrainK(x, y, z, plane)
           terrainCache.set(cacheKey, k)
+          cacheMisses++
+        } else {
+          cacheHits++
         }
         values[idx] = k
       }
     }
   }
+
+  const elapsedMs = performance.now() - started
+  console.log(`Chunk (${chunkX}, ${chunkY}, ${chunkZ}) done in ${elapsedMs.toFixed(1)}ms, cache hits=${cacheHits}, misses=${cacheMisses}`)
 
   const response: ChunkResponse = {
     id,
@@ -84,7 +96,7 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
     chunkY,
     chunkZ,
     values,
-    elapsedMs: performance.now() - started,
+    elapsedMs,
   }
   self.postMessage(response, [values.buffer])
 }

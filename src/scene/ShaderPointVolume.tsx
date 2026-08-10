@@ -76,11 +76,11 @@ const vertexShader = /* glsl */ `
     vK = aK;
 
     float kFactor = aK / 16.0;
-    float radius = uPointSize * kFactor;
+    float radius = uPointSize * (0.5 + 0.5 * kFactor);  // Increased base size
 
     // Distance attenuation from focus point (2D screen projection).
     float dist = length(position.xy - uFocusPoint);
-    radius *= 1.0 / (1.0 + 0.04 * dist);
+    radius *= 1.0 / (1.0 + 0.02 * dist);  // Reduced attenuation
 
     // Pulse for expensive terrain.
     if (kFactor > 0.7) {
@@ -185,6 +185,14 @@ function buildGeometryFromChunks(
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.setAttribute('aK', new Float32BufferAttribute(kValues, 1))
+  
+  // Debug: log chunk and value info
+  if (chunkList.length > 0) {
+    const sampleK = Array.from(kValues.slice(0, 100))
+    const uniqueK = [...new Set(sampleK)].sort((a, b) => a - b)
+    console.log(`Built geometry: ${chunkList.length} chunks, ${totalCells} cells, K range: ${Math.min(...kValues)}-${Math.max(...kValues)}, unique sample: ${uniqueK.join(',')}`)
+  }
+  
   return geometry
 }
 

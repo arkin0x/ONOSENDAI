@@ -11,6 +11,7 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainChunks } from '../hooks/useTerrainChunks'
+import { useViewWindow, type ViewWindow } from '../hooks/useViewWindow'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
 import { ClickPlane } from './ClickPlane'
@@ -22,15 +23,23 @@ import { ViewRig } from './ViewRig'
 /**
  * Visible box, on screen axes, in cell units.
  *
- * The scene draws one unit per cell at every scale, so these bounds are the
- * grid radius directly and do not vary with scaleExp. The box shows the full
- * grid depth.
+ * The scene draws one unit per cell at every scale, so the extent is the grid
+ * radius directly and does not vary with scaleExp. It is centred on the view
+ * window rather than on the avatar, because the camera pans to the cursor: a
+ * box fixed at the avatar would leave the field behind as you aim away.
  */
-function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
+function useBoxBounds(win: ViewWindow): {
+  boxMin: [number, number, number]
+  boxMax: [number, number, number]
+} {
   return useMemo(() => ({
-    boxMin: [-GRID_RADIUS, -GRID_RADIUS, -GRID_RADIUS] as [number, number, number],
-    boxMax: [GRID_RADIUS, GRID_RADIUS, GRID_RADIUS] as [number, number, number],
-  }), [])
+    boxMin: [
+      win.right - GRID_RADIUS, win.up - GRID_RADIUS, win.out - GRID_RADIUS,
+    ] as [number, number, number],
+    boxMax: [
+      win.right + GRID_RADIUS, win.up + GRID_RADIUS, win.out + GRID_RADIUS,
+    ] as [number, number, number],
+  }), [win.right, win.up, win.out])
 }
 
 function World(): JSX.Element {
@@ -39,7 +48,8 @@ function World(): JSX.Element {
   const chunks = useTerrainChunks()
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
-  const { boxMin, boxMax } = useBoxBounds()
+  const win = useViewWindow()
+  const { boxMin, boxMax } = useBoxBounds(win)
 
   return (
     <group quaternion={view}>
@@ -50,7 +60,7 @@ function World(): JSX.Element {
         boxMax={boxMax}
       />
 
-      <BoundaryGrid axes={axes} />
+      <BoundaryGrid axes={axes} win={win} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <ClickPlane axes={axes} />
       <Cursor axes={axes} />

@@ -82,7 +82,7 @@ let chunkRequestId = 0
 let workerIdx = 0
 
 export function useTerrainChunks(): ChunkMap {
-  const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane: Plane = useCyberspace((s) => s.plane)
   const view = useCyberspace((s) => s.view)
@@ -93,9 +93,14 @@ export function useTerrainChunks(): ChunkMap {
   const listenersAttached = useRef(false)
   const flushHandle = useRef<number | null>(null)
 
-  // Focus point: always the avatar position, not the cursor.
-  // The terrain is anchored to where you stand, not where you're aiming.
-  const focus = position
+  // Residency follows the cursor, which is where the camera is looking.
+  //
+  // This is not the same thing as the anchor. The geometry origin stays the
+  // avatar's aligned cell, so the gibsons never move; this only decides which
+  // chunks are resident. Keeping residency on the avatar meant aiming away
+  // walked the visible window off the loaded region and into empty space.
+  // Reduces to the avatar whenever the cursor is not active.
+  const focus = cursor
 
   // Chunk coordinates of the focus point.
   const [focusCX, focusCY, focusCZ] = worldToChunk(focus.x, focus.y, focus.z, scaleExp)

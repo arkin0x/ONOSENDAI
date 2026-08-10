@@ -21,15 +21,18 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { boundaryColor } from '../lib/palette'
+import type { ViewWindow } from '../hooks/useViewWindow'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 const EXTENT = GRID_RADIUS + 0.5
 
 interface Props {
   axes: ViewAxes
+  /** Visible window centre, so the lines follow the camera pan. */
+  win: ViewWindow
 }
 
-export function BoundaryGrid({ axes }: Props): JSX.Element {
+export function BoundaryGrid({ axes, win }: Props): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const ref = useRef<LineSegments>(null)
@@ -52,23 +55,27 @@ export function BoundaryGrid({ axes }: Props): JSX.Element {
       colors.push(color.r, color.g, color.b, color.r, color.g, color.b)
     }
 
+    // Indices are offset by the window centre so the lattice covers whatever
+    // the camera is looking at, not just the cells around the avatar.
     for (let i = -GRID_RADIUS; i <= GRID_RADIUS + 1; i++) {
-      const local = i - 0.5
-
       // Boundaries perpendicular to the screen-right axis (vertical lines).
-      const cx = boundaryCoord(origin[axes.right.axis], i, step, axes.right.dir)
-      pushLine(local, -EXTENT, local, EXTENT, boundaryHeight(cx, scaleExp))
+      const iR = i + win.right
+      const localR = iR - 0.5
+      const cx = boundaryCoord(origin[axes.right.axis], iR, step, axes.right.dir)
+      pushLine(localR, win.up - EXTENT, localR, win.up + EXTENT, boundaryHeight(cx, scaleExp))
 
       // Boundaries perpendicular to the screen-up axis (horizontal lines).
-      const cy = boundaryCoord(origin[axes.up.axis], i, step, axes.up.dir)
-      pushLine(-EXTENT, local, EXTENT, local, boundaryHeight(cy, scaleExp))
+      const iU = i + win.up
+      const localU = iU - 0.5
+      const cy = boundaryCoord(origin[axes.up.axis], iU, step, axes.up.dir)
+      pushLine(win.right - EXTENT, localU, win.right + EXTENT, localU, boundaryHeight(cy, scaleExp))
     }
 
     geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3))
     geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
     geometry.attributes.position.needsUpdate = true
     geometry.attributes.color.needsUpdate = true
-  }, [position, scaleExp, axes, geometry])
+  }, [position, scaleExp, axes, win.right, win.up, geometry])
 
   return (
     <lineSegments ref={ref} geometry={geometry} frustumCulled={false} position={[0, 0, 0.01]}>

@@ -207,11 +207,9 @@ export function ShaderPointVolume({
   const pointsRef = useRef<Points>(null)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
 
-  const focus = cursor.x !== position.x || cursor.y !== position.y || cursor.z !== position.z
-    ? cursor
-    : position
+  // Always anchor geometry to avatar position, not cursor.
+  const focus = position
 
   // Compute focus chunk coordinates (for geometry centering).
   const chunkStep = BigInt(CHUNK_SIZE) * stepFor(scaleExp)

@@ -13,6 +13,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainChunks } from '../hooks/useTerrainChunks'
 import { Avatar } from './Avatar'
 import { BoundaryGrid } from './BoundaryGrid'
+import { ClickPlane } from './ClickPlane'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
 import { ShaderPointVolume } from './ShaderPointVolume'
@@ -57,6 +58,7 @@ function World(): JSX.Element {
 
       <BoundaryGrid axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <ClickPlane axes={axes} />
       <Cursor axes={axes} />
       <Avatar axes={axes} />
     </group>

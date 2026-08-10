@@ -9,8 +9,8 @@
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useRef, useState } from 'react'
-import { Quaternion, Vector3 } from 'three'
+import { useState } from 'react'
+import { Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 
 interface LabelPosition {
@@ -27,17 +27,13 @@ const LABEL_OFFSET = 0.2
 
 function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPosition[]) => void }): JSX.Element {
   const view = useCyberspace((s) => s.view)
-  const currentQuaternion = useRef(new Quaternion())
   const { camera, size } = useThree()
 
   useFrame(() => {
-    // Smoothly interpolate toward target view
-    currentQuaternion.current.slerp(view, 0.15)
-    
-    // Position camera the same way as ViewRig: rotate [0, 0, distance] by the view quaternion
-    const cameraPos = new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(currentQuaternion.current)
+    // Snap instantly to target view (no slerp)
+    const cameraPos = new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(view)
     camera.position.copy(cameraPos)
-    camera.quaternion.copy(currentQuaternion.current)
+    camera.quaternion.copy(view)
 
     // Project arrow tip positions to screen space for labels
     const axisTips = [

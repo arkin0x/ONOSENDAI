@@ -2,9 +2,7 @@
  * Scene.tsx — assembles the spatial view with 3D terrain chunks.
  *
  * The terrain is now a 3D volume of chunks managed by useTerrainChunks.
- * During normal viewing, the box culling shows only a thin slab along the
- * current view plane. During rotation, the box expands to reveal depth layers,
- * then collapses back when rotation completes.
+ * The view snaps instantly to the new orientation (no slerp animation).
  */
 
 import { Canvas } from '@react-three/fiber'
@@ -24,40 +22,33 @@ import { ViewRig } from './ViewRig'
  * Compute box bounds in local grid space (same units as geometry positions).
  *
  * Geometry positions are `(cellIndex - halfSize) * step`, so the box bounds
- * must match. During normal viewing, depth is ±0.5 step (thin slab).
- * During rotation, depth expands to ±halfSize * step (full cube).
+ * must match. The box shows the full grid depth.
  */
 function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
-  const isRotating = useCyberspace((s) => s.isRotating)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const step = Number(stepFor(scaleExp))
   const halfGrid = GRID_RADIUS * step
 
-  // Thin slab: only the current plane (±0.5 step in depth).
-  const slabDepth = step * 0.5
-
   // Full cube: entire grid depth.
   const cubeDepth = halfGrid
 
-  const depth = isRotating ? cubeDepth : slabDepth
-
   return {
-    boxMin: [-halfGrid, -halfGrid, -depth],
-    boxMax: [halfGrid, halfGrid, depth],
+    boxMin: [-halfGrid, -halfGrid, -cubeDepth],
+    boxMax: [halfGrid, halfGrid, cubeDepth],
   }
 }
 
 function World(): JSX.Element {
-  const displayView = useCyberspace((s) => s.displayView)
+  const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const chunks = useTerrainChunks()
-  const axes = useMemo(() => useCyberspace.getState().axes(), [displayView])
+  const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const { boxMin, boxMax } = useBoxBounds()
 
   return (
-    <group quaternion={displayView}>
+    <group quaternion={view}>
       <ShaderPointVolume
         chunks={chunks}
         boxMin={boxMin}

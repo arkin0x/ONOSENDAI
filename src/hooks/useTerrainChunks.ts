@@ -77,6 +77,7 @@ export function useTerrainChunks(): ChunkMap {
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane: Plane = useCyberspace((s) => s.plane)
+  const view = useCyberspace((s) => s.view)
 
   const [chunks, setChunks] = useState<ChunkMap>({})
   const chunksRef = useRef<ChunkMap>({})
@@ -97,6 +98,8 @@ export function useTerrainChunks(): ChunkMap {
     listenersAttached.current = true
 
     const workers = getTerrainWorkers()
+    console.log(`[useTerrainChunks] Attaching listeners to ${workers.length} workers`)
+    
     for (const worker of workers) {
       worker.addEventListener('message', (event: MessageEvent<ChunkResponse>) => {
         const { chunkX, chunkY, chunkZ, values } = event.data
@@ -109,6 +112,8 @@ export function useTerrainChunks(): ChunkMap {
 
         chunksRef.current[key] = data
         pendingRef.current.delete(key)
+
+        console.log(`[useTerrainChunks] Received chunk (${chunkX}, ${chunkY}, ${chunkZ}), total chunks: ${Object.keys(chunksRef.current).length}`)
 
         // Trigger re-render with new chunk data.
         setChunks({ ...chunksRef.current })
@@ -123,8 +128,8 @@ export function useTerrainChunks(): ChunkMap {
 
     const needed = new Set<string>()
 
-    console.log(`Chunk manager: focus=(${focusCX}, ${focusCY}, ${focusCZ}), scaleExp=${scaleExp}, plane=${plane}`)
-    console.log(`Existing chunks: ${Object.keys(chunksRef.current).length}, pending: ${pendingRef.current.size}`)
+    console.log(`[useTerrainChunks] Focus at chunk (${focusCX}, ${focusCY}, ${focusCZ}), scaleExp=${scaleExp}, plane=${plane}, view=${view.toArray().map(v => v.toFixed(2)).join(',')}`)
+    console.log(`[useTerrainChunks] Existing chunks: ${Object.keys(chunksRef.current).length}, pending: ${pendingRef.current.size}`)
 
     for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
       for (let dy = -CHUNK_RADIUS; dy <= CHUNK_RADIUS; dy++) {
@@ -140,7 +145,7 @@ export function useTerrainChunks(): ChunkMap {
             const id = ++chunkRequestId
             const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
 
-            console.log(`Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ})`)
+            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIdx % workers.length}`)
 
             // Round-robin dispatch across worker pool.
             workers[workerIdx % workers.length].postMessage({
@@ -167,7 +172,7 @@ export function useTerrainChunks(): ChunkMap {
         delete chunksRef.current[key]
       }
     }
-  }, [focusCX, focusCY, focusCZ, scaleExp, plane])
+  }, [focusCX, focusCY, focusCZ, scaleExp, plane, view])
 
   return chunks
 }

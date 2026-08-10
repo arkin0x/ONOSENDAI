@@ -31,12 +31,12 @@ function getProofWorker(): Worker {
 
 export function getTerrainWorkers(): Worker[] {
   if (terrainWorkers.length === 0) {
+    console.log(`[workers] Creating terrain worker pool: ${TERRAIN_WORKER_COUNT} workers (hardwareConcurrency=${navigator.hardwareConcurrency})`)
     for (let i = 0; i < TERRAIN_WORKER_COUNT; i++) {
-      terrainWorkers.push(
-        new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), {
-          type: 'module',
-        })
-      )
+      const worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), {
+        type: 'module',
+      })
+      terrainWorkers.push(worker)
     }
   }
   return terrainWorkers

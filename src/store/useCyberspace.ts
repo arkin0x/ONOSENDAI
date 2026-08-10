@@ -99,12 +99,8 @@ export interface CyberspaceState {
   pendingTarget: Position | null
   plane: Plane
   scaleExp: number
-  /** Target view quaternion (camera slerps toward this). */
+  /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
-  /** Settled view for rendering the world group (lags behind view during rotation). */
-  displayView: Quaternion
-  /** True while a rotation animation is in progress. */
-  isRotating: boolean
   viewHistory: Quaternion[]
   proof: ProofState
   /** Chained from the previous hop, mirroring the protocol's prev-event link. */
@@ -119,7 +115,6 @@ export interface CyberspaceState {
   cancel: () => void
   adjustScale: (delta: number) => void
   rotate: (dir: RotateDirection) => void
-  finishRotation: () => void
   popView: () => void
   resetView: () => void
   canonicalView: () => void
@@ -230,8 +225,6 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   plane: 0,
   scaleExp: 0,
   view: topDownQuaternion(),
-  displayView: topDownQuaternion(),
-  isRotating: false,
   viewHistory: [],
   proof: IDLE_PROOF,
   prevEventId: persisted?.prevEventId ?? ZERO_EVENT_ID,
@@ -331,16 +324,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const { view, viewHistory } = get()
     set({
       view: rotateView(view, dir),
-      isRotating: true,
       viewHistory: [...viewHistory, view.clone()],
-    })
-  },
-  
-  finishRotation: () => {
-    const { view } = get()
-    set({
-      displayView: view.clone(),
-      isRotating: false,
     })
   },
 

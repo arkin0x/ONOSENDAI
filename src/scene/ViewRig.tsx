@@ -1,28 +1,22 @@
 /**
  * ViewRig.tsx — the camera.
  *
- * The target orientation snaps instantly (so the sampled slice is always
- * correct) while the camera slerps toward it. That gap is the 90-degree swing
- * you see when you shift-rotate, and it is what makes the third axis legible.
+ * The camera snaps instantly to the target orientation. No slerp animation.
  */
 
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { Quaternion, Vector3 } from 'three'
+import { Vector3 } from 'three'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 
 const CAMERA_DISTANCE = 200
-// Rotation easing. Was 9; slowed 3x so the 90-degree swing reads spatially
-// rather than as a cut.
-const SLERP_RATE = 3
 
 export function ViewRig(): null {
   const target = useCyberspace((s) => s.view)
   const camera = useThree((s) => s.camera)
   const size = useThree((s) => s.size)
   const offset = useRef(new Vector3())
-  const current = useRef(new Quaternion().copy(target))
 
   // Keep the whole grid in frame regardless of window shape.
   useEffect(() => {
@@ -34,23 +28,12 @@ export function ViewRig(): null {
     }
   }, [camera, size])
 
-  useFrame((_, delta) => {
-    // Frame-rate independent easing toward the target orientation.
-    const t = 1 - Math.exp(-SLERP_RATE * delta)
-    current.current.slerp(target, t)
-    camera.quaternion.copy(current.current)
+  useFrame(() => {
+    // Snap instantly to target orientation
+    camera.quaternion.copy(target)
     camera.position.copy(
-      offset.current.set(0, 0, CAMERA_DISTANCE).applyQuaternion(current.current),
+      offset.current.set(0, 0, CAMERA_DISTANCE).applyQuaternion(target),
     )
-    
-    // When slerp is close enough, finish the rotation
-    const dot = current.current.dot(target)
-    if (Math.abs(dot) > 0.9999) {
-      const { isRotating, finishRotation } = useCyberspace.getState()
-      if (isRotating) {
-        finishRotation()
-      }
-    }
   })
 
   return null

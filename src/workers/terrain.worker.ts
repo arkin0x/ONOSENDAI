@@ -15,6 +15,8 @@ import { terrainK, type Plane } from 'cyberspace-core'
 
 export interface ChunkRequest {
   id: number
+  /** Cache key, echoed back so the caller never has to rebuild it. */
+  key: string
   /** Chunk lattice coordinates. BigInt: at 85-bit positions these exceed 2^53. */
   chunkX: bigint
   chunkY: bigint
@@ -29,6 +31,7 @@ export interface ChunkRequest {
 
 export interface ChunkResponse {
   id: number
+  key: string
   chunkX: bigint
   chunkY: bigint
   chunkZ: bigint
@@ -40,7 +43,7 @@ const AXIS_MAX = (1n << 85n) - 1n
 
 self.onmessage = (event: MessageEvent<ChunkRequest>) => {
   const {
-    id, chunkX, chunkY, chunkZ,
+    id, key, chunkX, chunkY, chunkZ,
     originX, originY, originZ,
     step, plane, size,
   } = event.data
@@ -80,6 +83,7 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
 
   const response: ChunkResponse = {
     id,
+    key,
     chunkX,
     chunkY,
     chunkZ,

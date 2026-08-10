@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
-import { getTerrainWorkers, type ChunkResponse } from '../lib/workers'
+import { getTerrainWorkers, postChunk, type ChunkResponse } from '../lib/workers'
 import { GRID_RADIUS, stepFor } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 
@@ -43,8 +43,21 @@ export interface ChunkMap {
   [key: string]: ChunkData
 }
 
-function chunkKey(cx: bigint, cy: bigint, cz: bigint): string {
-  return `${cx},${cy},${cz}`
+/**
+ * Chunk identity includes the lattice it was sampled on.
+ *
+ * Keying on the indices alone made chunks from different scales collide.
+ * Indices shrink as scaleExp grows and converge toward zero, so past about
+ * scaleExp 80 every scale yields the same handful of keys. Once those existed,
+ * the "already have it" and "already pending" tests suppressed every further
+ * request, and the retained chunks carried indices from the old lattice that
+ * filter entirely outside the window, leaving the field permanently empty.
+ */
+function chunkKey(
+  cx: bigint, cy: bigint, cz: bigint,
+  scaleExp: number, plane: Plane,
+): string {
+  return `${cx},${cy},${cz}@${scaleExp}:${plane}`
 }
 
 /**
@@ -79,7 +92,30 @@ function chunkToWorld(
 }
 
 let chunkRequestId = 0
-let workerIdx = 0
+
+/**
+ * Chunk offsets around the focus, nearest first.
+ *
+ * Plain nested loops start at the (-R,-R,-R) corner, so on a cold load the
+ * grid fills in from a corner and the cells you are actually looking at arrive
+ * last. Sorting by distance means the centre chunk is queued first and the
+ * view is usable almost immediately, with the surrounding ring filling in.
+ */
+const CHUNK_OFFSETS: Array<[number, number, number]> = (() => {
+  const list: Array<[number, number, number]> = []
+  for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+    for (let dy = -CHUNK_RADIUS; dy <= CHUNK_RADIUS; dy++) {
+      for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+        list.push([dx, dy, dz])
+      }
+    }
+  }
+  return list.sort(
+    (a, b) =>
+      (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) -
+      (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]),
+  )
+})()
 
 export function useTerrainChunks(): ChunkMap {
   const cursor = useCyberspace((s) => s.cursor)
@@ -130,8 +166,7 @@ export function useTerrainChunks(): ChunkMap {
     
     for (const worker of workers) {
       worker.addEventListener('message', (event: MessageEvent<ChunkResponse>) => {
-        const { chunkX, chunkY, chunkZ, values } = event.data
-        const key = chunkKey(chunkX, chunkY, chunkZ)
+        const { key, chunkX, chunkY, chunkZ, values } = event.data
 
         const data: ChunkData = {
           chunkX, chunkY, chunkZ, values,
@@ -149,56 +184,59 @@ export function useTerrainChunks(): ChunkMap {
 
   // Request missing chunks and evict distant ones.
   useEffect(() => {
-    const workers = getTerrainWorkers()
-
     const needed = new Set<string>()
+    let requested = 0
 
-    console.log(`[useTerrainChunks] Focus at chunk (${focusCX}, ${focusCY}, ${focusCZ}), scaleExp=${scaleExp}, plane=${plane}, view=${view.toArray().map(v => v.toFixed(2)).join(',')}`)
-    console.log(`[useTerrainChunks] Existing chunks: ${Object.keys(chunksRef.current).length}, pending: ${pendingRef.current.size}`)
+    // Nearest first, so the centre of the view resolves before the outer ring.
+    for (const [dx, dy, dz] of CHUNK_OFFSETS) {
+      const cx = focusCX + BigInt(dx)
+      const cy = focusCY + BigInt(dy)
+      const cz = focusCZ + BigInt(dz)
+      const key = chunkKey(cx, cy, cz, scaleExp, plane)
+      needed.add(key)
 
-    for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
-      for (let dy = -CHUNK_RADIUS; dy <= CHUNK_RADIUS; dy++) {
-        for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
-          const cx = focusCX + BigInt(dx)
-          const cy = focusCY + BigInt(dy)
-          const cz = focusCZ + BigInt(dz)
-          const key = chunkKey(cx, cy, cz)
-          needed.add(key)
+      if (!chunksRef.current[key] && !pendingRef.current.has(key)) {
+        pendingRef.current.add(key)
+        const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
+        requested++
 
-          if (!chunksRef.current[key] && !pendingRef.current.has(key)) {
-            pendingRef.current.add(key)
-            const id = ++chunkRequestId
-            const [originX, originY, originZ] = chunkToWorld(cx, cy, cz, scaleExp)
-
-            // Use persistent workerIdx across renders for true round-robin
-            const workerIndex = workerIdx % workers.length
-            console.log(`[useTerrainChunks] Requesting chunk (${cx}, ${cy}, ${cz}), origin=(${originX}, ${originY}, ${originZ}), dispatching to worker ${workerIndex}`)
-
-            // Round-robin dispatch across worker pool.
-            workers[workerIndex].postMessage({
-              id,
-              chunkX: cx,
-              chunkY: cy,
-              chunkZ: cz,
-              originX,
-              originY,
-              originZ,
-              step: stepFor(scaleExp),
-              plane,
-              size: CHUNK_SIZE,
-            })
-            workerIdx++
-          }
-        }
+        postChunk({
+          id: ++chunkRequestId,
+          key,
+          chunkX: cx,
+          chunkY: cy,
+          chunkZ: cz,
+          originX,
+          originY,
+          originZ,
+          step: stepFor(scaleExp),
+          plane,
+          size: CHUNK_SIZE,
+        })
       }
     }
 
     // Evict chunks outside the needed set.
+    let evicted = 0
     for (const key of Object.keys(chunksRef.current)) {
       if (!needed.has(key)) {
         delete chunksRef.current[key]
+        evicted++
       }
     }
+
+    console.log(
+      `[useTerrainChunks] scaleExp=${scaleExp} plane=${plane} ` +
+      `focus=(${focusCX},${focusCY},${focusCZ}) ` +
+      `requested=${requested} evicted=${evicted} ` +
+      `resident=${Object.keys(chunksRef.current).length} pending=${pendingRef.current.size}`,
+    )
+
+    // Eviction alone changes what should be drawn, and nothing else publishes
+    // it: without this the last snapshot keeps rendering until a new chunk
+    // lands, which after a scale change is a set of stale chunks whose indices
+    // now fall entirely outside the window, so the field reads as empty.
+    if (evicted > 0) scheduleFlush()
   }, [focusCX, focusCY, focusCZ, scaleExp, plane, view])
 
   return chunks

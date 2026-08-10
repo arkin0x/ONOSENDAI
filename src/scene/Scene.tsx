@@ -28,16 +28,18 @@ import { ViewRig } from './ViewRig'
 function useBoxBounds(): { boxMin: [number, number, number]; boxMax: [number, number, number] } {
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
-  const step = Number(stepFor(scaleExp))
-  const halfGrid = GRID_RADIUS * step
+  return useMemo(() => {
+    const step = Number(stepFor(scaleExp))
+    const halfGrid = GRID_RADIUS * step
 
-  // Full cube: entire grid depth.
-  const cubeDepth = halfGrid
+    // Full cube: entire grid depth.
+    const cubeDepth = halfGrid
 
-  return {
-    boxMin: [-halfGrid, -halfGrid, -cubeDepth],
-    boxMax: [halfGrid, halfGrid, cubeDepth],
-  }
+    return {
+      boxMin: [-halfGrid, -halfGrid, -cubeDepth] as [number, number, number],
+      boxMax: [halfGrid, halfGrid, cubeDepth] as [number, number, number],
+    }
+  }, [scaleExp])
 }
 
 function World(): JSX.Element {

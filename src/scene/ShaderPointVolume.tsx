@@ -11,7 +11,7 @@
  */
 
 import { useFrame } from '@react-three/fiber'
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useEffect } from 'react'
 import {
   BufferGeometry,
   Float32BufferAttribute,
@@ -140,8 +140,26 @@ const fragmentShader = /* glsl */ `
 `
 
 /**
- * Flatten all chunk data into a single geometry buffer.
- * Each chunk contributes CHUNK_SIZE³ vertices.
+ * Cell index range within one chunk axis that falls inside the box.
+ *
+ * A cell's local coordinate is `(base + d) * step`, so in cell units the box
+ * admits `d` where `minCell <= base + d <= maxCell`. Returns null when the
+ * chunk does not reach the box on this axis.
+ */
+function axisRange(base: number, minCell: number, maxCell: number): [number, number] | null {
+  const lo = Math.max(0, Math.ceil(minCell - base))
+  const hi = Math.min(CHUNK_SIZE - 1, Math.floor(maxCell - base))
+  return lo > hi ? null : [lo, hi]
+}
+
+/**
+ * Flatten the chunk cells that fall inside the box into a single geometry.
+ *
+ * Only in-box cells are emitted. The shader also culls against the box, but
+ * that happens after every vertex has been allocated and uploaded, so it saves
+ * nothing on its own: with the default 5³ chunk load and a ±GRID_RADIUS box,
+ * roughly 0.8% of the loaded cells are ever visible. Filtering here is what
+ * keeps the buffer (and the GPU upload) proportional to what is on screen.
  */
 function buildGeometryFromChunks(
   chunks: ChunkMap,
@@ -149,31 +167,54 @@ function buildGeometryFromChunks(
   focusChunkX: number,
   focusChunkY: number,
   focusChunkZ: number,
+  boxMin: [number, number, number],
+  boxMax: [number, number, number],
 ): BufferGeometry {
   const chunkList = Object.values(chunks)
-  const totalCells = chunkList.length * CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE
+  const step = Number(stepFor(scaleExp))
+  const halfSize = Math.floor(CHUNK_SIZE / 2)
+
+  // Box bounds in cell units, matching the geometry's own units.
+  const minCell = [boxMin[0] / step, boxMin[1] / step, boxMin[2] / step]
+  const maxCell = [boxMax[0] / step, boxMax[1] / step, boxMax[2] / step]
+
+  // Per-chunk in-box ranges, computed once so we can size the buffers exactly
+  // and then iterate only the cells we keep.
+  const visible: Array<{
+    chunk: ChunkMap[string]
+    baseX: number; baseY: number; baseZ: number
+    rx: [number, number]; ry: [number, number]; rz: [number, number]
+  }> = []
+  let totalCells = 0
+
+  for (const chunk of chunkList) {
+    const baseX = (chunk.chunkX - focusChunkX) * CHUNK_SIZE - halfSize
+    const baseY = (chunk.chunkY - focusChunkY) * CHUNK_SIZE - halfSize
+    const baseZ = (chunk.chunkZ - focusChunkZ) * CHUNK_SIZE - halfSize
+
+    const rx = axisRange(baseX, minCell[0], maxCell[0])
+    const ry = axisRange(baseY, minCell[1], maxCell[1])
+    const rz = axisRange(baseZ, minCell[2], maxCell[2])
+    if (!rx || !ry || !rz) continue
+
+    totalCells += (rx[1] - rx[0] + 1) * (ry[1] - ry[0] + 1) * (rz[1] - rz[0] + 1)
+    visible.push({ chunk, baseX, baseY, baseZ, rx, ry, rz })
+  }
 
   const positions = new Float32Array(totalCells * 3)
   const kValues = new Float32Array(totalCells)
 
   let vertexIdx = 0
-  const step = Number(stepFor(scaleExp))
-  const halfSize = Math.floor(CHUNK_SIZE / 2)
+  for (const { chunk, baseX, baseY, baseZ, rx, ry, rz } of visible) {
+    for (let dz = rz[0]; dz <= rz[1]; dz++) {
+      for (let dy = ry[0]; dy <= ry[1]; dy++) {
+        const rowIdx = dz * CHUNK_SIZE * CHUNK_SIZE + dy * CHUNK_SIZE
+        for (let dx = rx[0]; dx <= rx[1]; dx++) {
+          const k = chunk.values[rowIdx + dx]
 
-  for (const chunk of chunkList) {
-    const chunkOffsetX = (chunk.chunkX - focusChunkX) * CHUNK_SIZE
-    const chunkOffsetY = (chunk.chunkY - focusChunkY) * CHUNK_SIZE
-    const chunkOffsetZ = (chunk.chunkZ - focusChunkZ) * CHUNK_SIZE
-
-    for (let dz = 0; dz < CHUNK_SIZE; dz++) {
-      for (let dy = 0; dy < CHUNK_SIZE; dy++) {
-        for (let dx = 0; dx < CHUNK_SIZE; dx++) {
-          const cellIdx = dz * CHUNK_SIZE * CHUNK_SIZE + dy * CHUNK_SIZE + dx
-          const k = chunk.values[cellIdx]
-
-          positions[vertexIdx * 3]     = (chunkOffsetX + dx - halfSize) * step
-          positions[vertexIdx * 3 + 1] = (chunkOffsetY + dy - halfSize) * step
-          positions[vertexIdx * 3 + 2] = (chunkOffsetZ + dz - halfSize) * step
+          positions[vertexIdx * 3]     = (baseX + dx) * step
+          positions[vertexIdx * 3 + 1] = (baseY + dy) * step
+          positions[vertexIdx * 3 + 2] = (baseZ + dz) * step
           kValues[vertexIdx] = k === 255 ? 0 : k
 
           vertexIdx++
@@ -185,14 +226,7 @@ function buildGeometryFromChunks(
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.setAttribute('aK', new Float32BufferAttribute(kValues, 1))
-  
-  // Debug: log chunk and value info
-  if (chunkList.length > 0) {
-    const sampleK = Array.from(kValues.slice(0, 100))
-    const uniqueK = [...new Set(sampleK)].sort((a, b) => a - b)
-    console.log(`Built geometry: ${chunkList.length} chunks, ${totalCells} cells, K range: ${Math.min(...kValues)}-${Math.max(...kValues)}, unique sample: ${uniqueK.join(',')}`)
-  }
-  
+
   return geometry
 }
 
@@ -237,13 +271,25 @@ export function ShaderPointVolume({
     }
   }
 
-  // Build geometry from chunks. Rebuilds when chunks change.
+  // Build geometry from chunks. Rebuilds when chunks or the box change.
+  // Depend on the box's numbers, not the array identity: the parent rebuilds
+  // those arrays every render, which would rebuild the buffer every frame.
+  const [bx0, by0, bz0] = boxMin
+  const [bx1, by1, bz1] = boxMax
   const geometry = useMemo(() => {
-    return buildGeometryFromChunks(chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ)
-  }, [chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ])
+    return buildGeometryFromChunks(
+      chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ,
+      [bx0, by0, bz0], [bx1, by1, bz1],
+    )
+  }, [chunks, scaleExp, focusChunkX, focusChunkY, focusChunkZ, bx0, by0, bz0, bx1, by1, bz1])
+
+  // Three.js buffers live on the GPU and are not garbage collected. Dropping
+  // the reference leaks them, so release each geometry when it is replaced.
+  useEffect(() => () => geometry.dispose(), [geometry])
 
   // Circular texture for smooth point edges.
   const circularTexture = useMemo(() => createCircularTexture(64), [])
+  useEffect(() => () => circularTexture.dispose(), [circularTexture])
 
   // Shader material.
   const material = useMemo(() => {
@@ -262,7 +308,11 @@ export function ShaderPointVolume({
       transparent: true,
       depthWrite: false,
     })
-  }, [circularTexture, boxMin, boxMax])
+    // Box uniforms are refreshed every frame in useFrame, so they must not be
+    // dependencies here or the material is rebuilt (and leaked) every render.
+  }, [circularTexture])
+
+  useEffect(() => () => material.dispose(), [material])
 
   // Update box uniforms and animate fade.
   useFrame((state, delta) => {

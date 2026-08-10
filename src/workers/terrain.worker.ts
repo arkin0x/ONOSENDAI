@@ -1,14 +1,14 @@
 /**
  * terrain.worker.ts — computes terrain K values for 3D chunks.
  *
- * Each chunk is a 3D grid of cells (default 49³). The worker maintains a
- * per-coordinate cache to avoid recomputing K for cells we've already seen.
- * This is critical because chunks overlap at their boundaries, and the avatar
- * moves through space incrementally, so most cells are revisited.
+ * Each chunk is a 3D grid of cells (default 49³).
  *
- * The cache is a Map keyed by "x:y:z:plane" strings. Memory is negligible
- * (1 byte per cell), and the cache never goes stale because terrain is
- * deterministic.
+ * There is deliberately no per-coordinate cache here. Chunks tile space
+ * disjointly rather than overlapping, and useTerrainChunks never re-requests a
+ * chunk it already holds, so such a cache hit-rates at roughly zero while
+ * growing without bound: an "x:y:z:plane" key over 85-bit coordinates is an
+ * ~80 character string, so it costs hundreds of bytes and a BigInt-to-string
+ * conversion per cell to buy nothing. Chunk-level reuse is the caller's job.
  */
 
 import { terrainK, type Plane } from 'cyberspace-core'
@@ -36,7 +36,6 @@ export interface ChunkResponse {
 }
 
 const AXIS_MAX = (1n << 85n) - 1n
-const terrainCache = new Map<string, number>()
 
 self.onmessage = (event: MessageEvent<ChunkRequest>) => {
   const {
@@ -50,9 +49,6 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
   const started = performance.now()
   const values = new Uint8Array(size * size * size)
   const halfSize = Math.floor(size / 2)
-
-  let cacheHits = 0
-  let cacheMisses = 0
 
   for (let dz = 0; dz < size; dz++) {
     for (let dy = 0; dy < size; dy++) {
@@ -73,22 +69,13 @@ self.onmessage = (event: MessageEvent<ChunkRequest>) => {
           continue
         }
 
-        const cacheKey = `${x}:${y}:${z}:${plane}`
-        let k = terrainCache.get(cacheKey)
-        if (k === undefined) {
-          k = terrainK(x, y, z, plane)
-          terrainCache.set(cacheKey, k)
-          cacheMisses++
-        } else {
-          cacheHits++
-        }
-        values[idx] = k
+        values[idx] = terrainK(x, y, z, plane)
       }
     }
   }
 
   const elapsedMs = performance.now() - started
-  console.log(`Chunk (${chunkX}, ${chunkY}, ${chunkZ}) done in ${elapsedMs.toFixed(1)}ms, cache hits=${cacheHits}, misses=${cacheMisses}`)
+  console.log(`Chunk (${chunkX}, ${chunkY}, ${chunkZ}) done in ${elapsedMs.toFixed(1)}ms`)
 
   const response: ChunkResponse = {
     id,

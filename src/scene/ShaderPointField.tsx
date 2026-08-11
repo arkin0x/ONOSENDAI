@@ -1,9 +1,9 @@
 /**
  * ShaderPointField.tsx — the terrain K field as GL_POINTS.
  *
- * One vertex per visible cell, sized and coloured by K in the shaders. The
- * field is the avatar's plane, so this is at most PLANE_SIZE^2 points, and the
- * CPU emits only cells it actually has, which means no culling work on the GPU.
+ * One vertex per visible cell, sized and coloured by K in the shaders. The field
+ * is a cube around the view window, so this is at most VOLUME_SIZE^3 points, and
+ * the CPU emits only cells it actually has.
  *
  * Positions are in cell units on the screen axes, the same frame BoundaryGrid,
  * Cursor and Avatar draw in, offset by the view window so the field stays put
@@ -18,12 +18,12 @@ import {
   Points,
   ShaderMaterial,
 } from 'three'
-import { PLANE_SIZE, type TerrainPlane } from '../hooks/useTerrainPlane'
+import { VOLUME_SIZE, type TerrainVolume } from '../hooks/useTerrainVolume'
 import { UNKNOWN } from '../workers/terrain.worker'
 import type { ViewWindow } from '../hooks/useViewWindow'
 
 interface Props {
-  plane: TerrainPlane
+  volume: TerrainVolume
   win: ViewWindow
 }
 
@@ -143,10 +143,10 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-function buildGeometry(plane: TerrainPlane, win: ViewWindow): BufferGeometry {
-  const R = plane.radius
-  const N = PLANE_SIZE
-  const { values } = plane
+function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
+  const R = volume.radius
+  const N = VOLUME_SIZE
+  const { values } = volume
 
   let count = 0
   for (let i = 0; i < values.length; i++) if (values[i] !== UNKNOWN) count++
@@ -155,16 +155,19 @@ function buildGeometry(plane: TerrainPlane, win: ViewWindow): BufferGeometry {
   const kValues = new Float32Array(count)
 
   let v = 0
-  for (let row = 0; row < N; row++) {
-    for (let col = 0; col < N; col++) {
-      const k = values[row * N + col]
-      if (k === UNKNOWN) continue
+  for (let depth = 0; depth < N; depth++) {
+    for (let row = 0; row < N; row++) {
+      const slice = (depth * N + row) * N
+      for (let col = 0; col < N; col++) {
+        const k = values[slice + col]
+        if (k === UNKNOWN) continue
 
-      positions[v * 3] = win.right + (col - R)
-      positions[v * 3 + 1] = win.up + (row - R)
-      positions[v * 3 + 2] = 0
-      kValues[v] = k
-      v++
+        positions[v * 3] = win.right + (col - R)
+        positions[v * 3 + 1] = win.up + (row - R)
+        positions[v * 3 + 2] = win.out + (depth - R)
+        kValues[v] = k
+        v++
+      }
     }
   }
 
@@ -180,10 +183,13 @@ function buildGeometry(plane: TerrainPlane, win: ViewWindow): BufferGeometry {
   return geometry
 }
 
-export function ShaderPointField({ plane, win }: Props): JSX.Element {
+export function ShaderPointField({ volume, win }: Props): JSX.Element {
   const pointsRef = useRef<Points>(null)
 
-  const geometry = useMemo(() => buildGeometry(plane, win), [plane, win.right, win.up])
+  const geometry = useMemo(
+    () => buildGeometry(volume, win),
+    [volume, win.right, win.up, win.out],
+  )
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -194,8 +200,8 @@ export function ShaderPointField({ plane, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 2 },
-      uMaxTileFrac: { value: 0.45 },
+      uMinPx: { value: 1.2 },
+      uMaxTileFrac: { value: 0.22 },
       uGamma: { value: 3 },
       uZoom: { value: 8 },
       uDpr: { value: 1 },

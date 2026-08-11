@@ -98,3 +98,32 @@ All three render 2401/2401 terrain with zero page errors.
 **Caveat on C:** the camera sits 60 units back, so C tests *perspective from
 outside the structure*, not from within it. v1's was a chase camera close to the
 avatar. C as built does not settle whether an inside-the-room perspective works.
+
+
+## Variant D notes (from building it)
+
+Built and captured at `?variant=D`. Screenshots `v03-D.png` (scaleExp 0) and
+`v03-D-zoomed.png` (scaleExp 3).
+
+What works: the room reads instantly as *the volume you are inside*, the parent
+is legible beyond it without competing, and the black sun as a proxy disc on the
+room's `+Z` side answers "which way am I facing" with no explanation at all. The
+composition of room plus sun plus terrain plus bloom is the closest thing yet to
+the v1 feeling, in an orthographic view, which is further evidence for ticket
+01's claim that scenery and light rather than projection carry embodiment.
+
+**The open UX question, which building it exposed.** The room is currently the
+subtree at `scaleExp + ROOM_DEPTH`, a fixed height *above* the current scale. So
+it is always the same 16 cells on screen, and zooming swaps which subtree is
+current without the room ever appearing to change size. You get a new lattice,
+not the feeling of stepping out into a bigger room.
+
+For "pick which subtree you are in" to feel like moving through the nest, the
+room probably has to be pinned to an absolute height rather than a relative one:
+ascending makes the current room grow until it fills the view, at which point its
+parent becomes current and the view rescales. That is a different interaction
+from `Q`/`E` swapping scaleExp, and it is the thing to test next.
+
+Two smaller ones: the sun at `size * 0.28` covers over half the room's width and
+probably wants to be smaller or pushed further out; and siblings are not yet
+dimmed, so there is no sense of the rooms you are *not* in.

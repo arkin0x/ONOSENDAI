@@ -11,6 +11,9 @@
  *   A  light only     today's flat ortho slice + bloom + fog
  *   B  rooms          A + the aligned-subtree nest as containment (still ortho)
  *   C  perspective    B with a real perspective rig
+ *   D  the room       one subtree is current: you are inside it, its parent is
+ *                     faint beyond it, and the black sun is a proxy on its +Z
+ *                     wall. Zoom moves you through the nest.
  *
  * A vs B isolates whether structure earns its keep. A vs C isolates whether
  * projection does. Precision is unchanged in all three: same cursor, same grid,
@@ -33,10 +36,11 @@ import { PathTrail } from '../PathTrail'
 import { ShaderPointField } from '../ShaderPointField'
 import { ViewRig } from '../ViewRig'
 import { Rooms } from './Rooms'
+import { Room } from './Room'
 import { currentVariant, type VariantKey } from './PrototypeSwitcher'
 
 /** The world content. Identical across variants; only the treatment differs. */
-function WorldContent({ rooms }: { rooms: boolean }): JSX.Element {
+function WorldContent({ rooms, room }: { rooms: boolean; room: boolean }): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
@@ -49,6 +53,7 @@ function WorldContent({ rooms }: { rooms: boolean }): JSX.Element {
     <group quaternion={view}>
       <ShaderPointField plane={plane} win={win} />
       {rooms && <Rooms axes={axes} />}
+      {room && <Room axes={axes} />}
       <BoundaryGrid axes={axes} win={win} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <ClickPlane axes={axes} />
@@ -74,7 +79,8 @@ function Glow(): JSX.Element {
 export function PrototypeScene(): JSX.Element {
   const variant: VariantKey = currentVariant()
   const perspective = variant === 'C'
-  const rooms = variant !== 'A'
+  const rooms = variant === 'B' || variant === 'C'
+  const room = variant === 'D'
 
   return (
     <Canvas
@@ -95,7 +101,7 @@ export function PrototypeScene(): JSX.Element {
       <ambientLight intensity={0.8} />
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <ViewRig perspective={perspective} />
-      <WorldContent rooms={rooms} />
+      <WorldContent rooms={rooms} room={room} />
       <Glow />
     </Canvas>
   )

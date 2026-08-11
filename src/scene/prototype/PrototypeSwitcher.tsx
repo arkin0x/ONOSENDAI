@@ -15,6 +15,7 @@ export const VARIANTS = {
   A: 'Light only — flat slice, bloom + fog',
   B: 'Rooms — aligned-subtree containment',
   C: 'Perspective room — B with a real rig',
+  D: 'The room you are in — subtree as primary volume',
 } as const
 
 export type VariantKey = keyof typeof VARIANTS

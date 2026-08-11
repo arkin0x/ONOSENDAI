@@ -23,9 +23,9 @@ const CyberspaceInfo = ({style = {height: "100svh"}}: CyberspaceViewerProps) => 
   return (
     <div className="cyberspace-info">
       <div id="info">
-        <Canvas style={style} onClick={nextMessage}>
+        <Canvas style={{...style, touchAction: "none"}} onClick={nextMessage}>
           <ambientLight intensity={2.0} />
-          <OrbitControls />
+          <OrbitControls enablePan />
           <group>
             <Terminal 
               animate={messageIncrement === 0}

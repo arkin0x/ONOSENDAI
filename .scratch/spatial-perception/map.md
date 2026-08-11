@@ -59,15 +59,14 @@ for decisions, `/research` for AFK fact-finding.
 <!-- one line per closed ticket: gist + link -->
 
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
-  — **A bearing, not a place.** Rendered at a fixed `+Z_cs` bearing so §11.3 holds
-  from any coordinate. A literal point cannot: even after correcting the spec it
-  averages 42.1° off `+Z` over 2000 spawns, because the marker is ~0.24
-  light-years away while a random spawn is off-axis by a comparable distance.
-  Found a spec defect worth its own fix — §11.2's u85 triple `(0,0,2^84)` puts the
-  marker at the axis *middle* and the `-X,-Y` corner, leaving the "+Z guidepost"
-  **behind 51.1% of all spawns**. The km figure was correct throughout; the km
-  frame is cube-centred while u85 is corner-relative. Fix upstream in
-  [cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17).
+  — **Neither: it has no coordinate.** Ruled by the protocol author — a
+  recommended visual guidepost that exists beyond the `+Z` end, outside all
+  coordinates, drawn when the `+Z` boundary plane is in the frustum. So §11.2's
+  u85 triple is a category error, §11.2 and §11.3 never contradicted, and the
+  marker is a rare coarse-scale landmark rather than a compass. **Ticket 02
+  over-read it** as "the only absolute reference the protocol defines"; ticket 04
+  still needs an orientation answer for working scales, and it will not come from
+  the black sun.
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:

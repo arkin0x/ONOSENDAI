@@ -18,12 +18,14 @@ Decide what furniture the world needs, and build it:
 - **The black sun.** §11.2 defines a purple marker at the `+Z_cs` boundary as
   the directional guidepost, and §11.3's canonical view faces it. The app
   implements the view (`canonicalQuaternion`, the `C` key) and renders no marker.
-  **Ticket 07 ruled it a bearing, not a place**: render it at a fixed `+Z_cs`
-  bearing from wherever you stand, like a sun on the horizon. It is never
-  approached, never parallaxes, has no distance. A literal point cannot serve as
-  a `+Z` bearing — measured at 35° off `+Z` from a typical spawn even after
-  correcting the spec's arithmetic. Per 02 it is the *only* absolute reference
-  the protocol defines; everything else on this list is relative.
+  **Ticket 07: it has no coordinate.** Per the protocol author it exists beyond
+  the `+Z` end, outside all coordinates, and is drawn when the `+Z` boundary
+  plane is inside the frustum. Purple, shape free, present in both planes. At
+  working scales that boundary is ~2^85 gibsons away and never in view, so **the
+  black sun will almost never be on screen** and cannot be the orientation
+  answer. Ticket 02 over-read it. This ticket must answer "which way am I facing"
+  some other way — the existing `Compass3D` gizmo, structure in the world, or
+  something new.
 - **What else deserves to be absolute?** Carried over from 07: the origin, the
   axis extents, the sector lattice. Is one sun the whole of it, or does the space
   need more fixed reference than a single bearing?

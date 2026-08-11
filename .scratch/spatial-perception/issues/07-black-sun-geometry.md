@@ -43,60 +43,49 @@ the origin, the axis extents, the sector lattice — or is one sun the whole of 
 
 ## Answer
 
-**The black sun is a bearing, not a place.** Render it at a fixed `+Z_cs` bearing
-from wherever the avatar stands, like a sun on the horizon. §11.3 then holds
-exactly, everywhere.
+**Ruled by the protocol author, and it supersedes everything below.**
 
-### Evidence
+> The black sun is a recommended visual guidepost for visual implementations of
+> the Cyberspace protocol. It exists at the Z+ end, beyond all coordinates. It
+> can be seen when the Z+ plane is within the frustum. That's all it is.
 
-**The km figure was correct all along; the u85 triple is the error.** §9.7 maps
-`u = km * 1000 * 2^33 + 2^84`, so `km = 0` sits at u85 `2^84`. The km frame is
-therefore **cube-centred** while u85 is **corner-relative**. Centre plus one
-half-axis (§9.2's ~2.25e12 km) is exactly the `+Z` boundary, so the stated km
-triple already denoted the centre of the `+Z` face — which is what §11.2 says the
-marker marks.
+Three consequences:
 
-The stated u85 triple `(0, 0, 2^84)` does not: the axis maximum is `2^85 - 1`, so
-`2^84` is the middle of the z axis and `x = y = 0` is the axis minimum. Spec
-commit `088a7cc` introduced it with the words "the maximum u85 value", which is
-where the error entered. That commit also added a guard saying not to convert the
-km figure — but the guard's own premise was the bug, and following it propagates
-the error. The guard has since been dropped from the spec while the km figure
-remains, which is the trap that makes this worth fixing.
+1. **It has no coordinate.** "Beyond all coordinates" means it is outside the
+   coordinate space, so §11.2's `black_sun_u85` triple is a category error rather
+   than an arithmetic one. Nothing to correct; it should not be there.
+2. **§11.2 and §11.3 do not contradict.** "Facing the black sun" is a view
+   *orientation* toward `+Z_cs`, not a line of sight to an object. The
+   contradiction I reported only existed because I treated the marker as a point
+   inside the cube.
+3. **It is not an always-visible bearing either**, which is what this ticket
+   originally ruled. It is drawn when the `+Z_cs` boundary plane enters the view
+   frustum. At fine scales that boundary is ~2^85 gibsons away and effectively
+   never in view, so the black sun appears only when you are zoomed out far
+   enough to see the edge of the universe.
 
-**Measured, over 2000 pubkey-derived spawns** (12-spawn samples agree within a
-few degrees):
+### Consequence for the map
 
-| marker | mean angle off `+Z` | worst | behind the viewer |
-|---|---|---|---|
-| stated `(0, 0, 2^84)` | 90.9° | 175.9° | **51.1%** |
-| km-derived / corrected | 42.1° | 89.9° | 0% |
+**The black sun is not the orientation answer.** Ticket 02 ranked it highly as
+"the only absolute reference the protocol defines", and that over-read it: it is
+a rare, coarse-scale landmark, not a compass you navigate by day to day. Ticket
+04 still needs an answer for "which way am I facing" at working scales, and it
+will not come from here.
 
-The 51.1% is decisive: the current coordinate puts the `+Z` guidepost *behind
-half of all spawns*. Correcting it removes that and halves the mean error.
+Rendering rule for ticket 04: draw it beyond the `+Z_cs` boundary plane, visible
+only when that plane is inside the frustum, purple, shape implementation-defined,
+present in both planes.
 
-**But correcting it does not rescue §11.3.** A 42.1° mean remains, because the
-marker is ~0.24 light-years away (§9.2) while a random spawn is off-axis by a
-comparable distance, so it is nowhere near effective infinity. No literal point
-can serve as a `+Z` bearing from an arbitrary coordinate. Hence: a bearing.
+### Process note
 
-**Upstream:** the coordinate fix is
-[arkin0x/cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17), which
-sets `black_sun_u85 = (2^84, 2^84, 2^85 - 1)` and states that the two forms are
-the same point. It deliberately leaves §11.3 untouched and raises point-versus-
-bearing as an open decision for the maintainer.
+I got this wrong three times before asking: first that the km figure was
+authoritative, then that the u85 triple was, then that it was an always-visible
+bearing. Each reading was defensible from the text and each was wrong. The text
+could not settle it because the object was never a coordinate; only the author
+could. Ask earlier.
 
-### Consequences
+### Upstream
 
-- **Ticket 04** builds it as a bearing indicator, not a reachable landmark. It is
-  never approached, never parallaxes, and has no distance. Per ticket 02 it is the
-  only absolute reference the protocol defines; everything else is relative.
-- **§11.2's "purple circle marking the +Z_cs boundary"** becomes figurative: the
-  marker indicates the boundary's direction rather than sitting on it.
-- **Upstream:** two corrections to raise against `arkin0x/cyberspace` — the u85
-  triple is arithmetically inconsistent with its own km triple, and point-versus-
-  direction needs stating explicitly, since §11's whole purpose is that different
-  viewers agree on orientation.
-- **Secondary question** (what else deserves to be an absolute reference: origin,
-  axis extents, sector lattice) folds into ticket 04 rather than becoming its own
-  ticket — it is the same landmark-set decision.
+[cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17) fixes the
+coordinate rather than removing it, so it addresses the wrong layer and should be
+reworked or closed.

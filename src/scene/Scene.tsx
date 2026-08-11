@@ -98,17 +98,27 @@ function ScreenAxes(): null {
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
     const local = [axes.right, axes.up, axes.out]
 
-    const nearest = (v: Vector3): AxisDirection => {
+    // Claimed one at a time, strongest first, because snapping the three basis
+    // vectors independently does not have to yield three different axes. Around
+    // 45 degrees two of them round to the same one, and then a whole cyberspace
+    // axis has no key bound to it: R/F aliases onto W/S and you cannot leave the
+    // plane at all. Claiming makes the result a permutation by construction.
+    const taken = [false, false, false]
+    const claim = (v: Vector3): AxisDirection => {
       const c = [v.x, v.y, v.z]
-      let i = 0
-      for (let k = 1; k < 3; k++) if (Math.abs(c[k]) > Math.abs(c[i])) i = k
+      let i = -1
+      for (let k = 0; k < 3; k++) {
+        if (taken[k]) continue
+        if (i === -1 || Math.abs(c[k]) > Math.abs(c[i])) i = k
+      }
+      taken[i] = true
       const dir = (local[i].dir * (c[i] >= 0 ? 1 : -1)) as 1 | -1
       return { axis: local[i].axis, dir }
     }
 
-    const r = nearest(right.current)
-    const u = nearest(up.current)
-    const o = nearest(out.current)
+    const r = claim(right.current)
+    const u = claim(up.current)
+    const o = claim(out.current)
     useCyberspace.getState().setScreenAxes({ right: r, up: u, out: o })
     if (import.meta.env.DEV) {
       ;(window as unknown as { __screenAxes?: unknown }).__screenAxes = { right: r, up: u, out: o }

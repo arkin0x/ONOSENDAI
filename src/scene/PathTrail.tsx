@@ -8,7 +8,7 @@
 import { useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
-import { cellOffset, type ViewAxes } from '../lib/space'
+import { alignTo, cellDelta, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin } from '../store/useCyberspace'
 
 interface Props {
@@ -19,7 +19,6 @@ interface Props {
 export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const positionHistory = useCyberspace((s) => s.positionHistory)
   const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
 
   const geometry = useMemo(() => {
     if (positionHistory.length < 2) return null
@@ -27,24 +26,25 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     const origin = alignedOrigin(position, scaleExp)
     const vertices: number[] = []
 
-    // Build segments: each pair of consecutive positions becomes two vertices
+    // All three axes. The trail used to map right and up only and pin depth to a
+    // constant, so it drew a flat shadow of a 3D path: every out-axis hop
+    // collapsed to nothing, and rotating the view changed which axis was being
+    // flattened, so the shape changed with the view. Cell centres, matching the
+    // cursor and the avatar, so a segment ends where its gibson is drawn.
+    const centre = (p: Position): [number, number, number] => [
+      cellDelta(alignTo(p[axes.right.axis], scaleExp), origin[axes.right.axis], scaleExp) * axes.right.dir,
+      cellDelta(alignTo(p[axes.up.axis], scaleExp), origin[axes.up.axis], scaleExp) * axes.up.dir,
+      cellDelta(alignTo(p[axes.out.axis], scaleExp), origin[axes.out.axis], scaleExp) * axes.out.dir,
+    ]
+
     for (let i = 0; i < positionHistory.length - 1; i++) {
-      const from = positionHistory[i]
-      const to = positionHistory[i + 1]
-      
-      const x1 = cellOffset(from[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
-      const y1 = cellOffset(from[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
-      vertices.push(x1, y1, 0.02)
-      
-      const x2 = cellOffset(to[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir)
-      const y2 = cellOffset(to[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir)
-      vertices.push(x2, y2, 0.02)
+      vertices.push(...centre(positionHistory[i]), ...centre(positionHistory[i + 1]))
     }
 
     const geom = new BufferGeometry()
     geom.setAttribute('position', new Float32BufferAttribute(vertices, 3))
     return geom
-  }, [positionHistory, axes, scaleExp, position, cursor])
+  }, [positionHistory, axes, scaleExp, position])
 
   if (!geometry) return null
 

@@ -423,8 +423,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
   setScreenAxes: (a) => {
     const cur = get().screenAxes
-    if (cur && cur.right.axis === a.right.axis && cur.right.dir === a.right.dir
-      && cur.up.axis === a.up.axis && cur.up.dir === a.up.dir) return
+    // All three compared. Comparing only right and up let a stale `out` survive
+    // any orbit that left those two unchanged, so R and F kept pushing along
+    // whichever axis they had been bound to when the camera last passed here.
+    const same = (x: AxisDirection, y: AxisDirection): boolean =>
+      x.axis === y.axis && x.dir === y.dir
+    if (cur && same(cur.right, a.right) && same(cur.up, a.up) && same(cur.out, a.out)) return
     set({ screenAxes: a })
   },
 
@@ -467,6 +471,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     ]
   },
 }))
+
+if (import.meta.env.DEV) {
+  // Lets the browser harness read and drive real state instead of inferring it
+  // from the HUD, the same way __terrain and __screenAxes work.
+  ;(window as unknown as { __store?: unknown }).__store = useCyberspace
+}
 
 /** Positions are equal when all three axes match. */
 export function samePosition(a: Position, b: Position): boolean {

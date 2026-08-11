@@ -91,10 +91,12 @@ export function useKeyboard(): void {
       }
 
       // R and F travel along the axis perpendicular to the screen, which is
-      // otherwise unreachable without rotating the view first.
+      // otherwise unreachable without rotating the view first. `out` points out
+      // of the screen toward you, so R (push away, into the screen) is its
+      // inverse and F pulls back toward you.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
-        store.moveCursor(event.code === 'KeyR' ? axes.out : invert(axes.out))
+        store.moveCursor(event.code === 'KeyR' ? invert(axes.out) : axes.out)
         return
       }
 

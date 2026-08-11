@@ -6,9 +6,10 @@
  * The camera is a real perspective rig rather than the orthographic slice this
  * replaced. Two things carried over from the spatial-model prototype:
  *
- * - **Bloom over black**, from v1. With a threshold near zero every non-black
- *   pixel glows, which is what makes line geometry read as emitted light rather
- *   than as thin tinted strokes. Cheap, and it does most of the aesthetic work.
+ * - **Bloom is currently OFF**, to measure what it costs. It is what makes line
+ *   geometry read as emitted light rather than as thin tinted strokes, and it
+ *   does most of the aesthetic work, but it is also by far the most expensive
+ *   thing in the frame. Revert this commit to get it back.
  * - **The aligned-subtree nest as rooms**, drawn in 3D. Per §4.5 the boxes are
  *   not chosen by anyone: everyone inside one computes the same root, so they
  *   are the shared structure of the space, and their edges are exactly the
@@ -22,7 +23,6 @@
 
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
@@ -197,16 +197,6 @@ export function Scene(): JSX.Element {
       <CellMetric />
       <ScreenAxes />
       <World />
-      {/*
-        Bloom is what makes line geometry read as emitted light, and it is also
-        by far the most expensive thing on screen: measured at 6fps with levels 9
-        at full resolution against 49fps with the pass removed entirely. Halving
-        its resolution and cutting the mip levels buys nearly all of that back,
-        and is invisible because the effect is a blur to begin with.
-      */}
-      <EffectComposer resolutionScale={0.25}>
-        <Bloom mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
-      </EffectComposer>
     </Canvas>
   )
 }

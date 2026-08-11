@@ -58,6 +58,15 @@ for decisions, `/research` for AFK fact-finding.
 
 <!-- one line per closed ticket: gist + link -->
 
+- [03 — What is the spatial model?](issues/03-spatial-model.md)
+  — **Perspective, orbiting a 49³ volume, with bloom and the room nest.** Variant
+  C won on the strength of the 3D boxes; A's bloom and B's rooms came with it.
+  Click-to-cursor is replaced by free orbit around the cursor. The volume is
+  affordable only because of the block cache: 117,649 cells resolve from 343
+  samples at scaleExp 0. Created four follow-ups, notably that the boundary grid
+  is still plane-shaped and streaks across the volume, and that the 6.9s fill is
+  CPU scanning rather than hashing.
+
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
   — **Neither: conceptually at `+Z` infinity, rendered as a scale-relative
   proxy.** A recommended guidepost beyond the `+Z` end, visible iff the frustum
@@ -97,6 +106,10 @@ for decisions, `/research` for AFK fact-finding.
   `ScaleBar` the best comprehension element in the client for *physical size*,
   and the *hierarchy* entirely absent. Small defect to sweep up here: ScaleBar
   reports meters in ideaspace, which §9.1 says has no physical mapping.
+- **Prefetch for volumes.** The random-walk prefetch was removed when terrain
+  became a volume: it speculated a plane ahead, and speculating whole volumes
+  costs more than it saves. Needs a redesign around what is actually cheap to
+  speculate now, probably blocks rather than volumes.
 - **Path and history.** Where have you been, across scales and rotations, and how
   does the trail stay meaningful when a single step can cross a wall?
 - **Mobile.** Whether whatever spatial model wins survives a phone, one-handed.

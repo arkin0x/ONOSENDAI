@@ -1,7 +1,7 @@
 # 03 — What is the spatial model?
 
 Type: prototype
-Status: claimed
+Status: resolved
 Blocked by: —
 
 ## Question
@@ -127,3 +127,51 @@ from `Q`/`E` swapping scaleExp, and it is the thing to test next.
 Two smaller ones: the sun at `size * 0.28` covers over half the room's width and
 probably wants to be smaller or pushed further out; and siblings are not yet
 dimmed, so there is no sense of the rooms you are *not* in.
+
+## Answer
+
+**Variant C wins: perspective, orbiting a volume, keeping A's bloom and B's
+rooms.** Merged to `v2` as `21d8be3` and browser-verified.
+
+Judged by looking at all four. A is a real baseline improvement and its bloom
+carries most of the aesthetic effortlessly. B is the most intelligible layout. C
+is the one with a wow factor, from the 3D boxes in perspective — its only fault
+was being far too far away.
+
+What shipped, beyond picking C:
+
+- **Terrain is a 49³ volume**, not a plane. Gibsons exist in every direction and
+  the camera is inside them.
+- **OrbitControls around the cursor**, replacing click-to-cursor and its
+  ClickPlane, so the same drag now orbits arbitrarily.
+- **Camera much closer**: fov 55 starting 26 cells out, versus 60 units in the
+  prototype.
+- **Smaller points**: 1.2px floor, 0.22 of a tile at K=16. A dense cloud needs
+  smaller marks than a plane did.
+- **The world group carries no rotation.** With the camera free, the quaternion
+  pair the orthographic rig needed, which cancelled itself and made `view`
+  geometrically inert, is gone.
+
+**The volume is only affordable because of the block cache.** 117,649 cells
+resolve from **343 distinct samples** at scaleExp 0, exactly the 7³ predicted by
+K being constant across an aligned 2^3 cube. Without that this would be 117,649
+terrainK evaluations.
+
+### Follow-ups this created
+
+1. **The boundary grid is still plane-shaped.** It draws a flat 2D lattice that
+   now streaks across the whole volume, which is the most visible flaw in the new
+   baseline. It needs to become a 3D lattice, or be replaced by the room edges
+   which already carry the same information. Belongs with ticket 05, which owns
+   how cost is shown.
+2. **6.9s to fill the volume, and none of it is hashing.** The samples are ~18ms
+   of terrainK; the rest is the CPU re-scanning all 117,649 cells on every
+   frame-coalesced flush. The scan wants incrementalising, or the volume wants
+   building on a worker.
+3. **The prefetch walk was removed, not ported.** It speculated a plane ahead;
+   speculating whole volumes would cost far more than it saves. Needs a redesign
+   around the volume before it comes back.
+4. **Rotation is now redundant.** `Shift+WASD` remaps axes in 90° steps, which
+   made sense when that was the only way to see another angle. With free orbit it
+   is a second, conflicting rotation model. Ticket 06 should resolve which
+   survives.

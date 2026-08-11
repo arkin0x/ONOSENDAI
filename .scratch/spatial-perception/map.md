@@ -134,20 +134,13 @@ for decisions, `/research` for AFK fact-finding.
   Note shards are **not** in the v2 spec or any DECK; they were a v1 concept.
   Platforms and obstacles would be app-level content or need a DECK, with
   `kind:33330` region-keyed content (§8.6) the nearest protocol hook.
-  **This may redraw the destination rather than sit inside it** — see below.
+  **Ruled: opportunistic, not a destination redraw.** The destination stays
+  spatial perception. The platformer is a target to take if the work passes near
+  it, not one to steer toward. No ticket redraws itself for it; if a variant or a
+  control scheme happens to land close, take the shot.
 - **The DECKs as navigation.** Hyperjumps (DECK-0001) are a navigation primitive,
   and virtual spawn (PR #15) would allow cheap synthetic avatars for local
   iteration. Both may become navigation/visualization questions later.
-
-## Open question on the destination
-
-The platformer framing above is not obviously a means to the current destination
-or a replacement for it. The destination is spatial *perception*, judged by
-comprehension and style; a game framing is a strategy for relatability, which
-serves comprehension, so it may sit inside the map. But it is also a large
-product commitment that would reshape tickets 03, 04 and 06 and likely add
-several more. Redrawing a destination is a scoping act and belongs to the person
-who owns the effort, not to a session. Unresolved.
 
 ## Out of scope
 

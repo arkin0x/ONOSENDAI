@@ -29,6 +29,7 @@ import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, type AxisDirection } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { Avatar } from './Avatar'
@@ -87,9 +88,14 @@ function ScreenAxes(): null {
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
   const right = useRef(new Vector3())
   const up = useRef(new Vector3())
+  const out = useRef(new Vector3())
 
   useFrame((state) => {
-    state.camera.matrixWorld.extractBasis(right.current, up.current, new Vector3())
+    // The third basis vector is the camera's +Z, which points out of the screen
+    // toward the viewer, exactly what `out` means here. Deriving out as "the
+    // axis the other two did not claim" kept its original sign, so R and F
+    // pushed the wrong way once an orbit flipped that axis.
+    state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
     const local = [axes.right, axes.up, axes.out]
 
     const nearest = (v: Vector3): AxisDirection => {
@@ -102,8 +108,7 @@ function ScreenAxes(): null {
 
     const r = nearest(right.current)
     const u = nearest(up.current)
-    // The out axis is whichever one right and up did not claim.
-    const o = local.find((a) => a.axis !== r.axis && a.axis !== u.axis) ?? axes.out
+    const o = nearest(out.current)
     useCyberspace.getState().setScreenAxes({ right: r, up: u, out: o })
     if (import.meta.env.DEV) {
       ;(window as unknown as { __screenAxes?: unknown }).__screenAxes = { right: r, up: u, out: o }
@@ -124,6 +129,10 @@ function ScreenAxes(): null {
  */
 function CellMetric(): null {
   useFrame((state) => {
+    // Share the camera's orientation with the compass, which renders in its own
+    // Canvas and cannot reach this one's camera.
+    cameraPose.copy(state.camera.quaternion)
+
     const cam = state.camera as unknown as { fov?: number; position: { distanceTo: (v: never) => number } }
     if (cam.fov === undefined) return
     const [tx, ty, tz] = useCyberspace.getState().cursorOffset()
@@ -147,25 +156,47 @@ function Rig(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const view = useCyberspace((s) => s.view)
-  const controls = useRef<{ object: { position: { set: (x: number, y: number, z: number) => void } }; update: () => void } | null>(null)
+  const controls = useRef<{ object: { position: Vector3 }; update: () => void } | null>(null)
 
   const target = useMemo(
     () => useCyberspace.getState().cursorOffset(),
     [cursor, position, scaleExp, view],
   )
 
-  // Snap straight-on ONLY when the axis mapping changes. Moving the cursor
-  // retargets the orbit but must not reset it: orbiting to an angle and then
-  // driving the cursor from there is the point.
+  // Locked means the camera travels with the cursor, so an axis-aligned view
+  // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
+  // breaks the lock, because once you have chosen an angle you are looking at
+  // the space rather than following the cursor through it.
+  const locked = useRef(true)
+  const prevTarget = useRef(target)
   const latestTarget = useRef(target)
   latestTarget.current = target
+
   useEffect(() => {
     const c = controls.current
     if (!c) return
     const [x, y, z] = latestTarget.current
     c.object.position.set(x, y, z + START_DISTANCE)
+    prevTarget.current = latestTarget.current
+    locked.current = true
     c.update()
   }, [view])
+
+  // While locked, translate the camera by however far the cursor moved, so the
+  // framing is unchanged. Unlocked, the camera stays put and merely re-aims,
+  // which lets the cursor move around within the angle you picked.
+  useEffect(() => {
+    const c = controls.current
+    if (!c) return
+    if (locked.current) {
+      const p = prevTarget.current
+      c.object.position.x += target[0] - p[0]
+      c.object.position.y += target[1] - p[1]
+      c.object.position.z += target[2] - p[2]
+      c.update()
+    }
+    prevTarget.current = target
+  }, [target])
 
   return (
     <OrbitControls
@@ -176,6 +207,7 @@ function Rig(): JSX.Element {
       minDistance={2}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
+      onStart={() => { locked.current = false }}
     />
   )
 }

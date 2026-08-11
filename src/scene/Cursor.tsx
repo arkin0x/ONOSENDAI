@@ -11,7 +11,11 @@
  * cursor.
  */
 
-import { useLayoutEffect, useMemo } from 'react'
+import { useLayoutEffect, useMemo, useRef } from 'react'
+import { Billboard, Text } from '@react-three/drei'
+import { useFrame, type RootState } from '@react-three/fiber'
+import { Group, Vector3 } from 'three'
+import { formatCellSize } from '../lib/scale'
 import {
   BufferGeometry,
   EdgesGeometry,
@@ -164,11 +168,53 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
       </lineSegments>
 
+      {/* The scale reading, attached to the cursor rather than parked on the
+          left edge. The cursor cube IS the instrument: one cell wide, so the
+          label states what that cube measures. Billboarded and scaled to a
+          constant screen size, so it stays readable at any orbit distance. */}
+      <ScaleLabel scaleExp={scaleExp} color={targetColor} />
+
       {/* Exact cursor point */}
       <mesh position={points.b} renderOrder={10}>
         <ringGeometry args={[0.12, 0.2, 24]} />
         <meshBasicMaterial color={targetColor} toneMapped={false} transparent depthTest={false} />
       </mesh>
+    </group>
+  )
+}
+
+/** A constant-screen-size, camera-facing label for the cursor's cell size. */
+function ScaleLabel({ scaleExp, color }: { scaleExp: number; color: string }): JSX.Element {
+  const group = useRef<Group>(null)
+  const label = useMemo(() => formatCellSize(scaleExp), [scaleExp])
+
+  // World scale is set from view depth each frame so the text holds a constant
+  // pixel height. Without this it shrinks to nothing as you pull the camera out.
+  useFrame((state: RootState) => {
+    const g = group.current
+    if (!g) return
+    const cam = state.camera as unknown as { fov?: number; position: Vector3 }
+    if (cam.fov === undefined) return
+    const depth = Math.max(0.001, cam.position.distanceTo(g.getWorldPosition(new Vector3())))
+    const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
+    const s = (14 * depth) / projScale
+    g.scale.setScalar(s)
+  })
+
+  return (
+    <group ref={group} position={[0.75, 0.75, 0]}>
+      <Billboard>
+        <Text
+          fontSize={1}
+          anchorX="left"
+          anchorY="middle"
+          color={color}
+          outlineWidth={0.06}
+          outlineColor="#05070d"
+        >
+          {label}
+        </Text>
+      </Billboard>
     </group>
   )
 }

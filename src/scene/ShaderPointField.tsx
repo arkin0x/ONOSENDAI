@@ -39,15 +39,13 @@ interface Props {
 const vertexShader = /* glsl */ `
   attribute float aK;
   uniform float uTime;
-  uniform float uMinPx;
-  uniform float uMaxWorld;
-  uniform float uGamma;
-  uniform float uProjScale;
+  uniform float uFarPx;
+  uniform float uNearPx;
+  uniform float uKSpread;
   uniform float uDpr;
   uniform vec3 uFocus;
   uniform float uFadeRadius;
   uniform float uNearRadius;
-  uniform float uNearBoost;
 
   varying float vK;
   varying float vPx;
@@ -67,44 +65,34 @@ const vertexShader = /* glsl */ `
     // K = 0 keeps zero size and disappears, which is also how cells outside the
     // universe read, since they arrive as 0.
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    float viewDepth = max(-mvPosition.z, 0.001);
 
     float px = 0.0;
 
     if (aK >= 1.0) {
-      // Size is a WORLD size, then divided by view depth. Setting gl_PointSize
-      // from a constant scale made every point the same size on screen no matter
-      // how far away it was, which is why nearby gibsons never looked nearer.
-      // Weighted toward high K: K is Binomial(16, 0.5), so it piles up around 8
-      // and only ~1% of cells reach 13+, and a linear ramp spends its width on
-      // the values that are everywhere.
-      float t = pow((aK - 1.0) / 15.0, uGamma);
-      float world = mix(uMaxWorld * 0.18, uMaxWorld, t);
-
-
-      // Proximity to the cursor, as a tight quadratic. Perspective attenuation
-      // alone barely varies here: the camera orbits the cursor at a fixed-ish
-      // distance while the volume is only VOLUME_RADIUS deep, so every point
-      // sits at a similar view depth and nothing near the cursor looked nearer.
-      // The boost is deliberately concentrated in a few cells and falls to
-      // nothing beyond uNearRadius, so it reads as "these are the ones you are
-      // pointing at" rather than as a general brightening.
+      // Sized directly in pixels rather than in world units through perspective.
+      // The field wants to read as fine dust, a pixel or two across, with only
+      // the cells you are pointing at standing out. At that size perspective
+      // attenuation has no room to express itself, and the cursor is what the
+      // eye tracks anyway.
+      //
+      // The ramp is quartic and dies within uNearRadius cells, so the bump reads
+      // as "these ones" rather than as a general brightening.
       float prox = clamp(1.0 - distance(position, uFocus) / max(uNearRadius, 0.001), 0.0, 1.0);
-      world *= 1.0 + uNearBoost * prox * prox;
+      float near = prox * prox * prox * prox;
 
-      // Perspective attenuation, then a pixel floor so distant cells stay
-      // legible as structure rather than disappearing.
-      px = max(world * uProjScale / viewDepth, uMinPx);
+      // K still moves the size a little, so terrain stays legible in the dust.
+      float kFactor = aK / 16.0;
+      float far = uFarPx * (1.0 - uKSpread + uKSpread * 2.0 * kFactor);
+      px = mix(far, uNearPx, near);
 
       // Pulse for expensive terrain.
-      float kFactor = aK / 16.0;
       if (kFactor > 0.7) {
         px *= 1.0 + 0.06 * sin(uTime * 2.5 + float(gl_VertexID) * 0.37);
       }
     }
 
-    // gl_PointSize is in drawing-buffer pixels; uProjScale is derived from CSS
-    // size, so scale by the device pixel ratio or every dot lands at 1/dpr.
+    // gl_PointSize is in drawing-buffer pixels while these sizes are CSS px, so
+    // scale by the device pixel ratio or every dot lands at 1/dpr.
     vPx = px * uDpr;
     gl_PointSize = vPx;
     gl_Position = projectionMatrix * mvPosition;
@@ -229,15 +217,14 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 0.55 },
-      /** Diameter in cells of a K=16 gibson, before proximity and perspective. */
-      uMaxWorld: { value: 0.26 },
-      /** Cells over which the near-cursor size boost applies. Deliberately short. */
-      uNearRadius: { value: 4 },
-      /** Multiplier at the cursor itself, easing in quadratically to nothing. */
-      uNearBoost: { value: 4.5 },
-      uGamma: { value: 3 },
-      uProjScale: { value: 500 },
+      /** Diameter of an ordinary gibson, in CSS pixels. The field is dust. */
+      uFarPx: { value: 1.3 },
+      /** Diameter at the cursor itself. Falls to uFarPx within uNearRadius. */
+      uNearPx: { value: 3.2 },
+      /** How much K swings the far size, as a fraction either side. */
+      uKSpread: { value: 0.35 },
+      /** Cells over which the near bump decays. Quartic, so it dies fast. */
+      uNearRadius: { value: 3 },
       uDpr: { value: 1 },
       uFocus: { value: new Vector3() },
       // Corners of a radius-R cube sit at R*sqrt(3), so fade over that, not R.

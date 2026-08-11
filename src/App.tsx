@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Hud } from './hud/Hud'
-import { ScaleBar } from './hud/ScaleBar'
 import { Compass3D } from './scene/Compass3D'
 import { Scene } from './scene/Scene'
 import { useKeyboard } from './hooks/useKeyboard'
@@ -25,7 +24,6 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {showPanels && <Hud hideTerrainLegend={hideOverlays} menuOpen={hideOverlays} />}
-      {!hideOverlays && <ScaleBar />}
       {!hideOverlays && <Compass3D />}
       {isMobile && showPanels && <div className="mobile-overlay" />}
       {isMobile && (

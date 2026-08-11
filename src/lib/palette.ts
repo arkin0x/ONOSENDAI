@@ -3,7 +3,7 @@
  *
  * Two encodings carry the protocol meaning and must stay distinguishable:
  *   - terrain K (0..16) as a cool-to-hot field, drawn as filled cells
- *   - LCA boundary height as line brightness, drawn as lines on top
+ *   - LCA boundary height as a full-spectrum hue, violet through red
  *
  * They use different marks (fill vs line) so they can be read simultaneously.
  */
@@ -82,13 +82,14 @@ export function boundaryIntensity(height: number, floor: number): number {
  * `excess` is the height above the scale floor (what makes a boundary costly).
  */
 const LCA_STOPS: Array<[number, string]> = [
-  [0, '#0a0e27'],    // extremely dark blue — cheapest crossings
-  [5, '#1a1a5e'],    // dark indigo
-  [10, '#3b1d8e'],   // deep purple
-  [20, '#7c3aed'],   // vivid purple
-  [40, '#a855f7'],   // bright purple
-  [60, '#c084fc'],   // light purple
-  [85, '#e9d5ff'],   // very light purple — most expensive crossings
+  [0, '#4c1d95'],    // deep violet — cheapest crossings
+  [8, '#4338ca'],    // indigo
+  [16, '#0284c7'],   // blue
+  [26, '#0d9488'],   // teal
+  [36, '#16a34a'],   // green
+  [48, '#eab308'],   // yellow
+  [62, '#f97316'],   // orange
+  [85, '#ef4444'],   // red — most expensive crossings
 ]
 
 const lcaCache = new Map<number, Color>()

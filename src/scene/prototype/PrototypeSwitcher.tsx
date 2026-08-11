@@ -56,8 +56,6 @@ export function PrototypeSwitcher(): JSX.Element | null {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  if (!import.meta.env.DEV) return null
-
   return (
     <div className="proto-switcher">
       <button onClick={() => cycle(-1)} aria-label="Previous variant">←</button>

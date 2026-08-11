@@ -24,7 +24,10 @@ export default function App(): JSX.Element {
   const hideOverlays = isMobile && showPanels
 
   // PROTOTYPE (ticket 03): ?variant= swaps the spatial model in dev only.
-  const proto = import.meta.env.DEV && new URLSearchParams(window.location.search).has('variant')
+  // Active whenever ?variant= is present, including production builds: this
+  // branch is throwaway and never merges, and Vercel previews are production
+  // builds, so a DEV gate makes the prototype unusable where it gets judged.
+  const proto = new URLSearchParams(window.location.search).has('variant')
 
   return (
     <div className="app">

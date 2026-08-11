@@ -23,14 +23,13 @@
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { Avatar } from './Avatar'
-import { BoundaryGrid } from './BoundaryGrid'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
@@ -49,9 +48,15 @@ function World(): JSX.Element {
 
   return (
     <group>
+      {/*
+        The LCA boundary grid is hidden. It drew a flat 2D lattice that streaked
+        across the volume once the view became perspective, and the room boxes
+        now carry the same information as containment: a box edge IS the
+        expensive boundary. Kept in the tree for ticket 05, which owns how cost
+        is shown, rather than deleted.
+      */}
       <ShaderPointField volume={volume} win={win} />
       <Rooms axes={axes} />
-      <BoundaryGrid axes={axes} win={win} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />
       <Avatar axes={axes} />
@@ -59,20 +64,38 @@ function World(): JSX.Element {
   )
 }
 
-/** Orbit around the cursor, which is where the camera is looking. */
+/**
+ * Orbit around the cursor, with the axis views as snap-backs.
+ *
+ * Free orbit and the 90° axis remapping are both worth having and they do
+ * different jobs: orbit is for looking, `Shift+WASD` is for recovering a precise,
+ * axis-aligned view once you have finished looking. So changing `view` does not
+ * merely remap the axes, it also returns the camera to straight-on.
+ */
 function Rig(): JSX.Element {
   const cursor = useCyberspace((s) => s.cursor)
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const view = useCyberspace((s) => s.view)
+  const controls = useRef<{ object: { position: { set: (x: number, y: number, z: number) => void } }; update: () => void } | null>(null)
 
   const target = useMemo(
     () => useCyberspace.getState().cursorOffset(),
     [cursor, position, scaleExp, view],
   )
 
+  // Snap straight-on whenever the axis mapping changes, so Shift+WASD and Esc
+  // are a way back out of an arbitrary orbit rather than a confusing relabel.
+  useEffect(() => {
+    const c = controls.current
+    if (!c) return
+    c.object.position.set(target[0], target[1], target[2] + START_DISTANCE)
+    c.update()
+  }, [view, target])
+
   return (
     <OrbitControls
+      ref={controls as never}
       makeDefault
       target={target}
       enablePan={false}
@@ -98,8 +121,15 @@ export function Scene(): JSX.Element {
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />
       <World />
-      <EffectComposer>
-        <Bloom mipmapBlur levels={9} intensity={2.2} luminanceThreshold={0.001} luminanceSmoothing={0} />
+      {/*
+        Bloom is what makes line geometry read as emitted light, and it is also
+        by far the most expensive thing on screen: measured at 6fps with levels 9
+        at full resolution against 49fps with the pass removed entirely. Halving
+        its resolution and cutting the mip levels buys nearly all of that back,
+        and is invisible because the effect is a blur to begin with.
+      */}
+      <EffectComposer resolutionScale={0.5}>
+        <Bloom mipmapBlur levels={5} intensity={2.4} luminanceThreshold={0.001} luminanceSmoothing={0} />
       </EffectComposer>
     </Canvas>
   )

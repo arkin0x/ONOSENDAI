@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { GRID_RADIUS, stepFor, type AxisName, type ViewAxes } from '../lib/space'
+import { stepFor, type AxisName, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import {
   BLOCK_BITS, BLOCK_SIZE, cacheSize, inflightRuns, isPending,
@@ -26,8 +26,22 @@ import type { Position } from '../lib/space'
 import type { ViewWindow } from './useViewWindow'
 import type { Plane } from 'cyberspace-core'
 
+/**
+ * Half-width of the rendered volume, in cells.
+ *
+ * Deliberately smaller than GRID_RADIUS. A full 49³ is 117,649 cells, and while
+ * the block cache makes the *sampling* cheap (343 distinct values at scaleExp 0),
+ * the cost that actually hurts is the CPU re-scanning every cell on each flush
+ * and rebuilding the buffer. 12 gives 25³ = 15,625, roughly 7.5x less scan for a
+ * volume that still surrounds the camera.
+ */
+export const VOLUME_RADIUS = 12
+
 /** Cells across the volume, per axis. */
-export const VOLUME_SIZE = GRID_RADIUS * 2 + 1
+export const VOLUME_SIZE = VOLUME_RADIUS * 2 + 1
+
+/** Rebuilds are throttled to this, so a burst of arrivals cannot rescan per frame. */
+const FLUSH_MS = 120
 
 export interface TerrainVolume {
   /** VOLUME_SIZE^3 values, indexed ((d+R)*N + (r+R))*N + (c+R). */
@@ -59,23 +73,26 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
   const flushHandle = useRef<number | null>(null)
 
   useEffect(() => {
+    // Throttled rather than per-frame. A volume resolves as hundreds of small
+    // runs, and rescanning every cell on each arrival is what made filling it
+    // take seconds: the sampling is milliseconds, the scanning is not.
     const unsubscribe = onTerrainData(() => {
       if (flushHandle.current !== null) return
-      flushHandle.current = requestAnimationFrame(() => {
+      flushHandle.current = window.setTimeout(() => {
         flushHandle.current = null
         setDataVersion((v) => v + 1)
-      })
+      }, FLUSH_MS)
     })
     return () => {
       unsubscribe()
-      if (flushHandle.current !== null) cancelAnimationFrame(flushHandle.current)
+      if (flushHandle.current !== null) clearTimeout(flushHandle.current)
     }
   }, [])
 
   const originKey = `${position.x},${position.y},${position.z}`
 
   return useMemo(() => {
-    const R = GRID_RADIUS
+    const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
     const step = stepFor(scaleExp)
     const origin = alignedOrigin(position, scaleExp)

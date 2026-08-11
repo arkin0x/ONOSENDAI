@@ -17,9 +17,11 @@ import {
   Float32BufferAttribute,
   Points,
   ShaderMaterial,
+  Vector3,
 } from 'three'
-import { VOLUME_SIZE, type TerrainVolume } from '../hooks/useTerrainVolume'
+import { VOLUME_RADIUS, VOLUME_SIZE, type TerrainVolume } from '../hooks/useTerrainVolume'
 import { UNKNOWN } from '../workers/terrain.worker'
+import { useCyberspace } from '../store/useCyberspace'
 import type { ViewWindow } from '../hooks/useViewWindow'
 
 interface Props {
@@ -42,12 +44,32 @@ const vertexShader = /* glsl */ `
   uniform float uGamma;
   uniform float uZoom;
   uniform float uDpr;
+  uniform vec3 uFocus;
+  uniform float uFadeRadius;
 
   varying float vK;
   varying float vPx;
+  varying float vFade;
 
   void main() {
     vK = aK;
+
+    // Distance from what you are looking at, eased out. Near the focus points
+    // stay full size and opaque; further out they shrink and fade, so the volume
+    // reads as depth rather than as a uniform wall of dots. Ease-out rather than
+    // linear so the falloff is gentle nearby and steep at the edge.
+    //
+    // This is not the vignette that was removed earlier: that one was centred on
+    // the avatar under an orthographic camera, where every point was the same
+    // distance away and it only dimmed one side of a flat slice. Here the camera
+    // is inside a volume and distance is real.
+    float dist = distance(position, uFocus) / max(uFadeRadius, 0.001);
+    float ease = 1.0 - pow(1.0 - clamp(dist, 0.0, 1.0), 3.0);
+
+    // Recede, do not erase. Distant cells keep a floor of opacity so the volume
+    // still reads as structure at its edges; taking them to zero emptied the
+    // field, since the corners of a radius-R cube are R*sqrt(3) away.
+    vFade = mix(1.0, 0.14, ease);
 
     // Sized in pixels, between a floor and a fraction of a tile. uZoom is the
     // orthographic camera's pixels per world unit, and the scene draws one
@@ -70,6 +92,10 @@ const vertexShader = /* glsl */ `
       // where the interesting cells are.
       float t = pow((aK - 1.0) / 15.0, uGamma);
       px = mix(uMinPx, maxPx, t);
+
+      // Nearer reads larger. Kept above zero so distant cells stay legible as
+      // structure even as they fade.
+      px *= mix(1.0, 0.55, ease);
 
       // Pulse for expensive terrain.
       float kFactor = aK / 16.0;
@@ -101,6 +127,7 @@ const fragmentShader = /* glsl */ `
 
   varying float vK;
   varying float vPx;
+  varying float vFade;
 
   vec3 terrainColor(float k) {
     vec3 c0  = vec3(0.024, 0.067, 0.110);
@@ -127,8 +154,12 @@ const fragmentShader = /* glsl */ `
 
     // Feather a constant couple of pixels, whatever the dot's size.
     float edge = clamp(2.0 / max(vPx, 1.0), 0.04, 0.5);
-    float alpha = 1.0 - smoothstep(1.0 - edge, 1.0, d);
-    if (alpha < 0.01) discard;
+    float alpha = (1.0 - smoothstep(1.0 - edge, 1.0, d)) * vFade;
+
+    // Discarding faded points is also what keeps this affordable: transparent
+    // points with bloom are overdraw-bound, so dropping the far half of a volume
+    // is the difference between a slideshow and a usable frame rate.
+    if (alpha < 0.02) discard;
 
     vec3 color = terrainColor(vK);
 
@@ -200,11 +231,14 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 1.2 },
-      uMaxTileFrac: { value: 0.22 },
+      uMinPx: { value: 1.8 },
+      uMaxTileFrac: { value: 0.26 },
       uGamma: { value: 3 },
       uZoom: { value: 8 },
       uDpr: { value: 1 },
+      uFocus: { value: new Vector3() },
+      // Corners of a radius-R cube sit at R*sqrt(3), so fade over that, not R.
+      uFadeRadius: { value: VOLUME_RADIUS * 1.75 },
     },
     transparent: true,
     depthWrite: false,
@@ -219,6 +253,10 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     if (!mat.uniforms) return
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
+
+    // Focus is what the camera orbits: the cursor.
+    const [fx, fy, fz] = useCyberspace.getState().cursorOffset()
+    mat.uniforms.uFocus.value.set(fx, fy, fz)
 
     const camera = state.camera as unknown as { zoom?: number }
     if (camera.zoom !== undefined) mat.uniforms.uZoom.value = camera.zoom

@@ -18,7 +18,7 @@ import {
   Float32BufferAttribute,
   Line,
   LineDashedMaterial,
-  PlaneGeometry,
+  BoxGeometry,
 } from 'three'
 import { estimateHopCost } from 'cyberspace-core'
 import { DANGER, SIDESTEP, WARN } from '../lib/palette'
@@ -122,7 +122,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const leg1 = useMemo(() => makeDashedLine(leg1Geometry), [leg1Geometry])
   const leg2 = useMemo(() => makeDashedLine(leg2Geometry), [leg2Geometry])
 
-  const cellOutline = useMemo(() => new EdgesGeometry(new PlaneGeometry(1, 1)), [])
+  // A cube, not a square: the view orbits now, so the target cell has to read
+  // as a volume from any angle rather than as a plane seen face-on.
+  const cellOutline = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
   const targetColor = plan?.landing
     ? plan.remainderBlocked ? DANGER : WARN

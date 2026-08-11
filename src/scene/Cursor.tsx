@@ -16,6 +16,7 @@ import { Billboard, Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Vector3 } from 'three'
 import { formatCellSize } from '../lib/scale'
+import { WORLD_FONT } from '../lib/font'
 import {
   BufferGeometry,
   EdgesGeometry,
@@ -168,23 +169,17 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
       </lineSegments>
 
-      {/* The scale reading, attached to the cursor rather than parked on the
-          left edge. The cursor cube IS the instrument: one cell wide, so the
-          label states what that cube measures. Billboarded and scaled to a
-          constant screen size, so it stays readable at any orbit distance. */}
-      <ScaleLabel scaleExp={scaleExp} color={targetColor} />
-
-      {/* Exact cursor point */}
-      <mesh position={points.b} renderOrder={10}>
-        <ringGeometry args={[0.12, 0.2, 24]} />
-        <meshBasicMaterial color={targetColor} toneMapped={false} transparent depthTest={false} />
-      </mesh>
+      {/* The scale reading rides the cursor cube, which is exactly one cell
+          wide, so the label states what that cube measures. */}
+      <ScaleLabel at={points.b} scaleExp={scaleExp} color={targetColor} />
     </group>
   )
 }
 
 /** A constant-screen-size, camera-facing label for the cursor's cell size. */
-function ScaleLabel({ scaleExp, color }: { scaleExp: number; color: string }): JSX.Element {
+function ScaleLabel({ at, scaleExp, color }: {
+  at: [number, number, number]; scaleExp: number; color: string
+}): JSX.Element {
   const group = useRef<Group>(null)
   const label = useMemo(() => formatCellSize(scaleExp), [scaleExp])
 
@@ -202,9 +197,10 @@ function ScaleLabel({ scaleExp, color }: { scaleExp: number; color: string }): J
   })
 
   return (
-    <group ref={group} position={[0.75, 0.75, 0]}>
+    <group ref={group} position={[at[0] + 0.7, at[1] + 0.7, at[2]]}>
       <Billboard>
         <Text
+          font={WORLD_FONT}
           fontSize={1}
           anchorX="left"
           anchorY="middle"

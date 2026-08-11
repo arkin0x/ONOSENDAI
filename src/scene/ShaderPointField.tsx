@@ -75,10 +75,12 @@ const vertexShader = /* glsl */ `
       // attenuation has no room to express itself, and the cursor is what the
       // eye tracks anyway.
       //
-      // The ramp is quartic and dies within uNearRadius cells, so the bump reads
-      // as "these ones" rather than as a general brightening.
+      // Quadratic, not quartic. A quartic ramp collapsed almost immediately:
+      // one cell out it had already given back four fifths of the bump, so
+      // everything looked the same size. Quadratic still dies within
+      // uNearRadius but leaves the first two cells visibly larger.
       float prox = clamp(1.0 - distance(position, uFocus) / max(uNearRadius, 0.001), 0.0, 1.0);
-      float near = prox * prox * prox * prox;
+      float near = prox * prox;
 
       // K still moves the size a little, so terrain stays legible in the dust.
       float kFactor = aK / 16.0;
@@ -220,7 +222,7 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
       /** Diameter of an ordinary gibson, in CSS pixels. The field is dust. */
       uFarPx: { value: 1.3 },
       /** Diameter at the cursor itself. Falls to uFarPx within uNearRadius. */
-      uNearPx: { value: 3.2 },
+      uNearPx: { value: 7.5 },
       /** How much K swings the far size, as a fraction either side. */
       uKSpread: { value: 0.35 },
       /** Cells over which the near bump decays. Quartic, so it dies fast. */

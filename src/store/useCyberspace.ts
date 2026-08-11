@@ -122,6 +122,9 @@ export interface CyberspaceState {
   applyProofMessage: (msg: ProofResponse) => void
 
   axes: () => ViewAxes
+  /** Axes as they appear on screen right now, including free orbit. */
+  screenAxes: ViewAxes | null
+  setScreenAxes: (a: ViewAxes) => void
   coordHex: () => string
   sector: () => string
   /** Which position the view centers on: cursor when active, avatar otherwise. */
@@ -414,6 +417,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       updated.chain,
       updated.positionHistory
     )
+  },
+
+  screenAxes: null,
+
+  setScreenAxes: (a) => {
+    const cur = get().screenAxes
+    if (cur && cur.right.axis === a.right.axis && cur.right.dir === a.right.dir
+      && cur.up.axis === a.up.axis && cur.up.dir === a.up.dir) return
+    set({ screenAxes: a })
   },
 
   axes: () => viewAxes(get().view),

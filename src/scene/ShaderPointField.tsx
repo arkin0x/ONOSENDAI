@@ -46,6 +46,8 @@ const vertexShader = /* glsl */ `
   uniform float uDpr;
   uniform vec3 uFocus;
   uniform float uFadeRadius;
+  uniform float uNearRadius;
+  uniform float uNearBoost;
 
   varying float vK;
   varying float vPx;
@@ -78,6 +80,17 @@ const vertexShader = /* glsl */ `
       // the values that are everywhere.
       float t = pow((aK - 1.0) / 15.0, uGamma);
       float world = mix(uMaxWorld * 0.18, uMaxWorld, t);
+
+
+      // Proximity to the cursor, as a tight quadratic. Perspective attenuation
+      // alone barely varies here: the camera orbits the cursor at a fixed-ish
+      // distance while the volume is only VOLUME_RADIUS deep, so every point
+      // sits at a similar view depth and nothing near the cursor looked nearer.
+      // The boost is deliberately concentrated in a few cells and falls to
+      // nothing beyond uNearRadius, so it reads as "these are the ones you are
+      // pointing at" rather than as a general brightening.
+      float prox = clamp(1.0 - distance(position, uFocus) / max(uNearRadius, 0.001), 0.0, 1.0);
+      world *= 1.0 + uNearBoost * prox * prox;
 
       // Perspective attenuation, then a pixel floor so distant cells stay
       // legible as structure rather than disappearing.
@@ -216,9 +229,13 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 1.0 },
-      /** Diameter in cells of a K=16 gibson, before perspective. */
-      uMaxWorld: { value: 0.5 },
+      uMinPx: { value: 0.55 },
+      /** Diameter in cells of a K=16 gibson, before proximity and perspective. */
+      uMaxWorld: { value: 0.26 },
+      /** Cells over which the near-cursor size boost applies. Deliberately short. */
+      uNearRadius: { value: 4 },
+      /** Multiplier at the cursor itself, easing in quadratically to nothing. */
+      uNearBoost: { value: 4.5 },
       uGamma: { value: 3 },
       uProjScale: { value: 500 },
       uDpr: { value: 1 },

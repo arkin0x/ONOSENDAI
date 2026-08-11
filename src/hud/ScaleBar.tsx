@@ -1,22 +1,26 @@
 /**
  * ScaleBar.tsx — integrated scale indicator on the left edge of the grid.
  *
- * A thin vertical line whose pixel height matches one tile on screen, with
- * the physical measurement and verbose unit name beside it. No panel chrome;
- * it lives directly on the grid edge so it reads as part of the interface.
+ * An isometric cube drawn at exactly the on-screen size of one cell, with the
+ * physical measurement beside it, so the reading is legible as "this cube is
+ * 1.91 micrometers" rather than as an abstract bracket. It is the same shape and
+ * colour as the cursor cube deliberately: the instrument and the thing it
+ * measures should be recognisably the same object.
+ *
+ * Its size comes from `--cell-px`, published each frame by the scene, because
+ * under a perspective camera a cell's screen size is the projection scale over
+ * the orbit distance and changes as you dolly. The previous version derived it
+ * from the orthographic zoom, which no longer exists, so it was reporting a
+ * scale the view had stopped using.
  *
  * The spec defines 2^33 Gibsons = 1 meter (§9.2, §9.7).
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { GRID_RADIUS } from '../lib/space'
+import { useMemo } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 
 /** Gibson size in meters: 2^-33 ≈ 1.16e-10 m (hydrogen atom diameter). */
 const GIBSON_METERS = 2 ** -33
-
-/** Grid span in world units: the camera zoom divides the viewport by this. */
-const GRID_SPAN = GRID_RADIUS * 2 + 2
 
 interface UnitEntry {
   threshold: number
@@ -48,36 +52,8 @@ function formatSize(meters: number): { value: number; symbol: string; name: stri
   return { value: meters, symbol: 'm', name: 'meters' }
 }
 
-function useViewportDimensions(): { width: number; height: number } {
-  const [dims, setDims] = useState(() => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }))
-
-  useEffect(() => {
-    const onResize = () => setDims({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    })
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  return dims
-}
-
 export function ScaleBar(): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const { width: viewportWidth, height: viewportHeight } = useViewportDimensions()
-
-  /** Pixel height of one tile on screen. The orthographic camera zooms so
-   *  that GRID_SPAN world units fill the smaller viewport dimension. */
-  const viewportMin = Math.min(viewportWidth, viewportHeight)
-  const tilePixels = viewportMin / GRID_SPAN
-
-  /** Position the scale bar at the grid's left edge, not the window edge.
-   *  The grid is centered on screen, spanning (GRID_RADIUS * 2 + 1) cells. */
-  const gridLeftEdge = viewportWidth / 2 - (GRID_RADIUS + 0.5) * tilePixels
 
   const { value, symbol, name } = useMemo(() => {
     const gibsons = 2 ** scaleExp
@@ -86,20 +62,26 @@ export function ScaleBar(): JSX.Element {
   }, [scaleExp])
 
   return (
-    <div
-      className="scale-bar"
-      aria-label="Scale indicator"
-      style={{ left: `${gridLeftEdge}px` }}
-    >
-      <div className="scale-bar__ruler" style={{ height: `${tilePixels}px` }}>
-        <div className="scale-bar__tick scale-bar__tick--top" />
-        <div className="scale-bar__line" />
-        <div className="scale-bar__tick scale-bar__tick--bottom" />
-      </div>
+    <div className="scale-bar" aria-label="Scale indicator">
+      <IsoCube />
       <div className="scale-bar__text">
         <span className="scale-bar__value">{value} {symbol}</span>
         <span className="scale-bar__name">{name}</span>
       </div>
     </div>
+  )
+}
+
+/**
+ * A wireframe cube in isometric projection: hexagonal silhouette with three
+ * edges meeting at the vertex nearest the viewer. Sized from `--cell-px` so it
+ * matches the cursor cube exactly, at any orbit distance.
+ */
+function IsoCube(): JSX.Element {
+  return (
+    <svg className="scale-bar__cube" viewBox="0 0 100 100" aria-hidden="true">
+      <polygon points="50,4 94,29 94,71 50,96 6,71 6,29" />
+      <path d="M50,50 L50,96 M50,50 L6,29 M50,50 L94,29" />
+    </svg>
   )
 }

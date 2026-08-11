@@ -41,7 +41,9 @@ export function useKeyboard(): void {
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
       const store = useCyberspace.getState()
-      const axes = store.axes()
+      // What is on screen, which under free orbit is not the snapped frame.
+      // Without this, orbiting 180 degrees leaves WASD inverted.
+      const axes = store.screenAxes ?? store.axes()
 
       if (event.code === 'Tab') {
         event.preventDefault()

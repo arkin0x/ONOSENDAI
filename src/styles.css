@@ -182,7 +182,10 @@ body {
 
 .scale-bar {
   position: absolute;
-  /* left is set dynamically based on grid position */
+  /* A constant now. It used to be derived from the orthographic grid's left
+     edge, which no longer exists under a perspective camera; this is where that
+     formula put it at a typical desktop size. */
+  left: 200px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
@@ -193,37 +196,10 @@ body {
   pointer-events: none;
 }
 
-.scale-bar__ruler {
-  position: relative;
-  width: 2px;
-}
 
-.scale-bar__tick {
-  position: absolute;
-  left: -3px;
-  width: 8px;
-  height: 1px;
-  background: var(--fg);
-  opacity: 0.6;
-}
 
-.scale-bar__tick--top {
-  top: 0;
-}
 
-.scale-bar__tick--bottom {
-  bottom: 0;
-}
 
-.scale-bar__line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 2px;
-  height: 100%;
-  background: var(--fg);
-  opacity: 0.4;
-}
 
 .scale-bar__text {
   display: flex;
@@ -536,6 +512,10 @@ kbd {
     max-height: none;
     overflow: visible;
   }
+
+  .scale-bar {
+    left: 16px;
+  }
 }
 
 /*
@@ -648,3 +628,22 @@ kbd {
   z-index: 0;
 }
 
+
+/* Scale instrument: an isometric cube the exact on-screen size of one cell. */
+.scale-bar__cube {
+  width: var(--cell-px, 24px);
+  height: var(--cell-px, 24px);
+  min-width: 10px;
+  min-height: 10px;
+  flex: none;
+  overflow: visible;
+}
+
+.scale-bar__cube polygon,
+.scale-bar__cube path {
+  fill: none;
+  stroke: var(--warn, #ffb020);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}

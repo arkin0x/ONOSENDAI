@@ -22,7 +22,7 @@ import {
 } from 'three'
 import { estimateHopCost } from 'cyberspace-core'
 import { DANGER, SIDESTEP, WARN } from '../lib/palette'
-import { alignTo, cellDelta, cellOffset, type Position, type ViewAxes } from '../lib/space'
+import { alignTo, cellDelta, type Position, type ViewAxes } from '../lib/space'
 import {
   MAX_COMPUTE_HEIGHT,
   alignedOrigin,
@@ -95,25 +95,27 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     return { landing, remainderBlocked: remainder.exceedsLimit }
   }, [active, position, target, plane])
 
-  // Screen-space endpoints. In-plane axes measure from the aligned cell (the
-  // grid's frame); the depth axis measures from the avatar's exact slice.
+  // Screen-space endpoints, at cell CENTRES.
+  //
+  // These used to come from which carries a half-cell bias: it was
+  // written when a cell was drawn as a square anchored at its corner. Now the
+  // cursor is a cube centred on its cell, and terrain points sit at integer cell
+  // offsets, so that bias put the line's endpoint on the cube's face rather than
+  // at its centre. The offset is 0.5 - 0.5/step, so it is invisible at scaleExp
+  // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
-    const point = (p: Position): [number, number, number] => [
-      cellOffset(p[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
-      cellOffset(p[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
-      cellDelta(p[axes.out.axis], position[axes.out.axis], scaleExp) * axes.out.dir,
+    const centre = (p: Position): [number, number, number] => [
+      cellDelta(alignTo(p[axes.right.axis], scaleExp), origin[axes.right.axis], scaleExp) * axes.right.dir,
+      cellDelta(alignTo(p[axes.up.axis], scaleExp), origin[axes.up.axis], scaleExp) * axes.up.dir,
+      cellDelta(alignTo(p[axes.out.axis], scaleExp), origin[axes.out.axis], scaleExp) * axes.out.dir,
     ]
-    const targetCell: [number, number, number] = [
-      cellDelta(alignTo(target[axes.right.axis], scaleExp), origin[axes.right.axis], scaleExp) * axes.right.dir,
-      cellDelta(alignTo(target[axes.up.axis], scaleExp), origin[axes.up.axis], scaleExp) * axes.up.dir,
-      point(target)[2],
-    ]
+    const b = centre(target)
     return {
-      a: point(position),
-      b: point(target),
-      landing: plan?.landing ? point(plan.landing) : null,
-      targetCell,
+      a: centre(position),
+      b,
+      landing: plan?.landing ? centre(plan.landing) : null,
+      targetCell: b,
     }
   }, [position, target, plan, scaleExp, axes])
 

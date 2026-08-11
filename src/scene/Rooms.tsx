@@ -8,15 +8,21 @@
  * highest-leverage visual available, because the same boxes are simultaneously
  * the walls, the scale hierarchy and the discovery radii.
  *
- * Brightness rises with the box's height above the current scale's floor, so a
- * room you can barely afford to leave glows and a cheap one is nearly invisible.
- * Uses boundaryIntensity, which the app ships and never calls (ticket 05).
+ * Each box is coloured by the **LCA boundary palette** at its own crossing
+ * height, so leaving a room costs exactly what its edges say it costs. The ramp
+ * runs from near-black indigo for the cheapest crossings up to near-white violet
+ * for the most expensive, which is the same scale the HUD legend documents.
+ *
+ * The palette takes *excess over the floor*, not absolute height: at scaleExp s
+ * the cheapest possible crossing is already height s+1, so passing the raw
+ * height saturates the ramp at every scale above about 5 and throws the signal
+ * away. That defect is what made the old flat boundary grid uninformative.
  */
 
 import { useMemo } from 'react'
 import { BoxGeometry, EdgesGeometry } from 'three'
 import { GRID_RADIUS, stepFor, type ViewAxes } from '../lib/space'
-import { boundaryIntensity } from '../lib/palette'
+import { boundaryColor, boundaryIntensity } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 /** How many nested subtrees above the current scale to draw. */
@@ -34,7 +40,10 @@ export function Rooms({ axes }: Props): JSX.Element {
     const step = stepFor(scaleExp)
     const origin = alignedOrigin(position, scaleExp)
     const screen = [axes.right, axes.up, axes.out]
-    const out: Array<{ h: number; centre: [number, number, number]; size: number; intensity: number }> = []
+    const out: Array<{
+      h: number; centre: [number, number, number]; size: number
+      intensity: number; color: string
+    }> = []
 
     for (let d = 1; d <= DEPTH; d++) {
       const h = scaleExp + d
@@ -53,7 +62,17 @@ export function Rooms({ axes }: Props): JSX.Element {
         centre[s] = ((lo + hi) / 2) * screen[s].dir
       }
 
-      out.push({ h, centre, size: sizeCells, intensity: boundaryIntensity(h, scaleExp + 1) })
+      // Absolute crossing height, not excess over the local floor. A room's
+      // edges cost 2^h to cross no matter what zoom you happen to be at, so the
+      // ramp should mean the same thing everywhere: dark rooms really are cheap
+      // to leave, and the whole nest brightens as you zoom out into expensive
+      // country. Excess would re-baseline the palette at every scale and make a
+      // trivial crossing look identical to a ruinous one.
+      out.push({
+        h, centre, size: sizeCells,
+        intensity: boundaryIntensity(h, scaleExp + 1),
+        color: `#${boundaryColor(h).getHexString()}`,
+      })
     }
     return out
   }, [position, scaleExp, axes])
@@ -61,15 +80,17 @@ export function Rooms({ axes }: Props): JSX.Element {
   return (
     <group>
       {boxes.map((b) => (
-        <RoomBox key={b.h} centre={b.centre} size={b.size} intensity={b.intensity} />
+        <RoomBox key={b.h} centre={b.centre} size={b.size} intensity={b.intensity} color={b.color} />
       ))}
     </group>
   )
 }
 
 function RoomBox({
-  centre, size, intensity,
-}: { centre: [number, number, number]; size: number; intensity: number }): JSX.Element {
+  centre, size, intensity, color,
+}: {
+  centre: [number, number, number]; size: number; intensity: number; color: string
+}): JSX.Element {
   const geometry = useMemo(
     () => new EdgesGeometry(new BoxGeometry(size, size, size)),
     [size],
@@ -77,10 +98,10 @@ function RoomBox({
   return (
     <lineSegments geometry={geometry} position={centre} frustumCulled={false}>
       <lineBasicMaterial
-        color="#c07dff"
+        color={color}
         toneMapped={false}
         transparent
-        opacity={0.15 + 0.85 * intensity}
+        opacity={0.35 + 0.65 * intensity}
       />
     </lineSegments>
   )

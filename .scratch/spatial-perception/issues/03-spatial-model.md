@@ -27,6 +27,15 @@ choose by looking. Candidates, not a closed list:
 - **Dual-mode** — an embodied view and a precise view, with an explicit
   transition. v1 had exactly this split (Cyberspace view plus Map view); ticket
   01 reports whether it worked.
+- **The room you are in** — the strongest candidate, added after ticket 07. One
+  aligned subtree is *current*: you are inside it, its walls are drawn, its
+  siblings are dimmed, and the black sun is painted on its `+Z` wall. Zoom stops
+  being a lattice swap and becomes **choosing which subtree to inhabit**, moving
+  you up and down the nest. This makes containment the organising concept rather
+  than a decoration: per ticket 02 the same boxes are already the walls, the
+  scale hierarchy and the discovery radii, and per 07 the room supplies the
+  reference volume the black sun needs. Variant B only *drew* the nest; this
+  makes it navigable, which is the part worth testing.
 
 **Correction from ticket 01, read this before choosing.** v1's LOCAL first-person
 view was *not* the immersive thing memory says it was: it was black space plus
@@ -63,6 +72,10 @@ Constraints and traps:
   position every frame with `copy()` at a fixed 5-unit offset, so there was no
   independent viewpoint and therefore **no way to look at a place without going
   there** — which is precisely the affordance a cursor needs.
+- **The black sun does not constrain this choice.** Ticket 07 resolved it as a
+  scale-relative proxy polygon at the `+Z` face of the current reference volume,
+  not literal geometry at infinity, so any projection renders it. An earlier
+  reading made it an argument for perspective; that is withdrawn.
 - Judge on comprehension *and* style, per the map's Notes.
 
 Deliverable: a decision recorded in the Answer, the winning treatment merged and

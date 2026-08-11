@@ -43,57 +43,58 @@ the origin, the axis extents, the sector lattice — or is one sun the whole of 
 
 ## Answer
 
-**The black sun is a bearing, not a place.** Render it at a fixed `+Z_cs` bearing
-from wherever the avatar stands, like a sun on the horizon. §11.3 then holds
-exactly, everywhere.
+**Ruled by the protocol author.**
 
-### Evidence
+> The black sun is a recommended visual guidepost for visual implementations of
+> the Cyberspace protocol. It exists at the Z+ end, beyond all coordinates. It
+> can be seen when the Z+ plane is within the frustum. That's all it is.
+>
+> At any scale it is visible IFF the frustum includes the Z+ end of the axes.
+> This will happen any time the user rotates the camera in that direction.
 
-**Which coordinate is authoritative: the u85 one.** Spec commit `088a7cc`
-("Fix §10.2 black sun position with correct axis extent") established this and
-added an explicit guard:
+### What it is
 
-> The GPS→dataspace mapping ... maps GPS coordinates into a GEO-centered region
-> spanning ~48,000 km. The black sun is at the full half-axis extent. **Do not
-> use the `units_per_km` formula for black sun positioning; use the u85
-> coordinate directly.**
+It sits at `+Z_cs` infinity, beyond the coordinate space. From **any** coordinate
+the direction to it is therefore exactly `+Z_cs`: position and scale are
+irrelevant, and only view direction decides whether you see it. Rotate toward
+`+Z` and it is there; rotate away and it is not.
 
-**That guard has since been dropped from the spec** (it appears nowhere in the
-current text). The km figure `+2.25×10^12 km` survived without it, which is a
-live trap: convert it through §9.7 and you get `(2^84, 2^84, ~2^85)`, a different
-point from the stated `(0, 0, 2^84)`.
+- It has **no coordinate**. §11.2's `black_sun_u85` triple is a category error,
+  not an arithmetic one. There is nothing to correct, only to remove.
+- **§11.2 and §11.3 never contradicted.** "Facing the black sun" is a view
+  orientation toward `+Z_cs`, and since the marker is at `+Z` infinity, facing
+  `+Z` *is* facing it. The conflict I reported was an artifact of treating it as
+  a point inside the cube.
+- It is a genuine absolute reference, so ticket 02's ranking of it stands.
 
-**The real defect.** §11.2 says the marker "MUST" sit on the `+Z_cs` boundary,
-then places it at `z = 2^84`. The axis is 85 bits, so its maximum is `2^85 - 1`:
-`2^84` is the **middle** of the z axis, not its boundary. `x = 0, y = 0` are the
-axis minimum. So the stated point is the centre of the `-X,-Y` edge, not a `+Z`
-boundary marker. Commit `088a7cc`'s own message calls `2^84` "the maximum u85
-value"; the current text calls it "the half-axis extent", which is correct — but
-the coordinate was never updated to match the boundary claim.
+### How it is rendered: a scale-relative proxy
 
-**Neither reading works as a bearing.** Measured over 12 real pubkey-derived
-spawns, the angle between `+Z_cs` and the bearing to the marker:
+Author's implementation ruling:
 
-- authoritative u85 point `(0, 0, 2^84)`: **82.7°** off `+Z` — essentially
-  perpendicular, the sun sits beside you
-- km-converted point: **35.0°** off `+Z`
+> The actual polygon that represents the black sun should be big enough that it
+> is always visible. At any scale, the position of the black sun may need to be
+> changed. For example if the sector is the primary space, the black sun could be
+> painted at the Z+ side of the current sector.
 
-The marker is ~0.24 light-years away (§9.2) while a random spawn is off-axis by a
-comparable distance, so it is nowhere near effective infinity. No literal point
-can serve as a `+Z` bearing from an arbitrary coordinate, which is what §11.3
-requires. Hence: a bearing.
+So the marker is a **proxy**, not literal geometry at infinity: a polygon large
+enough to always read, placed at the `+Z` face of whatever volume is the primary
+reference at the current scale, and repositioned as that volume changes. The
+standard skybox-sun technique — the concept is at infinity, the geometry is a
+scale-relative stand-in.
 
-### Consequences
+**This removes the projection constraint.** An earlier version of this answer
+concluded the black sun required a vanishing point and was therefore an argument
+for perspective. A proxy at a finite distance projects fine under orthographic:
+it simply appears at whichever screen edge `+Z` maps to. Any projection can
+render it, and ticket 03 is not constrained by it.
 
-- **Ticket 04** builds it as a bearing indicator, not a reachable landmark. It is
-  never approached, never parallaxes, and has no distance. Per ticket 02 it is the
-  only absolute reference the protocol defines; everything else is relative.
-- **§11.2's "purple circle marking the +Z_cs boundary"** becomes figurative: the
-  marker indicates the boundary's direction rather than sitting on it.
-- **Upstream:** two corrections to raise against `arkin0x/cyberspace` — the u85
-  triple is arithmetically inconsistent with its own km triple, and point-versus-
-  direction needs stating explicitly, since §11's whole purpose is that different
-  viewers agree on orientation.
-- **Secondary question** (what else deserves to be an absolute reference: origin,
-  axis extents, sector lattice) folds into ticket 04 rather than becoming its own
-  ticket — it is the same landmark-set decision.
+**Open question inherited by ticket 04:** which volume is "the primary space" at
+a given scale? The sector (2^30 gibsons, §10) is the author's example. The
+containing aligned subtree is another candidate, and would compose with the
+rooms treatment in variant B — the black sun painted on the current room's `+Z`
+wall, so it moves outward as you zoom out through the nest.
+
+### Upstream
+
+[cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17) corrects the
+coordinate rather than removing it, so it addresses the wrong layer.

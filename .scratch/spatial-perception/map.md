@@ -59,15 +59,14 @@ for decisions, `/research` for AFK fact-finding.
 <!-- one line per closed ticket: gist + link -->
 
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
-  — **A bearing, not a place.** Rendered at a fixed `+Z_cs` bearing from wherever
-  you stand, so §11.3 holds exactly everywhere. A literal point cannot: measured
-  over 12 real spawns the stated marker sits **82.7° off `+Z`**, because it is
-  only ~0.24 light-years away while a random spawn is off-axis by a comparable
-  distance. Two upstream defects found: §11.2 places the marker at `z = 2^84`
-  while claiming it marks the `+Z_cs` boundary, but the 85-bit axis maximum is
-  `2^85 - 1`, so that is the axis *middle*; and the guard from commit `088a7cc`
-  saying not to convert the km figure through `units_per_km` has been dropped
-  from the spec, leaving a stale physical gloss that yields a different point.
+  — **Neither: conceptually at `+Z` infinity, rendered as a scale-relative
+  proxy.** A recommended guidepost beyond the `+Z` end, visible iff the frustum
+  contains the `+Z` direction, at any scale. Drawn as a polygon big enough to
+  always read, placed at the `+Z` face of whatever volume is primary at the
+  current scale (the sector, or the containing room) and repositioned as that
+  changes. It therefore has no coordinate — §11.2's u85 triple is a category
+  error — and imposes no projection requirement. §11.2 and §11.3 never
+  contradicted. Ticket 04 inherits the question of which volume is primary.
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:

@@ -42,7 +42,11 @@ Decide the control model, given whatever spatial model ticket 03 chose:
   right separation or the reason it feels like a coordinate editor?
 - **Scale as navigation.** `Q`/`E` currently swap the lattice instantly. Is
   changing scale a *movement* — zooming out to travel far, in to land precisely —
-  and should it feel like one?
+  and should it feel like one? **Leading candidate, being tested as variant D of
+  ticket 03:** zoom selects which aligned subtree you are *inside*, so scaling is
+  moving up and down the nest of rooms rather than resampling a grid. If that
+  wins, this ticket inherits the question of what picking a room feels like when
+  several are available.
 - **The out-axis.** `R`/`F` currently move into space you cannot see. Whatever 03
   chose should make this an actual direction.
 - **Rotation.** 90° snaps are precise and disorienting. Does the winning spatial

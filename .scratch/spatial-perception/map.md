@@ -59,14 +59,15 @@ for decisions, `/research` for AFK fact-finding.
 <!-- one line per closed ticket: gist + link -->
 
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
-  — **Neither: it has no coordinate.** Ruled by the protocol author — a
-  recommended visual guidepost that exists beyond the `+Z` end, outside all
-  coordinates, drawn when the `+Z` boundary plane is in the frustum. So §11.2's
-  u85 triple is a category error, §11.2 and §11.3 never contradicted, and the
-  marker is a rare coarse-scale landmark rather than a compass. **Ticket 02
-  over-read it** as "the only absolute reference the protocol defines"; ticket 04
-  still needs an orientation answer for working scales, and it will not come from
-  the black sun.
+  — **Neither: it is at `+Z` infinity and has no coordinate.** Ruled by the
+  protocol author: a recommended guidepost beyond the `+Z` end, visible iff the
+  frustum contains the `+Z` direction, at any scale. So §11.2's u85 triple is a
+  category error, and §11.2 and §11.3 never contradicted. **Surfaced a constraint
+  on ticket 03:** a point at infinity only projects finitely under a projection
+  with a vanishing point, so under the current orthographic rig the black sun is
+  binary (centred in the canonical view, absent in the other 23 orientations) and
+  cannot sweep as a guidepost must. It is an argument for perspective that
+  neither research ticket found.
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:

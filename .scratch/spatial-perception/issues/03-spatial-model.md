@@ -63,6 +63,13 @@ Constraints and traps:
   position every frame with `copy()` at a fixed 5-unit offset, so there was no
   independent viewpoint and therefore **no way to look at a place without going
   there** — which is precisely the affordance a cursor needs.
+- **The winner must be able to render the black sun.** Ticket 07 established it
+  sits at `+Z` infinity and must be visible whenever the frustum contains the
+  `+Z` direction. A point at infinity projects finitely only under a projection
+  with a vanishing point, so orthographic can only put it dead centre or nowhere.
+  This is a real argument for perspective, arriving after the "perspective is not
+  the variable" correction above. Both are true: perspective is not what created
+  embodiment, but it may be required for this specific landmark.
 - Judge on comprehension *and* style, per the map's Notes.
 
 Deliverable: a decision recorded in the Answer, the winning treatment merged and

@@ -43,49 +43,57 @@ the origin, the axis extents, the sector lattice — or is one sun the whole of 
 
 ## Answer
 
-**Ruled by the protocol author, and it supersedes everything below.**
+**Ruled by the protocol author.**
 
 > The black sun is a recommended visual guidepost for visual implementations of
 > the Cyberspace protocol. It exists at the Z+ end, beyond all coordinates. It
 > can be seen when the Z+ plane is within the frustum. That's all it is.
+>
+> At any scale it is visible IFF the frustum includes the Z+ end of the axes.
+> This will happen any time the user rotates the camera in that direction.
 
-Three consequences:
+### What it is
 
-1. **It has no coordinate.** "Beyond all coordinates" means it is outside the
-   coordinate space, so §11.2's `black_sun_u85` triple is a category error rather
-   than an arithmetic one. Nothing to correct; it should not be there.
-2. **§11.2 and §11.3 do not contradict.** "Facing the black sun" is a view
-   *orientation* toward `+Z_cs`, not a line of sight to an object. The
-   contradiction I reported only existed because I treated the marker as a point
-   inside the cube.
-3. **It is not an always-visible bearing either**, which is what this ticket
-   originally ruled. It is drawn when the `+Z_cs` boundary plane enters the view
-   frustum. At fine scales that boundary is ~2^85 gibsons away and effectively
-   never in view, so the black sun appears only when you are zoomed out far
-   enough to see the edge of the universe.
+It sits at `+Z_cs` infinity, beyond the coordinate space. From **any** coordinate
+the direction to it is therefore exactly `+Z_cs`: position and scale are
+irrelevant, and only view direction decides whether you see it. Rotate toward
+`+Z` and it is there; rotate away and it is not.
 
-### Consequence for the map
+- It has **no coordinate**. §11.2's `black_sun_u85` triple is a category error,
+  not an arithmetic one. There is nothing to correct, only to remove.
+- **§11.2 and §11.3 never contradicted.** "Facing the black sun" is a view
+  orientation toward `+Z_cs`, and since the marker is at `+Z` infinity, facing
+  `+Z` *is* facing it. The conflict I reported was an artifact of treating it as
+  a point inside the cube.
+- It is a genuine absolute reference, so ticket 02's ranking of it stands.
 
-**The black sun is not the orientation answer.** Ticket 02 ranked it highly as
-"the only absolute reference the protocol defines", and that over-read it: it is
-a rare, coarse-scale landmark, not a compass you navigate by day to day. Ticket
-04 still needs an answer for "which way am I facing" at working scales, and it
-will not come from here.
+### Consequence for ticket 03: it needs a vanishing point
 
-Rendering rule for ticket 04: draw it beyond the `+Z_cs` boundary plane, visible
-only when that plane is inside the frustum, purple, shape implementation-defined,
-present in both planes.
+A point at infinity has a finite screen position only under a projection that
+has a vanishing point.
 
-### Process note
+- **Perspective:** `+Z` infinity projects to the vanishing point of the `+Z`
+  direction, which lies on screen whenever `+Z` is inside the frustum, and sweeps
+  across the view as you rotate. This is exactly the behaviour described above.
+- **Orthographic:** parallel projection has no vanishing point. A direction at
+  infinity projects nowhere finite unless the view axis is exactly `+Z`, in which
+  case it collapses to dead centre. So under the app's current orthographic rig
+  with 90° snapped rotation, the black sun is binary: centred in the canonical
+  view, absent in all 23 other orientations. It cannot sweep, so it cannot work
+  as the guidepost described.
 
-I got this wrong three times before asking: first that the km figure was
-authoritative, then that the u85 triple was, then that it was an always-visible
-bearing. Each reading was defensible from the text and each was wrong. The text
-could not settle it because the object was never a coordinate; only the author
-could. Ask earlier.
+So the black sun is an argument for a projection with a vanishing point, and
+against the current orthographic rig — an input to ticket 03 that neither
+research ticket surfaced. It does not settle 03 on its own, but the winning
+spatial model has to be able to render it, and A and B as built cannot.
+
+### Rendering rule for ticket 04
+
+Drawn at `+Z_cs` infinity, visible iff the frustum contains the `+Z_cs`
+direction. Purple, shape implementation-defined, present in both planes. No
+coordinate, no distance, no parallax.
 
 ### Upstream
 
-[cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17) fixes the
-coordinate rather than removing it, so it addresses the wrong layer and should be
-reworked or closed.
+[cyberspace#17](https://github.com/arkin0x/cyberspace/pull/17) corrects the
+coordinate rather than removing it, so it addresses the wrong layer.

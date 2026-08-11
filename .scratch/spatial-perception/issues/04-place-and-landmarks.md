@@ -18,14 +18,14 @@ Decide what furniture the world needs, and build it:
 - **The black sun.** §11.2 defines a purple marker at the `+Z_cs` boundary as
   the directional guidepost, and §11.3's canonical view faces it. The app
   implements the view (`canonicalQuaternion`, the `C` key) and renders no marker.
-  **Ticket 07: it has no coordinate.** Per the protocol author it exists beyond
-  the `+Z` end, outside all coordinates, and is drawn when the `+Z` boundary
-  plane is inside the frustum. Purple, shape free, present in both planes. At
-  working scales that boundary is ~2^85 gibsons away and never in view, so **the
-  black sun will almost never be on screen** and cannot be the orientation
-  answer. Ticket 02 over-read it. This ticket must answer "which way am I facing"
-  some other way — the existing `Compass3D` gizmo, structure in the world, or
-  something new.
+  **Ticket 07: it has no coordinate.** Per the protocol author it sits at `+Z`
+  infinity, beyond the coordinate space, visible iff the frustum contains the
+  `+Z` direction — at any scale, since direction to infinity does not depend on
+  where you stand. Purple, shape free, both planes, no distance and no parallax.
+  It is a real absolute reference, as ticket 02 said. But 07 also found it needs
+  a projection with a vanishing point: under orthographic it can only be dead
+  centre or absent, never sweeping. Whatever ticket 03 chooses must be able to
+  render it.
 - **What else deserves to be absolute?** Carried over from 07: the origin, the
   axis extents, the sector lattice. Is one sun the whole of it, or does the space
   need more fixed reference than a single bearing?

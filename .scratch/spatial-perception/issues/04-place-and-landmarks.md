@@ -22,10 +22,13 @@ Decide what furniture the world needs, and build it:
   infinity, beyond the coordinate space, visible iff the frustum contains the
   `+Z` direction — at any scale, since direction to infinity does not depend on
   where you stand. Purple, shape free, both planes, no distance and no parallax.
-  It is a real absolute reference, as ticket 02 said. But 07 also found it needs
-  a projection with a vanishing point: under orthographic it can only be dead
-  centre or absent, never sweeping. Whatever ticket 03 chooses must be able to
-  render it.
+  It is a real absolute reference, as ticket 02 said. Rendered as a **proxy**:
+  a polygon big enough to always read, at the `+Z` face of whatever volume is
+  primary at the current scale, repositioned as that volume changes. **Decide
+  which volume is primary** — the sector (2^30, §10) is the author's example, the
+  containing aligned subtree is the other candidate and would compose with the
+  rooms treatment, painting the sun on the current room's `+Z` wall so it moves
+  outward as you zoom through the nest.
 - **What else deserves to be absolute?** Carried over from 07: the origin, the
   axis extents, the sector lattice. Is one sun the whole of it, or does the space
   need more fixed reference than a single bearing?

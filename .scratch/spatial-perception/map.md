@@ -59,15 +59,14 @@ for decisions, `/research` for AFK fact-finding.
 <!-- one line per closed ticket: gist + link -->
 
 - [07 — Is the black sun a point or a direction?](issues/07-black-sun-geometry.md)
-  — **Neither: it is at `+Z` infinity and has no coordinate.** Ruled by the
-  protocol author: a recommended guidepost beyond the `+Z` end, visible iff the
-  frustum contains the `+Z` direction, at any scale. So §11.2's u85 triple is a
-  category error, and §11.2 and §11.3 never contradicted. **Surfaced a constraint
-  on ticket 03:** a point at infinity only projects finitely under a projection
-  with a vanishing point, so under the current orthographic rig the black sun is
-  binary (centred in the canonical view, absent in the other 23 orientations) and
-  cannot sweep as a guidepost must. It is an argument for perspective that
-  neither research ticket found.
+  — **Neither: conceptually at `+Z` infinity, rendered as a scale-relative
+  proxy.** A recommended guidepost beyond the `+Z` end, visible iff the frustum
+  contains the `+Z` direction, at any scale. Drawn as a polygon big enough to
+  always read, placed at the `+Z` face of whatever volume is primary at the
+  current scale (the sector, or the containing room) and repositioned as that
+  changes. It therefore has no coordinate — §11.2's u85 triple is a category
+  error — and imposes no projection requirement. §11.2 and §11.3 never
+  contradicted. Ticket 04 inherits the question of which volume is primary.
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:

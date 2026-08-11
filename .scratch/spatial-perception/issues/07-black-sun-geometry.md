@@ -67,31 +67,32 @@ irrelevant, and only view direction decides whether you see it. Rotate toward
   a point inside the cube.
 - It is a genuine absolute reference, so ticket 02's ranking of it stands.
 
-### Consequence for ticket 03: it needs a vanishing point
+### How it is rendered: a scale-relative proxy
 
-A point at infinity has a finite screen position only under a projection that
-has a vanishing point.
+Author's implementation ruling:
 
-- **Perspective:** `+Z` infinity projects to the vanishing point of the `+Z`
-  direction, which lies on screen whenever `+Z` is inside the frustum, and sweeps
-  across the view as you rotate. This is exactly the behaviour described above.
-- **Orthographic:** parallel projection has no vanishing point. A direction at
-  infinity projects nowhere finite unless the view axis is exactly `+Z`, in which
-  case it collapses to dead centre. So under the app's current orthographic rig
-  with 90° snapped rotation, the black sun is binary: centred in the canonical
-  view, absent in all 23 other orientations. It cannot sweep, so it cannot work
-  as the guidepost described.
+> The actual polygon that represents the black sun should be big enough that it
+> is always visible. At any scale, the position of the black sun may need to be
+> changed. For example if the sector is the primary space, the black sun could be
+> painted at the Z+ side of the current sector.
 
-So the black sun is an argument for a projection with a vanishing point, and
-against the current orthographic rig — an input to ticket 03 that neither
-research ticket surfaced. It does not settle 03 on its own, but the winning
-spatial model has to be able to render it, and A and B as built cannot.
+So the marker is a **proxy**, not literal geometry at infinity: a polygon large
+enough to always read, placed at the `+Z` face of whatever volume is the primary
+reference at the current scale, and repositioned as that volume changes. The
+standard skybox-sun technique — the concept is at infinity, the geometry is a
+scale-relative stand-in.
 
-### Rendering rule for ticket 04
+**This removes the projection constraint.** An earlier version of this answer
+concluded the black sun required a vanishing point and was therefore an argument
+for perspective. A proxy at a finite distance projects fine under orthographic:
+it simply appears at whichever screen edge `+Z` maps to. Any projection can
+render it, and ticket 03 is not constrained by it.
 
-Drawn at `+Z_cs` infinity, visible iff the frustum contains the `+Z_cs`
-direction. Purple, shape implementation-defined, present in both planes. No
-coordinate, no distance, no parallax.
+**Open question inherited by ticket 04:** which volume is "the primary space" at
+a given scale? The sector (2^30 gibsons, §10) is the author's example. The
+containing aligned subtree is another candidate, and would compose with the
+rooms treatment in variant B — the black sun painted on the current room's `+Z`
+wall, so it moves outward as you zoom out through the nest.
 
 ### Upstream
 

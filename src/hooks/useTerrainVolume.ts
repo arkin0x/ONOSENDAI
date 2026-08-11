@@ -32,10 +32,10 @@ import type { Plane } from 'cyberspace-core'
  * Deliberately smaller than GRID_RADIUS. A full 49³ is 117,649 cells, and while
  * the block cache makes the *sampling* cheap (343 distinct values at scaleExp 0),
  * the cost that actually hurts is the CPU re-scanning every cell on each flush
- * and rebuilding the buffer. 12 gives 25³ = 15,625, roughly 7.5x less scan for a
- * volume that still surrounds the camera.
+ * and rebuilding the buffer. 9 gives 19³ = 6,859, roughly 17x less scan than a full
+ * 49³ while still surrounding the camera.
  */
-export const VOLUME_RADIUS = 12
+export const VOLUME_RADIUS = 9
 
 /** Cells across the volume, per axis. */
 export const VOLUME_SIZE = VOLUME_RADIUS * 2 + 1

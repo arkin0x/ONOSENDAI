@@ -84,14 +84,18 @@ function Rig(): JSX.Element {
     [cursor, position, scaleExp, view],
   )
 
-  // Snap straight-on whenever the axis mapping changes, so Shift+WASD and Esc
-  // are a way back out of an arbitrary orbit rather than a confusing relabel.
+  // Snap straight-on ONLY when the axis mapping changes. Moving the cursor
+  // retargets the orbit but must not reset it: orbiting to an angle and then
+  // driving the cursor from there is the point.
+  const latestTarget = useRef(target)
+  latestTarget.current = target
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    c.object.position.set(target[0], target[1], target[2] + START_DISTANCE)
+    const [x, y, z] = latestTarget.current
+    c.object.position.set(x, y, z + START_DISTANCE)
     c.update()
-  }, [view, target])
+  }, [view])
 
   return (
     <OrbitControls
@@ -128,8 +132,8 @@ export function Scene(): JSX.Element {
         its resolution and cutting the mip levels buys nearly all of that back,
         and is invisible because the effect is a blur to begin with.
       */}
-      <EffectComposer resolutionScale={0.5}>
-        <Bloom mipmapBlur levels={5} intensity={2.4} luminanceThreshold={0.001} luminanceSmoothing={0} />
+      <EffectComposer resolutionScale={0.25}>
+        <Bloom mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
       </EffectComposer>
     </Canvas>
   )

@@ -40,9 +40,9 @@ const vertexShader = /* glsl */ `
   attribute float aK;
   uniform float uTime;
   uniform float uMinPx;
-  uniform float uMaxTileFrac;
+  uniform float uMaxWorld;
   uniform float uGamma;
-  uniform float uZoom;
+  uniform float uProjScale;
   uniform float uDpr;
   uniform vec3 uFocus;
   uniform float uFadeRadius;
@@ -54,48 +54,34 @@ const vertexShader = /* glsl */ `
   void main() {
     vK = aK;
 
-    // Distance from what you are looking at, eased out. Near the focus points
-    // stay full size and opaque; further out they shrink and fade, so the volume
-    // reads as depth rather than as a uniform wall of dots. Ease-out rather than
-    // linear so the falloff is gentle nearby and steep at the edge.
-    //
-    // This is not the vignette that was removed earlier: that one was centred on
-    // the avatar under an orthographic camera, where every point was the same
-    // distance away and it only dimmed one side of a flat slice. Here the camera
-    // is inside a volume and distance is real.
+    // Alpha eases out with distance from what you are looking at, so the volume
+    // reads as depth rather than a uniform wall of dots. Recede, do not erase:
+    // the corners of a radius-R cube sit at R*sqrt(3), and taking them to zero
+    // emptied the field.
     float dist = distance(position, uFocus) / max(uFadeRadius, 0.001);
     float ease = 1.0 - pow(1.0 - clamp(dist, 0.0, 1.0), 3.0);
+    vFade = mix(1.0, 0.16, ease);
 
-    // Recede, do not erase. Distant cells keep a floor of opacity so the volume
-    // still reads as structure at its edges; taking them to zero emptied the
-    // field, since the corners of a radius-R cube are R*sqrt(3) away.
-    vFade = mix(1.0, 0.14, ease);
+    // K = 0 keeps zero size and disappears, which is also how cells outside the
+    // universe read, since they arrive as 0.
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    float viewDepth = max(-mvPosition.z, 0.001);
 
-    // Sized in pixels, between a floor and a fraction of a tile. uZoom is the
-    // orthographic camera's pixels per world unit, and the scene draws one
-    // unit per cell, so uZoom is the tile width on screen.
-    //
-    // K = 0 keeps zero size and disappears, which is also how cells outside
-    // the universe read, since they arrive as 0. Everything from K = 1 up gets
-    // at least uMinPx: scaling straight from zero put the low end at well under
-    // a pixel, so most of the field was invisible rather than merely small.
     float px = 0.0;
 
     if (aK >= 1.0) {
-      float maxPx = max(uMaxTileFrac * uZoom, uMinPx);
-
-      // Weighted toward the top of the range. K is Binomial(16, 0.5), so it
-      // piles up around 8 and only about 1% of cells reach 13 or above. A
-      // linear ramp spends most of its width on the values that are everywhere
-      // and leaves the rare expensive terrain looking much like the rest.
-      // Raising t to uGamma keeps 1..10 close to the floor and puts the growth
-      // where the interesting cells are.
+      // Size is a WORLD size, then divided by view depth. Setting gl_PointSize
+      // from a constant scale made every point the same size on screen no matter
+      // how far away it was, which is why nearby gibsons never looked nearer.
+      // Weighted toward high K: K is Binomial(16, 0.5), so it piles up around 8
+      // and only ~1% of cells reach 13+, and a linear ramp spends its width on
+      // the values that are everywhere.
       float t = pow((aK - 1.0) / 15.0, uGamma);
-      px = mix(uMinPx, maxPx, t);
+      float world = mix(uMaxWorld * 0.18, uMaxWorld, t);
 
-      // Nearer reads larger. Kept above zero so distant cells stay legible as
-      // structure even as they fade.
-      px *= mix(1.0, 0.55, ease);
+      // Perspective attenuation, then a pixel floor so distant cells stay
+      // legible as structure rather than disappearing.
+      px = max(world * uProjScale / viewDepth, uMinPx);
 
       // Pulse for expensive terrain.
       float kFactor = aK / 16.0;
@@ -104,12 +90,11 @@ const vertexShader = /* glsl */ `
       }
     }
 
-    // gl_PointSize is in drawing-buffer pixels, but uZoom comes from the
-    // renderer's CSS size, so on a high-DPI display the two disagree and every
-    // dot lands at 1/dpr of its intended size against the tile.
+    // gl_PointSize is in drawing-buffer pixels; uProjScale is derived from CSS
+    // size, so scale by the device pixel ratio or every dot lands at 1/dpr.
     vPx = px * uDpr;
     gl_PointSize = vPx;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
   }
 `
 
@@ -231,10 +216,11 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     uniforms: {
       uTime: { value: 0 },
       // Small and flat across the common K values, growing sharply at the top.
-      uMinPx: { value: 1.8 },
-      uMaxTileFrac: { value: 0.26 },
+      uMinPx: { value: 1.0 },
+      /** Diameter in cells of a K=16 gibson, before perspective. */
+      uMaxWorld: { value: 0.5 },
       uGamma: { value: 3 },
-      uZoom: { value: 8 },
+      uProjScale: { value: 500 },
       uDpr: { value: 1 },
       uFocus: { value: new Vector3() },
       // Corners of a radius-R cube sit at R*sqrt(3), so fade over that, not R.
@@ -258,8 +244,6 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     const [fx, fy, fz] = useCyberspace.getState().cursorOffset()
     mat.uniforms.uFocus.value.set(fx, fy, fz)
 
-    const camera = state.camera as unknown as { zoom?: number }
-    if (camera.zoom !== undefined) mat.uniforms.uZoom.value = camera.zoom
     mat.uniforms.uDpr.value = state.gl.getPixelRatio()
   })
 

@@ -118,9 +118,36 @@ for decisions, `/research` for AFK fact-finding.
   `deriveRegionKeyMaterial` and `deriveRegionKeyMaterialScan` are exported by
   `cyberspace-core` and never called from `src/`. Whatever containment ends up
   looking like, the maths for it already exists.
+- **Cyberspace as a platformer.** A room you have paid for is a region of
+  spatially-free movement: §4.7 says many coordinate pairs inside one aligned
+  subtree share a root, and `compute_subtree_cantor` builds bottom-up, so paying
+  for height `h` yields every subtree inside it. Terrain K is the only remaining
+  per-hop cost. That makes the room a *level*: move freely inside, pay to leave.
+  Gravity is spec-native, since §11.1 makes `+Y_cs` up. Leaving a room becomes a
+  deliberate mechanic that happens to be a protocol-valid subtree transition, and
+  the cost structure becomes diegetic rather than annotated.
+  The tension to resolve: hops are discrete signed events costing up to ~100ms of
+  temporal work (§5.2), so continuous motion cannot be 1:1 with protocol
+  movement. v2's existing cursor/commit split already answers this — free motion
+  is the uncommitted layer, commits are the chain — and a platformer where moving
+  is free but *keeping* a position costs work is honest to the mechanic.
+  Note shards are **not** in the v2 spec or any DECK; they were a v1 concept.
+  Platforms and obstacles would be app-level content or need a DECK, with
+  `kind:33330` region-keyed content (§8.6) the nearest protocol hook.
+  **This may redraw the destination rather than sit inside it** — see below.
 - **The DECKs as navigation.** Hyperjumps (DECK-0001) are a navigation primitive,
   and virtual spawn (PR #15) would allow cheap synthetic avatars for local
   iteration. Both may become navigation/visualization questions later.
+
+## Open question on the destination
+
+The platformer framing above is not obviously a means to the current destination
+or a replacement for it. The destination is spatial *perception*, judged by
+comprehension and style; a game framing is a strategy for relatability, which
+serves comprehension, so it may sit inside the map. But it is also a large
+product commitment that would reshape tickets 03, 04 and 06 and likely add
+several more. Redrawing a destination is a scoping act and belongs to the person
+who owns the effort, not to a session. Unresolved.
 
 ## Out of scope
 

@@ -11,7 +11,7 @@
  * so sub-cell drift does not rebuild geometry every frame.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 
 export interface ViewWindow {
@@ -20,16 +20,50 @@ export interface ViewWindow {
   out: number
 }
 
+/**
+ * How long the window waits behind the cursor before it moves.
+ *
+ * The window is what the terrain volume is centred on, and recentring it costs
+ * a full rescan of every cell in the volume, measured at ~37ms. Running that
+ * inside the same render that moves the cursor put it directly on the critical
+ * path of a keypress, which is the one thing that has to feel instant.
+ *
+ * Terrain has no such requirement: it can arrive a frame or two late without
+ * anyone noticing, and while a key is held it need not arrive at all until you
+ * stop. So the cursor moves now and the field catches up, rather than the field
+ * holding the cursor back.
+ */
+const SETTLE_MS = 90
+
 export function useViewWindow(): ViewWindow {
   const cursor = useCyberspace((s) => s.cursor)
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const view = useCyberspace((s) => s.view)
 
-  return useMemo(() => {
+  const read = (): ViewWindow => {
     const [right, up, out] = useCyberspace.getState().cursorOffset()
     return { right: Math.round(right), up: Math.round(up), out: Math.round(out) }
+  }
+
+  const [win, setWin] = useState<ViewWindow>(read)
+  const handle = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (handle.current !== null) clearTimeout(handle.current)
+    handle.current = window.setTimeout(() => {
+      handle.current = null
+      const next = read()
+      setWin((prev) =>
+        prev.right === next.right && prev.up === next.up && prev.out === next.out ? prev : next,
+      )
+    }, SETTLE_MS)
+    return () => {
+      if (handle.current !== null) clearTimeout(handle.current)
+    }
     // cursorOffset derives from exactly these four.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, position, scaleExp, view])
+
+  return win
 }

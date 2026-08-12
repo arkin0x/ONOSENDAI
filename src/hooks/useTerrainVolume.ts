@@ -92,6 +92,7 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
   const originKey = `${position.x},${position.y},${position.z}`
 
   return useMemo(() => {
+    const t0 = performance.now()
     const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
     const step = stepFor(scaleExp)
@@ -157,8 +158,12 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
     if (import.meta.env.DEV) {
       let known = 0
       for (let i = 0; i < values.length; i++) if (values[i] !== UNKNOWN) known++
-      ;(window as unknown as { __terrain?: unknown }).__terrain = {
+      const w = window as unknown as { __terrain?: { scans?: number[] } & Record<string, unknown> }
+      const scans = w.__terrain?.scans ?? []
+      scans.push(Math.round((performance.now() - t0) * 100) / 100)
+      w.__terrain = {
         known, total: N * N * N, cache: cacheSize(), inflight: inflightRuns(), scaleExp,
+        scans: scans.slice(-40),
       }
     }
 

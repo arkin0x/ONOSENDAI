@@ -143,6 +143,12 @@ function CellMetric(): null {
     // Canvas and cannot reach this one's camera.
     cameraPose.copy(state.camera.quaternion)
 
+    if (import.meta.env.DEV) {
+      // R3F 8 keeps no handle on the canvas node, so the browser harness has no
+      // other way to inspect what is actually in the scene.
+      ;(window as unknown as { __scene?: unknown }).__scene = state.scene
+    }
+
     const cam = state.camera as unknown as { fov?: number; position: { distanceTo: (v: never) => number } }
     if (cam.fov === undefined) return
     const [tx, ty, tz] = useCyberspace.getState().cursorOffset()

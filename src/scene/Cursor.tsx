@@ -23,6 +23,7 @@ import {
   Float32BufferAttribute,
   Line,
   LineDashedMaterial,
+  LineSegments,
   BoxGeometry,
 } from 'three'
 import { estimateHopCost } from 'cyberspace-core'
@@ -68,6 +69,31 @@ function setSegment(line: Line, geometry: BufferGeometry, a: number[], b: number
   ;(line.material as LineDashedMaterial).color.set(color)
 }
 
+/** Move just the far end of a segment, in place, without reallocating. */
+function setSegmentEnd(line: Line, geometry: BufferGeometry, b: [number, number, number]): void {
+  const attr = geometry.attributes.position as Float32BufferAttribute | undefined
+  if (!attr || attr.count < 2) return
+  const arr = attr.array as Float32Array
+  if (arr[3] === b[0] && arr[4] === b[1] && arr[5] === b[2]) return
+  arr[3] = b[0]; arr[4] = b[1]; arr[5] = b[2]
+  attr.needsUpdate = true
+  line.computeLineDistances()
+}
+
+/**
+ * Where a cyberspace position sits in render space, at its cell's centre.
+ *
+ * The one definition the cursor, the label and the legs all share, so nothing
+ * can drift half a cell from anything else.
+ */
+function cellCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return [axes.right, axes.up, axes.out].map((a) =>
+    cellDelta(alignTo(p[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
+  ) as [number, number, number]
+}
+
 export function Cursor({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
@@ -110,11 +136,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
-    const centre = (p: Position): [number, number, number] => [
-      cellDelta(alignTo(p[axes.right.axis], scaleExp), origin[axes.right.axis], scaleExp) * axes.right.dir,
-      cellDelta(alignTo(p[axes.up.axis], scaleExp), origin[axes.up.axis], scaleExp) * axes.up.dir,
-      cellDelta(alignTo(p[axes.out.axis], scaleExp), origin[axes.out.axis], scaleExp) * axes.out.dir,
-    ]
+    const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
     const b = centre(target)
     return {
       a: centre(position),
@@ -149,6 +171,25 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     }
   }, [points, targetColor, leg1, leg2, leg1Geometry, leg2Geometry])
 
+  // The cursor's position is driven per frame, straight from the store, rather
+  // than waiting for a React commit.
+  //
+  // The point field already magnifies terrain around uFocus this way, so before
+  // this the two ran on different clocks: the gibsons swelled on the next frame
+  // while the cube waited a render out, and every long frame widened the gap.
+  // Reading both from the same store in the same frame makes them simultaneous
+  // by construction rather than by luck. Only the cube, the label and the live
+  // end of the tether move here; which legs exist and what colour they are stay
+  // in React, because those change with the plan, not with the cursor.
+  const outline = useRef<LineSegments>(null)
+  useFrame(() => {
+    const s = useCyberspace.getState()
+    const live = s.pendingTarget ?? s.cursor
+    const b = cellCentre(live, alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes)
+    if (outline.current) outline.current.position.set(b[0], b[1], b[2])
+    setSegmentEnd(leg2.visible ? leg2 : leg1, leg2.visible ? leg2Geometry : leg1Geometry, b)
+  })
+
   if (!active) return null
 
   return (
@@ -165,39 +206,45 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       )}
 
       {/* The cell the lined-up action targets */}
-      <lineSegments geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
+      <lineSegments ref={outline} geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
         <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
       </lineSegments>
 
       {/* The scale reading rides the cursor cube, which is exactly one cell
           wide, so the label states what that cube measures. */}
-      <ScaleLabel at={points.b} scaleExp={scaleExp} color={targetColor} />
+      <ScaleLabel axes={axes} scaleExp={scaleExp} color={targetColor} />
     </group>
   )
 }
 
 /** A constant-screen-size, camera-facing label for the cursor's cell size. */
-function ScaleLabel({ at, scaleExp, color }: {
-  at: [number, number, number]; scaleExp: number; color: string
+function ScaleLabel({ axes, scaleExp, color }: {
+  axes: ViewAxes; scaleExp: number; color: string
 }): JSX.Element {
   const group = useRef<Group>(null)
   const label = useMemo(() => formatCellSize(scaleExp), [scaleExp])
 
-  // World scale is set from view depth each frame so the text holds a constant
-  // pixel height. Without this it shrinks to nothing as you pull the camera out.
+  // Position AND scale come from this frame, not from a React commit: the label
+  // is attached to the cursor, so it has to arrive with it rather than after it.
+  // Scale is set from view depth so the text holds a constant pixel height;
+  // without it the label shrinks to nothing as you pull the camera out.
   useFrame((state: RootState) => {
     const g = group.current
     if (!g) return
+    const s = useCyberspace.getState()
+    const live = s.pendingTarget ?? s.cursor
+    const b = cellCentre(live, alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes)
+    g.position.set(b[0] + 0.7, b[1] + 0.7, b[2])
+
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
     if (cam.fov === undefined) return
     const depth = Math.max(0.001, cam.position.distanceTo(g.getWorldPosition(new Vector3())))
     const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    const s = (14 * depth) / projScale
-    g.scale.setScalar(s)
+    g.scale.setScalar((14 * depth) / projScale)
   })
 
   return (
-    <group ref={group} position={[at[0] + 0.7, at[1] + 0.7, at[2]]}>
+    <group ref={group}>
       <Billboard>
         <Text
           font={WORLD_FONT}

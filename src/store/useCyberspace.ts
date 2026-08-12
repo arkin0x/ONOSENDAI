@@ -28,7 +28,6 @@ import {
   alignTo,
   canonicalQuaternion,
   cellDelta,
-  cellOffset,
   clampAxis,
   rotateView,
   stepFor,
@@ -464,11 +463,14 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const { position, cursor, scaleExp, view } = get()
     const axes = viewAxes(view)
     const origin = alignedOrigin(position, scaleExp)
-    return [
-      cellOffset(cursor[axes.right.axis], origin[axes.right.axis], scaleExp, axes.right.dir),
-      cellOffset(cursor[axes.up.axis], origin[axes.up.axis], scaleExp, axes.up.dir),
-      cellDelta(cursor[axes.out.axis], position[axes.out.axis], scaleExp) * axes.out.dir,
-    ]
+    // Cell CENTRES, the same convention the cursor cube, the avatar and the path
+    // trail draw with. This used to mix cellOffset on two axes with cellDelta on
+    // the third, so the point field's focus, the camera target and the cursor
+    // cube could sit up to half a cell apart above scaleExp 0: the terrain
+    // magnified around a spot the cursor was not quite on.
+    return [axes.right, axes.up, axes.out].map((a) =>
+      cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
+    ) as [number, number, number]
   },
 }))
 

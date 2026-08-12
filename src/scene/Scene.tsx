@@ -36,6 +36,7 @@ import { Avatar } from './Avatar'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
+import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
@@ -60,6 +61,7 @@ function World(): JSX.Element {
       */}
       <ShaderPointField volume={volume} win={win} />
       <Rooms axes={axes} />
+      <SectorBox axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />
       <Avatar />

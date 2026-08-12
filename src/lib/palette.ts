@@ -17,6 +17,15 @@ export const WARN = '#ffb020'
 export const DANGER = '#ff3b6b'
 /** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
 export const SIDESTEP = '#c07dff'
+/**
+ * Sector lattice. Its own colour rather than WARN, which is amber and means
+ * cost: a sector boundary is a fact about where you are, not a warning.
+ *
+ * Saturated orange because bloom desaturates. WARN sits at 255/176/32, already
+ * yellow-leaning, and a bloomed halo of it over a teal scene reads khaki. This
+ * gives up brightness in the green channel to hold its hue through the glow.
+ */
+export const SECTOR = '#f7931a'
 export const DIM = '#3a5566'
 
 /**

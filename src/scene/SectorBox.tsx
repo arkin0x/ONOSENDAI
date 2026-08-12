@@ -19,7 +19,7 @@ import { useMemo } from 'react'
 import { BoxGeometry, EdgesGeometry } from 'three'
 import { SECTOR_BITS_DEFAULT } from 'cyberspace-core'
 import { GRID_RADIUS, cellDelta, type ViewAxes } from '../lib/space'
-import { WARN } from '../lib/palette'
+import { SECTOR } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
@@ -63,7 +63,7 @@ export function SectorBox({ axes }: Props): JSX.Element | null {
 
   return (
     <lineSegments geometry={geometry} position={box.centre} frustumCulled={false}>
-      <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.55} />
+      <lineBasicMaterial color={SECTOR} toneMapped={false} transparent opacity={0.9} />
     </lineSegments>
   )
 }

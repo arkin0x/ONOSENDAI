@@ -44,7 +44,9 @@ const vertexShader = /* glsl */ `
   uniform float uKSpread;
   uniform float uDpr;
   uniform vec3 uFocus;
+  uniform vec3 uCentre;
   uniform float uFadeRadius;
+  uniform float uFadeStart;
   uniform float uNearRadius;
 
   varying float vK;
@@ -54,13 +56,21 @@ const vertexShader = /* glsl */ `
   void main() {
     vK = aK;
 
-    // Alpha eases out with distance from what you are looking at, so the volume
-    // reads as depth rather than a uniform wall of dots. Recede, do not erase:
-    // the corners of a radius-R cube sit at R*sqrt(3), and taking them to zero
-    // emptied the field.
-    float dist = distance(position, uFocus) / max(uFadeRadius, 0.001);
-    float ease = 1.0 - pow(1.0 - clamp(dist, 0.0, 1.0), 3.0);
-    vFade = mix(1.0, 0.16, ease);
+    // Alpha falls to nothing before the volume's own edge, so the field reads as
+    // a ball of dust with no boundary rather than as a box of it.
+    //
+    // Two things gave the cube away. The fade floored at 0.16 instead of zero,
+    // so the outermost dots were still a fifth visible and then simply stopped
+    // where the data did, drawing the faces. And its radius was R*sqrt(3), sized
+    // to reach the cube's corners, which left everything nearer than that fully
+    // lit. Fading to zero by R hides the corners instead of chasing them.
+    //
+    // Centred on the volume, NOT on uFocus. The window that centres the volume
+    // settles behind the cursor, so during a fast run the two are cells apart;
+    // a ball centred on the cursor would then hang off one side of the cube and
+    // expose the face it overhung.
+    float rim = distance(position, uCentre);
+    vFade = 1.0 - smoothstep(uFadeStart, uFadeRadius, rim);
 
     // K = 0 keeps zero size and disappears, which is also how cells outside the
     // universe read, since they arrive as 0.
@@ -92,6 +102,11 @@ const vertexShader = /* glsl */ `
         px *= 1.0 + 0.06 * sin(uTime * 2.5 + float(gl_VertexID) * 0.37);
       }
     }
+
+    // Fully faded dots cost nothing: the fragment shader would discard them
+    // anyway, but only after rasterising, and roughly half a cube lies outside
+    // its own inscribed ball.
+    px *= step(0.004, vFade);
 
     // gl_PointSize is in drawing-buffer pixels while these sizes are CSS px, so
     // scale by the device pixel ratio or every dot lands at 1/dpr.
@@ -229,8 +244,12 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
       uNearRadius: { value: 3 },
       uDpr: { value: 1 },
       uFocus: { value: new Vector3() },
-      // Corners of a radius-R cube sit at R*sqrt(3), so fade over that, not R.
-      uFadeRadius: { value: VOLUME_RADIUS * 1.75 },
+      /** Centre of the rendered volume, which the fade is measured from. */
+      uCentre: { value: new Vector3() },
+      /** Full opacity out to here, then an S-curve to nothing. */
+      uFadeStart: { value: VOLUME_RADIUS * 0.45 },
+      /** Zero by the inscribed ball, so the cube's faces are never reached. */
+      uFadeRadius: { value: VOLUME_RADIUS },
     },
     transparent: true,
     depthWrite: false,
@@ -246,9 +265,13 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    // Focus is what the camera orbits: the cursor.
+    // Focus is what the camera orbits: the cursor. Live, so the magnification
+    // under the cursor keeps up with the keypress.
     const [fx, fy, fz] = useCyberspace.getState().cursorOffset()
     mat.uniforms.uFocus.value.set(fx, fy, fz)
+
+    // The volume's own centre, which is where the geometry was built around.
+    mat.uniforms.uCentre.value.set(win.right, win.up, win.out)
 
     mat.uniforms.uDpr.value = state.gl.getPixelRatio()
   })

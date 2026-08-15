@@ -28,7 +28,7 @@ import { useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { GRID_RADIUS, formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
-import { boundaryColor, boundaryIntensity } from '../lib/palette'
+import { LATTICE } from '../lib/palette'
 
 import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -125,10 +125,10 @@ export function Rooms({ axes }: Props): JSX.Element {
         geometry: gridGeometry(
           offs(axes.right), offs(axes.up), offs(axes.out), axes, EXTENT,
         ),
-        color: `#${boundaryColor(height).getHexString()}`,
-        // The lattice is background structure, so it stays well under the
-        // opacity of anything you are meant to look at.
-        opacity: 0.75 * boundaryIntensity(height, scaleExp + 1),
+        // One fixed hue for both heights, separated by weight alone. They are
+        // the same kind of thing at two resolutions, so they should read that
+        // way; the height is stated in the label rather than in the colour.
+        opacity: d === FINE ? 0.11 : 0.3,
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
         // cross, and that number changes with zoom while the box does not.
@@ -149,9 +149,9 @@ export function Rooms({ axes }: Props): JSX.Element {
       {levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>
-            <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
+            <lineBasicMaterial color={LATTICE} toneMapped={false} transparent opacity={l.opacity} />
           </lineSegments>
-          <WorldLabel text={l.label} color={l.color} at={l.labelAt} px={10} opacity={0.7} />
+          <WorldLabel text={l.label} color={LATTICE} at={l.labelAt} px={9} opacity={0.55} />
         </group>
       ))}
 

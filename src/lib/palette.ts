@@ -26,6 +26,17 @@ export const SIDESTEP = '#c07dff'
  * gives up brightness in the green channel to hold its hue through the glow.
  */
 export const SECTOR = '#f7931a'
+/**
+ * The aligned-subtree lattice: background structure, and deliberately the most
+ * recessive thing drawn.
+ *
+ * Fixed rather than taken from the LCA ramp. That ramp maps height to hue, and
+ * the drawn lattice heights follow the zoom, so the grid slid up the spectrum as
+ * you zoomed out: indigo at scaleExp 0, teal by 24, yellow by 55, and orange by
+ * 70, where it collides with the sector cage, then red, where it collides with
+ * the avatar. Hue has to say WHAT a thing is before it can say how much.
+ */
+export const LATTICE = '#4b3fa7'
 export const DIM = '#3a5566'
 
 /**

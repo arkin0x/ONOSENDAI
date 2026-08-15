@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, LineBasicMaterial } from 'three'
+import { BufferGeometry, Color, LineBasicMaterial } from 'three'
 import { GRID_RADIUS, type Position, type ViewAxes } from '../lib/space'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { boundaryColor } from '../lib/palette'
@@ -39,13 +39,15 @@ const DURATION = 1.4
  */
 const MAX_CELLS = GRID_RADIUS * 3
 
+const WHITE = new Color('#ffffff')
+
 interface Props {
   axes: ViewAxes
 }
 
 interface Flash {
   geometry: BufferGeometry
-  color: string
+  color: Color
   /** Heights crossed per screen axis, for the record. */
   heights: [number, number, number]
 }
@@ -58,7 +60,7 @@ function buildFlash(
   if (c.degenerate) return null
   return {
     geometry: boxEdges(c.centre, c.size),
-    color: `#${boundaryColor(c.peak).getHexString()}`,
+    color: boundaryColor(c.peak).clone(),
     heights: c.heights,
   }
 }
@@ -105,6 +107,13 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     // Ease out: bright on arrival, then a long tail rather than a linear wipe.
     const k = 1 - t
     material.current.opacity = k * k
+
+    // Strikes white, then resolves into its cost colour over the first third.
+    // The lattice and the covering box now hold fixed hues so they can be told
+    // apart at a glance, which leaves the LCA ramp free to mean what it was
+    // written to mean, here, where the number genuinely varies: a cheap crossing
+    // settles violet and a ruinous one settles red.
+    material.current.color.copy(WHITE).lerp(flash.color, Math.min(1, t * 3))
   })
 
   if (!flash) return null
@@ -113,7 +122,7 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     <lineSegments geometry={flash.geometry} frustumCulled={false} renderOrder={11}>
       <lineBasicMaterial
         ref={material}
-        color={flash.color}
+        color={WHITE}
         toneMapped={false}
         transparent
         opacity={1}

@@ -18,10 +18,11 @@
  */
 
 import { useMemo } from 'react'
+import { BoxGeometry, DoubleSide } from 'three'
 import { GRID_RADIUS, formatOps, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
-import { boundaryColor } from '../lib/palette'
+import { ACCENT, DANGER } from '../lib/palette'
 import { MAX_COMPUTE_HEIGHT, alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
 
@@ -47,17 +48,31 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     // Nothing is being crossed while the cursor sits on the avatar, and a box
     // around a single cell would just be a duplicate of the cursor outline.
     if (c.degenerate) return null
+    const est = estimateHopCost(
+      position.x, position.y, position.z,
+      target.x, target.y, target.z,
+      plane, MAX_COMPUTE_HEIGHT,
+    )
     return {
       geometry: boxEdges(c.centre, c.size),
-      color: `#${boundaryColor(c.peak).getHexString()}`,
+      // Filled as well as outlined. The covering box IS an aligned subtree, so
+      // against a lattice of aligned subtrees it was one more wireframe box
+      // among wireframe boxes, and at some heights it lands exactly on a lattice
+      // cell and competes with it outright. A volume and a grid are different
+      // KINDS of mark, which the eye separates without being told; two
+      // wireframes only differ once you have decoded their colours.
+      fill: new BoxGeometry(c.size[0], c.size[1], c.size[2]),
+      centre: c.centre,
+      // Cyan, not a point on the LCA ramp. This box is the live readout of what
+      // you are lining up, and it has to be told apart from the lattice at a
+      // glance rather than decoded: with both on the ramp, a cheap move drew a
+      // violet box inside a violet grid. Red when the crossing is past what this
+      // machine will compute, which is the one distinction worth a hue change.
+      color: est.exceedsLimit ? DANGER : ACCENT,
       // The panel's figure, not a second opinion on it. estimateHopCost also
       // counts the terrain tree, which is real work and would otherwise make
       // the label quietly under-report every move.
-      label: `h${c.peak}  ${formatOps(estimateHopCost(
-        position.x, position.y, position.z,
-        target.x, target.y, target.z,
-        plane, MAX_COMPUTE_HEIGHT,
-      ).totalOps)}`,
+      label: `h${c.peak}  ${formatOps(est.totalOps)}`,
       // Top corner, so the text clears the box rather than sitting inside it.
       at: [
         c.centre[0] + c.size[0] / 2,
@@ -71,8 +86,18 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
 
   return (
     <group>
+      <mesh geometry={box.fill} position={box.centre} frustumCulled={false}>
+        <meshBasicMaterial
+          color={box.color}
+          toneMapped={false}
+          transparent
+          opacity={0.07}
+          side={DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
       <lineSegments geometry={box.geometry} frustumCulled={false}>
-        <lineBasicMaterial color={box.color} toneMapped={false} transparent opacity={0.5} />
+        <lineBasicMaterial color={box.color} toneMapped={false} transparent opacity={0.85} />
       </lineSegments>
       <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, 0.4, 0]} px={13} />
     </group>

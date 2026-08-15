@@ -105,7 +105,7 @@ function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPositi
   )
 }
 
-export function Compass3D(): JSX.Element {
+export function Compass3D({ onTap }: { onTap?: () => void } = {}): JSX.Element {
   const [labels, setLabels] = useState<LabelPosition[]>([])
 
   const handleLabelsUpdate = (newLabels: LabelPosition[]) => {
@@ -124,7 +124,12 @@ export function Compass3D(): JSX.Element {
   }
 
   return (
-    <div className="compass-3d">
+    <div
+      className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}`}
+      onPointerDown={onTap ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
+      role={onTap ? 'button' : undefined}
+      aria-label={onTap ? 'View controls' : undefined}
+    >
       <Canvas
         camera={{ position: [0, 0, CAMERA_DISTANCE], fov: 40 }}
         gl={{ antialias: true, alpha: true }}

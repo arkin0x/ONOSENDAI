@@ -9,15 +9,16 @@
 
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
-import type { AxisDirection, RotateDirection } from '../lib/space'
+import { moveDirection, type MoveName } from '../lib/moves'
+import type { RotateDirection } from '../lib/space'
 
-type ScreenDirection = 'up' | 'down' | 'left' | 'right'
-
-const MOVE_KEYS: Record<string, ScreenDirection> = {
+const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
   KeyS: 'down',
   KeyA: 'left',
   KeyD: 'right',
+  KeyR: 'away',
+  KeyF: 'toward',
 }
 
 const ROTATE_KEYS: Record<string, RotateDirection> = {
@@ -25,13 +26,6 @@ const ROTATE_KEYS: Record<string, RotateDirection> = {
   KeyS: 'down',
   KeyA: 'left',
   KeyD: 'right',
-}
-
-/**
- * Flip an axis direction.
- */
-function invert(d: AxisDirection): AxisDirection {
-  return { axis: d.axis, dir: d.dir === 1 ? -1 : 1 }
 }
 
 export function useKeyboard(): void {
@@ -91,12 +85,10 @@ export function useKeyboard(): void {
       }
 
       // R and F travel along the axis perpendicular to the screen, which is
-      // otherwise unreachable without rotating the view first. `out` points out
-      // of the screen toward you, so R (push away, into the screen) is its
-      // inverse and F pulls back toward you.
+      // otherwise unreachable without rotating the view first.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
-        store.moveCursor(event.code === 'KeyR' ? invert(axes.out) : axes.out)
+        store.moveCursor(moveDirection(axes, MOVE_KEYS[event.code]))
         return
       }
 
@@ -111,21 +103,7 @@ export function useKeyboard(): void {
       const screenDir = MOVE_KEYS[event.code]
       if (!screenDir) return
       event.preventDefault()
-
-      switch (screenDir) {
-        case 'up':
-          store.moveCursor(axes.up)
-          break
-        case 'down':
-          store.moveCursor(invert(axes.up))
-          break
-        case 'right':
-          store.moveCursor(axes.right)
-          break
-        case 'left':
-          store.moveCursor(invert(axes.right))
-          break
-      }
+      store.moveCursor(moveDirection(axes, screenDir))
     }
 
     window.addEventListener('keydown', onKeyDown)

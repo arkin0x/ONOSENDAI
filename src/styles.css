@@ -647,3 +647,280 @@ kbd {
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
+
+/* ---------- Touch controls (cyberspace ops) ----------
+ *
+ * Overlays only. The canvas keeps its own touch handling, so orbiting and
+ * pinching on open space are unchanged; these sit above it and swallow their
+ * own presses. `touch-action: none` stops the browser reading a press as a
+ * scroll or a double-tap zoom, which otherwise eats every second tap.
+ *
+ * One corner cluster rather than controls scattered around the edges. The first
+ * pass put the pad, the scale and the actions in three separate places and they
+ * took a third of the screen between them while burying the compass. Everything
+ * a thumb needs now lives in a 122px column in the bottom right, which leaves
+ * the whole left side and the top two thirds of the view clear.
+ */
+
+.touchpad,
+.touchops {
+  position: fixed;
+  right: 14px;
+  z-index: 100;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* All nine cells earn their place. Empty corners read as broken, and the pad
+ * has exactly nine things worth reaching: six directions, the scale readout and
+ * its two steps. */
+.touchpad {
+  bottom: 62px;
+  display: grid;
+  grid-template-columns: repeat(3, 38px);
+  grid-template-rows: repeat(3, 38px);
+  gap: 4px;
+  grid-template-areas:
+    "away  up    toward"
+    "left  hub   right"
+    "sdown down  sup";
+}
+
+.touchpad__key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--fg, #c8f5ff);
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 9px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: none;
+  padding: 0;
+}
+
+.touchpad__key:active {
+  background: rgba(0, 229, 255, 0.3);
+  border-color: var(--accent, #00e5ff);
+}
+
+.touchpad__key--up { grid-area: up; }
+.touchpad__key--down { grid-area: down; }
+.touchpad__key--left { grid-area: left; }
+.touchpad__key--right { grid-area: right; }
+
+/* The out axis has no analogue on a flat pad, so it takes the top corners and
+ * is drawn dimmer: it is the axis you reach for deliberately. */
+.touchpad__key--away,
+.touchpad__key--toward {
+  grid-area: away;
+  font-size: 12px;
+  color: var(--accent, #00e5ff);
+  opacity: 0.75;
+}
+.touchpad__key--toward { grid-area: toward; }
+
+/* Scale changes the UNIT, not the camera. Bottom corners, away from the
+ * directions, and harmless to hit by mistake since it costs nothing. */
+.touchpad__key--sdown,
+.touchpad__key--sup {
+  grid-area: sdown;
+  font-size: 17px;
+  color: var(--dim, #7fa6bd);
+}
+.touchpad__key--sup { grid-area: sup; }
+
+.touchpad__hub {
+  grid-area: hub;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--accent, #00e5ff);
+  border-radius: 9px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+/* COMMIT is the only control here that spends anything, so it is the only one
+ * kept clear of the pad: no thumb aiming at an arrow should be able to graze
+ * it. It stays inert until the cursor is actually somewhere else. */
+.touchops {
+  bottom: 14px;
+  display: grid;
+  grid-template-columns: 56px 62px;
+  gap: 4px;
+  width: 122px;
+}
+
+.touchops__cancel,
+.touchops__commit {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  height: 40px;
+  border-radius: 9px;
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid var(--border, #1d3547);
+  color: var(--dim, #7fa6bd);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: none;
+  padding: 0;
+}
+
+.touchops__commit.is-armed {
+  color: #05070d;
+  background: var(--warn, #ffb020);
+  border-color: var(--warn, #ffb020);
+  font-weight: 700;
+}
+
+.touchops__commit.is-busy {
+  color: var(--warn, #ffb020);
+  border-color: var(--warn, #ffb020);
+}
+
+.touchops__cancel:active,
+.touchops__commit:active {
+  transform: scale(0.95);
+}
+
+/* The compass sat bottom-centre, directly under the action row, so the controls
+ * buried it. On a phone it moves out of the thumb zone entirely. */
+@media (max-width: 900px) {
+  .compass-3d {
+    bottom: auto;
+    top: 12px;
+    left: auto;
+    right: 12px;
+    transform: none;
+    width: 84px;
+    height: 84px;
+  }
+}
+
+/* ---------- Summoned controls: view menu, hint chip ---------- */
+
+.compass-3d--tappable {
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  background: rgba(6, 14, 22, 0.55);
+  backdrop-filter: blur(6px);
+  touch-action: none;
+}
+
+.viewmenu {
+  position: fixed;
+  top: 104px;
+  right: 12px;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid var(--border, #1d3547);
+  backdrop-filter: blur(10px);
+  touch-action: none;
+}
+
+.viewmenu__pad {
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-template-rows: repeat(3, 34px);
+  gap: 3px;
+  grid-template-areas:
+    ".    up    ."
+    "left hub   right"
+    ".    down  .";
+}
+
+.viewmenu__key,
+.viewmenu__op,
+.viewmenu__close {
+  font-family: inherit;
+  color: var(--fg, #c8f5ff);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: none;
+  padding: 0;
+}
+
+.viewmenu__key { font-size: 13px; }
+.viewmenu__key--up { grid-area: up; }
+.viewmenu__key--down { grid-area: down; }
+.viewmenu__key--left { grid-area: left; }
+.viewmenu__key--right { grid-area: right; }
+
+.viewmenu__hub {
+  grid-area: hub;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--dim, #7fa6bd);
+}
+
+.viewmenu__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+}
+
+.viewmenu__op {
+  height: 30px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
+.viewmenu__op:disabled { opacity: 0.35; }
+
+.viewmenu__close {
+  height: 26px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim, #7fa6bd);
+}
+
+.viewmenu__key:active,
+.viewmenu__op:active,
+.viewmenu__close:active {
+  background: rgba(0, 229, 255, 0.28);
+  border-color: var(--accent, #00e5ff);
+}
+
+/* What is left when the pad is dismissed: small enough to ignore, present
+ * enough that the controls are never actually lost. */
+.touchhint {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 100;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: var(--accent, #00e5ff);
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.touchhint:active {
+  background: rgba(0, 229, 255, 0.28);
+}

@@ -18,7 +18,7 @@
  */
 
 import { useMemo } from 'react'
-import { BoxGeometry, DoubleSide } from 'three'
+import { BoxGeometry, FrontSide } from 'three'
 import { GRID_RADIUS, formatOps, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
@@ -63,6 +63,11 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // wireframes only differ once you have decoded their colours.
       fill: new BoxGeometry(c.size[0], c.size[1], c.size[2]),
       centre: c.centre,
+      // Faint in proportion to how big it is. A covering box grows by powers of
+      // two, so an expensive crossing is tens of cells across and a fill tuned
+      // for a small one turns the screen into a wash. The outline carries the
+      // extent at any size; the fill only has to say "this is a volume".
+      fillOpacity: Math.max(0.02, Math.min(0.09, 0.09 * (8 / Math.max(...c.size)))),
       // Cyan, not a point on the LCA ramp. This box is the live readout of what
       // you are lining up, and it has to be told apart from the lattice at a
       // glance rather than decoded: with both on the ramp, a cheap move drew a
@@ -86,13 +91,19 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
 
   return (
     <group>
+      {/* Front faces only. A box wide enough to contain the camera would, with
+          DoubleSide, render its interior across the entire frame: a two-gibson
+          step that happens to cross a height-6 boundary covers 64 cells, and the
+          camera orbits 26 back, so it sits inside. Culling back faces means the
+          fill simply stops once you are within it, which is also when the
+          outline and the lattice are doing the work anyway. */}
       <mesh geometry={box.fill} position={box.centre} frustumCulled={false}>
         <meshBasicMaterial
           color={box.color}
           toneMapped={false}
           transparent
-          opacity={0.07}
-          side={DoubleSide}
+          opacity={box.fillOpacity}
+          side={FrontSide}
           depthWrite={false}
         />
       </mesh>

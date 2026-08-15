@@ -26,7 +26,7 @@
 
 import { useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
-import { GRID_RADIUS, formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
+import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { LATTICE } from '../lib/palette'
 
@@ -34,74 +34,86 @@ import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 /**
- * Heights drawn, as an excess above the current scale floor.
+ * The heights drawn, as an excess above the current scale floor, and how many
+ * lattice cells either side of the one you occupy each of them reaches.
  *
- * 3 gives cells 8 wide and 5 gives cells 32 wide, so across the drawn extent
- * you see roughly six fine cells and two coarse ones per axis. Enough to read
- * as a grid, few enough not to streak.
+ * `span` is the fix for the streaking. The lattice used to run the full width of
+ * the view at both heights: 7 planes per axis over 48 cells, so 147 lines each
+ * 48 cells long. Under perspective every one of those becomes a diagonal streak
+ * across the entire frustum, and three axes of them cross into a web that reads
+ * as noise rather than as a building. Total ink mattered more than line count.
+ *
+ * Bounded to a neighbourhood instead. The fine grid shows the cell you are in
+ * and its immediate neighbours, the coarse one shows only the cell you are in.
+ * 60 segments rather than 147, and the longest is a third of what it was. The
+ * lattice is still absolute and still world-static; you simply see the part of
+ * it you are standing in, which is all anyone can see of a building anyway.
  */
-const FINE = 3
-const COARSE = 5
-
-/** Half-extent of the lattice, in cells. */
-const EXTENT = GRID_RADIUS
+const LEVELS: Array<{ d: number; span: number; opacity: number }> = [
+  { d: 3, span: 1, opacity: 0.14 },
+  { d: 5, span: 0, opacity: 0.3 },
+]
 
 interface Props {
   axes: ViewAxes
 }
 
 /**
- * Offsets, in cells, of every height-h lattice plane crossing the drawn extent.
+ * Offsets, in cells, of the lattice planes bounding a neighbourhood of cells
+ * around `here`.
  *
  * The planes sit at world multiples of 2^h. Both those and the render origin are
- * multiples of the cell step, so the division is exact and the offsets land on
- * whole cells.
+ * multiples of the cell step, so the division is exact and offsets land on whole
+ * cells.
  */
 function latticeOffsets(
-  origin: bigint, scaleExp: number, height: number, extent: number,
+  here: bigint, origin: bigint, scaleExp: number, height: number, span: number,
 ): number[] {
   const step = stepFor(scaleExp)
   const h = BigInt(height)
-  const span = BigInt(extent) * step
-  // Arithmetic shift floors, which is what aligning down means for negatives too.
-  let base = ((origin - span) >> h) << h
   const stride = 1n << h
+  const base = (here >> h) << h
 
   const out: number[] = []
-  for (;;) {
-    const offset = Number((base - origin) / step)
-    if (offset > extent) break
-    if (offset >= -extent) out.push(offset)
-    base += stride
+  for (let k = -span; k <= span + 1; k++) {
+    out.push(Number((base + BigInt(k) * stride - origin) / step))
   }
   return out
 }
 
-/** A 3D grid of lines at the given lattice offsets, as one merged geometry. */
+/**
+ * A 3D grid of lines at the given lattice offsets, as one merged geometry.
+ *
+ * Each line runs only between the first and last plane of its own axis, so the
+ * whole thing is a closed block of cells rather than an infinite grid.
+ */
 function gridGeometry(
-  right: number[], up: number[], out: number[], axes: ViewAxes, extent: number,
+  right: number[], up: number[], out: number[], axes: ViewAxes,
 ): BufferGeometry {
   const v: number[] = []
   const dir = (a: AxisDirection, n: number): number => n * a.dir
-  const lo = -extent
-  const hi = extent
+  const span = (arr: number[]): [number, number] => [arr[0], arr[arr.length - 1]]
+
+  const [r0, r1] = span(right)
+  const [u0, u1] = span(up)
+  const [o0, o1] = span(out)
 
   for (const u of up) {
     for (const o of out) {
-      v.push(dir(axes.right, lo), dir(axes.up, u), dir(axes.out, o))
-      v.push(dir(axes.right, hi), dir(axes.up, u), dir(axes.out, o))
+      v.push(dir(axes.right, r0), dir(axes.up, u), dir(axes.out, o))
+      v.push(dir(axes.right, r1), dir(axes.up, u), dir(axes.out, o))
     }
   }
   for (const r of right) {
     for (const o of out) {
-      v.push(dir(axes.right, r), dir(axes.up, lo), dir(axes.out, o))
-      v.push(dir(axes.right, r), dir(axes.up, hi), dir(axes.out, o))
+      v.push(dir(axes.right, r), dir(axes.up, u0), dir(axes.out, o))
+      v.push(dir(axes.right, r), dir(axes.up, u1), dir(axes.out, o))
     }
   }
   for (const r of right) {
     for (const u of up) {
-      v.push(dir(axes.right, r), dir(axes.up, u), dir(axes.out, lo))
-      v.push(dir(axes.right, r), dir(axes.up, u), dir(axes.out, hi))
+      v.push(dir(axes.right, r), dir(axes.up, u), dir(axes.out, o0))
+      v.push(dir(axes.right, r), dir(axes.up, u), dir(axes.out, o1))
     }
   }
 
@@ -116,19 +128,17 @@ export function Rooms({ axes }: Props): JSX.Element {
 
   const levels = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
-    return [FINE, COARSE].map((d) => {
+    return LEVELS.map(({ d, span, opacity }) => {
       const height = scaleExp + d
       const offs = (a: AxisDirection): number[] =>
-        latticeOffsets(origin[a.axis], scaleExp, height, EXTENT)
+        latticeOffsets(position[a.axis], origin[a.axis], scaleExp, height, span)
       return {
         height,
-        geometry: gridGeometry(
-          offs(axes.right), offs(axes.up), offs(axes.out), axes, EXTENT,
-        ),
+        geometry: gridGeometry(offs(axes.right), offs(axes.up), offs(axes.out), axes),
         // One fixed hue for both heights, separated by weight alone. They are
         // the same kind of thing at two resolutions, so they should read that
         // way; the height is stated in the label rather than in the colour.
-        opacity: d === FINE ? 0.11 : 0.3,
+        opacity,
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
         // cross, and that number changes with zoom while the box does not.

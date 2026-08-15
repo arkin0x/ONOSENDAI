@@ -21,9 +21,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial } from 'three'
-import { findLcaHeight } from 'cyberspace-core'
-import { GRID_RADIUS, stepFor, type Position, type ViewAxes } from '../lib/space'
+import { BufferGeometry, LineBasicMaterial } from 'three'
+import { GRID_RADIUS, type Position, type ViewAxes } from '../lib/space'
+import { boxEdges, coveringBox } from '../lib/covering'
 import { boundaryColor } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
@@ -50,60 +50,17 @@ interface Flash {
   heights: [number, number, number]
 }
 
-/** Edges of an axis-aligned box given its centre and per-axis size, in cells. */
-function boxEdges(
-  centre: [number, number, number], size: [number, number, number],
-): BufferGeometry {
-  const h: [number, number, number] = [size[0] / 2, size[1] / 2, size[2] / 2]
-  const corner = (sx: number, sy: number, sz: number): number[] =>
-    [centre[0] + sx * h[0], centre[1] + sy * h[1], centre[2] + sz * h[2]]
-
-  const v: number[] = []
-  for (const sz of [-1, 1]) {
-    for (const sy of [-1, 1]) v.push(...corner(-1, sy, sz), ...corner(1, sy, sz))
-    for (const sx of [-1, 1]) v.push(...corner(sx, -1, sz), ...corner(sx, 1, sz))
-  }
-  for (const sy of [-1, 1]) {
-    for (const sx of [-1, 1]) v.push(...corner(sx, sy, -1), ...corner(sx, sy, 1))
-  }
-
-  const geom = new BufferGeometry()
-  geom.setAttribute('position', new Float32BufferAttribute(v, 3))
-  return geom
-}
-
 function buildFlash(
   from: Position, to: Position, scaleExp: number, axes: ViewAxes,
 ): Flash | null {
-  const step = stepFor(scaleExp)
   const origin = alignedOrigin(to, scaleExp)
-  const screen = [axes.right, axes.up, axes.out]
-
-  const centre: [number, number, number] = [0, 0, 0]
-  const size: [number, number, number] = [1, 1, 1]
-  const heights: [number, number, number] = [0, 0, 0]
-  let peak = 0
-
-  for (let s = 0; s < 3; s++) {
-    const axis = screen[s].axis
-    const height = findLcaHeight(from[axis], to[axis])
-    heights[s] = height
-    peak = Math.max(peak, height)
-
-    // An axis that did not move has no covering subtree, so it contributes the
-    // single cell you are standing in rather than a degenerate zero-width face.
-    const h = BigInt(Math.max(height, scaleExp))
-    const cells = Math.min(Number((1n << h) / step), MAX_CELLS)
-    const base = (from[axis] >> h) << h
-    const lo = Number((base - origin[axis]) / step)
-
-    size[s] = cells
-    centre[s] = (lo + (cells - 1) / 2) * screen[s].dir
+  const c = coveringBox(from, to, origin, scaleExp, axes, MAX_CELLS)
+  if (c.degenerate) return null
+  return {
+    geometry: boxEdges(c.centre, c.size),
+    color: `#${boundaryColor(c.peak).getHexString()}`,
+    heights: c.heights,
   }
-
-  if (peak === 0) return null
-
-  return { geometry: boxEdges(centre, size), color: `#${boundaryColor(peak).getHexString()}`, heights }
 }
 
 export function CrossingFlash({ axes }: Props): JSX.Element | null {

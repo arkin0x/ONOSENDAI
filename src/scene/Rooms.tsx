@@ -26,10 +26,12 @@
 
 import { useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
-import { GRID_RADIUS, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
-import { ACCENT, WARN, boundaryColor, boundaryIntensity } from '../lib/palette'
+import { GRID_RADIUS, formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
+import { subtreeCantorOps } from 'cyberspace-core'
+import { boundaryColor, boundaryIntensity } from '../lib/palette'
+
+import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import type { Position } from '../lib/space'
 
 /**
  * Heights drawn, as an excess above the current scale floor.
@@ -43,9 +45,6 @@ const COARSE = 5
 
 /** Half-extent of the lattice, in cells. */
 const EXTENT = GRID_RADIUS
-
-/** The cell containing the cursor is lit, so you can see the room you would land in. */
-const CURSOR_ROOM_HEIGHT = FINE
 
 interface Props {
   axes: ViewAxes
@@ -111,48 +110,8 @@ function gridGeometry(
   return geom
 }
 
-/** Edges of the height-h cell containing `p`, in render space. */
-function cellBoxGeometry(
-  p: Position, origin: Position, scaleExp: number, height: number, axes: ViewAxes,
-): BufferGeometry {
-  const step = stepFor(scaleExp)
-  const h = BigInt(height)
-  const size = Number((1n << h) / step)
-
-  const centre: [number, number, number] = [0, 0, 0]
-  const screen = [axes.right, axes.up, axes.out]
-  for (let s = 0; s < 3; s++) {
-    const axis = screen[s].axis
-    const base = (p[axis] >> h) << h
-    const lo = Number((base - origin[axis]) / step)
-    centre[s] = (lo + (size - 1) / 2) * screen[s].dir
-  }
-
-  const half = size / 2
-  const c = centre
-  const corner = (sx: number, sy: number, sz: number): [number, number, number] =>
-    [c[0] + sx * half, c[1] + sy * half, c[2] + sz * half]
-
-  const v: number[] = []
-  const edge = (a: [number, number, number], b: [number, number, number]): void => {
-    v.push(...a, ...b)
-  }
-  for (const sz of [-1, 1]) {
-    for (const sy of [-1, 1]) edge(corner(-1, sy, sz), corner(1, sy, sz))
-    for (const sx of [-1, 1]) edge(corner(sx, -1, sz), corner(sx, 1, sz))
-  }
-  for (const sy of [-1, 1]) {
-    for (const sx of [-1, 1]) edge(corner(sx, sy, -1), corner(sx, sy, 1))
-  }
-
-  const geom = new BufferGeometry()
-  geom.setAttribute('position', new Float32BufferAttribute(v, 3))
-  return geom
-}
-
 export function Rooms({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const levels = useMemo(() => {
@@ -170,45 +129,32 @@ export function Rooms({ axes }: Props): JSX.Element {
         // The lattice is background structure, so it stays well under the
         // opacity of anything you are meant to look at.
         opacity: 0.75 * boundaryIntensity(height, scaleExp + 1),
+        // Named, once, on the cell holding the avatar. An 8-cell box is
+        // meaningless until you know it is a height-27 wall costing 134M to
+        // cross, and that number changes with zoom while the box does not.
+        label: `h${height}  ${formatOps(subtreeCantorOps(height))}`,
+        labelAt: [axes.right, axes.up, axes.out].map((a, i) => {
+          const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
+          const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))
+          const cells = 2 ** d
+          // Far top corner, so the two heights' labels never stack.
+          return (lo + (i === 1 ? cells - 0.5 : cells / 2)) * a.dir
+        }) as [number, number, number],
       }
     })
   }, [position, scaleExp, axes])
 
-  // The two cells that answer "where am I" and "where would I land". Without
-  // these the lattice is honest but anonymous: every cell looks like every
-  // other one, and the whole point of a room is knowing you are in it.
-  const rooms = useMemo(() => {
-    const origin = alignedOrigin(position, scaleExp)
-    const height = scaleExp + CURSOR_ROOM_HEIGHT
-    const here = cellBoxGeometry(position, origin, scaleExp, height, axes)
-    const sameRoom = [axes.right, axes.up, axes.out].every(
-      (a) => (position[a.axis] >> BigInt(height)) === (cursor[a.axis] >> BigInt(height)),
-    )
-    return {
-      here,
-      there: sameRoom ? null : cellBoxGeometry(cursor, origin, scaleExp, height, axes),
-    }
-  }, [position, cursor, scaleExp, axes])
-
   return (
     <group>
       {levels.map((l) => (
-        <lineSegments key={l.height} geometry={l.geometry} frustumCulled={false}>
-          <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
-        </lineSegments>
+        <group key={l.height}>
+          <lineSegments geometry={l.geometry} frustumCulled={false}>
+            <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
+          </lineSegments>
+          <WorldLabel text={l.label} color={l.color} at={l.labelAt} px={10} opacity={0.7} />
+        </group>
       ))}
 
-      {/* The room you are standing in. */}
-      <lineSegments geometry={rooms.here} frustumCulled={false}>
-        <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.5} />
-      </lineSegments>
-
-      {/* The room the cursor would land in, when it is a different one. */}
-      {rooms.there && (
-        <lineSegments geometry={rooms.there} frustumCulled={false}>
-          <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.55} />
-        </lineSegments>
-      )}
     </group>
   )
 }

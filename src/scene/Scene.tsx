@@ -33,6 +33,7 @@ import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { Avatar } from './Avatar'
+import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Cursor } from './Cursor'
 import { PathTrail } from './PathTrail'
@@ -66,6 +67,7 @@ function World(): JSX.Element {
       <ShaderPointField volume={volume} win={win} />
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
+      <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <Cursor axes={axes} />

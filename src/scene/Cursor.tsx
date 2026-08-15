@@ -12,11 +12,9 @@
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import { Billboard, Text } from '@react-three/drei'
-import { useFrame, type RootState } from '@react-three/fiber'
-import { Group, Vector3 } from 'three'
+import { useFrame } from '@react-three/fiber'
 import { formatCellSize } from '../lib/scale'
-import { WORLD_FONT } from '../lib/font'
+import { WorldLabel } from './WorldLabel'
 import {
   BufferGeometry,
   EdgesGeometry,
@@ -197,53 +195,20 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       </lineSegments>
 
       {/* The scale reading rides the cursor cube, which is exactly one cell
-          wide, so the label states what that cube measures. */}
-      <ScaleLabel axes={axes} scaleExp={scaleExp} color={targetColor} />
-    </group>
-  )
-}
-
-/** A constant-screen-size, camera-facing label for the cursor's cell size. */
-function ScaleLabel({ axes, scaleExp, color }: {
-  axes: ViewAxes; scaleExp: number; color: string
-}): JSX.Element {
-  const group = useRef<Group>(null)
-  const label = useMemo(() => formatCellSize(scaleExp), [scaleExp])
-
-  // Position AND scale come from this frame, not from a React commit: the label
-  // is attached to the cursor, so it has to arrive with it rather than after it.
-  // Scale is set from view depth so the text holds a constant pixel height;
-  // without it the label shrinks to nothing as you pull the camera out.
-  useFrame((state: RootState) => {
-    const g = group.current
-    if (!g) return
-    const s = useCyberspace.getState()
-    const live = s.pendingTarget ?? s.cursor
-    const b = cellCentre(live, alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes)
-    g.position.set(b[0] + 0.7, b[1] + 0.7, b[2])
-
-    const cam = state.camera as unknown as { fov?: number; position: Vector3 }
-    if (cam.fov === undefined) return
-    const depth = Math.max(0.001, cam.position.distanceTo(g.getWorldPosition(new Vector3())))
-    const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    g.scale.setScalar((14 * depth) / projScale)
-  })
-
-  return (
-    <group ref={group}>
-      <Billboard>
-        <Text
-          font={WORLD_FONT}
-          fontSize={1}
-          anchorX="left"
-          anchorY="middle"
-          color={color}
-          outlineWidth={0.06}
-          outlineColor="#05070d"
-        >
-          {label}
-        </Text>
-      </Billboard>
+          wide, so the label states what that cube measures. It follows per
+          frame, arriving with the cube rather than a render behind it. */}
+      <WorldLabel
+        text={formatCellSize(scaleExp)}
+        color={targetColor}
+        offset={[0.7, 0.7, 0]}
+        follow={() => {
+          const s = useCyberspace.getState()
+          return cellCentre(
+            s.pendingTarget ?? s.cursor,
+            alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes,
+          )
+        }}
+      />
     </group>
   )
 }

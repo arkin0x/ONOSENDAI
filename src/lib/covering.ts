@@ -1,0 +1,95 @@
+/**
+ * covering.ts — the smallest aligned box holding two positions, and its price.
+ *
+ * This is the single most load-bearing object in the protocol's cost model.
+ * §4.5 gives it per axis as `h = lca(v1, v2)` and `base = (v1 >> h) << h`, and
+ * §4.7 has each axis build its Cantor tree over its own covering subtree before
+ * the three roots are paired into region_n. So this box IS region_n's extent,
+ * and its size IS the work: 2^h leaves per axis.
+ *
+ * The heights are genuinely independent per axis, which is why this returns a
+ * box and not a cube. A move that is ruinous on z and free on x and y covers a
+ * slab, and drawing it as a cube would misreport two of the three prices.
+ */
+
+import { BufferGeometry, Float32BufferAttribute } from 'three'
+import { findLcaHeight, subtreeCantorOps } from 'cyberspace-core'
+import { alignTo, cellDelta, stepFor, type Position, type ViewAxes } from './space'
+
+export interface Covering {
+  /** Render-space centre, in cells. */
+  centre: [number, number, number]
+  /** Render-space extent per axis, in cells. */
+  size: [number, number, number]
+  /** Crossing height per screen axis. */
+  heights: [number, number, number]
+  /** The largest of them, which is what the move is really priced by. */
+  peak: number
+  /** Cantor pairings across the three spatial axis trees, per subtreeCantorOps. */
+  ops: number
+  /** True when the two positions are the same cell, so nothing is being crossed. */
+  degenerate: boolean
+}
+
+/**
+ * @param maxCells clamp on the drawn extent. A ruinous crossing covers a box
+ *   wider than the universe you can see, and the geometry still has to be
+ *   finite; the reported heights and leaves are never clamped.
+ */
+export function coveringBox(
+  from: Position, to: Position, origin: Position,
+  scaleExp: number, axes: ViewAxes, maxCells: number,
+): Covering {
+  const step = stepFor(scaleExp)
+  const screen = [axes.right, axes.up, axes.out]
+
+  const centre: [number, number, number] = [0, 0, 0]
+  const size: [number, number, number] = [1, 1, 1]
+  const heights: [number, number, number] = [0, 0, 0]
+  let peak = 0
+  let ops = 0
+
+  for (let s = 0; s < 3; s++) {
+    const axis = screen[s].axis
+    const height = findLcaHeight(from[axis], to[axis])
+    heights[s] = height
+    peak = Math.max(peak, height)
+    // Same helper the cost estimate uses, so this can never quote a different
+    // number from the proof panel.
+    ops += subtreeCantorOps(height)
+
+    // Below the current scale the covering subtree is finer than a cell, so it
+    // is drawn as the one cell you are standing in.
+    const h = BigInt(Math.max(height, scaleExp))
+    const cells = Math.min(Number((1n << h) / step), maxCells)
+    const base = (from[axis] >> h) << h
+    const lo = cellDelta(alignTo(base, scaleExp), origin[axis], scaleExp)
+
+    size[s] = cells
+    centre[s] = (lo + (cells - 1) / 2) * screen[s].dir
+  }
+
+  return { centre, size, heights, peak, ops, degenerate: peak === 0 }
+}
+
+/** Edges of an axis-aligned box given its centre and per-axis size, in cells. */
+export function boxEdges(
+  centre: [number, number, number], size: [number, number, number],
+): BufferGeometry {
+  const h: [number, number, number] = [size[0] / 2, size[1] / 2, size[2] / 2]
+  const corner = (sx: number, sy: number, sz: number): number[] =>
+    [centre[0] + sx * h[0], centre[1] + sy * h[1], centre[2] + sz * h[2]]
+
+  const v: number[] = []
+  for (const sz of [-1, 1]) {
+    for (const sy of [-1, 1]) v.push(...corner(-1, sy, sz), ...corner(1, sy, sz))
+    for (const sx of [-1, 1]) v.push(...corner(sx, -1, sz), ...corner(sx, 1, sz))
+  }
+  for (const sy of [-1, 1]) {
+    for (const sx of [-1, 1]) v.push(...corner(sx, sy, -1), ...corner(sx, sy, 1))
+  }
+
+  const geom = new BufferGeometry()
+  geom.setAttribute('position', new Float32BufferAttribute(v, 3))
+  return geom
+}

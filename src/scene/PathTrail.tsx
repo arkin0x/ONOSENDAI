@@ -5,10 +5,12 @@
  * Each segment connects consecutive positions in the history array.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
-import { alignTo, cellDelta, type Position, type ViewAxes } from '../lib/space'
+import { cellCentre, type ViewAxes } from '../lib/space'
+import { travelOffset } from '../lib/travel'
 import { alignedOrigin } from '../store/useCyberspace'
 
 interface Props {
@@ -31,11 +33,8 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     // collapsed to nothing, and rotating the view changed which axis was being
     // flattened, so the shape changed with the view. Cell centres, matching the
     // cursor and the avatar, so a segment ends where its gibson is drawn.
-    const centre = (p: Position): [number, number, number] => [
-      cellDelta(alignTo(p[axes.right.axis], scaleExp), origin[axes.right.axis], scaleExp) * axes.right.dir,
-      cellDelta(alignTo(p[axes.up.axis], scaleExp), origin[axes.up.axis], scaleExp) * axes.up.dir,
-      cellDelta(alignTo(p[axes.out.axis], scaleExp), origin[axes.out.axis], scaleExp) * axes.out.dir,
-    ]
+    const centre = (p: typeof position): [number, number, number] =>
+      cellCentre(p, origin, scaleExp, axes)
 
     for (let i = 0; i < positionHistory.length - 1; i++) {
       vertices.push(...centre(positionHistory[i]), ...centre(positionHistory[i + 1]))
@@ -45,6 +44,24 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     geom.setAttribute('position', new Float32BufferAttribute(vertices, 3))
     return geom
   }, [positionHistory, axes, scaleExp, position])
+
+  // The newest segment ends on the avatar, which is drawn trailing behind its
+  // committed cell for a moment after a commit. Left alone, the trail would
+  // reach the destination while you were still visibly travelling to it, so the
+  // line would lead you there. Its final vertex rides the same offset.
+  const lastVertex = useRef<Float32Array | null>(null)
+  useFrame(() => {
+    const attr = geometry?.attributes.position
+    if (!attr) return
+    const arr = attr.array as Float32Array
+    const n = arr.length
+    if (n < 3) return
+    if (lastVertex.current !== arr) lastVertex.current = arr
+    arr[n - 3] = travelOffset.x
+    arr[n - 2] = travelOffset.y
+    arr[n - 1] = travelOffset.z
+    attr.needsUpdate = true
+  })
 
   if (!geometry) return null
 

@@ -106,6 +106,22 @@ export function cellDelta(value: bigint, origin: bigint, scaleExp: number): numb
 }
 
 /**
+ * Where a cyberspace position sits in render space, at its cell's centre.
+ *
+ * The one definition the cursor, the avatar, the trail, the room boxes and the
+ * travel animation all share, so nothing can drift half a cell from anything
+ * else. Note it aligns first: a coordinate names a whole cell, and the cell's
+ * centre is what gets drawn.
+ */
+export function cellCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return [axes.right, axes.up, axes.out].map((a) =>
+    cellDelta(alignTo(p[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
+  ) as [number, number, number]
+}
+
+/**
  * Sub-cell position along an axis as a 0..1 fraction.
  */
 export function subCellFraction(value: bigint, scaleExp: number): number {

@@ -28,7 +28,7 @@ import {
 } from 'three'
 import { estimateHopCost } from 'cyberspace-core'
 import { DANGER, SIDESTEP, WARN } from '../lib/palette'
-import { alignTo, cellDelta, type Position, type ViewAxes } from '../lib/space'
+import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   MAX_COMPUTE_HEIGHT,
   alignedOrigin,
@@ -78,20 +78,6 @@ function setSegmentEnd(line: Line, geometry: BufferGeometry, b: [number, number,
   arr[3] = b[0]; arr[4] = b[1]; arr[5] = b[2]
   attr.needsUpdate = true
   line.computeLineDistances()
-}
-
-/**
- * Where a cyberspace position sits in render space, at its cell's centre.
- *
- * The one definition the cursor, the label and the legs all share, so nothing
- * can drift half a cell from anything else.
- */
-function cellCentre(
-  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
-): [number, number, number] {
-  return [axes.right, axes.up, axes.out].map((a) =>
-    cellDelta(alignTo(p[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
-  ) as [number, number, number]
 }
 
 export function Cursor({ axes }: Props): JSX.Element | null {

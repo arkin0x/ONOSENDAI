@@ -39,6 +39,7 @@ import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
+import { Travel } from './Travel'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -60,6 +61,8 @@ function World(): JSX.Element {
         expensive boundary. Kept in the tree for ticket 05, which owns how cost
         is shown, rather than deleted.
       */}
+      {/* Runs before anything that reads travelOffset. */}
+      <Travel axes={axes} />
       <ShaderPointField volume={volume} win={win} />
       <Rooms axes={axes} />
       <SectorBox axes={axes} />

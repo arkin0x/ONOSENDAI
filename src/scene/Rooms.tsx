@@ -37,12 +37,19 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
  * The heights drawn, as an excess above the current scale floor, and how many
  * lattice cells either side of the one you occupy each of them reaches.
  *
+ * Three consecutive levels rather than two spaced apart. With only h+3 and h+5
+ * the intervening level is missing, so the relationship between them has to be
+ * taken on trust; with h+3, h+4 and h+5 each box is visibly twice the last and
+ * each costs visibly twice as much to leave. The doubling is the protocol's
+ * whole shape, and consecutive levels are what put it on screen rather than in
+ * a footnote.
+ *
  * `span` is how many lattice cells either side of the one you occupy a level
- * reaches. Both are 0, so each level draws exactly the cell you are standing in
- * and the two nest: the room, and the room that room is in.
+ * reaches. All are 0, so each level draws exactly the cell you are standing in
+ * and the three nest: the room, the room that room is in, and so on outward.
  *
  * It has come down twice. The lattice first ran the full width of the view at
- * both heights, 147 lines each 48 cells long, which under perspective turns into
+ * two heights, 147 lines each 48 cells long, which under perspective turns into
  * a web of diagonal streaks rather than a building. Bounding the fine level to
  * its immediate neighbours cut that to 60 segments, but 27 cells of grid still
  * competes with the two things that matter, the cell you are in and the box you
@@ -57,8 +64,9 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
  * on screen rather than being an unexplained jump.
  */
 const LEVELS: Array<{ d: number; span: number; opacity: number }> = [
-  { d: 3, span: 0, opacity: 0.26 },
-  { d: 5, span: 0, opacity: 0.34 },
+  { d: 3, span: 0, opacity: 0.22 },
+  { d: 4, span: 0, opacity: 0.28 },
+  { d: 5, span: 0, opacity: 0.36 },
 ]
 
 interface Props {
@@ -149,6 +157,7 @@ export function Rooms({ axes }: Props): JSX.Element {
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
         // cross, and that number changes with zoom while the box does not.
+        cells: 2 ** d,
         // What it costs to LEAVE this cell, on one axis, at the cheapest wall.
         //
         // This used to quote subtreeCantorOps(height), which is a different
@@ -162,7 +171,7 @@ export function Rooms({ axes }: Props): JSX.Element {
         // height. Every boundary of the height-3 lattice is at least height 4,
         // but the one at a multiple of 128 is height 8, and the ruler of
         // nested walls means a cell's six faces can each cost differently.
-        label: `h${height} cell\n${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
+        label: `h${height}  ${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
         labelAt: [axes.right, axes.up, axes.out].map((a, i) => {
           const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
           const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))
@@ -177,14 +186,28 @@ export function Rooms({ axes }: Props): JSX.Element {
   return (
     <group>
       {levels.map((l) => (
-        <group key={l.height}>
-          <lineSegments geometry={l.geometry} frustumCulled={false}>
-            <lineBasicMaterial color={LATTICE} toneMapped={false} transparent opacity={l.opacity} />
-          </lineSegments>
-          <WorldLabel text={l.label} color={LATTICE} at={l.labelAt} px={9} opacity={0.55} />
-        </group>
+        <lineSegments key={l.height} geometry={l.geometry} frustumCulled={false}>
+          <lineBasicMaterial color={LATTICE} toneMapped={false} transparent opacity={l.opacity} />
+        </lineSegments>
       ))}
 
+      {/*
+        One block for the whole nest rather than a label per cell.
+        
+        Per-cell labels sat at each cell's top corner, and nested cells share a
+        top edge whenever the inner one happens to sit in the upper half of the
+        outer, which is half the time: h3 and h4 printed over each other on the
+        first try. Stacking them also does the job the third level was added for,
+        since 15, 31, 63 in a column is the doubling itself, where three labels
+        scattered around the scene only imply it.
+      */}
+      <WorldLabel
+        text={levels.map((l) => l.label).join('\n')}
+        color={LATTICE}
+        at={levels[levels.length - 1].labelAt}
+        px={9}
+        opacity={0.6}
+      />
     </group>
   )
 }

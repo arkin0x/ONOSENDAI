@@ -142,10 +142,20 @@ export function Rooms({ axes }: Props): JSX.Element {
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
         // cross, and that number changes with zoom while the box does not.
-        // Qualified, because the covering box quotes a total for a whole move
-        // while this quotes the price of one wall on one axis. Same format for
-        // two different quantities is how a reader learns the wrong thing.
-        label: `h${height}  ${formatOps(subtreeCantorOps(height))} ops/wall`,
+        // What it costs to LEAVE this cell, on one axis, at the cheapest wall.
+        //
+        // This used to quote subtreeCantorOps(height), which is a different
+        // quantity entirely: the priciest move that stays INSIDE the cell. You
+        // cannot leave a height-h box without an LCA height above h, since two
+        // positions share that box exactly when their crossing height is h or
+        // less, so the floor to get out is subtreeCantorOps(h + 1). For the fine
+        // grid the label read 7 when the real minimum is 15.
+        //
+        // A floor rather than a figure, because walls are not all the same
+        // height. Every boundary of the height-3 lattice is at least height 4,
+        // but the one at a multiple of 128 is height 8, and the ruler of
+        // nested walls means a cell's six faces can each cost differently.
+        label: `h${height} cell\n${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
         labelAt: [axes.right, axes.up, axes.out].map((a, i) => {
           const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
           const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))

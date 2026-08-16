@@ -19,6 +19,18 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
 
+/**
+ * Suppress the long-press callout.
+ *
+ * Holding a direction is a first-class gesture here, it is how you cross more
+ * than a few gibsons, and on a touch device a long press is also how you ask for
+ * a context menu. So the very thing the pad is designed for is what pops a
+ * "copy / share" sheet over it on Android and a magnifier on iOS. The CSS half
+ * of this lives in `-webkit-touch-callout: none`; this is the half that stops
+ * the event a desktop right-click would raise on the same element.
+ */
+const noCallout = { onContextMenu: (e: React.MouseEvent) => e.preventDefault() }
+
 /** Delay before a held button starts repeating, then the repeat period. */
 const HOLD_DELAY = 380
 const REPEAT_MS = 110
@@ -34,6 +46,7 @@ function useRepeatable(): (action: () => void) => {
   onPointerUp: () => void
   onPointerCancel: () => void
   onPointerLeave: () => void
+  onContextMenu: (e: React.MouseEvent) => void
 } {
   const timers = useRef<{ delay?: number; repeat?: number }>({})
 
@@ -60,6 +73,7 @@ function useRepeatable(): (action: () => void) => {
     onPointerUp: stop,
     onPointerCancel: stop,
     onPointerLeave: stop,
+    ...noCallout,
   }), [stop])
 }
 
@@ -116,6 +130,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
           className="touchpad__hub"
           aria-label={`Scale 2^${scaleExp}. Tap to hide controls.`}
           title="Hide controls"
+          {...noCallout}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss() }}
         >2^{scaleExp}</button>
       </div>
@@ -124,6 +139,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
         <button
           className="touchops__cancel"
           title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}
+          {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
             useCyberspace.getState().cancel()
@@ -135,6 +151,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
           className={`touchops__commit ${computing ? 'is-busy' : armed ? 'is-armed' : ''}`}
           disabled={!armed && !computing}
           title="Commit hop (Space)"
+          {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
             useCyberspace.getState().commit()

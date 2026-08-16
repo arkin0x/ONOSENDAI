@@ -29,41 +29,43 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
     e.stopPropagation()
     fn()
   }
+  // Same reasoning as the movement pad: a held press must not raise a callout.
+  const noCallout = { onContextMenu: (e: React.MouseEvent) => e.preventDefault() }
   const rotate = (dir: RotateDirection) => () => useCyberspace.getState().rotate(dir)
 
   return (
     <div className="viewmenu" role="dialog" aria-label="View controls">
       <div className="viewmenu__pad">
-        <button className="viewmenu__key viewmenu__key--up" onPointerDown={press(rotate('up'))} aria-label="Rotate up">▲</button>
-        <button className="viewmenu__key viewmenu__key--left" onPointerDown={press(rotate('left'))} aria-label="Rotate left">◀</button>
+        <button className="viewmenu__key viewmenu__key--up" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('up'))} aria-label="Rotate up">▲</button>
+        <button className="viewmenu__key viewmenu__key--left" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('left'))} aria-label="Rotate left">◀</button>
         <span className="viewmenu__hub" aria-hidden="true">ROT</span>
-        <button className="viewmenu__key viewmenu__key--right" onPointerDown={press(rotate('right'))} aria-label="Rotate right">▶</button>
-        <button className="viewmenu__key viewmenu__key--down" onPointerDown={press(rotate('down'))} aria-label="Rotate down">▼</button>
+        <button className="viewmenu__key viewmenu__key--right" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('right'))} aria-label="Rotate right">▶</button>
+        <button className="viewmenu__key viewmenu__key--down" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('down'))} aria-label="Rotate down">▼</button>
       </div>
 
       <div className="viewmenu__row">
         <button
           className="viewmenu__op"
           disabled={!canGoBack}
-          onPointerDown={press(() => useCyberspace.getState().popView())}
+          onContextMenu={noCallout.onContextMenu} onPointerDown={press(() => useCyberspace.getState().popView())}
         >BACK</button>
         <button
           className="viewmenu__op"
-          onPointerDown={press(() => useCyberspace.getState().resetView())}
+          onContextMenu={noCallout.onContextMenu} onPointerDown={press(() => useCyberspace.getState().resetView())}
         >TOP</button>
       </div>
       <div className="viewmenu__row">
         <button
           className="viewmenu__op"
-          onPointerDown={press(() => useCyberspace.getState().canonicalView())}
+          onContextMenu={noCallout.onContextMenu} onPointerDown={press(() => useCyberspace.getState().canonicalView())}
         >SUN</button>
         <button
           className="viewmenu__op"
-          onPointerDown={press(() => useCyberspace.getState().togglePlane())}
+          onContextMenu={noCallout.onContextMenu} onPointerDown={press(() => useCyberspace.getState().togglePlane())}
         >{plane === 0 ? 'D-SPACE' : 'C-SPACE'}</button>
       </div>
 
-      <button className="viewmenu__close" onPointerDown={press(onClose)} aria-label="Close view controls">CLOSE</button>
+      <button className="viewmenu__close" onContextMenu={noCallout.onContextMenu} onPointerDown={press(onClose)} aria-label="Close view controls">CLOSE</button>
     </div>
   )
 }

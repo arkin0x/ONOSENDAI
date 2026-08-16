@@ -974,3 +974,34 @@ kbd {
     bottom: auto;
   }
 }
+
+/* ---------- Long-press must not raise a callout ----------
+ *
+ * Holding a direction is a first-class gesture on the pad, it is how you cross
+ * more than a few gibsons, and on a touch device a long press is also how you
+ * ask for a context menu. Without this the very thing the pad is designed for
+ * pops a share sheet over it on Android and a selection magnifier on iOS.
+ *
+ * `-webkit-touch-callout` is the iOS half and it has no standard equivalent;
+ * `user-select` stops the text inside a button being grabbed on Android, which
+ * is the other way a held press turns into a selection. The JS half is an
+ * onContextMenu that prevents default, since neither property stops the event a
+ * right-click raises on the same element.
+ */
+.touchpad__key,
+.touchpad__sub,
+.touchpad__hub,
+.touchops__commit,
+.touchops__cancel,
+.touchhint,
+.hamburger-menu,
+.compass-3d--tappable,
+.viewmenu,
+.viewmenu__key,
+.viewmenu__op,
+.viewmenu__close {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}

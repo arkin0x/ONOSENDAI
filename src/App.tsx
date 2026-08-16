@@ -52,6 +52,7 @@ export default function App(): JSX.Element {
       {!crowded && !padOpen && (
         <button
           className="touchhint"
+          onContextMenu={(e) => e.preventDefault()}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
           aria-label="Show controls"
         >CONTROLS</button>
@@ -59,6 +60,7 @@ export default function App(): JSX.Element {
       {crowded && <div className="mobile-overlay" />}
       <button
         className="hamburger-menu"
+        onContextMenu={(e) => e.preventDefault()}
         onClick={() => setPanelsOpen((open) => !open)}
         aria-label={panelsOpen ? 'Hide panels' : 'Show panels'}
       >

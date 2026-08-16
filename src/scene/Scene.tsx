@@ -27,8 +27,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, type AxisDirection } from '../lib/space'
-import { useCyberspace } from '../store/useCyberspace'
+import { GRID_RADIUS, cellDelta, type AxisDirection, type Position } from '../lib/space'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useViewWindow } from '../hooks/useViewWindow'
@@ -47,6 +47,15 @@ import { Travel } from './Travel'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
+
+/**
+ * Time constant for the camera's follow, in seconds.
+ *
+ * Small enough that driving still feels direct, large enough that a keypress
+ * glides rather than steps. Only real motion is eased; a change of render frame
+ * is applied whole, see the rig.
+ */
+const FOLLOW_TAU = 0.09
 
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
@@ -187,57 +196,99 @@ function CellMetric(): null {
  * merely remap the axes, it also returns the camera to straight-on.
  */
 function Rig(): JSX.Element {
-  const cursor = useCyberspace((s) => s.cursor)
-  const position = useCyberspace((s) => s.position)
-  const scaleExp = useCyberspace((s) => s.scaleExp)
   const view = useCyberspace((s) => s.view)
-  const controls = useRef<{ object: { position: Vector3 }; update: () => void } | null>(null)
-
-  const target = useMemo(
-    () => useCyberspace.getState().cursorOffset(),
-    [cursor, position, scaleExp, view],
-  )
+  const controls = useRef<{
+    object: { position: Vector3 }
+    target: Vector3
+    update: () => void
+  } | null>(null)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
   // breaks the lock, because once you have chosen an angle you are looking at
   // the space rather than following the cursor through it.
   const locked = useRef(true)
-  const prevTarget = useRef(target)
-  const latestTarget = useRef(target)
-  latestTarget.current = target
+  const smooth = useRef(new Vector3())
+  const prevOrigin = useRef<Position | null>(null)
+  const prevScale = useRef(-1)
 
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    const [x, y, z] = latestTarget.current
+    const [x, y, z] = useCyberspace.getState().cursorOffset()
+    smooth.current.set(x, y, z)
+    c.target.copy(smooth.current)
     c.object.position.set(x, y, z + START_DISTANCE)
-    prevTarget.current = latestTarget.current
     locked.current = true
     c.update()
   }, [view])
 
-  // While locked, translate the camera by however far the cursor moved, so the
-  // framing is unchanged. Unlocked, the camera stays put and merely re-aims,
-  // which lets the cursor move around within the angle you picked.
-  useEffect(() => {
+  useFrame((_, dt) => {
     const c = controls.current
     if (!c) return
-    if (locked.current) {
-      const p = prevTarget.current
-      c.object.position.x += target[0] - p[0]
-      c.object.position.y += target[1] - p[1]
-      c.object.position.z += target[2] - p[2]
-      c.update()
+    const s = useCyberspace.getState()
+    const origin = alignedOrigin(s.position, s.scaleExp)
+
+    // A commit re-anchors render space to the new avatar cell, so every
+    // coordinate in the scene shifts at once. That is a change of frame, not
+    // motion, and the camera has to absorb it in the very same frame or the
+    // whole world lurches. It used to be absorbed in an effect, which runs after
+    // paint: for exactly one frame the world had moved and the camera had not,
+    // which measured as the entire move distance appearing and vanishing.
+    //
+    // It also must not be eased. Easing a frame change would slide the world
+    // under a camera that is looking at something stationary.
+    if (prevOrigin.current && prevScale.current === s.scaleExp) {
+      const a = s.axes()
+      const prev = prevOrigin.current
+      const shift = [a.right, a.up, a.out].map(
+        (ax) => cellDelta(prev[ax.axis], origin[ax.axis], s.scaleExp) * ax.dir,
+      )
+      if (shift[0] !== 0 || shift[1] !== 0 || shift[2] !== 0) {
+        c.object.position.x += shift[0]
+        c.object.position.y += shift[1]
+        c.object.position.z += shift[2]
+        smooth.current.x += shift[0]
+        smooth.current.y += shift[1]
+        smooth.current.z += shift[2]
+      }
     }
-    prevTarget.current = target
-  }, [target])
+
+    const [tx, ty, tz] = s.cursorOffset()
+
+    // A zoom rescales every render coordinate, so there is no continuous path
+    // between the old framing and the new one to ease along.
+    if (prevScale.current !== s.scaleExp) smooth.current.set(tx, ty, tz)
+
+    prevOrigin.current = origin
+    prevScale.current = s.scaleExp
+
+    // Cursor movement, by contrast, IS motion, and eases. Exponential rather
+    // than a fixed fraction so the rate does not change with frame rate.
+    const k = 1 - Math.exp(-dt / FOLLOW_TAU)
+    const dx = (tx - smooth.current.x) * k
+    const dy = (ty - smooth.current.y) * k
+    const dz = (tz - smooth.current.z) * k
+
+    // Locked, the camera moves with what it is framing, which preserves the
+    // orbit offset exactly. Unlocked it stays put and only re-aims.
+    if (locked.current) {
+      c.object.position.x += dx
+      c.object.position.y += dy
+      c.object.position.z += dz
+    }
+    smooth.current.x += dx
+    smooth.current.y += dy
+    smooth.current.z += dz
+
+    c.target.copy(smooth.current)
+    c.update()
+  })
 
   return (
     <OrbitControls
       ref={controls as never}
       makeDefault
-      target={target}
       enablePan={false}
       minDistance={2}
       maxDistance={GRID_RADIUS * 4}

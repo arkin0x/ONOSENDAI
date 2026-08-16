@@ -29,7 +29,7 @@ import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { AXIS_BITS } from 'cyberspace-core'
-import { LATTICE_SHADES } from '../lib/palette'
+import { latticeShade } from '../lib/palette'
 
 import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -154,9 +154,10 @@ export function Rooms({ axes }: Props): JSX.Element {
       return {
         height,
         geometry: gridGeometry(offs(axes.right), offs(axes.up), offs(axes.out), axes),
-        // Lightness per level, hue shared. Alpha alone over a black field is
-        // nearly the same as lightness, and the three were reading as one purple.
-        color: LATTICE_SHADES[Math.min(i, LATTICE_SHADES.length - 1)],
+        // Hue from the crossing height, lightness from the level. The walls of
+        // this grid ARE crossings, so the grid climbs the same ramp the legend
+        // documents as you zoom out.
+        color: latticeShade(height, i),
         opacity,
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
@@ -176,17 +177,18 @@ export function Rooms({ axes }: Props): JSX.Element {
         // but the one at a multiple of 128 is height 8, and the ruler of
         // nested walls means a cell's six faces can each cost differently.
         label: `h${height}  ${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
-        // Centre of the cell's top face. Each level captions its own box rather
-        // than the three stacking into one block: a caption sitting on the face
-        // it describes needs no reading order to connect it to its cell. Centres
-        // cannot coincide the way top corners could, because a cell sits in one
+        // Dead centre of the cell. Each level captions its own box rather than
+        // the three stacking into one block: a caption sitting inside the volume
+        // it describes needs no reading order to connect it to its cell.
+        //
+        // Centres cannot coincide the way top corners could. A cell sits in one
         // half of its parent on every axis, so its centre is always offset from
-        // the parent's by a quarter of the parent's width.
-        labelAt: [axes.right, axes.up, axes.out].map((a, k) => {
+        // the parent's by a quarter of the parent's width, whereas their top
+        // faces are flush whenever the child is in the upper half.
+        labelAt: [axes.right, axes.up, axes.out].map((a) => {
           const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
           const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))
-          const cells = 2 ** d
-          return (lo + (k === 1 ? cells - 0.5 : (cells - 1) / 2)) * a.dir
+          return (lo + (2 ** d - 1) / 2) * a.dir
         }) as [number, number, number],
       }
     })
@@ -204,7 +206,6 @@ export function Rooms({ axes }: Props): JSX.Element {
             color={l.color}
             at={l.labelAt}
             align="center"
-            offset={[0, 0.5, 0]}
             px={9}
             opacity={0.75}
           />

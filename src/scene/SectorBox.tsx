@@ -9,10 +9,12 @@
  * Drawn at TRUE size, so it scales with zoom rather than being a fixed-size
  * badge. That has a consequence worth knowing: at scaleExp 0 a sector is 2^30
  * cells across, so its walls are half a billion cells away and there is nothing
- * on screen to see. It resolves into view around scaleExp 23, is one cell across
- * at exactly scaleExp 30, and shrinks below a cell above that. Being unable to
- * see the walls of your own sector from inside it is the honest answer, and it
- * is the same reason the room nest stops drawing boxes larger than the window.
+ * on screen to see. It resolves into view around scaleExp 23 and is exactly one
+ * cell across at scaleExp 30, which is where it stops being drawn: past that a
+ * whole sector is smaller than the unit you move in, and a speck with a label
+ * attached is not a landmark. Being unable to see the walls of your own sector
+ * from inside it is the honest answer at the other end, and it is the same
+ * reason the room nest stops drawing boxes larger than the window.
  */
 
 import { useMemo } from 'react'
@@ -39,6 +41,10 @@ export function SectorBox({ axes }: Props): JSX.Element | null {
     // Same cutoff as the room nest: a box far larger than the window reads as a
     // flat edge or nothing at all, and building the geometry is wasted work.
     if (sizeCells > GRID_RADIUS * 8) return null
+    // And nothing below a cell. Past scaleExp 30 a whole sector is smaller than
+    // the unit you are moving in, so the cage becomes a speck with a label
+    // attached and stops being a landmark at all.
+    if (sizeCells < 1) return null
 
     const origin = alignedOrigin(position, scaleExp)
     const screen = [axes.right, axes.up, axes.out]

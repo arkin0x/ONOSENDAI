@@ -36,7 +36,7 @@ export function Legend(): JSX.Element {
       </div>
 
       <div className="legend__row">
-        <span className="legend__label">Crossing cost (commit flash)</span>
+        <span className="legend__label">Crossing cost (grid + flash)</span>
         <div className="swatches">
           {HEIGHT_SAMPLES.map((height) => (
             <span
@@ -54,10 +54,12 @@ export function Legend(): JSX.Element {
       </div>
 
       <p className="legend__note">
-        Committing flashes the region the proof covered, striking white and
-        settling into its cost colour. Height is the power-of-two boundary you
-        cross, not how far you travel. The indigo grid is the subtree lattice and
-        the cyan box is the move you are lining up. Current scale: {scaleExp}.
+        The subtree lattice takes its colour from the height of its own walls, so
+        the grid climbs this ramp as you zoom out. Committing flashes the region
+        the proof covered, striking white and settling into the same ramp at the
+        height you paid. Height is the power-of-two boundary you cross, not how
+        far you travel. The cyan box is the move you are lining up. Current
+        scale: {scaleExp}.
       </p>
     </section>
   )

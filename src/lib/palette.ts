@@ -37,17 +37,33 @@ export const SECTOR = '#f7931a'
  * the avatar. Hue has to say WHAT a thing is before it can say how much.
  */
 export const LATTICE = '#4b3fa7'
+const WHITE = new Color('#ffffff')
+
 /**
- * One shade per lattice level, innermost first.
+ * Colour for one level of the lattice: the LCA ramp for hue, lightness for level.
  *
- * Opacity alone did not separate them. All three levels shared this hue and
- * differed only by alpha, which over a black field is nearly the same as
- * differing by lightness, and the gap between 0.22 and 0.36 is not enough to
- * read as three distinct things: zoomed out they were the same purple. Hue still
- * says what a thing is, so all three stay in the indigo family; lightness says
- * which level, which is the magnitude this palette is allowed to encode.
+ * The lattice belongs on the ramp. Its walls ARE crossings and their height is
+ * exactly what the ramp was built to encode, so as you zoom out the grid should
+ * climb the spectrum with the cost: violet in the small, red out where a single
+ * step is ruinous. That is what the HUD legend has always promised.
+ *
+ * It was taken off the ramp for a while because the grid slid into the sector
+ * cage's orange as you zoomed out. That is no longer possible: the cage is only
+ * drawn between scaleExp 23 and 30, where the lattice sits in blue through
+ * green, and the ramp does not reach orange until 55.
+ *
+ * The three levels are consecutive heights, so on a smooth ramp they land on
+ * nearly the same colour, which is why hue alone cannot separate them. Lightness
+ * does that instead: the innermost is darkened and the outermost lifted toward
+ * white, both keeping the hue the height earned.
  */
-export const LATTICE_SHADES = ['#372c74', '#5548bb', '#8b7df0']
+export function latticeShade(height: number, level: number): string {
+  // boundaryColor hands back a cached instance, so it must not be mutated.
+  const c = boundaryColor(height).clone()
+  if (level === 0) c.multiplyScalar(0.5)
+  else if (level >= 2) c.lerp(WHITE, 0.45)
+  return `#${c.getHexString()}`
+}
 export const DIM = '#3a5566'
 
 /**

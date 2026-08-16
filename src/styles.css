@@ -713,14 +713,23 @@ kbd {
 .touchpad__key--left { grid-area: left; }
 .touchpad__key--right { grid-area: right; }
 
-/* The out axis has no analogue on a flat pad, so it takes the top corners and
- * is drawn dimmer: it is the axis you reach for deliberately. */
+/* The out axis has no analogue on a flat pad, so it takes the top corners.
+ * Glyph over word, because at this size the ring-and-cross and the ring-and-dot
+ * are nearly the same shape. */
 .touchpad__key--away,
 .touchpad__key--toward {
   grid-area: away;
-  font-size: 12px;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 15px;
+  line-height: 1;
   color: var(--accent, #00e5ff);
-  opacity: 0.75;
+}
+
+.touchpad__sub {
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  opacity: 0.8;
 }
 .touchpad__key--toward { grid-area: toward; }
 

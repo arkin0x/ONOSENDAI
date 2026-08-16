@@ -45,7 +45,7 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <Scene />
-      {panelsOpen && <Hud hideTerrainLegend={crowded} menuOpen={crowded} />}
+      {panelsOpen && <Hud menuOpen={crowded} />}
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}

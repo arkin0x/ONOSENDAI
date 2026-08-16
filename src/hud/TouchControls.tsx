@@ -81,13 +81,15 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
 
   // Six directions plus the two scale steps: exactly nine things, which is
   // exactly how many cells a 3x3 pad has.
-  const pad: Array<{ cell: string; glyph: string; title: string; act: () => void }> = [
+  const pad: Array<{ cell: string; glyph: string; sub?: string; title: string; act: () => void }> = [
     // The physics convention for a vector through the page: a tail seen from
-    // behind going in, an arrow tip seen head-on coming out. Nothing else reads
-    // as depth on a flat pad.
-    { cell: 'away', glyph: '⊗', title: 'Away from camera (R)', act: move('away') },
+    // behind going in, an arrow tip seen head-on coming out. It is the right
+    // symbol and it is not enough on its own, because the two differ only by a
+    // small mark inside the circle and that mark is the first thing to go at
+    // this size. The word carries the meaning; the glyph carries the convention.
+    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away') },
     { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', title: 'Toward camera (F)', act: move('toward') },
+    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
     { cell: 'sdown', glyph: '−', title: 'Finer scale (E)', act: scale(-1) },
@@ -107,6 +109,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
             {...bind(b.act)}
           >
             {b.glyph}
+            {b.sub && <span className="touchpad__sub">{b.sub}</span>}
           </button>
         ))}
         <button

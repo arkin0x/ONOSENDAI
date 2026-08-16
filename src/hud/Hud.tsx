@@ -8,7 +8,6 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ChainPanel } from './ChainPanel'
 import { Legend } from './Legend'
 import { ProofPanel } from './ProofPanel'
-import { TerrainLegend } from './TerrainLegend'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -186,13 +185,7 @@ function Controls(): JSX.Element {
   )
 }
 
-export function Hud({
-  hideTerrainLegend = false,
-  menuOpen = false,
-}: {
-  hideTerrainLegend?: boolean
-  menuOpen?: boolean
-}): JSX.Element {
+export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
@@ -206,7 +199,6 @@ export function Hud({
         <ProofPanel />
         <ChainPanel />
         <Legend />
-        {!hideTerrainLegend && <TerrainLegend />}
         <Controls />
       </div>
     </div>

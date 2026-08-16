@@ -334,9 +334,23 @@ export function formatMs(ms: number): string {
 /**
  * Compact large integers for the ops readout.
  */
+const OPS_UNITS = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y']
+
 export function formatOps(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1e6) return `${(n / 1e3).toFixed(1)}K`
-  if (n < 1e9) return `${(n / 1e6).toFixed(1)}M`
-  return `${(n / 1e9).toFixed(2)}B`
+  if (!Number.isFinite(n)) return '\u221e'
+  if (n < 1000) return String(Math.round(n))
+
+  // It used to stop at billions, which was fine while this only ever showed the
+  // cost of a move you could actually afford. The lattice quotes 2^(h+1) - 1 for
+  // its own walls, and h runs to 85, so the top of the range printed
+  // 77371252455336272.00B. Every prefix through yotta is needed and, since the
+  // largest tree in the protocol is 2^86 leaves at about 7.7e25, they are also
+  // enough: nothing here can outrun Y.
+  let v = n
+  let i = 0
+  while (v >= 1000 && i < OPS_UNITS.length - 1) {
+    v /= 1000
+    i++
+  }
+  return `${parseFloat(v.toPrecision(3))}${OPS_UNITS[i]}`
 }

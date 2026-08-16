@@ -684,7 +684,7 @@ kbd {
   grid-template-areas:
     "away  up    toward"
     "left  hub   right"
-    "sdown down  sup";
+    "zoomout down zoomin";
 }
 
 .touchpad__key {
@@ -734,14 +734,15 @@ kbd {
 .touchpad__key--toward { grid-area: toward; }
 
 /* Scale changes the UNIT, not the camera. Bottom corners, away from the
- * directions, and harmless to hit by mistake since it costs nothing. */
-.touchpad__key--sdown,
-.touchpad__key--sup {
-  grid-area: sdown;
+ * directions, and harmless to hit by mistake since it costs nothing. Left is
+ * out and right is in, so the pad reads the way Q and E sit on a keyboard. */
+.touchpad__key--zoomout,
+.touchpad__key--zoomin {
+  grid-area: zoomout;
   font-size: 17px;
   color: var(--dim, #7fa6bd);
 }
-.touchpad__key--sup { grid-area: sup; }
+.touchpad__key--zoomin { grid-area: zoomin; }
 
 .touchpad__hub {
   grid-area: hub;

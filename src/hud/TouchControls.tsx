@@ -110,11 +110,16 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
     { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
+    // Left is Q and right is E, matching where those keys sit on a keyboard.
+    // Q raises the exponent and E lowers it, so the left button is the plus.
+    // Putting the minus on the left made the pad and the keys disagree about
+    // which way out is.
+    //
     // adjustScale already clamps, but a key that silently does nothing reads as
     // broken rather than as the end of the range.
-    { cell: 'sdown', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0 },
+    { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP },
     { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
-    { cell: 'sup', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP },
+    { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0 },
   ]
 
   return (

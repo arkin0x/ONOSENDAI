@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Hud } from './hud/Hud'
+import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
@@ -8,6 +9,7 @@ import { useCanvasTap } from './hooks/useCanvasTap'
 import { useKeyboard } from './hooks/useKeyboard'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useTargets } from './hooks/useTargets'
 
 export default function App(): JSX.Element {
   // The keyboard is unconditional. The on-screen controls are a second way in,
@@ -16,6 +18,7 @@ export default function App(): JSX.Element {
   useKeyboard()
   useProofListener()
   const isMobile = useIsMobile()
+  const targets = useTargets()
 
   // Panels start open on a desktop and closed on a phone, and after that the
   // hamburger owns it on both. It used to be derived from the breakpoint, which
@@ -45,6 +48,7 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <Scene />
+      {!crowded && <Targets targets={targets} />}
       {panelsOpen && <Hud menuOpen={crowded} />}
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}

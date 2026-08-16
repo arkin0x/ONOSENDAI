@@ -7,6 +7,7 @@ import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { ChainPanel } from './ChainPanel'
 import { Legend } from './Legend'
+import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
@@ -115,6 +116,8 @@ function ScalePanel(): JSX.Element {
           <dd>{signed(axes.up.axis, axes.up.dir)}</dd>
         </div>
       </dl>
+
+      <ScaleLadder />
 
       <div className="axis-legend">
         <div className="axis-legend-item">

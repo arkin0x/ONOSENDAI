@@ -20,6 +20,26 @@ const UNITS: Array<{ threshold: number; symbol: string; scale: number }> = [
   { threshold: 1.496e11, symbol: 'AU', scale: 1 / 1.496e11 },
 ]
 
+/**
+ * A gibson count as a human distance.
+ *
+ * Takes a bigint because these are real cyberspace distances: a landmark can be
+ * 10^25 gibsons away, which is past what a double holds exactly. The division to
+ * metres happens in fixed point for that reason, and only then becomes a float.
+ */
+export function formatDistance(gibsons: bigint): string {
+  if (gibsons === 0n) return '0'
+  // 2^33 gibsons per metre, so this is exact rather than a rounding.
+  const metres = Number((gibsons * 1_000_000n) >> 33n) / 1_000_000
+  for (let i = 0; i < UNITS.length; i++) {
+    const u = UNITS[i]
+    if (metres < u.threshold || i === UNITS.length - 1) {
+      return `${parseFloat((metres * u.scale).toPrecision(3))} ${u.symbol}`
+    }
+  }
+  return `${metres} m`
+}
+
 /** One cell at this scale, as a short human string like "1.91 \u03bcm". */
 export function formatCellSize(scaleExp: number): string {
   const meters = 2 ** scaleExp * GIBSON_METERS

@@ -1005,3 +1005,136 @@ kbd {
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* ---------- Scale ladder ----------
+ *
+ * The exponent spans a hydrogen atom to half a light-year. Drawn as a rail so
+ * the landmarks hold fixed positions and the current zoom moves against them,
+ * which is what makes "how much further to Earth" answerable at a glance.
+ */
+.ladder {
+  padding: 4px 0 2px;
+}
+
+.ladder__rail {
+  position: relative;
+  height: 132px;
+  margin-left: 6px;
+  border-left: 1px solid var(--border, #1d3547);
+}
+
+.ladder__tick,
+.ladder__here {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
+.ladder__tick-line {
+  width: 7px;
+  height: 1px;
+  background: var(--border, #1d3547);
+}
+
+.ladder__tick-name {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--dim, #7fa6bd);
+  opacity: 0.75;
+}
+
+/* The marker rides above the ticks: it is the one thing here that moves. */
+.ladder__here {
+  z-index: 1;
+}
+
+.ladder__here-dot {
+  width: 13px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--accent, #00e5ff);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.7);
+  margin-left: -6px;
+}
+
+.ladder__here-text {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--accent, #00e5ff);
+}
+
+/* ---------- Target markers ----------
+ *
+ * One marker per target, positioned per frame by JS rather than by React. The
+ * layer never takes pointer events: a landmark indicator must never sit between
+ * the canvas and an orbit drag.
+ */
+.targets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.target {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  will-change: transform;
+}
+
+/* Everything hangs off the marker's own centre. */
+.target > * {
+  position: absolute;
+  transform-origin: center;
+}
+
+.target__ring {
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.55;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+}
+
+.target__arrow {
+  font-size: 13px;
+  line-height: 1;
+  left: -6px;
+  top: -7px;
+  opacity: 0.9;
+}
+
+.target__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  left: 12px;
+  top: -12px;
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+.target__label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.target__dist {
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+/* On screen the ring IS the marker, so the chevron stands down. Off screen the
+ * ring means nothing, since there is no extent to describe out there. */
+.target[data-mode='on'] .target__arrow { display: none; }
+.target[data-mode='off'] .target__ring { display: none; }

@@ -29,12 +29,20 @@ export interface Covering {
   ops: number
   /** True when the two positions are the same cell, so nothing is being crossed. */
   degenerate: boolean
+  /** True when the real region is too large to draw and this is a stand-in. */
+  clipped: boolean
 }
 
 /**
- * @param maxCells clamp on the drawn extent. A ruinous crossing covers a box
- *   wider than the universe you can see, and the geometry still has to be
- *   finite; the reported heights and leaves are never clamped.
+ * @param maxCells the extent beyond which the box becomes a stand-in.
+ *
+ * A ruinous crossing covers a region wider than anything you can see: a hundred
+ * gibsons that happen to straddle a height-17 boundary cover 131072 cells. The
+ * clamp used to keep the true base and truncate, which put the box tens of
+ * thousands of cells from both endpoints, so it read as having wandered off or
+ * vanished. Now an oversized region is drawn as the bracket around the two
+ * endpoints instead, which is the part of it you can actually see, and `clipped`
+ * says so. The reported heights and ops are never clamped.
  */
 export function coveringBox(
   from: Position, to: Position, origin: Position,
@@ -48,6 +56,7 @@ export function coveringBox(
   const heights: [number, number, number] = [0, 0, 0]
   let peak = 0
   let ops = 0
+  let clipped = false
 
   for (let s = 0; s < 3; s++) {
     const axis = screen[s].axis
@@ -61,15 +70,26 @@ export function coveringBox(
     // Below the current scale the covering subtree is finer than a cell, so it
     // is drawn as the one cell you are standing in.
     const h = BigInt(Math.max(height, scaleExp))
-    const cells = Math.min(Number((1n << h) / step), maxCells)
+    const trueCells = Number((1n << h) / step)
     const base = (from[axis] >> h) << h
     const lo = cellDelta(alignTo(base, scaleExp), origin[axis], scaleExp)
 
-    size[s] = cells
-    centre[s] = (lo + (cells - 1) / 2) * screen[s].dir
+    if (trueCells <= maxCells) {
+      size[s] = trueCells
+      centre[s] = (lo + (trueCells - 1) / 2) * screen[s].dir
+      continue
+    }
+
+    // Too big to draw. Bracket the endpoints instead, which always contains both
+    // however far apart they are, and never lands somewhere neither of them is.
+    clipped = true
+    const a = cellDelta(alignTo(from[axis], scaleExp), origin[axis], scaleExp)
+    const b = cellDelta(alignTo(to[axis], scaleExp), origin[axis], scaleExp)
+    size[s] = Math.max(1, Math.abs(b - a) + 1)
+    centre[s] = ((a + b) / 2) * screen[s].dir
   }
 
-  return { centre, size, heights, peak, ops, degenerate: peak === 0 }
+  return { centre, size, heights, peak, ops, degenerate: peak === 0, clipped }
 }
 
 /** Edges of an axis-aligned box given its centre and per-axis size, in cells. */

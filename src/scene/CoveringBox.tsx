@@ -67,13 +67,18 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // two, so an expensive crossing is tens of cells across and a fill tuned
       // for a small one turns the screen into a wash. The outline carries the
       // extent at any size; the fill only has to say "this is a volume".
-      fillOpacity: Math.max(0.02, Math.min(0.09, 0.09 * (8 / Math.max(...c.size)))),
+      // No fill when the box is a stand-in: a solid volume asserts an extent,
+      // and a clipped box does not have one to assert.
+      fillOpacity: c.clipped
+        ? 0
+        : Math.max(0.02, Math.min(0.09, 0.09 * (8 / Math.max(...c.size)))),
       // Cyan, not a point on the LCA ramp. This box is the live readout of what
       // you are lining up, and it has to be told apart from the lattice at a
       // glance rather than decoded: with both on the ramp, a cheap move drew a
       // violet box inside a violet grid. Red when the crossing is past what this
       // machine will compute, which is the one distinction worth a hue change.
       color: est.exceedsLimit ? DANGER : ACCENT,
+      clipped: c.clipped,
       // The panel's figure, not a second opinion on it. estimateHopCost also
       // counts the terrain tree, which is real work and would otherwise make
       // the label quietly under-report every move.
@@ -116,7 +121,12 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
         />
       </mesh>
       <lineSegments geometry={box.geometry} frustumCulled={false}>
-        <lineBasicMaterial color={box.color} toneMapped={false} transparent opacity={0.85} />
+        <lineBasicMaterial
+          color={box.color}
+          toneMapped={false}
+          transparent
+          opacity={box.clipped ? 0.4 : 0.85}
+        />
       </lineSegments>
       <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, -1.3, 0]} px={13} />
     </group>

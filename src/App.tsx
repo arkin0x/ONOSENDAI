@@ -10,24 +10,26 @@ import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 
 export default function App(): JSX.Element {
+  // The keyboard is unconditional. The on-screen controls are a second way in,
+  // not a replacement: both call the same store actions, so WASD and the pad
+  // cannot drift apart, and nothing about having a pointer takes the keys away.
   useKeyboard()
   useProofListener()
   const isMobile = useIsMobile()
 
-  // Only the mobile toggle is state. Deriving visibility from it keeps the
-  // panels reachable across the breakpoint: the hamburger unmounts on desktop,
-  // so a stored `false` would strand the HUD with no control to restore it.
-  const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false)
-  const showPanels = !isMobile || mobilePanelsOpen
+  // Panels start open on a desktop and closed on a phone, and after that the
+  // hamburger owns it on both. It used to be derived from the breakpoint, which
+  // was necessary while the hamburger only existed on mobile: a stored `false`
+  // would have stranded a desktop HUD with no control to bring it back.
+  const [panelsOpen, setPanelsOpen] = useState(!isMobile)
 
-  // On mobile, hide ScaleBar, Compass3D, and TerrainLegend when panels are visible
-  const hideOverlays = isMobile && showPanels
+  // Only a phone has to choose between reading the panels and driving. On a
+  // desktop there is room for both at once.
+  const crowded = isMobile && panelsOpen
 
-  // The touch controls are summoned rather than permanent. They start visible so
-  // they can be found at all, and a tap on the scene puts them away, because a
-  // phone screen is mostly view and the view is the point.
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
+  const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -38,44 +40,34 @@ export default function App(): JSX.Element {
       return false
     })
   }, [])
-  useCanvasTap(onSceneTap, isMobile && !showPanels)
+  useCanvasTap(onSceneTap, !crowded)
 
   return (
     <div className="app">
       <Scene />
-      {showPanels && <Hud hideTerrainLegend={hideOverlays} menuOpen={hideOverlays} />}
-      {!hideOverlays && (
-        <Compass3D
-          onTap={isMobile ? () => setViewMenuOpen((open) => !open) : undefined}
-        />
-      )}
-      {isMobile && !showPanels && viewMenuOpen && (
-        <ViewMenu onClose={() => setViewMenuOpen(false)} />
-      )}
-      {isMobile && !showPanels && padOpen && (
-        <TouchControls onDismiss={() => setPadOpen(false)} />
-      )}
-      {isMobile && !showPanels && !padOpen && (
+      {panelsOpen && <Hud hideTerrainLegend={crowded} menuOpen={crowded} />}
+      {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
+      {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
+      {!crowded && !padOpen && (
         <button
           className="touchhint"
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
           aria-label="Show controls"
         >CONTROLS</button>
       )}
-      {isMobile && showPanels && <div className="mobile-overlay" />}
-      {isMobile && (
-        <button
-          className="hamburger-menu"
-          onClick={() => setMobilePanelsOpen((open) => !open)}
-          aria-label={showPanels ? 'Hide panels' : 'Show panels'}
-        >
-          <span className={`hamburger-icon ${showPanels ? 'hamburger-icon--open' : ''}`}>
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-        </button>
-      )}
+      {crowded && <div className="mobile-overlay" />}
+      <button
+        className="hamburger-menu"
+        onClick={() => setPanelsOpen((open) => !open)}
+        aria-label={panelsOpen ? 'Hide panels' : 'Show panels'}
+      >
+        <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
     </div>
   )
 }

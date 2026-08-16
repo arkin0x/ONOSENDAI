@@ -500,7 +500,7 @@ kbd {
 
 /* ---------- Narrow viewports ---------- */
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .hud {
     flex-direction: column;
     overflow-y: auto;
@@ -793,7 +793,7 @@ kbd {
 
 /* The compass sat bottom-centre, directly under the action row, so the controls
  * buried it. On a phone it moves out of the thumb zone entirely. */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .compass-3d {
     bottom: auto;
     top: 12px;
@@ -923,4 +923,43 @@ kbd {
 
 .touchhint:active {
   background: rgba(0, 229, 255, 0.28);
+}
+
+/* ---------- Controls on desktop ----------
+ *
+ * The cluster and the hamburger both sit in screen corners, which on a phone is
+ * empty space and on a desktop is where the HUD columns live: 320px of panels on
+ * the left and 300px on the right, both able to run the full height. So on a
+ * wide screen they move inboard, into the gap between the columns, rather than
+ * underneath them.
+ */
+@media (min-width: 1101px) {
+  .touchpad,
+  .touchops,
+  .touchhint {
+    right: 332px;
+  }
+
+  .hamburger-menu {
+    left: 352px;
+    bottom: 14px;
+    width: 46px;
+    height: 46px;
+  }
+
+  /* The view menu hangs off the compass, which is bottom-centre on a desktop
+   * rather than top-right, so the menu follows it down. */
+  .viewmenu {
+    top: auto;
+    bottom: 150px;
+    right: 332px;
+  }
+}
+
+/* Below this the panels are full-width and the corners are free again. */
+@media (max-width: 1100px) {
+  .viewmenu {
+    top: 104px;
+    bottom: auto;
+  }
 }

@@ -83,10 +83,13 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // on screen. Reported as X / Y / Z to match the panel rather than in
       // screen order, which changes under rotation.
       label: `h ${est.lcaX}/${est.lcaY}/${est.lcaZ}\n${formatOps(est.totalOps)} cantor ops`,
-      // Top corner, so the text clears the box rather than sitting inside it.
+      // Bottom corner. The cursor's own label hangs off its top right, and a
+      // small covering box has its top right in exactly that spot, so the two
+      // printed over each other. Opposite corners cannot collide however tight
+      // the box gets.
       at: [
         c.centre[0] + c.size[0] / 2,
-        c.centre[1] + c.size[1] / 2,
+        c.centre[1] - c.size[1] / 2,
         c.centre[2],
       ] as [number, number, number],
     }
@@ -115,7 +118,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       <lineSegments geometry={box.geometry} frustumCulled={false}>
         <lineBasicMaterial color={box.color} toneMapped={false} transparent opacity={0.85} />
       </lineSegments>
-      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, 0.4, 0]} px={13} />
+      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, -0.9, 0]} px={13} />
     </group>
   )
 }

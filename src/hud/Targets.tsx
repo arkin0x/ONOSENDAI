@@ -50,13 +50,22 @@ export function Targets({ targets }: Props): JSX.Element {
         let angle = 0
 
         if (!s.onScreen) {
-          // Clamp to the frame, and aim the chevron along the direction the
-          // target actually lies in from the centre.
+          // Slide along the true bearing until it meets the frame, rather than
+          // clamping x and y separately. Independent clamps pull anything far
+          // off-screen into a corner, so two targets in quite different
+          // directions pile up in the same place and the marker stops meaning
+          // "that way".
           const cx = w / 2
           const cy = h / 2
-          angle = Math.atan2(py - cy, px - cx)
-          px = Math.min(w - EDGE_INSET, Math.max(EDGE_INSET, px))
-          py = Math.min(h - EDGE_INSET, Math.max(EDGE_INSET, py))
+          const dx = px - cx
+          const dy = py - cy
+          angle = Math.atan2(dy, dx)
+          const t = Math.min(
+            (w / 2 - EDGE_INSET) / Math.max(Math.abs(dx), 1e-6),
+            (h / 2 - EDGE_INSET) / Math.max(Math.abs(dy), 1e-6),
+          )
+          px = cx + dx * t
+          py = cy + dy * t
         }
 
         el.style.transform = `translate(${px}px, ${py}px)`
@@ -87,7 +96,10 @@ export function Targets({ targets }: Props): JSX.Element {
       {targets.map((t) => (
         <div key={t.id} className="target" data-target={t.id} style={{ color: t.color }}>
           <span className="target__ring" />
-          <span className="target__arrow">◤</span>
+          {/* Points along +x unrotated, so a rotation by the screen bearing
+              aims it at the target. The previous glyph pointed up and left,
+              which put every chevron 135 degrees off. */}
+          <span className="target__arrow">➤</span>
           <span className="target__text">
             <span className="target__label">{t.label}</span>
             <span className="target__dist" />

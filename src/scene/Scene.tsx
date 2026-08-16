@@ -161,7 +161,11 @@ function CellMetric(): null {
     if (import.meta.env.DEV) {
       // R3F 8 keeps no handle on the canvas node, so the browser harness has no
       // other way to inspect what is actually in the scene.
-      ;(window as unknown as { __scene?: unknown }).__scene = state.scene
+      const w = window as unknown as { __scene?: unknown; __camera?: unknown }
+      w.__scene = state.scene
+      // The camera is not a child of the scene in R3F, so traversal cannot find
+      // it and the harness has no other route to the view basis.
+      w.__camera = state.camera
     }
 
     const cam = state.camera as unknown as { fov?: number; position: { distanceTo: (v: never) => number } }

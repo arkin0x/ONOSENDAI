@@ -142,7 +142,10 @@ export function Rooms({ axes }: Props): JSX.Element {
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
         // cross, and that number changes with zoom while the box does not.
-        label: `h${height}  ${formatOps(subtreeCantorOps(height))}`,
+        // Qualified, because the covering box quotes a total for a whole move
+        // while this quotes the price of one wall on one axis. Same format for
+        // two different quantities is how a reader learns the wrong thing.
+        label: `h${height}  ${formatOps(subtreeCantorOps(height))} ops/wall`,
         labelAt: [axes.right, axes.up, axes.out].map((a, i) => {
           const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
           const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))

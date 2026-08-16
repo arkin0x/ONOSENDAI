@@ -77,7 +77,12 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // The panel's figure, not a second opinion on it. estimateHopCost also
       // counts the terrain tree, which is real work and would otherwise make
       // the label quietly under-report every move.
-      label: `h${c.peak}  ${formatOps(est.totalOps)}`,
+      // All three heights, not just the largest. The box is dimensioned by one
+      // height per axis, which is exactly why it draws a slab rather than a cube
+      // when they differ, so quoting only the peak describes a shape that is not
+      // on screen. Reported as X / Y / Z to match the panel rather than in
+      // screen order, which changes under rotation.
+      label: `h ${est.lcaX}/${est.lcaY}/${est.lcaZ}\n${formatOps(est.totalOps)} cantor ops`,
       // Top corner, so the text clears the box rather than sitting inside it.
       at: [
         c.centre[0] + c.size[0] / 2,

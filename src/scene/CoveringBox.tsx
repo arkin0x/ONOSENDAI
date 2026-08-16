@@ -19,7 +19,7 @@
 
 import { useMemo } from 'react'
 import { BoxGeometry, FrontSide } from 'three'
-import { GRID_RADIUS, formatOps, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, cellCentre, formatOps, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { ACCENT, DANGER } from '../lib/palette'
@@ -83,15 +83,15 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // on screen. Reported as X / Y / Z to match the panel rather than in
       // screen order, which changes under rotation.
       label: `h ${est.lcaX}/${est.lcaY}/${est.lcaZ}\n${formatOps(est.totalOps)} cantor ops`,
-      // Bottom corner. The cursor's own label hangs off its top right, and a
-      // small covering box has its top right in exactly that spot, so the two
-      // printed over each other. Opposite corners cannot collide however tight
-      // the box gets.
-      at: [
-        c.centre[0] + c.size[0] / 2,
-        c.centre[1] - c.size[1] / 2,
-        c.centre[2],
-      ] as [number, number, number],
+      // Anchored under the cursor, not on the box.
+      //
+      // A corner of the box seems the natural place until the box is a slab a
+      // hundred cells long, and then the corner is off screen and the reading
+      // goes with it. The box always contains the cursor, and the cursor is
+      // where you are already looking, so the label is legible at every size.
+      // Below it, because the cursor's own scale label hangs off the top right
+      // and the two would otherwise print over each other.
+      at: cellCentre(target, origin, scaleExp, axes),
     }
   }, [position, target, scaleExp, plane, axes])
 
@@ -118,7 +118,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       <lineSegments geometry={box.geometry} frustumCulled={false}>
         <lineBasicMaterial color={box.color} toneMapped={false} transparent opacity={0.85} />
       </lineSegments>
-      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, -0.9, 0]} px={13} />
+      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, -1.3, 0]} px={13} />
     </group>
   )
 }

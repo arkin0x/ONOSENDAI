@@ -37,21 +37,28 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
  * The heights drawn, as an excess above the current scale floor, and how many
  * lattice cells either side of the one you occupy each of them reaches.
  *
- * `span` is the fix for the streaking. The lattice used to run the full width of
- * the view at both heights: 7 planes per axis over 48 cells, so 147 lines each
- * 48 cells long. Under perspective every one of those becomes a diagonal streak
- * across the entire frustum, and three axes of them cross into a web that reads
- * as noise rather than as a building. Total ink mattered more than line count.
+ * `span` is how many lattice cells either side of the one you occupy a level
+ * reaches. Both are 0, so each level draws exactly the cell you are standing in
+ * and the two nest: the room, and the room that room is in.
  *
- * Bounded to a neighbourhood instead. The fine grid shows the cell you are in
- * and its immediate neighbours, the coarse one shows only the cell you are in.
- * 60 segments rather than 147, and the longest is a third of what it was. The
- * lattice is still absolute and still world-static; you simply see the part of
- * it you are standing in, which is all anyone can see of a building anyway.
+ * It has come down twice. The lattice first ran the full width of the view at
+ * both heights, 147 lines each 48 cells long, which under perspective turns into
+ * a web of diagonal streaks rather than a building. Bounding the fine level to
+ * its immediate neighbours cut that to 60 segments, but 27 cells of grid still
+ * competes with the two things that matter, the cell you are in and the box you
+ * are about to pay for. Now 24 segments and 480 cells of ink, against 7056 at
+ * the start.
+ *
+ * The cost of drawing only the containing cell is that it jumps to the adjacent
+ * one when you cross a boundary, which is the egocentric reading this moved away
+ * from. That is survivable now in a way it was not before: the crossing flash
+ * marks the moment, the covering box shows the move ahead of time, and the
+ * avatar visibly travels, so a box changing is explained by three other things
+ * on screen rather than being an unexplained jump.
  */
 const LEVELS: Array<{ d: number; span: number; opacity: number }> = [
-  { d: 3, span: 1, opacity: 0.14 },
-  { d: 5, span: 0, opacity: 0.3 },
+  { d: 3, span: 0, opacity: 0.26 },
+  { d: 5, span: 0, opacity: 0.34 },
 ]
 
 interface Props {

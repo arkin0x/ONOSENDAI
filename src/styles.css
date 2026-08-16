@@ -948,10 +948,12 @@ kbd {
   }
 
   /* The view menu hangs off the compass, which is bottom-centre on a desktop
-   * rather than top-right, so the menu follows it down. */
+   * rather than top-right, so the menu follows it down. It has to clear the
+   * movement pad, whose top edge is 184px up: the pad is 122px tall and sits
+   * 62px from the bottom. At 150 the menu covered the pad's top row. */
   .viewmenu {
     top: auto;
-    bottom: 150px;
+    bottom: 196px;
     right: 332px;
   }
 }

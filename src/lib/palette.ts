@@ -37,6 +37,14 @@ export const SECTOR = '#f7931a'
  * the avatar. Hue has to say WHAT a thing is before it can say how much.
  */
 export const LATTICE = '#4b3fa7'
+/**
+ * Earth, in dataspace.
+ *
+ * Blue, and free of every other assignment at the zooms it appears: the planet
+ * is only drawable between roughly scaleExp 50 and 56, where the lattice ramp is
+ * up in yellow and orange and the sector cage has long stopped being drawn.
+ */
+export const EARTH = '#2f81f7'
 const WHITE = new Color('#ffffff')
 
 /**

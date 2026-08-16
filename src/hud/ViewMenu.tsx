@@ -62,7 +62,7 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
         <button
           className="viewmenu__op"
           onContextMenu={noCallout.onContextMenu} onPointerDown={press(() => useCyberspace.getState().togglePlane())}
-        >{plane === 0 ? 'D-SPACE' : 'C-SPACE'}</button>
+        >{plane === 0 ? 'D-SPACE' : 'I-SPACE'}</button>
       </div>
 
       <button className="viewmenu__close" onContextMenu={noCallout.onContextMenu} onPointerDown={press(onClose)} aria-label="Close view controls">CLOSE</button>

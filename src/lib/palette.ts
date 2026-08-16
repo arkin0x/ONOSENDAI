@@ -45,8 +45,6 @@ export const LATTICE = '#4b3fa7'
  * up in yellow and orange and the sector cage has long stopped being drawn.
  */
 export const EARTH = '#2f81f7'
-const WHITE = new Color('#ffffff')
-
 /**
  * Colour for one level of the lattice: the LCA ramp for hue, lightness for level.
  *
@@ -62,14 +60,27 @@ const WHITE = new Color('#ffffff')
  *
  * The three levels are consecutive heights, so on a smooth ramp they land on
  * nearly the same colour, which is why hue alone cannot separate them. Lightness
- * does that instead: the innermost is darkened and the outermost lifted toward
- * white, both keeping the hue the height earned.
+ * does that instead, and it darkens INWARD from the ramp rather than lightening
+ * outward from it. Two reasons.
+ *
+ * The outermost box is then exactly the colour the legend swatch shows, so the
+ * key and the scene agree on one reading rather than on a family of them. And
+ * lightening a saturated hue is how you get pastel: an orange lifted toward
+ * white came out peach, which read as a different kind of thing rather than as
+ * the same ramp one step up. Darkening keeps the hue recognisable all the way
+ * down, and the biggest, costliest box being the brightest is the right ordering
+ * anyway.
  */
+const LIGHTNESS: number[] = [0.45, 0.7, 1]
+
 export function latticeShade(height: number, level: number): string {
   // boundaryColor hands back a cached instance, so it must not be mutated.
   const c = boundaryColor(height).clone()
-  if (level === 0) c.multiplyScalar(0.5)
-  else if (level >= 2) c.lerp(WHITE, 0.45)
+  const hsl = { h: 0, s: 0, l: 0 }
+  c.getHSL(hsl)
+  // Hue and saturation held fixed: all three are the same colour at three
+  // weights, not three colours.
+  c.setHSL(hsl.h, hsl.s, hsl.l * (LIGHTNESS[level] ?? 1))
   return `#${c.getHexString()}`
 }
 export const DIM = '#3a5566'

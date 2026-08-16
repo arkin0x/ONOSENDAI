@@ -37,6 +37,17 @@ export const SECTOR = '#f7931a'
  * the avatar. Hue has to say WHAT a thing is before it can say how much.
  */
 export const LATTICE = '#4b3fa7'
+/**
+ * One shade per lattice level, innermost first.
+ *
+ * Opacity alone did not separate them. All three levels shared this hue and
+ * differed only by alpha, which over a black field is nearly the same as
+ * differing by lightness, and the gap between 0.22 and 0.36 is not enough to
+ * read as three distinct things: zoomed out they were the same purple. Hue still
+ * says what a thing is, so all three stay in the indigo family; lightness says
+ * which level, which is the magnitude this palette is allowed to encode.
+ */
+export const LATTICE_SHADES = ['#372c74', '#5548bb', '#8b7df0']
 export const DIM = '#3a5566'
 
 /**

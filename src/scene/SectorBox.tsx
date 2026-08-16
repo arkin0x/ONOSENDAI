@@ -21,6 +21,7 @@ import { SECTOR_BITS_DEFAULT } from 'cyberspace-core'
 import { GRID_RADIUS, cellDelta, type ViewAxes } from '../lib/space'
 import { SECTOR } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { WorldLabel } from './WorldLabel'
 
 interface Props {
   axes: ViewAxes
@@ -29,6 +30,7 @@ interface Props {
 export function SectorBox({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const sectorId = useCyberspace((s) => s.sector())
 
   const box = useMemo(() => {
     // Cells across, at the current zoom. Fractional above scaleExp 30, where a
@@ -62,8 +64,23 @@ export function SectorBox({ axes }: Props): JSX.Element | null {
   if (!box || !geometry) return null
 
   return (
-    <lineSegments geometry={geometry} position={box.centre} frustumCulled={false}>
-      <lineBasicMaterial color={SECTOR} toneMapped={false} transparent opacity={0.9} />
-    </lineSegments>
+    <group>
+      <lineSegments geometry={geometry} position={box.centre} frustumCulled={false}>
+        <lineBasicMaterial color={SECTOR} toneMapped={false} transparent opacity={0.9} />
+      </lineSegments>
+      {/* The HUD prints this id in a panel; the cage is the thing it names, so
+          the cage should say so itself. h30 because that is the height whose
+          aligned subtree a sector IS, which ties it to the same ladder the
+          lattice labels use rather than leaving it as an unrelated landmark. */}
+      <WorldLabel
+        text={`SECTOR  h${SECTOR_BITS_DEFAULT}\n${sectorId}`}
+        color={SECTOR}
+        at={[box.centre[0], box.centre[1] + box.size / 2, box.centre[2]]}
+        align="center"
+        offset={[0, 0.6, 0]}
+        px={9}
+        opacity={0.85}
+      />
+    </group>
   )
 }

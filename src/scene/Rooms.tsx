@@ -28,7 +28,8 @@ import { useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
-import { LATTICE } from '../lib/palette'
+import { AXIS_BITS } from 'cyberspace-core'
+import { LATTICE_SHADES } from '../lib/palette'
 
 import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -143,16 +144,19 @@ export function Rooms({ axes }: Props): JSX.Element {
 
   const levels = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
-    return LEVELS.map(({ d, span, opacity }) => {
+    // Nothing above the axis width exists to be drawn. At scaleExp 84 the three
+    // levels would be h87, h88 and h89, which are not boundaries of an 85-bit
+    // axis; the whole space is one cell by then and the nest has run out.
+    return LEVELS.filter(({ d }) => scaleExp + d <= AXIS_BITS).map(({ d, span, opacity }, i) => {
       const height = scaleExp + d
       const offs = (a: AxisDirection): number[] =>
         latticeOffsets(position[a.axis], origin[a.axis], scaleExp, height, span)
       return {
         height,
         geometry: gridGeometry(offs(axes.right), offs(axes.up), offs(axes.out), axes),
-        // One fixed hue for both heights, separated by weight alone. They are
-        // the same kind of thing at two resolutions, so they should read that
-        // way; the height is stated in the label rather than in the colour.
+        // Lightness per level, hue shared. Alpha alone over a black field is
+        // nearly the same as lightness, and the three were reading as one purple.
+        color: LATTICE_SHADES[Math.min(i, LATTICE_SHADES.length - 1)],
         opacity,
         // Named, once, on the cell holding the avatar. An 8-cell box is
         // meaningless until you know it is a height-27 wall costing 134M to
@@ -172,12 +176,17 @@ export function Rooms({ axes }: Props): JSX.Element {
         // but the one at a multiple of 128 is height 8, and the ruler of
         // nested walls means a cell's six faces can each cost differently.
         label: `h${height}  ${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
-        labelAt: [axes.right, axes.up, axes.out].map((a, i) => {
+        // Centre of the cell's top face. Each level captions its own box rather
+        // than the three stacking into one block: a caption sitting on the face
+        // it describes needs no reading order to connect it to its cell. Centres
+        // cannot coincide the way top corners could, because a cell sits in one
+        // half of its parent on every axis, so its centre is always offset from
+        // the parent's by a quarter of the parent's width.
+        labelAt: [axes.right, axes.up, axes.out].map((a, k) => {
           const base = (position[a.axis] >> BigInt(height)) << BigInt(height)
           const lo = Number((base - origin[a.axis]) / stepFor(scaleExp))
           const cells = 2 ** d
-          // Far top corner, so the two heights' labels never stack.
-          return (lo + (i === 1 ? cells - 0.5 : cells / 2)) * a.dir
+          return (lo + (k === 1 ? cells - 0.5 : (cells - 1) / 2)) * a.dir
         }) as [number, number, number],
       }
     })
@@ -186,28 +195,21 @@ export function Rooms({ axes }: Props): JSX.Element {
   return (
     <group>
       {levels.map((l) => (
-        <lineSegments key={l.height} geometry={l.geometry} frustumCulled={false}>
-          <lineBasicMaterial color={LATTICE} toneMapped={false} transparent opacity={l.opacity} />
-        </lineSegments>
+        <group key={l.height}>
+          <lineSegments geometry={l.geometry} frustumCulled={false}>
+            <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
+          </lineSegments>
+          <WorldLabel
+            text={l.label}
+            color={l.color}
+            at={l.labelAt}
+            align="center"
+            offset={[0, 0.5, 0]}
+            px={9}
+            opacity={0.75}
+          />
+        </group>
       ))}
-
-      {/*
-        One block for the whole nest rather than a label per cell.
-        
-        Per-cell labels sat at each cell's top corner, and nested cells share a
-        top edge whenever the inner one happens to sit in the upper half of the
-        outer, which is half the time: h3 and h4 printed over each other on the
-        first try. Stacking them also does the job the third level was added for,
-        since 15, 31, 63 in a column is the doubling itself, where three labels
-        scattered around the scene only imply it.
-      */}
-      <WorldLabel
-        text={levels.map((l) => l.label).join('\n')}
-        color={LATTICE}
-        at={levels[levels.length - 1].labelAt}
-        px={9}
-        opacity={0.6}
-      />
     </group>
   )
 }

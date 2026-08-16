@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
+import { MAX_SCALE_EXP } from '../lib/space'
 
 /**
  * Suppress the long-press callout.
@@ -95,7 +96,10 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
 
   // Six directions plus the two scale steps: exactly nine things, which is
   // exactly how many cells a 3x3 pad has.
-  const pad: Array<{ cell: string; glyph: string; sub?: string; title: string; act: () => void }> = [
+  const pad: Array<{
+    cell: string; glyph: string; sub?: string; title: string
+    act: () => void; disabled?: boolean
+  }> = [
     // The physics convention for a vector through the page: a tail seen from
     // behind going in, an arrow tip seen head-on coming out. It is the right
     // symbol and it is not enough on its own, because the two differ only by a
@@ -106,9 +110,11 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
     { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
-    { cell: 'sdown', glyph: '−', title: 'Finer scale (E)', act: scale(-1) },
+    // adjustScale already clamps, but a key that silently does nothing reads as
+    // broken rather than as the end of the range.
+    { cell: 'sdown', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0 },
     { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
-    { cell: 'sup', glyph: '+', title: 'Coarser scale (Q)', act: scale(1) },
+    { cell: 'sup', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP },
   ]
 
   return (
@@ -120,6 +126,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
             className={`touchpad__key touchpad__key--${b.cell}`}
             title={b.title}
             aria-label={b.title}
+            disabled={b.disabled}
             {...bind(b.act)}
           >
             {b.glyph}

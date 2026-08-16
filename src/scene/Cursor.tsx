@@ -25,7 +25,7 @@ import {
   BoxGeometry,
 } from 'three'
 import { estimateHopCost } from 'cyberspace-core'
-import { DANGER, SIDESTEP, WARN } from '../lib/palette'
+import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
 import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   MAX_COMPUTE_HEIGHT,
@@ -174,33 +174,22 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     setSegmentEnd(leg2.visible ? leg2 : leg1, leg2.visible ? leg2Geometry : leg1Geometry, b)
   })
 
-  if (!active) return null
-
   return (
     <group position={[0, 0, 0.04]}>
-      <primitive object={leg1} />
-      <primitive object={leg2} />
-
-      {/* Sidestep landing: where Space actually takes you */}
-      {points.landing && (
-        <mesh position={points.landing} renderOrder={10}>
-          <circleGeometry args={[0.14, 4]} />
-          <meshBasicMaterial color={SIDESTEP} toneMapped={false} transparent depthTest={false} />
-        </mesh>
-      )}
-
-      {/* The cell the lined-up action targets */}
-      <lineSegments ref={outline} geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
-        <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
-      </lineSegments>
-
-      {/* The scale reading rides the cursor cube, which is exactly one cell
-          wide, so the label states what that cube measures. It follows per
-          frame, arriving with the cube rather than a render behind it. */}
+      {/*
+        The scale reading is always up, even with the cursor parked on the
+        avatar. What one cell measures is a fact about the current zoom rather
+        than about any pending action, and it is the only thing on screen that
+        ties the abstract ladder to a physical size, so having it appear only
+        once you started moving meant the answer to "how big is a gibson here"
+        vanished exactly when you stopped to think about it. It rides the cursor,
+        which sits on the avatar while idle, so it has a home either way.
+      */}
       <WorldLabel
         text={formatCellSize(scaleExp)}
-        color={targetColor}
+        color={active ? targetColor : ACCENT}
         offset={[0.7, 0.7, 0]}
+        opacity={active ? 1 : 0.75}
         follow={() => {
           const s = useCyberspace.getState()
           return cellCentre(
@@ -209,6 +198,26 @@ export function Cursor({ axes }: Props): JSX.Element | null {
           )
         }}
       />
+
+      {active && (
+        <>
+          <primitive object={leg1} />
+          <primitive object={leg2} />
+
+          {/* Sidestep landing: where Space actually takes you */}
+          {points.landing && (
+            <mesh position={points.landing} renderOrder={10}>
+              <circleGeometry args={[0.14, 4]} />
+              <meshBasicMaterial color={SIDESTEP} toneMapped={false} transparent depthTest={false} />
+            </mesh>
+          )}
+
+          {/* The cell the lined-up action targets */}
+          <lineSegments ref={outline} geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
+            <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
+          </lineSegments>
+        </>
+      )}
     </group>
   )
 }

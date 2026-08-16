@@ -30,10 +30,12 @@ interface Props {
   /** Height in CSS pixels, held constant at any camera distance. */
   px?: number
   opacity?: number
+  /** Left for labels that hang off a point, centre for labels that cap a face. */
+  align?: 'left' | 'center'
 }
 
 export function WorldLabel({
-  text, color, at, follow, offset = [0, 0, 0], px = 14, opacity = 1,
+  text, color, at, follow, offset = [0, 0, 0], px = 14, opacity = 1, align = 'left',
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const scratch = useMemo(() => new Vector3(), [])
@@ -60,9 +62,10 @@ export function WorldLabel({
         <Text
           font={WORLD_FONT}
           fontSize={1}
-          anchorX="left"
+          anchorX={align}
           anchorY="middle"
           color={color}
+          textAlign={align}
           fillOpacity={opacity}
           outlineWidth={0.06}
           outlineColor="#05070d"

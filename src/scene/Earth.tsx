@@ -91,7 +91,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
         <meshBasicMaterial color={EARTH} wireframe transparent opacity={0.32} toneMapped={false} />
       </mesh>
       <WorldLabel
-        text={`EARTH\\nr 6371 km`}
+        text={`EARTH\nr 6371 km`}
         color={EARTH}
         at={[0, globe.radius, 0]}
         align="center"

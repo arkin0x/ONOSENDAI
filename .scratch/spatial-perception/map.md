@@ -76,6 +76,11 @@ for decisions, `/research` for AFK fact-finding.
   changes. It therefore has no coordinate — §11.2's u85 triple is a category
   error — and imposes no projection requirement. §11.2 and §11.3 never
   contradicted. Ticket 04 inherits the question of which volume is primary.
+  **Superseded in build, 2026-08-22:** the sun is a fixed-size ring pinned to the
+  camera along +Z_cs, so there is no volume and the inherited question dissolved.
+  Being at infinity means no parallax and constant apparent size, and pinning
+  gives both without a coordinate; a proxy on a volume's face would have needed
+  repositioning and would have blinked out wherever no such volume is drawn.
 
 - [01 — What made v1 embodied, and what made it floaty?](issues/01-v1-embodiment-post-mortem.md)
   — Two findings reframe the map. **Embodiment did not come from perspective**:
@@ -100,23 +105,27 @@ for decisions, `/research` for AFK fact-finding.
 
 ## Not yet specified
 
-- **Scale legibility.** `scaleExp` spans 0..84 and zoom is currently an instant
-  lattice swap. How does the interface convey where you are in that hierarchy,
-  and that a step at 2^60 is not the same act as a step at 2^0? Ticket 02 rates
-  `ScaleBar` the best comprehension element in the client for *physical size*,
-  and the *hierarchy* entirely absent. Small defect to sweep up here: ScaleBar
-  reports meters in ideaspace, which §9.1 says has no physical mapping.
+- **Ideaspace still measures itself in metres.** The rest of this patch
+  graduated: `ScaleLadder` answers hierarchy with landmarks from the gibson up to
+  the axis, and the cursor carries a physical-size label. The defect did not
+  graduate, it MOVED. `ScaleBar` is gone, and `formatCellSize` now prints metres
+  unconditionally in three places (ladder, ladder landmarks, cursor label),
+  including in ideaspace, which §9.1 says has no physical mapping at all.
 - **Prefetch for volumes.** The random-walk prefetch was removed when terrain
   became a volume: it speculated a plane ahead, and speculating whole volumes
   costs more than it saves. Needs a redesign around what is actually cheap to
   speculate now, probably blocks rather than volumes.
 - **Path and history.** Where have you been, across scales and rotations, and how
   does the trail stay meaningful when a single step can cross a wall?
-- **Mobile.** Whether whatever spatial model wins survives a phone, one-handed.
 - **Dataspace vs ideaspace.** Two planes sharing XYZ; currently a toggle with no
   perceptual difference at all.
-- **The HUD's role.** Once the world itself carries meaning, what is left for
-  panels, and how much of the current HUD should exist?
+- **The HUD's role.** A policy has emerged in the diffs without ever being
+  written down: *if the world can carry it, the panel loses it*. The XOR readout
+  is the counter-case that sharpens it, since it left the panel column for the
+  scene while staying DOM text: the world cannot draw arithmetic, so the readout
+  is neither panel nor geometry but an instrument laid over the space. Open
+  question is now narrower than "how much HUD should exist": what belongs to
+  that third category, and does anything remain that is genuinely a panel?
 - **Terrain visual language.** Ticket 02 measured the real hill structure: K is
   constant across every aligned 2^3 cube, and within an aligned 2^7 cube K spans
   a 4-wide band against a global range of 2..15 — so the 128-cube sets base
@@ -124,9 +133,12 @@ for decisions, `/research` for AFK fact-finding.
   which is why the field reads as noise above scaleExp 3. Rendering the base
   elevation is the open question — but scoped *down*, per 02's priority
   inversion finding.
-- **GPS / §9 dataspace bridge.** Mapping dataspace to real places would answer
-  "where am I *actually*", which serves place-comprehension — but it is a large,
-  consensus-critical workstream with golden vectors. In scope, not yet sharp.
+- **GPS / §9 dataspace bridge.** Partly graduated. §9.7's mapping is implemented
+  and Earth is drawn at true protocol scale, so "where am I actually" has an
+  answer in the world. What did not graduate is the consensus-critical half:
+  golden vectors, and any mapping of arbitrary real places rather than the one
+  planet. See also the reachability patch below, which is the reason the answer
+  currently cannot be walked to.
 - **Region primitives are sitting unused.** `deriveRegionN`,
   `deriveRegionKeyMaterial` and `deriveRegionKeyMaterialScan` are exported by
   `cyberspace-core` and never called from `src/`. Whatever containment ends up
@@ -154,6 +166,49 @@ for decisions, `/research` for AFK fact-finding.
 - **The DECKs as navigation.** Hyperjumps (DECK-0001) are a navigation primitive,
   and virtual spawn (PR #15) would allow cheap synthetic avatars for local
   iteration. Both may become navigation/visualization questions later.
+- **Reaching a target you can see.** The target system points at anything from
+  anywhere and there is nothing you can do about it. There is no goto and no way
+  to turn a chevron into a move: `moveCursor` steps one cell and
+  `setCursorAtCell` is bounded to the drawn grid. Pointing at something you can
+  never travel to is a tease, and it generalises the moment other avatars become
+  targets.
+- **A landmark you can never reach is a landmark that lies.** Earth is drawn at
+  true scale and the chevron reports its distance honestly, but the globe only
+  renders between roughly scaleExp 50 and 56, and at those scales it is still
+  ~1e8 to 2e10 cells from a pubkey-derived spawn, so it also fails the reach
+  cull. There is no scale at which Earth both renders and is near you. Its own
+  patch, because the fix is a navigation mode rather than a rendering change.
+- **The ramp has no headroom at high scaleExp.** Absolute heights on the LCA ramp
+  are deliberate (`88498fb`), so at scaleExp `s` the reachable band starts at
+  `s+1` and by the 50s the whole scene is orange through red. The ramp stops
+  discriminating exactly where crossings get interesting. This is the honest
+  residue of the dead baseline instruction that used to open ticket 05.
+- **Nothing refuses a computation it cannot finish.** No sidestep ceiling exists
+  in the store, the worker, or core. An h60 sidestep is offered with a plain
+  seconds figure against what §6.13-6.14 put at roughly 731 years. Arguably 05's,
+  arguably its own patch. A defect either way, not a design question.
+- **Two orientation frames coexist and the readouts use the stale one.** `view` is
+  the snapped quaternion; `screenAxes` is the live orbit. Keys and pad both read
+  `screenAxes ?? axes()`, but `Hud.tsx` reads `s.axes()`, so its screen-right and
+  screen-up go stale the moment you orbit. `Compass3D` composes both correctly,
+  which is why the compass and the panel disagree. Small bug, real question
+  underneath: which frame is canonical for a readout?
+
+## Decided in conversation, not yet on a ticket
+
+<!-- The gap that let execution run ten days ahead of this map. Anything here is
+     sharp enough to ticket and should become one at the next session. -->
+
+- **Snap-to-Earth and spectating, as named anchors.** Rather than reworking the
+  floating origin so distant things stay precise, the render origin stops being
+  hardwired to the avatar and becomes a choice from a small set: your avatar,
+  Earth, another pubkey. Inside any anchor everything works as it does now,
+  because you are near what you are looking at, so the precision problem
+  evaporates without touching the maths. Read-only while anchored away from your
+  avatar, since at 2^52 a cell is 524,000 km and any commit from out there is a
+  proof that will never finish. Snap scale 2^52, where Earth is 24.3 cells
+  across, about half the view. This is the largest designed-but-unbuilt piece and
+  it half-answers two of the fog patches above.
 
 ## Out of scope
 

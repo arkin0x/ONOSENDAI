@@ -11,23 +11,31 @@ sharpest instance of it.
 
 The spec calls it the protocol's "central and least intuitive property": cost is
 set by which power-of-two boundary you cross, not by how far you travel. Moving
-7→8 costs 16× moving 4→5, for the same single gibson. At the extreme, one step
+7→8 costs 15× moving 4→5, for the same single gibson: h is 4 against 1, and
+cost is 2^h - 1, so 15 pairings against 1. (This ticket and 02 both said 16×
+until 2026-08-22. 16 is 2^4, the leaf count of the h=4 tree, not a ratio of
+anything. The leaves ratio is 8×.) At the extreme, one step
 across 2^34 requires a tree of 17 billion leaves. And by decomposition
 invariance (§4.8) you cannot dodge it by taking small steps — the wall is real
 and there is no way around it.
 
-**Start by fixing the baseline, or you will evaluate against a broken one.**
-Ticket 02 found `BoundaryGrid.tsx:65,71` passes the *absolute* height to
-`boundaryColor`, whose parameter is documented as *excess over the floor*
-(`palette.ts:96`). At scaleExp `s` the cheapest possible crossing is already
-height `s+1`, so above roughly scaleExp 5 every ordinary gridline saturates and
-the colour ramp carries no information at all. The helper written for exactly
-this, `boundaryIntensity(height, floor)` (`palette.ts:69`), exists and is never
-called. Confirm the degeneracy in a browser before and after.
+**The original baseline instruction here is dead, and its question survives.**
+This ticket used to open by telling you to fix `BoundaryGrid.tsx`, which passed
+an absolute height to a helper expecting excess over the floor, and to wire up
+`boundaryIntensity`. Neither exists any more: `BoundaryGrid` was superseded by
+`Rooms.tsx` and both were deleted in `14d3720`, and absolute-height colouring was
+later chosen deliberately in `88498fb`. So the contract is dead by decision, not
+by neglect.
 
-Today `BoundaryGrid` colours gridlines by crossing height, which is a start, and
-`estimateHopCost` / `estimateSidestepCost` exist in `cyberspace-core` and are
-never called. So you commit a move *before* learning what it costs.
+What the instruction was groping at is still true and is now the sharper
+question: **the ramp has no headroom at high scaleExp.** At scaleExp `s` the
+cheapest possible crossing is already height `s+1`, so by the 50s the whole
+scene is orange through red and the ramp stops discriminating exactly where
+crossings get interesting.
+
+Also now stale: `estimateHopCost` and `estimateSidestepCost` are no longer
+uncalled. Both are wired into the store, and the covering box quotes the
+estimate before you commit.
 
 Make the cost structure perceivable **in the space**:
 

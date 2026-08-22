@@ -23,7 +23,8 @@ Cover at least:
   Note §11.1–11.3: the canonical view and the black sun at `+Z_cs`, which this
   app implements as an orientation but renders no marker for.
 - **Cost and reachability** — LCA height (§4.4), why a 1-gibson step can cost
-  16×, decomposition invariance (§4.8: there are no shortcuts), the hop/sidestep
+  15× (see 05: the figure was stated as 16× here and there, which is 2^h, the
+  leaf count, not a ratio of pairings), decomposition invariance (§4.8: there are no shortcuts), the hop/sidestep
   split (§6.13–6.14: continents you cannot cross at all).
 - **Terrain** — K as the temporal cost landscape (§5.2), constant across 2^3
   blocks, hills and valleys.

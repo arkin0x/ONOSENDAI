@@ -4,9 +4,9 @@
  *
  * Every other cost readout in this HUD is a figure you have to take on trust.
  * This one shows the reason: twenty bits of the avatar's coordinate, the same
- * twenty bits of the cursor's, and their XOR, per axis. The leading run of
+ * twenty bits of the target's, and their XOR, per axis. The leading run of
  * zeroes is the prefix the two share, the highest set bit is the wall being
- * crossed, and h is that bit's index plus one. Nudge the cursor one gibson
+ * crossed, and h is that bit's index plus one. Nudge the target one gibson
  * across a power of two and you watch the wall jump up the column while the
  * distance on screen does not change at all.
  *
@@ -15,20 +15,26 @@
  * it survives the hamburger: hiding the panels to see the space should not take
  * away the one readout that explains what the space costs.
  *
- * Columns follow the screen axes, so the leftmost column is the one W and D
- * drive, but each is labelled with its cyberspace letter because Shift+WASD
- * reshuffles that order.
+ * Columns follow the screen axes, so the first column is the one W and D drive,
+ * but each is labelled with its cyberspace letter because Shift+WASD reshuffles
+ * that order. Whether those columns sit side by side or stack is a question of
+ * room, so the stylesheet owns it; the markup is the same either way.
  */
 
 import { WINDOW_BITS, xorReadout } from '../lib/bits'
 import { useCyberspace } from '../store/useCyberspace'
 
+/** The row labels, which double as the palette hook for each row's tone. */
+type Tone = 'pos' | 'trg' | 'xor'
+
 /**
  * One line of a column.
  *
- * The two out-of-frame slots are rendered on every row, not just the XOR row,
- * so that lighting one up cannot shift the bits sideways: a column you cannot
- * read straight down is worse than no column.
+ * Both out-of-frame slots are rendered on every row, not just the XOR row, so
+ * that lighting one up cannot shift the bits sideways: a column you cannot read
+ * straight down is worse than no column. The row label is drawn per column and
+ * hidden by CSS in every column but the first, which is what lets the same
+ * markup stack on a phone, where each column needs its own labels back.
  */
 function Row({
   tone,
@@ -36,21 +42,24 @@ function Row({
   above = false,
   below = false,
 }: {
-  tone: 'pos' | 'cur' | 'xor'
+  tone: Tone
   bits: JSX.Element | string
   above?: boolean
   below?: boolean
 }): JSX.Element {
-  const slot = (on: boolean): JSX.Element => (
-    <span className={on ? 'bits__edge bits__edge--set' : 'bits__edge'}>{'…'}</span>
-  )
   return (
     <div className={`bits__row--${tone}`}>
-      {slot(above)}
+      <span className="bits__key">{`${tone} `}</span>
+      <Slot on={above} />
       {bits}
-      {slot(below)}
+      <Slot on={below} />
     </div>
   )
+}
+
+/** An out-of-frame marker: one cell wide always, lit only when it means something. */
+function Slot({ on = false }: { on?: boolean }): JSX.Element {
+  return <span className={on ? 'bits__edge bits__edge--set' : 'bits__edge'}>{'…'}</span>
 }
 
 export function BitReadout(): JSX.Element {
@@ -67,19 +76,18 @@ export function BitReadout(): JSX.Element {
       </div>
 
       <div className="bits__grid">
-        <div className="bits__col">
-          <div className="bits__head">{' '}</div>
-          <div className="bits__row--pos">pos</div>
-          <div className="bits__row--cur">cur</div>
-          <div className="bits__row--xor">xor</div>
-          <div className="bits__head">{' '}</div>
-        </div>
-
         {columns.map((c) => (
           <div className="bits__col" key={c.axis}>
-            <div className="bits__head">{c.axis.toUpperCase()}</div>
+            {/* The heading carries the same two lead-ins as the rows below it,
+                empty, so the axis letter sits over its own first bit instead of
+                floating a cell to the left of the column. */}
+            <div className="bits__head">
+              <span className="bits__key">{'    '}</span>
+              <Slot />
+              {c.axis.toUpperCase()} h={c.height}
+            </div>
             <Row tone="pos" bits={c.avatar} />
-            <Row tone="cur" bits={c.cursor} />
+            <Row tone="trg" bits={c.cursor} />
             <Row
               tone="xor"
               above={c.hiddenAbove}
@@ -92,7 +100,6 @@ export function BitReadout(): JSX.Element {
                 </>
               }
             />
-            <div className="bits__head">h={c.height}</div>
           </div>
         ))}
       </div>

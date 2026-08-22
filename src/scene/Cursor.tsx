@@ -188,7 +188,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       <WorldLabel
         text={formatCellSize(scaleExp)}
         color={active ? targetColor : ACCENT}
-        offset={[0.7, 0.7, 0]}
+        offset={[1.5, 0.7, 0]}
         opacity={active ? 1 : 0.75}
         follow={() => {
           const s = useCyberspace.getState()

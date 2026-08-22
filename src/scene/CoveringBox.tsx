@@ -53,6 +53,13 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       target.x, target.y, target.z,
       plane, MAX_COMPUTE_HEIGHT,
     )
+    // Heights keyed by axis so they can be emitted in whatever order the view
+    // currently puts them in.
+    const byAxis: Record<string, number> = { x: est.lcaX, y: est.lcaY, z: est.lcaZ }
+    const screenHeights = [axes.right, axes.up, axes.out]
+      .map((a) => `${a.axis}${byAxis[a.axis]}`)
+      .join('/')
+
     return {
       geometry: boxEdges(c.centre, c.size),
       // Filled as well as outlined. The covering box IS an aligned subtree, so
@@ -85,9 +92,19 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // All three heights, not just the largest. The box is dimensioned by one
       // height per axis, which is exactly why it draws a slab rather than a cube
       // when they differ, so quoting only the peak describes a shape that is not
-      // on screen. Reported as X / Y / Z to match the panel rather than in
-      // screen order, which changes under rotation.
-      label: `h ${est.lcaX}/${est.lcaY}/${est.lcaZ}\n${formatOps(est.totalOps)} cantor ops`,
+      // on screen.
+      //
+      // Screen order, and each height carries its axis letter. The order used to
+      // be fixed at X / Y / Z precisely because screen order reshuffles under
+      // rotation and an unlabelled triple would then be unreadable. Labelling
+      // removes that objection, and screen order is worth having because it puts
+      // these heights in the same sequence as the XOR readout's columns, so the
+      // two instruments can be read against each other without transposing.
+      //
+      // k is the terrain height at the destination, taken from the same estimate
+      // as the ops figure below it rather than recomputed, so the label cannot
+      // hold two opinions about one move.
+      label: `h ${screenHeights}\nk ${est.terrainK}\n${formatOps(est.totalOps)} cantor ops`,
       // Anchored under the cursor, not on the box.
       //
       // A corner of the box seems the natural place until the box is a slab a
@@ -128,7 +145,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           opacity={box.clipped ? 0.4 : 0.85}
         />
       </lineSegments>
-      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[0.4, -1.3, 0]} px={13} />
+      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />
     </group>
   )
 }

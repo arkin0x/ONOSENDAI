@@ -415,8 +415,22 @@ body {
 
 /* ---------- XOR bit readout ---------- */
 
+/*
+ * The in-world labels are drawn in Monaspace Krypton by troika (see lib/font.ts)
+ * and the readout is painted into the same layer, so it takes the same typeface
+ * from the same file rather than the HUD's system stack. One voice for
+ * everything that sits on the scene, and one download shared with the 3D text.
+ */
+@font-face {
+  font-family: 'Monaspace Krypton';
+  src: url('/fonts/MonaspaceKrypton-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Sits on the scene, not in a panel: an instrument you read while driving. Top
- * centre is the one band of screen that stays clear at every width, with the
+ * centre is the one band of screen that stays clear at this width, with the
  * panel columns either side of it and the compass below. */
 .bits {
   position: absolute;
@@ -425,11 +439,25 @@ body {
   transform: translateX(-50%);
   z-index: 2;
   pointer-events: none;
-  font-size: 9px;
+  font-family: 'Monaspace Krypton', var(--mono);
+  /*
+   * Seventy-two character cells (three 22-wide columns, the row labels, and the
+   * gaps between them) have to fit whatever the viewport is, and a phone is
+   * 360px. Krypton's advance is 0.6em, so the block is 43.2em, and 2.1vw leaves
+   * a margin on the narrowest phone while the cap stops it growing past
+   * readable on a desktop. Clipped bits are worse than small ones: a truncated
+   * column silently changes which bit you think you are looking at.
+   */
+  font-size: min(9px, 2.1vw);
   line-height: 1.6;
-  /* No panel behind it, so the point field has to be pushed off the glyphs the
-   * same way the target markers do it. */
-  text-shadow: 0 0 5px var(--bg), 0 0 3px var(--bg);
+  color: var(--fg);
+  /*
+   * Nothing behind it but the point field, so every glyph carries its own
+   * lighting: a tight dark halo for contrast against whatever it lands on, then
+   * a wider bloom in currentColor, which means each row and the wall glow their
+   * own colour without this rule having to know the palette.
+   */
+  text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
 
 .bits__title {
@@ -440,7 +468,7 @@ body {
 
 .bits__grid {
   display: flex;
-  gap: 6px;
+  gap: 0.6em; /* One character cell, so the whole block scales as one. */
   white-space: pre;
 }
 
@@ -450,20 +478,37 @@ body {
 }
 
 .bits__head {
-  color: var(--dim);
+  color: rgba(0, 229, 255, 0.55);
   letter-spacing: 0.14em;
+}
+
+/*
+ * One hue for the whole readout, so the eye reads brightness rather than
+ * colour: where you stand is low key, where you are pointing is live, and the
+ * difference between them sits in between. The only warm thing on the block is
+ * the wall, which is the one thing that costs money.
+ */
+.bits__row--pos {
+  color: #4a8fb5;
+}
+
+.bits__row--cur {
+  color: var(--accent);
+}
+
+.bits__row--xor {
+  color: #78d5f5;
 }
 
 /* The three things the XOR row has to keep apart: shared prefix, wall, and
  * divergence that fell outside the window. Everything else is diverged
- * territory and stays plain. */
+ * territory and stays the row's own colour. */
 .bits__matched {
-  color: var(--dim);
+  color: #2c5670;
 }
 
 .bits__wall {
   color: var(--danger);
-  font-weight: 700;
 }
 
 .bits__edge {
@@ -874,6 +919,16 @@ kbd {
     transform: none;
     width: 84px;
     height: 84px;
+  }
+
+  /* The compass has the top right corner at this width, and centring the
+   * readout would run its last column under the cube. Full width is worth more
+   * to it than the middle of the screen, so it drops below instead: any
+   * narrower and the type has to shrink to stay unclipped. */
+  .bits {
+    top: 104px;
+    left: 8px;
+    transform: none;
   }
 }
 

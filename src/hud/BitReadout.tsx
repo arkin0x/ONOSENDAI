@@ -31,10 +31,12 @@ import { useCyberspace } from '../store/useCyberspace'
  * read straight down is worse than no column.
  */
 function Row({
+  tone,
   bits,
   above = false,
   below = false,
 }: {
+  tone: 'pos' | 'cur' | 'xor'
   bits: JSX.Element | string
   above?: boolean
   below?: boolean
@@ -43,7 +45,7 @@ function Row({
     <span className={on ? 'bits__edge bits__edge--set' : 'bits__edge'}>{'…'}</span>
   )
   return (
-    <div>
+    <div className={`bits__row--${tone}`}>
       {slot(above)}
       {bits}
       {slot(below)}
@@ -67,18 +69,19 @@ export function BitReadout(): JSX.Element {
       <div className="bits__grid">
         <div className="bits__col">
           <div className="bits__head">{' '}</div>
-          <div>pos</div>
-          <div>cur</div>
-          <div>xor</div>
+          <div className="bits__row--pos">pos</div>
+          <div className="bits__row--cur">cur</div>
+          <div className="bits__row--xor">xor</div>
           <div className="bits__head">{' '}</div>
         </div>
 
         {columns.map((c) => (
           <div className="bits__col" key={c.axis}>
             <div className="bits__head">{c.axis.toUpperCase()}</div>
-            <Row bits={c.avatar} />
-            <Row bits={c.cursor} />
+            <Row tone="pos" bits={c.avatar} />
+            <Row tone="cur" bits={c.cursor} />
             <Row
+              tone="xor"
               above={c.hiddenAbove}
               below={c.hiddenBelow}
               bits={

@@ -46,6 +46,21 @@ export const LATTICE = '#4b3fa7'
  */
 export const EARTH = '#2f81f7'
 /**
+ * The black sun: the one absolute bearing in cyberspace (§11.2).
+ *
+ * Purple per the spec, and its own constant rather than SIDESTEP, which is also
+ * purple but means "this crossing is a Merkle sidestep". The sun is not a cost
+ * and not a plane, it is the direction +Z_cs, so sharing a swatch with a cost
+ * would say something false about it.
+ *
+ * Pinker than SIDESTEP so the two are separable when both are on screen, which
+ * they routinely are: sidesteps are exactly the expensive moves you make while
+ * navigating by the sun. Kept deliberately dark for its size, since it is drawn
+ * large enough to sit behind everything else and a bright fill at that scale
+ * washes out the geometry you are actually navigating by.
+ */
+export const BLACK_SUN = '#9258d1'
+/**
  * Colour for one level of the lattice: the LCA ramp for hue, lightness for level.
  *
  * The lattice belongs on the ramp. Its walls ARE crossings and their height is

@@ -53,11 +53,13 @@ export const EARTH = '#2f81f7'
  * and not a plane, it is the direction +Z_cs, so sharing a swatch with a cost
  * would say something false about it.
  *
- * Brighter and pinker than SIDESTEP so the two are separable when both are on
- * screen, which they routinely are: sidesteps are exactly the expensive moves
- * you make while navigating by the sun.
+ * Pinker than SIDESTEP so the two are separable when both are on screen, which
+ * they routinely are: sidesteps are exactly the expensive moves you make while
+ * navigating by the sun. Kept deliberately dark for its size, since it is drawn
+ * large enough to sit behind everything else and a bright fill at that scale
+ * washes out the geometry you are actually navigating by.
  */
-export const BLACK_SUN = '#b26bff'
+export const BLACK_SUN = '#9258d1'
 /**
  * Colour for one level of the lattice: the LCA ramp for hue, lightness for level.
  *

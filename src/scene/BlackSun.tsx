@@ -45,17 +45,22 @@ const DISTANCE = 4000
  * Radii, in the same render units.
  *
  * A vertical fov of 55 degrees puts the visible half-height at
- * DISTANCE * tan(27.5 deg), about 2082 units, so an outer radius of 150 draws a
- * disc about 7 percent of the screen height across: measured at 64.8px in a
- * 900px viewport. Big enough to read as a landmark at a glance, small enough not
- * to occupy the view you are navigating.
+ * DISTANCE * tan(27.5 deg), about 2082 units, so an outer radius of 450 draws a
+ * disc about 22 percent of the screen height across: measured at 194px in a
+ * 900px viewport. Large on purpose. It is the only fixed thing in the space, so
+ * it has to read as a horizon you are oriented against rather than as one more
+ * marker competing with the cursor, and at the previous seventh of that size it
+ * sat inside the cursor's own glow in the canonical view.
+ *
+ * INNER holds the same ratio to OUTER, so the corona stays a rim rather than
+ * thickening into a disc as the whole thing grows.
  *
  * Drawn as a ring, not a disc, which is what makes it a BLACK sun: the centre is
  * unlit space showing through, and the corona is the only thing emitted. Bloom
  * runs at a threshold near zero, so the ring glows and the hole stays black.
  */
-const OUTER = 150
-const INNER = 124
+const OUTER = 450
+const INNER = 372
 
 interface Props {
   axes: ViewAxes

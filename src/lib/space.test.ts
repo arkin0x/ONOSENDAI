@@ -17,6 +17,7 @@ import {
   cellOffset,
   clampAxis,
   flipHandedness,
+  renderDirection,
   rotateView,
   snapToAxis,
   stepFor,
@@ -24,6 +25,7 @@ import {
   topDownQuaternion,
   trailingZeros,
   viewAxes,
+  type ViewAxes,
 } from './space'
 
 describe('scale helpers', () => {
@@ -376,3 +378,65 @@ describe('view history invariants', () => {
     expect(seen.size).toBe(24)
   })
 })
+
+describe('renderDirection: where an absolute axis has gone on screen', () => {
+  const ALL = ['x', 'y', 'z'] as const
+
+  it('puts the black sun dead ahead in the canonical view', () => {
+    // Section 11.3's canonical view faces the black sun, so +Z_cs must come out
+    // as straight into the screen. Render -Z is the direction the camera looks.
+    const axes = viewAxes(canonicalQuaternion())
+    expect(renderDirection(axes, 'z')).toEqual([0, 0, -1])
+  })
+
+  it('is a signed unit vector on exactly one render axis, for every view', () => {
+    // Every orientation reachable by 90 degree rotations, which is every view
+    // the app can be in.
+    const seen = quarterTurnViews()
+    for (const axes of seen) {
+      for (const axis of ALL) {
+        const v = renderDirection(axes, axis)
+        const nonZero = v.filter((c) => c !== 0)
+        expect(nonZero).toHaveLength(1)
+        expect(Math.abs(nonZero[0])).toBe(1)
+      }
+    }
+  })
+
+  it('sends the three axes to three different render axes', () => {
+    // viewAxes returns a permutation, so the inverse must be one too. If two
+    // cyberspace axes landed on the same render axis, a direction-anchored
+    // object would sit on top of another one and never separate.
+    for (const axes of quarterTurnViews()) {
+      const slots = ALL.map((a) => renderDirection(axes, a).findIndex((c) => c !== 0))
+      expect(new Set(slots).size).toBe(3)
+    }
+  })
+
+  it('agrees with viewAxes about which axis is where', () => {
+    for (const axes of quarterTurnViews()) {
+      const basis = [axes.right, axes.up, axes.out]
+      for (let i = 0; i < 3; i++) {
+        const v = renderDirection(axes, basis[i].axis)
+        expect(v[i]).toBe(basis[i].dir)
+      }
+    }
+  })
+})
+
+/** Every view reachable by 90 degree rotations from top-down. */
+function quarterTurnViews(): ViewAxes[] {
+  const out: ViewAxes[] = []
+  const dirs = ['left', 'right', 'up', 'down'] as const
+  for (const a of dirs) {
+    for (const b of dirs) {
+      let q = topDownQuaternion()
+      q = rotateView(q, a)
+      q = rotateView(q, b)
+      out.push(viewAxes(q))
+    }
+  }
+  out.push(viewAxes(topDownQuaternion()))
+  out.push(viewAxes(canonicalQuaternion()))
+  return out
+}

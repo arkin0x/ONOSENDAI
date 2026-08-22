@@ -34,6 +34,7 @@ import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
+import { BlackSun } from './BlackSun'
 import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
@@ -78,6 +79,8 @@ function World(): JSX.Element {
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
       <TargetProjector axes={axes} targets={targets} />
+      {/* At infinity, so it draws behind everything regardless of tree order. */}
+      <BlackSun axes={axes} />
       <ShaderPointField volume={volume} win={win} />
       <Rooms axes={axes} />
       <SectorBox axes={axes} />

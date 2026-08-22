@@ -19,13 +19,23 @@
  * but each is labelled with its cyberspace letter because Shift+WASD reshuffles
  * that order. Whether those columns sit side by side or stack is a question of
  * room, so the stylesheet owns it; the markup is the same either way.
+ *
+ * Its own heading is the button that folds it away, the way tapping the compass
+ * is what opens the view menu. A separate chip elsewhere would be one more thing
+ * floating on the scene, and it would have to explain which block it belonged to.
  */
 
+import { useState } from 'react'
 import { WINDOW_BITS, xorReadout } from '../lib/bits'
 import { useCyberspace } from '../store/useCyberspace'
 
 /** The row labels, which double as the palette hook for each row's tone. */
 type Tone = 'pos' | 'trg' | 'xor'
+
+/** An out-of-frame marker: one cell wide always, lit only when it means something. */
+function Slot({ on = false }: { on?: boolean }): JSX.Element {
+  return <span className={on ? 'bits__edge bits__edge--set' : 'bits__edge'}>{'…'}</span>
+}
 
 /**
  * One line of a column.
@@ -33,7 +43,7 @@ type Tone = 'pos' | 'trg' | 'xor'
  * Both out-of-frame slots are rendered on every row, not just the XOR row, so
  * that lighting one up cannot shift the bits sideways: a column you cannot read
  * straight down is worse than no column. The row label is drawn per column and
- * hidden by CSS in every column but the first, which is what lets the same
+ * hidden by CSS wherever the columns sit abreast, which is what lets the same
  * markup stack on a phone, where each column needs its own labels back.
  */
 function Row({
@@ -57,12 +67,10 @@ function Row({
   )
 }
 
-/** An out-of-frame marker: one cell wide always, lit only when it means something. */
-function Slot({ on = false }: { on?: boolean }): JSX.Element {
-  return <span className={on ? 'bits__edge bits__edge--set' : 'bits__edge'}>{'…'}</span>
-}
-
 export function BitReadout(): JSX.Element {
+  // Open by default: it is the readout that explains what everything else on
+  // screen costs, so it has to be seen before anyone would think to dismiss it.
+  const [open, setOpen] = useState(true)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -71,38 +79,48 @@ export function BitReadout(): JSX.Element {
 
   return (
     <div className="bits">
-      <div className="bits__title">
-        XOR BITS {scaleExp}..{scaleExp + WINDOW_BITS - 1}
-      </div>
+      <button
+        className="bits__toggle"
+        onContextMenu={(e) => e.preventDefault()}
+        /* pointerdown, swallowed, which is how the controls chip does it: a tap
+           here must not also reach the canvas and toggle the pad. */
+        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
+        aria-label={open ? 'Hide XOR readout' : 'Show XOR readout'}
+        aria-pressed={open}
+      >
+        XOR BITS{open ? ` ${scaleExp}..${scaleExp + WINDOW_BITS - 1}` : ''}
+      </button>
 
-      <div className="bits__grid">
-        {columns.map((c) => (
-          <div className="bits__col" key={c.axis}>
-            {/* The heading carries the same two lead-ins as the rows below it,
-                empty, so the axis letter sits over its own first bit instead of
-                floating a cell to the left of the column. */}
-            <div className="bits__head">
-              <span className="bits__key">{'    '}</span>
-              <Slot />
-              {c.axis.toUpperCase()} h={c.height}
+      {open && (
+        <div className="bits__grid">
+          {columns.map((c) => (
+            <div className="bits__col" key={c.axis}>
+              {/* The heading carries the same two lead-ins as the rows below it,
+                  empty, so the axis letter sits over its own first bit instead
+                  of floating a cell to the left of the column. */}
+              <div className="bits__head">
+                <span className="bits__key">{'    '}</span>
+                <Slot />
+                {c.axis.toUpperCase()} h={c.height}
+              </div>
+              <Row tone="pos" bits={c.avatar} />
+              <Row tone="trg" bits={c.cursor} />
+              <Row
+                tone="xor"
+                above={c.hiddenAbove}
+                below={c.hiddenBelow}
+                bits={
+                  <>
+                    <span className="bits__matched">{c.matched}</span>
+                    <span className="bits__wall">{c.wall}</span>
+                    {c.rest}
+                  </>
+                }
+              />
             </div>
-            <Row tone="pos" bits={c.avatar} />
-            <Row tone="trg" bits={c.cursor} />
-            <Row
-              tone="xor"
-              above={c.hiddenAbove}
-              below={c.hiddenBelow}
-              bits={
-                <>
-                  <span className="bits__matched">{c.matched}</span>
-                  <span className="bits__wall">{c.wall}</span>
-                  {c.rest}
-                </>
-              }
-            />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

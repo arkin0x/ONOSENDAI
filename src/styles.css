@@ -430,20 +430,21 @@ body {
 }
 
 /*
- * Sits on the scene, not in a panel: an instrument you read while driving.
- *
- * Flush left and level with the compass, so the two instruments share a band
- * instead of stacking down the centre line of the screen. Not quite the
- * compass's own baseline: the hamburger owns the bottom left corner (24px in,
- * 56px across), and a button drawn over the first ten characters of every row
- * would cost more than the 68px of height it takes to clear it.
+ * Sits on the scene, not in a panel: an instrument you read while driving, so
+ * it goes flush left and level with the compass rather than stacking down the
+ * centre line of the screen with it. Here that means the top left, because a
+ * phone puts the compass in the top right corner.
  */
 .bits {
   position: absolute;
-  left: 16px;
-  bottom: 88px;
+  top: 12px;
+  left: 8px;
   z-index: 2;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   font-family: 'Monaspace Krypton', var(--mono);
   font-size: 9px;
   line-height: 1.6;
@@ -457,14 +458,37 @@ body {
   text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
 
-.bits__title {
-  color: var(--accent);
+/* The heading doubles as the control, so it is dressed as the controls chip:
+ * same family of floating buttons as that and the tappable compass. */
+.bits__toggle {
+  pointer-events: auto;
+  font-family: inherit;
+  font-size: inherit;
   letter-spacing: 0.2em;
-  margin-bottom: 3px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.bits__toggle:active {
+  background: rgba(0, 229, 255, 0.28);
+}
+
+/* Folded away, it should read as a thing you could open, not as a live readout
+ * that has gone quiet. */
+.bits__toggle[aria-pressed='false'] {
+  color: var(--dim);
+  border-color: rgba(200, 245, 255, 0.18);
 }
 
 .bits__grid {
   display: flex;
+  flex-direction: column;
   gap: 0.6em; /* One character cell, so the whole block scales as one. */
   white-space: pre;
 }
@@ -472,21 +496,6 @@ body {
 .bits__col {
   display: flex;
   flex-direction: column;
-}
-
-/*
- * Side by side the row labels only need saying once, and the columns are close
- * enough to read across. Stacked they have to come back, which is why every
- * column carries its own and all but the first are hidden here rather than
- * being absent from the markup.
- *
- * Three columns abreast is 71 cells, about 400px, and the compass is centred, so
- * they cannot reach it before the 1100px breakpoint stacks them anyway: the
- * overlap rule and the breakpoint happen to be the same line. Grow the type and
- * that stops being true.
- */
-.bits__col:not(:first-child) .bits__key {
-  display: none;
 }
 
 .bits__head {
@@ -533,6 +542,29 @@ body {
 .bits__edge--set {
   opacity: 1;
   color: var(--warn);
+}
+
+/*
+ * Three columns abreast is 71 cells, about 400px, and the compass is centred, so
+ * they only fit beside it on a genuinely wide screen. Below that they stay
+ * stacked: one column of 20 bits is 26 cells, which fits the narrowest phone at
+ * full size, where shrinking the type to keep them abreast would not have.
+ *
+ * This is the overlap rule the layout is built on, so it is derived rather than
+ * picked: 352px in, plus the block, plus a margin, has to clear half the
+ * viewport less the compass's own half width.
+ */
+@media (min-width: 1660px) {
+  .bits__grid {
+    flex-direction: row;
+  }
+
+  /* Abreast, the row labels only need saying once and the columns are close
+   * enough to read across. Stacked they have to come back, which is why every
+   * column carries its own rather than the first column owning them. */
+  .bits__col:not(:first-child) .bits__key {
+    display: none;
+  }
 }
 
 /* ---------- Legend ---------- */
@@ -936,27 +968,6 @@ kbd {
     height: 84px;
   }
 
-  /*
-   * The compass takes the top right corner at this width, so the readout goes
-   * to the top left to stay level with it. Three columns abreast would run
-   * under the cube on a phone, so they stack: one column of twenty bits is 26
-   * cells, which fits the narrowest phone at full size, where shrinking the
-   * type to keep them abreast would not have.
-   */
-  .bits {
-    top: 12px;
-    bottom: auto;
-    left: 8px;
-  }
-
-  .bits__grid {
-    flex-direction: column;
-  }
-
-  /* Stacked, every column is on its own again and needs its labels back. */
-  .bits__col:not(:first-child) .bits__key {
-    display: inline;
-  }
 }
 
 /* ---------- Summoned controls: view menu, hint chip ---------- */
@@ -1092,6 +1103,15 @@ kbd {
   .touchops,
   .touchhint {
     right: 332px;
+  }
+
+  /* Same reason as the hamburger: flush left on a desktop is underneath 320px
+   * of panels. The scene's left edge is 352px in, and the compass has moved to
+   * the bottom, so the readout goes with it and sits above the hamburger. */
+  .bits {
+    top: auto;
+    bottom: 88px;
+    left: 352px;
   }
 
   .hamburger-menu {

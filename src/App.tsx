@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { BitReadout } from './hud/BitReadout'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
@@ -49,6 +50,7 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {!crowded && <Targets targets={targets} />}
+      {!crowded && <BitReadout />}
       {panelsOpen && <Hud menuOpen={crowded} />}
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}

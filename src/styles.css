@@ -413,6 +413,128 @@ body {
   border-left: 2px solid var(--danger);
 }
 
+/* ---------- XOR bit readout ---------- */
+
+/*
+ * The in-world labels are drawn in Monaspace Krypton by troika (see lib/font.ts)
+ * and the readout is painted into the same layer, so it takes the same typeface
+ * from the same file rather than the HUD's system stack. One voice for
+ * everything that sits on the scene, and one download shared with the 3D text.
+ */
+@font-face {
+  font-family: 'Monaspace Krypton';
+  src: url('/fonts/MonaspaceKrypton-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * Sits on the scene, not in a panel: an instrument you read while driving.
+ *
+ * Flush left and level with the compass, so the two instruments share a band
+ * instead of stacking down the centre line of the screen. Not quite the
+ * compass's own baseline: the hamburger owns the bottom left corner (24px in,
+ * 56px across), and a button drawn over the first ten characters of every row
+ * would cost more than the 68px of height it takes to clear it.
+ */
+.bits {
+  position: absolute;
+  left: 16px;
+  bottom: 88px;
+  z-index: 2;
+  pointer-events: none;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--fg);
+  /*
+   * Nothing behind it but the point field, so every glyph carries its own
+   * lighting: a tight dark halo for contrast against whatever it lands on, then
+   * a wider bloom in currentColor, which means each row and the wall glow their
+   * own colour without this rule having to know the palette.
+   */
+  text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
+}
+
+.bits__title {
+  color: var(--accent);
+  letter-spacing: 0.2em;
+  margin-bottom: 3px;
+}
+
+.bits__grid {
+  display: flex;
+  gap: 0.6em; /* One character cell, so the whole block scales as one. */
+  white-space: pre;
+}
+
+.bits__col {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Side by side the row labels only need saying once, and the columns are close
+ * enough to read across. Stacked they have to come back, which is why every
+ * column carries its own and all but the first are hidden here rather than
+ * being absent from the markup.
+ *
+ * Three columns abreast is 71 cells, about 400px, and the compass is centred, so
+ * they cannot reach it before the 1100px breakpoint stacks them anyway: the
+ * overlap rule and the breakpoint happen to be the same line. Grow the type and
+ * that stops being true.
+ */
+.bits__col:not(:first-child) .bits__key {
+  display: none;
+}
+
+.bits__head {
+  color: rgba(0, 229, 255, 0.55);
+}
+
+/*
+ * One hue for the whole readout, so the eye reads brightness rather than
+ * colour: where you stand is low key, where you are pointing is live, and the
+ * difference between them sits in between. The only warm thing on the block is
+ * the wall, which is the one thing that costs money.
+ */
+.bits__row--pos {
+  color: #4a8fb5;
+}
+
+.bits__row--trg {
+  color: var(--accent);
+}
+
+.bits__row--xor {
+  color: #78d5f5;
+}
+
+.bits__key {
+  color: rgba(0, 229, 255, 0.55);
+}
+
+/* The three things the XOR row has to keep apart: shared prefix, wall, and
+ * divergence that fell outside the window. Everything else is diverged
+ * territory and stays the row's own colour. */
+.bits__matched {
+  color: #2c5670;
+}
+
+.bits__wall {
+  color: var(--danger);
+}
+
+.bits__edge {
+  opacity: 0;
+}
+
+.bits__edge--set {
+  opacity: 1;
+  color: var(--warn);
+}
+
 /* ---------- Legend ---------- */
 
 .legend__row {
@@ -812,6 +934,28 @@ kbd {
     transform: none;
     width: 84px;
     height: 84px;
+  }
+
+  /*
+   * The compass takes the top right corner at this width, so the readout goes
+   * to the top left to stay level with it. Three columns abreast would run
+   * under the cube on a phone, so they stack: one column of twenty bits is 26
+   * cells, which fits the narrowest phone at full size, where shrinking the
+   * type to keep them abreast would not have.
+   */
+  .bits {
+    top: 12px;
+    bottom: auto;
+    left: 8px;
+  }
+
+  .bits__grid {
+    flex-direction: column;
+  }
+
+  /* Stacked, every column is on its own again and needs its labels back. */
+  .bits__col:not(:first-child) .bits__key {
+    display: inline;
   }
 }
 

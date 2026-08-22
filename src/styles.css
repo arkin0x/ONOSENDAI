@@ -413,6 +413,51 @@ body {
   border-left: 2px solid var(--danger);
 }
 
+/* ---------- XOR bit readout ---------- */
+
+.bits {
+  display: flex;
+  gap: 3px;
+  /* 69 characters (three 22-wide columns plus the row labels) have to sit
+   * inside a 320px HUD column, which sets the size. overflow-x is the safety
+   * net for the day someone bumps the font. */
+  font-size: 7.5px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.bits__col {
+  display: flex;
+  flex-direction: column;
+}
+
+.bits__head {
+  color: var(--dim);
+  letter-spacing: 0.14em;
+}
+
+/* The three things the XOR row has to keep apart: shared prefix, wall, and
+ * divergence that fell outside the window. Everything else is diverged
+ * territory and stays plain. */
+.bits__matched {
+  color: var(--dim);
+}
+
+.bits__wall {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.bits__edge {
+  opacity: 0;
+}
+
+.bits__edge--set {
+  opacity: 1;
+  color: var(--warn);
+}
+
 /* ---------- Legend ---------- */
 
 .legend__row {

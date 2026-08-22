@@ -5,6 +5,7 @@
 
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { BitReadout } from './BitReadout'
 import { ChainPanel } from './ChainPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
@@ -195,6 +196,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <Brand />
         <IdentityPanel />
         <PositionPanel />
+        <BitReadout />
         <ScalePanel />
         <LinksPanel />
       </div>

@@ -112,7 +112,7 @@ src/
   lib/workers.ts      worker singletons
   store/              zustand store: position, scale, view, proof telemetry
   workers/            proof and terrain sampling, off the main thread
-  scene/              R3F: camera rig, terrain field, boundary grid, avatar, cursor
+  scene/              R3F: camera rig, terrain field, lattice, avatar, cursor
   hud/                overlay panels
 ```
 

@@ -474,7 +474,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   },
 }))
 
-if (import.meta.env.DEV) {
+// DEV is also true under vitest, which runs in node, and importing this module
+// for alignedOrigin must not blow up on a missing window. Same reason the
+// localStorage calls above are wrapped.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   // Lets the browser harness read and drive real state instead of inferring it
   // from the HUD, the same way __terrain and __screenAxes work.
   ;(window as unknown as { __store?: unknown }).__store = useCyberspace

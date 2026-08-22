@@ -21,7 +21,7 @@
  * the fine grid carries the texture and the coarse one carries the structure.
  * Both are measured from the scale floor: at scaleExp s the cheapest possible
  * crossing is already height s+1, so anything below that is sub-cell and cannot
- * be drawn. That is what `boundaryIntensity(height, floor)` was written for.
+ * be drawn.
  */
 
 import { useMemo } from 'react'

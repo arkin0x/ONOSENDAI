@@ -3,8 +3,8 @@
  *
  * The camera pans to the cursor while the world stays anchored to the avatar,
  * so the region on screen is no longer centred on the avatar's cell. Anything
- * that renders a bounded region (the terrain box, the LCA boundary grid) has
- * to follow the window or the view runs off its edge into empty space.
+ * that renders a bounded region (the terrain box, the lattice) has to follow the
+ * window or the view runs off its edge into empty space.
  *
  * Coordinates are cell offsets from the avatar's aligned cell along the screen
  * axes, which is the frame the whole scene is drawn in. Rounded to whole cells

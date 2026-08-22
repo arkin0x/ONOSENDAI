@@ -278,6 +278,31 @@ export function viewAxes(q: Quaternion): ViewAxes {
   }
 }
 
+/**
+ * The render-space unit vector pointing along the POSITIVE direction of a given
+ * cyberspace axis.
+ *
+ * `viewAxes` answers "which cyberspace axis is on screen-right"; this is the
+ * inverse question, "where on screen has cyberspace +Z gone". Needed by anything
+ * anchored to an absolute direction rather than to a coordinate, which so far is
+ * the black sun.
+ *
+ * The render basis is exactly (right, up, out), so the answer is a signed unit
+ * vector on whichever of the three claimed this axis. `viewAxes` always returns
+ * a permutation, so exactly one does.
+ */
+export function renderDirection(axes: ViewAxes, axis: AxisName): [number, number, number] {
+  const out: [number, number, number] = [0, 0, 0]
+  const basis = [axes.right, axes.up, axes.out]
+  for (let i = 0; i < 3; i++) {
+    if (basis[i].axis === axis) {
+      out[i] = basis[i].dir
+      return out
+    }
+  }
+  return out
+}
+
 export type RotateDirection = 'left' | 'right' | 'up' | 'down'
 
 /**

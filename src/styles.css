@@ -415,16 +415,33 @@ body {
 
 /* ---------- XOR bit readout ---------- */
 
+/* Sits on the scene, not in a panel: an instrument you read while driving. Top
+ * centre is the one band of screen that stays clear at every width, with the
+ * panel columns either side of it and the compass below. */
 .bits {
-  display: flex;
-  gap: 3px;
-  /* 69 characters (three 22-wide columns plus the row labels) have to sit
-   * inside a 320px HUD column, which sets the size. overflow-x is the safety
-   * net for the day someone bumps the font. */
-  font-size: 7.5px;
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
+  font-size: 9px;
   line-height: 1.6;
+  /* No panel behind it, so the point field has to be pushed off the glyphs the
+   * same way the target markers do it. */
+  text-shadow: 0 0 5px var(--bg), 0 0 3px var(--bg);
+}
+
+.bits__title {
+  color: var(--accent);
+  letter-spacing: 0.2em;
+  margin-bottom: 3px;
+}
+
+.bits__grid {
+  display: flex;
+  gap: 6px;
   white-space: pre;
-  overflow-x: auto;
 }
 
 .bits__col {

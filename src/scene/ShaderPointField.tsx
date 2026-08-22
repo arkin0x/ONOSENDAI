@@ -5,9 +5,9 @@
  * is a cube around the view window, so this is at most VOLUME_SIZE^3 points, and
  * the CPU emits only cells it actually has.
  *
- * Positions are in cell units on the screen axes, the same frame BoundaryGrid,
- * Cursor and Avatar draw in, offset by the view window so the field stays put
- * while the camera pans to the cursor.
+ * Positions are in cell units on the screen axes, the same frame Rooms, Cursor
+ * and Avatar draw in, offset by the view window so the field stays put while the
+ * camera pans to the cursor.
  */
 
 import { useFrame } from '@react-three/fiber'

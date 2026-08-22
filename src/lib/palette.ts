@@ -141,19 +141,6 @@ export function terrainColor(k: number): Color {
 }
 
 /**
- * Brightness for an LCA boundary line.
- *
- * `height` is the LCA height paid to cross, `floor` is the cheapest possible
- * crossing at the current scale (an ordinary step boundary). Excess above the
- * floor is what makes a boundary expensive, so that is what we light up.
- */
-export function boundaryIntensity(height: number, floor: number): number {
-  const excess = Math.max(0, height - floor)
-  // Each extra height level doubles cost, so a log-ish ramp reads linearly.
-  return Math.min(1, 0.12 + excess / 12)
-}
-
-/**
  * Colour for an LCA boundary line.
  *
  * Uses a three-stop ramp from extremely dark blue (cheap crossings) through

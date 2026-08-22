@@ -122,6 +122,27 @@ export function cellCentre(
 }
 
 /**
+ * How far every render coordinate moves when the render origin is re-anchored
+ * from `prev` to `next`, per screen axis, in cells.
+ *
+ * A commit re-anchors render space to the avatar's new aligned cell, so the
+ * whole scene shifts at once. That is a change of frame, not motion: the camera
+ * has to add exactly this to its own position and to what it is looking at, in
+ * the same frame, or the world lurches by the move distance and back.
+ *
+ * It is the negative of what cellCentre does to a fixed world point, which is
+ * the property that makes the two cancel: same helper, same fixed-point
+ * division, same per-axis sign, so no rounding can survive the subtraction.
+ */
+export function originShift(
+  prev: Position, next: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return [axes.right, axes.up, axes.out].map(
+    (a) => cellDelta(prev[a.axis], next[a.axis], scaleExp) * a.dir,
+  ) as [number, number, number]
+}
+
+/**
  * Sub-cell position along an axis as a 0..1 fraction.
  */
 export function subCellFraction(value: bigint, scaleExp: number): number {
@@ -134,7 +155,7 @@ export function subCellFraction(value: bigint, scaleExp: number): number {
  * gibson, not its low corner, so the marker sits at the gibson's centre:
  * exactly mid-cell at scale 2^0, and vanishingly close to the lattice point at
  * larger scales. Mirrors when the axis points left or down on screen, matching
- * how BoundaryGrid lays cells out along a flipped axis.
+ * how the lattice lays cells out along a flipped axis.
  */
 export function cellOffset(
   value: bigint,
@@ -301,6 +322,47 @@ export function renderDirection(axes: ViewAxes, axis: AxisName): [number, number
     }
   }
   return out
+}
+
+/**
+ * Bind the camera's three basis vectors to the three cyberspace axes of the
+ * view frame, as a permutation.
+ *
+ * `local` names which cyberspace axis each of the scene's local x/y/z is, which
+ * is meaningful only because the world group carries no rotation. The basis
+ * vectors arrive in that same local frame, so a vector's component index IS the
+ * index into `local`.
+ *
+ * The axes are claimed one at a time, strongest remaining component first,
+ * rather than each vector being snapped independently. Independent snapping does
+ * not have to yield three DIFFERENT axes: around 45 degrees two basis vectors
+ * round to the same one, and then a whole cyberspace axis has no key bound to
+ * it, R/F aliases onto W/S, and the cursor cannot leave the screen plane at all.
+ * Measured through an orbit sweep, 4 frames in 24 were degenerate. Claiming
+ * makes the result a permutation by construction, for any input whatsoever,
+ * including a zero vector or three identical ones.
+ */
+export function claimScreenAxes(
+  right: Vector3, up: Vector3, out: Vector3, local: ViewAxes,
+): ViewAxes {
+  const slots = [local.right, local.up, local.out]
+  const taken = [false, false, false]
+  const claim = (v: Vector3): AxisDirection => {
+    const c = [v.x, v.y, v.z]
+    let i = -1
+    for (let k = 0; k < 3; k++) {
+      if (taken[k]) continue
+      if (i === -1 || Math.abs(c[k]) > Math.abs(c[i])) i = k
+    }
+    taken[i] = true
+    const dir = (slots[i].dir * (c[i] >= 0 ? 1 : -1)) as 1 | -1
+    return { axis: slots[i].axis, dir }
+  }
+  // Claimed in this order, so screen-right gets first pick of the three.
+  const r = claim(right)
+  const u = claim(up)
+  const o = claim(out)
+  return { right: r, up: u, out: o }
 }
 
 export type RotateDirection = 'left' | 'right' | 'up' | 'down'

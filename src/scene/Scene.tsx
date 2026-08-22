@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, type AxisDirection, type Position } from '../lib/space'
+import { GRID_RADIUS, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -69,13 +69,6 @@ function World(): JSX.Element {
 
   return (
     <group>
-      {/*
-        The LCA boundary grid is hidden. It drew a flat 2D lattice that streaked
-        across the volume once the view became perspective, and the room boxes
-        now carry the same information as containment: a box edge IS the
-        expensive boundary. Kept in the tree for ticket 05, which owns how cost
-        is shown, rather than deleted.
-      */}
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
       <TargetProjector axes={axes} targets={targets} />
@@ -123,32 +116,13 @@ function ScreenAxes(): null {
     // axis the other two did not claim" kept its original sign, so R and F
     // pushed the wrong way once an orbit flipped that axis.
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
-    const local = [axes.right, axes.up, axes.out]
-
-    // Claimed one at a time, strongest first, because snapping the three basis
-    // vectors independently does not have to yield three different axes. Around
-    // 45 degrees two of them round to the same one, and then a whole cyberspace
-    // axis has no key bound to it: R/F aliases onto W/S and you cannot leave the
-    // plane at all. Claiming makes the result a permutation by construction.
-    const taken = [false, false, false]
-    const claim = (v: Vector3): AxisDirection => {
-      const c = [v.x, v.y, v.z]
-      let i = -1
-      for (let k = 0; k < 3; k++) {
-        if (taken[k]) continue
-        if (i === -1 || Math.abs(c[k]) > Math.abs(c[i])) i = k
-      }
-      taken[i] = true
-      const dir = (local[i].dir * (c[i] >= 0 ? 1 : -1)) as 1 | -1
-      return { axis: local[i].axis, dir }
-    }
-
-    const r = claim(right.current)
-    const u = claim(up.current)
-    const o = claim(out.current)
-    useCyberspace.getState().setScreenAxes({ right: r, up: u, out: o })
+    // The permutation itself is claimScreenAxes, in space.ts, so the property
+    // that makes it correct (three different axes for any camera angle) can be
+    // asserted without a camera.
+    const screen = claimScreenAxes(right.current, up.current, out.current, axes)
+    useCyberspace.getState().setScreenAxes(screen)
     if (import.meta.env.DEV) {
-      ;(window as unknown as { __screenAxes?: unknown }).__screenAxes = { right: r, up: u, out: o }
+      ;(window as unknown as { __screenAxes?: unknown }).__screenAxes = screen
     }
   })
 
@@ -242,11 +216,7 @@ function Rig(): JSX.Element {
     // It also must not be eased. Easing a frame change would slide the world
     // under a camera that is looking at something stationary.
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
-      const a = s.axes()
-      const prev = prevOrigin.current
-      const shift = [a.right, a.up, a.out].map(
-        (ax) => cellDelta(prev[ax.axis], origin[ax.axis], s.scaleExp) * ax.dir,
-      )
+      const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
       if (shift[0] !== 0 || shift[1] !== 0 || shift[2] !== 0) {
         c.object.position.x += shift[0]
         c.object.position.y += shift[1]

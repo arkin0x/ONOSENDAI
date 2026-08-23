@@ -10,10 +10,13 @@
 import { useMemo } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
+import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
+
+const TAP_SLOP = 8
 
 const REACH = GRID_RADIUS * 8
 /** The message colour: a warm note against the cool field. */
@@ -66,12 +69,23 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => (
-        <group key={w.key}>
-          <WorldLabel text={wrap(w.text)} color={NOTE} at={w.centre} align="center" px={13} />
-          <WorldLabel text={`— ${shortAuthor(w.author, w.mine)}`} color={ACCENT} at={[w.centre[0], w.centre[1] - 0.9, w.centre[2]]} align="center" px={9} opacity={0.7} />
-        </group>
-      ))}
+      {placed.map((w) => {
+        const open = (e: ThreeEvent<MouseEvent>): void => {
+          if (e.delta > TAP_SLOP) return
+          e.stopPropagation()
+          useShards.getState().selectSecret(w.key)
+        }
+        return (
+          <group key={w.key}>
+            <WorldLabel text={wrap(w.text)} color={NOTE} at={w.centre} align="center" px={13} />
+            <WorldLabel text={`— ${shortAuthor(w.author, w.mine)}`} color={ACCENT} at={[w.centre[0], w.centre[1] - 0.9, w.centre[2]]} align="center" px={9} opacity={0.7} />
+            <mesh position={w.centre} onClick={open}>
+              <sphereGeometry args={[1, 8, 8]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            </mesh>
+          </group>
+        )
+      })}
     </>
   )
 }

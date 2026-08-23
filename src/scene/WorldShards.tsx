@@ -9,10 +9,14 @@
  */
 
 import { useMemo } from 'react'
+import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
+
+/** A press that travels further than this is an orbit, not a tap. */
+const TAP_SLOP = 8
 
 const REACH = GRID_RADIUS * 8
 
@@ -50,11 +54,24 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => (
-        <group key={w.key} position={w.centre}>
-          <ShardMesh shard={w.shard} scale={w.scale} />
-        </group>
-      ))}
+      {placed.map((w) => {
+        const hit = Math.max(0.6, w.scale * 2)
+        const open = (e: ThreeEvent<MouseEvent>): void => {
+          if (e.delta > TAP_SLOP) return
+          e.stopPropagation()
+          useShards.getState().selectSecret(w.key)
+        }
+        return (
+          <group key={w.key} position={w.centre}>
+            <ShardMesh shard={w.shard} scale={w.scale} />
+            {/* An invisible, generous tap target: shards can be a few pixels. */}
+            <mesh onClick={open}>
+              <sphereGeometry args={[hit, 8, 8]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            </mesh>
+          </group>
+        )
+      })}
     </>
   )
 }

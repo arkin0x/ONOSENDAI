@@ -1183,6 +1183,168 @@ kbd {
   border-color: var(--danger);
 }
 
+/* ---------- Secret modal (a hidden thing, tapped in the world) ---------- */
+.modal__card.secret {
+  border-color: rgba(0, 229, 255, 0.5);
+  max-width: 440px;
+}
+
+.secret__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.secret__badge {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+
+.secret__badge--message { color: #ffd27d; }
+
+.secret__mine {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: #05070d;
+  background: var(--ok);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.secret__close {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 12px;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.2);
+  cursor: pointer;
+}
+
+.secret__message {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #ffd27d;
+  background: rgba(255, 210, 125, 0.08);
+  border-left: 3px solid #ffd27d;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.secret__shard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(0, 229, 255, 0.06);
+  border-left: 3px solid var(--accent);
+  border-radius: 3px;
+}
+
+.secret__shard-name { font-size: 14px; color: var(--fg); }
+.secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
+
+.secret__creator {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+.secret__label {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.secret__person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.secret__person-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.secret__name { font-size: 13px; color: var(--fg); }
+.secret__nip05 { font-size: 10px; color: var(--accent); }
+.secret__npub { font-size: 9px; color: var(--dim); }
+
+.secret__about {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+  max-height: 60px;
+  overflow-y: auto;
+}
+
+.secret__facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.secret__facts dt {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.secret__facts dd { margin: 0; font-size: 11px; color: var(--fg); }
+
+.secret__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.secret__act {
+  flex: 1;
+  min-width: 100px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 34px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+}
+
+.secret__act:hover { background: rgba(0, 229, 255, 0.16); }
+
+.secret__act.is-on {
+  color: #05070d;
+  background: var(--accent);
+  font-weight: 700;
+}
+
+.secret__act--danger {
+  color: var(--danger);
+  border-color: rgba(255, 59, 107, 0.5);
+  background: rgba(255, 59, 107, 0.08);
+}
+
 /* ---------- Deployment detail overlay ----------
  *
  * The wire record of a deployed shard, up while the scene is flown to it. Left

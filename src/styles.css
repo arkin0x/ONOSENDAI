@@ -496,6 +496,13 @@ body {
   flex-direction: column;
   gap: 0.6em; /* One character cell, so the whole block scales as one. */
   white-space: pre;
+  /* The container is pointer-events: none so the scene shows through the gaps;
+   * the grid opts back in so a tap on it can flip binary/hex. */
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .bits__col {

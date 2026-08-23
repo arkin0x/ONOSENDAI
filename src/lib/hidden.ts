@@ -22,7 +22,7 @@
 
 import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
-import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
+import { positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from './shards'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import type { Position } from './space'
@@ -33,24 +33,6 @@ export const HIDDEN_KIND = 33330
 export const SHARD_KIND = 3330
 /** A plain note, inside the envelope. */
 export const MESSAGE_KIND = 1
-
-/**
- * The indexable tag discovery filters on: the region's lookup id.
- *
- * Spec §8.6 puts the lookup id in the `d` tag. But kind 33330 is addressable,
- * so a `d` shared by everything in a region means one author can hide only one
- * thing there — a second overwrites the first. To let you leave many things
- * around one place, each envelope gets a UNIQUE `d` (its own address, never
- * replaced) and carries the region lookup id in `l` instead, which discovery
- * queries with `#l`. A deliberate, documented deviation for multiplicity.
- */
-export const REGION_TAG = 'l'
-
-function randomHex(bytes = 16): string {
-  const a = new Uint8Array(bytes)
-  ;(globalThis.crypto as Crypto).getRandomValues(a)
-  return bytesToHex(a)
-}
 
 /** Longest hidden message; the whole event still has to fit a relay's limit. */
 export const MAX_MESSAGE_LENGTH = 2000
@@ -65,8 +47,10 @@ export function messagePreview(text: string, max = 32): string {
 
 /** What a decoded hidden thing carries, ready to render. */
 export interface Hidden {
-  /** The envelope event id. */
+  /** The item's stable identity: its inner event id. */
   eventId: string
+  /** The envelope (bag) currently holding it; changes when the bag is rewritten. */
+  bagId: string
   /** The author, from the inner (and envelope) pubkey. */
   author: string
   at: Position
@@ -101,24 +85,25 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
 }
 
 /**
- * Wrap a signed inner event into the envelope template. The caller signs the
- * result and publishes it. The `-` tag makes it author-only to republish.
+ * Wrap a BAG of signed inner events into one region envelope template.
+ *
+ * Spec §8.6: the envelope is keyed by `d = lookup_id`, so there is one per
+ * (author, region, height). kind 33330 is addressable, so republishing it with
+ * more items in the bag replaces the old one — which is how a region
+ * accumulates content without a tag per item. The caller signs and publishes.
+ * `createdAt` must exceed the previous bag's, so the relay keeps the newer.
+ * The `-` tag makes it author-only to republish (with a store-side fallback).
  */
-export async function hideTemplate(inner: NostrEvent, regionKey: Uint8Array, lookupId: string, height: number, protect = true): Promise<EventTemplate> {
-  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inner))
+export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, protect = true): Promise<EventTemplate> {
+  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inners))
   const tags: string[][] = [
-    // Unique per item, so addressable events at one region never replace each
-    // other; the region handle lives in `l` for discovery instead.
-    ['d', randomHex()],
-    [REGION_TAG, lookupId],
+    ['d', lookupId],
     ['encrypted', ALGO, ciphertext],
     ['version', '2'],
     ['h', String(height)],
   ]
-  // NIP-70: the author-only-republish mark. Some relays reject it outright
-  // rather than auth-gating it, so the store can turn it off and try again.
   if (protect) tags.push(['-'])
-  return { kind: HIDDEN_KIND, created_at: inner.created_at, content: '', tags }
+  return { kind: HIDDEN_KIND, created_at: createdAt, content: '', tags }
 }
 
 function tag(ev: NostrEvent, name: string): string | undefined {
@@ -139,26 +124,8 @@ export function heightHint(ev: NostrEvent): number {
   return Number.isInteger(n) && n >= 0 ? n : 0
 }
 
-/**
- * Decrypt an envelope with a region key and return what is inside, or null.
- *
- * Null covers every way it can fail to be a hidden thing for you: not an
- * envelope, the wrong region key, an inner event that is not validly signed,
- * an inner author who is not the one who wrapped it (someone else's event
- * re-wrapped), or an unknown inner kind. A viewer renders only what verifies.
- */
-export async function unhide(outer: NostrEvent, regionKey: Uint8Array): Promise<Hidden | null> {
-  const ct = ciphertextOf(outer)
-  if (!ct) return null
-  const json = await decryptForRegion(regionKey, ct)
-  if (!json) return null
-
-  let inner: NostrEvent
-  try {
-    inner = JSON.parse(json) as NostrEvent
-  } catch {
-    return null
-  }
+/** One inner event of a bag -> a Hidden, or null if it does not verify. */
+function fromInner(inner: NostrEvent, outer: NostrEvent): Hidden | null {
   // The inner event must be genuinely signed, and by the same key that wrapped
   // it: an envelope carrying someone else's event is not theirs to place.
   if (!inner || typeof inner.kind !== 'number' || inner.pubkey !== outer.pubkey) return null
@@ -168,7 +135,8 @@ export async function unhide(outer: NostrEvent, regionKey: Uint8Array): Promise<
   if (!coordHex) return null
   const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
   const base = {
-    eventId: outer.id,
+    eventId: inner.id,
+    bagId: outer.id,
     author: outer.pubkey,
     at: { x, y, z },
     plane,
@@ -188,4 +156,39 @@ export async function unhide(outer: NostrEvent, regionKey: Uint8Array): Promise<
     return { ...base, type: 'message', text: inner.content.slice(0, MAX_MESSAGE_LENGTH) }
   }
   return null
+}
+
+/**
+ * Decrypt a region envelope and return every item in its bag, verified.
+ *
+ * Empty covers every way it fails to open for you: not an envelope, the wrong
+ * region key, or a bag that is not an array. Each item that does not verify is
+ * dropped, not the whole bag.
+ */
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array): Promise<Hidden[]> {
+  const ct = ciphertextOf(outer)
+  if (!ct) return []
+  const json = await decryptForRegion(regionKey, ct)
+  if (!json) return []
+  let inners: unknown
+  try { inners = JSON.parse(json) } catch { return [] }
+  if (!Array.isArray(inners)) return []
+  const out: Hidden[] = []
+  for (const inner of inners) {
+    const h = fromInner(inner as NostrEvent, outer)
+    if (h) out.push(h)
+  }
+  return out
+}
+
+/** The signed inner events currently in an envelope's bag (unverified passthrough). */
+export async function bagInners(outer: NostrEvent, regionKey: Uint8Array): Promise<NostrEvent[]> {
+  const ct = ciphertextOf(outer)
+  if (!ct) return []
+  const json = await decryptForRegion(regionKey, ct)
+  if (!json) return []
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? (arr as NostrEvent[]).filter((e) => e && e.pubkey === outer.pubkey && verifyEvent(e)) : []
+  } catch { return [] }
 }

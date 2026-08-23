@@ -14,7 +14,7 @@
 
 import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
-import { unhide, HIDDEN_KIND, REGION_TAG } from '../lib/hidden'
+import { unbag, HIDDEN_KIND } from '../lib/hidden'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
@@ -69,16 +69,16 @@ export function useDiscovery(): void {
       if (keys.size === 0) return
 
       // A superseded scan must not write stale finds.
-      const events = await query({ kinds: [HIDDEN_KIND], [`#${REGION_TAG}`]: [...keys.keys()] })
+      const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
       if (id !== reqId.current) return
 
       const found = []
       for (const ev of events) {
-        const region = ev.tags.find((t) => t[0] === REGION_TAG)?.[1]
+        const region = ev.tags.find((t) => t[0] === 'd')?.[1]
         const keyHex = region ? keys.get(region) : undefined
         if (!keyHex) continue
-        const decoded = await unhide(ev, hexToBytes(keyHex))
-        if (decoded) found.push(decoded)
+        // One envelope holds a bag; unbag flattens it to items.
+        found.push(...await unbag(ev, hexToBytes(keyHex)))
       }
       if (id === reqId.current) {
         useShards.getState().addDiscovered(found)

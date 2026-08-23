@@ -9,6 +9,8 @@
 
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
+import { useWorkshop } from '../store/useWorkshop'
+import { useShards } from '../store/useShards'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 
@@ -33,6 +35,10 @@ export function useKeyboard(): void {
     const onKeyDown = (event: KeyboardEvent) => {
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      // Typing into a field, or building on the bench: not ours.
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (useWorkshop.getState().open) return
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.
@@ -45,16 +51,39 @@ export function useKeyboard(): void {
         return
       }
 
+      // The chain explorer: one action back or forward, held keys repeat
+      // through the keyboard's own repeat; Home and End are the spawn and the
+      // head. These work wherever the scene is anchored, head included.
+      if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
+        event.preventDefault()
+        store.exploreStep(event.code === 'BracketLeft' ? -1 : 1)
+        return
+      }
+      if (event.code === 'Home') {
+        event.preventDefault()
+        store.explore(0)
+        return
+      }
+      if (event.code === 'End') {
+        event.preventDefault()
+        store.explore(null)
+        return
+      }
+
       if (event.code === 'Escape') {
         event.preventDefault()
+        // Deploying: back out of it rather than resetting the view.
+        if (useShards.getState().pending) { useShards.getState().cancelDeploy(); return }
         store.resetView()
         return
       }
 
-      // Commit the cursor's hop: the only key that costs a proof.
+      // Commit the cursor's hop: the only key that costs a proof. While
+      // deploying, Space places the shard at the cursor instead of moving.
       if (event.code === 'Space') {
         event.preventDefault()
-        store.commit()
+        if (useShards.getState().pending) void useShards.getState().deploy()
+        else store.commit()
         return
       }
 

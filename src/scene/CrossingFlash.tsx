@@ -78,6 +78,9 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     const from = previous.current
     previous.current = position
     if (from.x === position.x && from.y === position.y && from.z === position.z) return
+    // A commit that lands while you are looking at history would flash in a
+    // frame anchored somewhere else entirely.
+    if (!useCyberspace.getState().atHead()) return
 
     const next = buildFlash(from, position, scaleExp, axes)
     setFlash((old) => {

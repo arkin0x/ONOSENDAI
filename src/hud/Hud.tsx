@@ -5,7 +5,12 @@
 
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
+import { DerezzPanel } from './DerezzPanel'
+import { RelaysPanel } from './RelaysPanel'
+import { TargetsPanel } from './TargetsPanel'
+import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
@@ -27,12 +32,13 @@ function Brand(): JSX.Element {
 
 function IdentityPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
+  const live = useCyberspace((s) => s.live)
 
   return (
     <section className="panel">
       <header className="panel__head">
         <h2>Identity</h2>
-        <span className="tag tag--local">LOCAL</span>
+        <span className={`tag ${live ? 'tag--live' : 'tag--local'}`}>{live ? 'LIVE' : 'LOCAL'}</span>
       </header>
 
       <div className="hash">
@@ -44,6 +50,9 @@ function IdentityPanel(): JSX.Element {
         Spawned at this key's coordinate: the 256-bit pubkey decodes directly
         to x / y / z / plane (spec section 8.3). Persisted locally so
         refreshing keeps your identity and position.
+        {live
+          ? ' LIVE: every action is signed and published to cyberspace.nostr1.com as it completes.'
+          : ' LOCAL: actions are signed but stay on this device. Going live publishes the whole chain.'}
       </p>
     </section>
   )
@@ -167,6 +176,8 @@ function Controls(): JSX.Element {
     ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
+    ['[ / ]', 'chain explorer: back / forward one action'],
+    ['Home / End', 'chain explorer: spawn / live head'],
   ]
 
   return (
@@ -195,6 +206,8 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <Brand />
         <IdentityPanel />
         <PositionPanel />
+        <AvatarsPanel />
+        <TargetsPanel />
         <ScalePanel />
         <LinksPanel />
       </div>
@@ -202,7 +215,10 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ProofPanel />
         <ChainPanel />
         <Legend />
+        <ShardsPanel />
         <Controls />
+        <DerezzPanel />
+        <RelaysPanel />
       </div>
     </div>
   )

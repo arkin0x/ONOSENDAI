@@ -45,3 +45,15 @@ export interface TargetScreen {
 
 /** Written per frame inside the Canvas, read per frame by the HUD. */
 export const targetScreens: Record<string, TargetScreen> = {}
+
+/**
+ * A colour for a pubkey, from its own bits, so a target keeps its colour
+ * across sessions and devices and two targets rarely share one. Hue only;
+ * saturation and lightness are fixed so every one of them reads against the
+ * dark field and none collides with Earth's blue or the avatar's red by being
+ * a wash of either.
+ */
+export function targetColor(pubkey: string): string {
+  const hue = (parseInt(pubkey.slice(0, 4), 16) / 0xffff) * 360
+  return `hsl(${hue.toFixed(0)} 90% 62%)`
+}

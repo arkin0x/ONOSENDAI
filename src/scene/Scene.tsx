@@ -43,6 +43,12 @@ import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
+import { SpawnMarker } from './SpawnMarker'
+import { TargetAvatars } from './TargetAvatars'
+import { WorldShards } from './WorldShards'
+import { WorldMessages } from './WorldMessages'
+import { ShardGhost } from './ShardGhost'
+import { DeployRegionBox } from './DeployRegionBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -61,6 +67,7 @@ const FOLLOW_TAU = 0.09
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const pubkey = useCyberspace((s) => s.focusPubkey())
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const win = useViewWindow()
@@ -81,6 +88,12 @@ function World(): JSX.Element {
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <SpawnMarker pubkey={pubkey} axes={axes} />
+      <TargetAvatars axes={axes} />
+      <WorldShards axes={axes} />
+      <WorldMessages axes={axes} />
+      <ShardGhost axes={axes} />
+      <DeployRegionBox axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>
@@ -174,6 +187,9 @@ function CellMetric(): null {
  */
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
+  const genesisId = useCyberspace((s) => s.genesisId)
+  const focusPubkey = useCyberspace((s) => s.focusPubkey())
+  const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -189,6 +205,11 @@ function Rig(): JSX.Element {
   const prevOrigin = useRef<Position | null>(null)
   const prevScale = useRef(-1)
 
+  // Re-framed on an axis snap and on a respawn. A respawn moves the render
+  // origin home in one step, and the per-frame shift below would faithfully
+  // carry the camera the same distance, which is the whole width of the axis:
+  // the avatar would be at the origin and the camera 10^20 cells away. Treating
+  // it as a fresh frame, like a zoom, is what puts you back at your spawn.
   useEffect(() => {
     const c = controls.current
     if (!c) return
@@ -197,14 +218,18 @@ function Rig(): JSX.Element {
     c.target.copy(smooth.current)
     c.object.position.set(x, y, z + START_DISTANCE)
     locked.current = true
+    prevOrigin.current = null
     c.update()
-  }, [view])
+  }, [view, genesisId, focusPubkey, focusPoint])
 
   useFrame((_, dt) => {
     const c = controls.current
     if (!c) return
     const s = useCyberspace.getState()
-    const origin = alignedOrigin(s.position, s.scaleExp)
+    // The anchor, not the position: in history the scene is drawn from the
+    // action being looked at, and the camera has to ride that the same way it
+    // rides a commit.
+    const origin = alignedOrigin(s.anchor, s.scaleExp)
 
     // A commit re-anchors render space to the new avatar cell, so every
     // coordinate in the scene shifts at once. That is a change of frame, not

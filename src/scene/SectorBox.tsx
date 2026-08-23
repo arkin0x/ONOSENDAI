@@ -19,7 +19,7 @@
 
 import { useMemo } from 'react'
 import { BoxGeometry, EdgesGeometry } from 'three'
-import { SECTOR_BITS_DEFAULT } from 'cyberspace-core'
+import { sectorTag, xyzToSectorId, SECTOR_BITS_DEFAULT } from 'cyberspace-core'
 import { GRID_RADIUS, cellDelta, type ViewAxes } from '../lib/space'
 import { SECTOR } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -30,9 +30,9 @@ interface Props {
 }
 
 export function SectorBox({ axes }: Props): JSX.Element | null {
-  const position = useCyberspace((s) => s.position)
+  const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const sectorId = useCyberspace((s) => s.sector())
+  const sectorId = sectorTag(xyzToSectorId(position.x, position.y, position.z))
 
   const box = useMemo(() => {
     // Cells across, at the current zoom. Fractional above scaleExp 30, where a

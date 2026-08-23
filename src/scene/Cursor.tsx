@@ -84,9 +84,13 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
+  const anchor = useCyberspace((s) => s.anchor)
+  const atHead = useCyberspace((s) => s.atHead())
 
-  const target = pendingTarget ?? cursor
-  const active = !samePosition(position, target)
+  // In history there is no move being lined up, so no tether and no target
+  // cell. The scale label stays, riding the anchor instead of the cursor.
+  const target = atHead ? (pendingTarget ?? cursor) : anchor
+  const active = atHead && !samePosition(position, target)
 
   // The action being lined up: null legs when inactive; a landing splits the
   // journey when the direct hop is beyond the Cantor ceiling.
@@ -119,7 +123,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // at its centre. The offset is 0.5 - 0.5/step, so it is invisible at scaleExp
   // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
-    const origin = alignedOrigin(position, scaleExp)
+    const origin = alignedOrigin(anchor, scaleExp)
     const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
     const b = centre(target)
     return {
@@ -128,7 +132,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       landing: plan?.landing ? centre(plan.landing) : null,
       targetCell: b,
     }
-  }, [position, target, plan, scaleExp, axes])
+  }, [position, target, plan, scaleExp, axes, anchor])
 
   const leg1Geometry = useMemo(() => new BufferGeometry(), [])
   const leg2Geometry = useMemo(() => new BufferGeometry(), [])
@@ -168,8 +172,8 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const outline = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
-    const live = s.pendingTarget ?? s.cursor
-    const b = cellCentre(live, alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes)
+    const live = s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor
+    const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
     setSegmentEnd(leg2.visible ? leg2 : leg1, leg2.visible ? leg2Geometry : leg1Geometry, b)
   })
@@ -193,8 +197,8 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         follow={() => {
           const s = useCyberspace.getState()
           return cellCentre(
-            s.pendingTarget ?? s.cursor,
-            alignedOrigin(s.position, s.scaleExp), s.scaleExp, axes,
+            s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor,
+            alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}
       />

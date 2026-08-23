@@ -65,9 +65,10 @@ function cellAt(
 }
 
 export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume {
-  const position = useCyberspace((s) => s.position)
+  // The anchor: the terrain is around whoever the scene is anchored on.
+  const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const plane: Plane = useCyberspace((s) => s.plane)
+  const plane: Plane = useCyberspace((s) => s.anchorPlane)
 
   const [dataVersion, setDataVersion] = useState(0)
   const flushHandle = useRef<number | null>(null)

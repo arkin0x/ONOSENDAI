@@ -174,9 +174,27 @@ body {
   border-color: rgba(200, 245, 255, 0.3);
 }
 
-.tag--local {
+/* Live is the state worth noticing. Local is not an error, it is just quiet. */
+.tag--live {
   color: var(--ok);
 }
+
+.tag--local {
+  color: var(--dim);
+}
+
+/* Relay state, inline after the published count. */
+.relay {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  margin-left: 4px;
+}
+
+.relay--synced { color: var(--ok); }
+.relay--sending,
+.relay--queued { color: var(--warn); }
+.relay--retrying { color: var(--danger); }
+.relay--local { color: var(--dim); }
 
 /* ---------- Scale bar (integrated left edge) ---------- */
 
@@ -431,15 +449,22 @@ body {
 
 /*
  * Sits on the scene, not in a panel: an instrument you read while driving, so
- * it goes flush left and level with the compass rather than stacking down the
- * centre line of the screen with it. Here that means the top left, because a
- * phone puts the compass in the top right corner.
+ * it goes top left on every screen, opposite the compass on a phone and beside
+ * the panel column on a desktop.
  */
-.bits {
+.instruments {
   position: absolute;
   top: 12px;
   left: 8px;
   z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bits {
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -458,32 +483,12 @@ body {
   text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
 
-/* The heading doubles as the control, so it is dressed as the controls chip:
- * same family of floating buttons as that and the tappable compass. */
+/* The heading doubles as the control, so it is the same chip as CONTROLS: one
+ * rule, not a second family that happens to be similar. It used to set its own
+ * type, padding and radius and came out smaller, tighter and in the world font,
+ * which read as a different kind of thing from the chip across the screen. */
 .bits__toggle {
   pointer-events: auto;
-  font-family: inherit;
-  font-size: inherit;
-  letter-spacing: 0.2em;
-  padding: 4px 7px;
-  border-radius: 7px;
-  color: var(--accent);
-  background: rgba(6, 14, 22, 0.72);
-  border: 1px solid rgba(0, 229, 255, 0.3);
-  backdrop-filter: blur(6px);
-  cursor: pointer;
-  touch-action: none;
-}
-
-.bits__toggle:active {
-  background: rgba(0, 229, 255, 0.28);
-}
-
-/* Folded away, it should read as a thing you could open, not as a live readout
- * that has gone quiet. */
-.bits__toggle[aria-pressed='false'] {
-  color: var(--dim);
-  border-color: rgba(200, 245, 255, 0.18);
 }
 
 .bits__grid {
@@ -491,6 +496,13 @@ body {
   flex-direction: column;
   gap: 0.6em; /* One character cell, so the whole block scales as one. */
   white-space: pre;
+  /* The container is pointer-events: none so the scene shows through the gaps;
+   * the grid opts back in so a tap on it can flip binary/hex. */
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .bits__col {
@@ -565,6 +577,206 @@ body {
   .bits__col:not(:first-child) .bits__key {
     display: none;
   }
+}
+
+/* ---------- Chain explorer ----------
+ *
+ * Same voice as the readout above it: the world font, small, glowing. The rail
+ * is the one thing here that wants a finger, so it alone is generous.
+ */
+.explorer {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--fg);
+  text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
+}
+
+.explorer__toggle {
+  pointer-events: auto;
+}
+
+.explorer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* Never wider than the screen: on a phone the rail gives way, not the
+   * buttons, and the detail lines wrap rather than running off the edge. */
+  max-width: calc(100vw - 16px);
+  padding: 6px 8px 7px;
+  border-radius: 7px;
+  background: rgba(6, 14, 22, 0.55);
+  border: 1px solid rgba(0, 229, 255, 0.18);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  text-shadow: none;
+}
+
+/* In history the block turns amber, the same colour the cursor goes when it is
+ * somewhere the avatar is not: you are looking at a place you are not at. */
+.explorer__body.is-history {
+  border-color: rgba(255, 176, 32, 0.45);
+}
+
+.explorer__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.explorer__btn {
+  font-family: inherit;
+  font-size: 9px;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.explorer__btn:active {
+  background: rgba(0, 229, 255, 0.28);
+  border-color: var(--accent);
+}
+
+.explorer__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.explorer__rail {
+  position: relative;
+  flex: 1 1 200px;
+  min-width: 90px;
+  max-width: 200px;
+  height: 24px;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.explorer__line,
+.explorer__walked {
+  position: absolute;
+  left: 0;
+  top: 11px;
+  height: 2px;
+  background: rgba(0, 229, 255, 0.22);
+}
+
+.explorer__line {
+  width: 100%;
+}
+
+.explorer__walked {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+}
+
+.is-history .explorer__walked {
+  background: var(--warn);
+  box-shadow: 0 0 6px rgba(255, 176, 32, 0.6);
+}
+
+.explorer__tick {
+  position: absolute;
+  top: 8px;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  background: rgba(200, 245, 255, 0.35);
+}
+
+.explorer__tick--spawn {
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--fg);
+}
+
+.explorer__mark {
+  position: absolute;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.is-history .explorer__mark {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+
+.explorer__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  letter-spacing: 0.1em;
+}
+
+.explorer__type {
+  color: var(--accent);
+}
+
+.explorer__type--spawn {
+  color: var(--ok);
+}
+
+.explorer__type--sidestep {
+  color: var(--sidestep);
+}
+
+.explorer__when {
+  color: var(--dim);
+}
+
+.explorer__live {
+  margin-left: auto;
+  color: var(--ok);
+}
+
+.explorer__return {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.explorer__detail {
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.explorer__key {
+  color: rgba(0, 229, 255, 0.55);
 }
 
 /* ---------- Legend ---------- */
@@ -650,6 +862,1291 @@ kbd {
   color: var(--fg);
   background: rgba(0, 229, 255, 0.06);
   white-space: nowrap;
+}
+
+/* ---------- Avatars ---------- */
+
+.avatars__find {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.avatars__input {
+  min-width: 0;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.avatars__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.avatars__go,
+.avatars__spectate {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 0 9px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.avatars__go:hover,
+.avatars__spectate:hover {
+  background: rgba(0, 229, 255, 0.18);
+}
+
+.avatars__go:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.avatars__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.avatars__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.avatars__row:first-child {
+  border-top: 0;
+}
+
+.avatars__who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatars__type {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+.avatars__type--spawn { color: var(--ok); }
+.avatars__type--sidestep { color: var(--sidestep); }
+
+.avatars__when {
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.avatars__you {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #ff2323;
+  padding: 0 9px;
+}
+
+.avatars__empty {
+  font-size: 10px;
+  color: var(--dim);
+  padding: 6px 0;
+}
+
+/* ---------- Targets ---------- */
+
+.targets__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.targets__row:first-child {
+  border-top: 0;
+}
+
+.targets__row--contact {
+  grid-template-columns: 1fr auto;
+}
+
+.targets__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.targets__status {
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.targets__status--resolving { color: var(--warn); }
+.targets__status--error { color: var(--danger); }
+
+.targets__remove {
+  font-family: inherit;
+  font-size: 10px;
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.18);
+  cursor: pointer;
+}
+
+.targets__remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.targets__toggle {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 3px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.25);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.targets__toggle:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* Lit in the target's own colour, set inline, so the row and the marker on
+ * the scene agree about which one this is. */
+.targets__toggle.is-on {
+  background: rgba(200, 245, 255, 0.06);
+}
+
+.targets__toggle--mini {
+  width: 26px;
+  padding: 0;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.avatars__acts {
+  display: flex;
+  gap: 4px;
+}
+
+.targets__follows {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+/* ---------- Modal (destructive confirms) ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 7, 13, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal__card {
+  width: min(420px, 100%);
+  padding: 18px 18px 16px;
+  border-radius: 10px;
+  background: rgba(6, 14, 22, 0.98);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+}
+
+.modal__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+}
+
+.modal__body {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+.modal__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.modal__cancel,
+.modal__confirm {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modal__cancel {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.3);
+}
+
+.modal__confirm {
+  color: #05070d;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 700;
+}
+
+.modal__confirm--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---------- Deployment detail overlay ----------
+ *
+ * The wire record of a deployed shard, up while the scene is flown to it. Left
+ * of the panels on a desktop, along the bottom on a phone.
+ */
+.detail {
+  position: fixed;
+  left: 14px;
+  top: 14px;
+  z-index: 101;
+  width: min(320px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.15);
+  backdrop-filter: blur(10px);
+  font-size: 10px;
+}
+
+.detail__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail__eye { color: var(--accent); font-size: 13px; }
+
+.detail__title {
+  flex: 1;
+  letter-spacing: 0.1em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail__title strong { color: var(--accent); }
+
+.detail__exit {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #05070d;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.detail__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.detail__field {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.detail__field--relays { align-items: start; }
+
+.detail__key {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.detail__val {
+  font-family: inherit;
+  font-size: 10px;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.detail__val:hover { color: var(--accent); }
+
+.detail__plain {
+  font-size: 10px;
+  color: var(--fg);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.detail__delete {
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  height: 34px;
+  border-radius: 7px;
+  color: var(--danger);
+  background: rgba(255, 59, 107, 0.08);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+  cursor: pointer;
+}
+
+.detail__delete:hover {
+  background: rgba(255, 59, 107, 0.18);
+}
+
+@media (max-width: 1100px) {
+  .detail {
+    top: auto;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: auto;
+  }
+}
+
+/* ---------- Shards panel sections ---------- */
+.shards__section + .shards__section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+.shards__goto {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shards__goto:hover { background: rgba(0, 229, 255, 0.06); }
+
+.shards__row--deployed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.shards__row--deployed:first-child { border-top: 0; }
+
+.shards__row--deployed.is-viewing {
+  background: rgba(0, 229, 255, 0.1);
+  border-radius: 4px;
+}
+
+.shards__goto-hint {
+  color: var(--dim);
+  padding-right: 4px;
+}
+
+/* ---------- Shards & messages panel additions ---------- */
+.tag--scan {
+  color: var(--warn);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.shards__type {
+  margin-right: 5px;
+  color: var(--accent);
+}
+
+.shards__type--message { color: #ffd27d; }
+
+.shards__compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shards__textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.shards__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.shards__compose-open {
+  width: 100%;
+}
+
+/* ---------- Deployment detail: message + test ---------- */
+.detail__message {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ffd27d;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(255, 210, 125, 0.08);
+  border-left: 2px solid #ffd27d;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.detail__test {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 32px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+}
+
+.detail__test:disabled { opacity: 0.6; cursor: default; }
+.detail__test--testing { color: var(--warn); border-color: var(--warn); }
+.detail__test--found {
+  color: #05070d;
+  background: var(--ok);
+  border-color: var(--ok);
+  font-weight: 700;
+}
+.detail__test--missing { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- Deploy bar ----------
+
+/* ---------- Deploy bar ----------
+ *
+ * Up while you are placing a shard. Bottom of the scene on a phone, above the
+ * pad; a floating card on the left on a desktop, clear of both panel columns.
+ */
+.deploybar {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 101;
+  width: min(360px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(82, 227, 159, 0.5);
+  box-shadow: 0 0 18px rgba(82, 227, 159, 0.18);
+  backdrop-filter: blur(10px);
+  font-size: 10px;
+}
+
+.deploybar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deploybar__eye {
+  color: var(--ok);
+  font-size: 13px;
+}
+
+.deploybar__title {
+  flex: 1;
+  letter-spacing: 0.12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deploybar__title strong {
+  color: var(--ok);
+}
+
+.deploybar__cancel {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.25);
+  cursor: pointer;
+}
+
+.deploybar__label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.deploybar__btn {
+  font-family: inherit;
+  font-size: 12px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.deploybar__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.deploybar__value {
+  font-size: 13px;
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.deploybar__radius {
+  color: var(--ok);
+  letter-spacing: 0.06em;
+}
+
+.deploybar__hint {
+  display: block;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.deploybar__deploy {
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  height: 38px;
+  border-radius: 8px;
+  color: #05070d;
+  background: var(--ok);
+  border: 1px solid var(--ok);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.deploybar__deploy:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Clear of the panel columns on a desktop. */
+@media (min-width: 1101px) {
+  .deploybar {
+    left: 332px;
+    bottom: 14px;
+  }
+}
+
+/* Above the movement pad on a phone. */
+@media (max-width: 1100px) {
+  .deploybar {
+    bottom: 150px;
+  }
+}
+
+.shards__row--deployed {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.shards__deployed {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+.workshop__deploy {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--ok);
+  border: 1px solid var(--ok);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.workshop__deploy:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---------- Spectate bar ----------
+ *
+ * Top right on a desktop, flush to the edge: the panels are locked away while
+ * this is up, so there is no column to leave room for. Along the bottom on a
+ * phone, where the movement pad would be if it were yours to use.
+ */
+.spectate {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.82);
+  border: 1px solid rgba(255, 35, 35, 0.45);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 14px rgba(255, 35, 35, 0.18);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  max-width: calc(100vw - 24px);
+}
+
+.spectate__eye {
+  color: #ff2323;
+  font-size: 13px;
+  line-height: 1;
+  animation: spectate-blink 2.4s ease-in-out infinite;
+}
+
+@keyframes spectate-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.spectate__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.spectate__label {
+  color: #ff2323;
+  font-weight: 700;
+}
+
+.spectate__who {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectate__meta {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.spectate__end {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #05070d;
+  background: #ff2323;
+  border: 1px solid #ff2323;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.spectate__end:hover {
+  background: #ff5c5c;
+}
+
+@media (max-width: 1100px) {
+  .spectate {
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    left: 92px;
+  }
+
+  .spectate__meta {
+    white-space: normal;
+  }
+}
+
+.hamburger-menu:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
+/* ---------- Shards panel ---------- */
+
+.shards__row {
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.shards__row:first-child {
+  border-top: 0;
+}
+
+.shards__open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shards__open:hover {
+  background: rgba(0, 229, 255, 0.06);
+}
+
+.shards__meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.shards__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---------- Workshop ----------
+ *
+ * A full-screen bench. The bench fills what the head and the tools leave,
+ * and on a phone the tools wrap rather than scroll: every control has to be
+ * reachable with the model still in view.
+ */
+.workshop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+}
+
+.workshop__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workshop__list-btn,
+.workshop__close,
+.workshop__mode,
+.workshop__tool,
+.workshop__btn,
+.workshop__new,
+.workshop__mini {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  white-space: nowrap;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workshop__btn:active:not(:disabled),
+.workshop__tool:active,
+.workshop__mode:active {
+  background: rgba(0, 229, 255, 0.28);
+}
+
+.workshop__btn:disabled,
+.workshop__tool:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.workshop__mode.is-on,
+.workshop__tool.is-on {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.workshop__close {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.workshop__name {
+  flex: 1 1 120px;
+  min-width: 80px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.workshop__name:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.workshop__modes {
+  display: flex;
+  gap: 3px;
+}
+
+.workshop__list {
+  position: absolute;
+  top: 48px;
+  left: 10px;
+  z-index: 1;
+  width: min(320px, calc(100vw - 20px));
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.96);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+.workshop__list ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.workshop__list li {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.workshop__list li.is-current .workshop__pick {
+  color: var(--accent);
+}
+
+.workshop__new {
+  width: 100%;
+  color: var(--accent);
+}
+
+.workshop__pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workshop__pick-meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.workshop__mini {
+  width: 30px;
+  padding: 0;
+  color: var(--dim);
+}
+
+.workshop__mini--danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.workshop__bench {
+  position: relative;
+  min-height: 0;
+}
+
+.workshop__bench canvas {
+  display: block;
+}
+
+.workshop__stats {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  pointer-events: none;
+  text-shadow: 0 0 4px var(--bg);
+}
+
+.workshop__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workshop__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.workshop__label {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+  min-width: 54px;
+}
+
+.workshop__label--gap {
+  margin-left: 10px;
+}
+
+.workshop__value {
+  font-size: 11px;
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.workshop__help {
+  flex: 1 1 200px;
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.workshop__pad {
+  display: grid;
+  grid-template-columns: repeat(6, auto);
+  gap: 4px;
+}
+
+.workshop__btn--x { color: #ff4444; }
+.workshop__btn--y { color: #44ff44; }
+.workshop__btn--z { color: #4488ff; }
+
+.workshop__btn--danger {
+  color: var(--danger);
+  border-color: rgba(255, 59, 107, 0.4);
+}
+
+.workshop__color {
+  width: 38px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workshop__swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.workshop__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .workshop__help { display: none; }
+  .workshop__label { min-width: 0; }
+
+  /* Portrait: the header buttons overran the right edge and CLOSE fell off the
+   * screen. The name takes its own top row, and SHARDS, the modes, DEPLOY and
+   * CLOSE wrap onto rows below it, all within reach of a thumb. */
+  .workshop__name {
+    flex: 1 1 100%;
+    order: -1;
+  }
+
+  .workshop__modes {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .workshop__modes .workshop__mode {
+    flex: 1;
+  }
+
+  .workshop__list-btn { flex: 0 0 auto; }
+  .workshop__deploy { flex: 1; }
+  .workshop__close { flex: 0 0 auto; margin-left: 0; }
+}
+
+/* ---------- Relays panel ---------- */
+.relays__list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.relays__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.relays__row:first-child { border-top: 0; }
+
+.relays__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  opacity: 0.5;
+  flex: none;
+}
+
+.relays__dot.is-on {
+  background: var(--ok);
+  opacity: 1;
+  box-shadow: 0 0 6px var(--ok);
+}
+
+.relays__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relays__default {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+/* ---------- Derezz ----------
+ *
+ * The one panel that destroys something. Red throughout, last in the column,
+ * and its button arms a warning rather than acting, so nothing here happens on
+ * one click.
+ */
+
+.panel--derezz {
+  border-color: rgba(255, 59, 107, 0.28);
+}
+
+.panel--derezz .panel__head {
+  border-bottom-color: rgba(255, 59, 107, 0.2);
+}
+
+.panel--derezz .panel__head h2 {
+  color: var(--danger);
+}
+
+.tag--danger {
+  color: var(--danger);
+}
+
+.panel--derezz.is-armed {
+  background: rgba(40, 6, 16, 0.88);
+  border-color: var(--danger);
+}
+
+.derezz__arm,
+.derezz__cancel,
+.derezz__now {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  height: 30px;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0 12px;
+}
+
+.derezz__arm {
+  margin-top: 10px;
+  width: 100%;
+  color: var(--danger);
+  background: rgba(255, 59, 107, 0.06);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+}
+
+.derezz__arm:hover {
+  background: rgba(255, 59, 107, 0.16);
+}
+
+.derezz__warning {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+}
+
+.derezz__fine {
+  margin: 8px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  color: rgba(255, 59, 107, 0.7);
+}
+
+.derezz__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.derezz__cancel {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.3);
+}
+
+.derezz__now {
+  color: #05070d;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  font-weight: 700;
+}
+
+.derezz__now:hover {
+  background: #ff5c85;
 }
 
 /* ---------- Narrow viewports ---------- */
@@ -830,7 +2327,7 @@ kbd {
  * has exactly nine things worth reaching: six directions, the scale readout and
  * its two steps. */
 .touchpad {
-  bottom: 62px;
+  bottom: 92px;
   display: grid;
   grid-template-columns: repeat(3, 38px);
   grid-template-rows: repeat(3, 38px);
@@ -918,8 +2415,47 @@ kbd {
   bottom: 14px;
   display: grid;
   grid-template-columns: 56px 62px;
+  grid-template-rows: 40px 26px;
   gap: 4px;
   width: 122px;
+}
+
+/* Local / Live, under RECALL and COMMIT. A two-way switch, so the state that
+ * is on is always written out next to the one that is not: "LIVE" lit beside a
+ * dark "LOCAL" cannot be misread as a button that would turn live on. */
+.touchmode {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 9px;
+  overflow: hidden;
+  background: rgba(6, 14, 22, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.touchmode__opt {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--dim, #7fa6bd);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.touchmode__opt.is-on {
+  color: #05070d;
+  background: var(--ok, #52e39f);
+  font-weight: 700;
+}
+
+.touchmode__opt:first-child.is-on {
+  /* Local lit is the quieter state: present, deliberately not green. */
+  color: var(--fg, #c8f5ff);
+  background: rgba(200, 245, 255, 0.16);
 }
 
 .touchops__cancel,
@@ -1066,16 +2602,18 @@ kbd {
   border-color: var(--accent, #00e5ff);
 }
 
-/* What is left when the pad is dismissed: small enough to ignore, present
- * enough that the controls are never actually lost. */
-.touchhint {
-  position: fixed;
-  right: 14px;
-  bottom: 14px;
+/* ---------- Chips ----------
+ *
+ * The floating buttons that sit on the scene: CONTROLS, which brings the pad
+ * back, and XOR BITS, which folds the readout. One rule, so they are one kind
+ * of thing wherever they sit. Position is the only thing each adds.
+ */
+.chip {
   z-index: 100;
-  font-family: inherit;
+  font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.14em;
+  line-height: 1;
   padding: 9px 12px;
   border-radius: 9px;
   color: var(--accent, #00e5ff);
@@ -1084,10 +2622,26 @@ kbd {
   backdrop-filter: blur(6px);
   cursor: pointer;
   touch-action: none;
+  white-space: nowrap;
 }
 
-.touchhint:active {
+.chip:active {
   background: rgba(0, 229, 255, 0.28);
+}
+
+/* Folded away, a chip should read as a thing you could open, not as a live
+ * control that has gone quiet. */
+.chip[aria-pressed='false'] {
+  color: var(--dim);
+  border-color: rgba(200, 245, 255, 0.18);
+}
+
+/* What is left when the pad is dismissed: small enough to ignore, present
+ * enough that the controls are never actually lost. */
+.touchhint {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
 }
 
 /* ---------- Controls on desktop ----------
@@ -1106,11 +2660,11 @@ kbd {
   }
 
   /* Same reason as the hamburger: flush left on a desktop is underneath 320px
-   * of panels. The scene's left edge is 352px in, and the compass has moved to
-   * the bottom, so the readout goes with it and sits above the hamburger. */
-  .bits {
-    top: auto;
-    bottom: 88px;
+   * of panels, so it moves to the scene's left edge, 352px in. It stays at the
+   * top. It used to follow the compass to the bottom and sit above the
+   * hamburger, which put the one readout you drive by in the corner you look
+   * at least, behind the pad's row of buttons on a short window. */
+  .instruments {
     left: 352px;
   }
 
@@ -1127,7 +2681,7 @@ kbd {
    * 62px from the bottom. At 150 the menu covered the pad's top row. */
   .viewmenu {
     top: auto;
-    bottom: 196px;
+    bottom: 226px;
     right: 332px;
   }
 }
@@ -1158,6 +2712,7 @@ kbd {
 .touchpad__hub,
 .touchops__commit,
 .touchops__cancel,
+.touchmode__opt,
 .touchhint,
 .hamburger-menu,
 .compass-3d--tappable,

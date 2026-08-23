@@ -139,7 +139,7 @@ function gridGeometry(
 }
 
 export function Rooms({ axes }: Props): JSX.Element {
-  const position = useCyberspace((s) => s.position)
+  const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   const levels = useMemo(() => {

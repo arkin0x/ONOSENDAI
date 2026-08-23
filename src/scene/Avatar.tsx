@@ -19,9 +19,14 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { IcosahedronGeometry, EdgesGeometry, Group } from 'three'
 import { travelOffset } from '../lib/travel'
+import { useCyberspace } from '../store/useCyberspace'
 
-export function Avatar(): JSX.Element {
+export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
+  // Looking at a shard means the origin is that shard, not you: drawing your
+  // marker there would say you are standing on it. Spectating keeps the marker,
+  // where it stands in for the avatar being watched.
+  const focus = useCyberspace((s) => s.focus)
 
   const avatarGeometry = useMemo(() => {
     const geo = new IcosahedronGeometry(0.5, 1)
@@ -31,6 +36,8 @@ export function Avatar(): JSX.Element {
   useFrame(() => {
     if (group.current) group.current.position.copy(travelOffset)
   })
+
+  if (focus) return null
 
   return (
     <group ref={group} position={[0, 0, 0]}>

@@ -449,9 +449,8 @@ body {
 
 /*
  * Sits on the scene, not in a panel: an instrument you read while driving, so
- * it goes flush left and level with the compass rather than stacking down the
- * centre line of the screen with it. Here that means the top left, because a
- * phone puts the compass in the top right corner.
+ * it goes top left on every screen, opposite the compass on a phone and beside
+ * the panel column on a desktop.
  */
 .bits {
   position: absolute;
@@ -476,32 +475,12 @@ body {
   text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
 
-/* The heading doubles as the control, so it is dressed as the controls chip:
- * same family of floating buttons as that and the tappable compass. */
+/* The heading doubles as the control, so it is the same chip as CONTROLS: one
+ * rule, not a second family that happens to be similar. It used to set its own
+ * type, padding and radius and came out smaller, tighter and in the world font,
+ * which read as a different kind of thing from the chip across the screen. */
 .bits__toggle {
   pointer-events: auto;
-  font-family: inherit;
-  font-size: inherit;
-  letter-spacing: 0.2em;
-  padding: 4px 7px;
-  border-radius: 7px;
-  color: var(--accent);
-  background: rgba(6, 14, 22, 0.72);
-  border: 1px solid rgba(0, 229, 255, 0.3);
-  backdrop-filter: blur(6px);
-  cursor: pointer;
-  touch-action: none;
-}
-
-.bits__toggle:active {
-  background: rgba(0, 229, 255, 0.28);
-}
-
-/* Folded away, it should read as a thing you could open, not as a live readout
- * that has gone quiet. */
-.bits__toggle[aria-pressed='false'] {
-  color: var(--dim);
-  border-color: rgba(200, 245, 255, 0.18);
 }
 
 .bits__grid {
@@ -1123,16 +1102,18 @@ kbd {
   border-color: var(--accent, #00e5ff);
 }
 
-/* What is left when the pad is dismissed: small enough to ignore, present
- * enough that the controls are never actually lost. */
-.touchhint {
-  position: fixed;
-  right: 14px;
-  bottom: 14px;
+/* ---------- Chips ----------
+ *
+ * The floating buttons that sit on the scene: CONTROLS, which brings the pad
+ * back, and XOR BITS, which folds the readout. One rule, so they are one kind
+ * of thing wherever they sit. Position is the only thing each adds.
+ */
+.chip {
   z-index: 100;
-  font-family: inherit;
+  font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.14em;
+  line-height: 1;
   padding: 9px 12px;
   border-radius: 9px;
   color: var(--accent, #00e5ff);
@@ -1141,10 +1122,26 @@ kbd {
   backdrop-filter: blur(6px);
   cursor: pointer;
   touch-action: none;
+  white-space: nowrap;
 }
 
-.touchhint:active {
+.chip:active {
   background: rgba(0, 229, 255, 0.28);
+}
+
+/* Folded away, a chip should read as a thing you could open, not as a live
+ * control that has gone quiet. */
+.chip[aria-pressed='false'] {
+  color: var(--dim);
+  border-color: rgba(200, 245, 255, 0.18);
+}
+
+/* What is left when the pad is dismissed: small enough to ignore, present
+ * enough that the controls are never actually lost. */
+.touchhint {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
 }
 
 /* ---------- Controls on desktop ----------
@@ -1163,11 +1160,11 @@ kbd {
   }
 
   /* Same reason as the hamburger: flush left on a desktop is underneath 320px
-   * of panels. The scene's left edge is 352px in, and the compass has moved to
-   * the bottom, so the readout goes with it and sits above the hamburger. */
+   * of panels, so it moves to the scene's left edge, 352px in. It stays at the
+   * top. It used to follow the compass to the bottom and sit above the
+   * hamburger, which put the one readout you drive by in the corner you look
+   * at least, behind the pad's row of buttons on a short window. */
   .bits {
-    top: auto;
-    bottom: 88px;
     left: 352px;
   }
 

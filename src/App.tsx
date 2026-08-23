@@ -60,7 +60,7 @@ export default function App(): JSX.Element {
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
       {!crowded && !padOpen && (
         <button
-          className="touchhint"
+          className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
           aria-label="Show controls"

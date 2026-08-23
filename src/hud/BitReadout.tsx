@@ -23,6 +23,8 @@
  * Its own heading is the button that folds it away, the way tapping the compass
  * is what opens the view menu. A separate chip elsewhere would be one more thing
  * floating on the scene, and it would have to explain which block it belonged to.
+ * It is dressed as the same chip as CONTROLS, because it is the same kind of
+ * thing: a floating handle that brings an instrument back.
  */
 
 import { useState } from 'react'
@@ -80,7 +82,7 @@ export function BitReadout(): JSX.Element {
   return (
     <div className="bits">
       <button
-        className="bits__toggle"
+        className="chip bits__toggle"
         onContextMenu={(e) => e.preventDefault()}
         /* pointerdown, swallowed, which is how the controls chip does it: a tap
            here must not also reach the canvas and toggle the pad. */

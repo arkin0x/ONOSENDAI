@@ -31,6 +31,15 @@ export function TargetsPanel(): JSX.Element {
     return () => window.clearInterval(t)
   }, [])
 
+  // Logging in is a new identity: point "Follows of" at it, and drop the old
+  // identity's contacts so the list never shows one key's follows under
+  // another's npub.
+  useEffect(() => {
+    setWho(me.npub)
+    setContacts(null)
+    setContactsState('idle')
+  }, [me.npub])
+
   const typed = parsePubkey(input)
   const whoHex = parsePubkey(who)
   const list = Object.values(targets)

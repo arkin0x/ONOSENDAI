@@ -171,7 +171,7 @@ export const useShards = create<ShardsState>((set, get) => {
   /** Build and publish the region bag. */
   async function publishBag(inners: NostrEvent[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
-    const event = cyber().sign(await bagTemplate(inners, key, lookupId, height, createdAt))
+    const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt))
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
@@ -204,7 +204,10 @@ export const useShards = create<ShardsState>((set, get) => {
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
-    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(SCAN_MAX_HEIGHT, Math.round(h))) }),
+    // Buryable up to the compute ceiling (past that the region derivation
+    // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
+    // warns about.
+    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(MAX_COMPUTE_HEIGHT, Math.round(h))) }),
     cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null }),
 
     deploy: async () => {
@@ -231,7 +234,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ deployStatus: 'working', deployError: null })
       try {
         const rk = regionKeyAt(at, deployHeight, MAX_COMPUTE_HEIGHT)
-        const inner = cs.sign(innerTemplate)
+        const inner = await cs.signEvent(innerTemplate)
         const live = cs.live
         const existing = await gatherInners(rk.lookupId, rk.key, live)
         const allInners = mergeInners(existing, [inner])
@@ -282,7 +285,7 @@ export const useShards = create<ShardsState>((set, get) => {
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (cs.live && item.published) {
-          const del = cs.sign({
+          const del = await cs.signEvent({
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
             content: 'hidden content removed',

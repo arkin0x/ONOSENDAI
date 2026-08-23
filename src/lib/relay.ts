@@ -33,7 +33,7 @@ let pool: SimplePool | null = null
  * write them.
  */
 function authSign(template: EventTemplate): Promise<VerifiedEvent> {
-  return Promise.resolve(useCyberspace.getState().sign(template) as unknown as VerifiedEvent)
+  return useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
 }
 
 export function getPool(): SimplePool {

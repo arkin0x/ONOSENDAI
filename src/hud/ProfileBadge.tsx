@@ -13,11 +13,25 @@ import { targetColor } from '../lib/targets'
 import { profileLabel } from '../store/useProfiles'
 import { useProfile } from '../hooks/useProfile'
 
+/**
+ * npubEncode throws on anything that is not a 32-byte hex pubkey: a synthetic
+ * landmark id like "earth", a truncated key from a bad tag. A profile view is
+ * never worth taking the whole render down for, so callers that might be handed
+ * one encode through this and fall back.
+ */
+function safeNpub(pubkey: string): string | null {
+  try {
+    return nip19.npubEncode(pubkey)
+  } catch {
+    return null
+  }
+}
+
 export function ProfilePic({ pubkey, size = 22 }: { pubkey: string; size?: number }): JSX.Element {
   const profile = useProfile(pubkey)
   const [broken, setBroken] = useState(false)
-  const npub = nip19.npubEncode(pubkey)
-  const initial = (profile?.name ?? npub.slice(4, 5)).slice(0, 1).toUpperCase()
+  const npub = safeNpub(pubkey)
+  const initial = (profile?.name ?? (npub ? npub.slice(4, 5) : pubkey.slice(0, 1))).slice(0, 1).toUpperCase()
   const style = { width: size, height: size, minWidth: size } as const
 
   if (profile?.picture && !broken) {
@@ -40,10 +54,10 @@ interface BadgeProps {
 
 export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '' }: BadgeProps): JSX.Element {
   const profile = useProfile(pubkey)
-  const npub = nip19.npubEncode(pubkey)
-  const name = profile?.name ?? fallbackName ?? profileLabel(profile, npub)
+  const npub = safeNpub(pubkey)
+  const name = profile?.name ?? fallbackName ?? (npub ? profileLabel(profile, npub) : pubkey.slice(0, 8))
   return (
-    <span className={`badge ${className}`} title={npub}>
+    <span className={`badge ${className}`} title={npub ?? pubkey}>
       <ProfilePic pubkey={pubkey} size={size} />
       <span className="badge__name">{name}</span>
     </span>

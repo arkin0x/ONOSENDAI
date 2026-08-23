@@ -10,19 +10,19 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { SPAWN, useCyberspace } from './useCyberspace'
 
-function land(dx: bigint): void {
+async function land(dx: bigint): Promise<void> {
   const s = useCyberspace.getState()
   useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + dx } })
-  s.applyProofMessage({
+  await s.applyProofMessage({
     type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32),
     regionN: '1', terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
   })
 }
 
 describe('explore', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // Three hops: the chain is spawn, +1, +2, +3.
-    land(1n); land(1n); land(1n)
+    await land(1n); await land(1n); await land(1n)
   })
 
   it('starts at the head, anchored on the live position', () => {
@@ -72,9 +72,9 @@ describe('explore', () => {
     expect(useCyberspace.getState().proof.status).not.toBe('computing')
   })
 
-  it('leaves the anchor in history when a commit lands, and follows once back at the head', () => {
+  it('leaves the anchor in history when a commit lands, and follows once back at the head', async () => {
     useCyberspace.getState().explore(0)
-    land(1n)
+    await land(1n)
     let s = useCyberspace.getState()
     expect(s.actions()).toHaveLength(5)
     expect(s.exploreIndex).toBe(0)
@@ -85,9 +85,9 @@ describe('explore', () => {
     expect(s.position).toEqual({ ...SPAWN, x: SPAWN.x + 4n })
   })
 
-  it('comes back to the head on a respawn', () => {
+  it('comes back to the head on a respawn', async () => {
     useCyberspace.getState().explore(2)
-    useCyberspace.getState().respawn()
+    await useCyberspace.getState().respawn()
     const s = useCyberspace.getState()
     expect(s.exploreIndex).toBeNull()
     expect(s.anchor).toEqual(SPAWN)

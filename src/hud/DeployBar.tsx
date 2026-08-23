@@ -14,7 +14,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatCellSize } from '../lib/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
-import { useCyberspace } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -46,7 +46,7 @@ export function DeployBar(): JSX.Element | null {
         <span className="deploybar__label">HIDE AT HEIGHT</span>
         <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height - 1))} disabled={height <= 0} aria-label="Lower height">−</button>
         <span className="deploybar__value">{height}</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height + 1))} disabled={height >= SCAN_MAX_HEIGHT} aria-label="Higher height">+</button>
+        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height + 1))} disabled={height >= MAX_COMPUTE_HEIGHT} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
         </span>
@@ -58,6 +58,12 @@ export function DeployBar(): JSX.Element | null {
           ? ' At height 0 only someone on this exact point can find it.'
           : ` Anyone who computes this ${formatCellSize(height)} region can find and open it.`}
       </div>
+
+      {height > SCAN_MAX_HEIGHT && (
+        <div className="deploybar__row deploybar__warn">
+          ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
+        </div>
+      )}
 
       {error && <div className="deploybar__row notice">{error}</div>}
 

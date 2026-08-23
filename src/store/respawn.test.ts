@@ -12,7 +12,7 @@ import { parseAction } from '../lib/events'
 import { SPAWN, useCyberspace } from './useCyberspace'
 
 describe('respawn', () => {
-  it('replaces the chain with a single spawn at the pubkey and resets the cursor', () => {
+  it('replaces the chain with a single spawn at the pubkey and resets the cursor', async () => {
     const before = useCyberspace.getState()
     const oldGenesis = before.genesisId
     // Pretend the chain had gone somewhere.
@@ -22,7 +22,7 @@ describe('respawn', () => {
       chain: { hops: 3, sidesteps: 1, totalOps: 99, totalHashes: 7, totalMs: 12 },
     })
 
-    useCyberspace.getState().respawn()
+    await useCyberspace.getState().respawn()
     const s = useCyberspace.getState()
 
     expect(s.events).toHaveLength(1)

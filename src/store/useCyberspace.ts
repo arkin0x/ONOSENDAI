@@ -17,8 +17,23 @@
 
 import { create } from 'zustand'
 import { Quaternion } from 'three'
-import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+import {
+  deferredReconnect,
+  localSigner,
+  randomSigner,
+  signerFromNcryptsec,
+  signerFromNsec,
+  signerFromPref,
+  nip07Signer,
+  nip46Signer,
+  prefOf,
+  loadSignerPref,
+  saveSignerPref,
+  type Signer,
+  type SignerKind,
+} from '../lib/signers'
 import {
   coordToXyz,
   estimateHopCost,
@@ -256,8 +271,28 @@ export interface CyberspaceState {
   setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
   /** The tracked targets as things the HUD can point at. */
   targetList: () => CyberTarget[]
-  /** Sign a template with this identity's key. The only door to it outside this module. */
-  sign: (template: EventTemplate) => NostrEvent
+  /** Sign a template with this identity's active signer. Async because an
+   * extension or a bunker is genuinely remote. The only door to it outside this module. */
+  signEvent: (template: EventTemplate) => Promise<NostrEvent>
+
+  /** How the current identity signs: a local key, an extension, or a bunker. */
+  signerKind: SignerKind
+  /** The last login attempt's failure, shown in the identity panel; null when clear. */
+  loginError: string | null
+  /** Reconnect a stored extension/bunker signer on startup, if there is one. */
+  initSigner: () => Promise<void>
+  /** Replace the identity with a fresh random key, spawning anew. */
+  useNewKey: () => Promise<void>
+  /** Replace the identity from a pasted nsec. */
+  useNsec: (nsec: string) => Promise<void>
+  /** Replace the identity from an ncryptsec and its password. */
+  useNcryptsec: (ncryptsec: string, password: string) => Promise<void>
+  /** Switch to the browser extension (NIP-07). */
+  useExtension: () => Promise<void>
+  /** Switch to a remote bunker (NIP-46) from its bunker:// URI. */
+  useBunker: (uri: string) => Promise<void>
+  /** Clear a shown login error. */
+  clearLoginError: () => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -296,6 +331,13 @@ export interface CyberspaceState {
  */
 const STORAGE_KEY = 'onosendai:nsec'
 const CHAIN_KEY = 'onosendai:chain'
+
+/** Chains are stored per identity, so switching keys and back keeps each one's
+ * local history. The bare CHAIN_KEY is the pre-multi-identity slot, migrated in
+ * on first load for whichever identity it belonged to. */
+function chainKeyFor(pubkey: string): string {
+  return `${CHAIN_KEY}:${pubkey}`
+}
 const LIVE_KEY = 'onosendai:live'
 const TARGETS_KEY = 'onosendai:targets'
 
@@ -332,7 +374,15 @@ function loadOrGenerateKey(): Uint8Array {
 
 function loadChain(pubkey: string): PersistedChain | null {
   try {
-    const raw = localStorage.getItem(CHAIN_KEY)
+    let raw = localStorage.getItem(chainKeyFor(pubkey))
+    if (!raw) {
+      // Migrate the single legacy chain, but only for the identity that wrote it.
+      const legacy = localStorage.getItem(CHAIN_KEY)
+      if (legacy) {
+        const d = JSON.parse(legacy) as Partial<PersistedChain>
+        if (Array.isArray(d.events) && d.events[0]?.pubkey === pubkey) raw = legacy
+      }
+    }
     if (!raw) return null
     const data = JSON.parse(raw) as Partial<PersistedChain>
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
@@ -352,6 +402,8 @@ function loadChain(pubkey: string): PersistedChain | null {
 }
 
 function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats): void {
+  const pubkey = events[0]?.pubkey
+  if (!pubkey) return
   try {
     const data: PersistedChain = {
       version: 2,
@@ -359,7 +411,7 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
       published: events.map((e) => e.id).filter((id) => published[id] === 'ok'),
       stats,
     }
-    localStorage.setItem(CHAIN_KEY, JSON.stringify(data))
+    localStorage.setItem(chainKeyFor(pubkey), JSON.stringify(data))
   } catch { /* quota exceeded or private mode */ }
 }
 
@@ -407,20 +459,53 @@ function nextCreatedAt(head: NostrEvent | undefined): number {
   return head ? Math.max(now, head.created_at) : now
 }
 
-const secretKey = loadOrGenerateKey()
-const pubkeyHex = getPublicKey(secretKey)
-const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
-const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
-
 /** Where any pubkey spawns: its own bits, read as a coordinate (spec §3.1). */
 function spawnOf(pubkey: string): { position: Position; plane: Plane } {
   const { x, y, z, plane } = coordToXyz(hexToCoord(pubkey))
   return { position: { x, y, z }, plane }
 }
 
-/** The one place the key touches an event. */
-function sign(template: EventTemplate): NostrEvent {
-  return finalizeEvent(template, secretKey)
+/**
+ * The signer in use. Mutable, because you can switch from the default random
+ * key to an nsec, an extension, or a bunker. Everything signs through it and
+ * awaits it: local keys resolve at once, the others are genuinely remote.
+ */
+let currentSigner: Signer = pickInitialSigner()
+
+function pickInitialSigner(): Signer {
+  const pref = loadSignerPref()
+  // A stored extension/bunker identity whose chain we already hold: reconnect
+  // lazily, keeping its pubkey so the chain loads now.
+  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey)) {
+    return deferredReconnect(pref, (s) => { currentSigner = s })
+  }
+  if (pref?.nsec) { try { return signerFromNsec(pref.nsec) } catch { /* corrupt */ } }
+  return localSigner(loadOrGenerateKey())
+}
+
+function signEvent(template: EventTemplate): Promise<NostrEvent> {
+  return currentSigner.signEvent(template)
+}
+
+const pubkeyHex = currentSigner.pubkey
+const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
+const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
+
+/** A fresh spawn signed synchronously: only possible with a local key, which is
+ * the only case module init ever needs one (see pickInitialSigner). */
+function freshSpawnSync(signer: Signer): PersistedChain {
+  if (!signer.secretKey) throw new Error('cannot spawn without a local key at init')
+  const createdAt = Math.floor(Date.now() / 1000)
+  const spawn = finalizeEvent(spawnTemplate(signer.pubkey, createdAt), signer.secretKey) as unknown as NostrEvent
+  return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
+}
+
+/** A fresh spawn signed through whatever signer is active (may be remote). */
+async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<PersistedChain> {
+  const now = Math.floor(Date.now() / 1000)
+  const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
+  const spawn = await signer.signEvent(spawnTemplate(signer.pubkey, createdAt))
+  return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
 }
 
 /**
@@ -431,12 +516,6 @@ function sign(template: EventTemplate): NostrEvent {
  * as the one before it is the same bytes, the same id, and so not a new spawn
  * at all. The timestamp therefore steps past the old head, not merely to now.
  */
-function freshSpawn(retiring?: NostrEvent): PersistedChain {
-  const now = Math.floor(Date.now() / 1000)
-  const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
-  return { version: 2, events: [sign(spawnTemplate(pubkeyHex, createdAt))], published: [], stats: EMPTY_STATS }
-}
-
 /** Everything the store derives from a chain, so spawn and respawn agree. */
 function derive(saved: PersistedChain): {
   events: NostrEvent[]
@@ -472,11 +551,37 @@ function derive(saved: PersistedChain): {
   }
 }
 
-const initial = derive(loadChain(pubkeyHex) ?? freshSpawn())
+const initial = derive(loadChain(pubkeyHex) ?? freshSpawnSync(currentSigner))
 
 let requestId = 0
 
-export const useCyberspace = create<CyberspaceState>((set, get) => ({
+export const useCyberspace = create<CyberspaceState>((set, get) => {
+  /**
+   * Replace the active identity. A known pubkey keeps its stored chain; a new
+   * one spawns where its own bits land (spec §3.1). Either way the scene lets
+   * go of whatever it was spectating and returns to the new head.
+   */
+  const switchTo = async (signer: Signer): Promise<void> => {
+    currentSigner = signer
+    saveSignerPref(prefOf(signer))
+    const saved = loadChain(signer.pubkey) ?? (await freshSpawnAsync(signer))
+    const d = derive(saved)
+    set({
+      identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
+      signerKind: signer.kind,
+      loginError: null,
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      proof: IDLE_PROOF,
+      publishError: null,
+      spectate: null,
+      focus: null,
+    })
+    saveChain(d.events, d.published, d.chain)
+  }
+
+  return {
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
   spectate: null,
@@ -490,6 +595,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   proof: IDLE_PROOF,
   publishError: null,
   live: loadLive(),
+  signerKind: currentSigner.kind,
+  loginError: null,
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
@@ -618,7 +725,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     set({ plane: get().plane === 0 ? 1 : 0, proof: IDLE_PROOF })
   },
 
-  applyProofMessage: (msg) => {
+  applyProofMessage: async (msg) => {
     // Stale responses from a cancelled commit must not overwrite fresh state.
     if (msg.id !== requestId) return
 
@@ -642,7 +749,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       return
     }
 
-    const { pendingTarget, position, plane, chain, events, genesisId, prevEventId, published } = get()
+    // Capture the chain we are extending. A cancel or a respawn bumps requestId,
+    // so for this id events/head stay valid across the await; only `published`
+    // moves under us as the publisher drains, so that is re-read after signing.
+    const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
     const newPosition = pendingTarget ?? position
     const head = events[events.length - 1]
 
@@ -658,23 +768,46 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       plane,
       proofHash: msg.proofHash,
     }
-    const event = sign(
-      msg.mode === 'sidestep' && msg.sidestep
-        ? sidestepTemplate({ ...link, ...msg.sidestep })
-        : hopTemplate(link),
-    )
 
-    const stats: ChainStats = {
-      hops: chain.hops + (msg.mode === 'hop' ? 1 : 0),
-      sidesteps: chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
-      totalOps: chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
-      totalHashes: chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
-      totalMs: chain.totalMs + msg.elapsedMs,
+    let event: NostrEvent
+    try {
+      event = await signEvent(
+        msg.mode === 'sidestep' && msg.sidestep
+          ? sidestepTemplate({ ...link, ...msg.sidestep })
+          : hopTemplate(link),
+      )
+    } catch (err) {
+      // The signer refused, or a bunker dropped mid-handshake: the move does not
+      // commit, and the avatar stays where the last committed hop left it.
+      if (msg.id !== requestId) return
+      set({
+        pendingTarget: null,
+        proof: {
+          ...IDLE_PROOF,
+          status: 'infeasible',
+          elapsedMs: msg.elapsedMs,
+          message: `Signing failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      })
+      return
     }
-    const nextEvents = [...events, event]
-    const nextPublished = { ...published, [event.id]: 'queued' as const }
 
-    const following = get().atHead()
+    // A remote signer can take seconds; a cancel or respawn may have landed
+    // while it was thinking. If so this receipt is for a chain that is gone.
+    if (msg.id !== requestId) return
+
+    const now = get()
+    const stats: ChainStats = {
+      hops: now.chain.hops + (msg.mode === 'hop' ? 1 : 0),
+      sidesteps: now.chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
+      totalOps: now.chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
+      totalHashes: now.chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
+      totalMs: now.chain.totalMs + msg.elapsedMs,
+    }
+    const nextEvents = [...now.events, event]
+    const nextPublished = { ...now.published, [event.id]: 'queued' as const }
+
+    const following = now.atHead()
     set({
       position: newPosition,
       headPlane: plane,
@@ -696,7 +829,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       prevEventId: event.id,
       published: nextPublished,
       chain: stats,
-      positionHistory: [...get().positionHistory, newPosition],
+      positionHistory: [...now.positionHistory, newPosition],
     })
 
     saveChain(nextEvents, nextPublished, stats)
@@ -708,14 +841,14 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     set({ live, publishError: null })
   },
 
-  respawn: () => {
+  respawn: async () => {
     // A proof in flight was for a chain that is about to stop existing.
     if (get().proof.status === 'computing') {
       cancelProof()
       requestId++
     }
     const { events } = get()
-    const fresh = derive(freshSpawn(events[events.length - 1]))
+    const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
     set({
       ...fresh,
       cursor: fresh.position,
@@ -864,7 +997,41 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       at: t.position,
     })),
 
-  sign,
+  signEvent,
+
+  initSigner: async () => {
+    // Local identities are live from module load; an extension or bunker was
+    // only deferred. Force its reconnection now, so the first move never waits.
+    const pref = loadSignerPref()
+    if (!pref || pref.kind === 'local') return
+    try {
+      if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
+        await currentSigner.reconnect()
+      } else {
+        await switchTo(await signerFromPref(pref))
+      }
+    } catch (err) {
+      set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  },
+  useNewKey: async () => { await switchTo(randomSigner()) },
+  useNsec: async (nsec) => {
+    try { await switchTo(signerFromNsec(nsec)) }
+    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  },
+  useNcryptsec: async (ncryptsec, password) => {
+    try { await switchTo(signerFromNcryptsec(ncryptsec, password)) }
+    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  },
+  useExtension: async () => {
+    try { await switchTo(await nip07Signer()) }
+    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  },
+  useBunker: async (uri) => {
+    try { await switchTo(await nip46Signer(uri)) }
+    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  },
+  clearLoginError: () => set({ loginError: null }),
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()
@@ -951,7 +1118,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
     ) as [number, number, number]
   },
-}))
+  }
+})
 
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the

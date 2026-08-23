@@ -83,6 +83,29 @@ vertices, colours blending along it), chosen per shard and previewed live.
 localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
 1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
 
+**Hidden content is a wrapped, signed event.** A hidden thing is a full signed
+nostr event — a shard (`kind:3330`, geometry in the content) or a message
+(`kind:1`, text) — serialized, AES-256-GCM encrypted to the region key, and
+carried inside a `kind:33330` envelope (spec section 8.6). Discovery decrypts
+the envelope, verifies the inner signature (and that the inner author is the
+one who wrapped it), and renders by inner kind. The envelope carries the NIP-70
+`-` tag so only its author can republish it; a relay that blocks protected
+events rather than auth-gating them makes the deploy fall back to an
+unprotected copy, honestly recorded per deployment. Because `kind:33330` is
+addressable, each envelope gets a unique `d` (so many things can share a
+region without replacing each other) and carries the region lookup id in an
+`l` tag that discovery filters on.
+
+**Leave a hidden message.** The Shards panel has a WRITE A MESSAGE box: type
+text, then aim and place at a height, exactly like a shard. Discovered messages
+render as billboarded notes at their coordinate with a marker of who left them.
+
+**Test discovery.** A deployment's detail overlay has TEST DISCOVERY: it derives
+the region key fresh from the coordinate, as a stranger would, asks the relay,
+and opens what comes back — proving the whole round-trip independent of local
+state. A SCANNING / N NEAR indicator on the Shards panel shows the background
+scan working.
+
 **Models vs instances.** A **model** is a named design that lives on this
 device (the Shards panel's Models section). A deployed **instance** is one copy
 of it placed at a coordinate and published (the Deployed section). One model can

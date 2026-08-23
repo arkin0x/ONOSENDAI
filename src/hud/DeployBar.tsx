@@ -13,20 +13,23 @@
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatCellSize } from '../lib/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
+import { messagePreview } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
 
 export function DeployBar(): JSX.Element | null {
-  const deployId = useShards((s) => s.deployId)
-  const shard = useShards((s) => (deployId ? s.deployShard() : null))
+  const pending = useShards((s) => s.pending)
+  const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   const height = useShards((s) => s.deployHeight)
   const status = useShards((s) => s.deployStatus)
   const error = useShards((s) => s.deployError)
   const live = useCyberspace((s) => s.live)
   const bind = useRepeatable()
 
-  if (!deployId || !shard) return null
+  if (!pending) return null
 
-  const empty = shard.vertices.length === 0
+  const isMessage = pending.type === 'message'
+  const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
+  const empty = isMessage ? pending.text.trim().length === 0 : !shard || shard.vertices.length === 0
   const working = status === 'working'
 
   return (
@@ -34,7 +37,7 @@ export function DeployBar(): JSX.Element | null {
       <div className="deploybar__row">
         <span className="deploybar__eye" aria-hidden="true">◇</span>
         <span className="deploybar__title">
-          DEPLOY <strong>{shard.name}</strong>
+          {isMessage ? 'HIDE MESSAGE' : 'DEPLOY'} <strong>{name}</strong>
         </span>
         <button className="deploybar__cancel" onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
       </div>
@@ -64,7 +67,7 @@ export function DeployBar(): JSX.Element | null {
         onClick={() => void useShards.getState().deploy()}
         {...noCallout}
       >
-        {empty ? 'SHARD IS EMPTY' : working ? 'HIDING…' : live ? 'DEPLOY & PUBLISH' : 'DEPLOY (LOCAL)'}
+        {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? 'HIDING…' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
       </button>
     </div>
   )

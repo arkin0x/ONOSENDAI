@@ -1301,6 +1301,89 @@ kbd {
   padding-right: 4px;
 }
 
+/* ---------- Shards & messages panel additions ---------- */
+.tag--scan {
+  color: var(--warn);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.shards__type {
+  margin-right: 5px;
+  color: var(--accent);
+}
+
+.shards__type--message { color: #ffd27d; }
+
+.shards__compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shards__textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.shards__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.shards__compose-open {
+  width: 100%;
+}
+
+/* ---------- Deployment detail: message + test ---------- */
+.detail__message {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ffd27d;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(255, 210, 125, 0.08);
+  border-left: 2px solid #ffd27d;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.detail__test {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 32px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+}
+
+.detail__test:disabled { opacity: 0.6; cursor: default; }
+.detail__test--testing { color: var(--warn); border-color: var(--warn); }
+.detail__test--found {
+  color: #05070d;
+  background: var(--ok);
+  border-color: var(--ok);
+  font-weight: 700;
+}
+.detail__test--missing { color: var(--danger); border-color: var(--danger); }
+
 /* ---------- Deploy bar ----------
 
 /* ---------- Deploy bar ----------

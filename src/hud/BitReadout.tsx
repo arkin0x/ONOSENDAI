@@ -69,10 +69,19 @@ function Row({
   )
 }
 
+/** The WINDOW_BITS-wide binary string as right-padded hex, MSB first. */
+function toHex(binary: string): string {
+  const width = Math.ceil(binary.length / 4)
+  return (parseInt(binary || '0', 2) >>> 0).toString(16).padStart(width, '0')
+}
+
 export function BitReadout(): JSX.Element {
   // Open by default: it is the readout that explains what everything else on
   // screen costs, so it has to be seen before anyone would think to dismiss it.
   const [open, setOpen] = useState(true)
+  // The window can be read as binary, where the wall is a shape, or as hex,
+  // where it is compact. Tapping the open grid flips between them.
+  const [hex, setHex] = useState(false)
   // At the head: you and the cursor. In history: the hop into the action
   // shown, so scrubbing the chain reads each crossing's cost off the bits.
   const [from, to] = useCyberspace((s) => s.readoutPair())
@@ -91,11 +100,15 @@ export function BitReadout(): JSX.Element {
         aria-label={open ? 'Hide XOR readout' : 'Show XOR readout'}
         aria-pressed={open}
       >
-        XOR BITS{open ? ` ${scaleExp}..${scaleExp + WINDOW_BITS - 1}` : ''}
+        XOR {hex ? 'HEX' : 'BITS'}{open ? ` ${scaleExp}..${scaleExp + WINDOW_BITS - 1}` : ''}
       </button>
 
       {open && (
-        <div className="bits__grid">
+        <div
+          className="bits__grid"
+          title={hex ? 'Tap for binary' : 'Tap for hex'}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setHex((v) => !v) }}
+        >
           {columns.map((c) => (
             <div className="bits__col" key={c.axis}>
               {/* The heading carries the same two lead-ins as the rows below it,
@@ -103,23 +116,33 @@ export function BitReadout(): JSX.Element {
                   of floating a cell to the left of the column. */}
               <div className="bits__head">
                 <span className="bits__key">{'    '}</span>
-                <Slot />
+                {!hex && <Slot />}
                 {c.axis.toUpperCase()} h={c.height}
               </div>
-              <Row tone="pos" bits={c.avatar} />
-              <Row tone="trg" bits={c.cursor} />
-              <Row
-                tone="xor"
-                above={c.hiddenAbove}
-                below={c.hiddenBelow}
-                bits={
-                  <>
-                    <span className="bits__matched">{c.matched}</span>
-                    <span className="bits__wall">{c.wall}</span>
-                    {c.rest}
-                  </>
-                }
-              />
+              {hex ? (
+                <>
+                  <div className="bits__row--pos"><span className="bits__key">{'pos '}</span>{toHex(c.avatar)}</div>
+                  <div className="bits__row--trg"><span className="bits__key">{'trg '}</span>{toHex(c.cursor)}</div>
+                  <div className="bits__row--xor"><span className="bits__key">{'xor '}</span>{toHex(c.xor)}</div>
+                </>
+              ) : (
+                <>
+                  <Row tone="pos" bits={c.avatar} />
+                  <Row tone="trg" bits={c.cursor} />
+                  <Row
+                    tone="xor"
+                    above={c.hiddenAbove}
+                    below={c.hiddenBelow}
+                    bits={
+                      <>
+                        <span className="bits__matched">{c.matched}</span>
+                        <span className="bits__wall">{c.wall}</span>
+                        {c.rest}
+                      </>
+                    }
+                  />
+                </>
+              )}
             </div>
           ))}
         </div>

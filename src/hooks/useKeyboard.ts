@@ -73,7 +73,7 @@ export function useKeyboard(): void {
       if (event.code === 'Escape') {
         event.preventDefault()
         // Deploying: back out of it rather than resetting the view.
-        if (useShards.getState().deployId) { useShards.getState().cancelDeploy(); return }
+        if (useShards.getState().pending) { useShards.getState().cancelDeploy(); return }
         store.resetView()
         return
       }
@@ -82,7 +82,7 @@ export function useKeyboard(): void {
       // deploying, Space places the shard at the cursor instead of moving.
       if (event.code === 'Space') {
         event.preventDefault()
-        if (useShards.getState().deployId) void useShards.getState().deploy()
+        if (useShards.getState().pending) void useShards.getState().deploy()
         else store.commit()
         return
       }

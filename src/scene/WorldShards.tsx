@@ -30,15 +30,16 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    return useShards.getState().worldShards()
-      .filter((w) => w.plane === anchorPlane)
+    return useShards.getState().worldItems()
+      .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
       .map((w) => {
+        const shard = w.shard!
         const centre = cellCentre(w.at, origin, scaleExp, axes)
         // 2^(unit - scaleExp) render cells per model unit, in fixed point so
         // the ratio survives past a double at large separations of the two.
-        const exp = w.shard.unit - scaleExp
+        const exp = shard.unit - scaleExp
         const scale = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
-        return { ...w, centre, scale }
+        return { key: w.key, shard, centre, scale }
       })
       .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldShards reads.

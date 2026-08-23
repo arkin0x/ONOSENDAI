@@ -1,9 +1,9 @@
 /**
- * ShardGhost.tsx — the shard about to be placed, at the cursor.
+ * ShardGhost.tsx — the thing about to be placed, at the cursor.
  *
- * While deploying, this draws the shard you are aiming, dimmed, exactly where
- * and at the size it would land: at the cursor, one model unit to 2^(unit -
- * scaleExp) render cells. Moving the cursor moves it, so you place by looking.
+ * While deploying, this draws what you are aiming, dimmed, where and at the
+ * size it would land: a shard at 2^(unit - scaleExp) cells per model unit, or a
+ * message as a note. Moving the cursor moves it, so you place by looking.
  */
 
 import { useFrame } from '@react-three/fiber'
@@ -12,15 +12,17 @@ import { Group } from 'three'
 import { cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
+import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
+import { WorldLabel } from './WorldLabel'
 
 interface Props {
   axes: ViewAxes
 }
 
 export function ShardGhost({ axes }: Props): JSX.Element | null {
-  const deployId = useShards((s) => s.deployId)
-  const shard = useShards((s) => (deployId ? s.deployShard() : null))
+  const pending = useShards((s) => s.pending)
+  const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const group = useRef<Group>(null)
 
@@ -39,7 +41,26 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     g.position.set(b[0], b[1], b[2])
   })
 
-  if (!shard || !deployId || !Number.isFinite(scale)) return null
+  const cursorAt = (): [number, number, number] => {
+    const st = useCyberspace.getState()
+    return cellCentre(st.cursor, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
+  }
+
+  // A message ghosts as a dim note that follows the cursor.
+  if (pending?.type === 'message') {
+    return (
+      <WorldLabel
+        text={messagePreview(pending.text, 40)}
+        color="#ffd27d"
+        follow={cursorAt}
+        align="center"
+        px={13}
+        opacity={0.5}
+      />
+    )
+  }
+
+  if (!shard || pending?.type !== 'shard' || !Number.isFinite(scale)) return null
 
   return (
     <group ref={group}>

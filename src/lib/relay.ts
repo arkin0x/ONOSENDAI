@@ -13,8 +13,10 @@
 
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools/filter'
+import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
 import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
+import { useCyberspace } from '../store/useCyberspace'
 
 /** The default relay, always present; kept here so panels can name it. */
 export const CYBERSPACE_RELAY = DEFAULT_RELAY
@@ -24,8 +26,23 @@ const MAX_WAIT_MS = 8000
 
 let pool: SimplePool | null = null
 
+/**
+ * Sign a relay's NIP-42 challenge with this identity's key, so a relay that
+ * auth-gates can be told who we are. Needed to publish NIP-70 protected events
+ * (our hidden content carries the `-` tag): only the authenticated author may
+ * write them.
+ */
+function authSign(template: EventTemplate): Promise<VerifiedEvent> {
+  return Promise.resolve(useCyberspace.getState().sign(template) as unknown as VerifiedEvent)
+}
+
 export function getPool(): SimplePool {
-  if (!pool) pool = new SimplePool()
+  if (!pool) {
+    pool = new SimplePool()
+    // Not in SimplePool's constructor options, but the abstract pool honours it:
+    // when a relay proactively sends an AUTH challenge, authenticate with it.
+    ;(pool as unknown as { automaticallyAuth?: () => typeof authSign }).automaticallyAuth = () => authSign
+  }
   return pool
 }
 
@@ -39,7 +56,7 @@ export type PublishResult = { ok: true } | { ok: false; reason: string }
 /** Send to a set of relays; ok if any accepts, the last refusal otherwise. */
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
-  const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS }))
+  const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
   if (results.some((r) => r.status === 'fulfilled')) return { ok: true }
   const reason = results.map((r) => (r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : '')).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }

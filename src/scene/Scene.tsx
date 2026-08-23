@@ -46,7 +46,9 @@ import { ShaderPointField } from './ShaderPointField'
 import { SpawnMarker } from './SpawnMarker'
 import { TargetAvatars } from './TargetAvatars'
 import { WorldShards } from './WorldShards'
+import { WorldMessages } from './WorldMessages'
 import { ShardGhost } from './ShardGhost'
+import { DeployRegionBox } from './DeployRegionBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -89,7 +91,9 @@ function World(): JSX.Element {
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <WorldShards axes={axes} />
+      <WorldMessages axes={axes} />
       <ShardGhost axes={axes} />
+      <DeployRegionBox axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>

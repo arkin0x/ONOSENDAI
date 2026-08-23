@@ -27,7 +27,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const live = useCyberspace((s) => s.live)
-  const deploying = useShards((s) => s.deployId !== null)
+  const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
 
   const computing = proof.status === 'computing'

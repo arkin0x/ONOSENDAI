@@ -71,7 +71,7 @@ export function Workshop(): JSX.Element | null {
         <button
           className="workshop__deploy"
           disabled={!shard || shard.vertices.length === 0}
-          onClick={() => { if (shard) { useShards.getState().startDeploy(shard.id); w().closeWorkshop() } }}
+          onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id); w().closeWorkshop() } }}
           title="Place this shard in the world"
         >DEPLOY ▸</button>
         <button className="workshop__close" onClick={() => w().closeWorkshop()}>CLOSE</button>

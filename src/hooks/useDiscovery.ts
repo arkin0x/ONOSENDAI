@@ -14,7 +14,7 @@
 
 import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
-import { decodeShard, ENCRYPTED_KIND } from '../lib/shardEvents'
+import { unhide, HIDDEN_KIND, REGION_TAG } from '../lib/hidden'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
@@ -51,6 +51,7 @@ export function useDiscovery(): void {
     const id = ++reqId.current
     const w = worker.current
     if (!w) return
+    useShards.getState().setScanning(true)
 
     // Collect this scan's keys, then query the relay once for all of them.
     const keys = new Map<string, string>() // lookupId -> keyHex
@@ -68,18 +69,21 @@ export function useDiscovery(): void {
       if (keys.size === 0) return
 
       // A superseded scan must not write stale finds.
-      const events = await query({ kinds: [ENCRYPTED_KIND], '#d': [...keys.keys()] })
+      const events = await query({ kinds: [HIDDEN_KIND], [`#${REGION_TAG}`]: [...keys.keys()] })
       if (id !== reqId.current) return
 
       const found = []
       for (const ev of events) {
-        const d = ev.tags.find((t) => t[0] === 'd')?.[1]
-        const keyHex = d ? keys.get(d) : undefined
+        const region = ev.tags.find((t) => t[0] === REGION_TAG)?.[1]
+        const keyHex = region ? keys.get(region) : undefined
         if (!keyHex) continue
-        const decoded = await decodeShard(ev, hexToBytes(keyHex))
+        const decoded = await unhide(ev, hexToBytes(keyHex))
         if (decoded) found.push(decoded)
       }
-      if (id === reqId.current) useShards.getState().addDiscovered(found)
+      if (id === reqId.current) {
+        useShards.getState().addDiscovered(found)
+        useShards.getState().setScanning(false)
+      }
     }
 
     w.addEventListener('message', onMessage)

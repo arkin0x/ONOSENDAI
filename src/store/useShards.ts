@@ -1,55 +1,73 @@
 /**
- * useShards.ts — deploying shards, and everything visible in the world.
+ * useShards.ts — hiding things at a location, and everything visible in the world.
  *
- * Deploy is its own small mode: pick a shard, aim the cursor, choose a height
- * to hide it at, and place. The height is the discovery radius (spec §7.3):
- * height 0 is a single gibson, so only someone at that exact point finds it;
- * higher hides it across a wider aligned cube that costs more to compute. What
- * gets published is a kind 33330 event whose ciphertext only opens to the
- * region key, so the coordinate never leaves this device in the clear.
+ * A hidden thing is a shard or a text message, wrapped as a signed inner event
+ * inside a location-encrypted kind:33330 envelope (see lib/hidden). Deploy is
+ * one small mode for both: choose the content, aim the cursor, pick a height to
+ * hide it at, and place. Height is the discovery radius (spec §7.3): height 0
+ * is a single gibson, so only someone at that exact point finds it; higher
+ * hides it across a wider aligned cube that costs more to compute.
  *
  * Two sources feed the world. `mine` is what this device deployed, kept with
- * its key so it always renders regardless of scanning: you can always see your
- * own chalk. `discovered` is what a background scan turned up near you and
- * managed to decrypt. Both persist their inputs, not their positions, so a
- * reload re-derives everything honestly.
+ * its key so it always renders: you can always see your own chalk. `discovered`
+ * is what a background scan turned up near you and could decrypt and verify.
  */
 
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { publishMany, relaySet } from '../lib/relay'
-import { ENCRYPTED_KIND } from '../lib/shardEvents'
-import { deployTemplate, type DecodedShard } from '../lib/shardEvents'
+import { publishMany, query, relaySet } from '../lib/relay'
 import { bytesToHex, hexToBytes } from '../lib/events'
+import { regionKeyAt } from '../lib/shardCrypto'
+import {
+  HIDDEN_KIND,
+  REGION_TAG,
+  hideTemplate,
+  messageInnerTemplate,
+  shardInnerTemplate,
+  unhide,
+  type Hidden,
+  type HiddenType,
+} from '../lib/hidden'
 import { useWorkshop } from './useWorkshop'
 import type { ShardModel } from '../lib/shards'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 
-/** What this device put out there: enough to re-render and re-publish it. */
+/** What this device put out there: enough to re-render, re-publish, or delete it. */
 export interface MyDeployment {
   eventId: string
-  shard: ShardModel
+  type: HiddenType
+  shard?: ShardModel
+  text?: string
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
   lookupId: string
   keyHex: string
-  /** The relays this instance was sent to; where a deletion has to go. */
   relays: string[]
   createdAt: number
   published: boolean
+  /** Whether it went out with the NIP-70 author-only mark. */
+  protectedEvent: boolean
 }
 
-/** A shard placed in the world, ready to draw. */
-export interface WorldShard {
+/** Something placed in the world, ready to draw. */
+export interface WorldItem {
   key: string
-  shard: ShardModel
+  type: HiddenType
   at: Position
   plane: Plane
   height: number
   mine: boolean
+  author?: string
+  shard?: ShardModel
+  text?: string
 }
+
+/** What a deploy is placing, before it lands. */
+export type DeployPending =
+  | { type: 'shard'; shardId: string }
+  | { type: 'message'; text: string }
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */
 export const SCAN_MAX_HEIGHT = 12
@@ -57,29 +75,31 @@ export const SCAN_MAX_HEIGHT = 12
 export type DeployStatus = 'idle' | 'working' | 'done' | 'error'
 
 interface ShardsState {
-  /** Which shard is being deployed, or null. */
-  deployId: string | null
+  pending: DeployPending | null
   deployHeight: number
   deployStatus: DeployStatus
   deployError: string | null
   mine: MyDeployment[]
-  /** Discovered shards keyed by event id. */
-  discovered: Record<string, DecodedShard>
-  /** Deleted instance ids, so a later scan never rebuilds them. Persisted. */
+  discovered: Record<string, Hidden>
   deleted: Record<string, true>
-  /** The deployment whose wire details are open, or null. */
   inspecting: string | null
+  /** A background scan is in flight. */
+  scanning: boolean
 
-  startDeploy: (shardId: string) => void
+  startDeployShard: (shardId: string) => void
+  startDeployMessage: (text: string) => void
   setDeployHeight: (h: number) => void
   cancelDeploy: () => void
   deploy: () => Promise<void>
-  /** Delete one instance: a NIP-09 deletion to its relays, and gone from here. */
   deleteInstance: (eventId: string) => Promise<void>
   inspect: (eventId: string | null) => void
-  addDiscovered: (shards: DecodedShard[]) => void
-  deployShard: () => ShardModel | null
-  worldShards: () => WorldShard[]
+  addDiscovered: (items: Hidden[]) => void
+  setScanning: (scanning: boolean) => void
+  /** Freshly derive the region key and confirm the relay returns and opens it. */
+  testDiscovery: (eventId: string) => Promise<boolean>
+  /** The shard being deployed, when a shard is pending. */
+  pendingShard: () => ShardModel | null
+  worldItems: () => WorldItem[]
 }
 
 const MINE_KEY = 'onosendai:deployments'
@@ -90,7 +110,7 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.shard) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && (d.shard || d.text)) : []
   } catch { return [] }
 }
 
@@ -113,8 +133,12 @@ function saveDeleted(deleted: Record<string, true>): void {
   try { localStorage.setItem(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
 }
 
+function positionOf(d: MyDeployment): Position {
+  return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
+}
+
 export const useShards = create<ShardsState>((set, get) => ({
-  deployId: null,
+  pending: null,
   deployHeight: 0,
   deployStatus: 'idle',
   deployError: null,
@@ -122,43 +146,69 @@ export const useShards = create<ShardsState>((set, get) => ({
   discovered: {},
   deleted: loadDeleted(),
   inspecting: null,
+  scanning: false,
 
-  startDeploy: (shardId) => set({ deployId: shardId, deployStatus: 'idle', deployError: null }),
+  startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
+  startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
   setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(SCAN_MAX_HEIGHT, Math.round(h))) }),
-  cancelDeploy: () => set({ deployId: null, deployStatus: 'idle', deployError: null }),
+  cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null }),
 
   deploy: async () => {
-    const { deployId, deployHeight } = get()
-    const shard = useWorkshop.getState().shards.find((s) => s.id === deployId)
-    if (!shard || shard.vertices.length === 0) return
-    set({ deployStatus: 'working', deployError: null })
-
+    const { pending, deployHeight } = get()
+    if (!pending) return
     const cs = useCyberspace.getState()
-    // The cursor is where you aimed; the plane is the one you are in.
     const at: Position = { ...cs.cursor }
     const plane = cs.plane
     const createdAt = Math.floor(Date.now() / 1000)
 
+    let shard: ShardModel | undefined
+    let text: string | undefined
+    let innerTemplate
+    if (pending.type === 'shard') {
+      shard = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+      if (!shard || shard.vertices.length === 0) return
+      innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
+    } else {
+      text = pending.text.trim()
+      if (!text) return
+      innerTemplate = messageInnerTemplate(text, at, plane, createdAt)
+    }
+
+    set({ deployStatus: 'working', deployError: null })
     try {
-      const { template, lookupId, key } = await deployTemplate({ shard, at, plane, height: deployHeight, createdAt, maxComputeHeight: MAX_COMPUTE_HEIGHT })
-      const event = cs.sign(template)
+      const rk = regionKeyAt(at, deployHeight, MAX_COMPUTE_HEIGHT)
+      const inner = cs.sign(innerTemplate)
       const live = cs.live
-      const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
+
+      // Prefer the protected (author-only) form. A relay that blocks it rather
+      // than auth-gating it is common, so fall back to an unprotected copy so
+      // the content still lands and can be discovered.
+      let protectedEvent = true
+      let event = cs.sign(await hideTemplate(inner, rk.key, rk.lookupId, deployHeight, true))
+      let result = live ? await publishMany(relaySet(), event) : { ok: true as const, reason: undefined }
+      if (live && !result.ok && /protect|blocked/i.test((result as { reason?: string }).reason ?? '')) {
+        protectedEvent = false
+        event = cs.sign(await hideTemplate(inner, rk.key, rk.lookupId, deployHeight, false))
+        result = await publishMany(relaySet(), event)
+      }
 
       const deployment: MyDeployment = {
         eventId: event.id,
+        type: pending.type,
         shard,
+        text,
         at: { x: at.x.toString(), y: at.y.toString(), z: at.z.toString() },
         plane,
         height: deployHeight,
-        lookupId,
-        keyHex: bytesToHex(key),
+        lookupId: rk.lookupId,
+        keyHex: bytesToHex(rk.key),
         relays: relaySet(),
         createdAt,
         published: live && result.ok,
+        protectedEvent: protectedEvent && (!live || result.ok),
       }
       const mine = [...get().mine, deployment]
-      set({ mine, deployStatus: 'done', deployId: null })
+      set({ mine, deployStatus: 'done', pending: null })
       saveMine(mine)
     } catch (err) {
       set({ deployStatus: 'error', deployError: err instanceof Error ? err.message : String(err) })
@@ -169,15 +219,14 @@ export const useShards = create<ShardsState>((set, get) => ({
     const dep = get().mine.find((d) => d.eventId === eventId)
     if (!dep) return
     const cs = useCyberspace.getState()
-    // NIP-09: a kind 5 naming the event tells relays to drop it. Sent to the
-    // relays this instance actually went to. It only works while Live; local
-    // instances never left the device, so removing them here is the whole job.
+    // NIP-09: a kind 5 naming the event tells relays to drop it. Only meaningful
+    // if it was published; a local instance never left the device.
     if (cs.live && dep.published) {
       const del = cs.sign({
         kind: 5,
         created_at: Math.floor(Date.now() / 1000),
-        content: 'shard instance removed',
-        tags: [['e', eventId], ['k', String(ENCRYPTED_KIND)]],
+        content: 'hidden content removed',
+        tags: [['e', eventId], ['k', String(HIDDEN_KIND)]],
       })
       try { await publishMany(dep.relays ?? relaySet(), del) } catch { /* best effort */ }
     }
@@ -185,41 +234,62 @@ export const useShards = create<ShardsState>((set, get) => ({
     const deleted = { ...get().deleted, [eventId]: true as const }
     const discovered = { ...get().discovered }
     delete discovered[eventId]
-    const inspecting = get().inspecting === eventId ? null : get().inspecting
-    if (get().inspecting === eventId) cs.clearFocus()
-    set({ mine, deleted, discovered, inspecting })
+    const wasInspecting = get().inspecting === eventId
+    set({ mine, deleted, discovered, inspecting: wasInspecting ? null : get().inspecting })
+    if (wasInspecting) cs.clearFocus()
     saveMine(mine); saveDeleted(deleted)
   },
 
   inspect: (eventId) => set({ inspecting: eventId }),
 
-  addDiscovered: (shards) => {
-    if (shards.length === 0) return
+  addDiscovered: (items) => {
+    if (items.length === 0) return
     const { deleted } = get()
     const discovered = { ...get().discovered }
     let changed = false
-    for (const s of shards) if (!discovered[s.id] && !deleted[s.id]) { discovered[s.id] = s; changed = true }
+    for (const h of items) if (!discovered[h.eventId] && !deleted[h.eventId]) { discovered[h.eventId] = h; changed = true }
     if (changed) set({ discovered })
   },
 
-  deployShard: () => useWorkshop.getState().shards.find((s) => s.id === get().deployId) ?? null,
+  setScanning: (scanning) => set({ scanning }),
 
-  worldShards: () => {
-    const out: WorldShard[] = []
+  testDiscovery: async (eventId) => {
+    const dep = get().mine.find((d) => d.eventId === eventId)
+    if (!dep || !dep.published) return false
+    // Derive the region key fresh from the coordinate, as a stranger would,
+    // rather than trusting the stored one: this proves the region gate, not
+    // just that we kept the key.
+    const rk = regionKeyAt(positionOf(dep), dep.height, MAX_COMPUTE_HEIGHT)
+    const events = await query({ kinds: [HIDDEN_KIND], [`#${REGION_TAG}`]: [rk.lookupId] })
+    for (const ev of events) {
+      const got = await unhide(ev, rk.key)
+      if (got && got.eventId === eventId) return true
+    }
+    return false
+  },
+
+  pendingShard: () => {
+    const { pending } = get()
+    if (pending?.type !== 'shard') return null
+    return useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
+  },
+
+  worldItems: () => {
+    const out: WorldItem[] = []
     const seen = new Set<string>()
     for (const d of get().mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, shard: d.shard, at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, plane: d.plane, height: d.height, mine: true })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, shard: d.shard, text: d.text })
     }
-    for (const d of Object.values(get().discovered)) {
-      if (seen.has(d.id)) continue
-      out.push({ key: d.id, shard: d.shard, at: d.at, plane: d.plane, height: d.height, mine: false })
+    for (const h of Object.values(get().discovered)) {
+      if (seen.has(h.eventId)) continue
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text })
     }
     return out
   },
 }))
 
-/** The key bytes for one of my deployments, for republish or re-derivation. */
+/** The key bytes for one of my deployments. */
 export function keyBytes(hex: string): Uint8Array {
   return hexToBytes(hex)
 }

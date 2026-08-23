@@ -4,22 +4,28 @@
  *
  * Movement is two-phase: WASD noodles a free cursor, Space commits the hop.
  * Only a commit computes a proof, and position advances only when that proof
- * lands, so the prevEventId chain stays contiguous: every position the avatar
- * has ever occupied is covered by a completed proof.
+ * lands, so the chain stays contiguous: every position the avatar has ever
+ * occupied is covered by a completed proof.
+ *
+ * The chain is real. Every committed action is signed into a kind:3333 event
+ * (spec §8) the moment its proof lands, and the NEXT proof's temporal work is
+ * bound to that event's id, exactly as a verifier will recompute it. Local or
+ * Live only decides whether those events leave the device; the chain itself
+ * is identical either way, so switching to Live later publishes the same
+ * history you would have had from the start.
  */
 
 import { create } from 'zustand'
 import { Quaternion } from 'three'
-import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { nip19 } from 'nostr-tools'
 import {
-  coordToHex,
   coordToXyz,
   estimateHopCost,
   findLcaHeight,
   hexToCoord,
   sectorTag,
   sidestepLanding,
-  xyzToCoord,
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
@@ -38,12 +44,19 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
+import {
+  buildChain,
+  hopTemplate,
+  sidestepTemplate,
+  spawnTemplate,
+  type ActionEvent,
+  type EventTemplate,
+  type NostrEvent,
+} from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
-
-const ZERO_EVENT_ID = '0'.repeat(64)
 
 export type ProofStatus = 'idle' | 'computing' | 'done' | 'infeasible'
 
@@ -89,6 +102,14 @@ export interface ChainStats {
   totalMs: number
 }
 
+const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 }
+
+/**
+ * Where an event is on its way to the relay. `queued` is the resting state in
+ * Local mode: nothing is wrong, nothing has been sent.
+ */
+export type PublishStatus = 'queued' | 'sending' | 'ok' | 'failed'
+
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
   position: Position
@@ -96,14 +117,34 @@ export interface CyberspaceState {
   cursor: Position
   /** Destination of the in-flight proof; null when nothing is computing. */
   pendingTarget: Position | null
+  /**
+   * The plane the next commit lands in. Part of the lined-up action, like the
+   * cursor: toggling it costs nothing until committed, and a commit with the
+   * cursor parked but the plane flipped is a valid hop in its own right.
+   */
   plane: Plane
+  /** The plane the chain head is actually in. */
+  headPlane: Plane
   scaleExp: number
   /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
   viewHistory: Quaternion[]
   proof: ProofState
-  /** Chained from the previous hop, mirroring the protocol's prev-event link. */
+  /**
+   * The chain, as signed events, spawn first. This is what gets published and
+   * what everything else here is derived from.
+   */
+  events: NostrEvent[]
+  /** Id of the spawn event: the `genesis` every hop names. */
+  genesisId: string
+  /** Id of the chain head: what the next proof's temporal work binds to. */
   prevEventId: string
+  /** Per event id. Only `ok` survives a reload; the rest is in flight. */
+  published: Record<string, PublishStatus>
+  /** The relay's last refusal, for the panel. */
+  publishError: string | null
+  /** Live publishes the chain as it grows; Local keeps it here. */
+  live: boolean
   chain: ChainStats
   /** History of all committed positions for rendering the path trail. */
   positionHistory: Position[]
@@ -119,13 +160,18 @@ export interface CyberspaceState {
   canonicalView: () => void
   togglePlane: () => void
   applyProofMessage: (msg: ProofResponse) => void
+  setLive: (live: boolean) => void
+  setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
   screenAxes: ViewAxes | null
   setScreenAxes: (a: ViewAxes) => void
+  /** The chain head's coordinate, exactly as its event carries it. */
   coordHex: () => string
   sector: () => string
+  /** The chain, parsed. */
+  actions: () => ActionEvent[]
   /** Which position the view centers on: cursor when active, avatar otherwise. */
   viewCenter: () => Position
   /**
@@ -142,12 +188,23 @@ export interface CyberspaceState {
  */
 const STORAGE_KEY = 'onosendai:nsec'
 const CHAIN_KEY = 'onosendai:chain'
+const LIVE_KEY = 'onosendai:live'
 
-interface PersistedState {
-  position: { x: string; y: string; z: string }
-  prevEventId: string
-  chain: ChainStats
-  positionHistory: Array<{ x: string; y: string; z: string }>
+/**
+ * The chain on disk is the events themselves. Position, history, plane and the
+ * previous-event link are all read back out of them, so there is exactly one
+ * thing that can be wrong and it is the thing that gets published.
+ *
+ * Version 1 stored positions with proof hashes standing in for event ids and
+ * no events at all, which nothing could verify or publish. It is not migrated:
+ * a chain that never existed on the wire restarts at spawn.
+ */
+interface PersistedChain {
+  version: 2
+  events: NostrEvent[]
+  /** Ids the relay has acknowledged. */
+  published: string[]
+  stats: ChainStats
 }
 
 function loadOrGenerateKey(): Uint8Array {
@@ -164,74 +221,116 @@ function loadOrGenerateKey(): Uint8Array {
   return fresh
 }
 
-function positionToStrings(pos: Position): { x: string; y: string; z: string } {
-  return { x: pos.x.toString(), y: pos.y.toString(), z: pos.z.toString() }
-}
-
-function stringsToPosition(s: { x: string; y: string; z: string }): Position {
-  return { x: BigInt(s.x), y: BigInt(s.y), z: BigInt(s.z) }
-}
-
-function loadPersistedState(): {
-  position: Position
-  prevEventId: string
-  chain: ChainStats
-  positionHistory: Position[]
-} | null {
+function loadChain(pubkey: string): PersistedChain | null {
   try {
     const raw = localStorage.getItem(CHAIN_KEY)
     if (!raw) return null
-    const data: PersistedState = JSON.parse(raw)
+    const data = JSON.parse(raw) as Partial<PersistedChain>
+    if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
+    // Must reassemble to exactly what was stored, from our own key. Anything
+    // else is a chain that cannot be continued, and pretending otherwise would
+    // sign hops onto a history the relay will reject.
+    const chain = buildChain(data.events)
+    if (chain.length !== data.events.length || chain[0].pubkey !== pubkey) return null
     return {
-      position: stringsToPosition(data.position),
-      prevEventId: data.prevEventId,
-      chain: data.chain,
-      positionHistory: data.positionHistory.map(stringsToPosition),
+      version: 2,
+      events: data.events,
+      published: Array.isArray(data.published) ? data.published : [],
+      stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
     }
   } catch { /* corrupt or missing */ }
   return null
 }
 
-function savePersistedState(
-  position: Position,
-  prevEventId: string,
-  chain: ChainStats,
-  positionHistory: Position[],
-): void {
+function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats): void {
   try {
-    const data: PersistedState = {
-      position: positionToStrings(position),
-      prevEventId,
-      chain,
-      positionHistory: positionHistory.map(positionToStrings),
+    const data: PersistedChain = {
+      version: 2,
+      events,
+      published: events.map((e) => e.id).filter((id) => published[id] === 'ok'),
+      stats,
     }
     localStorage.setItem(CHAIN_KEY, JSON.stringify(data))
   } catch { /* quota exceeded or private mode */ }
 }
 
+function loadLive(): boolean {
+  try {
+    const raw = localStorage.getItem(LIVE_KEY)
+    // Live is the default: the chain is meant to be seen.
+    return raw === null ? true : raw === '1'
+  } catch { return true }
+}
+
+function saveLive(live: boolean): void {
+  try { localStorage.setItem(LIVE_KEY, live ? '1' : '0') } catch { /* private mode */ }
+}
+
+/** Seconds now, never earlier than the chain head, so the chain reads forward. */
+function nextCreatedAt(head: NostrEvent | undefined): number {
+  const now = Math.floor(Date.now() / 1000)
+  return head ? Math.max(now, head.created_at) : now
+}
+
 const secretKey = loadOrGenerateKey()
 const pubkeyHex = getPublicKey(secretKey)
-const SPAWN = coordToXyz(hexToCoord(pubkeyHex))
-const persisted = loadPersistedState()
+const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
+const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
-// Reserved for signing spawn/hop events when publishing lands.
-void secretKey
+/** The one place the key touches an event. */
+function sign(template: EventTemplate): NostrEvent {
+  return finalizeEvent(template, secretKey)
+}
+
+/** A fresh chain: one spawn, signed now, unpublished. */
+function freshSpawn(): PersistedChain {
+  return { version: 2, events: [sign(spawnTemplate(pubkeyHex, nextCreatedAt(undefined)))], published: [], stats: EMPTY_STATS }
+}
+
+/** Everything the store derives from a chain, so spawn and respawn agree. */
+function derive(saved: PersistedChain): {
+  events: NostrEvent[]
+  genesisId: string
+  prevEventId: string
+  published: Record<string, PublishStatus>
+  chain: ChainStats
+  position: Position
+  positionHistory: Position[]
+  plane: Plane
+  headPlane: Plane
+} {
+  const actions = buildChain(saved.events)
+  const head = actions[actions.length - 1]
+  const published: Record<string, PublishStatus> = {}
+  for (const e of saved.events) published[e.id] = saved.published.includes(e.id) ? 'ok' : 'queued'
+  return {
+    events: saved.events,
+    genesisId: actions[0].id,
+    prevEventId: head.id,
+    published,
+    chain: saved.stats,
+    position: head.position,
+    positionHistory: actions.map((a) => a.position),
+    plane: head.plane,
+    headPlane: head.plane,
+  }
+}
+
+const initial = derive(loadChain(pubkeyHex) ?? freshSpawn())
 
 let requestId = 0
 
 export const useCyberspace = create<CyberspaceState>((set, get) => ({
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
-  position: persisted?.position ?? SPAWN,
-  cursor: persisted?.position ?? SPAWN,
+  ...initial,
+  cursor: initial.position,
   pendingTarget: null,
-  plane: 0,
   scaleExp: 0,
   view: topDownQuaternion(),
   viewHistory: [],
   proof: IDLE_PROOF,
-  prevEventId: persisted?.prevEventId ?? ZERO_EVENT_ID,
-  chain: persisted?.chain ?? { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 },
-  positionHistory: persisted?.positionHistory ?? [SPAWN],
+  publishError: null,
+  live: loadLive(),
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
@@ -266,10 +365,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   },
 
   commit: () => {
-    const { position, cursor, plane, prevEventId, proof } = get()
+    const { position, cursor, plane, headPlane, prevEventId, proof } = get()
     // One proof at a time. X cancels a commit you regret.
     if (proof.status === 'computing') return
-    if (samePosition(position, cursor)) return
+    // Nothing lined up: same cell, same plane.
+    if (samePosition(position, cursor) && plane === headPlane) return
 
     // Route by feasibility: a hop straight to the cursor when the Cantor tree
     // fits, otherwise a Merkle sidestep across the blocking wall(s). The
@@ -283,7 +383,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     )
     const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
     const to = mode === 'sidestep' ? sidestepTarget(position, cursor) : { ...cursor }
-    if (samePosition(position, to)) return
+    if (samePosition(position, to) && plane === headPlane) return
 
     const id = ++requestId
     set({
@@ -303,7 +403,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   },
 
   cancel: () => {
-    const { proof, position } = get()
+    const { proof, position, headPlane } = get()
     if (proof.status === 'computing') {
       // A Cantor proof is one synchronous computation, so cancelling means
       // killing the worker thread. Position never moved; the chain is intact.
@@ -312,8 +412,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       set({ pendingTarget: null, proof: IDLE_PROOF })
       return
     }
-    // Not computing: recall the cursor to where you actually stand.
-    set({ cursor: { ...position } })
+    // Not computing: recall the cursor, plane included, to where you stand.
+    set({ cursor: { ...position }, plane: headPlane })
   },
 
   adjustScale: (delta) => {
@@ -378,12 +478,41 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       return
     }
 
-    const { pendingTarget, position, chain } = get()
+    const { pendingTarget, position, plane, chain, events, genesisId, prevEventId, published } = get()
     const newPosition = pendingTarget ?? position
+    const head = events[events.length - 1]
+
+    // The proof covers exactly position -> pendingTarget, and this event is
+    // its receipt: the hop the next proof will bind to. Signed before the
+    // position moves, so the chain and the avatar can never disagree.
+    const link = {
+      createdAt: nextCreatedAt(head),
+      genesisId,
+      previousId: prevEventId,
+      prevCoordHex: head.tags.find((t) => t[0] === 'C')?.[1] ?? '',
+      to: newPosition,
+      plane,
+      proofHash: msg.proofHash,
+    }
+    const event = sign(
+      msg.mode === 'sidestep' && msg.sidestep
+        ? sidestepTemplate({ ...link, ...msg.sidestep })
+        : hopTemplate(link),
+    )
+
+    const stats: ChainStats = {
+      hops: chain.hops + (msg.mode === 'hop' ? 1 : 0),
+      sidesteps: chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
+      totalOps: chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
+      totalHashes: chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
+      totalMs: chain.totalMs + msg.elapsedMs,
+    }
+    const nextEvents = [...events, event]
+    const nextPublished = { ...published, [event.id]: 'queued' as const }
+
     set({
-      // The proof covers exactly position -> pendingTarget, so only now does
-      // the avatar arrive.
       position: newPosition,
+      headPlane: plane,
       pendingTarget: null,
       proof: {
         status: 'done',
@@ -397,25 +526,28 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
         totalOps: msg.totalOps,
         message: null,
       },
-      prevEventId: msg.proofHash,
-      chain: {
-        hops: chain.hops + (msg.mode === 'hop' ? 1 : 0),
-        sidesteps: chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
-        totalOps: chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
-        totalHashes: chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
-        totalMs: chain.totalMs + msg.elapsedMs,
-      },
+      events: nextEvents,
+      prevEventId: event.id,
+      published: nextPublished,
+      chain: stats,
       positionHistory: [...get().positionHistory, newPosition],
     })
-    
-    // Persist the updated state
-    const updated = get()
-    savePersistedState(
-      updated.position,
-      updated.prevEventId,
-      updated.chain,
-      updated.positionHistory
-    )
+
+    saveChain(nextEvents, nextPublished, stats)
+  },
+
+  setLive: (live) => {
+    if (live === get().live) return
+    saveLive(live)
+    set({ live, publishError: null })
+  },
+
+  setPublishStatus: (id, status, reason) => {
+    const { published, events, chain } = get()
+    if (!(id in published)) return
+    const next = { ...published, [id]: status }
+    set({ published: next, publishError: status === 'failed' ? reason ?? 'relay refused' : null })
+    if (status === 'ok') saveChain(events, next, chain)
   },
 
   screenAxes: null,
@@ -434,14 +566,16 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   axes: () => viewAxes(get().view),
 
   coordHex: () => {
-    const { position, plane } = get()
-    return coordToHex(xyzToCoord(position.x, position.y, position.z, plane))
+    const { events } = get()
+    return events[events.length - 1].tags.find((t) => t[0] === 'C')?.[1] ?? ''
   },
 
   sector: () => {
     const { position } = get()
     return sectorTag(xyzToSectorId(position.x, position.y, position.z))
   },
+
+  actions: () => buildChain(get().events),
 
   /**
    * Which position the camera tracks: the cursor when it is away from the
@@ -482,6 +616,9 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   // from the HUD, the same way __terrain and __screenAxes work.
   ;(window as unknown as { __store?: unknown }).__store = useCyberspace
 }
+
+/** The spawn coordinate of this identity: where every chain of its starts. */
+export { SPAWN }
 
 /** Positions are equal when all three axes match. */
 export function samePosition(a: Position, b: Position): boolean {

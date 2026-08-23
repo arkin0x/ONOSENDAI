@@ -27,12 +27,13 @@ function Brand(): JSX.Element {
 
 function IdentityPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
+  const live = useCyberspace((s) => s.live)
 
   return (
     <section className="panel">
       <header className="panel__head">
         <h2>Identity</h2>
-        <span className="tag tag--local">LOCAL</span>
+        <span className={`tag ${live ? 'tag--live' : 'tag--local'}`}>{live ? 'LIVE' : 'LOCAL'}</span>
       </header>
 
       <div className="hash">
@@ -44,6 +45,9 @@ function IdentityPanel(): JSX.Element {
         Spawned at this key's coordinate: the 256-bit pubkey decodes directly
         to x / y / z / plane (spec section 8.3). Persisted locally so
         refreshing keeps your identity and position.
+        {live
+          ? ' LIVE: every action is signed and published to cyberspace.nostr1.com as it completes.'
+          : ' LOCAL: actions are signed but stay on this device. Going live publishes the whole chain.'}
       </p>
     </section>
   )

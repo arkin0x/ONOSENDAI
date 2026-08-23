@@ -174,9 +174,27 @@ body {
   border-color: rgba(200, 245, 255, 0.3);
 }
 
-.tag--local {
+/* Live is the state worth noticing. Local is not an error, it is just quiet. */
+.tag--live {
   color: var(--ok);
 }
+
+.tag--local {
+  color: var(--dim);
+}
+
+/* Relay state, inline after the published count. */
+.relay {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  margin-left: 4px;
+}
+
+.relay--synced { color: var(--ok); }
+.relay--sending,
+.relay--queued { color: var(--warn); }
+.relay--retrying { color: var(--danger); }
+.relay--local { color: var(--dim); }
 
 /* ---------- Scale bar (integrated left edge) ---------- */
 
@@ -830,7 +848,7 @@ kbd {
  * has exactly nine things worth reaching: six directions, the scale readout and
  * its two steps. */
 .touchpad {
-  bottom: 62px;
+  bottom: 92px;
   display: grid;
   grid-template-columns: repeat(3, 38px);
   grid-template-rows: repeat(3, 38px);
@@ -918,8 +936,47 @@ kbd {
   bottom: 14px;
   display: grid;
   grid-template-columns: 56px 62px;
+  grid-template-rows: 40px 26px;
   gap: 4px;
   width: 122px;
+}
+
+/* Local / Live, under RECALL and COMMIT. A two-way switch, so the state that
+ * is on is always written out next to the one that is not: "LIVE" lit beside a
+ * dark "LOCAL" cannot be misread as a button that would turn live on. */
+.touchmode {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 9px;
+  overflow: hidden;
+  background: rgba(6, 14, 22, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.touchmode__opt {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--dim, #7fa6bd);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.touchmode__opt.is-on {
+  color: #05070d;
+  background: var(--ok, #52e39f);
+  font-weight: 700;
+}
+
+.touchmode__opt:first-child.is-on {
+  /* Local lit is the quieter state: present, deliberately not green. */
+  color: var(--fg, #c8f5ff);
+  background: rgba(200, 245, 255, 0.16);
 }
 
 .touchops__cancel,
@@ -1127,7 +1184,7 @@ kbd {
    * 62px from the bottom. At 150 the menu covered the pad's top row. */
   .viewmenu {
     top: auto;
-    bottom: 196px;
+    bottom: 226px;
     right: 332px;
   }
 }
@@ -1158,6 +1215,7 @@ kbd {
 .touchpad__hub,
 .touchops__commit,
 .touchops__cancel,
+.touchmode__opt,
 .touchhint,
 .hamburger-menu,
 .compass-3d--tappable,

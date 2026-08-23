@@ -83,6 +83,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const live = useCyberspace((s) => s.live)
   const bind = useRepeatable()
 
   const computing = proof.status === 'computing'
@@ -171,6 +172,25 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
         >
           {computing ? `${Math.round(proof.progress * 100)}%` : 'COMMIT'}
         </button>
+        {/* Whether a commit leaves the device. Under COMMIT because that is the
+            only control whose meaning it changes, and a switch rather than a
+            toggle so the current mode is always spelled out, not implied. */}
+        <div className="touchmode" role="group" aria-label="Publishing mode">
+          <button
+            className={`touchmode__opt ${live ? '' : 'is-on'}`}
+            aria-pressed={!live}
+            title="Local: sign actions but keep them on this device"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(false) }}
+          >LOCAL</button>
+          <button
+            className={`touchmode__opt ${live ? 'is-on' : ''}`}
+            aria-pressed={live}
+            title="Live: publish every action to cyberspace.nostr1.com"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(true) }}
+          >LIVE</button>
+        </div>
       </div>
     </>
   )

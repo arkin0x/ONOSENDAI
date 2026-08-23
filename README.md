@@ -52,9 +52,23 @@ up, and both turn red when the hop is beyond the compute ceiling. Position
 only advances when a committed proof completes, so the movement chain shown in
 the HUD is contiguous by construction.
 
-**You spawn at your pubkey.** Each session generates an ephemeral keypair, and
-per spec section 8.3 the spawn coordinate IS the pubkey: the 256-bit key
-decodes directly to x / y / z / plane.
+**You spawn at your pubkey.** The first visit generates a keypair and keeps it
+in localStorage, and per spec section 8.3 the spawn coordinate IS the pubkey:
+the 256-bit key decodes directly to x / y / z / plane.
+
+**The chain is real.** Spawning signs a `kind:3333` spawn event, and every
+committed hop or sidestep is signed into its own event the moment the proof
+lands, naming the spawn as `genesis` and the previous event as `previous`
+(spec section 8). The next proof's temporal work is bound to that event's id,
+exactly as a verifier recomputes it. The chain persists as those events, so a
+reload reads position, plane and history back out of them.
+
+**Local / Live.** The switch under RECALL and COMMIT decides whether events
+leave the device. Live (the default) publishes each one to
+`wss://cyberspace.nostr1.com` as it is signed, in chain order, and the proof
+chain panel shows how many the relay has acknowledged. Local keeps them here;
+switching to Live later publishes the whole backlog, oldest first, so every
+prefix the relay holds is itself a valid chain.
 
 ## What you are looking at
 
@@ -109,6 +123,9 @@ Two consequences worth knowing:
 src/
   lib/space.ts        coordinate <-> render-space maths, view orientation
   lib/palette.ts      the two visual encodings (terrain fill, boundary lines)
+  lib/events.ts       kind:3333 builders, parser, chain reassembly (spec 8, 10)
+  lib/relay.ts        the one relay, publish / query / subscribe
+  lib/publisher.ts    drains unpublished events in chain order while Live
   lib/workers.ts      worker singletons
   store/              zustand store: position, scale, view, proof telemetry
   workers/            proof and terrain sampling, off the main thread

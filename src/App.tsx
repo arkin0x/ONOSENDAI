@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
@@ -11,6 +11,7 @@ import { useKeyboard } from './hooks/useKeyboard'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
+import { startPublisher } from './lib/publisher'
 
 export default function App(): JSX.Element {
   // The keyboard is unconditional. The on-screen controls are a second way in,
@@ -18,6 +19,8 @@ export default function App(): JSX.Element {
   // cannot drift apart, and nothing about having a pointer takes the keys away.
   useKeyboard()
   useProofListener()
+  // The chain drains to the relay from here on, whenever Live is on.
+  useEffect(() => startPublisher(), [])
   const isMobile = useIsMobile()
   const targets = useTargets()
 

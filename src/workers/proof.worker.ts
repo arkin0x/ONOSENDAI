@@ -14,6 +14,7 @@ import {
   estimateSidestepCost,
   type Plane,
 } from 'cyberspace-core'
+import { bytesToHex } from '../lib/events'
 
 export type ProofMode = 'hop' | 'sidestep'
 
@@ -25,6 +26,18 @@ export interface ProofRequest {
   plane: Plane
   prevEventId: string
   maxComputeHeight: number
+}
+
+/**
+ * What a sidestep event carries beyond the proof hash (spec §8.5): the
+ * per-axis Merkle roots, the destination leaf's inclusion path on each axis,
+ * and the LCA heights that tell a verifier how long each path should be.
+ * Already hex, so the main thread can drop them straight into tags.
+ */
+export interface SidestepTags {
+  merkleRoots: [string, string, string]
+  inclusionProofs: [string, string, string]
+  lcaHeights: [number, number, number]
 }
 
 export type ProofResponse =
@@ -40,6 +53,8 @@ export type ProofResponse =
       lca: { x: number; y: number; z: number }
       /** Cantor pairings for hops; SHA-256 evaluations for sidesteps. */
       totalOps: number
+      /** Present on sidesteps only. */
+      sidestep?: SidestepTags
     }
   | { type: 'error'; id: number; message: string; elapsedMs: number }
 
@@ -77,6 +92,9 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         prevEventId,
         onProgress,
       )
+      // §8.5: siblings concatenated leaf-first per axis, empty where the axis
+      // did not move.
+      const path = (siblings: Uint8Array[]): string => siblings.map(bytesToHex).join('')
       const response: ProofResponse = {
         type: 'done',
         id,
@@ -87,6 +105,15 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         terrainK: proof.terrainK,
         lca: { x: proof.lcaHeights[0], y: proof.lcaHeights[1], z: proof.lcaHeights[2] },
         totalOps: estimate.totalHashes,
+        sidestep: {
+          merkleRoots: [bytesToHex(proof.merkleX), bytesToHex(proof.merkleY), bytesToHex(proof.merkleZ)],
+          inclusionProofs: [
+            path(proof.inclusionProofs.x),
+            path(proof.inclusionProofs.y),
+            path(proof.inclusionProofs.z),
+          ],
+          lcaHeights: proof.lcaHeights,
+        },
       }
       self.postMessage(response)
       return

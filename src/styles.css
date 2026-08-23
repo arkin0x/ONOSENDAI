@@ -1707,6 +1707,13 @@ kbd {
   color: var(--dim);
 }
 
+.deploybar__warn {
+  display: block;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--warn);
+}
+
 .deploybar__deploy {
   margin-top: 2px;
   font-family: inherit;

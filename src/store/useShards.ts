@@ -204,7 +204,10 @@ export const useShards = create<ShardsState>((set, get) => {
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
-    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(SCAN_MAX_HEIGHT, Math.round(h))) }),
+    // Buryable up to the compute ceiling (past that the region derivation
+    // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
+    // warns about.
+    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(MAX_COMPUTE_HEIGHT, Math.round(h))) }),
     cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null }),
 
     deploy: async () => {

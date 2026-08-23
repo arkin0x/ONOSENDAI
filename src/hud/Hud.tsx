@@ -3,8 +3,14 @@
  * would cost, and what the chain has cost so far.
  */
 
+import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { shortHex } from '../lib/time'
+import { ProfilePic } from './ProfileBadge'
+import { useProfile } from '../hooks/useProfile'
+import { profileLabel } from '../store/useProfiles'
+import { LoginModal } from './LoginModal'
 import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
@@ -30,9 +36,20 @@ function Brand(): JSX.Element {
   )
 }
 
+const SIGNER_LABEL: Record<string, string> = {
+  local: 'LOCAL KEY',
+  nip07: 'EXTENSION',
+  nip46: 'BUNKER',
+}
+
 function IdentityPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
+  const signerKind = useCyberspace((s) => s.signerKind)
   const live = useCyberspace((s) => s.live)
+  const profile = useProfile(identity.pubkey)
+  const [loginOpen, setLoginOpen] = useState(false)
+
+  const name = profileLabel(profile, identity.npub)
 
   return (
     <section className="panel">
@@ -41,9 +58,14 @@ function IdentityPanel(): JSX.Element {
         <span className={`tag ${live ? 'tag--live' : 'tag--local'}`}>{live ? 'LIVE' : 'LOCAL'}</span>
       </header>
 
-      <div className="hash">
-        <span className="hash__label">npub</span>
-        <code>{identity.npub}</code>
+      <div className="identity__who">
+        <ProfilePic pubkey={identity.pubkey} size={38} />
+        <div className="identity__who-text">
+          <span className="identity__name">{name}</span>
+          <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>
+          <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+        </div>
+        <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
       </div>
 
       <p className="legend__note">
@@ -54,6 +76,8 @@ function IdentityPanel(): JSX.Element {
           ? ' LIVE: every action is signed and published to cyberspace.nostr1.com as it completes.'
           : ' LOCAL: actions are signed but stay on this device. Going live publishes the whole chain.'}
       </p>
+
+      {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
     </section>
   )
 }

@@ -171,7 +171,7 @@ export const useShards = create<ShardsState>((set, get) => {
   /** Build and publish the region bag. */
   async function publishBag(inners: NostrEvent[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
-    const event = cyber().sign(await bagTemplate(inners, key, lookupId, height, createdAt))
+    const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt))
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
@@ -231,7 +231,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ deployStatus: 'working', deployError: null })
       try {
         const rk = regionKeyAt(at, deployHeight, MAX_COMPUTE_HEIGHT)
-        const inner = cs.sign(innerTemplate)
+        const inner = await cs.signEvent(innerTemplate)
         const live = cs.live
         const existing = await gatherInners(rk.lookupId, rk.key, live)
         const allInners = mergeInners(existing, [inner])
@@ -282,7 +282,7 @@ export const useShards = create<ShardsState>((set, get) => {
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (cs.live && item.published) {
-          const del = cs.sign({
+          const del = await cs.signEvent({
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
             content: 'hidden content removed',

@@ -3065,3 +3065,145 @@ kbd {
  * ring means nothing, since there is no extent to describe out there. */
 .target[data-mode='on'] .target__arrow { display: none; }
 .target[data-mode='off'] .target__ring { display: none; }
+
+/* ---------- Identity panel: who is signing ---------- */
+.identity__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.identity__who-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.identity__name {
+  font-size: 13px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity__signer {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+
+.identity__change {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 0 10px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.identity__change:hover {
+  background: rgba(0, 229, 255, 0.16);
+}
+
+/* ---------- Login modal (choosing who signs) ---------- */
+.modal__card.login {
+  border-color: rgba(0, 229, 255, 0.5);
+  max-width: 440px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.login__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.login__head .modal__title {
+  margin: 0;
+}
+
+.login__current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.18);
+}
+
+.login__current-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.login__kind {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+
+.login__note {
+  margin: 12px 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+.login__error {
+  margin: 0 0 12px;
+  word-break: break-word;
+}
+
+.login__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid rgba(200, 245, 255, 0.08);
+}
+
+.login__section--row {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.login__section--row .login__act {
+  flex: 1;
+}
+
+.login__label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.login__input {
+  width: 100%;
+  font-size: 11px;
+  padding: 8px 9px;
+}
+
+.login__act {
+  margin-top: 2px;
+}
+
+.login__act:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

@@ -17,7 +17,7 @@
 
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { publishMany, SHARD_RELAYS } from '../lib/relay'
+import { publishMany, relaySet } from '../lib/relay'
 import { ENCRYPTED_KIND } from '../lib/shardEvents'
 import { deployTemplate, type DecodedShard } from '../lib/shardEvents'
 import { bytesToHex, hexToBytes } from '../lib/events'
@@ -143,7 +143,7 @@ export const useShards = create<ShardsState>((set, get) => ({
       const { template, lookupId, key } = await deployTemplate({ shard, at, plane, height: deployHeight, createdAt, maxComputeHeight: MAX_COMPUTE_HEIGHT })
       const event = cs.sign(template)
       const live = cs.live
-      const result = live ? await publishMany(SHARD_RELAYS, event) : { ok: true as const }
+      const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
 
       const deployment: MyDeployment = {
         eventId: event.id,
@@ -153,7 +153,7 @@ export const useShards = create<ShardsState>((set, get) => ({
         height: deployHeight,
         lookupId,
         keyHex: bytesToHex(key),
-        relays: SHARD_RELAYS,
+        relays: relaySet(),
         createdAt,
         published: live && result.ok,
       }
@@ -179,7 +179,7 @@ export const useShards = create<ShardsState>((set, get) => ({
         content: 'shard instance removed',
         tags: [['e', eventId], ['k', String(ENCRYPTED_KIND)]],
       })
-      try { await publishMany(dep.relays ?? SHARD_RELAYS, del) } catch { /* best effort */ }
+      try { await publishMany(dep.relays ?? relaySet(), del) } catch { /* best effort */ }
     }
     const mine = get().mine.filter((d) => d.eventId !== eventId)
     const deleted = { ...get().deleted, [eventId]: true as const }

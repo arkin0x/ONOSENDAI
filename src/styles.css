@@ -1918,6 +1918,55 @@ kbd {
   .workshop__close { flex: 0 0 auto; margin-left: 0; }
 }
 
+/* ---------- Relays panel ---------- */
+.relays__list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.relays__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.relays__row:first-child { border-top: 0; }
+
+.relays__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  opacity: 0.5;
+  flex: none;
+}
+
+.relays__dot.is-on {
+  background: var(--ok);
+  opacity: 1;
+  box-shadow: 0 0 6px var(--ok);
+}
+
+.relays__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relays__default {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
 /* ---------- Derezz ----------
  *
  * The one panel that destroys something. Red throughout, last in the column,

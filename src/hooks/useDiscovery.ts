@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { queryAny, SHARD_RELAYS } from '../lib/relay'
+import { query } from '../lib/relay'
 import { decodeShard, ENCRYPTED_KIND } from '../lib/shardEvents'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
@@ -68,7 +68,7 @@ export function useDiscovery(): void {
       if (keys.size === 0) return
 
       // A superseded scan must not write stale finds.
-      const events = await queryAny(SHARD_RELAYS, { kinds: [ENCRYPTED_KIND], '#d': [...keys.keys()] })
+      const events = await query({ kinds: [ENCRYPTED_KIND], '#d': [...keys.keys()] })
       if (id !== reqId.current) return
 
       const found = []

@@ -1,9 +1,10 @@
 /**
- * relay.ts — the one relay this client talks to, and how.
+ * relay.ts — the relays this client talks to, and how.
  *
- * cyberspace.nostr1.com is where the v2 chains live. A single pool, created on
- * first use so a page that never goes live never opens a socket, and shared by
- * publishing, chain lookups and subscriptions so they all ride one connection.
+ * The set is user-configurable (see the relays store); cyberspace.nostr1.com is
+ * the default and is always in it. A single pool, created on first use so a
+ * page that never goes live never opens a socket, and shared by publishing,
+ * lookups and subscriptions so they ride the same connections.
  *
  * Publishing reports a result rather than throwing, because the caller is a
  * queue that needs to know whether to move on or try again, and a relay that
@@ -13,18 +14,10 @@
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools/filter'
 import type { NostrEvent } from './events'
+import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
 
-export const CYBERSPACE_RELAY = 'wss://cyberspace.nostr1.com'
-
-/**
- * Where encrypted shard content lives. The cyberspace relay accepts the
- * location-encrypted kind:33330 events (§8.6) alongside movement, so shards
- * sit on the same relay as everything else. A list rather than the constant so
- * a deploy can be fanned to more relays later without touching the callers;
- * §7.1 makes that free, since the ciphertext is public and only the region key
- * opens it.
- */
-export const SHARD_RELAYS = [CYBERSPACE_RELAY]
+/** The default relay, always present; kept here so panels can name it. */
+export const CYBERSPACE_RELAY = DEFAULT_RELAY
 
 /** How long a publish or a one-shot query waits before giving up. */
 const MAX_WAIT_MS = 8000
@@ -36,54 +29,54 @@ export function getPool(): SimplePool {
   return pool
 }
 
-export type PublishResult = { ok: true } | { ok: false; reason: string }
-
-/** Send one event and wait for the relay's OK, or its refusal. */
-export async function publish(event: NostrEvent): Promise<PublishResult> {
-  try {
-    const [promise] = getPool().publish([CYBERSPACE_RELAY], event, { maxWait: MAX_WAIT_MS })
-    await promise
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
-  }
+/** The relays every cyberspace read and write fans out across, right now. */
+export function relaySet(): string[] {
+  return currentRelays()
 }
 
-/** Send to several relays; ok if any accepts, the reason of the last refusal otherwise. */
+export type PublishResult = { ok: true } | { ok: false; reason: string }
+
+/** Send to a set of relays; ok if any accepts, the last refusal otherwise. */
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
+  if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
   const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS }))
   if (results.some((r) => r.status === 'fulfilled')) return { ok: true }
   const reason = results.map((r) => (r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : '')).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }
 }
 
-/** One-shot query: everything the relay has for the filter, then close. */
-export function query(filter: Filter): Promise<NostrEvent[]> {
-  return getPool().querySync([CYBERSPACE_RELAY], filter, { maxWait: MAX_WAIT_MS })
+/** Send one event to every configured relay. */
+export function publish(event: NostrEvent): Promise<PublishResult> {
+  return publishMany(relaySet(), event)
 }
 
-/**
- * The same against any set of relays, for the few things that do not live
- * here: contact lists, mostly. Results are the union; callers pick.
- */
+/** One-shot query across the configured relays, merged, then close. */
+export function query(filter: Filter): Promise<NostrEvent[]> {
+  return getPool().querySync(relaySet(), filter, { maxWait: MAX_WAIT_MS })
+}
+
+/** The same against an explicit set, for the few things that live elsewhere
+ * (contact lists). Results are the union; callers pick. */
 export function queryAny(relays: string[], filter: Filter): Promise<NostrEvent[]> {
   return getPool().querySync(relays, filter, { maxWait: MAX_WAIT_MS })
 }
 
-/** A live subscription; the returned function closes it. */
+/** A live subscription across the configured relays; the returned function closes it. */
 export function subscribe(
   filter: Filter,
   onEvent: (ev: NostrEvent) => void,
   onEose?: () => void,
 ): () => void {
-  const sub = getPool().subscribe([CYBERSPACE_RELAY], filter, {
+  const sub = getPool().subscribe(relaySet(), filter, {
     onevent: onEvent,
     oneose: onEose,
   })
   return () => sub.close()
 }
 
-/** Whether the socket to the relay is currently open. */
+/** Whether any configured relay is currently connected. */
 export function connected(): boolean {
-  return pool?.listConnectionStatus().get(CYBERSPACE_RELAY) ?? false
+  const status = pool?.listConnectionStatus()
+  if (!status) return false
+  return relaySet().some((r) => status.get(r))
 }

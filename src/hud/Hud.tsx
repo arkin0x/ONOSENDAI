@@ -8,6 +8,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
+import { RelaysPanel } from './RelaysPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -217,6 +218,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ShardsPanel />
         <Controls />
         <DerezzPanel />
+        <RelaysPanel />
       </div>
     </div>
   )

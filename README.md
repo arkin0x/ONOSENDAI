@@ -72,6 +72,17 @@ shows what that hop cost); what came after is drawn faint. Off the head the
 movement controls stand down and RETURN TO LIVE brings them back. The same
 instrument walks any other avatar's chain while spectating.
 
+**Shards.** The Shards panel opens the workshop: a full-screen bench where a
+shard is built from coloured vertices on an integer grid. ADD places a vertex
+where you tap, at the current level; SELECT picks one for the nudge pad
+(a unit along X, Y or Z), the colour input and DELETE; FACE joins three taps
+into a triangle. A shard renders SOLID (triangles, colours blended across
+faces), POINTS (every vertex a light) or LINES (a polyline through the
+vertices, colours blending along it), chosen per shard and previewed live.
+`unit` says what one grid unit is in gibsons (2^unit). Shards persist in
+localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
+1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
+
 **Targets.** The Targets panel points at any number of pubkeys the way the
 HUD points at Earth: a reticle in frame, a chevron on the nearest edge out of
 frame, the distance either way, and the avatar itself (a wireframe icosahedron

@@ -9,6 +9,7 @@ import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { TargetsPanel } from './TargetsPanel'
+import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
@@ -213,6 +214,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ProofPanel />
         <ChainPanel />
         <Legend />
+        <ShardsPanel />
         <Controls />
         <DerezzPanel />
       </div>

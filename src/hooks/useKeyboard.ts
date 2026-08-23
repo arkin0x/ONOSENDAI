@@ -9,6 +9,7 @@
 
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
+import { useWorkshop } from '../store/useWorkshop'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 
@@ -33,6 +34,10 @@ export function useKeyboard(): void {
     const onKeyDown = (event: KeyboardEvent) => {
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      // Typing into a field, or building on the bench: not ours.
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (useWorkshop.getState().open) return
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.

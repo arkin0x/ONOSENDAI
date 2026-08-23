@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { ChainExplorer } from './hud/ChainExplorer'
 import { SpectateBar } from './hud/SpectateBar'
+import { Workshop } from './workshop/Workshop'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
@@ -85,6 +86,7 @@ export default function App(): JSX.Element {
         >CONTROLS</button>
       )}
       {crowded && <div className="mobile-overlay" />}
+      <Workshop />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

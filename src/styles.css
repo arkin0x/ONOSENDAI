@@ -1162,6 +1162,320 @@ kbd {
   transform: none;
 }
 
+/* ---------- Shards panel ---------- */
+
+.shards__row {
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.shards__row:first-child {
+  border-top: 0;
+}
+
+.shards__open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shards__open:hover {
+  background: rgba(0, 229, 255, 0.06);
+}
+
+.shards__meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.shards__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---------- Workshop ----------
+ *
+ * A full-screen bench. The bench fills what the head and the tools leave,
+ * and on a phone the tools wrap rather than scroll: every control has to be
+ * reachable with the model still in view.
+ */
+.workshop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+}
+
+.workshop__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workshop__list-btn,
+.workshop__close,
+.workshop__mode,
+.workshop__tool,
+.workshop__btn,
+.workshop__new,
+.workshop__mini {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  white-space: nowrap;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workshop__btn:active:not(:disabled),
+.workshop__tool:active,
+.workshop__mode:active {
+  background: rgba(0, 229, 255, 0.28);
+}
+
+.workshop__btn:disabled,
+.workshop__tool:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.workshop__mode.is-on,
+.workshop__tool.is-on {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.workshop__close {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.workshop__name {
+  flex: 1 1 120px;
+  min-width: 80px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.workshop__name:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.workshop__modes {
+  display: flex;
+  gap: 3px;
+}
+
+.workshop__list {
+  position: absolute;
+  top: 48px;
+  left: 10px;
+  z-index: 1;
+  width: min(320px, calc(100vw - 20px));
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.96);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+.workshop__list ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.workshop__list li {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.workshop__list li.is-current .workshop__pick {
+  color: var(--accent);
+}
+
+.workshop__new {
+  width: 100%;
+  color: var(--accent);
+}
+
+.workshop__pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workshop__pick-meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.workshop__mini {
+  width: 30px;
+  padding: 0;
+  color: var(--dim);
+}
+
+.workshop__mini--danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.workshop__bench {
+  position: relative;
+  min-height: 0;
+}
+
+.workshop__bench canvas {
+  display: block;
+}
+
+.workshop__stats {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  pointer-events: none;
+  text-shadow: 0 0 4px var(--bg);
+}
+
+.workshop__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workshop__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.workshop__label {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+  min-width: 54px;
+}
+
+.workshop__label--gap {
+  margin-left: 10px;
+}
+
+.workshop__value {
+  font-size: 11px;
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.workshop__help {
+  flex: 1 1 200px;
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.workshop__pad {
+  display: grid;
+  grid-template-columns: repeat(6, auto);
+  gap: 4px;
+}
+
+.workshop__btn--x { color: #ff4444; }
+.workshop__btn--y { color: #44ff44; }
+.workshop__btn--z { color: #4488ff; }
+
+.workshop__btn--danger {
+  color: var(--danger);
+  border-color: rgba(255, 59, 107, 0.4);
+}
+
+.workshop__color {
+  width: 38px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workshop__swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.workshop__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .workshop__help { display: none; }
+  .workshop__label { min-width: 0; }
+}
+
 /* ---------- Derezz ----------
  *
  * The one panel that destroys something. Red throughout, last in the column,

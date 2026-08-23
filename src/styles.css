@@ -3041,14 +3041,29 @@ kbd {
   opacity: 0.9;
 }
 
+/* Avatar and name, as one row just right of the marker's centre. */
+.target__body {
+  left: 14px;
+  top: 0;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+/* A circle that stays legible over any terrain: its own ring in the target's
+ * colour and a dark halo. */
+.target__body .pfp {
+  border: 1px solid currentColor;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
+}
+
 .target__text {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  left: 12px;
-  top: -12px;
-  white-space: nowrap;
-  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
 }
 
 .target__label {

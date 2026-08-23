@@ -24,11 +24,18 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import type { Material, Mesh, MeshStandardMaterial } from 'three'
 import { GRID_RADIUS, cellCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { WorldLabel } from './WorldLabel'
 
 const MODEL = '/spawn.glb'
 
 /** v1 drew it at three times model scale, and the model's rings are radius 1. */
 const SCALE = 3
+
+/** The warm red of the marker's radiating bars, so the label reads as part of it. */
+const LABEL_COLOR = '#ff7a90'
+
+/** Below the marker's lowest bar, in cells, clear of the mesh at any zoom. */
+const LABEL_DROP = 4.5
 
 /** Beyond this it would be drawn somewhere nobody can see. Same cull as Earth. */
 const REACH = GRID_RADIUS * 8
@@ -91,13 +98,19 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
   if (!at) return null
 
   return (
-    <group name="spawn-marker" position={at} scale={SCALE} dispose={null}>
-      {PARTS.map(([node, material]) => {
-        const mesh = gltf.nodes[node]
-        if (!mesh) return null
-        return <mesh key={node} geometry={mesh.geometry} material={materials[material]} frustumCulled={false} />
-      })}
-    </group>
+    <>
+      <group name="spawn-marker" position={at} scale={SCALE} dispose={null}>
+        {PARTS.map(([node, material]) => {
+          const mesh = gltf.nodes[node]
+          if (!mesh) return null
+          return <mesh key={node} geometry={mesh.geometry} material={materials[material]} frustumCulled={false} />
+        })}
+      </group>
+      {/* A sibling, not a child: the marker group is scaled x3, and the label
+          holds its own constant pixel height, so it must sit outside that scale.
+          Dropped below the mesh so it never overlaps the rings and bars. */}
+      <WorldLabel text="SPAWN POINT" color={LABEL_COLOR} at={at} offset={[0, -LABEL_DROP, 0]} align="center" px={11} opacity={0.85} />
+    </>
   )
 }
 

@@ -15,6 +15,8 @@
 import { useEffect, useRef } from 'react'
 import { formatDistance } from '../lib/scale'
 import { targetScreens, type CyberTarget } from '../lib/targets'
+import { useProfile } from '../hooks/useProfile'
+import { ProfilePic } from './ProfileBadge'
 
 /** Keep chevrons off the very edge, where they get clipped. */
 const EDGE_INSET = 26
@@ -94,18 +96,36 @@ export function Targets({ targets }: Props): JSX.Element {
   return (
     <div className="targets" ref={host}>
       {targets.map((t) => (
-        <div key={t.id} className="target" data-target={t.id} style={{ color: t.color }}>
-          <span className="target__ring" />
-          {/* Points along +x unrotated, so a rotation by the screen bearing
-              aims it at the target. The previous glyph pointed up and left,
-              which put every chevron 135 degrees off. */}
-          <span className="target__arrow">➤</span>
-          <span className="target__text">
-            <span className="target__label">{t.label}</span>
-            <span className="target__dist" />
-          </span>
-        </div>
+        <TargetMarker key={t.id} target={t} />
       ))}
+    </div>
+  )
+}
+
+/**
+ * One marker. Its position, distance, ring and chevron are driven imperatively
+ * by the parent's animation frame (which finds it by data-target and reaches
+ * the spans by class), so those stay in the DOM exactly where the loop expects.
+ * The name and face are the reactive part: the profile arrives from the cache,
+ * so a target that started as a wall of hex becomes a person without a reload.
+ */
+function TargetMarker({ target }: { target: CyberTarget }): JSX.Element {
+  const profile = useProfile(target.id)
+  const name = profile?.name ?? target.label
+  return (
+    <div className="target" data-target={target.id} style={{ color: target.color }}>
+      <span className="target__ring" />
+      {/* Points along +x unrotated, so a rotation by the screen bearing aims it
+          at the target. The previous glyph pointed up and left, which put every
+          chevron 135 degrees off. */}
+      <span className="target__arrow">➤</span>
+      <span className="target__body">
+        <ProfilePic pubkey={target.id} size={18} />
+        <span className="target__text">
+          <span className="target__label">{name}</span>
+          <span className="target__dist" />
+        </span>
+      </span>
     </div>
   )
 }

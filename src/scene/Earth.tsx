@@ -53,9 +53,9 @@ function inCells(value: bigint, step: bigint): number {
 }
 
 export function Earth({ axes }: Props): JSX.Element | null {
-  const position = useCyberspace((s) => s.position)
+  const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const plane = useCyberspace((s) => s.plane)
+  const plane = useCyberspace((s) => s.anchorPlane)
 
   const globe = useMemo(() => {
     // Ideaspace has no physical mapping at all (§9.1), so there is no planet in

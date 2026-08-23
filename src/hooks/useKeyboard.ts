@@ -45,6 +45,25 @@ export function useKeyboard(): void {
         return
       }
 
+      // The chain explorer: one action back or forward, held keys repeat
+      // through the keyboard's own repeat; Home and End are the spawn and the
+      // head. These work wherever the scene is anchored, head included.
+      if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
+        event.preventDefault()
+        store.exploreStep(event.code === 'BracketLeft' ? -1 : 1)
+        return
+      }
+      if (event.code === 'Home') {
+        event.preventDefault()
+        store.explore(0)
+        return
+      }
+      if (event.code === 'End') {
+        event.preventDefault()
+        store.explore(null)
+        return
+      }
+
       if (event.code === 'Escape') {
         event.preventDefault()
         store.resetView()

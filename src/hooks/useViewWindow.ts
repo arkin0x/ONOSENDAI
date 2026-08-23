@@ -37,7 +37,8 @@ const SETTLE_MS = 90
 
 export function useViewWindow(): ViewWindow {
   const cursor = useCyberspace((s) => s.cursor)
-  const position = useCyberspace((s) => s.position)
+  const anchor = useCyberspace((s) => s.anchor)
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const view = useCyberspace((s) => s.view)
 
@@ -61,9 +62,9 @@ export function useViewWindow(): ViewWindow {
     return () => {
       if (handle.current !== null) clearTimeout(handle.current)
     }
-    // cursorOffset derives from exactly these four.
+    // cursorOffset derives from exactly these five.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, position, scaleExp, view])
+  }, [cursor, anchor, exploreIndex, scaleExp, view])
 
   return win
 }

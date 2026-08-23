@@ -55,6 +55,16 @@ import {
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 
+/**
+ * The explored chain, parsed once per events change rather than on every
+ * read. Every explorer selector goes through this.
+ */
+let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
+function parsedChain(events: NostrEvent[]): ActionEvent[] {
+  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: buildChain(events) }
+  return actionsFor.actions
+}
+
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
 
@@ -148,6 +158,20 @@ export interface CyberspaceState {
   chain: ChainStats
   /** History of all committed positions for rendering the path trail. */
   positionHistory: Position[]
+  /**
+   * Which action of the chain the scene is anchored on, or null for the head.
+   * Exploring history moves the anchor, not the avatar: nothing about the
+   * chain changes, only where you are looking from.
+   */
+  exploreIndex: number | null
+  /**
+   * The scene's render origin, materialised: the position of the action being
+   * looked at. Equal to `position` at the head. Every origin-relative thing in
+   * the scene reads this rather than `position`, which is what lets the same
+   * scene show you your own past and, later, someone else's present.
+   */
+  anchor: Position
+  anchorPlane: Plane
 
   moveCursor: (dir: AxisDirection) => void
   setCursorAtCell: (row: number, col: number) => void
@@ -169,6 +193,10 @@ export interface CyberspaceState {
    * anywhere.
    */
   respawn: () => void
+  /** Anchor the scene on action `index` of the chain; null or past the end is the head. */
+  explore: (index: number | null) => void
+  /** Step the explored index; clamps at both ends. */
+  exploreStep: (delta: number) => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -179,6 +207,14 @@ export interface CyberspaceState {
   sector: () => string
   /** The chain, parsed. */
   actions: () => ActionEvent[]
+  /** True when the scene is anchored on the live head, where the controls apply. */
+  atHead: () => boolean
+  /**
+   * The two positions the XOR readout compares: at the head, where you stand
+   * and where the cursor is; in history, the action before the one shown and
+   * the one shown, so the readout explains what that hop cost.
+   */
+  readoutPair: () => [Position, Position]
   /** Which position the view centers on: cursor when active, avatar otherwise. */
   viewCenter: () => Position
   /**
@@ -314,6 +350,9 @@ function derive(saved: PersistedChain): {
   positionHistory: Position[]
   plane: Plane
   headPlane: Plane
+  exploreIndex: null
+  anchor: Position
+  anchorPlane: Plane
 } {
   const actions = buildChain(saved.events)
   const head = actions[actions.length - 1]
@@ -329,6 +368,9 @@ function derive(saved: PersistedChain): {
     positionHistory: actions.map((a) => a.position),
     plane: head.plane,
     headPlane: head.plane,
+    exploreIndex: null,
+    anchor: head.position,
+    anchorPlane: head.plane,
   }
 }
 
@@ -350,6 +392,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
+    if (!get().atHead()) return
     const step = stepFor(scaleExp) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
@@ -384,6 +427,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const { position, cursor, plane, headPlane, prevEventId, proof } = get()
     // One proof at a time. X cancels a commit you regret.
     if (proof.status === 'computing') return
+    // Looking at history: nothing here is a place you can move from.
+    if (!get().atHead()) return
     // Nothing lined up: same cell, same plane.
     if (samePosition(position, cursor) && plane === headPlane) return
 
@@ -526,9 +571,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const nextEvents = [...events, event]
     const nextPublished = { ...published, [event.id]: 'queued' as const }
 
+    const following = get().exploreIndex === null
     set({
       position: newPosition,
       headPlane: plane,
+      ...(following ? { anchor: newPosition, anchorPlane: plane } : {}),
       pendingTarget: null,
       proof: {
         status: 'done',
@@ -576,6 +623,26 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     saveChain(fresh.events, fresh.published, fresh.chain)
   },
 
+  explore: (index) => {
+    const actions = get().actions()
+    const last = actions.length - 1
+    if (index === null || index >= last) {
+      const { position, headPlane } = get()
+      set({ exploreIndex: null, anchor: position, anchorPlane: headPlane })
+      return
+    }
+    const i = Math.max(0, Math.floor(index))
+    const a = actions[i]
+    set({ exploreIndex: i, anchor: a.position, anchorPlane: a.plane })
+  },
+
+  exploreStep: (delta) => {
+    const { exploreIndex } = get()
+    const last = get().actions().length - 1
+    const from = exploreIndex ?? last
+    get().explore(Math.min(last, Math.max(0, from + delta)))
+  },
+
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()
     if (!(id in published)) return
@@ -609,7 +676,18 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     return sectorTag(xyzToSectorId(position.x, position.y, position.z))
   },
 
-  actions: () => buildChain(get().events),
+  actions: () => parsedChain(get().events),
+
+  atHead: () => get().exploreIndex === null,
+
+  readoutPair: () => {
+    const { exploreIndex, position, cursor } = get()
+    if (exploreIndex === null) return [position, cursor]
+    const actions = get().actions()
+    const here = actions[exploreIndex]?.position ?? position
+    const before = actions[exploreIndex - 1]?.position ?? here
+    return [before, here]
+  },
 
   /**
    * Which position the camera tracks: the cursor when it is away from the
@@ -628,9 +706,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
    * screen centre, so zooming tracks the cursor instead of the avatar.
    */
   cursorOffset: (): [number, number, number] => {
-    const { position, cursor, scaleExp, view } = get()
+    const { anchor, cursor, scaleExp, view, exploreIndex } = get()
+    // In history there is no cursor to frame; the camera sits on the anchor.
+    if (exploreIndex !== null) return [0, 0, 0]
     const axes = viewAxes(view)
-    const origin = alignedOrigin(position, scaleExp)
+    const origin = alignedOrigin(anchor, scaleExp)
     // Cell CENTRES, the same convention the cursor cube, the avatar and the path
     // trail draw with. This used to mix cellOffset on two axes with cellDelta on
     // the third, so the point field's focus, the camera target and the cursor

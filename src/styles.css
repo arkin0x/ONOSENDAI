@@ -452,11 +452,19 @@ body {
  * it goes top left on every screen, opposite the compass on a phone and beside
  * the panel column on a desktop.
  */
-.bits {
+.instruments {
   position: absolute;
   top: 12px;
   left: 8px;
   z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bits {
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -562,6 +570,199 @@ body {
   .bits__col:not(:first-child) .bits__key {
     display: none;
   }
+}
+
+/* ---------- Chain explorer ----------
+ *
+ * Same voice as the readout above it: the world font, small, glowing. The rail
+ * is the one thing here that wants a finger, so it alone is generous.
+ */
+.explorer {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--fg);
+  text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
+}
+
+.explorer__toggle {
+  pointer-events: auto;
+}
+
+.explorer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px 7px;
+  border-radius: 7px;
+  background: rgba(6, 14, 22, 0.55);
+  border: 1px solid rgba(0, 229, 255, 0.18);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  text-shadow: none;
+}
+
+/* In history the block turns amber, the same colour the cursor goes when it is
+ * somewhere the avatar is not: you are looking at a place you are not at. */
+.explorer__body.is-history {
+  border-color: rgba(255, 176, 32, 0.45);
+}
+
+.explorer__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.explorer__btn {
+  font-family: inherit;
+  font-size: 9px;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.explorer__btn:active {
+  background: rgba(0, 229, 255, 0.28);
+  border-color: var(--accent);
+}
+
+.explorer__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.explorer__rail {
+  position: relative;
+  width: 200px;
+  height: 24px;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.explorer__line,
+.explorer__walked {
+  position: absolute;
+  left: 0;
+  top: 11px;
+  height: 2px;
+  background: rgba(0, 229, 255, 0.22);
+}
+
+.explorer__line {
+  width: 100%;
+}
+
+.explorer__walked {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+}
+
+.is-history .explorer__walked {
+  background: var(--warn);
+  box-shadow: 0 0 6px rgba(255, 176, 32, 0.6);
+}
+
+.explorer__tick {
+  position: absolute;
+  top: 8px;
+  width: 1px;
+  height: 8px;
+  margin-left: -0.5px;
+  background: rgba(200, 245, 255, 0.35);
+}
+
+.explorer__tick--spawn {
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--fg);
+}
+
+.explorer__mark {
+  position: absolute;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.is-history .explorer__mark {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+
+.explorer__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: 0.1em;
+}
+
+.explorer__type {
+  color: var(--accent);
+}
+
+.explorer__type--spawn {
+  color: var(--ok);
+}
+
+.explorer__type--sidestep {
+  color: var(--sidestep);
+}
+
+.explorer__when {
+  color: var(--dim);
+}
+
+.explorer__live {
+  margin-left: auto;
+  color: var(--ok);
+}
+
+.explorer__return {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.explorer__detail {
+  color: var(--dim);
+  white-space: pre;
+}
+
+.explorer__key {
+  color: rgba(0, 229, 255, 0.55);
 }
 
 /* ---------- Legend ---------- */
@@ -1256,7 +1457,7 @@ kbd {
    * top. It used to follow the compass to the bottom and sit above the
    * hamburger, which put the one readout you drive by in the corner you look
    * at least, behind the pad's row of buttons on a short window. */
-  .bits {
+  .instruments {
     left: 352px;
   }
 

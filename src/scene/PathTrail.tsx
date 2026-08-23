@@ -1,8 +1,10 @@
 /**
- * PathTrail.tsx - renders red lines connecting all committed positions.
+ * PathTrail.tsx - renders the chain as a line through cyberspace.
  *
- * Shows the movement chain as a visible trail through cyberspace.
- * Each segment connects consecutive positions in the history array.
+ * Each segment connects consecutive committed positions. When the scene is
+ * anchored on an earlier action, the trail up to that action is drawn in full
+ * and what came after it is drawn faint: the chain is the same object, you are
+ * just standing somewhere along it, and the faint part is where it goes next.
  */
 
 import { useMemo, useRef } from 'react'
@@ -20,38 +22,49 @@ interface Props {
 
 export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const positionHistory = useCyberspace((s) => s.positionHistory)
-  const position = useCyberspace((s) => s.position)
+  const anchor = useCyberspace((s) => s.anchor)
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
+
+  const split = exploreIndex ?? positionHistory.length - 1
 
   const geometry = useMemo(() => {
     if (positionHistory.length < 2) return null
 
-    const origin = alignedOrigin(position, scaleExp)
-    const vertices: number[] = []
+    const origin = alignedOrigin(anchor, scaleExp)
+    const walked: number[] = []
+    const ahead: number[] = []
 
     // All three axes. The trail used to map right and up only and pin depth to a
     // constant, so it drew a flat shadow of a 3D path: every out-axis hop
     // collapsed to nothing, and rotating the view changed which axis was being
     // flattened, so the shape changed with the view. Cell centres, matching the
     // cursor and the avatar, so a segment ends where its gibson is drawn.
-    const centre = (p: typeof position): [number, number, number] =>
+    const centre = (p: typeof anchor): [number, number, number] =>
       cellCentre(p, origin, scaleExp, axes)
 
     for (let i = 0; i < positionHistory.length - 1; i++) {
-      vertices.push(...centre(positionHistory[i]), ...centre(positionHistory[i + 1]))
+      const into = i < split ? walked : ahead
+      into.push(...centre(positionHistory[i]), ...centre(positionHistory[i + 1]))
     }
 
-    const geom = new BufferGeometry()
-    geom.setAttribute('position', new Float32BufferAttribute(vertices, 3))
-    return geom
-  }, [positionHistory, axes, scaleExp, position])
+    const make = (v: number[]): BufferGeometry | null => {
+      if (v.length === 0) return null
+      const geom = new BufferGeometry()
+      geom.setAttribute('position', new Float32BufferAttribute(v, 3))
+      return geom
+    }
+    return { walked: make(walked), ahead: make(ahead) }
+  }, [positionHistory, axes, scaleExp, anchor, split])
 
   // The newest segment ends on the avatar, which is drawn trailing behind its
   // committed cell for a moment after a commit. Left alone, the trail would
   // reach the destination while you were still visibly travelling to it, so the
-  // line would lead you there. Its final vertex rides the same offset.
+  // line would lead you there. Its final vertex rides the same offset. Only at
+  // the head: in history nothing is travelling.
   const lastVertex = useRef<Float32Array | null>(null)
   useFrame(() => {
-    const attr = geometry?.attributes.position
+    if (exploreIndex !== null) return
+    const attr = geometry?.walked?.attributes.position
     if (!attr) return
     const arr = attr.array as Float32Array
     const n = arr.length
@@ -66,8 +79,17 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   if (!geometry) return null
 
   return (
-    <lineSegments geometry={geometry} frustumCulled={false}>
-      <lineBasicMaterial color="#ff0000" linewidth={2} toneMapped={false} />
-    </lineSegments>
+    <>
+      {geometry.walked && (
+        <lineSegments geometry={geometry.walked} frustumCulled={false}>
+          <lineBasicMaterial color="#ff0000" linewidth={2} toneMapped={false} />
+        </lineSegments>
+      )}
+      {geometry.ahead && (
+        <lineSegments geometry={geometry.ahead} frustumCulled={false}>
+          <lineBasicMaterial color="#ff0000" transparent opacity={0.22} toneMapped={false} />
+        </lineSegments>
+      )}
+    </>
   )
 }

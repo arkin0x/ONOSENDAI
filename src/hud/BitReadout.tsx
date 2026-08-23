@@ -73,11 +73,12 @@ export function BitReadout(): JSX.Element {
   // Open by default: it is the readout that explains what everything else on
   // screen costs, so it has to be seen before anyone would think to dismiss it.
   const [open, setOpen] = useState(true)
-  const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
+  // At the head: you and the cursor. In history: the hop into the action
+  // shown, so scrubbing the chain reads each crossing's cost off the bits.
+  const [from, to] = useCyberspace((s) => s.readoutPair())
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const axes = useCyberspace((s) => s.axes())
-  const columns = xorReadout(position, cursor, axes, scaleExp)
+  const columns = xorReadout(from, to, axes, scaleExp)
 
   return (
     <div className="bits">

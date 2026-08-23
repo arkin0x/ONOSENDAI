@@ -39,10 +39,14 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
+  const atHead = useCyberspace((s) => s.exploreIndex === null)
 
   const target = pendingTarget ?? cursor
 
   const box = useMemo(() => {
+    // In history nothing is being lined up, and the box would be drawn against
+    // an origin that is not the avatar's.
+    if (!atHead) return null
     const origin = alignedOrigin(position, scaleExp)
     const c = coveringBox(position, target, origin, scaleExp, axes, MAX_CELLS)
     // Nothing is being crossed while the cursor sits on the avatar, and a box
@@ -115,7 +119,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // and the two would otherwise print over each other.
       at: cellCentre(target, origin, scaleExp, axes),
     }
-  }, [position, target, scaleExp, plane, axes])
+  }, [position, target, scaleExp, plane, axes, atHead])
 
   if (!box) return null
 

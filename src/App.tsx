@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
+import { ChainExplorer } from './hud/ChainExplorer'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
@@ -12,6 +13,7 @@ import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
 import { startPublisher } from './lib/publisher'
+import { useCyberspace } from './store/useCyberspace'
 
 export default function App(): JSX.Element {
   // The keyboard is unconditional. The on-screen controls are a second way in,
@@ -23,6 +25,9 @@ export default function App(): JSX.Element {
   useEffect(() => startPublisher(), [])
   const isMobile = useIsMobile()
   const targets = useTargets()
+  // Off the head there is nothing to drive: the movement controls stand down
+  // and the explorer's RETURN TO LIVE is the way back.
+  const atHead = useCyberspace((s) => s.exploreIndex === null)
 
   // Panels start open on a desktop and closed on a phone, and after that the
   // hamburger owns it on both. It used to be derived from the breakpoint, which
@@ -36,7 +41,7 @@ export default function App(): JSX.Element {
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
-  const showPad = padOpen && !crowded
+  const showPad = padOpen && !crowded && atHead
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -53,12 +58,17 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {!crowded && <Targets targets={targets} />}
-      {!crowded && <BitReadout />}
+      {!crowded && (
+        <div className="instruments">
+          <BitReadout />
+          <ChainExplorer />
+        </div>
+      )}
       {panelsOpen && <Hud menuOpen={crowded} />}
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
-      {!crowded && !padOpen && (
+      {!crowded && !padOpen && atHead && (
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}

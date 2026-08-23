@@ -59,7 +59,7 @@ interface Props {
 }
 
 function Model({ pubkey, axes }: Props): JSX.Element | null {
-  const position = useCyberspace((s) => s.position)
+  const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gltf = useGLTF(MODEL) as unknown as {
     nodes: Record<string, Mesh>

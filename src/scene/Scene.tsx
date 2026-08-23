@@ -214,7 +214,10 @@ function Rig(): JSX.Element {
     const c = controls.current
     if (!c) return
     const s = useCyberspace.getState()
-    const origin = alignedOrigin(s.position, s.scaleExp)
+    // The anchor, not the position: in history the scene is drawn from the
+    // action being looked at, and the camera has to ride that the same way it
+    // rides a commit.
+    const origin = alignedOrigin(s.anchor, s.scaleExp)
 
     // A commit re-anchors render space to the new avatar cell, so every
     // coordinate in the scene shifts at once. That is a change of frame, not

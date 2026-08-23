@@ -39,6 +39,8 @@ cd ../cyberspace-cli-js && npm install && npm run build
 | `R` / `F` | cursor along the axis into / out of the screen |
 | `C` | canonical view ("facing the black sun") |
 | `P` | toggle dataspace and ideaspace |
+| `[` / `]` | chain explorer: one action back / forward (hold to repeat) |
+| `Home` / `End` | chain explorer: the spawn / the live head |
 
 Movement is expressed in screen directions and resolved to world axes through
 the current view, so `W` is always "away from you" in any of the 24 reachable
@@ -62,6 +64,13 @@ lands, naming the spawn as `genesis` and the previous event as `previous`
 (spec section 8). The next proof's temporal work is bound to that event's id,
 exactly as a verifier recomputes it. The chain persists as those events, so a
 reload reads position, plane and history back out of them.
+
+**The chain explorer.** Under the XOR readout, the CHAIN instrument walks the
+chain: back, forward, spawn, head, or scrub the rail. The scene re-anchors on
+the action shown (avatar, trail, terrain, rooms, and the readout, which then
+shows what that hop cost); what came after is drawn faint. Off the head the
+movement controls stand down and RETURN TO LIVE brings them back. The same
+instrument walks any other avatar's chain while spectating.
 
 **The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
 rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,

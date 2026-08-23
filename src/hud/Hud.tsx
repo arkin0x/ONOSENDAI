@@ -172,6 +172,8 @@ function Controls(): JSX.Element {
     ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
+    ['[ / ]', 'chain explorer: back / forward one action'],
+    ['Home / End', 'chain explorer: spawn / live head'],
   ]
 
   return (

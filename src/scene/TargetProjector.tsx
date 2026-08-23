@@ -31,7 +31,9 @@ export function TargetProjector({ axes, targets }: Props): null {
 
   useFrame((state) => {
     const s = useCyberspace.getState()
-    const origin = alignedOrigin(s.position, s.scaleExp)
+    // Everything is measured from the anchor: the avatar being looked at, which
+    // is you at the head and whoever or whenever else the scene is anchored on.
+    const origin = alignedOrigin(s.anchor, s.scaleExp)
     const step = stepFor(s.scaleExp)
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
     state.camera.getWorldDirection(forward)
@@ -66,7 +68,7 @@ export function TargetProjector({ axes, targets }: Props): null {
       const sy = behind ? -scratch.y : scratch.y
 
       const dist = (a: 'x' | 'y' | 'z'): bigint => {
-        const d = t.at[a] - s.position[a]
+        const d = t.at[a] - s.anchor[a]
         return d < 0n ? -d : d
       }
       // Chebyshev rather than Euclidean: no bigint square root, and for "how far

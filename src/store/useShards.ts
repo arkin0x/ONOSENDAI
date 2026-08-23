@@ -53,8 +53,6 @@ export interface MyDeployment {
   relays: string[]
   createdAt: number
   published: boolean
-  /** Whether the bag went out with the NIP-70 author-only mark. */
-  protectedEvent: boolean
 }
 
 /** Something placed in the world, ready to draw. */
@@ -164,18 +162,12 @@ function nextBagAt(lookupId: string): number {
 export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
-  /** Build the region bag, try protected, fall back to unprotected on a block. */
-  async function publishBag(inners: NostrEvent[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean; protectedEvent: boolean }> {
+  /** Build and publish the region bag. */
+  async function publishBag(inners: NostrEvent[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
-    let protectedEvent = true
-    let event = cyber().sign(await bagTemplate(inners, key, lookupId, height, createdAt, true))
-    let result = live ? await publishMany(relaySet(), event) : { ok: true as const, reason: undefined }
-    if (live && !result.ok && /protect|blocked/i.test((result as { reason?: string }).reason ?? '')) {
-      protectedEvent = false
-      event = cyber().sign(await bagTemplate(inners, key, lookupId, height, createdAt, false))
-      result = await publishMany(relaySet(), event)
-    }
-    return { event, published: live && result.ok, protectedEvent: protectedEvent && (!live || result.ok) }
+    const event = cyber().sign(await bagTemplate(inners, key, lookupId, height, createdAt))
+    const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
+    return { event, published: live && result.ok }
   }
 
   /** The author's current bag inners for a region: relay (authoritative) + local. */
@@ -236,7 +228,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const live = cs.live
         const existing = await gatherInners(rk.lookupId, rk.key, live)
         const allInners = mergeInners(existing, [inner])
-        const { event, published, protectedEvent } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live)
+        const { event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live)
 
         const item: MyDeployment = {
           eventId: inner.id,
@@ -253,11 +245,10 @@ export const useShards = create<ShardsState>((set, get) => {
           relays: relaySet(),
           createdAt,
           published,
-          protectedEvent,
         }
         // Every item now in this region's bag shares its new envelope and status.
         const mine = [
-          ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, protectedEvent } : d)),
+          ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published } : d)),
           item,
         ]
         set({ mine, deployStatus: 'done', pending: null })
@@ -277,10 +268,10 @@ export const useShards = create<ShardsState>((set, get) => {
       let mine: MyDeployment[]
       if (remaining.length > 0) {
         // Rewrite the region bag without this item; the newer bag replaces it.
-        const { event, published, protectedEvent } = await publishBag(remaining.map((d) => d.inner), key, item.lookupId, item.height, cs.live)
+        const { event, published } = await publishBag(remaining.map((d) => d.inner), key, item.lookupId, item.height, cs.live)
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
-          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, protectedEvent } : d))
+          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (cs.live && item.published) {

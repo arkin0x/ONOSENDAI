@@ -46,6 +46,37 @@ export function getPool(): SimplePool {
   return pool
 }
 
+interface AuthRelay {
+  challenge?: string
+  auth(sign: typeof authSign): Promise<unknown>
+}
+
+/**
+ * Make sure the connection is authenticated before a read or write.
+ *
+ * The relay now requires NIP-42 auth for everything, and answers an unauthed
+ * REQ by closing it — the pool's read path does not retry that, so a query on
+ * an unauthed socket comes back empty. So we open the relay, wait for its
+ * challenge, and answer it up front. relay.auth caches its own promise per
+ * challenge, so calling this before every operation costs nothing once done,
+ * and re-auths on its own when a reconnect brings a fresh challenge.
+ */
+const authedFor = new Map<string, string>()
+async function authRelay(url: string): Promise<void> {
+  try {
+    const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
+    for (let i = 0; i < 20 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 50))
+    if (relay.challenge && authedFor.get(url) !== relay.challenge) {
+      await relay.auth(authSign)
+      authedFor.set(url, relay.challenge)
+    }
+  } catch { /* relay down, or does not require auth */ }
+}
+
+async function authAll(relays: string[]): Promise<void> {
+  await Promise.allSettled(relays.map(authRelay))
+}
+
 /** The relays every cyberspace read and write fans out across, right now. */
 export function relaySet(): string[] {
   return currentRelays()
@@ -56,6 +87,10 @@ export type PublishResult = { ok: true } | { ok: false; reason: string }
 /** Send to a set of relays; ok if any accepts, the last refusal otherwise. */
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
+  // Protected events (the `-` tag) are only accepted from an authenticated
+  // author, and the relay does not challenge on the EVENT itself, so we must
+  // already be authed before publishing.
+  await authAll(relays)
   const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
   if (results.some((r) => r.status === 'fulfilled')) return { ok: true }
   const reason = results.map((r) => (r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : '')).find(Boolean)
@@ -67,15 +102,43 @@ export function publish(event: NostrEvent): Promise<PublishResult> {
   return publishMany(relaySet(), event)
 }
 
-/** One-shot query across the configured relays, merged, then close. */
-export function query(filter: Filter): Promise<NostrEvent[]> {
-  return getPool().querySync(relaySet(), filter, { maxWait: MAX_WAIT_MS })
+/**
+ * One-shot query, merged across relays, then close.
+ *
+ * Via subscribeEose rather than querySync because only the former takes an
+ * `onauth`: the relay now requires NIP-42 auth for reads, so a query has to be
+ * able to answer the challenge and retry, or it comes back empty.
+ */
+async function collect(relays: string[], filter: Filter): Promise<NostrEvent[]> {
+  await authAll(relays)
+  return new Promise((resolve) => {
+    const events = new Map<string, NostrEvent>()
+    let settled = false
+    const done = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { sub.close() } catch { /* already closed */ }
+      resolve([...events.values()])
+    }
+    const timer = setTimeout(done, MAX_WAIT_MS + 2000)
+    const sub = getPool().subscribeEose(relays, filter, {
+      onevent: (e) => events.set(e.id, e),
+      onclose: done,
+      onauth: authSign,
+      maxWait: MAX_WAIT_MS,
+    })
+  })
 }
 
-/** The same against an explicit set, for the few things that live elsewhere
- * (contact lists). Results are the union; callers pick. */
+/** Query the configured relays. */
+export function query(filter: Filter): Promise<NostrEvent[]> {
+  return collect(relaySet(), filter)
+}
+
+/** Query an explicit set, for the few things that live elsewhere (contact lists). */
 export function queryAny(relays: string[], filter: Filter): Promise<NostrEvent[]> {
-  return getPool().querySync(relays, filter, { maxWait: MAX_WAIT_MS })
+  return collect(relays, filter)
 }
 
 /** A live subscription across the configured relays; the returned function closes it. */
@@ -84,11 +147,16 @@ export function subscribe(
   onEvent: (ev: NostrEvent) => void,
   onEose?: () => void,
 ): () => void {
-  const sub = getPool().subscribe(relaySet(), filter, {
-    onevent: onEvent,
-    oneose: onEose,
+  const relays = relaySet()
+  let closed = false
+  let sub: { close: () => void } | null = null
+  // Authenticate first; a live subscription opened on an unauthed socket is
+  // closed by the relay before it delivers anything.
+  void authAll(relays).then(() => {
+    if (closed) return
+    sub = getPool().subscribe(relays, filter, { onevent: onEvent, oneose: onEose, onauth: authSign })
   })
-  return () => sub.close()
+  return () => { closed = true; sub?.close() }
 }
 
 /** Whether any configured relay is currently connected. */

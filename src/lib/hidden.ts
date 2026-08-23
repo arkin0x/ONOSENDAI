@@ -92,18 +92,20 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
  * more items in the bag replaces the old one — which is how a region
  * accumulates content without a tag per item. The caller signs and publishes.
  * `createdAt` must exceed the previous bag's, so the relay keeps the newer.
- * The `-` tag makes it author-only to republish (with a store-side fallback).
+ *
+ * No NIP-70 `-` (protected) tag: it is only accepted from the authenticated
+ * author on relays that support it, is refused outright on ones that do not,
+ * and buys little anyway — the location encryption is the real gate, and anyone
+ * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, protect = true): Promise<EventTemplate> {
+export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number): Promise<EventTemplate> {
   const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inners))
-  const tags: string[][] = [
-    ['d', lookupId],
-    ['encrypted', ALGO, ciphertext],
-    ['version', '2'],
-    ['h', String(height)],
-  ]
-  if (protect) tags.push(['-'])
-  return { kind: HIDDEN_KIND, created_at: createdAt, content: '', tags }
+  return {
+    kind: HIDDEN_KIND,
+    created_at: createdAt,
+    content: '',
+    tags: [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2'], ['h', String(height)]],
+  }
 }
 
 function tag(ev: NostrEvent, name: string): string | undefined {

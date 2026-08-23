@@ -30,17 +30,13 @@ async function bag(inners: ReturnType<typeof finalizeEvent>[], key = rk.key): Pr
 }
 
 describe('the envelope (spec 8.6)', () => {
-  it('is kind 33330, keyed by d = lookup_id, with encrypted, version, h and the - tag', async () => {
+  it('is kind 33330, keyed by d = lookup_id, with encrypted, version and h', async () => {
     const outer = await bagTemplate([finalizeEvent(shardInnerTemplate(shard, at, 0, 1), sk)], rk.key, rk.lookupId, 6, 100)
     expect(outer.kind).toBe(HIDDEN_KIND)
     expect(outer.tags.find((t) => t[0] === 'd')).toEqual(['d', rk.lookupId])
     expect(outer.tags.find((t) => t[0] === 'encrypted')?.[1]).toBe('aes-256-gcm')
     expect(outer.tags.find((t) => t[0] === 'h')).toEqual(['h', '6'])
-    expect(outer.tags.some((t) => t[0] === '-')).toBe(true)
-  })
-
-  it('drops the - tag when protection is off', async () => {
-    const outer = await bagTemplate([], rk.key, rk.lookupId, 6, 100, false)
+    // No NIP-70 protected tag.
     expect(outer.tags.some((t) => t[0] === '-')).toBe(false)
   })
 })

@@ -75,12 +75,7 @@ export function DeploymentDetail(): JSX.Element | null {
           <span className="detail__key">relays</span>
           <span className="detail__plain">{dep.published ? dep.relays.map((r) => r.replace('wss://', '')).join(', ') : 'local only — never published'}</span>
         </div>
-        {dep.published && (
-          <div className="detail__field">
-            <span className="detail__key">protect</span>
-            <span className="detail__plain">{dep.protectedEvent ? 'NIP-70 — author only can republish' : 'off — relay rejected the - tag'}</span>
-          </div>
-        )}
+
       </div>
 
       {dep.published && (

@@ -11,6 +11,14 @@ and the terrain underneath shows where the temporal work is concentrated.
 > Status: MVP. Rendering verified manually in a real browser; the protocol
 > maths and view geometry are covered by unit tests.
 
+## Relays and auth
+
+The client speaks NIP-42: it answers a relay's AUTH challenge with the session
+key before reading or writing, so an auth-required relay works. cyberspace.nostr1.com
+requires auth; publishing (movement `kind:3333`, hidden content `kind:33330`,
+deletions `kind:5`) works for any pubkey, and reading requires the relay to
+authorize the pubkey for REQs.
+
 ## Running it
 
 ```sh
@@ -92,10 +100,9 @@ events. Deploying reads the region's bag, appends the new item, and rewrites it
 — `kind:33330` is addressable, so the newer bag replaces the old, and one place
 accumulates content with no per-item tags. Discovery decrypts a bag, verifies
 each inner signature (and that its author is the one who wrapped it), and
-renders every item by its kind. The envelope carries the NIP-70 `-` tag so only
-its author can republish it; a relay that blocks protected events rather than
-auth-gating them makes the deploy fall back to an unprotected copy, recorded per
-deployment.
+renders every item by its kind. The location encryption is the access control:
+there is no NIP-70 protected tag, because the ciphertext is public anyway and
+anyone who can decrypt can re-sign identical content as themselves regardless.
 
 **Leave a hidden message.** The Shards panel has a WRITE A MESSAGE box: type
 text, then aim and place at a height, exactly like a shard. Discovered messages

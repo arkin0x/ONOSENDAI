@@ -20,6 +20,7 @@ import { useTargets } from './hooks/useTargets'
 import { startPublisher } from './lib/publisher'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
+import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
   // The keyboard is unconditional. The on-screen controls are a second way in,
@@ -47,6 +48,16 @@ export default function App(): JSX.Element {
   // would have stranded a desktop HUD with no control to bring it back.
   const [panelsOpen, setPanelsOpen] = useState(!isMobile)
   const showPanels = panelsOpen && !spectating
+
+  // Opening a deployment's wire record flies the scene to the shard, and on a
+  // phone that overlay sits along the bottom over the hamburger. So tapping a
+  // deployment closes the panels: the shard is what you asked to look at, the
+  // overlay is how you act on it, and EXIT frees the hamburger again. Only on a
+  // phone, where the two fight for the space; a desktop shows both at once.
+  const inspecting = useShards((s) => s.inspecting !== null)
+  useEffect(() => {
+    if (inspecting && isMobile) setPanelsOpen(false)
+  }, [inspecting, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.

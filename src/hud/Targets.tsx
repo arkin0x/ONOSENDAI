@@ -109,9 +109,14 @@ export function Targets({ targets }: Props): JSX.Element {
  * The name and face are the reactive part: the profile arrives from the cache,
  * so a target that started as a wall of hex becomes a person without a reload.
  */
+/** Real people have a 32-byte hex id; landmarks like Earth or the YOU marker
+ * carry a plain word, which has no profile and no avatar. */
+const IS_PUBKEY = /^[0-9a-f]{64}$/i
+
 function TargetMarker({ target }: { target: CyberTarget }): JSX.Element {
-  const profile = useProfile(target.id)
-  const name = profile?.name ?? target.label
+  const person = IS_PUBKEY.test(target.id)
+  const profile = useProfile(person ? target.id : null)
+  const name = (person && profile?.name) || target.label
   return (
     <div className="target" data-target={target.id} style={{ color: target.color }}>
       <span className="target__ring" />
@@ -120,7 +125,7 @@ function TargetMarker({ target }: { target: CyberTarget }): JSX.Element {
           chevron 135 degrees off. */}
       <span className="target__arrow">➤</span>
       <span className="target__body">
-        <ProfilePic pubkey={target.id} size={18} />
+        {person && <ProfilePic pubkey={target.id} size={18} />}
         <span className="target__text">
           <span className="target__label">{name}</span>
           <span className="target__dist" />

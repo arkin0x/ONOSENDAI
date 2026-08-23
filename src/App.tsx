@@ -3,6 +3,8 @@ import { BitReadout } from './hud/BitReadout'
 import { ChainExplorer } from './hud/ChainExplorer'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
+import { DeployBar } from './hud/DeployBar'
+import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
@@ -24,6 +26,8 @@ export default function App(): JSX.Element {
   // cannot drift apart, and nothing about having a pointer takes the keys away.
   useKeyboard()
   useProofListener()
+  // The background scan for hidden shards near where you are looking.
+  useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
   useEffect(() => { startPublisher(); startTracker() }, [])
@@ -87,6 +91,7 @@ export default function App(): JSX.Element {
       )}
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
+      <DeployBar />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

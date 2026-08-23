@@ -45,6 +45,8 @@ import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 import { SpawnMarker } from './SpawnMarker'
 import { TargetAvatars } from './TargetAvatars'
+import { WorldShards } from './WorldShards'
+import { ShardGhost } from './ShardGhost'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -86,6 +88,8 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
+      <WorldShards axes={axes} />
+      <ShardGhost axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>

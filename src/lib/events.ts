@@ -161,6 +161,13 @@ export function bytesToHex(bytes: Uint8Array): string {
   return out
 }
 
+export function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.length % 2 ? '0' + hex : hex
+  const out = new Uint8Array(clean.length / 2)
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
+
 function tag(ev: NostrEvent, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
 }

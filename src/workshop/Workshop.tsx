@@ -17,6 +17,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { GRID_HALF, MODES, hexToRgb, rgbToHex, type ShardMode } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 
 const PALETTE = ['#00e5ff', '#ff2323', '#52e39f', '#ffb020', '#c07dff', '#f7931a', '#ffffff', '#2f81f7']
@@ -67,6 +68,12 @@ export function Workshop(): JSX.Element | null {
             </button>
           ))}
         </div>
+        <button
+          className="workshop__deploy"
+          disabled={!shard || shard.vertices.length === 0}
+          onClick={() => { if (shard) { useShards.getState().startDeploy(shard.id); w().closeWorkshop() } }}
+          title="Place this shard in the world"
+        >DEPLOY ▸</button>
         <button className="workshop__close" onClick={() => w().closeWorkshop()}>CLOSE</button>
       </header>
 

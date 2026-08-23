@@ -83,6 +83,24 @@ vertices, colours blending along it), chosen per shard and previewed live.
 localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
 1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
 
+**Deploying a shard.** DEPLOY on the bench, or from the Shards panel, enters
+deploy mode: aim the movement cursor at where it should go (it ghosts there at
+its true size), pick a height to hide it at, and place (DEPLOY, Space, or the
+PLACE button). Height is the discovery radius (spec section 7.3): 0 is a single
+gibson, each step up doubles the aligned cube it hides in. What is published is
+a location-encrypted `kind:33330` event (spec section 8.6): the shard, its
+coordinate and plane are AES-256-GCM encrypted to the region key
+`sha256(region_bytes)`, and only the `lookup_id = sha256(key)` is public, so
+the coordinate never leaves in the clear. The derivation is spec section 7.2
+exactly, so a shard hidden here is one the reference CLI can find and open.
+
+**Discovery.** A background scan derives the region keys for heights 0 to 12 at
+wherever the scene is anchored (in a worker, since that is the O(2^h) work the
+protocol says looking must cost), asks the relay for content under those lookup
+ids, and renders whatever decrypts. Your own deployments always render; others'
+appear when you are near enough to compute their region. The scan only re-runs
+when you cross a region boundary (spec section 7.5).
+
 **Targets.** The Targets panel points at any number of pubkeys the way the
 HUD points at Earth: a reticle in frame, a chevron on the nearest edge out of
 frame, the distance either way, and the avatar itself (a wireframe icosahedron

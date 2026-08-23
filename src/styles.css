@@ -1061,6 +1061,184 @@ kbd {
   border-top: 1px solid rgba(0, 229, 255, 0.14);
 }
 
+/* ---------- Deploy bar ----------
+ *
+ * Up while you are placing a shard. Bottom of the scene on a phone, above the
+ * pad; a floating card on the left on a desktop, clear of both panel columns.
+ */
+.deploybar {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 101;
+  width: min(360px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(82, 227, 159, 0.5);
+  box-shadow: 0 0 18px rgba(82, 227, 159, 0.18);
+  backdrop-filter: blur(10px);
+  font-size: 10px;
+}
+
+.deploybar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deploybar__eye {
+  color: var(--ok);
+  font-size: 13px;
+}
+
+.deploybar__title {
+  flex: 1;
+  letter-spacing: 0.12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deploybar__title strong {
+  color: var(--ok);
+}
+
+.deploybar__cancel {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.25);
+  cursor: pointer;
+}
+
+.deploybar__label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.deploybar__btn {
+  font-family: inherit;
+  font-size: 12px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.deploybar__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.deploybar__value {
+  font-size: 13px;
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.deploybar__radius {
+  color: var(--ok);
+  letter-spacing: 0.06em;
+}
+
+.deploybar__hint {
+  display: block;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.deploybar__deploy {
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  height: 38px;
+  border-radius: 8px;
+  color: #05070d;
+  background: var(--ok);
+  border: 1px solid var(--ok);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.deploybar__deploy:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Clear of the panel columns on a desktop. */
+@media (min-width: 1101px) {
+  .deploybar {
+    left: 332px;
+    bottom: 14px;
+  }
+}
+
+/* Above the movement pad on a phone. */
+@media (max-width: 1100px) {
+  .deploybar {
+    bottom: 150px;
+  }
+}
+
+.shards__row--deployed {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.shards__deployed {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+.workshop__deploy {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--ok);
+  border: 1px solid var(--ok);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.workshop__deploy:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* ---------- Spectate bar ----------
  *
  * Top right on a desktop, flush to the edge: the panels are locked away while

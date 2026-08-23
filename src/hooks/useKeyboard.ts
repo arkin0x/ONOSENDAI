@@ -10,6 +10,7 @@
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop } from '../store/useWorkshop'
+import { useShards } from '../store/useShards'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 
@@ -71,14 +72,18 @@ export function useKeyboard(): void {
 
       if (event.code === 'Escape') {
         event.preventDefault()
+        // Deploying: back out of it rather than resetting the view.
+        if (useShards.getState().deployId) { useShards.getState().cancelDeploy(); return }
         store.resetView()
         return
       }
 
-      // Commit the cursor's hop: the only key that costs a proof.
+      // Commit the cursor's hop: the only key that costs a proof. While
+      // deploying, Space places the shard at the cursor instead of moving.
       if (event.code === 'Space') {
         event.preventDefault()
-        store.commit()
+        if (useShards.getState().deployId) void useShards.getState().deploy()
+        else store.commit()
         return
       }
 

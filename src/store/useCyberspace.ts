@@ -245,6 +245,8 @@ export interface CyberspaceState {
   setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
   /** The tracked targets as things the HUD can point at. */
   targetList: () => CyberTarget[]
+  /** Sign a template with this identity's key. The only door to it outside this module. */
+  sign: (template: EventTemplate) => NostrEvent
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -832,6 +834,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
       color: targetColor(t.pubkey),
       at: t.position,
     })),
+
+  sign,
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()

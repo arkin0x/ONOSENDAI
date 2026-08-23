@@ -18,6 +18,7 @@
 import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
+import { useShards } from '../store/useShards'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 
 export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Element {
@@ -26,6 +27,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const live = useCyberspace((s) => s.live)
+  const deploying = useShards((s) => s.deployId !== null)
   const bind = useRepeatable()
 
   const computing = proof.status === 'computing'
@@ -103,16 +105,17 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
           {computing ? 'STOP' : 'RECALL'}
         </button>
         <button
-          className={`touchops__commit ${computing ? 'is-busy' : armed ? 'is-armed' : ''}`}
-          disabled={!armed && !computing}
-          title="Commit hop (Space)"
+          className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : armed ? 'is-armed' : ''}`}
+          disabled={!deploying && !armed && !computing}
+          title={deploying ? 'Place shard here' : 'Commit hop (Space)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
-            useCyberspace.getState().commit()
+            if (deploying) void useShards.getState().deploy()
+            else useCyberspace.getState().commit()
           }}
         >
-          {computing ? `${Math.round(proof.progress * 100)}%` : 'COMMIT'}
+          {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : 'COMMIT'}
         </button>
         {/* Whether a commit leaves the device. Under COMMIT because that is the
             only control whose meaning it changes, and a switch rather than a

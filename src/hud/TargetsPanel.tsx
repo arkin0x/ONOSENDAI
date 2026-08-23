@@ -9,7 +9,8 @@
  * client spawned with has no follows of its own.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { parsePubkey } from '../lib/chains'
 import { fetchContacts, GENERAL_RELAYS, type Contact } from '../lib/contacts'
 import { spectate } from '../lib/spectator'
@@ -21,6 +22,7 @@ import { ProfileBadge } from './ProfileBadge'
 export function TargetsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity)
+  const myPos = useCyberspace((s) => s.position)
   const [input, setInput] = useState('')
   const [who, setWho] = useState(me.npub)
   const [contacts, setContacts] = useState<Contact[] | null>(null)
@@ -43,6 +45,29 @@ export function TargetsPanel(): JSX.Element {
   const typed = parsePubkey(input)
   const whoHex = parsePubkey(who)
   const list = Object.values(targets)
+
+  // Nearest first. A follow you have never seen move still has a place: its
+  // spawn coordinate, straight from its pubkey (spec §3.1), which is exactly
+  // where it would appear. Most of a contact list has not spawned, so this is
+  // the honest position for nearly all of them. Ties (all but impossible across
+  // 85-bit coordinates) fall back to the name.
+  const sortedContacts = useMemo(() => {
+    if (!contacts) return contacts
+    const withDistance = contacts.map((c) => {
+      const p = coordToXyz(hexToCoord(c.pubkey))
+      const dx = myPos.x - p.x
+      const dy = myPos.y - p.y
+      const dz = myPos.z - p.z
+      return { c, d2: dx * dx + dy * dy + dz * dz }
+    })
+    withDistance.sort((a, b) => {
+      if (a.d2 !== b.d2) return a.d2 < b.d2 ? -1 : 1
+      const an = (a.c.name ?? a.c.pubkey).toLowerCase()
+      const bn = (b.c.name ?? b.c.pubkey).toLowerCase()
+      return an < bn ? -1 : an > bn ? 1 : 0
+    })
+    return withDistance.map((x) => x.c)
+  }, [contacts, myPos])
 
   const loadContacts = async (): Promise<void> => {
     if (!whoHex) return
@@ -96,9 +121,9 @@ export function TargetsPanel(): JSX.Element {
           </button>
         </form>
         {contactsState === 'error' && <p className="notice">Could not reach the contact relays.</p>}
-        {contactsState === 'ready' && contacts && (
+        {contactsState === 'ready' && sortedContacts && (
           <ul className="avatars__list">
-            {contacts.map((c) => {
+            {sortedContacts.map((c) => {
               const on = !!targets[c.pubkey]
               return (
                 <li key={c.pubkey} className="targets__row targets__row--contact">
@@ -112,7 +137,7 @@ export function TargetsPanel(): JSX.Element {
                 </li>
               )
             })}
-            {contacts.length === 0 && <li className="avatars__empty">No kind 3 contact list found for that key.</li>}
+            {sortedContacts.length === 0 && <li className="avatars__empty">No kind 3 contact list found for that key.</li>}
           </ul>
         )}
       </div>

@@ -66,6 +66,7 @@ export interface WorldItem {
   author?: string
   shard?: ShardModel
   text?: string
+  createdAt?: number
 }
 
 /** What a deploy is placing, before it lands. */
@@ -88,6 +89,8 @@ interface ShardsState {
   deleted: Record<string, true>
   inspecting: string | null
   scanning: boolean
+  /** A world item clicked open, by its inner event id. */
+  selectedSecret: string | null
 
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
@@ -96,11 +99,14 @@ interface ShardsState {
   deploy: () => Promise<void>
   deleteInstance: (eventId: string) => Promise<void>
   inspect: (eventId: string | null) => void
+  selectSecret: (eventId: string | null) => void
   addDiscovered: (items: Hidden[]) => void
   setScanning: (scanning: boolean) => void
   testDiscovery: (eventId: string) => Promise<boolean>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
+  /** The clicked item, mine or discovered, as one shape. */
+  secretByEvent: (eventId: string) => WorldItem | null
 }
 
 const MINE_KEY = 'onosendai:deployments'
@@ -194,6 +200,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deleted: loadDeleted(),
     inspecting: null,
     scanning: false,
+    selectedSecret: null,
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
@@ -297,6 +304,8 @@ export const useShards = create<ShardsState>((set, get) => {
 
     inspect: (eventId) => set({ inspecting: eventId }),
 
+    selectSecret: (eventId) => set({ selectedSecret: eventId }),
+
     addDiscovered: (items) => {
       if (items.length === 0) return
       const { deleted } = get()
@@ -330,16 +339,19 @@ export const useShards = create<ShardsState>((set, get) => {
     worldItems: () => {
       const out: WorldItem[] = []
       const seen = new Set<string>()
+      const me = useCyberspace.getState().identity.pubkey
       for (const d of get().mine) {
         seen.add(d.eventId)
-        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, shard: d.shard, text: d.text })
+        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt })
       }
       for (const h of Object.values(get().discovered)) {
         if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text })
+        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt })
       }
       return out
     },
+
+    secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,
   }
 })
 

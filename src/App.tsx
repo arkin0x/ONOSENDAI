@@ -5,6 +5,7 @@ import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { DeploymentDetail } from './hud/DeploymentDetail'
+import { SecretModal } from './hud/SecretModal'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
@@ -105,6 +106,7 @@ export default function App(): JSX.Element {
       <Workshop />
       <DeployBar />
       <DeploymentDetail />
+      <SecretModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

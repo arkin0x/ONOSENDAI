@@ -62,6 +62,8 @@ import {
 import {
   buildChain,
   hopTemplate,
+  parseAction,
+  positionHex,
   sidestepTemplate,
   spawnTemplate,
   type ActionEvent,
@@ -232,7 +234,7 @@ export interface CyberspaceState {
 
   moveCursor: (dir: AxisDirection) => void
   setCursorAtCell: (row: number, col: number) => void
-  commit: () => void
+  commit: () => Promise<void>
   cancel: () => void
   adjustScale: (delta: number) => void
   rotate: (dir: RotateDirection) => void
@@ -269,6 +271,9 @@ export interface CyberspaceState {
   toggleTarget: (pubkey: string, name?: string | null) => void
   /** A target's chain, fetched or updated: its head becomes the position. */
   setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
+  /** Fold relay events for THIS identity into the live chain, adopting a newer
+   * one from another machine. The self-sync loop and login both feed this. */
+  adoptChain: (events: NostrEvent[]) => void
   /** The tracked targets as things the HUD can point at. */
   targetList: () => CyberTarget[]
   /** Sign a template with this identity's active signer. Async because an
@@ -516,6 +521,45 @@ async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<P
  * as the one before it is the same bytes, the same id, and so not a new spawn
  * at all. The timestamp therefore steps past the old head, not merely to now.
  */
+/**
+ * The chain state for an identity that has not been placed yet: it sits at its
+ * own spawn coordinate (spec §3.1) with nothing signed. Switching to a bunker
+ * or extension lands here, so login never signs a spawn; the self-sync loop
+ * fills in the real chain from the relay if there is one, and otherwise the
+ * first move signs the spawn (see commit).
+ */
+function provisionalChain(pubkey: string): ReturnType<typeof derive> {
+  const { position, plane } = spawnOf(pubkey)
+  return {
+    events: [],
+    genesisId: '',
+    prevEventId: '',
+    published: {},
+    chain: EMPTY_STATS,
+    position,
+    positionHistory: [position],
+    plane,
+    headPlane: plane,
+    exploreIndex: null,
+    anchor: position,
+    anchorPlane: plane,
+  }
+}
+
+/** Hop and sidestep counts of an adopted chain; compute totals are this
+ * device's own effort, so they carry over rather than reset to another
+ * machine's unknown work. */
+function statsFromChain(events: NostrEvent[], prev: ChainStats): ChainStats {
+  let hops = 0
+  let sidesteps = 0
+  for (const e of events) {
+    const a = parseAction(e)
+    if (a?.type === 'hop') hops++
+    else if (a?.type === 'sidestep') sidesteps++
+  }
+  return { ...prev, hops, sidesteps }
+}
+
 /** Everything the store derives from a chain, so spawn and respawn agree. */
 function derive(saved: PersistedChain): {
   events: NostrEvent[]
@@ -564,21 +608,25 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   const switchTo = async (signer: Signer): Promise<void> => {
     currentSigner = signer
     saveSignerPref(prefOf(signer))
-    const saved = loadChain(signer.pubkey) ?? (await freshSpawnAsync(signer))
-    const d = derive(saved)
+    // No spawn is signed here. A returning identity loads from local storage now
+    // and from the relay a moment later (self-sync), and a brand-new one sits at
+    // its spawn coordinate until its first move. So switching to a bunker or an
+    // extension never makes it sign anything just to log in.
+    const local = loadChain(signer.pubkey)
+    const base = local ? derive(local) : provisionalChain(signer.pubkey)
     set({
       identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
       signerKind: signer.kind,
       loginError: null,
-      ...d,
-      cursor: d.position,
+      ...base,
+      cursor: base.position,
       pendingTarget: null,
       proof: IDLE_PROOF,
       publishError: null,
       spectate: null,
       focus: null,
     })
-    saveChain(d.events, d.published, d.chain)
+    if (local) saveChain(base.events, base.published, base.chain)
   }
 
   return {
@@ -631,12 +679,34 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ cursor: next })
   },
 
-  commit: () => {
-    const { position, cursor, plane, headPlane, prevEventId, proof } = get()
+  commit: async () => {
     // One proof at a time. X cancels a commit you regret.
-    if (proof.status === 'computing') return
+    if (get().proof.status === 'computing') return
     // Looking at history: nothing here is a place you can move from.
     if (!get().atHead()) return
+
+    // A provisional identity (logged in, never placed) has no genesis yet. Sign
+    // its spawn now, on this first deliberate move, rather than at login. This
+    // is the only spawn a switched-in identity ever signs.
+    if (get().events.length === 0) {
+      let spawn: NostrEvent
+      try {
+        spawn = await signEvent(spawnTemplate(get().identity.pubkey, Math.floor(Date.now() / 1000)))
+      } catch (err) {
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+        return
+      }
+      // The relay chain may have landed while the signer was thinking; if so it
+      // already placed us and this spawn is redundant.
+      if (get().events.length === 0) {
+        const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS })
+        set({ ...d })
+        saveChain(d.events, d.published, d.chain)
+      }
+    }
+
+    const { position, cursor, plane, headPlane, prevEventId, proof } = get()
+    if (proof.status === 'computing') return
     // Nothing lined up: same cell, same plane.
     if (samePosition(position, cursor) && plane === headPlane) return
 
@@ -969,6 +1039,55 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     else get().addTarget(pubkey, name)
   },
 
+  adoptChain: (incoming) => {
+    const cur = get()
+    // A local commit owns the head while it computes; a relay echo must not race it.
+    if (cur.proof.status === 'computing') return
+    const me = cur.identity.pubkey
+    const mine = incoming.filter((e) => e.pubkey === me)
+    if (mine.length === 0) return
+    const seen = new Set(cur.events.map((e) => e.id))
+    const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
+    // buildChain is §3.2: the newest spawn wins, then follow the links. So a
+    // newer chain from another machine supersedes ours; our own echoed events
+    // fold in as a no-op. It returns parsed actions in order; map back to the
+    // raw events the store actually holds.
+    const order = buildChain(merged)
+    if (order.length === 0) return
+    const head = order[order.length - 1]
+    if (head.id === cur.prevEventId && order.length === cur.events.length) return
+    const byId = new Map(merged.map((e) => [e.id, e]))
+    const chainEvents = order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
+    // Relay events are on the wire; keep whatever of ours was already published.
+    const okIds = new Set<string>([
+      ...mine.map((e) => e.id),
+      ...cur.events.filter((e) => cur.published[e.id] === 'ok').map((e) => e.id),
+    ])
+    const saved: PersistedChain = {
+      version: 2,
+      events: chainEvents,
+      published: chainEvents.filter((e) => okIds.has(e.id)).map((e) => e.id),
+      stats: statsFromChain(chainEvents, cur.chain),
+    }
+    const d = derive(saved)
+    const following = cur.atHead()
+    set({
+      events: d.events,
+      genesisId: d.genesisId,
+      prevEventId: d.prevEventId,
+      published: d.published,
+      chain: saved.stats,
+      position: d.position,
+      plane: d.plane,
+      headPlane: d.headPlane,
+      positionHistory: d.positionHistory,
+      // Follow to the new head only if you were living at it; browsing history
+      // or spectating keeps its view while the chain updates underneath.
+      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, cursor: d.position, exploreIndex: null } : {}),
+    })
+    saveChain(d.events, d.published, saved.stats)
+  },
+
   setTargetChain: (pubkey, events, status) => {
     const { targets } = get()
     const t = targets[pubkey]
@@ -1057,8 +1176,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   axes: () => viewAxes(get().view),
 
   coordHex: () => {
-    const { events } = get()
-    return events[events.length - 1].tags.find((t) => t[0] === 'C')?.[1] ?? ''
+    const { events, position, plane } = get()
+    const head = events[events.length - 1]
+    // Provisional identity: no head event yet, so read the spawn coordinate.
+    return head ? head.tags.find((t) => t[0] === 'C')?.[1] ?? '' : positionHex(position, plane)
   },
 
   sector: () => {

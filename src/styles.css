@@ -966,13 +966,14 @@ kbd {
 
 /* ---------- Spectate bar ----------
  *
- * Top right of the scene on a desktop, beside the panel column; along the
- * bottom on a phone, where the movement pad would be if it were yours to use.
+ * Top right on a desktop, flush to the edge: the panels are locked away while
+ * this is up, so there is no column to leave room for. Along the bottom on a
+ * phone, where the movement pad would be if it were yours to use.
  */
 .spectate {
   position: fixed;
   top: 12px;
-  right: 332px;
+  right: 14px;
   z-index: 101;
   display: flex;
   align-items: center;

@@ -26,9 +26,10 @@ const MAX_TICKS = 96
 
 export function ChainExplorer(): JSX.Element {
   const events = useCyberspace((s) => s.events)
+  const spectate = useCyberspace((s) => s.spectate)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   // Parsed once per chain change; the store caches, this just subscribes.
-  const actions = useMemo(() => useCyberspace.getState().actions(), [events])
+  const actions = useMemo(() => useCyberspace.getState().focusChain(), [events, spectate])
   const last = actions.length - 1
   const index = exploreIndex ?? last
   const action = actions[index]
@@ -58,6 +59,9 @@ export function ChainExplorer(): JSX.Element {
 
   const fraction = last <= 0 ? 1 : index / last
   const ticks = last + 1 <= MAX_TICKS ? actions.map((_, i) => (last === 0 ? 1 : i / last)) : []
+
+  // A spectated pubkey with nothing on the relay has no chain to walk.
+  if (actions.length === 0) return <></>
 
   return (
     <div className="explorer">
@@ -114,10 +118,10 @@ export function ChainExplorer(): JSX.Element {
             <span className={`explorer__type explorer__type--${action.type}`}>{action.type.toUpperCase()}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
             {atHead ? (
-              <span className="explorer__live">LIVE</span>
+              <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LIVE'}</span>
             ) : (
               <button className="explorer__return" {...noCallout}
-                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>RETURN TO LIVE</button>
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LIVE'}</button>
             )}
           </div>
 

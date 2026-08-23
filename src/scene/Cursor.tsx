@@ -85,7 +85,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
   const anchor = useCyberspace((s) => s.anchor)
-  const atHead = useCyberspace((s) => s.exploreIndex === null)
+  const atHead = useCyberspace((s) => s.atHead())
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
@@ -172,7 +172,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const outline = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
-    const live = s.exploreIndex === null ? (s.pendingTarget ?? s.cursor) : s.anchor
+    const live = s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor
     const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
     setSegmentEnd(leg2.visible ? leg2 : leg1, leg2.visible ? leg2Geometry : leg1Geometry, b)
@@ -197,7 +197,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         follow={() => {
           const s = useCyberspace.getState()
           return cellCentre(
-            s.exploreIndex === null ? (s.pendingTarget ?? s.cursor) : s.anchor,
+            s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor,
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}

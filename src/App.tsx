@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { ChainExplorer } from './hud/ChainExplorer'
+import { SpectateBar } from './hud/SpectateBar'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
@@ -25,19 +26,23 @@ export default function App(): JSX.Element {
   useEffect(() => startPublisher(), [])
   const isMobile = useIsMobile()
   const targets = useTargets()
-  // Off the head there is nothing to drive: the movement controls stand down
-  // and the explorer's RETURN TO LIVE is the way back.
-  const atHead = useCyberspace((s) => s.exploreIndex === null)
+  // Off your own head there is nothing to drive: the movement controls stand
+  // down and the explorer's RETURN TO LIVE is the way back.
+  const atHead = useCyberspace((s) => s.atHead())
+  // Spectating locks the panels: they describe you, and the scene is not about
+  // you right now. The bar carries what matters and the way out.
+  const spectating = useCyberspace((s) => s.spectate !== null)
 
   // Panels start open on a desktop and closed on a phone, and after that the
   // hamburger owns it on both. It used to be derived from the breakpoint, which
   // was necessary while the hamburger only existed on mobile: a stored `false`
   // would have stranded a desktop HUD with no control to bring it back.
   const [panelsOpen, setPanelsOpen] = useState(!isMobile)
+  const showPanels = panelsOpen && !spectating
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
-  const crowded = isMobile && panelsOpen
+  const crowded = isMobile && showPanels
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
@@ -64,7 +69,8 @@ export default function App(): JSX.Element {
           <ChainExplorer />
         </div>
       )}
-      {panelsOpen && <Hud menuOpen={crowded} />}
+      {showPanels && <Hud menuOpen={crowded} />}
+      <SpectateBar />
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
@@ -81,7 +87,8 @@ export default function App(): JSX.Element {
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}
         onClick={() => setPanelsOpen((open) => !open)}
-        aria-label={panelsOpen ? 'Hide panels' : 'Show panels'}
+        disabled={spectating}
+        aria-label={spectating ? 'Panels locked while spectating' : panelsOpen ? 'Hide panels' : 'Show panels'}
       >
         <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>
           <span></span>

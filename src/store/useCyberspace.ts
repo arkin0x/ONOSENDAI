@@ -68,6 +68,22 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
 
+/**
+ * Another avatar, followed. Their chain is the focus chain while this is set:
+ * the scene anchors on it, the explorer walks it, and the controls stand down
+ * because nothing here is yours to move.
+ */
+export interface SpectateState {
+  pubkey: string
+  npub: string
+  /** Raw, so new events from the relay can be merged and the chain rebuilt. */
+  events: NostrEvent[]
+  actions: ActionEvent[]
+  /** created_at of their newest action; null when the relay has none. */
+  lastActive: number | null
+  status: 'loading' | 'live' | 'empty' | 'error'
+}
+
 export type ProofStatus = 'idle' | 'computing' | 'done' | 'infeasible'
 
 export interface ProofState {
@@ -164,6 +180,7 @@ export interface CyberspaceState {
    * chain changes, only where you are looking from.
    */
   exploreIndex: number | null
+  spectate: SpectateState | null
   /**
    * The scene's render origin, materialised: the position of the action being
    * looked at. Equal to `position` at the head. Every origin-relative thing in
@@ -197,6 +214,12 @@ export interface CyberspaceState {
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
   exploreStep: (delta: number) => void
+  /** Start following a pubkey: anchors on its spawn coordinate until its chain arrives. */
+  beginSpectate: (pubkey: string) => void
+  /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
+  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
+  /** Back to your own head. */
+  endSpectate: () => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -207,8 +230,12 @@ export interface CyberspaceState {
   sector: () => string
   /** The chain, parsed. */
   actions: () => ActionEvent[]
-  /** True when the scene is anchored on the live head, where the controls apply. */
+  /** True when the scene is anchored on YOUR live head, where the controls apply. */
   atHead: () => boolean
+  /** The chain the scene is anchored on: the spectated avatar's, else yours. */
+  focusChain: () => ActionEvent[]
+  /** Whose chain that is. */
+  focusPubkey: () => string
   /**
    * The two positions the XOR readout compares: at the head, where you stand
    * and where the cursor is; in history, the action before the one shown and
@@ -320,6 +347,12 @@ const pubkeyHex = getPublicKey(secretKey)
 const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
 const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
+/** Where any pubkey spawns: its own bits, read as a coordinate (spec §3.1). */
+function spawnOf(pubkey: string): { position: Position; plane: Plane } {
+  const { x, y, z, plane } = coordToXyz(hexToCoord(pubkey))
+  return { position: { x, y, z }, plane }
+}
+
 /** The one place the key touches an event. */
 function sign(template: EventTemplate): NostrEvent {
   return finalizeEvent(template, secretKey)
@@ -381,6 +414,7 @@ let requestId = 0
 export const useCyberspace = create<CyberspaceState>((set, get) => ({
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
+  spectate: null,
   cursor: initial.position,
   pendingTarget: null,
   scaleExp: 0,
@@ -512,6 +546,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   togglePlane: () => {
     // A plane flip mid-proof would desync the in-flight terrain K.
     if (get().proof.status === 'computing') return
+    // Someone else's plane is theirs; the terrain follows their chain.
+    if (get().spectate) return
     set({ plane: get().plane === 0 ? 1 : 0, proof: IDLE_PROOF })
   },
 
@@ -571,7 +607,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const nextEvents = [...events, event]
     const nextPublished = { ...published, [event.id]: 'queued' as const }
 
-    const following = get().exploreIndex === null
+    const following = get().atHead()
     set({
       position: newPosition,
       headPlane: plane,
@@ -624,23 +660,67 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   },
 
   explore: (index) => {
-    const actions = get().actions()
-    const last = actions.length - 1
+    const chain = get().focusChain()
+    const last = chain.length - 1
+    // Nothing to walk: a spectated pubkey with no chain on the relay. The
+    // anchor stays on its spawn coordinate.
+    if (last < 0) { set({ exploreIndex: null }); return }
     if (index === null || index >= last) {
-      const { position, headPlane } = get()
-      set({ exploreIndex: null, anchor: position, anchorPlane: headPlane })
+      const a = chain[last]
+      set({ exploreIndex: null, anchor: a.position, anchorPlane: a.plane })
       return
     }
     const i = Math.max(0, Math.floor(index))
-    const a = actions[i]
+    const a = chain[i]
     set({ exploreIndex: i, anchor: a.position, anchorPlane: a.plane })
   },
 
   exploreStep: (delta) => {
     const { exploreIndex } = get()
-    const last = get().actions().length - 1
+    const last = get().focusChain().length - 1
     const from = exploreIndex ?? last
     get().explore(Math.min(last, Math.max(0, from + delta)))
+  },
+
+  beginSpectate: (pubkey) => {
+    const spawn = spawnOf(pubkey)
+    set({
+      spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading' },
+      exploreIndex: null,
+      anchor: spawn.position,
+      anchorPlane: spawn.plane,
+    })
+  },
+
+  setSpectateChain: (pubkey, events, status) => {
+    const prev = get().spectate
+    if (!prev || prev.pubkey !== pubkey) return
+    const actions = buildChain(events)
+    const head = actions[actions.length - 1]
+    // A chain that grew under an explorer parked in its history leaves the
+    // explorer where it was; one that was replaced (a respawn) snaps to head.
+    const keep = get().exploreIndex !== null
+      && get().exploreIndex! < actions.length
+      && actions[get().exploreIndex!]?.id === prev.actions[get().exploreIndex!]?.id
+    const at = keep ? actions[get().exploreIndex!] : head
+    const spawn = spawnOf(pubkey)
+    set({
+      spectate: {
+        ...prev,
+        events,
+        actions,
+        lastActive: head?.createdAt ?? null,
+        status: status ?? (head ? 'live' : 'empty'),
+      },
+      exploreIndex: keep ? get().exploreIndex : null,
+      anchor: at?.position ?? spawn.position,
+      anchorPlane: at?.plane ?? spawn.plane,
+    })
+  },
+
+  endSpectate: () => {
+    const { position, headPlane } = get()
+    set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: headPlane })
   },
 
   setPublishStatus: (id, status, reason) => {
@@ -678,14 +758,22 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
   actions: () => parsedChain(get().events),
 
-  atHead: () => get().exploreIndex === null,
+  atHead: () => get().exploreIndex === null && get().spectate === null,
+
+  focusChain: () => {
+    const { spectate } = get()
+    return spectate ? spectate.actions : parsedChain(get().events)
+  },
+
+  focusPubkey: () => get().spectate?.pubkey ?? get().identity.pubkey,
 
   readoutPair: () => {
-    const { exploreIndex, position, cursor } = get()
-    if (exploreIndex === null) return [position, cursor]
-    const actions = get().actions()
-    const here = actions[exploreIndex]?.position ?? position
-    const before = actions[exploreIndex - 1]?.position ?? here
+    const { exploreIndex, position, cursor, anchor } = get()
+    if (get().atHead()) return [position, cursor]
+    const chain = get().focusChain()
+    const i = exploreIndex ?? chain.length - 1
+    const here = chain[i]?.position ?? anchor
+    const before = chain[i - 1]?.position ?? here
     return [before, here]
   },
 
@@ -706,9 +794,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
    * screen centre, so zooming tracks the cursor instead of the avatar.
    */
   cursorOffset: (): [number, number, number] => {
-    const { anchor, cursor, scaleExp, view, exploreIndex } = get()
-    // In history there is no cursor to frame; the camera sits on the anchor.
-    if (exploreIndex !== null) return [0, 0, 0]
+    const { anchor, cursor, scaleExp, view } = get()
+    // Off your own head there is no cursor to frame; the camera sits on the anchor.
+    if (!get().atHead()) return [0, 0, 0]
     const axes = viewAxes(view)
     const origin = alignedOrigin(anchor, scaleExp)
     // Cell CENTRES, the same convention the cursor cube, the avatar and the path

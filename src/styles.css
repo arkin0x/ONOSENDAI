@@ -857,6 +857,213 @@ kbd {
   white-space: nowrap;
 }
 
+/* ---------- Avatars ---------- */
+
+.avatars__find {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.avatars__input {
+  min-width: 0;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+
+.avatars__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.avatars__go,
+.avatars__spectate {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 0 9px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.avatars__go:hover,
+.avatars__spectate:hover {
+  background: rgba(0, 229, 255, 0.18);
+}
+
+.avatars__go:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.avatars__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.avatars__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.avatars__row:first-child {
+  border-top: 0;
+}
+
+.avatars__who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatars__type {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+.avatars__type--spawn { color: var(--ok); }
+.avatars__type--sidestep { color: var(--sidestep); }
+
+.avatars__when {
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.avatars__you {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #ff2323;
+  padding: 0 9px;
+}
+
+.avatars__empty {
+  font-size: 10px;
+  color: var(--dim);
+  padding: 6px 0;
+}
+
+/* ---------- Spectate bar ----------
+ *
+ * Top right of the scene on a desktop, beside the panel column; along the
+ * bottom on a phone, where the movement pad would be if it were yours to use.
+ */
+.spectate {
+  position: fixed;
+  top: 12px;
+  right: 332px;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.82);
+  border: 1px solid rgba(255, 35, 35, 0.45);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 14px rgba(255, 35, 35, 0.18);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  max-width: calc(100vw - 24px);
+}
+
+.spectate__eye {
+  color: #ff2323;
+  font-size: 13px;
+  line-height: 1;
+  animation: spectate-blink 2.4s ease-in-out infinite;
+}
+
+@keyframes spectate-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.spectate__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.spectate__label {
+  color: #ff2323;
+  font-weight: 700;
+}
+
+.spectate__who {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectate__meta {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.spectate__end {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #05070d;
+  background: #ff2323;
+  border: 1px solid #ff2323;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.spectate__end:hover {
+  background: #ff5c5c;
+}
+
+@media (max-width: 1100px) {
+  .spectate {
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    left: 92px;
+  }
+
+  .spectate__meta {
+    white-space: normal;
+  }
+}
+
+.hamburger-menu:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
 /* ---------- Derezz ----------
  *
  * The one panel that destroys something. Red throughout, last in the column,

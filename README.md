@@ -72,6 +72,14 @@ shows what that hop cost); what came after is drawn faint. Off the head the
 movement controls stand down and RETURN TO LIVE brings them back. The same
 instrument walks any other avatar's chain while spectating.
 
+**Spectating.** The Avatars panel lists every pubkey with a v2 action on the
+relay, newest first, with a field for any npub. SPECTATE anchors the scene on
+that avatar's chain head (their terrain, their rooms, their trail, their spawn
+marker), keeps their hops arriving live, hands the chain explorer their
+history, and points a YOU marker back at your own avatar. The panels lock, the
+movement controls stand down, the compass and view controls stay, and END
+SPECTATION brings you home.
+
 **The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
 rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,
 sized in cells like the avatar so it marks the spawn cell at any scale.

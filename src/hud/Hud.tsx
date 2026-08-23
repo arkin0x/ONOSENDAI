@@ -5,6 +5,7 @@
 
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { Legend } from './Legend'
@@ -202,6 +203,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <Brand />
         <IdentityPanel />
         <PositionPanel />
+        <AvatarsPanel />
         <ScalePanel />
         <LinksPanel />
       </div>

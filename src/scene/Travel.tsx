@@ -1,13 +1,16 @@
 /**
- * Travel.tsx — drives the avatar's catch-up after a commit.
+ * Travel.tsx — drives the avatar's catch-up after a move.
  *
- * Watches the committed position. `position` only advances when a proof lands
- * (`applyProofMessage` sets it, and nothing else does), so this fires at exactly
- * the right moment on its own: nothing moves while the work is being done, and
- * the journey begins the instant it is paid for. That ordering is the point.
- * Sliding during the computation would imply the move was already happening,
- * when in fact the whole premise of the protocol is that it has to be earned
- * first.
+ * Watches the anchor. At your own head that advances only when a proof lands
+ * (`applyProofMessage` sets it, and nothing else does), so this fires at
+ * exactly the right moment on its own: nothing moves while the work is being
+ * done, and the journey begins the instant it is paid for. That ordering is
+ * the point. Sliding during the computation would imply the move was already
+ * happening, when in fact the whole premise of the protocol is that it has to
+ * be earned first. While spectating, the anchor advances when THEIR proof
+ * lands on the relay, and the same catch-up shows their hop.
+ *
+ * Scrubbing history and changing whose chain is shown are not moves, and snap.
  *
  * Duration scales mildly with distance so a one gibson step is a flick and a
  * long haul reads as a haul, but it is clamped: this is punctuation on a commit,
@@ -32,32 +35,33 @@ interface Props {
 }
 
 export function Travel({ axes }: Props): null {
-  const position = useCyberspace((s) => s.position)
+  const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const genesisId = useCyberspace((s) => s.genesisId)
+  // A new chain (respawn) or a new avatar (spectate) is a cut, not a journey.
+  const focusKey = useCyberspace((s) => `${s.focusPubkey()}:${s.genesisId}`)
+  const exploring = useCyberspace((s) => s.exploreIndex !== null)
 
-  const previous = useRef<Position>(position)
-  const previousGenesis = useRef(genesisId)
+  const previous = useRef<Position>(anchor)
+  const previousKey = useRef(focusKey)
   const from = useRef(new Vector3())
   const duration = useRef(0)
   const startedAt = useRef<number | null>(null)
 
   useEffect(() => {
     const old = previous.current
-    previous.current = position
-    if (old.x === position.x && old.y === position.y && old.z === position.z) return
+    previous.current = anchor
+    if (old.x === anchor.x && old.y === anchor.y && old.z === anchor.z) return
 
-    // A respawn is not a move. Nothing was paid for the distance back to the
-    // pubkey, so nothing should be seen to travel it, however short it is.
-    if (previousGenesis.current !== genesisId) {
-      previousGenesis.current = genesisId
+    const cut = previousKey.current !== focusKey || exploring
+    previousKey.current = focusKey
+    if (cut) {
       travelOffset.set(0, 0, 0)
       startedAt.current = null
       return
     }
 
     // Where the avatar was, expressed against the origin it now uses.
-    const [x, y, z] = cellCentre(old, alignedOrigin(position, scaleExp), scaleExp, axes)
+    const [x, y, z] = cellCentre(old, alignedOrigin(anchor, scaleExp), scaleExp, axes)
     from.current.set(x, y, z)
 
     // A hop far enough to leave the drawn world would animate a mesh nobody can
@@ -74,7 +78,7 @@ export function Travel({ axes }: Props): null {
     // scaleExp and axes are read at commit time on purpose: a zoom or a rotation
     // mid-flight must not restart or re-aim a journey already under way.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position, genesisId])
+  }, [anchor, focusKey])
 
   useFrame((state) => {
     if (travelOffset.lengthSq() === 0) return

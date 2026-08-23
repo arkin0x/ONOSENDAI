@@ -39,7 +39,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
-  const atHead = useCyberspace((s) => s.exploreIndex === null)
+  const atHead = useCyberspace((s) => s.atHead())
 
   const target = pendingTarget ?? cursor
 

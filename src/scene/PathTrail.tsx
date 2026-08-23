@@ -21,10 +21,16 @@ interface Props {
 }
 
 export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
-  const positionHistory = useCyberspace((s) => s.positionHistory)
+  const ownHistory = useCyberspace((s) => s.positionHistory)
+  const spectate = useCyberspace((s) => s.spectate)
   const anchor = useCyberspace((s) => s.anchor)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
 
+  // Whose trail: the spectated avatar's chain, else your own.
+  const positionHistory = useMemo(
+    () => (spectate ? spectate.actions.map((a) => a.position) : ownHistory),
+    [spectate, ownHistory],
+  )
   const split = exploreIndex ?? positionHistory.length - 1
 
   const geometry = useMemo(() => {
@@ -63,7 +69,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // the head: in history nothing is travelling.
   const lastVertex = useRef<Float32Array | null>(null)
   useFrame(() => {
-    if (exploreIndex !== null) return
+    if (exploreIndex !== null || spectate) return
     const attr = geometry?.walked?.attributes.position
     if (!attr) return
     const arr = attr.array as Float32Array

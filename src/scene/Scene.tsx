@@ -62,7 +62,7 @@ const FOLLOW_TAU = 0.09
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const pubkey = useCyberspace((s) => s.identity.pubkey)
+  const pubkey = useCyberspace((s) => s.focusPubkey())
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const win = useViewWindow()
@@ -178,6 +178,7 @@ function CellMetric(): null {
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
+  const focusPubkey = useCyberspace((s) => s.focusPubkey())
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -208,7 +209,7 @@ function Rig(): JSX.Element {
     locked.current = true
     prevOrigin.current = null
     c.update()
-  }, [view, genesisId])
+  }, [view, genesisId, focusPubkey])
 
   useFrame((_, dt) => {
     const c = controls.current

@@ -10,17 +10,13 @@
  */
 
 import { useEffect, useState } from 'react'
-import { nip19 } from 'nostr-tools'
 import { parsePubkey } from '../lib/chains'
 import { fetchContacts, GENERAL_RELAYS, type Contact } from '../lib/contacts'
 import { spectate } from '../lib/spectator'
 import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
-
-function shortNpub(npub: string): string {
-  return `${npub.slice(0, 12)}…${npub.slice(-6)}`
-}
+import { ProfileBadge } from './ProfileBadge'
 
 export function TargetsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
@@ -67,7 +63,7 @@ export function TargetsPanel(): JSX.Element {
         {list.map((t) => (
           <li key={t.pubkey} className="targets__row">
             <span className="targets__dot" style={{ background: targetColor(t.pubkey), boxShadow: `0 0 6px ${targetColor(t.pubkey)}` }} />
-            <span className="avatars__who" title={t.npub}>{t.name ?? shortNpub(t.npub)}</span>
+            <ProfileBadge pubkey={t.pubkey} fallbackName={t.name} />
             <span className={`targets__status targets__status--${t.status}`} title={t.lastActive ? formatStamp(t.lastActive) : undefined}>
               {t.status === 'live' && t.lastActive ? formatAgo(t.lastActive, now)
                 : t.status === 'resolving' ? 'FINDING'
@@ -97,7 +93,7 @@ export function TargetsPanel(): JSX.Element {
               const on = !!targets[c.pubkey]
               return (
                 <li key={c.pubkey} className="targets__row targets__row--contact">
-                  <span className="avatars__who" title={nip19.npubEncode(c.pubkey)}>{c.name ?? shortNpub(nip19.npubEncode(c.pubkey))}</span>
+                  <ProfileBadge pubkey={c.pubkey} fallbackName={c.name} />
                   <button
                     className={`targets__toggle ${on ? 'is-on' : ''}`}
                     style={on ? { color: targetColor(c.pubkey), borderColor: targetColor(c.pubkey) } : undefined}

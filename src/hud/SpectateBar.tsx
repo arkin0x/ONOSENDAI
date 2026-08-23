@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { stopSpectating } from '../lib/spectator'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { ProfileBadge } from './ProfileBadge'
 
 export function SpectateBar(): JSX.Element | null {
   const spectate = useCyberspace((s) => s.spectate)
@@ -22,7 +23,6 @@ export function SpectateBar(): JSX.Element | null {
 
   if (!spectate) return null
 
-  const short = `${spectate.npub.slice(0, 12)}…${spectate.npub.slice(-6)}`
   const status =
     spectate.status === 'loading' ? 'FETCHING CHAIN'
       : spectate.status === 'error' ? 'RELAY UNREACHABLE'
@@ -34,7 +34,7 @@ export function SpectateBar(): JSX.Element | null {
       <span className="spectate__eye" aria-hidden="true">◉</span>
       <span className="spectate__text">
         <span className="spectate__label">SPECTATING</span>
-        <span className="spectate__who" title={spectate.npub}>{short}</span>
+        <ProfileBadge pubkey={spectate.pubkey} className="spectate__badge" />
         <span className="spectate__meta">
           {spectate.lastActive !== null && (
             <span title={formatStamp(spectate.lastActive)}>LAST ACTIVE {formatAgo(spectate.lastActive, now).toUpperCase()} · </span>

@@ -864,6 +864,51 @@ kbd {
   white-space: nowrap;
 }
 
+/* ---------- Profile badge (face + name) ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.badge__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pfp {
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  display: inline-block;
+  background: rgba(0, 229, 255, 0.1);
+}
+
+.pfp--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #05070d;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.spectate__badge .badge__name {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* The avatars/targets/follows rows hold a badge where a bare name used to sit;
+ * the badge is the flexible column that ellipsizes. */
+.avatars__row .badge,
+.targets__row .badge,
+.targets__row--contact .badge {
+  min-width: 0;
+}
+
 /* ---------- Avatars ---------- */
 
 .avatars__find {

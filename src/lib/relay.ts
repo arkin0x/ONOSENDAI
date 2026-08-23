@@ -62,13 +62,20 @@ interface AuthRelay {
  * and re-auths on its own when a reconnect brings a fresh challenge.
  */
 const authedFor = new Map<string, string>()
+const noChallenge = new Set<string>()
 async function authRelay(url: string): Promise<void> {
+  // A relay that never challenged before will not now: skip the wait.
+  if (noChallenge.has(url)) return
   try {
     const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
-    for (let i = 0; i < 20 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 50))
-    if (relay.challenge && authedFor.get(url) !== relay.challenge) {
-      await relay.auth(authSign)
-      authedFor.set(url, relay.challenge)
+    for (let i = 0; i < 10 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 40))
+    if (relay.challenge) {
+      if (authedFor.get(url) !== relay.challenge) {
+        await relay.auth(authSign)
+        authedFor.set(url, relay.challenge)
+      }
+    } else {
+      noChallenge.add(url)
     }
   } catch { /* relay down, or does not require auth */ }
 }
@@ -109,7 +116,7 @@ export function publish(event: NostrEvent): Promise<PublishResult> {
  * `onauth`: the relay now requires NIP-42 auth for reads, so a query has to be
  * able to answer the challenge and retry, or it comes back empty.
  */
-async function collect(relays: string[], filter: Filter): Promise<NostrEvent[]> {
+async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<NostrEvent[]> {
   await authAll(relays)
   return new Promise((resolve) => {
     const events = new Map<string, NostrEvent>()
@@ -121,12 +128,12 @@ async function collect(relays: string[], filter: Filter): Promise<NostrEvent[]> 
       try { sub.close() } catch { /* already closed */ }
       resolve([...events.values()])
     }
-    const timer = setTimeout(done, MAX_WAIT_MS + 2000)
+    const timer = setTimeout(done, maxWait + 500)
     const sub = getPool().subscribeEose(relays, filter, {
       onevent: (e) => events.set(e.id, e),
       onclose: done,
       onauth: authSign,
-      maxWait: MAX_WAIT_MS,
+      maxWait,
     })
   })
 }
@@ -137,8 +144,8 @@ export function query(filter: Filter): Promise<NostrEvent[]> {
 }
 
 /** Query an explicit set, for the few things that live elsewhere (contact lists). */
-export function queryAny(relays: string[], filter: Filter): Promise<NostrEvent[]> {
-  return collect(relays, filter)
+export function queryAny(relays: string[], filter: Filter, maxWait?: number): Promise<NostrEvent[]> {
+  return collect(relays, filter, maxWait)
 }
 
 /** A live subscription across the configured relays; the returned function closes it. */

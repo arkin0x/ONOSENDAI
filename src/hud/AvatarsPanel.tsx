@@ -13,16 +13,10 @@ import { useRecentAvatars } from '../hooks/useRecentAvatars'
 import { parsePubkey } from '../lib/chains'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { spectate } from '../lib/spectator'
+import { ProfileBadge } from './ProfileBadge'
 import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
-import { nip19 } from 'nostr-tools'
-
-/** Enough to tell keys apart; the title carries the whole npub. */
-function shortNpub(pubkey: string): string {
-  const npub = nip19.npubEncode(pubkey)
-  return `${npub.slice(0, 12)}…${npub.slice(-6)}`
-}
 
 export function AvatarsPanel(): JSX.Element {
   const { avatars, status } = useRecentAvatars()
@@ -73,7 +67,7 @@ export function AvatarsPanel(): JSX.Element {
           const on = !!targets[a.pubkey]
           return (
             <li key={a.pubkey} className="avatars__row">
-              <span className="avatars__who" title={nip19.npubEncode(a.pubkey)}>{shortNpub(a.pubkey)}</span>
+              <ProfileBadge pubkey={a.pubkey} />
               <span className={`avatars__type avatars__type--${a.type}`}>{a.type.toUpperCase()}</span>
               <span className="avatars__when" title={formatStamp(a.createdAt)}>{formatAgo(a.createdAt, now)}</span>
               {you ? (

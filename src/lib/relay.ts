@@ -44,6 +44,14 @@ export function query(filter: Filter): Promise<NostrEvent[]> {
   return getPool().querySync([CYBERSPACE_RELAY], filter, { maxWait: MAX_WAIT_MS })
 }
 
+/**
+ * The same against any set of relays, for the few things that do not live
+ * here: contact lists, mostly. Results are the union; callers pick.
+ */
+export function queryAny(relays: string[], filter: Filter): Promise<NostrEvent[]> {
+  return getPool().querySync(relays, filter, { maxWait: MAX_WAIT_MS })
+}
+
 /** A live subscription; the returned function closes it. */
 export function subscribe(
   filter: Filter,

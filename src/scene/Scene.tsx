@@ -44,6 +44,7 @@ import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 import { SpawnMarker } from './SpawnMarker'
+import { TargetAvatars } from './TargetAvatars'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -84,6 +85,7 @@ function World(): JSX.Element {
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
+      <TargetAvatars axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>

@@ -8,6 +8,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
+import { TargetsPanel } from './TargetsPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
@@ -204,6 +205,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <IdentityPanel />
         <PositionPanel />
         <AvatarsPanel />
+        <TargetsPanel />
         <ScalePanel />
         <LinksPanel />
       </div>

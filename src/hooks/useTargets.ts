@@ -23,9 +23,14 @@ export function useTargets(): CyberTarget[] {
   const plane = useCyberspace((s) => s.anchorPlane)
   const spectating = useCyberspace((s) => s.spectate !== null)
   const position = useCyberspace((s) => s.position)
+  const tracked = useCyberspace((s) => s.targets)
+  const focus = useCyberspace((s) => s.focusPubkey())
 
   return useMemo(() => {
     const out: CyberTarget[] = []
+    // Tracked pubkeys first, except the one the scene is looking through: a
+    // marker for the avatar you are standing on would sit on your own centre.
+    for (const t of useCyberspace.getState().targetList()) if (t.id !== focus) out.push(t)
     // While you are looking through someone else's eyes, the way home is a
     // thing worth pointing at from anywhere.
     if (spectating) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
@@ -40,5 +45,7 @@ export function useTargets(): CyberTarget[] {
       })
     }
     return out
-  }, [plane, spectating, position])
+    // tracked is what targetList reads; listed so the memo follows it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plane, spectating, position, tracked, focus])
 }

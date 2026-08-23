@@ -13,6 +13,7 @@ import { useRecentAvatars } from '../hooks/useRecentAvatars'
 import { parsePubkey } from '../lib/chains'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { spectate } from '../lib/spectator'
+import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { nip19 } from 'nostr-tools'
@@ -26,6 +27,7 @@ function shortNpub(pubkey: string): string {
 export function AvatarsPanel(): JSX.Element {
   const { avatars, status } = useRecentAvatars()
   const me = useCyberspace((s) => s.identity.pubkey)
+  const targets = useCyberspace((s) => s.targets)
   const [input, setInput] = useState('')
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -68,6 +70,7 @@ export function AvatarsPanel(): JSX.Element {
       <ul className="avatars__list">
         {avatars.map((a) => {
           const you = a.pubkey === me
+          const on = !!targets[a.pubkey]
           return (
             <li key={a.pubkey} className="avatars__row">
               <span className="avatars__who" title={nip19.npubEncode(a.pubkey)}>{shortNpub(a.pubkey)}</span>
@@ -76,7 +79,16 @@ export function AvatarsPanel(): JSX.Element {
               {you ? (
                 <span className="avatars__you">YOU</span>
               ) : (
-                <button className="avatars__spectate" onClick={() => go(a.pubkey)}>SPECTATE</button>
+                <span className="avatars__acts">
+                  <button
+                    className={`targets__toggle targets__toggle--mini ${on ? 'is-on' : ''}`}
+                    style={on ? { color: targetColor(a.pubkey), borderColor: targetColor(a.pubkey) } : undefined}
+                    aria-pressed={on}
+                    title={on ? 'Stop targeting' : 'Target'}
+                    onClick={() => useCyberspace.getState().toggleTarget(a.pubkey)}
+                  >◎</button>
+                  <button className="avatars__spectate" onClick={() => go(a.pubkey)}>SPECTATE</button>
+                </span>
               )}
             </li>
           )

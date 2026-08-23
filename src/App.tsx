@@ -14,6 +14,7 @@ import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
 import { startPublisher } from './lib/publisher'
+import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 
 export default function App(): JSX.Element {
@@ -22,8 +23,9 @@ export default function App(): JSX.Element {
   // cannot drift apart, and nothing about having a pointer takes the keys away.
   useKeyboard()
   useProofListener()
-  // The chain drains to the relay from here on, whenever Live is on.
-  useEffect(() => startPublisher(), [])
+  // The chain drains to the relay from here on, whenever Live is on, and the
+  // targets' positions are kept current.
+  useEffect(() => { startPublisher(); startTracker() }, [])
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand

@@ -54,6 +54,7 @@ import {
   type NostrEvent,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { targetColor, type CyberTarget } from '../lib/targets'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -136,6 +137,21 @@ const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashe
  */
 export type PublishStatus = 'queued' | 'sending' | 'ok' | 'failed'
 
+/**
+ * A pubkey you are pointing at. Its position is its chain head on the relay,
+ * or its spawn coordinate until the chain arrives or when there is none.
+ */
+export interface TrackedTarget {
+  pubkey: string
+  npub: string
+  /** A petname, when it came from a contact list. */
+  name: string | null
+  position: Position
+  plane: Plane
+  lastActive: number | null
+  status: 'resolving' | 'live' | 'spawn' | 'error'
+}
+
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
   position: Position
@@ -181,6 +197,8 @@ export interface CyberspaceState {
    */
   exploreIndex: number | null
   spectate: SpectateState | null
+  /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
+  targets: Record<string, TrackedTarget>
   /**
    * The scene's render origin, materialised: the position of the action being
    * looked at. Equal to `position` at the head. Every origin-relative thing in
@@ -220,6 +238,13 @@ export interface CyberspaceState {
   setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
   /** Back to your own head. */
   endSpectate: () => void
+  addTarget: (pubkey: string, name?: string | null) => void
+  removeTarget: (pubkey: string) => void
+  toggleTarget: (pubkey: string, name?: string | null) => void
+  /** A target's chain, fetched or updated: its head becomes the position. */
+  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
+  /** The tracked targets as things the HUD can point at. */
+  targetList: () => CyberTarget[]
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -259,6 +284,7 @@ export interface CyberspaceState {
 const STORAGE_KEY = 'onosendai:nsec'
 const CHAIN_KEY = 'onosendai:chain'
 const LIVE_KEY = 'onosendai:live'
+const TARGETS_KEY = 'onosendai:targets'
 
 /**
  * The chain on disk is the events themselves. Position, history, plane and the
@@ -322,6 +348,32 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
     }
     localStorage.setItem(CHAIN_KEY, JSON.stringify(data))
   } catch { /* quota exceeded or private mode */ }
+}
+
+/** Only who and what they are called survive a reload; positions are refetched. */
+function loadTargets(): Record<string, TrackedTarget> {
+  try {
+    const raw = localStorage.getItem(TARGETS_KEY)
+    if (!raw) return {}
+    const list = JSON.parse(raw) as Array<{ pubkey: string; name?: string | null }>
+    const out: Record<string, TrackedTarget> = {}
+    for (const t of list) {
+      if (!/^[0-9a-f]{64}$/.test(t.pubkey)) continue
+      out[t.pubkey] = unresolvedTarget(t.pubkey, t.name ?? null)
+    }
+    return out
+  } catch { return {} }
+}
+
+function saveTargets(targets: Record<string, TrackedTarget>): void {
+  try {
+    localStorage.setItem(TARGETS_KEY, JSON.stringify(Object.values(targets).map((t) => ({ pubkey: t.pubkey, name: t.name }))))
+  } catch { /* private mode */ }
+}
+
+function unresolvedTarget(pubkey: string, name: string | null): TrackedTarget {
+  const spawn = spawnOf(pubkey)
+  return { pubkey, npub: nip19.npubEncode(pubkey), name, position: spawn.position, plane: spawn.plane, lastActive: null, status: 'resolving' }
 }
 
 function loadLive(): boolean {
@@ -415,6 +467,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
   spectate: null,
+  targets: loadTargets(),
   cursor: initial.position,
   pendingTarget: null,
   scaleExp: 0,
@@ -722,6 +775,63 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     const { position, headPlane } = get()
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: headPlane })
   },
+
+  addTarget: (pubkey, name = null) => {
+    const { targets } = get()
+    if (targets[pubkey]) {
+      // Already tracked: a name from a contact list is still worth keeping.
+      if (name && !targets[pubkey].name) {
+        const next = { ...targets, [pubkey]: { ...targets[pubkey], name } }
+        set({ targets: next }); saveTargets(next)
+      }
+      return
+    }
+    const next = { ...targets, [pubkey]: unresolvedTarget(pubkey, name) }
+    set({ targets: next })
+    saveTargets(next)
+  },
+
+  removeTarget: (pubkey) => {
+    const { targets } = get()
+    if (!targets[pubkey]) return
+    const next = { ...targets }
+    delete next[pubkey]
+    set({ targets: next })
+    saveTargets(next)
+  },
+
+  toggleTarget: (pubkey, name = null) => {
+    if (get().targets[pubkey]) get().removeTarget(pubkey)
+    else get().addTarget(pubkey, name)
+  },
+
+  setTargetChain: (pubkey, events, status) => {
+    const { targets } = get()
+    const t = targets[pubkey]
+    if (!t) return
+    const head = buildChain(events)[buildChain(events).length - 1]
+    const spawn = spawnOf(pubkey)
+    set({
+      targets: {
+        ...targets,
+        [pubkey]: {
+          ...t,
+          position: head?.position ?? spawn.position,
+          plane: head?.plane ?? spawn.plane,
+          lastActive: head?.createdAt ?? null,
+          status: head ? 'live' : status ?? 'spawn',
+        },
+      },
+    })
+  },
+
+  targetList: () =>
+    Object.values(get().targets).map((t) => ({
+      id: t.pubkey,
+      label: (t.name ?? `${t.npub.slice(0, 12)}…${t.npub.slice(-4)}`).toUpperCase(),
+      color: targetColor(t.pubkey),
+      at: t.position,
+    })),
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()

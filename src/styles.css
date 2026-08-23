@@ -964,6 +964,103 @@ kbd {
   padding: 6px 0;
 }
 
+/* ---------- Targets ---------- */
+
+.targets__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+
+.targets__row:first-child {
+  border-top: 0;
+}
+
+.targets__row--contact {
+  grid-template-columns: 1fr auto;
+}
+
+.targets__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.targets__status {
+  font-size: 9px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.targets__status--resolving { color: var(--warn); }
+.targets__status--error { color: var(--danger); }
+
+.targets__remove {
+  font-family: inherit;
+  font-size: 10px;
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.18);
+  cursor: pointer;
+}
+
+.targets__remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.targets__toggle {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 3px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.25);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.targets__toggle:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* Lit in the target's own colour, set inline, so the row and the marker on
+ * the scene agree about which one this is. */
+.targets__toggle.is-on {
+  background: rgba(200, 245, 255, 0.06);
+}
+
+.targets__toggle--mini {
+  width: 26px;
+  padding: 0;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.avatars__acts {
+  display: flex;
+  gap: 4px;
+}
+
+.targets__follows {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
 /* ---------- Spectate bar ----------
  *
  * Top right on a desktop, flush to the edge: the panels are locked away while

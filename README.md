@@ -72,6 +72,15 @@ shows what that hop cost); what came after is drawn faint. Off the head the
 movement controls stand down and RETURN TO LIVE brings them back. The same
 instrument walks any other avatar's chain while spectating.
 
+**Targets.** The Targets panel points at any number of pubkeys the way the
+HUD points at Earth: a reticle in frame, a chevron on the nearest edge out of
+frame, the distance either way, and the avatar itself (a wireframe icosahedron
+in the target's own colour, named) once you are near. Add a key, toggle one
+from the Avatars list, or load a kind 3 contact list for any npub and toggle
+follows. Positions are chain heads on the relay, kept live by a per-target
+subscription; a key with no chain is pointed at its spawn coordinate. Targets
+persist across reloads.
+
 **Spectating.** The Avatars panel lists every pubkey with a v2 action on the
 relay, newest first, with a field for any npub. SPECTATE anchors the scene on
 that avatar's chain head (their terrain, their rooms, their trail, their spawn

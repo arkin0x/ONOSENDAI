@@ -19,6 +19,7 @@ import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
 import { startPublisher } from './lib/publisher'
+import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 import { useShards } from './store/useShards'
@@ -33,7 +34,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); void useCyberspace.getState().initSigner() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); void useCyberspace.getState().initSigner() }, [])
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand

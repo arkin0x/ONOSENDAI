@@ -43,6 +43,7 @@ import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
+import { SpawnMarker } from './SpawnMarker'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -61,6 +62,7 @@ const FOLLOW_TAU = 0.09
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const pubkey = useCyberspace((s) => s.identity.pubkey)
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const win = useViewWindow()
@@ -81,6 +83,7 @@ function World(): JSX.Element {
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <SpawnMarker pubkey={pubkey} axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>

@@ -63,6 +63,10 @@ lands, naming the spawn as `genesis` and the previous event as `previous`
 exactly as a verifier recomputes it. The chain persists as those events, so a
 reload reads position, plane and history back out of them.
 
+**The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
+rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,
+sized in cells like the avatar so it marks the spawn cell at any scale.
+
 **Derezz.** The last panel in the HUD abandons the chain: a new spawn event is
 signed (and published, when Live), which per spec section 3.2 retires every
 action before it, and the avatar is back at its pubkey with nothing behind it.

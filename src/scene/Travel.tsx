@@ -37,8 +37,9 @@ interface Props {
 export function Travel({ axes }: Props): null {
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  // A new chain (respawn) or a new avatar (spectate) is a cut, not a journey.
-  const focusKey = useCyberspace((s) => `${s.focusPubkey()}:${s.genesisId}`)
+  // A new chain (respawn), a new avatar (spectate), or a new fixed point
+  // (looking at a shard) is a cut, not a journey.
+  const focusKey = useCyberspace((s) => `${s.focusPubkey()}:${s.genesisId}:${s.focus ? s.focus.position.x.toString() : ''}`)
   const exploring = useCyberspace((s) => s.exploreIndex !== null)
 
   const previous = useRef<Position>(anchor)

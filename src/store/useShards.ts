@@ -18,6 +18,7 @@
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, SHARD_RELAYS } from '../lib/relay'
+import { ENCRYPTED_KIND } from '../lib/shardEvents'
 import { deployTemplate, type DecodedShard } from '../lib/shardEvents'
 import { bytesToHex, hexToBytes } from '../lib/events'
 import { useWorkshop } from './useWorkshop'
@@ -34,6 +35,8 @@ export interface MyDeployment {
   height: number
   lookupId: string
   keyHex: string
+  /** The relays this instance was sent to; where a deletion has to go. */
+  relays: string[]
   createdAt: number
   published: boolean
 }
@@ -62,18 +65,25 @@ interface ShardsState {
   mine: MyDeployment[]
   /** Discovered shards keyed by event id. */
   discovered: Record<string, DecodedShard>
+  /** Deleted instance ids, so a later scan never rebuilds them. Persisted. */
+  deleted: Record<string, true>
+  /** The deployment whose wire details are open, or null. */
+  inspecting: string | null
 
   startDeploy: (shardId: string) => void
   setDeployHeight: (h: number) => void
   cancelDeploy: () => void
   deploy: () => Promise<void>
-  undeploy: (eventId: string) => void
+  /** Delete one instance: a NIP-09 deletion to its relays, and gone from here. */
+  deleteInstance: (eventId: string) => Promise<void>
+  inspect: (eventId: string | null) => void
   addDiscovered: (shards: DecodedShard[]) => void
   deployShard: () => ShardModel | null
   worldShards: () => WorldShard[]
 }
 
 const MINE_KEY = 'onosendai:deployments'
+const DELETED_KEY = 'onosendai:deployments-deleted'
 
 function loadMine(): MyDeployment[] {
   try {
@@ -88,6 +98,21 @@ function saveMine(mine: MyDeployment[]): void {
   try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
 }
 
+function loadDeleted(): Record<string, true> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY)
+    if (!raw) return {}
+    const list = JSON.parse(raw)
+    const out: Record<string, true> = {}
+    if (Array.isArray(list)) for (const id of list) if (typeof id === 'string') out[id] = true
+    return out
+  } catch { return {} }
+}
+
+function saveDeleted(deleted: Record<string, true>): void {
+  try { localStorage.setItem(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
+}
+
 export const useShards = create<ShardsState>((set, get) => ({
   deployId: null,
   deployHeight: 0,
@@ -95,6 +120,8 @@ export const useShards = create<ShardsState>((set, get) => ({
   deployError: null,
   mine: loadMine(),
   discovered: {},
+  deleted: loadDeleted(),
+  inspecting: null,
 
   startDeploy: (shardId) => set({ deployId: shardId, deployStatus: 'idle', deployError: null }),
   setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(SCAN_MAX_HEIGHT, Math.round(h))) }),
@@ -126,6 +153,7 @@ export const useShards = create<ShardsState>((set, get) => ({
         height: deployHeight,
         lookupId,
         keyHex: bytesToHex(key),
+        relays: SHARD_RELAYS,
         createdAt,
         published: live && result.ok,
       }
@@ -137,18 +165,40 @@ export const useShards = create<ShardsState>((set, get) => ({
     }
   },
 
-  undeploy: (eventId) => {
-    // Local only: a published event cannot be unpublished, but it can be
-    // dropped from what this device draws and re-derives.
+  deleteInstance: async (eventId) => {
+    const dep = get().mine.find((d) => d.eventId === eventId)
+    if (!dep) return
+    const cs = useCyberspace.getState()
+    // NIP-09: a kind 5 naming the event tells relays to drop it. Sent to the
+    // relays this instance actually went to. It only works while Live; local
+    // instances never left the device, so removing them here is the whole job.
+    if (cs.live && dep.published) {
+      const del = cs.sign({
+        kind: 5,
+        created_at: Math.floor(Date.now() / 1000),
+        content: 'shard instance removed',
+        tags: [['e', eventId], ['k', String(ENCRYPTED_KIND)]],
+      })
+      try { await publishMany(dep.relays ?? SHARD_RELAYS, del) } catch { /* best effort */ }
+    }
     const mine = get().mine.filter((d) => d.eventId !== eventId)
-    set({ mine }); saveMine(mine)
+    const deleted = { ...get().deleted, [eventId]: true as const }
+    const discovered = { ...get().discovered }
+    delete discovered[eventId]
+    const inspecting = get().inspecting === eventId ? null : get().inspecting
+    if (get().inspecting === eventId) cs.clearFocus()
+    set({ mine, deleted, discovered, inspecting })
+    saveMine(mine); saveDeleted(deleted)
   },
+
+  inspect: (eventId) => set({ inspecting: eventId }),
 
   addDiscovered: (shards) => {
     if (shards.length === 0) return
+    const { deleted } = get()
     const discovered = { ...get().discovered }
     let changed = false
-    for (const s of shards) if (!discovered[s.id]) { discovered[s.id] = s; changed = true }
+    for (const s of shards) if (!discovered[s.id] && !deleted[s.id]) { discovered[s.id] = s; changed = true }
     if (changed) set({ discovered })
   },
 

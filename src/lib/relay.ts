@@ -17,13 +17,14 @@ import type { NostrEvent } from './events'
 export const CYBERSPACE_RELAY = 'wss://cyberspace.nostr1.com'
 
 /**
- * Where encrypted shard content lives. The cyberspace relay only accepts the
- * movement kind, so location-encrypted kind:33330 events go to general relays
- * instead, which is spec-fine: §7.1 says the ciphertext is public and can sit
- * on any relay, since only the region key opens it. Several, so a deploy lands
- * even if one is unreachable, and a scan sees what any of them holds.
+ * Where encrypted shard content lives. The cyberspace relay accepts the
+ * location-encrypted kind:33330 events (§8.6) alongside movement, so shards
+ * sit on the same relay as everything else. A list rather than the constant so
+ * a deploy can be fanned to more relays later without touching the callers;
+ * §7.1 makes that free, since the ciphertext is public and only the region key
+ * opens it.
  */
-export const SHARD_RELAYS = ['wss://nos.lol', 'wss://relay.damus.io', 'wss://relay.primal.net']
+export const SHARD_RELAYS = [CYBERSPACE_RELAY]
 
 /** How long a publish or a one-shot query waits before giving up. */
 const MAX_WAIT_MS = 8000

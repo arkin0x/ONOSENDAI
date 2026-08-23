@@ -1061,6 +1061,248 @@ kbd {
   border-top: 1px solid rgba(0, 229, 255, 0.14);
 }
 
+/* ---------- Modal (destructive confirms) ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 7, 13, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal__card {
+  width: min(420px, 100%);
+  padding: 18px 18px 16px;
+  border-radius: 10px;
+  background: rgba(6, 14, 22, 0.98);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+}
+
+.modal__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+}
+
+.modal__body {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+.modal__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.modal__cancel,
+.modal__confirm {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modal__cancel {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.3);
+}
+
+.modal__confirm {
+  color: #05070d;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 700;
+}
+
+.modal__confirm--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---------- Deployment detail overlay ----------
+ *
+ * The wire record of a deployed shard, up while the scene is flown to it. Left
+ * of the panels on a desktop, along the bottom on a phone.
+ */
+.detail {
+  position: fixed;
+  left: 14px;
+  top: 14px;
+  z-index: 101;
+  width: min(320px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.15);
+  backdrop-filter: blur(10px);
+  font-size: 10px;
+}
+
+.detail__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail__eye { color: var(--accent); font-size: 13px; }
+
+.detail__title {
+  flex: 1;
+  letter-spacing: 0.1em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail__title strong { color: var(--accent); }
+
+.detail__exit {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #05070d;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.detail__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.detail__field {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.detail__field--relays { align-items: start; }
+
+.detail__key {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.detail__val {
+  font-family: inherit;
+  font-size: 10px;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.detail__val:hover { color: var(--accent); }
+
+.detail__plain {
+  font-size: 10px;
+  color: var(--fg);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.detail__delete {
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  height: 34px;
+  border-radius: 7px;
+  color: var(--danger);
+  background: rgba(255, 59, 107, 0.08);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+  cursor: pointer;
+}
+
+.detail__delete:hover {
+  background: rgba(255, 59, 107, 0.18);
+}
+
+@media (max-width: 1100px) {
+  .detail {
+    top: auto;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: auto;
+  }
+}
+
+/* ---------- Shards panel sections ---------- */
+.shards__section + .shards__section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+}
+
+.shards__goto {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shards__goto:hover { background: rgba(0, 229, 255, 0.06); }
+
+.shards__row--deployed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+
+.shards__row--deployed:first-child { border-top: 0; }
+
+.shards__row--deployed.is-viewing {
+  background: rgba(0, 229, 255, 0.1);
+  border-radius: 4px;
+}
+
+.shards__goto-hint {
+  color: var(--dim);
+  padding-right: 4px;
+}
+
+/* ---------- Deploy bar ----------
+
 /* ---------- Deploy bar ----------
  *
  * Up while you are placing a shard. Bottom of the scene on a phone, above the
@@ -1403,6 +1645,7 @@ kbd {
 .workshop__head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
@@ -1652,6 +1895,27 @@ kbd {
 @media (max-width: 600px) {
   .workshop__help { display: none; }
   .workshop__label { min-width: 0; }
+
+  /* Portrait: the header buttons overran the right edge and CLOSE fell off the
+   * screen. The name takes its own top row, and SHARDS, the modes, DEPLOY and
+   * CLOSE wrap onto rows below it, all within reach of a thumb. */
+  .workshop__name {
+    flex: 1 1 100%;
+    order: -1;
+  }
+
+  .workshop__modes {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .workshop__modes .workshop__mode {
+    flex: 1;
+  }
+
+  .workshop__list-btn { flex: 0 0 auto; }
+  .workshop__deploy { flex: 1; }
+  .workshop__close { flex: 0 0 auto; margin-left: 0; }
 }
 
 /* ---------- Derezz ----------

@@ -185,6 +185,7 @@ function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
+  const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -215,7 +216,7 @@ function Rig(): JSX.Element {
     locked.current = true
     prevOrigin.current = null
     c.update()
-  }, [view, genesisId, focusPubkey])
+  }, [view, genesisId, focusPubkey, focusPoint])
 
   useFrame((_, dt) => {
     const c = controls.current

@@ -83,6 +83,15 @@ vertices, colours blending along it), chosen per shard and previewed live.
 localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
 1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
 
+**Models vs instances.** A **model** is a named design that lives on this
+device (the Shards panel's Models section). A deployed **instance** is one copy
+of it placed at a coordinate and published (the Deployed section). One model can
+have many instances. Deleting a model (behind a modal) removes it from this
+device and leaves its instances alone; deleting an instance sends a NIP-09
+deletion to the relays it is on and leaves the model alone. Tapping a deployment
+flies the scene to it and opens its wire record: event id, relays, lookup id,
+coordinate, and the height it is hidden at.
+
 **Deploying a shard.** DEPLOY on the bench, or from the Shards panel, enters
 deploy mode: aim the movement cursor at where it should go (it ghosts there at
 its true size), pick a height to hide it at, and place (DEPLOY, Space, or the
@@ -92,7 +101,8 @@ a location-encrypted `kind:33330` event (spec section 8.6): the shard, its
 coordinate and plane are AES-256-GCM encrypted to the region key
 `sha256(region_bytes)`, and only the `lookup_id = sha256(key)` is public, so
 the coordinate never leaves in the clear. The derivation is spec section 7.2
-exactly, so a shard hidden here is one the reference CLI can find and open.
+exactly, so a shard hidden here is one the reference CLI can find and open. The
+events go to `wss://cyberspace.nostr1.com` alongside movement.
 
 **Discovery.** A background scan derives the region keys for heights 0 to 12 at
 wherever the scene is anchored (in a worker, since that is the O(2^h) work the

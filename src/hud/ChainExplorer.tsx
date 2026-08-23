@@ -35,7 +35,9 @@ export function ChainExplorer(): JSX.Element {
   const action = actions[index]
   const atHead = exploreIndex === null
 
-  const [open, setOpen] = useState(true)
+  // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
+  // opens on a tap when you actually want to walk the chain.
+  const [open, setOpen] = useState(false)
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -125,13 +127,17 @@ export function ChainExplorer(): JSX.Element {
             )}
           </div>
 
+          {/* One field per line, labelled in words, so the block stays narrow
+              rather than running a wide C … S … row across the scene. */}
           <div className="explorer__detail" title={action.coordHex}>
-            <span className="explorer__key">C </span>{shortHex(action.coordHex, 10, 8)}
-            <span className="explorer__key">  S </span>{action.sector}
+            <span className="explorer__key">coord </span>{shortHex(action.coordHex, 8, 6)}
+          </div>
+          <div className="explorer__detail" title={action.sector}>
+            <span className="explorer__key">sector </span>{action.sector}
           </div>
           {action.proofHash && (
             <div className="explorer__detail" title={action.proofHash}>
-              <span className="explorer__key">proof </span>{shortHex(action.proofHash, 10, 8)}
+              <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}
             </div>
           )}
         </div>

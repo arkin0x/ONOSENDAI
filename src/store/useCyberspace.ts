@@ -197,6 +197,13 @@ export interface CyberspaceState {
    */
   exploreIndex: number | null
   spectate: SpectateState | null
+  /**
+   * A fixed coordinate the scene is looking at, with nothing to walk: used to
+   * fly to a deployed shard. Like spectating, it is read-only, since the point
+   * is somewhere you are not. Exclusive with spectating in practice, because
+   * the panel it is reached from is hidden while spectating.
+   */
+  focus: { position: Position; plane: Plane; label: string } | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
   targets: Record<string, TrackedTarget>
   /**
@@ -238,6 +245,10 @@ export interface CyberspaceState {
   setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
   /** Back to your own head. */
   endSpectate: () => void
+  /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
+  /** Stop looking; the scene returns to your avatar. */
+  clearFocus: () => void
   addTarget: (pubkey: string, name?: string | null) => void
   removeTarget: (pubkey: string) => void
   toggleTarget: (pubkey: string, name?: string | null) => void
@@ -469,6 +480,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
   spectate: null,
+  focus: null,
   targets: loadTargets(),
   cursor: initial.position,
   pendingTarget: null,
@@ -778,6 +790,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: headPlane })
   },
 
+  focusOn: (position, plane, label, scaleExp) => {
+    const next: Partial<CyberspaceState> = {
+      focus: { position: { ...position }, plane, label },
+      spectate: null,
+      exploreIndex: null,
+      anchor: { ...position },
+      anchorPlane: plane,
+    }
+    if (scaleExp !== undefined) next.scaleExp = Math.max(0, Math.min(MAX_SCALE_EXP, Math.round(scaleExp)))
+    set(next)
+  },
+
+  clearFocus: () => {
+    const { position, headPlane } = get()
+    set({ focus: null, anchor: position, anchorPlane: headPlane })
+  },
+
   addTarget: (pubkey, name = null) => {
     const { targets } = get()
     if (targets[pubkey]) {
@@ -872,7 +901,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
 
   actions: () => parsedChain(get().events),
 
-  atHead: () => get().exploreIndex === null && get().spectate === null,
+  atHead: () => get().exploreIndex === null && get().spectate === null && get().focus === null,
 
   focusChain: () => {
     const { spectate } = get()

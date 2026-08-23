@@ -162,6 +162,13 @@ export interface CyberspaceState {
   applyProofMessage: (msg: ProofResponse) => void
   setLive: (live: boolean) => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
+  /**
+   * §3.2: a new spawn event, which by being newer retires every prior action.
+   * The avatar is back at its pubkey with nothing behind it. Cannot be undone,
+   * because the old chain's events still exist on relays but no longer lead
+   * anywhere.
+   */
+  respawn: () => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -282,9 +289,18 @@ function sign(template: EventTemplate): NostrEvent {
   return finalizeEvent(template, secretKey)
 }
 
-/** A fresh chain: one spawn, signed now, unpublished. */
-function freshSpawn(): PersistedChain {
-  return { version: 2, events: [sign(spawnTemplate(pubkeyHex, nextCreatedAt(undefined)))], published: [], stats: EMPTY_STATS }
+/**
+ * A fresh chain: one spawn, signed now, unpublished.
+ *
+ * A respawn passes the chain it retires. §3.2 makes the new spawn win by being
+ * newer, and "newer" has to be strictly so: a spawn signed in the same second
+ * as the one before it is the same bytes, the same id, and so not a new spawn
+ * at all. The timestamp therefore steps past the old head, not merely to now.
+ */
+function freshSpawn(retiring?: NostrEvent): PersistedChain {
+  const now = Math.floor(Date.now() / 1000)
+  const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
+  return { version: 2, events: [sign(spawnTemplate(pubkeyHex, createdAt))], published: [], stats: EMPTY_STATS }
 }
 
 /** Everything the store derives from a chain, so spawn and respawn agree. */
@@ -540,6 +556,24 @@ export const useCyberspace = create<CyberspaceState>((set, get) => ({
     if (live === get().live) return
     saveLive(live)
     set({ live, publishError: null })
+  },
+
+  respawn: () => {
+    // A proof in flight was for a chain that is about to stop existing.
+    if (get().proof.status === 'computing') {
+      cancelProof()
+      requestId++
+    }
+    const { events } = get()
+    const fresh = derive(freshSpawn(events[events.length - 1]))
+    set({
+      ...fresh,
+      cursor: fresh.position,
+      pendingTarget: null,
+      proof: IDLE_PROOF,
+      publishError: null,
+    })
+    saveChain(fresh.events, fresh.published, fresh.chain)
   },
 
   setPublishStatus: (id, status, reason) => {

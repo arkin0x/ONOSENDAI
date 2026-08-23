@@ -6,6 +6,7 @@
 import { formatBig, formatStep } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { ChainPanel } from './ChainPanel'
+import { DerezzPanel } from './DerezzPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
@@ -207,6 +208,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ChainPanel />
         <Legend />
         <Controls />
+        <DerezzPanel />
       </div>
     </div>
   )

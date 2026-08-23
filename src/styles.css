@@ -649,6 +649,98 @@ kbd {
   white-space: nowrap;
 }
 
+/* ---------- Derezz ----------
+ *
+ * The one panel that destroys something. Red throughout, last in the column,
+ * and its button arms a warning rather than acting, so nothing here happens on
+ * one click.
+ */
+
+.panel--derezz {
+  border-color: rgba(255, 59, 107, 0.28);
+}
+
+.panel--derezz .panel__head {
+  border-bottom-color: rgba(255, 59, 107, 0.2);
+}
+
+.panel--derezz .panel__head h2 {
+  color: var(--danger);
+}
+
+.tag--danger {
+  color: var(--danger);
+}
+
+.panel--derezz.is-armed {
+  background: rgba(40, 6, 16, 0.88);
+  border-color: var(--danger);
+}
+
+.derezz__arm,
+.derezz__cancel,
+.derezz__now {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  height: 30px;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0 12px;
+}
+
+.derezz__arm {
+  margin-top: 10px;
+  width: 100%;
+  color: var(--danger);
+  background: rgba(255, 59, 107, 0.06);
+  border: 1px solid rgba(255, 59, 107, 0.5);
+}
+
+.derezz__arm:hover {
+  background: rgba(255, 59, 107, 0.16);
+}
+
+.derezz__warning {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+}
+
+.derezz__fine {
+  margin: 8px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  color: rgba(255, 59, 107, 0.7);
+}
+
+.derezz__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.derezz__cancel {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.3);
+}
+
+.derezz__now {
+  color: #05070d;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  font-weight: 700;
+}
+
+.derezz__now:hover {
+  background: #ff5c85;
+}
+
 /* ---------- Narrow viewports ---------- */
 
 @media (max-width: 1100px) {

@@ -63,6 +63,11 @@ lands, naming the spawn as `genesis` and the previous event as `previous`
 exactly as a verifier recomputes it. The chain persists as those events, so a
 reload reads position, plane and history back out of them.
 
+**Derezz.** The last panel in the HUD abandons the chain: a new spawn event is
+signed (and published, when Live), which per spec section 3.2 retires every
+action before it, and the avatar is back at its pubkey with nothing behind it.
+It arms a warning first, in v1's words, because it cannot be undone.
+
 **Local / Live.** The switch under RECALL and COMMIT decides whether events
 leave the device. Live (the default) publishes each one to
 `wss://cyberspace.nostr1.com` as it is signed, in chain order, and the proof

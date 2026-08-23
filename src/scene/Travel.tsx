@@ -34,8 +34,10 @@ interface Props {
 export function Travel({ axes }: Props): null {
   const position = useCyberspace((s) => s.position)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const genesisId = useCyberspace((s) => s.genesisId)
 
   const previous = useRef<Position>(position)
+  const previousGenesis = useRef(genesisId)
   const from = useRef(new Vector3())
   const duration = useRef(0)
   const startedAt = useRef<number | null>(null)
@@ -44,6 +46,15 @@ export function Travel({ axes }: Props): null {
     const old = previous.current
     previous.current = position
     if (old.x === position.x && old.y === position.y && old.z === position.z) return
+
+    // A respawn is not a move. Nothing was paid for the distance back to the
+    // pubkey, so nothing should be seen to travel it, however short it is.
+    if (previousGenesis.current !== genesisId) {
+      previousGenesis.current = genesisId
+      travelOffset.set(0, 0, 0)
+      startedAt.current = null
+      return
+    }
 
     // Where the avatar was, expressed against the origin it now uses.
     const [x, y, z] = cellCentre(old, alignedOrigin(position, scaleExp), scaleExp, axes)
@@ -63,7 +74,7 @@ export function Travel({ axes }: Props): null {
     // scaleExp and axes are read at commit time on purpose: a zoom or a rotation
     // mid-flight must not restart or re-aim a journey already under way.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position])
+  }, [position, genesisId])
 
   useFrame((state) => {
     if (travelOffset.lengthSq() === 0) return

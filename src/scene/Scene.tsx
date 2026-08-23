@@ -174,6 +174,7 @@ function CellMetric(): null {
  */
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
+  const genesisId = useCyberspace((s) => s.genesisId)
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -189,6 +190,11 @@ function Rig(): JSX.Element {
   const prevOrigin = useRef<Position | null>(null)
   const prevScale = useRef(-1)
 
+  // Re-framed on an axis snap and on a respawn. A respawn moves the render
+  // origin home in one step, and the per-frame shift below would faithfully
+  // carry the camera the same distance, which is the whole width of the axis:
+  // the avatar would be at the origin and the camera 10^20 cells away. Treating
+  // it as a fresh frame, like a zoom, is what puts you back at your spawn.
   useEffect(() => {
     const c = controls.current
     if (!c) return
@@ -197,8 +203,9 @@ function Rig(): JSX.Element {
     c.target.copy(smooth.current)
     c.object.position.set(x, y, z + START_DISTANCE)
     locked.current = true
+    prevOrigin.current = null
     c.update()
-  }, [view])
+  }, [view, genesisId])
 
   useFrame((_, dt) => {
     const c = controls.current

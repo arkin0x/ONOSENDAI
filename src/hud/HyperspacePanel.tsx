@@ -347,7 +347,9 @@ export function HyperspacePanel(): JSX.Element {
             useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
           }
         }}
-      >EARTH</button>
+      >{/* The astronomical symbol for Earth, matching the HUD's glyph
+          voice (the touchpad's vector marks, the badge glyphs). */}
+        <span aria-hidden="true">⊕</span> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
 

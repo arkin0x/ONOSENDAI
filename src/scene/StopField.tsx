@@ -23,12 +23,13 @@
  * columnar index exists to avoid — so picks carry heights, not stops.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
 import { GRID_RADIUS, pointCentre, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
+import { coverageRuns } from '../lib/hyperspace/station'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
@@ -64,6 +65,14 @@ const MAX_LANDFALL_POINTS = 9_000
  * "I clicked that dot" without making neighbours ambiguous.
  */
 const PICK_THRESHOLD = 0.35
+
+/**
+ * Main-thread budget per build slice, in milliseconds. The scan chips away
+ * between frames instead of blocking: rows are processed in small batches,
+ * and when the budget is spent the loop yields through setTimeout so input
+ * and rendering run before the next slice.
+ */
+const SLICE_MS = 12
 
 /**
  * While the bulk sync churns, a rebuild is only worth its cost when the line
@@ -121,63 +130,144 @@ export function StopField({ axes }: Props): JSX.Element | null {
   }
   const rebuildVersion = gate.current.version
 
-  const built = useMemo((): Built | null => {
+  const [built, setBuilt] = useState<Built | null>(null)
+
+  // The spatial frame the current geometry was built in. A sync bump keeps
+  // the stale field visible while the rebuild runs (its positions are still
+  // right); a change of anchor, plane, zoom or axes clears it first, because
+  // every drawn position is relative to exactly those.
+  const spatialKey = `${anchor.x} ${anchor.y} ${anchor.z} ${anchorPlane} ${scaleExp} ` +
+    `${axes.right.axis}${axes.right.dir} ${axes.up.axis}${axes.up.dir} ${axes.out.axis}${axes.out.dir}`
+  const prevSpatial = useRef('')
+
+  useEffect(() => {
+    const job = { cancelled: false }
+    if (prevSpatial.current !== spatialKey) {
+      prevSpatial.current = spatialKey
+      setBuilt(null)
+    }
+
     const index = getStopIndex()
-    if (index.size === 0) return null
-
-    const origin = alignedOrigin(anchor, scaleExp)
     const wantPort = anchorPlane === 1
-    const centres: number[] = []
-    const inRange: number[] = []
+    const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
+    const commit = (next: Built | null): void => { if (!job.cancelled) setBuilt(next) }
 
-    for (let row = 0; row < index.size; row++) {
-      // Ports live on plane 1, landfalls on plane 0, so matching the anchor's
-      // plane is what makes the Earth view show landfalls and the ideaspace
-      // view show ports, rather than superimposing two unrelated clouds. The
-      // kind byte IS the plane bit, so the wrong half skips before decoding.
-      if (kindIsPort(index, row) !== wantPort) continue
-      const d = xyzAt(index, row)
-      const c = pointCentre(d, origin, scaleExp, axes)
-      if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
-      centres.push(c[0], c[1], c[2])
-      inRange.push(row)
+    if (index.size === 0 || index.permCount === 0) {
+      commit(null)
+      return
     }
 
-    if (inRange.length === 0) return null
-
-    const stride = Math.max(1, Math.ceil(inRange.length / (wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS)))
-    const count = Math.ceil(inRange.length / stride)
-    const positions = new Float32Array(count * 3)
-    const colors = new Float32Array(count * 3)
-    const heights: number[] = new Array(count)
-
-    let v = 0
-    for (let i = 0; i < inRange.length; i += stride) {
-      positions[v * 3] = centres[i * 3]
-      positions[v * 3 + 1] = centres[i * 3 + 1]
-      positions[v * 3 + 2] = centres[i * 3 + 2]
-      const col = kindIsPort(index, inRange[i]) ? PORT_COLOR : LANDFALL_COLOR
-      colors[v * 3] = col.r
-      colors[v * 3 + 1] = col.g
-      colors[v * 3 + 2] = col.b
-      heights[v] = heightAt(index, inRange[i])
-      v++
+    // The sorted view bounds the scan to rows that can possibly be in range
+    // (coverageRuns), so a spawn-scale build touches a handful of rows
+    // instead of cold-decoding a million to keep none of them. That cold
+    // decode, measured at ~7 microseconds a row, was the six-second boot
+    // freeze once the index snapshot began delivering the whole line at
+    // once, and the same freeze on VIEW NEAREST STOP.
+    const runs = coverageRuns(index, anchor.x, anchor.y, anchor.z, scaleExp, REACH + 2)
+    let runTotal = 0
+    for (const [runStart, runEnd] of runs) runTotal += runEnd - runStart
+    if (runTotal === 0) {
+      commit(null)
+      return
     }
 
-    const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
-
-    // Same dev hook style as ShaderPointField: lets the browser harness read
-    // what actually reached the GPU, decimation factor included.
-    if (import.meta.env.DEV) {
-      ;(window as unknown as { __stopField?: unknown }).__stopField = {
-        rendered: count, inRange: inRange.length, stride,
+    // Decimate BEFORE decoding: the run total already bounds the in-range
+    // population, so sampling down to about twice the point budget cuts a
+    // dense view's decode work by an order of magnitude, and the post-filter
+    // stride below still lands the budget. Row ids are copied out up front
+    // because a background merge may re-sort perm between slices; the rows
+    // themselves never move.
+    const preStride = Math.max(1, Math.floor(runTotal / (budget * 2)))
+    const rows = new Uint32Array(Math.ceil(runTotal / preStride))
+    let w = 0
+    {
+      let i = 0
+      let next = 0
+      for (const [runStart, runEnd] of runs) {
+        for (let pos = runStart; pos < runEnd; pos++, i++) {
+          if (i === next) {
+            rows[w++] = index.perm[pos]
+            next += preStride
+          }
+        }
       }
     }
 
-    return { geometry, heights, stride }
-  }, [rebuildVersion, anchor, scaleExp, axes, anchorPlane])
+    const origin = alignedOrigin(anchor, scaleExp)
+    const kept: number[] = []
+    const centres: number[] = []
+    let i = 0
+
+    const finish = (): void => {
+      if (kept.length === 0) {
+        commit(null)
+        return
+      }
+      const stride = Math.max(1, Math.ceil(kept.length / budget))
+      const count = Math.ceil(kept.length / stride)
+      const positions = new Float32Array(count * 3)
+      const colors = new Float32Array(count * 3)
+      const heights: number[] = new Array(count)
+      let v = 0
+      for (let k = 0; k < kept.length; k += stride) {
+        positions[v * 3] = centres[k * 3]
+        positions[v * 3 + 1] = centres[k * 3 + 1]
+        positions[v * 3 + 2] = centres[k * 3 + 2]
+        const col = kindIsPort(index, kept[k]) ? PORT_COLOR : LANDFALL_COLOR
+        colors[v * 3] = col.r
+        colors[v * 3 + 1] = col.g
+        colors[v * 3 + 2] = col.b
+        heights[v] = heightAt(index, kept[k])
+        v++
+      }
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+      geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+      // Same dev hook style as ShaderPointField: lets the browser harness
+      // read what actually reached the GPU, decimation factor included.
+      if (import.meta.env.DEV) {
+        ;(window as unknown as { __stopField?: unknown }).__stopField = {
+          rendered: count, inRange: kept.length, stride: preStride * stride, runTotal,
+        }
+      }
+      commit({ geometry, heights, stride: preStride * stride })
+    }
+
+    // Chip away between frames. The first slice runs synchronously, so the
+    // common case after the coverage cull (a small view) commits in the same
+    // React flush as the clear above and never flickers through an empty
+    // frame.
+    const slice = (): void => {
+      if (job.cancelled) return
+      const t0 = performance.now()
+      while (i < w) {
+        const batchEnd = Math.min(w, i + 1024)
+        for (; i < batchEnd; i++) {
+          const row = rows[i]
+          // Ports live on plane 1, landfalls on plane 0, so matching the
+          // anchor's plane shows one cloud instead of superimposing two
+          // unrelated ones; the kind byte IS the plane bit.
+          if (kindIsPort(index, row) !== wantPort) continue
+          const d = xyzAt(index, row)
+          const c = pointCentre(d, origin, scaleExp, axes)
+          if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
+          kept.push(row)
+          centres.push(c[0], c[1], c[2])
+        }
+        if (performance.now() - t0 >= SLICE_MS) {
+          setTimeout(slice, 0)
+          return
+        }
+      }
+      finish()
+    }
+    slice()
+
+    return () => { job.cancelled = true }
+    // The spatial deps ride in spatialKey on purpose: listing the objects
+    // too would re-run the build on identity changes that changed nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rebuildVersion, spatialKey])
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => { built?.geometry.dispose() }, [built])

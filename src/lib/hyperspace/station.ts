@@ -21,7 +21,8 @@
  * but to be safe against ties the finalists are re-derived exactly before
  * the winner is chosen.
  */
-import { findLcaHeight, coordToXyz } from 'cyberspace-core'
+import { findLcaHeight, coordToXyz, xyzToCoord } from 'cyberspace-core'
+import { stepFor } from '../space'
 import { type Stop, stopCoordExact } from './stops'
 import { bigToBytes32 } from './headers'
 import {
@@ -212,4 +213,54 @@ export function maxAxisLcaViaAxes(a: bigint, b: bigint): number {
     findLcaHeight(pa.y, pb.y),
     findLcaHeight(pa.z, pb.z),
   )
+}
+
+const AXIS_MAX = (1n << 85n) - 1n
+
+/**
+ * Sorted-view runs covering every stop within `reachCells` of a position at
+ * this scale. An axis-aligned box no wider than an aligned cube spans at
+ * most two aligned cells per axis, so the cubes of the box's eight corners,
+ * at the first level whose cube side exceeds the box, are the whole cover;
+ * each cube is one prefixRange run and the runs are merged. A superset by
+ * construction: callers still range-test each row, they just never touch
+ * the hundreds of thousands of rows that cannot qualify, which is what
+ * keeps a spawn-scale scan at microseconds instead of seconds of decode.
+ */
+export function coverageRuns(
+  index: StopIndex,
+  x: bigint,
+  y: bigint,
+  z: bigint,
+  scaleExp: number,
+  reachCells: number,
+): Array<[number, number]> {
+  if (index.permCount === 0) return []
+  let r = BigInt(Math.max(1, Math.ceil(reachCells))) * stepFor(scaleExp)
+  if (r < 1n) r = 1n
+  // 2^d must exceed the box's 2r+1 gibsons; the bit length of 2r does that
+  // whether or not 2r is a power of two.
+  const d = Math.min(85, (2n * r).toString(2).length)
+  const clamp = (v: bigint): bigint => (v < 0n ? 0n : v > AXIS_MAX ? AXIS_MAX : v)
+  const runs: Array<[number, number]> = []
+  for (const cx of [clamp(x - r), clamp(x + r)]) {
+    for (const cy of [clamp(y - r), clamp(y + r)]) {
+      for (const cz of [clamp(z - r), clamp(z + r)]) {
+        const key = bigToBytes32(xyzToCoord(cx, cy, cz, 0) >> 1n)
+        const run = prefixRange(index, key, d)
+        if (run[1] > run[0]) runs.push(run)
+      }
+    }
+  }
+  runs.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const merged: Array<[number, number]> = []
+  for (const [start, end] of runs) {
+    const last = merged[merged.length - 1]
+    if (last && start <= last[1]) {
+      if (end > last[1]) last[1] = end
+    } else {
+      merged.push([start, end])
+    }
+  }
+  return merged
 }

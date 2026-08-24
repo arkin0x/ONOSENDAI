@@ -5,9 +5,10 @@
  * would look broken. The brute-force cross-check is the guard.
  */
 import { describe, expect, it } from 'vitest'
-import { xyzToCoord } from 'cyberspace-core'
-import { buildIndex, findStation, insertStop, maxAxisLca, maxAxisLcaViaAxes, nearestStops } from './station'
-import { keyHexAtSorted } from './compactIndex'
+import { coordToXyz, xyzToCoord } from 'cyberspace-core'
+import { buildIndex, coverageRuns, findStation, insertStop, maxAxisLca, maxAxisLcaViaAxes, nearestStops } from './station'
+import { keyHexAtSorted, rowByHeight } from './compactIndex'
+import { stepFor } from '../space'
 import type { Stop } from './stops'
 
 function rand85(rng: () => number): bigint {
@@ -132,5 +133,49 @@ describe('findStation', () => {
     expect(got.length).toBe(5)
     const all = stops.map((s) => maxAxisLca(q, s.coordExact as bigint)).sort((a, b) => a - b)
     expect(got[0].distance).toBe(all[0])
+  })
+})
+
+describe('coverageRuns', () => {
+  it('covers every stop within reach of the box, across scales', () => {
+    const rng = mulberry32(77)
+    const axisMax = (1n << 85n) - 1n
+    const clampAxis = (v: bigint): bigint => (v < 0n ? 0n : v > axisMax ? axisMax : v)
+    for (const scaleExp of [0, 30, 52, 70, 85]) {
+      const q = { x: rand85(rng), y: rand85(rng), z: rand85(rng) }
+      const step = stepFor(scaleExp)
+      const stops: Stop[] = []
+      for (let h = 0; h < 200; h++) {
+        stops.push(syntheticStop(h, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), h % 2 === 0 ? 0 : 1)))
+      }
+      // Stops planted inside the reach box, so the assertion has teeth at
+      // every scale (a random 85-bit point is never within reach at fine
+      // scales).
+      for (let h = 200; h < 240; h++) {
+        const off = (): bigint => BigInt(Math.floor(rng() * 380) - 190) * step
+        stops.push(syntheticStop(h, xyzToCoord(
+          clampAxis(q.x + off()), clampAxis(q.y + off()), clampAxis(q.z + off()), h % 2 === 0 ? 0 : 1,
+        )))
+      }
+      const index = buildIndex(stops)
+      const runs = coverageRuns(index, q.x, q.y, q.z, scaleExp, 194)
+      for (let i = 0; i < runs.length; i++) {
+        expect(runs[i][0]).toBeLessThan(runs[i][1])
+        if (i > 0) expect(runs[i][0]).toBeGreaterThanOrEqual(runs[i - 1][1])
+      }
+      const covered = new Set<number>()
+      for (const [start, end] of runs) for (let p = start; p < end; p++) covered.add(index.perm[p])
+      const reach = 194n * step
+      const within = (a: bigint, b: bigint): boolean => (a > b ? a - b : b - a) <= reach
+      let inReach = 0
+      for (const stop of stops) {
+        const pos = coordToXyz(stop.coordExact as bigint)
+        if (within(pos.x, q.x) && within(pos.y, q.y) && within(pos.z, q.z)) {
+          inReach++
+          expect(covered.has(rowByHeight(index, stop.height))).toBe(true)
+        }
+      }
+      expect(inReach).toBeGreaterThan(0)
+    }
   })
 })

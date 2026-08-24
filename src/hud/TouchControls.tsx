@@ -19,6 +19,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
+import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 
 export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Element {
@@ -29,6 +30,9 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
   const live = useCyberspace((s) => s.live)
   const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
+  // The scene's covering box reports when the region it draws is a clipped
+  // stand-in; the zoom-out key is the remedy, so it echoes that (useUiHints).
+  const coveringClipped = useUiHints((s) => s.coveringClipped)
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -43,7 +47,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
   // exactly how many cells a 3x3 pad has.
   const pad: Array<{
     cell: string; glyph: string; sub?: string; title: string
-    act: () => void; disabled?: boolean
+    act: () => void; disabled?: boolean; hint?: boolean
   }> = [
     // The physics convention for a vector through the page: a tail seen from
     // behind going in, an arrow tip seen head-on coming out. It is the right
@@ -62,7 +66,12 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
     //
     // adjustScale already clamps, but a key that silently does nothing reads as
     // broken rather than as the end of the range.
-    { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP },
+    //
+    // Glows while the covering box is clipped, because coarser scale is the
+    // fix the scene is asking for. Not while disabled: a glowing dead key
+    // would promise a remedy it cannot deliver.
+    { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
+      hint: coveringClipped && scaleExp < MAX_SCALE_EXP },
     { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0 },
   ]
@@ -73,7 +82,7 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
         {pad.map((b) => (
           <button
             key={b.cell}
-            className={`touchpad__key touchpad__key--${b.cell}`}
+            className={`touchpad__key touchpad__key--${b.cell}${b.hint ? ' is-zoomhint' : ''}`}
             title={b.title}
             aria-label={b.title}
             disabled={b.disabled}

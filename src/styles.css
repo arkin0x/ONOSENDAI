@@ -2705,6 +2705,29 @@ kbd {
   transform: scale(0.95);
 }
 
+/* ---------- Zoom-out hint ----------
+ *
+ * The scene's covering box is clipped: the true region extends past the
+ * drawable window and its walls are breathing outward to say so. This key is
+ * the remedy (coarser scale IS zoom out), so it echoes the message in the same
+ * accent blue as the walls, at low alpha and a slow ease. A hint about where
+ * relief lives, not an alarm about a fault. */
+.touchpad__key.is-zoomhint {
+  animation: zoomhint-pulse 2s ease-in-out infinite;
+}
+
+@keyframes zoomhint-pulse {
+  0%, 100% {
+    border-color: var(--border, #1d3547);
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0);
+  }
+  50% {
+    border-color: rgba(0, 229, 255, 0.55);
+    box-shadow: 0 0 9px 1px rgba(0, 229, 255, 0.28);
+    color: var(--accent, #00e5ff);
+  }
+}
+
 /* The compass sat bottom-centre, directly under the action row, so the controls
  * buried it. On a phone it moves out of the thumb zone entirely. */
 @media (max-width: 1100px) {

@@ -1357,7 +1357,19 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
    * screen centre, so zooming tracks the cursor instead of the avatar.
    */
   cursorOffset: (): [number, number, number] => {
-    const { anchor, cursor, scaleExp, view } = get()
+    const { anchor, cursor, scaleExp, view, focus } = get()
+    const focusAxes = viewAxes(view)
+    // A focus is a continuous point (a stop, Earth's centre), and everything
+    // drawn at it uses pointCentre. Framing [0,0,0], the aligned CORNER of
+    // its cell, put the viewed block up-and-right of screen centre by the
+    // sub-cell fraction (always positive, so always the same corner). Frame
+    // the point itself, with the same continuous math it is drawn with.
+    if (focus !== null) {
+      const focusOrigin = alignedOrigin(anchor, scaleExp)
+      return [focusAxes.right, focusAxes.up, focusAxes.out].map(
+        (a) => cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) * a.dir,
+      ) as [number, number, number]
+    }
     // Off your own head there is no cursor to frame; the camera sits on the anchor.
     if (!get().atHead()) return [0, 0, 0]
     const axes = viewAxes(view)

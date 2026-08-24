@@ -26,7 +26,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
-import { GRID_RADIUS, pointCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
 import { coverageRuns } from '../lib/hyperspace/station'
@@ -100,6 +100,16 @@ interface Built {
   heights: number[]
   /** 1 = every stop in range is drawn; N = every Nth survived the cap. */
   stride: number
+  /** The aligned origin the positions were computed against; the render
+   * rebases the whole cloud by originShift when the anchor has since moved. */
+  origin: Position
+  /** The anchor at build time, for measuring how far the view has drifted. */
+  anchor: Position
+  /** Plane, zoom and axes of the build. A mismatch is a different frame
+   * entirely: those positions are never drawn, and a rebuild starts. */
+  frameKey: string
+  /** The rebuildVersion the rows were read at. */
+  version: number
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
@@ -131,26 +141,45 @@ export function StopField({ axes }: Props): JSX.Element | null {
   const rebuildVersion = gate.current.version
 
   const [built, setBuilt] = useState<Built | null>(null)
+  const builtRef = useRef<Built | null>(null)
 
-  // The spatial frame the current geometry was built in. A sync bump keeps
-  // the stale field visible while the rebuild runs (its positions are still
-  // right); a change of anchor, plane, zoom or axes clears it first, because
-  // every drawn position is relative to exactly those.
-  const spatialKey = `${anchor.x} ${anchor.y} ${anchor.z} ${anchorPlane} ${scaleExp} ` +
+  const frameKey = `${anchorPlane} ${scaleExp} ` +
     `${axes.right.axis}${axes.right.dir} ${axes.up.axis}${axes.up.dir} ${axes.out.axis}${axes.out.dir}`
-  const prevSpatial = useRef('')
+  const anchorKey = `${anchor.x} ${anchor.y} ${anchor.z}`
 
   useEffect(() => {
     const job = { cancelled: false }
-    if (prevSpatial.current !== spatialKey) {
-      prevSpatial.current = spatialKey
+
+    // A pure translation of the anchor does not invalidate the geometry:
+    // the render rebases the whole cloud by originShift. Rebuild only when
+    // the frame itself changed, stops arrived, or the view has drifted far
+    // enough into the REACH margin that fresh content is due. This is what
+    // keeps clicking a block (which re-anchors the scene on it) from
+    // blanking and rebuilding the field mid-burst.
+    const cur = builtRef.current
+    if (cur && cur.frameKey === frameKey && cur.version === rebuildVersion) {
+      const drift = Math.max(
+        Math.abs(cellDelta(anchor.x, cur.anchor.x, scaleExp)),
+        Math.abs(cellDelta(anchor.y, cur.anchor.y, scaleExp)),
+        Math.abs(cellDelta(anchor.z, cur.anchor.z, scaleExp)),
+      )
+      if (drift < REACH / 4) return
+    }
+    // Positions from another frame cannot be shown while the rebuild runs;
+    // a same-frame rebuild keeps the old cloud visible (rebased) instead.
+    if (cur && cur.frameKey !== frameKey) {
+      builtRef.current = null
       setBuilt(null)
     }
 
     const index = getStopIndex()
     const wantPort = anchorPlane === 1
     const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
-    const commit = (next: Built | null): void => { if (!job.cancelled) setBuilt(next) }
+    const commit = (next: Built | null): void => {
+      if (job.cancelled) return
+      builtRef.current = next
+      setBuilt(next)
+    }
 
     if (index.size === 0 || index.permCount === 0) {
       commit(null)
@@ -230,7 +259,15 @@ export function StopField({ axes }: Props): JSX.Element | null {
           rendered: count, inRange: kept.length, stride: preStride * stride, runTotal,
         }
       }
-      commit({ geometry, heights, stride: preStride * stride })
+      commit({
+        geometry,
+        heights,
+        stride: preStride * stride,
+        origin,
+        anchor: { ...anchor },
+        frameKey,
+        version: rebuildVersion,
+      })
     }
 
     // Chip away between frames. The first slice runs synchronously, so the
@@ -264,10 +301,10 @@ export function StopField({ axes }: Props): JSX.Element | null {
     slice()
 
     return () => { job.cancelled = true }
-    // The spatial deps ride in spatialKey on purpose: listing the objects
-    // too would re-run the build on identity changes that changed nothing.
+    // The spatial deps ride in the keys on purpose: listing the objects too
+    // would re-run the build on identity changes that changed nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rebuildVersion, spatialKey])
+  }, [rebuildVersion, frameKey, anchorKey])
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => { built?.geometry.dispose() }, [built])
@@ -304,8 +341,11 @@ export function StopField({ axes }: Props): JSX.Element | null {
   }, [highlight])
   useEffect(() => () => { highlightGeometry?.dispose() }, [highlightGeometry])
 
-  if (!built) return null
+  if (!built || built.frameKey !== frameKey) return null
   const portView = anchorPlane === 1
+  // Rebase the cloud into the current frame: a re-anchor is a change of
+  // origin, not of where the stops are.
+  const rebase = originShift(built.origin, alignedOrigin(anchor, scaleExp), scaleExp, axes)
 
   const pick = (e: ThreeEvent<MouseEvent>): void => {
     // An orbit-drag that happens to end on a dot is not a tap.
@@ -318,7 +358,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
     let bestIndex: number | undefined
     let bestDist = Infinity
     for (const hit of e.intersections) {
-      if (hit.object !== e.eventObject || hit.index === undefined) continue
+      // The list is sorted by distance, so the first hit that is not a dot
+      // is something solid in front of the rest (the Earth occluder): dots
+      // beyond it are on the far side of the planet and not clickable, even
+      // when one of them lines up with the ray better than any near dot.
+      if (hit.object !== e.eventObject) break
+      if (hit.index === undefined) continue
       const d = hit.distanceToRay ?? 0
       if (d < bestDist) {
         bestDist = d
@@ -333,7 +378,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
   }
 
   return (
-    <group>
+    <group position={rebase}>
       <points geometry={built.geometry} onClick={pick} frustumCulled={false}>
         {/*
           Ports: pixel-sized like the terrain dust (sizeAttenuation off), so

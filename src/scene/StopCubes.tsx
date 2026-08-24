@@ -52,11 +52,17 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
       seen.add(stop.height)
       candidates.push(stop)
     }
-    // The stop being viewed and the chosen destination always get a cube;
-    // then the prefix-nearest stops fill the rest.
+    // The stop being viewed and the chosen destination always get a cube.
     consider(scrubHeight !== null ? getStopByHeight(scrubHeight) : undefined)
     consider(destination !== null ? getStopByHeight(destination) : undefined)
-    for (const near of nearestStops(index, anchorCoord, MAX_CUBES * 2)) consider(near.stop)
+    // The nearest-stop fleet exists for ideaspace, where ports are sparse
+    // landmarks worth making solid and clickable. On the landfall shell the
+    // dots ARE the landmarks, and a fleet keyed on the anchor just trails
+    // the selection around the globe; only the viewed stop and the
+    // destination earn a cube there.
+    if (anchorPlane === 1) {
+      for (const near of nearestStops(index, anchorCoord, MAX_CUBES * 2)) consider(near.stop)
+    }
 
     const out: Array<{ stop: Stop; centre: [number, number, number] }> = []
     // A cube that would sit against one already placed adds nothing but

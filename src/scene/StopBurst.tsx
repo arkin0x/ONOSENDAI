@@ -4,15 +4,16 @@
  * Setting a stop as the destination emits a one-shot radial burst of rainbow
  * streaks from its cube, fading in about a second and a half. Your station
  * (the stop nearest your avatar, the one boarding sets you down at) instead
- * pulses the same burst continuously while you are viewing it: that block is
- * your entry to the line, so the lines never quite leave it. The full
- * surrounding warp (HyperspaceCone) stays reserved for actually being in
- * transit, so the three read together as: the lines live inside the blocks,
- * the ones at your door keep spilling out, and boarding puts you among them.
+ * wears a continuous aura while you are viewing it: the same streaks, each
+ * cycling outward on its own phase like the transit warp's, fading as they
+ * get a little way from the block, so the flow is constant and smooth
+ * rather than a synchronized pulse. That block is your entry to the line;
+ * the lines never quite leave it. The full surrounding warp (HyperspaceCone)
+ * stays reserved for actually being in transit.
  *
- * One LineSegments draw call per burst (at most two: the station pulse and a
- * destination shot); positions come from the vertex shader, so a burst
- * allocates nothing per frame.
+ * One LineSegments draw call per emitter (at most two: the station aura and
+ * a destination shot); positions come from the vertex shader, so nothing is
+ * allocated per frame.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
@@ -68,19 +69,34 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-/** One emitting block: its own material (uAge is per-burst), shared shape. */
-function BurstLines({
-  centre,
-  bornAt,
-  loop,
-  onDone,
-}: {
-  centre: [number, number, number]
-  bornAt: number
-  loop?: boolean
-  onDone?: () => void
-}): JSX.Element {
-  const geometry = useMemo(() => {
+/** The aura: per-streak phase, so the flow never restarts as a whole. */
+const auraVertexShader = /* glsl */ `
+  attribute vec3 aDir;
+  attribute float aSeed;
+  attribute float aEnd;
+  uniform float uTime;
+  varying float vSeed;
+  varying float vFade;
+
+  void main() {
+    // Each streak cycles outward on its own phase: the transit warp's trick,
+    // pointed radially out of one block, so the emission is constant and
+    // smooth instead of a synchronized pulse.
+    float rate = 0.30 + aSeed * 0.35;
+    float travel = fract(aSeed * 13.7 + uTime * rate);
+    float reach = ${REACH.toFixed(1)} * (0.5 + aSeed * 0.5);
+    float head = 0.15 + travel * reach;
+    float len = (0.35 + aSeed * 0.8) * (1.0 - 0.55 * travel);
+    vec3 pos = aDir * (head - aEnd * len);
+    // Born quietly at the block, gone before the tip of its reach: distance
+    // from the block is the whole fade axis.
+    vFade = smoothstep(0.0, 0.08, travel) * (1.0 - travel) * (1.0 - travel);
+    vSeed = aSeed;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`
+
+function makeBurstGeometry(): BufferGeometry {
     const dirs = new Float32Array(STREAKS * 2 * 3)
     const seeds = new Float32Array(STREAKS * 2)
     const ends = new Float32Array(STREAKS * 2)
@@ -101,14 +117,25 @@ function BurstLines({
         ends[v] = end
       }
     }
-    const geo = new BufferGeometry()
-    geo.setAttribute('position', new Float32BufferAttribute(positions, 3))
-    geo.setAttribute('aDir', new Float32BufferAttribute(dirs, 3))
-    geo.setAttribute('aSeed', new Float32BufferAttribute(seeds, 1))
-    geo.setAttribute('aEnd', new Float32BufferAttribute(ends, 1))
-    return geo
-  }, [])
+  const geo = new BufferGeometry()
+  geo.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geo.setAttribute('aDir', new Float32BufferAttribute(dirs, 3))
+  geo.setAttribute('aSeed', new Float32BufferAttribute(seeds, 1))
+  geo.setAttribute('aEnd', new Float32BufferAttribute(ends, 1))
+  return geo
+}
 
+/** The one-shot: a block was just chosen as the destination. */
+function BurstLines({
+  centre,
+  bornAt,
+  onDone,
+}: {
+  centre: [number, number, number]
+  bornAt: number
+  onDone?: () => void
+}): JSX.Element {
+  const geometry = useMemo(makeBurstGeometry, [])
   const material = useMemo(
     () =>
       new ShaderMaterial({
@@ -127,13 +154,37 @@ function BurstLines({
   useEffect(() => { done.current = false }, [bornAt])
   useFrame(() => {
     const age = (performance.now() - bornAt) / 1000
-    // Looping restarts the emission each period: the station's beacon.
-    material.uniforms.uAge.value = loop ? age % LIFE : age
-    if (!loop && age > LIFE && !done.current) {
+    material.uniforms.uAge.value = age
+    if (age > LIFE && !done.current) {
       done.current = true
       onDone?.()
     }
   })
+
+  return (
+    <group position={centre}>
+      <lineSegments geometry={geometry} material={material} frustumCulled={false} renderOrder={5} />
+    </group>
+  )
+}
+
+/** The station's continuous aura while it is being viewed. */
+function StationAura({ centre }: { centre: [number, number, number] }): JSX.Element {
+  const geometry = useMemo(makeBurstGeometry, [])
+  const material = useMemo(
+    () =>
+      new ShaderMaterial({
+        vertexShader: auraVertexShader,
+        fragmentShader,
+        uniforms: { uTime: { value: 0 } },
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      }),
+    [],
+  )
+  useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
+  useFrame((state) => { material.uniforms.uTime.value = state.clock.elapsedTime })
 
   return (
     <group position={centre}>
@@ -168,7 +219,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   // The station: the stop nearest the avatar's committed position, i.e. the
   // block boarding would set you down at. While the owned view is on it, it
-  // pulses persistently: that block is your entry point.
+  // wears the aura persistently: that block is your entry point.
   const station = useMemo(() => {
     void indexVersion
     const index = getStopIndex()
@@ -198,7 +249,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
   if (inTransit) return null
   return (
     <>
-      {sustainedCentre && <BurstLines centre={sustainedCentre} bornAt={0} loop />}
+      {sustainedCentre && <StationAura centre={sustainedCentre} />}
       {shot && shotCentre && (
         <BurstLines centre={shotCentre} bornAt={shot.bornAt} onDone={() => setShot(null)} />
       )}

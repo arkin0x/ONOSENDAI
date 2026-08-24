@@ -97,10 +97,13 @@ export default function App(): JSX.Element {
       {!crowded && <Targets targets={targets} />}
       {!crowded && (
         <div className="instruments">
-          <BitReadout />
-          <ChainExplorer />
+          {/* Ordered by how often each is reached for right now: hyperspace
+              on top with its status bar, the chain under it, the XOR readout
+              last. */}
           <LineScrubber />
           <HyperspaceBar />
+          <ChainExplorer />
+          <BitReadout />
         </div>
       )}
       {showPanels && <Hud menuOpen={crowded} />}

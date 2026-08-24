@@ -14,6 +14,7 @@ import { create } from 'zustand'
 import { anchorIndex, anchorsByHeight, runAnchorSync } from '../lib/hyperspace/anchors'
 import type { Stop } from '../lib/hyperspace/stops'
 import type { StopIndex } from '../lib/hyperspace/station'
+import { useCyberspace } from './useCyberspace'
 
 export interface HyperspaceSync {
   status: 'idle' | 'loading-cache' | 'syncing' | 'ready' | 'error'
@@ -31,6 +32,8 @@ interface HyperspaceState {
   tipHeight: number | null
   /** The stop being viewed on the line; null = scrubber off. */
   scrubHeight: number | null
+  /** True while hyperspace UI owns the camera focus (VIEW, EARTH, the scrubber). */
+  viewOwned: boolean
   /** The chosen destination stop height; null = none. */
   destination: number | null
   startSync: () => void
@@ -47,6 +50,7 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   indexVersion: 0,
   tipHeight: null,
   scrubHeight: null,
+  viewOwned: false,
   destination: null,
 
   startSync: () => {
@@ -82,3 +86,31 @@ export function getStopByHeight(height: number): Stop | undefined {
 export function stopCount(): number {
   return anchorsByHeight.size
 }
+
+
+/** Mark the current camera focus as hyperspace's, so RETURN and Escape know to clear it. */
+export function ownHyperspaceView(): void {
+  useHyperspace.setState({ viewOwned: true })
+}
+
+/**
+ * Leave the hyperspace view: close the scrubber, and clear the focus only if
+ * hyperspace set it (never a shard's focus, never a running spectate).
+ */
+export function exitHyperspaceView(): void {
+  const owned = useHyperspace.getState().viewOwned
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false })
+  const cs = useCyberspace.getState()
+  if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
+}
+
+// Spectating a person replaces any hyperspace view: drop the scrubber and the
+// ownership without touching the focus (beginSpectate already cleared it).
+useCyberspace.subscribe((s, prev) => {
+  if (s.spectate !== null && prev.spectate === null) {
+    const hs = useHyperspace.getState()
+    if (hs.scrubHeight !== null || hs.viewOwned) {
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false })
+    }
+  }
+})

@@ -9,7 +9,7 @@
 
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
-import { useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { moveDirection, type MoveName } from '../lib/moves'
@@ -75,6 +75,9 @@ export function useKeyboard(): void {
         event.preventDefault()
         // Deploying: back out of it rather than resetting the view.
         if (useShards.getState().pending) { useShards.getState().cancelDeploy(); return }
+        // Viewing a stop or EARTH: come home before anything else.
+        const hs = useHyperspace.getState()
+        if (hs.scrubHeight !== null || hs.viewOwned) { exitHyperspaceView(); return }
         store.resetView()
         return
       }
@@ -114,7 +117,8 @@ export function useKeyboard(): void {
       if (event.code === 'KeyH') {
         event.preventDefault()
         const hs = useHyperspace.getState()
-        hs.setScrubHeight(hs.scrubHeight === null ? hs.tipHeight ?? 0 : null)
+        if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
+        else exitHyperspaceView()
         return
       }
 

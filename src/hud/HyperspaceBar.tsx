@@ -12,12 +12,29 @@
 
 import { formatMs } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
+import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { abortRide, useRideRun } from './HyperspacePanel'
 
 export function HyperspaceBar(): JSX.Element | null {
   const transit = useCyberspace((s) => s.transit)
   const progress = useRideRun((s) => s.progress)
-  if (transit === null && progress === null) return null
+  const viewOwned = useHyperspace((s) => s.viewOwned)
+  const focusLabel = useCyberspace((s) => s.focus?.label ?? null)
+  if (transit === null && progress === null) {
+    // Just looking: the bar is the always-visible way home from VIEW, EARTH,
+    // or a scrubbed stop, since the panel column may be folded away.
+    if (!viewOwned) return null
+    return (
+      <div className="hyperbar" role="status">
+        <span className="hyperbar__glyph" aria-hidden="true">◆</span>
+        <span className="hyperbar__text">
+          <span className="hyperbar__label">VIEWING</span>
+          <span className="hyperbar__meta">{focusLabel ?? 'HYPERSPACE'}</span>
+        </span>
+        <button className="hyperbar__end" onClick={() => exitHyperspaceView()}>RETURN</button>
+      </div>
+    )
+  }
 
   const label = progress !== null
     ? `RIDING ${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 100}%`

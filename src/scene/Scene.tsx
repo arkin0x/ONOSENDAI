@@ -41,6 +41,7 @@ import { Earth } from './Earth'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { StopField } from './StopField'
+import { StopCubes } from './StopCubes'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
@@ -90,6 +91,7 @@ function World(): JSX.Element {
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />
+      <StopCubes axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />

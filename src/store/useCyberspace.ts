@@ -987,6 +987,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({
       spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading' },
       exploreIndex: null,
+      // A standing focus (a shard, EARTH, a viewed stop) would hide the
+      // avatar and keep the rig on the old point: spectating replaces it.
+      focus: null,
       anchor: spawn.position,
       anchorPlane: spawn.plane,
     })

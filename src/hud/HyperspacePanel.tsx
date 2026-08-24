@@ -24,7 +24,7 @@ import { findStation, nearestStops } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
-import { getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -135,6 +135,7 @@ const kindLabel = (stop: Stop): string => (stop.kind === 'port' ? 'PORT' : 'LAND
 
 export function HyperspacePanel(): JSX.Element {
   const sync = useHyperspace((s) => s.sync)
+  const viewOwned = useHyperspace((s) => s.viewOwned)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const destination = useHyperspace((s) => s.destination)
   const transit = useCyberspace((s) => s.transit)
@@ -213,13 +214,13 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <button
               className="avatars__spectate"
-              onClick={() => useCyberspace.getState().focusOn(
+              onClick={() => { ownHyperspaceView(); useCyberspace.getState().focusOn(
                 stopPosition(nearest.stop),
                 stopPlane(nearest.stop),
                 `STATION · BLOCK ${nearest.stop.height}`,
                 34,
-              )}
-            >SPECTATE</button>
+              ) }}
+            >VIEW</button>
           </>
         ) : (
           <p className="legend__note">No stops in the index yet.</p>
@@ -298,14 +299,17 @@ export function HyperspacePanel(): JSX.Element {
       </div>
       <button
         className="hyper__btn hyper__btn--earth"
-        onClick={() => useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)}
+        onClick={() => { ownHyperspaceView(); useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52) }}
       >EARTH</button>
+      {viewOwned && (
+        <button className="hyper__btn hyper__btn--earth" onClick={() => exitHyperspaceView()}>RETURN</button>
+      )}
 
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
 
       <p className="legend__note">
-        Boarding marks your chain; the ride proves fresh work for every block
+        The nearest stop is your station: the stop boarding sets you down at. VIEW flies the camera there; RETURN or Escape brings it home. Boarding marks your chain; the ride proves fresh work for every block
         passed and sets you down exactly at the stop. Leaving is an ordinary
         hop, so the last mile from any stop is normal movement.
       </p>

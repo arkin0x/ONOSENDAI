@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { getStopByHeight, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, getStopByHeight, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
 /** The coarse step: the line is ~900k blocks, single steps are the last few. */
@@ -41,11 +41,14 @@ export function LineScrubber(): JSX.Element {
     const was = prev.current
     prev.current = scrubHeight
     if (scrubHeight === null) {
-      if (was !== null) useCyberspace.getState().clearFocus()
+      // Closed by any path that skipped exitHyperspaceView: settle through it
+      // so an owned focus clears and a foreign one (a spectate) survives.
+      if (was !== null) exitHyperspaceView()
       return
     }
     const stop = getStopByHeight(scrubHeight)
     if (!stop) return
+    ownHyperspaceView()
     useCyberspace.getState().focusOn(
       stopPosition(stop),
       stopPlane(stop),
@@ -56,7 +59,8 @@ export function LineScrubber(): JSX.Element {
 
   const toggle = (): void => {
     const hs = useHyperspace.getState()
-    hs.setScrubHeight(hs.scrubHeight === null ? hs.tipHeight ?? 0 : null)
+    if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
+    else exitHyperspaceView()
   }
 
   const step = (d: number) => (): void => {

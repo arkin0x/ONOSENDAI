@@ -135,7 +135,9 @@ export function LineScrubber(): JSX.Element {
         aria-pressed={open}
       >
         {ready
-          ? `HYPERSPACE ${scrubHeight ?? tip}/${tip}`
+          ? destination !== null
+            ? `HYPERSPACE ${destination}`
+            : 'HYPERSPACE READY'
           : sync.status === 'loading-cache'
             ? `HYPERSPACE LOADING ${syncPercent}%`
             : `HYPERSPACE SYNCING ${syncPercent}%`}
@@ -159,6 +161,7 @@ export function LineScrubber(): JSX.Element {
             >VIEW</button>
           </div>
 
+          <hr className="linescrub__hr" />
           <span className="linescrub__headline linescrub__headline--to">TO BLOCK</span>
           <div className="explorer__row">
             <button className="explorer__btn" title={`Back ${JUMP} blocks (hold to repeat)`} aria-label={`Back ${JUMP} blocks`} disabled={scrubHeight === 0} {...bind(step(-JUMP))}>«</button>

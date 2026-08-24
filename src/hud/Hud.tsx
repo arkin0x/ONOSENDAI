@@ -31,7 +31,9 @@ function signed(axis: string, dir: number): string {
 function Brand(): JSX.Element {
   return (
     <header className="brand">
-      <img src="/logo.png" alt="ONOSENDAI" />
+      {/* Intrinsic dimensions reserve the box before the file arrives, so
+          even a cold cache cannot shift the layout under the pointer. */}
+      <img src="/logo.png" alt="ONOSENDAI" width={1871} height={354} decoding="async" />
       <p>Cyberspace Protocol v2 spatial explorer</p>
     </header>
   )

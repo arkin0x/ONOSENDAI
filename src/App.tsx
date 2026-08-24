@@ -67,6 +67,12 @@ export default function App(): JSX.Element {
     if (inspecting && isMobile) setPanelsOpen(false)
   }, [inspecting, isMobile])
 
+  // Reading a hidden thing owns the screen: the top-aligned modal sits where
+  // the instrument stack lives, so the stack stands aside and the hamburger
+  // folds instead of layering underneath it.
+  const secretOpen = useShards((s) => s.selectedSecret !== null)
+  useEffect(() => { if (secretOpen) setPanelsOpen(false) }, [secretOpen])
+
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
@@ -95,7 +101,7 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {!crowded && <Targets targets={targets} />}
-      {!crowded && (
+      {!crowded && !secretOpen && (
         <div className="instruments">
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout

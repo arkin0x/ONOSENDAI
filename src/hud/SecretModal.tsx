@@ -48,7 +48,7 @@ export function SecretModal(): JSX.Element | null {
   const target = (): void => useCyberspace.getState().toggleTarget(author, profile?.name ?? null)
 
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
+    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
           <span className={`secret__badge secret__badge--${item.type}`}>{item.type === 'message' ? '✎ MESSAGE' : '◇ SHARD'}</span>

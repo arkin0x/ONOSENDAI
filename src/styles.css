@@ -1186,9 +1186,20 @@ kbd {
 }
 
 /* ---------- Secret modal (a hidden thing, tapped in the world) ---------- */
+/* Aligned to the top of the screen, not centred: the card's height varies
+   wildly with the message, and a fixed anchor keeps the close control where
+   the hand last found it. */
+.modal--top {
+  align-items: flex-start;
+}
+
 .modal__card.secret {
   border-color: rgba(0, 229, 255, 0.5);
   max-width: 440px;
+  /* Never taller than the screen; anything longer scrolls inside. */
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 
 .secret__head {
@@ -1229,7 +1240,12 @@ kbd {
   cursor: pointer;
 }
 
+/* A long message scrolls in place instead of growing the card past every
+   control that could close it. */
 .secret__message {
+  max-height: 40vh;
+  max-height: 40dvh;
+  overflow-y: auto;
   margin: 0 0 14px;
   padding: 10px 12px;
   font-size: 14px;
@@ -2425,8 +2441,8 @@ kbd {
 
 .hamburger-menu {
   position: fixed;
-  bottom: 24px;
-  left: 24px;
+  bottom: 12px;
+  left: 12px;
   width: 56px;
   height: 56px;
   border-radius: 50%;

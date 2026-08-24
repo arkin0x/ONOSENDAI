@@ -138,16 +138,21 @@ export function LineScrubber(): JSX.Element {
             <button className="explorer__btn" title={`Forward ${JUMP} blocks (hold to repeat)`} aria-label={`Forward ${JUMP} blocks`} disabled={scrubHeight === tip} {...bind(step(JUMP))}>»</button>
           </div>
 
-          <div className="explorer__meta">
-            <span className="explorer__type">BLOCK {scrubHeight}</span>
-            {stop ? (
-              <>
-                <span className={`linescrub__kind linescrub__kind--${stop.kind}`}>{stop.kind === 'port' ? 'PORT' : 'LANDFALL'}</span>
-                {stop.kind === 'landfall' && <span className="explorer__when">{formatLatLon(stop)}</span>}
-              </>
-            ) : (
-              <span className="explorer__when">NO STOP DATA</span>
-            )}
+          <div className="explorer__meta linescrub__meta">
+            <div className="linescrub__info">
+              <span className="explorer__type">BLOCK {scrubHeight}</span>
+              {stop ? (
+                <>
+                  <span className={`linescrub__kind linescrub__kind--${stop.kind}`}>
+                    {stop.kind === 'port' ? 'PORT · IDEASPACE' : "LANDFALL · DATASPACE · EARTH'S SURFACE"}
+                  </span>
+                  {stop.kind === 'landfall' && <span className="explorer__when">{formatLatLon(stop)}</span>}
+                </>
+              ) : (
+                <span className="explorer__when">NO STOP DATA</span>
+              )}
+            </div>
+            <div className="linescrub__actions">
             <button
               className="linescrub__set"
               disabled={!stop}
@@ -169,6 +174,7 @@ export function LineScrubber(): JSX.Element {
                 }}
               >✕</button>
             )}
+            </div>
           </div>
         </div>
       )}

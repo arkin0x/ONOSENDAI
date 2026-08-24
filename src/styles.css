@@ -3338,7 +3338,6 @@ kbd {
 
 .linescrub__kind {
   display: inline-block;
-  min-width: 64px;
 }
 
 .linescrub .explorer__when {
@@ -3368,8 +3367,32 @@ kbd {
   color: #2f81f7;
 }
 
-.linescrub__set {
+/* The meta area: block, kind and place stacked on the left; the action
+   buttons in their own right-aligned column so they line up under the rail's
+   end button instead of being pushed below the text. */
+.linescrub__meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.linescrub__info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.linescrub__actions {
   margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.linescrub__set {
   font-family: inherit;
   font-size: 8px;
   letter-spacing: 0.12em;

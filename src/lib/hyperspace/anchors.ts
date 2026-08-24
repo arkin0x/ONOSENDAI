@@ -246,7 +246,7 @@ const BUMP_MS = 500
 const SYNC_BUMP_MS = 2500
 /** Main-thread budget per merge slice; comfortably inside one frame. */
 const MERGE_SLICE_MS = 12
-const CACHE_CHUNK = 5000
+const CACHE_CHUNK = 50_000
 const COVERED_KEY = 'covered'
 
 let running = false
@@ -386,6 +386,8 @@ function announceSource(cb: SyncCallbacks): void {
 
 async function loadCache(cb: SyncCallbacks): Promise<void> {
   if (!db) return
+  const t0 = performance.now()
+  const before = anchorIndex.size
   const stored = await getMeta(db, COVERED_KEY)
   if (validCovered(stored)) covered = stored
   // Only replay heights the blobs did not deliver. When there are no blobs
@@ -406,6 +408,10 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
     })
   }
   announceSource(cb)
+  const restored = anchorIndex.size - before
+  if (restored > 0) {
+    console.info(`[hyperspace] resumed ${restored} stops from cache in ${Math.round(performance.now() - t0)} ms`)
+  }
 }
 
 /** The max B among the newest anchors; the NTH publisher tails the tip. */

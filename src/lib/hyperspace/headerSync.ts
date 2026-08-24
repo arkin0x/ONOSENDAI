@@ -17,8 +17,12 @@
 import type { BlobColumns } from './headers'
 import type { HeadersRequest, HeadersResponse } from '../../workers/headers.worker'
 
+// raw.githubusercontent, not a release asset: release downloads send no
+// access-control-allow-origin header and are unfetchable from a browser,
+// raw sends *. The headers-v1 branch holds only the blobs, the manifest,
+// and a README.
 export const HEADERS_MANIFEST_URL =
-  'https://github.com/arkin0x/nth/releases/download/headers-v1/manifest.json'
+  'https://raw.githubusercontent.com/arkin0x/nth/headers-v1/manifest.json'
 
 const MANIFEST_OVERRIDE_KEY = 'onosendai:headersManifest'
 

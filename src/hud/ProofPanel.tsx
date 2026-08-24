@@ -10,6 +10,7 @@
 
 import { useMemo } from 'react'
 import { estimateHopCost, estimateSidestepCost } from 'cyberspace-core'
+import { useCalibration } from '../lib/calibration'
 import { formatMs, formatOps } from '../lib/space'
 import { samePosition, sidestepTarget, useCyberspace } from '../store/useCyberspace'
 
@@ -34,6 +35,10 @@ export function ProofPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
+  // What calibration measured this machine finishing in budget: conservative
+  // defaults until the quiet benchmark lands, then the line updates in place.
+  const hopCeil = useCalibration((s) => s.hopHeight)
+  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
 
   // Live preview of the action the cursor is lining up. Both estimates are
   // closed-form, so cheap enough to run on every noodle.
@@ -157,6 +162,8 @@ export function ProofPanel(): JSX.Element {
           {proof.message && <p className="notice">{proof.message}</p>}
         </>
       )}
+
+      <p className="legend__note">{`THIS MACHINE: HOP <= h${hopCeil} · SIDESTEP <= h${sidestepCeil}`}</p>
     </section>
   )
 }

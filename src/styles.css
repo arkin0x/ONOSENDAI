@@ -3237,24 +3237,8 @@ kbd {
  * (boarding requires your own head), but a collision would hide the one way
  * out of one of them, so they get separate slots anyway. */
 .hyperbar {
-  position: fixed;
-  top: 64px;
-  right: 14px;
-  z-index: 101;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 8px 7px 12px;
-  border-radius: 9px;
-  color: var(--fg);
-  background: rgba(6, 14, 22, 0.82);
-  border: 1px solid rgba(247, 147, 26, 0.5);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  max-width: calc(100vw - 24px);
-}
+    margin-top: 6px;
+  }
 
 .hyperbar__glyph {
   color: #f7931a;
@@ -3327,6 +3311,39 @@ kbd {
 
 .linescrub .explorer__body {
   border-color: rgba(247, 147, 26, 0.35);
+  /* The meta row's content changes length between PORT and LANDFALL stops;
+     a fixed body width keeps the rail from resizing under the pointer. */
+  width: 380px;
+  max-width: calc(100vw - 28px);
+  box-sizing: border-box;
+}
+
+.linescrub .explorer__type {
+  min-width: 96px;
+}
+
+.linescrub__kind {
+  display: inline-block;
+  min-width: 64px;
+}
+
+.linescrub .explorer__when {
+  display: inline-block;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.linescrub__clear {
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid var(--danger);
+  cursor: pointer;
+  touch-action: none;
 }
 
 .linescrub__kind--port {

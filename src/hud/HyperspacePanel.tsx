@@ -23,6 +23,16 @@ import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from 
 import { findStation, nearestStops } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
+
+/** Ride estimates run to hours and days; raw seconds read as noise. */
+function formatDuration(ms: number): string {
+  if (ms < 90_000) return formatMs(ms)
+  const m = ms / 60_000
+  if (m < 90) return `${m.toFixed(0)} min`
+  const h = m / 60
+  if (h < 48) return `${h.toFixed(1)} h`
+  return `${(h / 24).toFixed(1)} d`
+}
 import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 
@@ -84,7 +94,15 @@ export async function startRide(): Promise<void> {
   // uses, rather than trusting anything cached from before the choice.
   const { position, plane } = useCyberspace.getState()
   const here = xyzToCoord(position.x, position.y, position.z, plane)
-  const station = findStation(getStopIndex(), here, destination)
+  // DECK-0001 v3 §4.2 (as amended): the station set is bounded by a declared
+  // as_of height, not the destination. Declare the tip we synced, so the
+  // station is the genuine nearest stop; the bound rides in the event.
+  const asOf = useHyperspace.getState().tipHeight
+  if (asOf === null || asOf < destination) {
+    useRideRun.setState({ error: 'The line is not synced past the destination yet.', progress: null })
+    return
+  }
+  const station = findStation(getStopIndex(), here, asOf)
   if (station === null) {
     useRideRun.setState({ error: 'No station: no stop at or below the destination height' })
     return
@@ -112,6 +130,7 @@ export async function startRide(): Promise<void> {
       controller.signal,
     )
     await useCyberspace.getState().completeRide({
+      asOf,
       toCoordHex: coordToHex(stopCoordExact(destStop)),
       fromHeight: station.stop.height,
       toHeight: destination,
@@ -170,7 +189,8 @@ export function HyperspacePanel(): JSX.Element {
   const estimate = useMemo(() => {
     if (destination === null) return null
     const here = xyzToCoord(position.x, position.y, position.z, plane)
-    const station = findStation(getStopIndex(), here, destination)
+    const asOf = useHyperspace.getState().tipHeight
+    const station = findStation(getStopIndex(), here, Math.max(asOf ?? destination, destination))
     if (station === null) return null
     return { station, length: rideBlocks(station.stop.height, destination).length }
   }, [destination, position, plane, indexVersion])
@@ -254,13 +274,15 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    <dd>{benchMs === null ? 'CALIBRATING' : formatMs(estimate.length * benchMs)}</dd>
+                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration(estimate.length * benchMs)}</dd>
                   </div>
                 </>
               )}
             </dl>
             <p className="legend__note">
-              All of the per-block work runs locally and resumes if interrupted.
+              STATION is where boarding sets you down: your nearest stop as of
+              the synced tip. The ride runs from it to the destination; all of
+              the per-block work runs locally and resumes if interrupted.
             </p>
           </>
         )}

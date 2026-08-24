@@ -64,6 +64,53 @@ export async function getAllPaged<T>(
   }
 }
 
+/**
+ * Read rows with keys in [lower, upper] in key order, chunked like
+ * getAllPaged. upper === null means unbounded above; the header-blob path
+ * uses that to replay whatever tail the blobs did not cover without knowing
+ * the tip yet.
+ */
+export async function getRangePaged<T>(
+  db: IDBDatabase,
+  store: string,
+  lower: IDBValidKey,
+  upper: IDBValidKey | null,
+  chunkSize: number,
+  keyOf: (row: T) => IDBValidKey,
+  onChunk: (rows: T[]) => void | Promise<void>,
+): Promise<void> {
+  let from = lower
+  let open = false
+  for (;;) {
+    const range = upper === null
+      ? IDBKeyRange.lowerBound(from, open)
+      : IDBKeyRange.bound(from, upper, open, false)
+    const os = db.transaction(store, 'readonly').objectStore(store)
+    const rows = await request(os.getAll(range, chunkSize)) as T[]
+    if (rows.length === 0) return
+    await onChunk(rows)
+    if (rows.length < chunkSize) return
+    from = keyOf(rows[rows.length - 1])
+    open = true
+  }
+}
+
+/** Delete every row with a key in [lower, upper]; one transaction. */
+export function deleteRange(
+  db: IDBDatabase,
+  store: string,
+  lower: IDBValidKey,
+  upper: IDBValidKey,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).delete(IDBKeyRange.bound(lower, upper))
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB delete failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB delete aborted'))
+  })
+}
+
 /** Put every row in one transaction; resolves when the transaction commits. */
 export function putMany(db: IDBDatabase, store: string, rows: unknown[]): Promise<void> {
   return new Promise((resolve, reject) => {

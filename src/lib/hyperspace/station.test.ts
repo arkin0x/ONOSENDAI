@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { xyzToCoord } from 'cyberspace-core'
 import { buildIndex, findStation, insertStop, maxAxisLca, maxAxisLcaViaAxes, nearestStops } from './station'
+import { keyHexAtSorted } from './compactIndex'
 import type { Stop } from './stops'
 
 function rand85(rng: () => number): bigint {
@@ -110,8 +111,10 @@ describe('findStation', () => {
       stops.push(s)
       insertStop(index, s)
     }
-    for (let i = 1; i < index.keys.length; i++) {
-      expect(index.keys[i] >= index.keys[i - 1]).toBe(true)
+    // Fixed-width hex sorts like the underlying 255-bit keys, so string
+    // comparison is a faithful sortedness probe over the permutation.
+    for (let i = 1; i < index.permCount; i++) {
+      expect(keyHexAtSorted(index, i) >= keyHexAtSorted(index, i - 1)).toBe(true)
     }
     const q = xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 0)
     expect(findStation(index, q, 10_000)?.stop.height).toBe(bruteStation(stops, q, 10_000)?.height)

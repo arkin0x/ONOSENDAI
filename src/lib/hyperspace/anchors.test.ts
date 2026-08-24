@@ -17,6 +17,7 @@ import {
   recordFromStop,
   runsOf,
   stopFromRecord,
+  subtractCovered,
   type StopRecord,
 } from './anchors'
 import type { Stop } from './stops'
@@ -52,6 +53,37 @@ describe('mergeCovered', () => {
     const covered: Array<[number, number]> = [[0, 5]]
     mergeCovered(covered, [4, 9])
     expect(covered).toEqual([[0, 5]])
+  })
+})
+
+describe('subtractCovered', () => {
+  it('removes a whole range', () => {
+    expect(subtractCovered([[0, 9]], [0, 9])).toEqual([])
+    expect(subtractCovered([[3, 5]], [0, 9])).toEqual([])
+  })
+
+  it('trims overlaps on either side', () => {
+    expect(subtractCovered([[0, 9]], [0, 4])).toEqual([[5, 9]])
+    expect(subtractCovered([[0, 9]], [5, 9])).toEqual([[0, 4]])
+  })
+
+  it('splits a containing range', () => {
+    expect(subtractCovered([[0, 9]], [3, 5])).toEqual([[0, 2], [6, 9]])
+  })
+
+  it('leaves disjoint ranges alone and never mutates', () => {
+    const covered: Array<[number, number]> = [[0, 2], [10, 12]]
+    expect(subtractCovered(covered, [4, 8])).toEqual([[0, 2], [10, 12]])
+    expect(covered).toEqual([[0, 2], [10, 12]])
+  })
+
+  it('subtracts across several ranges', () => {
+    expect(subtractCovered([[0, 2], [4, 6], [8, 10]], [1, 9])).toEqual([[0, 0], [10, 10]])
+  })
+
+  it('round-trips with mergeCovered', () => {
+    const merged = mergeCovered([[0, 4]], [10, 14])
+    expect(subtractCovered(mergeCovered(merged, [5, 9]), [5, 9])).toEqual(merged)
   })
 })
 

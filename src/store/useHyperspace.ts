@@ -2,16 +2,18 @@
  * useHyperspace.ts: sync state and UI selections for the hyperspace line.
  *
  * The store holds only what React should re-render on: sync progress, the
- * tip, the scrubber position and the chosen destination. The ~950k stops
- * themselves live in module-level singletons owned by the anchors engine
- * (the cameraPose convention: per-frame and bulk data must not flow through
- * state). Components read them through getStopIndex / getStopByHeight and
- * subscribe to indexVersion to learn that stops changed; the engine batches
- * bumps to at most one per 500 ms during the bulk load.
+ * tip, the scrubber position and the chosen destination. The ~1M stops
+ * themselves live in a module-level columnar singleton owned by the anchors
+ * engine (the cameraPose convention: per-frame and bulk data must not flow
+ * through state). Components read them through getStopIndex / getStopByHeight
+ * and subscribe to indexVersion to learn that stops changed; the engine
+ * batches bumps to at most one per 2.5 s during the bulk load and one per
+ * 500 ms once ready.
  */
 
 import { create } from 'zustand'
-import { anchorIndex, anchorsByHeight, runAnchorSync } from '../lib/hyperspace/anchors'
+import { anchorIndex, runAnchorSync, type SyncSource } from '../lib/hyperspace/anchors'
+import { stopByHeight } from '../lib/hyperspace/compactIndex'
 import type { Stop } from '../lib/hyperspace/stops'
 import type { StopIndex } from '../lib/hyperspace/station'
 import { useCyberspace } from './useCyberspace'
@@ -23,6 +25,8 @@ export interface HyperspaceSync {
   /** tipHeight + 1 when known, else 0. */
   total: number
   error: string | null
+  /** Where stops have come from: verified header blobs, the relay, or both. */
+  source: SyncSource
 }
 
 interface HyperspaceState {
@@ -46,7 +50,7 @@ interface HyperspaceState {
 let started = false
 
 export const useHyperspace = create<HyperspaceState>((set) => ({
-  sync: { status: 'idle', loaded: 0, total: 0, error: null },
+  sync: { status: 'idle', loaded: 0, total: 0, error: null, source: 'relay' },
   indexVersion: 0,
   tipHeight: null,
   scrubHeight: null,
@@ -64,6 +68,7 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
     }
     void runAnchorSync({
       onStatus: (status, error) => set((s) => ({ sync: { ...s.sync, status, error: error ?? null } })),
+      onSource: (source) => set((s) => ({ sync: { ...s.sync, source } })),
       onLoaded: (loaded) => set((s) => ({ sync: { ...s.sync, loaded } })),
       onTip: (tip) => set((s) => ({ tipHeight: tip, sync: { ...s.sync, total: tip + 1 } })),
       onIndexChanged: () => set((s) => ({ indexVersion: s.indexVersion + 1 })),
@@ -80,11 +85,11 @@ export function getStopIndex(): StopIndex {
 }
 
 export function getStopByHeight(height: number): Stop | undefined {
-  return anchorsByHeight.get(height)
+  return stopByHeight(anchorIndex, height)
 }
 
 export function stopCount(): number {
-  return anchorsByHeight.size
+  return anchorIndex.size
 }
 
 
@@ -114,3 +119,18 @@ useCyberspace.subscribe((s, prev) => {
     }
   }
 })
+
+
+// DEV window handle, the house pattern (__store, __shards): lets a headless
+// smoke test drive the scrubber and destination without waiting for a full
+// relay sync to unlock the rail UI.
+declare global {
+  interface Window { __hyper?: unknown }
+}
+try {
+  if (typeof window !== 'undefined' && import.meta.env.DEV) {
+    window.__hyper = { store: useHyperspace, getStopByHeight, stopCount }
+  }
+} catch {
+  // node or a locked-down context: the handle is a convenience only
+}

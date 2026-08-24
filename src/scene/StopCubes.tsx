@@ -20,8 +20,11 @@ import { type Stop } from '../lib/hyperspace/stops'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
 
-/** v1's HYPERJUMP colour. */
-const CUBE_COLOR = '#ffff00'
+/** The fleet: toned-down bitcoin orange. Only the chosen destination gets
+ * v1's bright HYPERJUMP yellow, glowing and spinning, so one cube in the
+ * scene means "this is where you are going" and nothing else competes. */
+const CUBE_COLOR = '#f7931a'
+const DEST_COLOR = '#ffff00'
 /** At most this many cubes; the point field carries the rest. */
 const MAX_CUBES = 24
 /** A cube never renders smaller than this many cells (visibility floor). */
@@ -39,7 +42,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const cubes = useMemo(() => {
     void indexVersion
     const index = getStopIndex()
-    if (index.stops.length === 0) return []
+    if (index.size === 0) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const anchorCoord = xyzToCoord(anchor.x, anchor.y, anchor.z, anchorPlane)
     const candidates: Stop[] = []
@@ -81,22 +84,32 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   return (
     <>
-      <group ref={spin}>
-        {cubes.map(({ stop, centre }) => (
+      {cubes.map(({ stop, centre }) =>
+        stop.height === destination ? null : (
           <mesh key={stop.height} position={centre}>
             <boxGeometry args={[side, side, side]} />
-            <meshBasicMaterial color={CUBE_COLOR} toneMapped={false} />
+            <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0.75} />
           </mesh>
-        ))}
+        ),
+      )}
+      <group ref={spin}>
+        {cubes.map(({ stop, centre }) =>
+          stop.height === destination ? (
+            <mesh key={stop.height} position={centre}>
+              <boxGeometry args={[side, side, side]} />
+              <meshBasicMaterial color={DEST_COLOR} toneMapped={false} />
+            </mesh>
+          ) : null,
+        )}
       </group>
       {cubes.map(({ stop, centre }) => (
         <WorldLabel
           key={`l${stop.height}`}
           text={`BLOCK ${stop.height}`}
-          color={CUBE_COLOR}
+          color={stop.height === destination ? DEST_COLOR : CUBE_COLOR}
           at={[centre[0], centre[1] + side * 0.9 + 0.3, centre[2]]}
           px={11}
-          opacity={0.85}
+          opacity={stop.height === destination ? 0.95 : 0.7}
         />
       ))}
     </>

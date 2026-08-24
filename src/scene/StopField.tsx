@@ -14,17 +14,23 @@
  * Number. One GL_POINTS draw for the whole cloud, coloured per vertex
  * (landfall warm-blue EARTH, port purple SIDESTEP), and clicking a point
  * selects that stop as the ride's destination.
+ *
+ * The cloud reads straight off the columnar index: the kind byte first (a
+ * port is plane 1, a landfall plane 0, so the plane filter never has to
+ * decode the wrong half of the line), then the cached per-row decode
+ * (xyzAt de-interleaves each row once, ever). No Stop objects are
+ * materialized here — a million of them per rebuild is exactly what the
+ * columnar index exists to avoid — so picks carry heights, not stops.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
-import { coordToXyz, type Xyz } from 'cyberspace-core'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
-import { ACCENT, EARTH, SIDESTEP } from '../lib/palette'
+import { ACCENT, SIDESTEP } from '../lib/palette'
+import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
-import type { Stop } from '../lib/hyperspace/stops'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
 const TAP_SLOP = 8
@@ -50,26 +56,19 @@ const MAX_POINTS = 120_000
 const PICK_THRESHOLD = 0.35
 
 /**
- * Decoded-coordinate cache. coordToXyz de-interleaves 255 bits per stop, and
- * doing that for ~950k stops costs seconds — far too much to repeat on every
- * anchor move or zoom, which only change the cheap cellDelta step. Stops are
- * stable objects (the index replaces the array, not the entries), so a WeakMap
- * keyed on the Stop itself survives every rebuild that keeps an entry and lets
- * the GC reclaim what a rebuild drops.
+ * While the bulk sync churns, a rebuild is only worth its cost when the line
+ * grew substantially: the cloud's shape is hash-uniform, so 10k more dots in
+ * a field of half a million are invisible. Total index size is the cheap
+ * proxy for "stops in range" — positions are uniform, so range population
+ * grows in proportion.
  */
-const decoded = new WeakMap<Stop, Xyz>()
-
-function decode(stop: Stop): Xyz {
-  let d = decoded.get(stop)
-  if (!d) {
-    d = coordToXyz(stop.coordApprox)
-    decoded.set(stop, d)
-  }
-  return d
-}
+const REBUILD_MIN_GROWTH = 50_000
+const REBUILD_GROWTH_FRACTION = 0.15
 
 /** Per-vertex colours: landfalls in Earth's blue, ports in ideaspace purple. */
-const LANDFALL_COLOR = new Color(EARTH)
+// Landfalls read as embers of bitcoin orange on the globe; the old EARTH
+// blue made scrubbed stops look selected when nothing was.
+const LANDFALL_COLOR = new Color('#b06f14')
 const PORT_COLOR = new Color(SIDESTEP)
 
 interface Props {
@@ -78,8 +77,8 @@ interface Props {
 
 interface Built {
   geometry: BufferGeometry
-  /** Parallel to the geometry's vertices, so a picked index maps to its stop. */
-  stops: Stop[]
+  /** Parallel to the geometry's vertices, so a picked index maps to its stop's height. */
+  heights: number[]
   /** 1 = every stop in range is drawn; N = every Nth survived the cap. */
   stride: number
 }
@@ -89,26 +88,49 @@ export function StopField({ axes }: Props): JSX.Element | null {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const indexVersion = useHyperspace((s) => s.indexVersion)
+  const syncStatus = useHyperspace((s) => s.sync.status)
   const destination = useHyperspace((s) => s.destination)
 
+  // The calm-down gate: while syncing, an indexVersion bump only triggers a
+  // geometry rebuild when the stop count changed materially. The ref carries
+  // the last version we honoured; honouring one updates it during render,
+  // which is safe because the decision is idempotent for a given version.
+  const gate = useRef({ version: -1, size: -1 })
+  {
+    const size = getStopIndex().size
+    const g = gate.current
+    if (g.version !== indexVersion) {
+      const syncing = syncStatus === 'syncing' || syncStatus === 'loading-cache'
+      const grownEnough =
+        size - g.size >= Math.max(REBUILD_MIN_GROWTH, g.size * REBUILD_GROWTH_FRACTION)
+      if (g.version === -1 || !syncing || grownEnough) {
+        g.version = indexVersion
+        g.size = size
+      }
+    }
+  }
+  const rebuildVersion = gate.current.version
+
   const built = useMemo((): Built | null => {
-    const { stops } = getStopIndex()
-    if (stops.length === 0) return null
+    const index = getStopIndex()
+    if (index.size === 0) return null
 
     const origin = alignedOrigin(anchor, scaleExp)
+    const wantPort = anchorPlane === 1
     const centres: number[] = []
-    const inRange: Stop[] = []
+    const inRange: number[] = []
 
-    for (const stop of stops) {
-      const d = decode(stop)
+    for (let row = 0; row < index.size; row++) {
       // Ports live on plane 1, landfalls on plane 0, so matching the anchor's
       // plane is what makes the Earth view show landfalls and the ideaspace
-      // view show ports, rather than superimposing two unrelated clouds.
-      if (d.plane !== anchorPlane) continue
+      // view show ports, rather than superimposing two unrelated clouds. The
+      // kind byte IS the plane bit, so the wrong half skips before decoding.
+      if (kindIsPort(index, row) !== wantPort) continue
+      const d = xyzAt(index, row)
       const c = cellCentre(d, origin, scaleExp, axes)
       if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
       centres.push(c[0], c[1], c[2])
-      inRange.push(stop)
+      inRange.push(row)
     }
 
     if (inRange.length === 0) return null
@@ -117,18 +139,18 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const count = Math.ceil(inRange.length / stride)
     const positions = new Float32Array(count * 3)
     const colors = new Float32Array(count * 3)
-    const kept: Stop[] = new Array(count)
+    const heights: number[] = new Array(count)
 
     let v = 0
     for (let i = 0; i < inRange.length; i += stride) {
       positions[v * 3] = centres[i * 3]
       positions[v * 3 + 1] = centres[i * 3 + 1]
       positions[v * 3 + 2] = centres[i * 3 + 2]
-      const col = inRange[i].kind === 'landfall' ? LANDFALL_COLOR : PORT_COLOR
+      const col = kindIsPort(index, inRange[i]) ? PORT_COLOR : LANDFALL_COLOR
       colors[v * 3] = col.r
       colors[v * 3 + 1] = col.g
       colors[v * 3 + 2] = col.b
-      kept[v] = inRange[i]
+      heights[v] = heightAt(index, inRange[i])
       v++
     }
 
@@ -144,8 +166,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
       }
     }
 
-    return { geometry, stops: kept, stride }
-  }, [indexVersion, anchor, scaleExp, axes, anchorPlane])
+    return { geometry, heights, stride }
+  }, [rebuildVersion, anchor, scaleExp, axes, anchorPlane])
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => { built?.geometry.dispose() }, [built])
@@ -165,8 +187,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
   // by identity because the destination can outlive a geometry rebuild.
   const highlight = useMemo((): [number, number, number] | null => {
     if (!built || destination === null) return null
-    for (let i = 0; i < built.stops.length; i++) {
-      if (built.stops[i].height === destination) {
+    for (let i = 0; i < built.heights.length; i++) {
+      if (built.heights[i] === destination) {
         const p = built.geometry.getAttribute('position')
         return [p.getX(i), p.getY(i), p.getZ(i)]
       }
@@ -188,10 +210,10 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // An orbit-drag that happens to end on a dot is not a tap.
     if (e.delta > TAP_SLOP) return
     if (e.index === undefined) return
-    const stop = built.stops[e.index]
-    if (!stop) return
+    const height = built.heights[e.index]
+    if (height === undefined) return
     e.stopPropagation()
-    useHyperspace.getState().setDestination(stop.height)
+    useHyperspace.getState().setDestination(height)
   }
 
   return (

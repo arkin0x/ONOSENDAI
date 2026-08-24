@@ -53,7 +53,9 @@ export function LineScrubber(): JSX.Element {
       stopPosition(stop),
       stopPlane(stop),
       `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
-      34,
+      // A landfall is a place on Earth: frame the globe with the landfall's
+      // side toward the camera instead of standing on the surface grid.
+      stop.kind === 'landfall' ? 52 : 34,
     )
   }, [scrubHeight, indexVersion])
 
@@ -95,7 +97,7 @@ export function LineScrubber(): JSX.Element {
         aria-label={open ? 'Hide line scrubber' : 'Show line scrubber'}
         aria-pressed={open}
       >
-        {ready ? `LINE ${scrubHeight ?? tip}/${tip}` : `LINE SYNCING ${syncPercent}%`}
+        {ready ? `HYPERSPACE ${scrubHeight ?? tip}/${tip}` : `HYPERSPACE SYNCING ${syncPercent}%`}
       </button>
 
       {open && ready && (
@@ -151,6 +153,18 @@ export function LineScrubber(): JSX.Element {
                 if (scrubHeight !== null) useHyperspace.getState().setDestination(scrubHeight)
               }}
             >{destination !== null && destination === scrubHeight ? 'DESTINATION SET' : 'SET DESTINATION'}</button>
+            {destination !== null && (
+              <button
+                className="linescrub__clear"
+                title="Clear destination"
+                aria-label="Clear destination"
+                {...noCallout}
+                onPointerDown={(e) => {
+                  e.preventDefault(); e.stopPropagation()
+                  useHyperspace.getState().setDestination(null)
+                }}
+              >✕</button>
+            )}
           </div>
         </div>
       )}

@@ -74,6 +74,7 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { recommendedHopHeight } from '../lib/calibration'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -185,6 +186,8 @@ export interface CompletedRide {
   toCoordHex: string
   fromHeight: number
   toHeight: number
+  /** The station set bound declared in the event (as_of tag). */
+  asOf?: number
   rootHex: string
   mp: string
 }
@@ -744,14 +747,20 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // fits, otherwise a Merkle sidestep across the blocking wall(s). The
     // sidestep lands 1 gibson past the boundary, not at the cursor; the
     // cursor keeps the rest of the journey for the next commit.
+    // The ceiling this commit will actually attempt: the protocol's hard cap,
+    // lowered to what calibration measured THIS machine finishing in budget
+    // (lib/calibration.ts). Routing, the sidestep landing and the worker all
+    // use the same number, so a hop the machine cannot finish becomes a
+    // sidestep at the real ceiling instead of a stalled tab.
+    const ceiling = Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight())
     const estimate = estimateHopCost(
       position.x, position.y, position.z,
       cursor.x, cursor.y, cursor.z,
       plane,
-      MAX_COMPUTE_HEIGHT,
+      ceiling,
     )
     const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
-    const to = mode === 'sidestep' ? sidestepTarget(position, cursor) : { ...cursor }
+    const to = mode === 'sidestep' ? sidestepTarget(position, cursor, ceiling) : { ...cursor }
     if (samePosition(position, to) && plane === headPlane) return
 
     const id = ++requestId
@@ -767,7 +776,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       to,
       plane,
       prevEventId,
-      maxComputeHeight: MAX_COMPUTE_HEIGHT,
+      maxComputeHeight: ceiling,
     })
   },
 
@@ -1096,6 +1105,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       toCoordHex: ride.toCoordHex,
       fromHeight: ride.fromHeight,
       toHeight: ride.toHeight,
+      asOf: ride.asOf,
       rootHex: ride.rootHex,
       mp: ride.mp,
     })
@@ -1385,10 +1395,12 @@ export function samePosition(a: Position, b: Position): boolean {
  * Where a sidestep commit toward `cursor` actually lands: each axis whose
  * crossing is beyond the Cantor ceiling steps 1 gibson past its wall; every
  * other axis stays put, because a spec-valid sidestep only crosses walls.
+ * The ceiling defaults to the hard cap; commit passes the calibrated one so
+ * the landing agrees with the routing decision that chose a sidestep.
  */
-export function sidestepTarget(position: Position, cursor: Position): Position {
+export function sidestepTarget(position: Position, cursor: Position, ceiling: number = MAX_COMPUTE_HEIGHT): Position {
   const land = (p: bigint, c: bigint): bigint =>
-    findLcaHeight(p, c) > MAX_COMPUTE_HEIGHT ? sidestepLanding(p, c) : p
+    findLcaHeight(p, c) > ceiling ? sidestepLanding(p, c) : p
   return {
     x: land(position.x, cursor.x),
     y: land(position.y, cursor.y),

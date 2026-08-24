@@ -66,6 +66,8 @@ export interface ActionEvent {
   /** Hyperjump only (DECK-0001 v3 §5.2): the boarding and destination heights. */
   fromHeight?: number
   toHeight?: number
+  /** Hyperjump only: the declared station set bound (as_of tag). */
+  asOf?: number
   /** Hyperjump only: the sampled openings, as written in the `mp` tag. */
   mp?: string
 }
@@ -200,6 +202,10 @@ export interface HyperjumpInput {
   toCoordHex: string
   fromHeight: number
   toHeight: number
+  /** The station set bound: the highest stop height considered when the
+   * station was computed (DECK-0001 v3 §4.2 as amended). Travelers declare
+   * the tip they synced to. */
+  asOf?: number
   /** The ride's Merkle root (64 hex; the zero root for a zero-length ride). */
   rootHex: string
   /** The sampled openings; empty string for a zero-length ride. */
@@ -221,6 +227,7 @@ export function hyperjumpTemplate(i: HyperjumpInput): EventTemplate {
       ['C', i.toCoordHex],
       ['from_height', String(i.fromHeight)],
       ['B', String(i.toHeight)],
+      ...(i.asOf !== undefined ? [['as_of', String(i.asOf)]] : []),
       ['proof', i.rootHex],
       ['mp', i.mp],
       ...sectorTags({ x: at.x, y: at.y, z: at.z }),
@@ -313,6 +320,8 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     if (fromStr === undefined || !/^\d+$/.test(fromStr)) return null
     if (toStr === undefined || !/^\d+$/.test(toStr)) return null
     if (tag(ev, 'mp') === undefined) return null
+    const asOfStr = tag(ev, 'as_of')
+    if (asOfStr !== undefined && !/^\d+$/.test(asOfStr)) return null
     return {
       ...base,
       type,
@@ -322,6 +331,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
       proofHash,
       fromHeight: Number.parseInt(fromStr, 10),
       toHeight: Number.parseInt(toStr, 10),
+      asOf: asOfStr !== undefined ? Number.parseInt(asOfStr, 10) : undefined,
       mp: tag(ev, 'mp'),
     }
   }

@@ -20,6 +20,7 @@ import { useKeyboard } from './hooks/useKeyboard'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
+import { startCalibration } from './lib/calibration'
 import { startPublisher } from './lib/publisher'
 import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
@@ -37,7 +38,12 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
+
+  // Picking a destination in the scrubber is the moment the Hyperspace panel
+  // matters (BOARD and RIDE live there), so make sure the panels are open.
+  const hyperDestination = useHyperspace((s) => s.destination)
+  useEffect(() => { if (hyperDestination !== null) setPanelsOpen(true) }, [hyperDestination])
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand
@@ -92,11 +98,11 @@ export default function App(): JSX.Element {
           <BitReadout />
           <ChainExplorer />
           <LineScrubber />
+          <HyperspaceBar />
         </div>
       )}
       {showPanels && <Hud menuOpen={crowded} />}
       <SpectateBar />
-      <HyperspaceBar />
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}

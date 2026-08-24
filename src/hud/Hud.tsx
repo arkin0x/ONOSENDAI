@@ -14,6 +14,7 @@ import { LoginModal } from './LoginModal'
 import { AvatarsPanel } from './AvatarsPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
+import { HyperspacePanel } from './HyperspacePanel'
 import { RelaysPanel } from './RelaysPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
@@ -200,6 +201,7 @@ function Controls(): JSX.Element {
     ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
+    ['H', 'hyperspace line scrubber'],
     ['[ / ]', 'chain explorer: back / forward one action'],
     ['Home / End', 'chain explorer: spawn / live head'],
   ]
@@ -238,6 +240,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       <div className="hud__col hud__col--right">
         <ProofPanel />
         <ChainPanel />
+        <HyperspacePanel />
         <Legend />
         <ShardsPanel />
         <Controls />

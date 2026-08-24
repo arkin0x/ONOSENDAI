@@ -3229,3 +3229,201 @@ kbd {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ---------- Hyperspace ---------- */
+
+/* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,
+ * stacked below it. Transit and spectate are mutually exclusive in practice
+ * (boarding requires your own head), but a collision would hide the one way
+ * out of one of them, so they get separate slots anyway. */
+.hyperbar {
+  position: fixed;
+  top: 64px;
+  right: 14px;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.82);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  max-width: calc(100vw - 24px);
+}
+
+.hyperbar__glyph {
+  color: #f7931a;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.hyperbar__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hyperbar__label {
+  color: #f7931a;
+  font-weight: 700;
+}
+
+.hyperbar__meta {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.hyperbar__end {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #05070d;
+  background: #f7931a;
+  border: 1px solid #f7931a;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hyperbar__end:hover {
+  background: #ffb04d;
+}
+
+@media (max-width: 1100px) {
+  /* Same shore as the spectate bar on a phone, one slot up. */
+  .hyperbar {
+    top: auto;
+    right: 14px;
+    bottom: 66px;
+    left: 92px;
+  }
+
+  .hyperbar__meta {
+    white-space: normal;
+  }
+}
+
+/* The line scrubber: ChainExplorer's rail, retinted so a glance says which
+ * one-dimensional thing you are walking. Kind colours follow the scene's
+ * assignments: ideaspace purple for ports, Earth blue for landfalls. */
+.linescrub .explorer__walked {
+  background: #f7931a;
+  box-shadow: 0 0 6px rgba(247, 147, 26, 0.6);
+}
+
+.linescrub .explorer__mark {
+  background: #f7931a;
+  box-shadow: 0 0 8px #f7931a;
+}
+
+.linescrub .explorer__body {
+  border-color: rgba(247, 147, 26, 0.35);
+}
+
+.linescrub__kind--port {
+  color: var(--sidestep);
+}
+
+.linescrub__kind--landfall {
+  color: #2f81f7;
+}
+
+.linescrub__set {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #05070d;
+  background: #f7931a;
+  border: 1px solid #f7931a;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linescrub__set:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Panel groupings and actions. */
+.hyper__group {
+  margin-top: 12px;
+}
+
+.hyper__progress {
+  margin: 10px 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+}
+
+.hyper__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.hyper__btn {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.5);
+  cursor: pointer;
+}
+
+.hyper__btn:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.16);
+}
+
+.hyper__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.hyper__btn--ride {
+  color: #05070d;
+  background: #f7931a;
+  border-color: #f7931a;
+  font-weight: 700;
+}
+
+.hyper__btn--ride:hover:not(:disabled) {
+  background: #ffb04d;
+}
+
+.hyper__btn--abort {
+  color: #05070d;
+  background: var(--danger);
+  border-color: var(--danger);
+  font-weight: 700;
+}
+
+.hyper__btn--earth {
+  width: 100%;
+  margin-top: 6px;
+  color: #2f81f7;
+  border-color: rgba(47, 129, 247, 0.5);
+  background: rgba(47, 129, 247, 0.06);
+}
+
+.hyper__btn--earth:hover:not(:disabled) {
+  background: rgba(47, 129, 247, 0.16);
+}

@@ -39,6 +39,8 @@ import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { Cursor } from './Cursor'
+import { HyperspaceCone } from './HyperspaceCone'
+import { StopField } from './StopField'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
@@ -85,6 +87,9 @@ function World(): JSX.Element {
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
       <Earth axes={axes} />
+      {/* The hyperspace line's stops, placed true-size like the cage and the
+          planet: ports in ideaspace, landfalls on Earth's surface. */}
+      <StopField axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
@@ -313,6 +318,9 @@ export function Scene(): JSX.Element {
       <CellMetric />
       <ScreenAxes />
       <World />
+      {/* Camera-pinned, so it lives outside the world group: hyperspace is a
+          state, not a place. Mounts only while riding or browsing the line. */}
+      <HyperspaceCone />
       {/*
         Bloom is what makes line geometry read as emitted light, and it is also
         by far the most expensive thing on screen: measured at 6fps with levels 9

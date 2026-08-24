@@ -9,6 +9,7 @@
 
 import { useEffect } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
+import { useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { moveDirection, type MoveName } from '../lib/moves'
@@ -104,6 +105,16 @@ export function useKeyboard(): void {
       if (event.code === 'KeyP') {
         event.preventDefault()
         store.togglePlane()
+        return
+      }
+
+      // The hyperspace line scrubber: H opens it at the tip of the line, H
+      // again puts it away. The camera fly-to and its clearing live in
+      // LineScrubber's effect, so the key and the chip drive one mechanism.
+      if (event.code === 'KeyH') {
+        event.preventDefault()
+        const hs = useHyperspace.getState()
+        hs.setScrubHeight(hs.scrubHeight === null ? hs.tipHeight ?? 0 : null)
         return
       }
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { ChainExplorer } from './hud/ChainExplorer'
+import { HyperspaceBar } from './hud/HyperspaceBar'
+import { LineScrubber } from './hud/LineScrubber'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
@@ -22,6 +24,7 @@ import { startPublisher } from './lib/publisher'
 import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
+import { useHyperspace } from './store/useHyperspace'
 import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
@@ -34,7 +37,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); void useCyberspace.getState().initSigner() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand
@@ -88,10 +91,12 @@ export default function App(): JSX.Element {
         <div className="instruments">
           <BitReadout />
           <ChainExplorer />
+          <LineScrubber />
         </div>
       )}
       {showPanels && <Hud menuOpen={crowded} />}
       <SpectateBar />
+      <HyperspaceBar />
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}

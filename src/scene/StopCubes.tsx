@@ -59,11 +59,29 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     for (const near of nearestStops(index, anchorCoord, MAX_CUBES * 2)) consider(near.stop)
 
     const out: Array<{ stop: Stop; centre: [number, number, number] }> = []
+    // A cube that would sit against one already placed adds nothing but
+    // clutter: the point field already says stops are there, and a clump of
+    // cubes around the selection reads as selection spill. The viewed stop
+    // and the destination are considered first, so the fleet yields to them,
+    // never the other way around.
+    const minSep = Math.max(2 ** -scaleExp, MIN_CELLS) * 2.5
+    const minSep2 = minSep * minSep
     for (const stop of candidates) {
       if (out.length >= MAX_CUBES) break
       if (stopPlane(stop) !== anchorPlane) continue
       const centre = pointCentre(stopPosition(stop), origin, scaleExp, axes)
       if (Math.abs(centre[0]) > REACH || Math.abs(centre[1]) > REACH || Math.abs(centre[2]) > REACH) continue
+      let crowded = false
+      for (const o of out) {
+        const dx = centre[0] - o.centre[0]
+        const dy = centre[1] - o.centre[1]
+        const dz = centre[2] - o.centre[2]
+        if (dx * dx + dy * dy + dz * dz < minSep2) {
+          crowded = true
+          break
+        }
+      }
+      if (crowded) continue
       out.push({ stop, centre })
     }
     return out

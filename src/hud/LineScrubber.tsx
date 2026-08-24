@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { exitHyperspaceView, getStopByHeight, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, getStopByHeight, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
 /** The coarse step: the line is ~900k blocks, single steps are the last few. */
@@ -37,18 +37,29 @@ export function LineScrubber(): JSX.Element {
   // null would stomp a focus someone else set (a shard, the EARTH button).
   // indexVersion re-runs it so a stop that syncs in late still gets flown to.
   const prev = useRef<number | null>(null)
+  // Opening the scrubber must not steal the view: the mark parks on the
+  // chosen destination (or the tip) and the first fly happens only once the
+  // user actually moves it. Armed flips on the first height change and stays
+  // set, so the indexVersion re-run can still fly to a stop that synced in
+  // late, without un-parking a freshly opened scrubber.
+  const armed = useRef(false)
   useEffect(() => {
     const was = prev.current
     prev.current = scrubHeight
     if (scrubHeight === null) {
+      armed.current = false
       // Closed by any path that skipped exitHyperspaceView: settle through it
       // so an owned focus clears and a foreign one (a spectate) survives.
       if (was !== null) exitHyperspaceView()
       return
     }
+    if (was === null) return
+    if (was !== scrubHeight) armed.current = true
+    if (!armed.current) return
     const stop = getStopByHeight(scrubHeight)
     if (!stop) return
     ownHyperspaceView()
+    markViewedStop(stop.height)
     useCyberspace.getState().focusOn(
       stopPosition(stop),
       stopPlane(stop),
@@ -61,7 +72,7 @@ export function LineScrubber(): JSX.Element {
 
   const toggle = (): void => {
     const hs = useHyperspace.getState()
-    if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
+    if (hs.scrubHeight === null) hs.setScrubHeight(hs.destination ?? hs.tipHeight ?? 0)
     else exitHyperspaceView()
   }
 

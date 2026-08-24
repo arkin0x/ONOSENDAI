@@ -1,26 +1,31 @@
 /**
  * StopBurst.tsx - the rainbow lines living inside the blocks.
  *
- * Selecting a stop in the hyperspace UI (scrubbing to it, or setting it as
- * the destination) before boarding emits a short radial burst of rainbow
- * streaks from the block's cube, fading in about a second and a half. The
- * full surrounding warp (HyperspaceCone) is reserved for actually being in
- * transit, so the two together read as: the lines are inside the blocks, and
- * entering hyperspace puts you among them.
+ * Setting a stop as the destination emits a one-shot radial burst of rainbow
+ * streaks from its cube, fading in about a second and a half. Your station
+ * (the stop nearest your avatar, the one boarding sets you down at) instead
+ * pulses the same burst continuously while you are viewing it: that block is
+ * your entry to the line, so the lines never quite leave it. The full
+ * surrounding warp (HyperspaceCone) stays reserved for actually being in
+ * transit, so the three read together as: the lines live inside the blocks,
+ * the ones at your door keep spilling out, and boarding puts you among them.
  *
- * One LineSegments draw call; positions come from the vertex shader, so a
- * burst allocates nothing per frame.
+ * One LineSegments draw call per burst (at most two: the station pulse and a
+ * destination shot); positions come from the vertex shader, so a burst
+ * allocates nothing per frame.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, BufferGeometry, Float32BufferAttribute, ShaderMaterial } from 'three'
+import { xyzToCoord } from 'cyberspace-core'
 import { pointCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { getStopByHeight, useHyperspace } from '../store/useHyperspace'
+import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
+import { nearestStops } from '../lib/hyperspace/station'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
 
 const STREAKS = 220
-/** Seconds from emission to gone. */
+/** Seconds from emission to gone (one pulse period when looping). */
 const LIFE = 1.6
 /** How far the streaks reach, in render cells. */
 const REACH = 6
@@ -63,30 +68,18 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-interface Burst {
-  height: number
+/** One emitting block: its own material (uAge is per-burst), shared shape. */
+function BurstLines({
+  centre,
+  bornAt,
+  loop,
+  onDone,
+}: {
+  centre: [number, number, number]
   bornAt: number
-}
-
-export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
-  const anchor = useCyberspace((s) => s.anchor)
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  const scaleExp = useCyberspace((s) => s.scaleExp)
-  const inTransit = useCyberspace((s) => s.transit) !== null
-  const scrubHeight = useHyperspace((s) => s.scrubHeight)
-  const destination = useHyperspace((s) => s.destination)
-
-  const [burst, setBurst] = useState<Burst | null>(null)
-
-  // A new selection is a new emission; the full warp owns transit, so bursts
-  // stand down once boarded.
-  useEffect(() => {
-    if (scrubHeight !== null && !inTransit) setBurst({ height: scrubHeight, bornAt: performance.now() })
-  }, [scrubHeight, inTransit])
-  useEffect(() => {
-    if (destination !== null && !inTransit) setBurst({ height: destination, bornAt: performance.now() })
-  }, [destination, inTransit])
-
+  loop?: boolean
+  onDone?: () => void
+}): JSX.Element {
   const geometry = useMemo(() => {
     const dirs = new Float32Array(STREAKS * 2 * 3)
     const seeds = new Float32Array(STREAKS * 2)
@@ -131,28 +124,84 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
 
   const done = useRef(false)
+  useEffect(() => { done.current = false }, [bornAt])
   useFrame(() => {
-    if (!burst) return
-    const age = (performance.now() - burst.bornAt) / 1000
-    material.uniforms.uAge.value = age
-    if (age > LIFE && !done.current) {
+    const age = (performance.now() - bornAt) / 1000
+    // Looping restarts the emission each period: the station's beacon.
+    material.uniforms.uAge.value = loop ? age % LIFE : age
+    if (!loop && age > LIFE && !done.current) {
       done.current = true
-      setBurst(null)
+      onDone?.()
     }
   })
-  useEffect(() => { done.current = false }, [burst])
 
-  const centre = useMemo(() => {
-    if (!burst) return null
-    const stop = getStopByHeight(burst.height)
-    if (!stop || stopPlane(stop) !== anchorPlane) return null
-    return pointCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
-  }, [burst, anchor, anchorPlane, scaleExp, axes])
-
-  if (!burst || !centre || inTransit) return null
   return (
     <group position={centre}>
       <lineSegments geometry={geometry} material={material} frustumCulled={false} renderOrder={5} />
     </group>
+  )
+}
+
+interface Shot {
+  height: number
+  bornAt: number
+}
+
+export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
+  const anchor = useCyberspace((s) => s.anchor)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const position = useCyberspace((s) => s.position)
+  const plane = useCyberspace((s) => s.plane)
+  const inTransit = useCyberspace((s) => s.transit) !== null
+  const destination = useHyperspace((s) => s.destination)
+  const viewedStop = useHyperspace((s) => s.viewedStop)
+  const indexVersion = useHyperspace((s) => s.indexVersion)
+
+  // The one-shot: exactly when a block is SET as the destination, never on a
+  // scrub (browsing is looking, not choosing). The full warp owns transit,
+  // so shots stand down once boarded.
+  const [shot, setShot] = useState<Shot | null>(null)
+  useEffect(() => {
+    if (destination !== null && !inTransit) setShot({ height: destination, bornAt: performance.now() })
+  }, [destination, inTransit])
+
+  // The station: the stop nearest the avatar's committed position, i.e. the
+  // block boarding would set you down at. While the owned view is on it, it
+  // pulses persistently: that block is your entry point.
+  const station = useMemo(() => {
+    void indexVersion
+    const index = getStopIndex()
+    if (index.permCount === 0) return null
+    const here = xyzToCoord(position.x, position.y, position.z, plane)
+    return nearestStops(index, here, 1)[0]?.stop.height ?? null
+  }, [position, plane, indexVersion])
+  const sustained = viewedStop !== null && viewedStop === station ? station : null
+
+  const centreOf = (height: number | null): [number, number, number] | null => {
+    if (height === null) return null
+    const stop = getStopByHeight(height)
+    if (!stop || stopPlane(stop) !== anchorPlane) return null
+    return pointCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
+  }
+  const sustainedCentre = useMemo(
+    () => centreOf(sustained),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sustained, anchor, anchorPlane, scaleExp, axes, indexVersion],
+  )
+  const shotCentre = useMemo(
+    () => (shot !== null && shot.height !== sustained ? centreOf(shot.height) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shot, sustained, anchor, anchorPlane, scaleExp, axes, indexVersion],
+  )
+
+  if (inTransit) return null
+  return (
+    <>
+      {sustainedCentre && <BurstLines centre={sustainedCentre} bornAt={0} loop />}
+      {shot && shotCentre && (
+        <BurstLines centre={shotCentre} bornAt={shot.bornAt} onDone={() => setShot(null)} />
+      )}
+    </>
   )
 }

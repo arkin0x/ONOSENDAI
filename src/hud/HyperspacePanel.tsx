@@ -34,7 +34,7 @@ function formatDuration(ms: number): string {
   return `${(h / 24).toFixed(1)} d`
 }
 import { useCyberspace } from '../store/useCyberspace'
-import { ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -235,7 +235,7 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <button
               className="hyper__btn hyper__btn--view"
-              onClick={() => { ownHyperspaceView(); useCyberspace.getState().focusOn(
+              onClick={() => { ownHyperspaceView(); markViewedStop(nearest.stop.height); useCyberspace.getState().focusOn(
                 stopPosition(nearest.stop),
                 stopPlane(nearest.stop),
                 `STATION · BLOCK ${nearest.stop.height}`,
@@ -328,8 +328,10 @@ export function HyperspacePanel(): JSX.Element {
           ownHyperspaceView()
           const centre = { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }
           if (destStop && destStop.kind === 'landfall') {
+            markViewedStop(destStop.height)
             useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
           } else {
+            markViewedStop(null)
             useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
           }
         }}
@@ -358,13 +360,17 @@ export function HyperspacePanel(): JSX.Element {
 export function selectStopInScene(height: number): void {
   const hs = useHyperspace.getState()
   hs.setDestination(height)
-  if (hs.scrubHeight !== null) {
+  // With the scrubber open the height goes through it (its effect flies and
+  // marks); a click on the very block it is parked on falls through to the
+  // direct path, because a no-op set would fire no effect and no fly.
+  if (hs.scrubHeight !== null && hs.scrubHeight !== height) {
     hs.setScrubHeight(height)
     return
   }
   const stop = getStopByHeight(height)
   if (!stop) return
   ownHyperspaceView()
+  markViewedStop(stop.height)
   useCyberspace.getState().focusOn(
     stopPosition(stop),
     stopPlane(stop),

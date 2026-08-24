@@ -21,6 +21,7 @@
  */
 
 import { useMemo } from 'react'
+import { BackSide } from 'three'
 import { EARTH } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -88,11 +89,14 @@ export function Earth({ axes }: Props): JSX.Element | null {
   return (
     <group position={globe.centre}>
       {/* The planet is drawn as wireframe, but it must still be a solid to
-          the depth buffer and the raycaster: this sphere writes depth without
-          colour, so far-hemisphere stops stop showing through the surface,
-          and a click on the globe recentres the orbit on Earth instead of
-          falling through to whatever point cloud is behind it. Slightly
-          under the true radius so surface landfalls are not z-fought away. */}
+          the depth buffer and the raycaster. Back faces only: the far
+          hemisphere writes depth, so the camera sees INTO the globe but not
+          THROUGH it. Culling the near hemisphere keeps labels and stops
+          between the camera and the centre readable instead of cut off by
+          the curvature of a surface that is drawn as sparse wires anyway,
+          and a click on the globe still recentres the orbit on Earth.
+          Slightly under the true radius so surface landfalls are not
+          z-fought away. */}
       <mesh
         onClick={(e) => {
           if (e.delta > 8) return
@@ -102,7 +106,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
         }}
       >
         <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
-        <meshBasicMaterial colorWrite={false} />
+        <meshBasicMaterial colorWrite={false} side={BackSide} />
       </mesh>
       <mesh>
         <sphereGeometry args={[globe.radius, 48, 24]} />

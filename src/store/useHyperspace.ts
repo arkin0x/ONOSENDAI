@@ -41,6 +41,9 @@ interface HyperspaceState {
   /** The zoom to restore when the owned view exits; captured when hyperspace
    * first takes the focus, because its views re-frame at their own scales. */
   returnScaleExp: number | null
+  /** The stop height the owned hyperspace focus is on, or null when the
+   * focus is not a stop (EARTH's centre) or hyperspace has no view. */
+  viewedStop: number | null
   /** The chosen destination stop height; null = none. */
   destination: number | null
   startSync: () => void
@@ -59,6 +62,7 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   scrubHeight: null,
   viewOwned: false,
   returnScaleExp: null,
+  viewedStop: null,
   destination: null,
 
   startSync: () => {
@@ -106,13 +110,19 @@ export function ownHyperspaceView(): void {
   useHyperspace.setState({ viewOwned: true, returnScaleExp: useCyberspace.getState().scaleExp })
 }
 
+/** Record which stop the owned focus is on (null for a non-stop focus like
+ * EARTH's centre), so the scene can treat the viewed block specially. */
+export function markViewedStop(height: number | null): void {
+  useHyperspace.setState({ viewedStop: height })
+}
+
 /**
  * Leave the hyperspace view: close the scrubber, and clear the focus only if
  * hyperspace set it (never a shard's focus, never a running spectate).
  */
 export function exitHyperspaceView(): void {
   const { viewOwned: owned, returnScaleExp } = useHyperspace.getState()
-  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null })
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, viewedStop: null })
   const cs = useCyberspace.getState()
   if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
   // Back at the zoom the user left, not whatever a stop view chose.
@@ -129,7 +139,7 @@ useCyberspace.subscribe((s, prev) => {
     if (hs.scrubHeight !== null || hs.viewOwned) {
       // No zoom restore here: the spectate is taking the camera somewhere
       // else on purpose, and yanking the scale under it would fight that.
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null })
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, viewedStop: null })
     }
   }
 })

@@ -26,6 +26,7 @@ import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
+import { setSyncPriority } from './lib/hyperspace/anchors'
 import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
@@ -40,10 +41,6 @@ export default function App(): JSX.Element {
   // targets' positions are kept current.
   useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
 
-  // Picking a destination in the scrubber is the moment the Hyperspace panel
-  // matters (BOARD and RIDE live there), so make sure the panels are open.
-  const hyperDestination = useHyperspace((s) => s.destination)
-  useEffect(() => { if (hyperDestination !== null) setPanelsOpen(true) }, [hyperDestination])
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand
@@ -73,6 +70,11 @@ export default function App(): JSX.Element {
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
+
+  // The anchor backfill runs full tilt while the panels are open (the sync
+  // numbers are being watched) and breathes between batches while they are
+  // closed, so playing in the scene gets the frames.
+  useEffect(() => { setSyncPriority(showPanels) }, [showPanels])
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)

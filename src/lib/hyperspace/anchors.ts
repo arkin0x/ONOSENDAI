@@ -274,6 +274,9 @@ export interface SyncCallbacks {
 
 const BATCH_SIZE = 500
 const CONCURRENCY = 3
+/** Gap between relay batches while the panels are closed: the user is in the
+ * scene, so frames outrank the backfill's finish line. */
+const BACKGROUND_BATCH_GAP_MS = 600
 const RETRY_MS = 30_000
 /** indexVersion bump floor once the line is ready (the live tail). */
 const BUMP_MS = 500
@@ -523,6 +526,16 @@ async function discoverTip(): Promise<number | null> {
   return tip
 }
 
+// The pace lever, driven by the hamburger menu: open panels mean the user is
+// watching the sync numbers, so it runs full tilt; closed panels mean they
+// are playing, so the backfill breathes between batches. Off until the app
+// says otherwise, which errs toward smooth frames on first paint.
+let syncHighPriority = false
+
+export function setSyncPriority(high: boolean): void {
+  syncHighPriority = high
+}
+
 async function processBatch(heights: number[], cb: SyncCallbacks): Promise<void> {
   const events = await query({ kinds: [321], '#B': heights.map(String), limit: 2000 })
   const best = new Map<number, { stop: Stop; hasM: boolean }>()
@@ -563,6 +576,7 @@ async function syncMissing(tip: number, cb: SyncCallbacks): Promise<void> {
       const batch = batches[next]
       next += 1
       await processBatch(batch, cb)
+      if (!syncHighPriority) await delay(BACKGROUND_BATCH_GAP_MS)
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))

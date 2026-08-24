@@ -526,7 +526,11 @@ async function discoverTip(): Promise<number | null> {
 async function processBatch(heights: number[], cb: SyncCallbacks): Promise<void> {
   const events = await query({ kinds: [321], '#B': heights.map(String), limit: 2000 })
   const best = new Map<number, { stop: Stop; hasM: boolean }>()
-  for (const ev of events) {
+  // Parsed in slices with the loop handed back between them: a batch is up
+  // to 2000 events, and rendering must not wait for all of them.
+  for (let i = 0; i < events.length; i++) {
+    if (i > 0 && i % 250 === 0) await delay(0)
+    const ev = events[i]
     const stop = stopFromAnchor(ev)
     if (!stop || rowByHeight(anchorIndex, stop.height) !== -1) continue
     const candidate = { stop, hasM: ev.tags.some((t) => t.length >= 2 && t[0] === 'M') }

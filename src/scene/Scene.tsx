@@ -176,6 +176,7 @@ function ScreenAxes(): null {
  * a React render per frame to move one HUD element is not worth it.
  */
 function CellMetric(): null {
+  const lastCellPx = useRef<string | null>(null)
   useFrame((state) => {
     // Share the camera's orientation with the compass, which renders in its own
     // Canvas and cannot reach this one's camera.
@@ -196,7 +197,13 @@ function CellMetric(): null {
     const [tx, ty, tz] = useCyberspace.getState().cursorOffset()
     const dist = Math.max(0.001, cam.position.distanceTo({ x: tx, y: ty, z: tz } as never))
     const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    document.documentElement.style.setProperty('--cell-px', `${(projScale / dist).toFixed(2)}px`)
+    // Writing the same value re-dirties style on the root element; with the
+    // camera at rest that was a per-frame style pass for nothing.
+    const next = `${(projScale / dist).toFixed(2)}px`
+    if (next !== lastCellPx.current) {
+      lastCellPx.current = next
+      document.documentElement.style.setProperty('--cell-px', next)
+    }
   })
   return null
 }
@@ -362,7 +369,9 @@ export function Scene(): JSX.Element {
     <Canvas
       camera={{ fov: 55, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
       dpr={[1, 2]}
-      gl={{ antialias: true }}
+      // high-performance: ask for the discrete GPU and against power-save
+      // clocking, so a visually quiet frame still ships on time.
+      gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop="always"
     >

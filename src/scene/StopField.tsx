@@ -9,7 +9,7 @@
  * the whole cube the ports are a uniform dust; snapped to Earth the landfalls
  * shrink-wrap the planet.
  *
- * Placement follows the house rule exactly: cellCentre against the anchor's
+ * Placement follows the house rule exactly: pointCentre against the anchor's
  * aligned origin, fixed-point bigint deltas, never a coordinate through
  * Number. One GL_POINTS draw for the whole cloud, coloured per vertex
  * (landfall warm-blue EARTH, port purple SIDESTEP), and clicking a point
@@ -26,7 +26,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, pointCentre, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -127,7 +127,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // kind byte IS the plane bit, so the wrong half skips before decoding.
       if (kindIsPort(index, row) !== wantPort) continue
       const d = xyzAt(index, row)
-      const c = cellCentre(d, origin, scaleExp, axes)
+      const c = pointCentre(d, origin, scaleExp, axes)
       if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
       centres.push(c[0], c[1], c[2])
       inRange.push(row)
@@ -228,7 +228,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         */}
         <pointsMaterial
           vertexColors
-          size={3}
+          size={9}
           sizeAttenuation={false}
           transparent
           opacity={0.95}

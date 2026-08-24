@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, BufferGeometry, Float32BufferAttribute, ShaderMaterial } from 'three'
-import { cellCentre, type ViewAxes } from '../lib/space'
+import { pointCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, useHyperspace } from '../store/useHyperspace'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
@@ -146,7 +146,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
     if (!burst) return null
     const stop = getStopByHeight(burst.height)
     if (!stop || stopPlane(stop) !== anchorPlane) return null
-    return cellCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
+    return pointCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }, [burst, anchor, anchorPlane, scaleExp, axes])
 
   if (!burst || !centre || inTransit) return null

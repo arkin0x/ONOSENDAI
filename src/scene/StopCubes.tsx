@@ -12,7 +12,7 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
-import { cellCentre, GRID_RADIUS, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, pointCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
@@ -28,7 +28,7 @@ const DEST_COLOR = '#ffff00'
 /** At most this many cubes; the point field carries the rest. */
 const MAX_CUBES = 24
 /** A cube never renders smaller than this many cells (visibility floor). */
-const MIN_CELLS = 0.3
+const MIN_CELLS = 0.2
 const REACH = GRID_RADIUS * 8
 
 export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -62,7 +62,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     for (const stop of candidates) {
       if (out.length >= MAX_CUBES) break
       if (stopPlane(stop) !== anchorPlane) continue
-      const centre = cellCentre(stopPosition(stop), origin, scaleExp, axes)
+      const centre = pointCentre(stopPosition(stop), origin, scaleExp, axes)
       if (Math.abs(centre[0]) > REACH || Math.abs(centre[1]) > REACH || Math.abs(centre[2]) > REACH) continue
       out.push({ stop, centre })
     }
@@ -81,13 +81,16 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   if (cubes.length === 0) return null
   const side = Math.max(2 ** -scaleExp, MIN_CELLS)
+  // The fleet reads at half the selected block's size: present, but never
+  // competing with the one cube that means "this is where you are going".
+  const inertSide = side * 0.5
 
   return (
     <>
       {cubes.map(({ stop, centre }) =>
         stop.height === destination ? null : (
           <mesh key={stop.height} position={centre}>
-            <boxGeometry args={[side, side, side]} />
+            <boxGeometry args={[inertSide, inertSide, inertSide]} />
             <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0.75} />
           </mesh>
         ),

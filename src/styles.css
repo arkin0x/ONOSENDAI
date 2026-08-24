@@ -54,6 +54,12 @@ body {
   display: block;
   width: 100%;
   max-width: 290px;
+  /* The width/height ATTRIBUTES exist to hand the browser the intrinsic
+     aspect ratio before the file arrives (no layout shift). Without an
+     explicit CSS height the attribute's 354px applies literally against the
+     capped width and squashes the wordmark square; auto restores the ratio
+     while keeping the reservation. */
+  height: auto;
 }
 
 .brand p {

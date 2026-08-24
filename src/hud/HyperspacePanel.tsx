@@ -199,7 +199,9 @@ export function HyperspacePanel(): JSX.Element {
   const tag = ready ? `READY ${stopCount()} STOPS`
     : sync.status === 'error' ? 'ERROR'
       : sync.status === 'idle' ? 'IDLE'
-        : `SYNCING ${sync.loaded}/${sync.total}`
+        : sync.status === 'loading-cache'
+          ? `LOADING ${sync.loaded}/${sync.total}`
+          : `SYNCING ${sync.loaded}/${sync.total}`
 
   return (
     <section className="panel">

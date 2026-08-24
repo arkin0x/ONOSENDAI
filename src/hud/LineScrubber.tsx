@@ -97,7 +97,11 @@ export function LineScrubber(): JSX.Element {
         aria-label={open ? 'Hide line scrubber' : 'Show line scrubber'}
         aria-pressed={open}
       >
-        {ready ? `HYPERSPACE ${scrubHeight ?? tip}/${tip}` : `HYPERSPACE SYNCING ${syncPercent}%`}
+        {ready
+          ? `HYPERSPACE ${scrubHeight ?? tip}/${tip}`
+          : sync.status === 'loading-cache'
+            ? `HYPERSPACE LOADING ${syncPercent}%`
+            : `HYPERSPACE SYNCING ${syncPercent}%`}
       </button>
 
       {open && ready && (

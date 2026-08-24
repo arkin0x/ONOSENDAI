@@ -6,13 +6,19 @@
  * corrupted by an interrupted incremental merge would poison every prefix
  * search. The cross-checks here build the same stop set through every entry
  * path (builder, blob columns, relay batches, single inserts) and demand
- * identical answers.
+ * identical answers. The snapshot round trip has its own silent failure
+ * mode: a snapshot adopted with a truncated column, a permutation that skips
+ * a row, or a byHeight rebuilt off wrong heights would resume ~1M stops
+ * instantly and answer plausibly-but-wrong forever, so the adopted index is
+ * cross-checked against the original and malformed snapshots must be
+ * refused with the target left untouched.
  */
 import { describe, expect, it } from 'vitest'
 import { xyzToCoord } from 'cyberspace-core'
 import { bytesToHex, hexToBytes } from '../events'
 import { bigToBytes32, type BlobColumns } from './headers'
 import {
+  adoptSnapshot,
   appendColumns,
   appendStops,
   createStopIndex,
@@ -21,10 +27,11 @@ import {
   mergeAll,
   mergeStep,
   rowByHeight,
+  serializeIndex,
   stopAt,
   stopByHeight,
 } from './compactIndex'
-import { buildIndex, findStation, insertStop, maxAxisLca } from './station'
+import { buildIndex, findStation, insertStop, maxAxisLca, nearestStops } from './station'
 import type { Stop } from './stops'
 
 function mulberry32(seed: number): () => number {
@@ -232,5 +239,125 @@ describe('incremental merging', () => {
     assertSorted(index)
     expect(findStation(index, late.coordApprox, 10_000)?.stop.height).toBe(500)
     expect(stopAt(index, rowByHeight(index, 500)).height).toBe(500)
+  })
+})
+
+describe('snapshot serialize / adopt', () => {
+  /** A merged mixed-source index (blob columns + relay rows, some without a
+   * block hash) and the stops behind it, for round-trip cross-checks. */
+  function buildSample(): { index: ReturnType<typeof createStopIndex>; stops: Stop[] } {
+    const rng = mulberry32(31)
+    const stops: Stop[] = []
+    for (let h = 0; h < 300; h++) {
+      const hash = h < 150 ? hex64(rng) : h % 3 === 0 ? null : hex64(rng)
+      stops.push(syntheticStop(h, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 1), hash))
+    }
+    const index = createStopIndex()
+    appendColumns(index, columnsFrom(stops.slice(0, 150), 0))
+    appendStops(index, stops.slice(150))
+    mergeAll(index)
+    return { index, stops }
+  }
+
+  it('round-trips: the adopted index answers exactly like the original', () => {
+    const { index, stops } = buildSample()
+    const snap = serializeIndex(index)
+    if (snap === null) throw new Error('expected a snapshot from a merged index')
+    const fresh = createStopIndex()
+    expect(adoptSnapshot(fresh, snap)).toBe(true)
+    expect(fresh.size).toBe(index.size)
+    expect(fresh.permCount).toBe(index.permCount)
+    expect(fresh.maxHeight).toBe(index.maxHeight)
+    assertSorted(fresh)
+    // byHeight was rebuilt, not copied: every height must resolve with all
+    // its columns intact, blockHash (and its absence) included.
+    for (const want of stops) {
+      const got = stopByHeight(fresh, want.height)
+      expect(got?.merkleRoot).toBe(want.merkleRoot)
+      expect(got?.blockHash).toBe(want.blockHash)
+      expect(got?.coordApprox).toBe(want.coordApprox)
+    }
+    expect(rowByHeight(fresh, 300)).toBe(-1)
+    const rng = mulberry32(87)
+    for (let trial = 0; trial < 40; trial++) {
+      const q = xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 0)
+      const maxHeight = trial % 3 === 0 ? 120 : 10_000
+      const a = findStation(index, q, maxHeight)
+      const b = findStation(fresh, q, maxHeight)
+      expect(b?.stop.height).toBe(a?.stop.height)
+      expect(b?.distance).toBe(a?.distance)
+      const na = nearestStops(index, q, 8).map((r) => [r.stop.height, r.distance])
+      const nb = nearestStops(fresh, q, 8).map((r) => [r.stop.height, r.distance])
+      expect(nb).toEqual(na)
+    }
+  })
+
+  it('an adopted index keeps growing: appends land and stay queryable', () => {
+    const { index } = buildSample()
+    const fresh = createStopIndex()
+    expect(adoptSnapshot(fresh, serializeIndex(index))).toBe(true)
+    const rng = mulberry32(53)
+    const late = syntheticStop(1000, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 1), hex64(rng))
+    insertStop(fresh, late)
+    expect(stopByHeight(fresh, 1000)?.blockHash).toBe(late.blockHash)
+    expect(findStation(fresh, late.coordApprox, 10_000)?.stop.height).toBe(1000)
+    assertSorted(fresh)
+  })
+
+  it('returns null with rows pending or a merge parked mid-flight, works after mergeAll', () => {
+    const rng = mulberry32(61)
+    const stops: Stop[] = []
+    for (let h = 0; h < 6000; h++) {
+      stops.push(syntheticStop(h, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 1), null))
+    }
+    const index = createStopIndex()
+    appendStops(index, stops.slice(0, 3000))
+    expect(serializeIndex(index)).toBeNull()
+    mergeAll(index)
+    appendStops(index, stops.slice(3000))
+    expect(mergeStep(index, 0)).toBe(false)
+    expect(serializeIndex(index)).toBeNull()
+    mergeAll(index)
+    expect(serializeIndex(index)).not.toBeNull()
+  })
+
+  it('rejects malformed snapshots outright, leaving the target untouched', () => {
+    const { index } = buildSample()
+    const snap = serializeIndex(index)
+    if (snap === null) throw new Error('expected a snapshot from a merged index')
+
+    // A non-empty target must refuse: adopting over existing rows would
+    // duplicate heights behind byHeight's back.
+    const occupied = createStopIndex()
+    const rng = mulberry32(19)
+    appendStops(occupied, [syntheticStop(0, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), 1), null)])
+    expect(adoptSnapshot(occupied, snap)).toBe(false)
+
+    // A permutation with a duplicated entry (so another row is skipped).
+    const dupPerm = snap.perm.slice(0)
+    const dupView = new Uint32Array(dupPerm)
+    dupView[1] = dupView[0]
+
+    const cases: unknown[] = [
+      null,
+      42,
+      { ...snap, version: 2 },
+      { ...snap, count: snap.count + 1 },
+      { ...snap, count: snap.count - 1 },
+      { ...snap, keys: snap.keys.slice(0, snap.keys.byteLength - 1) },
+      { ...snap, heights: snap.heights.slice(0, snap.heights.byteLength - 4) },
+      { ...snap, perm: snap.coords },
+      { ...snap, perm: dupPerm },
+      { ...snap, maxHeight: snap.maxHeight + 1 },
+    ]
+    for (const bad of cases) {
+      const fresh = createStopIndex()
+      expect(adoptSnapshot(fresh, bad)).toBe(false)
+      // The failed adopt mutated nothing: the same target still accepts the
+      // good snapshot afterwards.
+      expect(fresh.size).toBe(0)
+      expect(adoptSnapshot(fresh, snap)).toBe(true)
+      expect(fresh.size).toBe(index.size)
+    }
   })
 })

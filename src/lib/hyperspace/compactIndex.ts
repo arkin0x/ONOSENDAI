@@ -446,3 +446,118 @@ export function mergeStep(index: StopIndex, budgetMs: number): boolean {
 export function mergeAll(index: StopIndex): void {
   while (!mergeStep(index, Number.POSITIVE_INFINITY)) { /* keep folding */ }
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * The built index as a handful of ArrayBuffers, the shape IndexedDB can store
+ * and hand back wholesale. Replaying ~1M cached rows re-sorts the whole line
+ * on every page load; adopting a snapshot is one bulk read plus a byHeight
+ * rebuild. The buffers are copies sliced to `count`, never views into the
+ * live typed arrays, so an in-flight IndexedDB write is not racing rows
+ * appended after serialization.
+ */
+export interface IndexSnapshot {
+  version: 1
+  count: number
+  maxHeight: number
+  keys: ArrayBuffer
+  coords: ArrayBuffer
+  merkles: ArrayBuffer
+  hashes: ArrayBuffer
+  kinds: ArrayBuffer
+  heights: ArrayBuffer
+  perm: ArrayBuffer
+}
+
+/**
+ * Serialize a fully merged index, or null while rows are still pending: a
+ * mid-merge permutation does not order every row, and persisting it would
+ * silently hide the unmerged tail from spatial queries after adoption.
+ * Callers run mergeAll first.
+ */
+export function serializeIndex(index: StopIndex): IndexSnapshot | null {
+  if (hasPending(index) || index.permCount !== index.size) return null
+  const count = index.size
+  return {
+    version: 1,
+    count,
+    maxHeight: index.maxHeight,
+    keys: index.keys.slice(0, count * 32).buffer,
+    coords: index.coords.slice(0, count * 32).buffer,
+    merkles: index.merkles.slice(0, count * 32).buffer,
+    hashes: index.hashes.slice(0, count * 32).buffer,
+    kinds: index.kinds.slice(0, count).buffer,
+    heights: index.heights.slice(0, count).buffer,
+    perm: index.perm.slice(0, count).buffer,
+  }
+}
+
+/** The value when it is an ArrayBuffer of exactly byteLength, else null. */
+function bufferOf(v: unknown, byteLength: number): ArrayBuffer | null {
+  return v instanceof ArrayBuffer && v.byteLength === byteLength ? v : null
+}
+
+/**
+ * Adopt a stored snapshot into an EMPTY index. Everything is validated before
+ * the first mutation (shape, version, exact buffer lengths, perm being a real
+ * permutation, heights unique and consistent with maxHeight), because a
+ * half-adopted index would answer queries plausibly and wrongly forever; on
+ * any mismatch the index is untouched (false) and the caller falls back to
+ * the row replay. The buffers become the live columns without copying: the
+ * snapshot comes out of IndexedDB as a structured clone the index then owns,
+ * and no code path writes inside the first `count` rows afterwards (rows
+ * never mutate, and adoption leaves capacity === count so the next append
+ * grows into fresh buffers before writing).
+ */
+export function adoptSnapshot(index: StopIndex, snap: unknown): boolean {
+  if (index.size !== 0 || index.permCount !== 0 || hasPending(index)) return false
+  if (typeof snap !== 'object' || snap === null) return false
+  const s = snap as Record<string, unknown>
+  if (s.version !== 1) return false
+  const count = s.count
+  if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return false
+  const maxHeight = s.maxHeight
+  if (typeof maxHeight !== 'number' || !Number.isSafeInteger(maxHeight)) return false
+  if (count === 0 ? maxHeight !== -1 : maxHeight < 0) return false
+  const keys = bufferOf(s.keys, count * 32)
+  const coords = bufferOf(s.coords, count * 32)
+  const merkles = bufferOf(s.merkles, count * 32)
+  const hashes = bufferOf(s.hashes, count * 32)
+  const kinds = bufferOf(s.kinds, count)
+  const heights = bufferOf(s.heights, count * 4)
+  const perm = bufferOf(s.perm, count * 4)
+  if (!keys || !coords || !merkles || !hashes || !kinds || !heights || !perm) return false
+
+  const heightCol = new Uint32Array(heights)
+  const permCol = new Uint32Array(perm)
+  const byHeight = new Uint32Array(count === 0 ? 0 : maxHeight + 1)
+  const seen = new Uint8Array(count)
+  let highest = -1
+  for (let row = 0; row < count; row++) {
+    const h = heightCol[row]
+    if (h > maxHeight || byHeight[h] !== 0) return false
+    byHeight[h] = row + 1
+    if (h > highest) highest = h
+    const p = permCol[row]
+    if (p >= count || seen[p] !== 0) return false
+    seen[p] = 1
+  }
+  if (highest !== maxHeight) return false
+
+  index.keys = new Uint8Array(keys)
+  index.coords = new Uint8Array(coords)
+  index.merkles = new Uint8Array(merkles)
+  index.hashes = new Uint8Array(hashes)
+  index.kinds = new Uint8Array(kinds)
+  index.heights = heightCol
+  index.perm = permCol
+  index.permCount = count
+  index.byHeight = byHeight
+  index.maxHeight = maxHeight
+  index.size = count
+  index.capacity = count
+  return true
+}

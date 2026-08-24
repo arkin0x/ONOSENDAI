@@ -12,7 +12,11 @@
  *
  * Relay-fetched stops are cached in IndexedDB alongside a 'covered' list of
  * height ranges, so a reload replays the cache and only fetches the
- * complement. A height the relay has no anchor for still counts as covered;
+ * complement. The BUILT index is additionally persisted wholesale (meta key
+ * 'indexSnapshot') once the pipeline is ready and occasionally from the tail:
+ * replaying ~1M rows re-sorts the line for tens of seconds on every load,
+ * while adopting the snapshot is one bulk read plus a byHeight rebuild, and
+ * the row replay then only covers what arrived after the snapshot. A height the relay has no anchor for still counts as covered;
  * without that, a single genuinely missing block would be re-queried on every
  * load forever. Blob-verified heights are deliberately NOT persisted in
  * 'covered': the Cache API holds the raw blobs and re-verification is cheap,
@@ -37,13 +41,16 @@
 import { query, subscribe } from '../relay'
 import { stopFromAnchor, type Stop, type StopKind } from './stops'
 import {
+  adoptSnapshot,
   appendColumns,
   appendStops,
   createStopIndex,
   hasPending,
   insertRow,
+  mergeAll,
   mergeStep,
   rowByHeight,
+  serializeIndex,
   type StopIndex,
 } from './compactIndex'
 import { fetchManifest, runHeaderSync } from './headerSync'
@@ -139,6 +146,35 @@ export function batchesOf(ranges: Array<[number, number]>, size: number): number
     }
   }
   if (current.length > 0) out.push(current)
+  return out
+}
+
+/**
+ * Where the IndexedDB row replay still has work to do: the complement of the
+ * union of the snapshot's covered ranges and this session's verified blob
+ * ranges, as [start, endOrNull] stretches with null for the open-ended tail.
+ * Every IDB row inside coveredAtSnapshot is by construction already in the
+ * adopted snapshot (rows are appended to the index when they arrive, and the
+ * snapshot serialized the whole index), and blob heights were just appended
+ * by the header phase, so replaying either would only burn IDB reads on rows
+ * the height dedupe then drops. With no snapshot this reduces to the
+ * blob-only complement, i.e. byte-for-byte the pre-snapshot behaviour; with
+ * neither it is one unbounded stretch, the old full replay.
+ */
+export function replayStretches(
+  coveredAtSnapshot: Array<[number, number]>,
+  blobCovered: Array<[number, number]>,
+): Array<[number, number | null]> {
+  let union: Array<[number, number]> = []
+  for (const range of coveredAtSnapshot) union = mergeCovered(union, range)
+  for (const range of blobCovered) union = mergeCovered(union, range)
+  const out: Array<[number, number | null]> = []
+  let cursor = 0
+  for (const [start, end] of union) {
+    if (start > cursor) out.push([cursor, start - 1])
+    if (end + 1 > cursor) cursor = end + 1
+  }
+  out.push([cursor, null])
   return out
 }
 
@@ -248,6 +284,10 @@ const SYNC_BUMP_MS = 2500
 const MERGE_SLICE_MS = 12
 const CACHE_CHUNK = 50_000
 const COVERED_KEY = 'covered'
+const SNAPSHOT_KEY = 'indexSnapshot'
+/** Tail re-snapshot gates: both must pass, so the ~130 MB put stays rare. */
+const SNAPSHOT_INTERVAL_MS = 10 * 60_000
+const SNAPSHOT_MIN_GROWTH = 5000
 
 let running = false
 let db: IDBDatabase | null = null
@@ -256,6 +296,11 @@ let covered: Array<[number, number]> = []
 let blobCovered: Array<[number, number]> = []
 /** Rows delivered by verified blobs, for the source label. */
 let blobRows = 0
+/** Index size and wall clock at the last snapshot write (or adoption), the
+ * baselines for the tail's re-snapshot gates and the redundant-write skip. */
+let snapshotSize = 0
+let snapshotAt = 0
+let snapshotWriting = false
 let knownTip: number | null = null
 let metaChain: Promise<void> = Promise.resolve()
 let currentStatus: 'loading-cache' | 'syncing' | 'ready' | 'error' = 'loading-cache'
@@ -359,17 +404,39 @@ function effectiveCovered(): Array<[number, number]> {
   return out
 }
 
-/** The gaps between blob-covered ranges, [start, endOrNull] with null for the
- * open-ended tail: where cached relay rows could still be useful. */
-function uncoveredStretches(ranges: Array<[number, number]>): Array<[number, number | null]> {
-  const out: Array<[number, number | null]> = []
-  let cursor = 0
-  for (const [start, end] of ranges) {
-    if (start > cursor) out.push([cursor, start - 1])
-    if (end + 1 > cursor) cursor = end + 1
+/** The stored 'indexSnapshot' meta shape. The snapshot itself stays unknown
+ * here on purpose: adoptSnapshot owns its deep validation. */
+function validSnapshotMeta(v: unknown): v is { snapshot: unknown; coveredAtSnapshot: Array<[number, number]> } {
+  if (typeof v !== 'object' || v === null) return false
+  const m = v as Record<string, unknown>
+  return typeof m.snapshot === 'object' && m.snapshot !== null && validCovered(m.coveredAtSnapshot)
+}
+
+/**
+ * Persist the built index wholesale so the next boot adopts it instead of
+ * re-sorting a million replayed rows. coveredAtSnapshot rides along so that
+ * boot's replay can skip every IDB row the snapshot already contains. One
+ * structured-clone put of ~130 MB of ArrayBuffers, which IndexedDB handles;
+ * best effort like every other cache write. mergeAll first: serializeIndex
+ * refuses a half-merged index, and by the time this runs (ready, or the
+ * quiescent tail) there is at most a sliver pending.
+ */
+async function persistSnapshot(): Promise<void> {
+  if (!db || snapshotWriting) return
+  const database = db
+  snapshotWriting = true
+  try {
+    mergeAll(anchorIndex)
+    const snapshot = serializeIndex(anchorIndex)
+    if (snapshot) {
+      await putMeta(database, SNAPSHOT_KEY, { snapshot, coveredAtSnapshot: effectiveCovered() })
+      snapshotSize = snapshot.count
+      snapshotAt = Date.now()
+    }
+  } catch { /* cache write is best effort */
+  } finally {
+    snapshotWriting = false
   }
-  out.push([cursor, null])
-  return out
 }
 
 /** Where stops have come from so far, for the HUD. */
@@ -390,9 +457,26 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
   const before = anchorIndex.size
   const stored = await getMeta(db, COVERED_KEY)
   if (validCovered(stored)) covered = stored
-  // Only replay heights the blobs did not deliver. When there are no blobs
-  // this is one unbounded stretch, i.e. exactly the old full replay.
-  for (const [start, end] of uncoveredStretches(blobCovered)) {
+  // Adopt the persisted built index wholesale when possible: the same rows
+  // the replay below would re-sort, in one bulk read. adoptSnapshot refuses
+  // a non-empty index, so a session the header blobs already fed falls back
+  // to the plain replay unchanged; so does any invalid or missing snapshot.
+  let coveredAtSnapshot: Array<[number, number]> = []
+  let adopted = 0
+  try {
+    const snapMeta = await getMeta(db, SNAPSHOT_KEY)
+    if (validSnapshotMeta(snapMeta) && adoptSnapshot(anchorIndex, snapMeta.snapshot)) {
+      adopted = anchorIndex.size - before
+      coveredAtSnapshot = snapMeta.coveredAtSnapshot
+      snapshotSize = anchorIndex.size
+      snapshotAt = Date.now()
+      cb.onLoaded(anchorIndex.size)
+      scheduleBump(cb)
+    }
+  } catch { /* snapshot read is best effort; the row replay below covers it */ }
+  // Only replay heights neither the snapshot nor the blobs delivered. With
+  // neither this is one unbounded stretch, i.e. exactly the old full replay.
+  for (const [start, end] of replayStretches(coveredAtSnapshot, blobCovered)) {
     await getRangePaged<StopRecord>(db, STOPS_STORE, start, end, CACHE_CHUNK, (row) => row.height, async (rows) => {
       const fresh: Stop[] = []
       for (const row of rows) {
@@ -410,7 +494,10 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
   announceSource(cb)
   const restored = anchorIndex.size - before
   if (restored > 0) {
-    console.info(`[hyperspace] resumed ${restored} stops from cache in ${Math.round(performance.now() - t0)} ms`)
+    const ms = Math.round(performance.now() - t0)
+    console.info(adopted > 0
+      ? `[hyperspace] resumed ${adopted} stops (snapshot) + ${restored - adopted} rows in ${ms} ms`
+      : `[hyperspace] resumed ${restored} stops from cache in ${ms} ms`)
   }
 }
 
@@ -481,6 +568,11 @@ function startTail(cb: SyncCallbacks): void {
     if (db) {
       putMany(db, STOPS_STORE, [recordFromStop(stop)]).catch(() => { /* best effort */ })
       persistCovered()
+      // Re-snapshot occasionally so a long-lived tab's accumulation is not
+      // replayed row by row on the next boot; both gates must pass.
+      if (Date.now() - snapshotAt >= SNAPSHOT_INTERVAL_MS && anchorIndex.size - snapshotSize >= SNAPSHOT_MIN_GROWTH) {
+        void persistSnapshot()
+      }
     }
     if (knownTip === null || stop.height > knownTip) {
       knownTip = stop.height
@@ -587,6 +679,11 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
       await whenMerged()
       setStatus(cb, 'ready')
       cb.onIndexChanged()
+      // Persist the built index for the next boot. Awaited on purpose: the
+      // bulk sync just finished, so nothing is hot. Skipped when no row has
+      // landed since the last write (a reload that adopted the snapshot and
+      // backfilled nothing) because rewriting identical buffers buys nothing.
+      if (anchorIndex.size !== snapshotSize) await persistSnapshot()
       break
     } catch (e) {
       setStatus(cb, 'error', e instanceof Error ? e.message : String(e))

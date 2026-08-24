@@ -6,7 +6,10 @@
  * keeping the legacy anchor over the v3 one would pin a landfall to a
  * derived coordinate when the publisher supplied the exact one; and a cache
  * round trip that loses bigint precision would quietly misplace every stop.
- * The UI would look plausible in all of these.
+ * A replay-stretch complement that wrongly believes a range is covered is
+ * the worst of them: 'covered' promises those heights are done, so nothing
+ * would ever re-fetch the rows the boot skipped and the index would stay
+ * silently short. The UI would look plausible in all of these.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -15,6 +18,7 @@ import {
   missingRanges,
   pickBetter,
   recordFromStop,
+  replayStretches,
   runsOf,
   stopFromRecord,
   subtractCovered,
@@ -127,6 +131,34 @@ describe('runsOf', () => {
     expect(runsOf([1, 2, 3, 7, 8, 10])).toEqual([[1, 3], [7, 8], [10, 10]])
     expect(runsOf([])).toEqual([])
     expect(runsOf([4])).toEqual([[4, 4]])
+  })
+})
+
+describe('replayStretches', () => {
+  it('is one unbounded stretch with no snapshot and no blobs (the old full replay)', () => {
+    expect(replayStretches([], [])).toEqual([[0, null]])
+  })
+
+  it('matches the blob-only complement when there is no snapshot', () => {
+    expect(replayStretches([], [[2, 4], [8, 9]])).toEqual([[0, 1], [5, 7], [10, null]])
+  })
+
+  it('leaves only the open tail when the snapshot covered everything so far', () => {
+    expect(replayStretches([[0, 100]], [])).toEqual([[101, null]])
+  })
+
+  it('replays the head when coverage does not start at zero', () => {
+    expect(replayStretches([[5, 9]], [])).toEqual([[0, 4], [10, null]])
+  })
+
+  it('finds the gaps between covered stretches', () => {
+    expect(replayStretches([[2, 4], [10, 14]], [[6, 7]])).toEqual([[0, 1], [5, 5], [8, 9], [15, null]])
+  })
+
+  it('unions snapshot and blob coverage, fusing overlap and adjacency', () => {
+    expect(replayStretches([[0, 4]], [[5, 9]])).toEqual([[10, null]])
+    expect(replayStretches([[0, 10]], [[5, 20]])).toEqual([[21, null]])
+    expect(replayStretches([[10, 12]], [[0, 3]])).toEqual([[4, 9], [13, null]])
   })
 })
 

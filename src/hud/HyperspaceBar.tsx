@@ -41,7 +41,7 @@ export function HyperspaceBar(): JSX.Element | null {
     : 'HYPERSPACE · BOARDED'
   const meta = progress !== null
     ? `BLOCK ${progress.done}/${progress.total}${progress.etaMs !== null ? ` · ETA ${formatMs(progress.etaMs)}` : ''}`
-    : 'PICK A STOP AND RIDE · MOVING CANCELS'
+    : 'PICK A BLOCK AND RIDE · MOVING CANCELS'
 
   // One gesture whatever the stage: stop any pool, forget the boarding. The
   // wire needs nothing, the next ordinary hop cancels it there (§3.3).

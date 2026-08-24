@@ -3423,6 +3423,43 @@ kbd {
   border-bottom-right-radius: 0;
 }
 
+/* The overlay reads as a ticket: FROM your station at the top, TO the block
+   the rail is pointing at. */
+.linescrub__headline {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+}
+
+.linescrub__headline--to {
+  margin-top: 4px;
+}
+
+.linescrub__fromrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.linescrub__view {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #f7931a;
+  background: rgba(247, 147, 26, 0.06);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linescrub__view:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .linescrub__kind--port {
   color: var(--sidestep);
 }
@@ -3481,6 +3518,14 @@ kbd {
 
 .hyper__progress {
   margin: 10px 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+}
+
+/* Why BOARD is dark right now, in one line. */
+.hyper__why {
+  margin: 6px 0 0;
   font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--warn);

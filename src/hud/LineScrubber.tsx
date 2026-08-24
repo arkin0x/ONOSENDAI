@@ -11,10 +11,12 @@
  * hundreds of thousands of blocks, only the fill and the mark are drawn.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { exitHyperspaceView, getStopByHeight, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { nearestStops } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
 /** The coarse step: the line is ~900k blocks, single steps are the last few. */
@@ -27,6 +29,30 @@ export function LineScrubber(): JSX.Element {
   const destination = useHyperspace((s) => s.destination)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const bind = useRepeatable()
+  const position = useCyberspace((s) => s.position)
+  const plane = useCyberspace((s) => s.plane)
+
+  // Your station: the block boarding sets you down at, recomputed as blocks
+  // sync in. The overlay leads with it because every ride runs FROM here.
+  const station = useMemo(() => {
+    void indexVersion
+    const index = getStopIndex()
+    if (index.permCount === 0) return undefined
+    const here = xyzToCoord(position.x, position.y, position.z, plane)
+    return nearestStops(index, here, 1)[0]?.stop
+  }, [position, plane, indexVersion])
+
+  const viewStation = (): void => {
+    if (!station) return
+    ownHyperspaceView()
+    markViewedStop(station.height)
+    useCyberspace.getState().focusOn(
+      stopPosition(station),
+      stopPlane(station),
+      `STATION · BLOCK ${station.height}`,
+      34,
+    )
+  }
 
   const ready = sync.status === 'ready' && tipHeight !== null
   const open = scrubHeight !== null
@@ -117,6 +143,23 @@ export function LineScrubber(): JSX.Element {
 
       {open && ready && (
         <div className="explorer__body">
+          <span className="linescrub__headline">FROM NEAREST BLOCK</span>
+          <div className="linescrub__fromrow">
+            <span className="explorer__type">{station ? `BLOCK ${station.height}` : 'NO BLOCKS YET'}</span>
+            {station && (
+              <span className={`linescrub__kind linescrub__kind--${station.kind}`}>
+                {station.kind === 'port' ? 'PORT' : 'LANDFALL'}
+              </span>
+            )}
+            <button
+              className="linescrub__view"
+              disabled={!station}
+              {...noCallout}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewStation() }}
+            >VIEW</button>
+          </div>
+
+          <span className="linescrub__headline linescrub__headline--to">TO BLOCK</span>
           <div className="explorer__row">
             <button className="explorer__btn" title={`Back ${JUMP} blocks (hold to repeat)`} aria-label={`Back ${JUMP} blocks`} disabled={scrubHeight === 0} {...bind(step(-JUMP))}>«</button>
             <button className="explorer__btn" title="Back one block (hold to repeat)" aria-label="Back one block" disabled={scrubHeight === 0} {...bind(step(-1))}>◀</button>
@@ -160,7 +203,7 @@ export function LineScrubber(): JSX.Element {
                   {stop.kind === 'landfall' && <span className="explorer__when">{formatLatLon(stop)}</span>}
                 </>
               ) : (
-                <span className="explorer__when">NO STOP DATA</span>
+                <span className="explorer__when">NO BLOCK DATA</span>
               )}
             </div>
             <div className="linescrub__actions">

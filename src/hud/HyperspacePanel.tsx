@@ -195,7 +195,7 @@ export function HyperspacePanel(): JSX.Element {
   }, [destination, position, plane, indexVersion])
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
-  const tag = ready ? `READY ${stopCount()} STOPS`
+  const tag = ready ? `READY ${stopCount()} BLOCKS`
     : sync.status === 'error' ? 'ERROR'
       : sync.status === 'idle' ? 'IDLE'
         : sync.status === 'loading-cache'
@@ -210,7 +210,7 @@ export function HyperspacePanel(): JSX.Element {
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest stop</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest block</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -243,10 +243,10 @@ export function HyperspacePanel(): JSX.Element {
                 // scale, so the stop reads as a place you could stand at.
                 34,
               ) }}
-            >VIEW NEAREST STOP</button>
+            >VIEW NEAREST BLOCK</button>
           </>
         ) : (
-          <p className="legend__note">No stops in the index yet.</p>
+          <p className="legend__note">No blocks in the index yet.</p>
         )}
       </div>
 
@@ -283,8 +283,8 @@ export function HyperspacePanel(): JSX.Element {
               )}
             </dl>
             <p className="legend__note">
-              STATION is where boarding sets you down: your nearest stop as of
-              the synced tip. The ride runs from it to the destination; all of
+              STATION is where boarding sets you down: your nearest block as
+              of the synced tip. The ride runs from it to the destination; all of
               the per-block work runs locally and resumes if interrupted.
             </p>
           </>
@@ -322,6 +322,18 @@ export function HyperspacePanel(): JSX.Element {
           <button className="hyper__btn hyper__btn--abort" onClick={abortRide}>ABORT</button>
         )}
       </div>
+      {/* A dead button that never says why reads as broken. One line names
+          the gate that is actually holding BOARD shut; the answer is never
+          proof of work, because boarding itself costs none. */}
+      {transit === null && progress === null && (
+        !ready ? (
+          <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
+        ) : destination === null ? (
+          <p className="hyper__why">BOARD NEEDS A DESTINATION BLOCK: PICK ONE ON THE LINE (H)</p>
+        ) : !atHead ? (
+          <p className="hyper__why">BOARD STARTS FROM YOUR AVATAR: RETURN TO IT FIRST</p>
+        ) : null
+      )}
       <button
         className="hyper__btn hyper__btn--earth"
         onClick={() => {
@@ -340,11 +352,12 @@ export function HyperspacePanel(): JSX.Element {
       {rideError && <p className="notice">{rideError}</p>}
 
       <p className="legend__note">
-        The nearest stop is your station: the stop boarding sets you down at.
-        VIEW NEAREST STOP flies the camera there; the viewing bar's RETURN or
-        Escape brings it home at your previous zoom. Boarding marks your chain; the ride proves fresh work for every block
-        passed and sets you down exactly at the stop. Leaving is an ordinary
-        hop, so the last mile from any stop is normal movement.
+        The nearest block is your station: the block boarding sets you down
+        at. VIEW NEAREST BLOCK flies the camera there; the viewing bar's
+        RETURN or Escape brings it home at your previous zoom. Boarding marks
+        your chain; the ride proves fresh work for every block passed and
+        sets you down exactly at the block. Leaving is an ordinary hop, so
+        the last mile from any block is normal movement.
       </p>
     </section>
   )

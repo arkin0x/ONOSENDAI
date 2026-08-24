@@ -28,7 +28,7 @@ import type { Position } from './space'
 /** §8.1: every movement action, spawn included, is this one kind. */
 export const ACTION_KIND = 3333
 
-export type ActionType = 'spawn' | 'hop' | 'sidestep'
+export type ActionType = 'spawn' | 'hop' | 'sidestep' | 'enter-hyperspace' | 'hyperjump'
 
 /** The shape nostr-tools signs and relays return; named here so nothing in
  * the app has to import it from the library to talk about an event. */
@@ -63,6 +63,11 @@ export interface ActionEvent {
   proofHash: string | null
   /** The `S` tag, as written. */
   sector: string
+  /** Hyperjump only (DECK-0001 v3 §5.2): the boarding and destination heights. */
+  fromHeight?: number
+  toHeight?: number
+  /** Hyperjump only: the sampled openings, as written in the `mp` tag. */
+  mp?: string
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -155,6 +160,74 @@ export function sidestepTemplate(i: SidestepInput): EventTemplate {
   }
 }
 
+export interface EnterHyperspaceInput {
+  createdAt: number
+  genesisId: string
+  previousId: string
+  /** Where the identity is standing; an enter does not move it (§3.3). */
+  at: Position
+  plane: Plane
+  /** The §3.2 entry proof hash. */
+  proofHash: string
+}
+
+/** DECK-0001 v3 §3.1: board the line from wherever you stand. c equals C. */
+export function enterHyperspaceTemplate(i: EnterHyperspaceInput): EventTemplate {
+  const here = positionHex(i.at, i.plane)
+  return {
+    kind: ACTION_KIND,
+    created_at: i.createdAt,
+    content: '',
+    tags: [
+      ['A', 'enter-hyperspace'],
+      ['e', i.genesisId, '', 'genesis'],
+      ['e', i.previousId, '', 'previous'],
+      ['c', here],
+      ['C', here],
+      ['proof', i.proofHash],
+      ...sectorTags(i.at),
+    ],
+  }
+}
+
+export interface HyperjumpInput {
+  createdAt: number
+  genesisId: string
+  previousId: string
+  /** The identity's current coordinate (the enter coordinate, or the previous stop). */
+  prevCoordHex: string
+  /** The destination stop's coordinate, already a 64-hex coord256. */
+  toCoordHex: string
+  fromHeight: number
+  toHeight: number
+  /** The ride's Merkle root (64 hex; the zero root for a zero-length ride). */
+  rootHex: string
+  /** The sampled openings; empty string for a zero-length ride. */
+  mp: string
+}
+
+/** DECK-0001 v3 §5.2: ride the line from the station (or current stop) to a stop. */
+export function hyperjumpTemplate(i: HyperjumpInput): EventTemplate {
+  const at = coordToXyz(hexToCoord(i.toCoordHex))
+  return {
+    kind: ACTION_KIND,
+    created_at: i.createdAt,
+    content: '',
+    tags: [
+      ['A', 'hyperjump'],
+      ['e', i.genesisId, '', 'genesis'],
+      ['e', i.previousId, '', 'previous'],
+      ['c', i.prevCoordHex],
+      ['C', i.toCoordHex],
+      ['from_height', String(i.fromHeight)],
+      ['B', String(i.toHeight)],
+      ['proof', i.rootHex],
+      ['mp', i.mp],
+      ...sectorTags({ x: at.x, y: at.y, z: at.z }),
+    ],
+  }
+}
+
 export function bytesToHex(bytes: Uint8Array): string {
   let out = ''
   for (const b of bytes) out += b.toString(16).padStart(2, '0')
@@ -187,7 +260,15 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
 export function parseAction(ev: NostrEvent): ActionEvent | null {
   if (ev.kind !== ACTION_KIND) return null
   const type = tag(ev, 'A')
-  if (type !== 'spawn' && type !== 'hop' && type !== 'sidestep') return null
+  if (
+    type !== 'spawn' &&
+    type !== 'hop' &&
+    type !== 'sidestep' &&
+    type !== 'enter-hyperspace' &&
+    type !== 'hyperjump'
+  ) {
+    return null
+  }
   const coordHex = tag(ev, 'C')
   if (!coordHex || !HEX_64.test(coordHex)) return null
   const sector = tag(ev, 'S')
@@ -220,6 +301,29 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   if (!proofHash || !HEX_64.test(proofHash)) return null
   if (type === 'sidestep') {
     for (const t of ['mr', 'mp', 'hx', 'hy', 'hz']) if (tag(ev, t) === undefined) return null
+  }
+  if (type === 'enter-hyperspace') {
+    // §3.1: an enter does not move; c must equal C.
+    if (prevCoordHex !== coordHex) return null
+  }
+  if (type === 'hyperjump') {
+    // §5.2: boarding and destination heights, and the openings tag (possibly empty).
+    const fromStr = tag(ev, 'from_height')
+    const toStr = tag(ev, 'B')
+    if (fromStr === undefined || !/^\d+$/.test(fromStr)) return null
+    if (toStr === undefined || !/^\d+$/.test(toStr)) return null
+    if (tag(ev, 'mp') === undefined) return null
+    return {
+      ...base,
+      type,
+      prevCoordHex,
+      genesisId,
+      previousId,
+      proofHash,
+      fromHeight: Number.parseInt(fromStr, 10),
+      toHeight: Number.parseInt(toStr, 10),
+      mp: tag(ev, 'mp'),
+    }
   }
   return { ...base, type, prevCoordHex, genesisId, previousId, proofHash }
 }

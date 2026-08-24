@@ -16,7 +16,7 @@ import { nip19 } from 'nostr-tools'
 import { query, subscribe } from './relay'
 
 /** The actions this client understands, and therefore the only ones it asks for. */
-export const V2_ACTIONS = ['spawn', 'hop', 'sidestep']
+export const V2_ACTIONS = ['spawn', 'hop', 'sidestep', 'enter-hyperspace', 'hyperjump']
 
 const KIND = 3333
 

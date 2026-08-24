@@ -18,6 +18,7 @@
     "@fontsource/monaspace-krypton": "^5.3.0",
     "@react-three/fiber": "^8.17.10",
     "cyberspace-core": "git+https://github.com/arkin0x/cyberspace-cli-js.git#master",
+    "decimal.js": "^10.6.0",
     "nostr-tools": "^2.24.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

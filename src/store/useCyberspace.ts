@@ -41,6 +41,7 @@ import {
   hexToCoord,
   sectorTag,
   sidestepLanding,
+  xyzToCoord,
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
@@ -69,8 +70,11 @@ import {
   type ActionEvent,
   type EventTemplate,
   type NostrEvent,
+  enterHyperspaceTemplate,
+  hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
 /**
@@ -167,6 +171,22 @@ export interface TrackedTarget {
   plane: Plane
   lastActive: number | null
   status: 'resolving' | 'live' | 'spawn' | 'error'
+}
+
+/** Hyperspace transit (DECK-0001 v3): the identity has boarded and not yet arrived. */
+export interface TransitState {
+  stage: 'boarded'
+  enterEventId: string
+  enterCoordHex: string
+}
+
+/** A finished ride, as the worker pool hands it back (§5.4 and §5.5). */
+export interface CompletedRide {
+  toCoordHex: string
+  fromHeight: number
+  toHeight: number
+  rootHex: string
+  mp: string
 }
 
 export interface CyberspaceState {
@@ -266,6 +286,14 @@ export interface CyberspaceState {
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /** Stop looking; the scene returns to your avatar. */
   clearFocus: () => void
+  /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
+  transit: TransitState | null
+  /** §3: sign and queue an enter-hyperspace event from the current position. */
+  boardHyperspace: () => Promise<void>
+  /** §5: sign and queue the hyperjump for a computed ride, arriving at the stop. */
+  completeRide: (ride: CompletedRide) => Promise<void>
+  /** Forget the boarding locally; the next hop cancels it on the wire (§3.3). */
+  cancelTransit: () => void
   addTarget: (pubkey: string, name?: string | null) => void
   removeTarget: (pubkey: string) => void
   toggleTarget: (pubkey: string, name?: string | null) => void
@@ -625,6 +653,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       publishError: null,
       spectate: null,
       focus: null,
+      transit: null,
     })
     if (local) saveChain(base.events, base.published, base.chain)
   }
@@ -634,6 +663,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   ...initial,
   spectate: null,
   focus: null,
+  transit: null,
   targets: loadTargets(),
   cursor: initial.position,
   pendingTarget: null,
@@ -1010,6 +1040,91 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ focus: null, anchor: position, anchorPlane: headPlane })
   },
 
+  boardHyperspace: async () => {
+    const { events, genesisId, prevEventId, position, plane, proof, transit } = get()
+    if (transit !== null || proof.status === 'computing') return
+    if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
+    // A provisional identity has no chain to board from; move once first.
+    if (events.length === 0 || !genesisId || !prevEventId) return
+    const head = events[events.length - 1]
+    const coord = xyzToCoord(position.x, position.y, position.z, plane)
+    const proofHash = computeEnterProof(coord, prevEventId)
+    const template = enterHyperspaceTemplate({
+      createdAt: nextCreatedAt(head),
+      genesisId,
+      previousId: prevEventId,
+      at: position,
+      plane,
+      proofHash,
+    })
+    let event: NostrEvent
+    try {
+      event = await get().signEvent(template)
+    } catch {
+      return
+    }
+    // The chain may have advanced while a remote signer thought about it.
+    if (get().prevEventId !== prevEventId) return
+    const published: Record<string, PublishStatus> = { ...get().published, [event.id]: 'queued' }
+    const nextEvents = [...get().events, event]
+    set({
+      events: nextEvents,
+      prevEventId: event.id,
+      published,
+      positionHistory: [...get().positionHistory, { ...position }],
+      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: positionHex(position, plane) },
+    })
+    saveChain(nextEvents, published, get().chain)
+  },
+
+  completeRide: async (ride) => {
+    const { events, genesisId, prevEventId, transit } = get()
+    if (!transit || !genesisId || !prevEventId) return
+    const head = events[events.length - 1]
+    if (!head) return
+    // One ride per boarding for now; the spec allows chaining rides (§4.3) and
+    // the builder supports it, but the client boards fresh each time.
+    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit.enterCoordHex
+    const template = hyperjumpTemplate({
+      createdAt: nextCreatedAt(head),
+      genesisId,
+      previousId: prevEventId,
+      prevCoordHex,
+      toCoordHex: ride.toCoordHex,
+      fromHeight: ride.fromHeight,
+      toHeight: ride.toHeight,
+      rootHex: ride.rootHex,
+      mp: ride.mp,
+    })
+    let event: NostrEvent
+    try {
+      event = await get().signEvent(template)
+    } catch {
+      return
+    }
+    if (get().prevEventId !== prevEventId) return
+    const dest = coordToXyz(hexToCoord(ride.toCoordHex))
+    const newPosition: Position = { x: dest.x, y: dest.y, z: dest.z }
+    const published: Record<string, PublishStatus> = { ...get().published, [event.id]: 'queued' }
+    const nextEvents = [...get().events, event]
+    set({
+      events: nextEvents,
+      prevEventId: event.id,
+      published,
+      position: newPosition,
+      cursor: { ...newPosition },
+      plane: dest.plane,
+      headPlane: dest.plane,
+      positionHistory: [...get().positionHistory, newPosition],
+      anchor: { ...newPosition },
+      anchorPlane: dest.plane,
+      transit: null,
+    })
+    saveChain(nextEvents, published, get().chain)
+  },
+
+  cancelTransit: () => set({ transit: null }),
+
   addTarget: (pubkey, name = null) => {
     const { targets } = get()
     if (targets[pubkey]) {
@@ -1189,7 +1304,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   actions: () => parsedChain(get().events),
 
-  atHead: () => get().exploreIndex === null && get().spectate === null && get().focus === null,
+  atHead: () =>
+    get().exploreIndex === null &&
+    get().spectate === null &&
+    get().focus === null &&
+    get().transit === null,
 
   focusChain: () => {
     const { spectate } = get()

@@ -30,6 +30,29 @@ interface Props {
 }
 
 /**
+ * Seconds over which a newly loaded point fades in.
+ *
+ * Terrain now arrives in a burst when the cursor settles, and popping several
+ * thousand points on in a single frame reads as a flash. A quarter second is
+ * long enough to read as the field resolving out of the dark and short enough
+ * that it never feels behind the cursor it just caught up with. The ramp is
+ * one way, up, and each cell rides it exactly once, so nothing strobes and the
+ * effect stays acceptable under prefers-reduced-motion.
+ */
+const FADE_IN_S = 0.25
+
+/**
+ * When each visible cell first appeared, in performance.now() seconds, keyed
+ * by its cell offset from the anchor. Carried across geometry rebuilds so a
+ * cell that survives a rebuild keeps its age and stays solid; only genuinely
+ * new cells fade in. Rebuilding the map from the cells actually emitted keeps
+ * it from outgrowing one volume. A module singleton because the registry has
+ * to outlive any single geometry, and rebuilding it is idempotent, which is
+ * what StrictMode's doubled render requires.
+ */
+let births = new Map<string, number>()
+
+/**
  * Vertex shader: point size in pixels, from K.
  *
  * K = 0 has no size and disappears, as do cells outside the universe, which
@@ -38,6 +61,9 @@ interface Props {
  */
 const vertexShader = /* glsl */ `
   attribute float aK;
+  attribute float aBirth;
+  uniform float uNow;
+  uniform float uFadeIn;
   uniform float uTime;
   uniform float uFarPx;
   uniform float uNearPx;
@@ -71,6 +97,12 @@ const vertexShader = /* glsl */ `
     // expose the face it overhung.
     float rim = distance(position, uCentre);
     vFade = 1.0 - smoothstep(uFadeStart, uFadeRadius, rim);
+
+    // Newly loaded cells resolve in over uFadeIn seconds instead of popping.
+    // aBirth is fixed at the cell's first appearance and survives rebuilds, so
+    // a cell that was already visible never dips or flashes.
+    float grow = clamp((uNow - aBirth) / uFadeIn, 0.0, 1.0);
+    vFade *= grow * grow * (3.0 - 2.0 * grow);
 
     // K = 0 keeps zero size and disappears, which is also how cells outside the
     // universe read, since they arrive as 0.
@@ -187,6 +219,11 @@ function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
 
   const positions = new Float32Array(count * 3)
   const kValues = new Float32Array(count)
+  const birthValues = new Float32Array(count)
+
+  // On the same clock the uNow uniform runs on, so ages line up exactly.
+  const now = performance.now() / 1000
+  const nextBirths = new Map<string, number>()
 
   let v = 0
   for (let depth = 0; depth < N; depth++) {
@@ -196,18 +233,29 @@ function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
         const k = values[slice + col]
         if (k === UNKNOWN) continue
 
-        positions[v * 3] = win.right + (col - R)
-        positions[v * 3 + 1] = win.up + (row - R)
-        positions[v * 3 + 2] = win.out + (depth - R)
+        const x = win.right + (col - R)
+        const y = win.up + (row - R)
+        const z = win.out + (depth - R)
+        positions[v * 3] = x
+        positions[v * 3 + 1] = y
+        positions[v * 3 + 2] = z
         kValues[v] = k
+
+        // First seen now, or however long ago the registry remembers.
+        const key = `${x},${y},${z}`
+        const born = births.get(key) ?? now
+        nextBirths.set(key, born)
+        birthValues[v] = born
         v++
       }
     }
   }
+  births = nextBirths
 
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.setAttribute('aK', new Float32BufferAttribute(kValues, 1))
+  geometry.setAttribute('aBirth', new Float32BufferAttribute(birthValues, 1))
 
   // Lets the browser verifier read what actually reached the GPU.
   if (import.meta.env.DEV) {
@@ -233,6 +281,10 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
+      /** The births clock, in performance.now() seconds; see buildGeometry. */
+      uNow: { value: performance.now() / 1000 },
+      /** How long a newly loaded point takes to reach full alpha. */
+      uFadeIn: { value: FADE_IN_S },
       // Small and flat across the common K values, growing sharply at the top.
       /** Diameter of an ordinary gibson, in CSS pixels. The field is dust. */
       uFarPx: { value: 1.3 },
@@ -264,6 +316,10 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     if (!mat.uniforms) return
 
     mat.uniforms.uTime.value = state.clock.elapsedTime
+
+    // The fade-in ages against the same clock buildGeometry stamped births
+    // with, which the r3f clock is not: it starts at zero and can be paused.
+    mat.uniforms.uNow.value = performance.now() / 1000
 
     // Focus is what the camera orbits: the cursor. Live, so the magnification
     // under the cursor keeps up with the keypress.

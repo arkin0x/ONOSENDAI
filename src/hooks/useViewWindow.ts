@@ -11,7 +11,7 @@
  * so sub-cell drift does not rebuild geometry every frame.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 
 export interface ViewWindow {
@@ -21,50 +21,71 @@ export interface ViewWindow {
 }
 
 /**
- * How long the window waits behind the cursor before it moves.
+ * How long the cursor must be still before the window follows it.
  *
  * The window is what the terrain volume is centred on, and recentring it costs
- * a full rescan of every cell in the volume, measured at ~37ms. Running that
- * inside the same render that moves the cursor put it directly on the critical
- * path of a keypress, which is the one thing that has to feel instant.
+ * a full rescan of every cell in the volume plus a geometry rebuild, measured
+ * at 30 to 60ms of main thread. Paying that per keypress put it directly on
+ * the critical path of movement, which is the one thing that has to feel
+ * instant. Terrain has no such requirement: while you are travelling the stale
+ * field is fine, and it need not update at all until you stop.
  *
- * Terrain has no such requirement: it can arrive a frame or two late without
- * anyone noticing, and while a key is held it need not arrive at all until you
- * stop. So the cursor moves now and the field catches up, rather than the field
- * holding the cursor back.
+ * 250ms is chosen to outlast every repeating input in the app: OS key repeat
+ * delivers a keydown every 30 to 80ms and the touch pad repeats at 110ms, so
+ * any held or rapidly tapped run of moves coalesces into a single rescan when
+ * you come to rest, while after a lone tap the field still catches up within a
+ * quarter second.
  */
-const SETTLE_MS = 90
+export const CURSOR_SETTLE_MS = 250
+
+/** The window the cursor is in right now, read straight off the store. */
+function read(): ViewWindow {
+  const [right, up, out] = useCyberspace.getState().cursorOffset()
+  return { right: Math.round(right), up: Math.round(up), out: Math.round(out) }
+}
 
 export function useViewWindow(): ViewWindow {
-  const cursor = useCyberspace((s) => s.cursor)
-  const anchor = useCyberspace((s) => s.anchor)
-  const exploreIndex = useCyberspace((s) => s.exploreIndex)
-  const scaleExp = useCyberspace((s) => s.scaleExp)
-  const view = useCyberspace((s) => s.view)
-
-  const read = (): ViewWindow => {
-    const [right, up, out] = useCyberspace.getState().cursorOffset()
-    return { right: Math.round(right), up: Math.round(up), out: Math.round(out) }
-  }
-
   const [win, setWin] = useState<ViewWindow>(read)
-  const handle = useRef<number | null>(null)
 
   useEffect(() => {
-    if (handle.current !== null) clearTimeout(handle.current)
-    handle.current = window.setTimeout(() => {
-      handle.current = null
+    let handle: number | null = null
+
+    const fire = (): void => {
+      handle = null
       const next = read()
       setWin((prev) =>
         prev.right === next.right && prev.up === next.up && prev.out === next.out ? prev : next,
       )
-    }, SETTLE_MS)
-    return () => {
-      if (handle.current !== null) clearTimeout(handle.current)
     }
-    // cursorOffset derives from exactly these five.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, anchor, exploreIndex, scaleExp, view])
+    const schedule = (): void => {
+      if (handle !== null) clearTimeout(handle)
+      handle = window.setTimeout(fire, CURSOR_SETTLE_MS)
+    }
+
+    // A transient store subscription rather than selector hooks. Subscribing
+    // this hook to `cursor` re-rendered the entire World subtree on every
+    // keypress just to restart a timer, so each move paid a React commit it
+    // did not need. The subscription restarts the timer without rendering
+    // anything, and the only render is the setWin once the cursor settles.
+    const unsubscribe = useCyberspace.subscribe((s, prev) => {
+      if (
+        s.cursor !== prev.cursor ||
+        s.anchor !== prev.anchor ||
+        s.exploreIndex !== prev.exploreIndex ||
+        s.scaleExp !== prev.scaleExp ||
+        s.view !== prev.view
+      ) schedule()
+    })
+
+    // The store may have moved between the initial state read and this effect
+    // attaching, so reconcile once on mount.
+    schedule()
+
+    return () => {
+      unsubscribe()
+      if (handle !== null) clearTimeout(handle)
+    }
+  }, [])
 
   return win
 }

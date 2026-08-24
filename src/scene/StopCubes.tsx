@@ -17,7 +17,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
 import { type Stop } from '../lib/hyperspace/stops'
-import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
+import { selectStopInScene, stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
 
 /** The fleet: toned-down bitcoin orange. Only the chosen destination gets
@@ -28,7 +28,7 @@ const DEST_COLOR = '#ffff00'
 /** At most this many cubes; the point field carries the rest. */
 const MAX_CUBES = 24
 /** A cube never renders smaller than this many cells (visibility floor). */
-const MIN_CELLS = 0.2
+const MIN_CELLS = 0.15
 const REACH = GRID_RADIUS * 8
 
 export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -89,7 +89,18 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     <>
       {cubes.map(({ stop, centre }) =>
         stop.height === destination ? null : (
-          <mesh key={stop.height} position={centre}>
+          <mesh
+            key={stop.height}
+            position={centre}
+            // A cube is an exact target in a way the point cloud is not:
+            // the raycast hits its faces, so a click selects THIS stop and
+            // never a neighbour within some threshold of the ray.
+            onClick={(e) => {
+              if (e.delta > 8) return
+              e.stopPropagation()
+              selectStopInScene(stop.height)
+            }}
+          >
             <boxGeometry args={[inertSide, inertSide, inertSide]} />
             <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0.75} />
           </mesh>
@@ -98,7 +109,15 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
       <group ref={spin}>
         {cubes.map(({ stop, centre }) =>
           stop.height === destination ? (
-            <mesh key={stop.height} position={centre}>
+            <mesh
+              key={stop.height}
+              position={centre}
+              onClick={(e) => {
+                if (e.delta > 8) return
+                e.stopPropagation()
+                selectStopInScene(stop.height)
+              }}
+            >
               <boxGeometry args={[side, side, side]} />
               <meshBasicMaterial color={DEST_COLOR} toneMapped={false} />
             </mesh>

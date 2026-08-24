@@ -38,6 +38,9 @@ interface HyperspaceState {
   scrubHeight: number | null
   /** True while hyperspace UI owns the camera focus (VIEW, EARTH, the scrubber). */
   viewOwned: boolean
+  /** The zoom to restore when the owned view exits; captured when hyperspace
+   * first takes the focus, because its views re-frame at their own scales. */
+  returnScaleExp: number | null
   /** The chosen destination stop height; null = none. */
   destination: number | null
   startSync: () => void
@@ -55,6 +58,7 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   tipHeight: null,
   scrubHeight: null,
   viewOwned: false,
+  returnScaleExp: null,
   destination: null,
 
   startSync: () => {
@@ -95,7 +99,11 @@ export function stopCount(): number {
 
 /** Mark the current camera focus as hyperspace's, so RETURN and Escape know to clear it. */
 export function ownHyperspaceView(): void {
-  useHyperspace.setState({ viewOwned: true })
+  if (useHyperspace.getState().viewOwned) return
+  // First ownership: remember the zoom the user was actually at, because the
+  // hyperspace views re-frame at their own scales and RETURN must not strand
+  // the camera there.
+  useHyperspace.setState({ viewOwned: true, returnScaleExp: useCyberspace.getState().scaleExp })
 }
 
 /**
@@ -103,10 +111,14 @@ export function ownHyperspaceView(): void {
  * hyperspace set it (never a shard's focus, never a running spectate).
  */
 export function exitHyperspaceView(): void {
-  const owned = useHyperspace.getState().viewOwned
-  useHyperspace.setState({ scrubHeight: null, viewOwned: false })
+  const { viewOwned: owned, returnScaleExp } = useHyperspace.getState()
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null })
   const cs = useCyberspace.getState()
   if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
+  // Back at the zoom the user left, not whatever a stop view chose.
+  if (owned && returnScaleExp !== null && returnScaleExp !== cs.scaleExp) {
+    useCyberspace.setState({ scaleExp: returnScaleExp })
+  }
 }
 
 // Spectating a person replaces any hyperspace view: drop the scrubber and the
@@ -115,7 +127,9 @@ useCyberspace.subscribe((s, prev) => {
   if (s.spectate !== null && prev.spectate === null) {
     const hs = useHyperspace.getState()
     if (hs.scrubHeight !== null || hs.viewOwned) {
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false })
+      // No zoom restore here: the spectate is taking the camera somewhere
+      // else on purpose, and yanking the scale under it would fight that.
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null })
     }
   }
 })

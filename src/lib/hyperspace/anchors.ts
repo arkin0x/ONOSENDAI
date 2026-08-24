@@ -285,6 +285,7 @@ const MERGE_SLICE_MS = 12
 const CACHE_CHUNK = 50_000
 const COVERED_KEY = 'covered'
 const SNAPSHOT_KEY = 'indexSnapshot'
+const TIP_KEY = 'tip'
 /** Tail re-snapshot gates: both must pass, so the ~130 MB put stays rare. */
 const SNAPSHOT_INTERVAL_MS = 10 * 60_000
 const SNAPSHOT_MIN_GROWTH = 5000
@@ -393,6 +394,16 @@ function persistCovered(): void {
   const database = db
   metaChain = metaChain
     .then(() => putMeta(database, COVERED_KEY, covered))
+    .catch(() => { /* cache write is best effort */ })
+}
+
+/** Remember the tip across reloads, riding the same write chain as covered,
+ * so the next boot can report the cache replay as a real percentage. */
+function persistTip(tip: number): void {
+  if (!db) return
+  const database = db
+  metaChain = metaChain
+    .then(() => putMeta(database, TIP_KEY, tip))
     .catch(() => { /* cache write is best effort */ })
 }
 
@@ -577,6 +588,7 @@ function startTail(cb: SyncCallbacks): void {
     if (knownTip === null || stop.height > knownTip) {
       knownTip = stop.height
       cb.onTip(stop.height)
+      persistTip(stop.height)
     }
     cb.onLoaded(anchorIndex.size)
     scheduleBump(cb)
@@ -622,6 +634,20 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
     db = null
   }
 
+  // The previous session's tip, so the loading phase can show a real
+  // percentage: without it the total is unknown until the manifest or the
+  // relay answers, and the whole cache replay reads LOADING 0%. Stale is
+  // fine, the tip only grows, and every later onTip overwrites it.
+  if (db) {
+    try {
+      const t = await getMeta(db, TIP_KEY)
+      if (typeof t === 'number' && Number.isSafeInteger(t) && t >= 0) {
+        knownTip = t
+        cb.onTip(t)
+      }
+    } catch { /* cache read is best effort */ }
+  }
+
   // Header-blob phase. fetchManifest never throws; null means the relay owns
   // everything this session.
   const mf = await fetchManifest()
@@ -630,6 +656,7 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
     setStatus(cb, 'syncing')
     knownTip = mf.manifest.generatedAtHeight
     cb.onTip(knownTip)
+    persistTip(knownTip)
     const result = await runHeaderSync(mf.manifest, mf.url, {
       onProgress: (_startHeight, verified) => cb.onLoaded(anchorIndex.size + verified),
       onColumns: (cols) => {
@@ -671,6 +698,7 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
       const tip = Math.max(relayTip ?? 0, knownMax ?? 0)
       knownTip = tip
       cb.onTip(tip)
+      persistTip(tip)
       setStatus(cb, 'syncing')
       await syncMissing(tip, cb)
       // Do not declare ready with rows still outside the sorted view; the

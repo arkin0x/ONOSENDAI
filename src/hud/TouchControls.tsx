@@ -22,7 +22,7 @@ import { useShards } from '../store/useShards'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 
-export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Element {
+export function TouchControls(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
@@ -92,12 +92,19 @@ export function TouchControls({ onDismiss }: { onDismiss: () => void }): JSX.Ele
             {b.sub && <span className="touchpad__sub">{b.sub}</span>}
           </button>
         ))}
+        {/* The hub doubles as the scale readout and its reset: a tap returns
+            to 2^0, the finest scale. Hiding the pad lives on the canvas tap,
+            where it always also lived, so nothing is lost to the reset. */}
         <button
           className="touchpad__hub"
-          aria-label={`Scale 2^${scaleExp}. Tap to hide controls.`}
-          title="Hide controls"
+          aria-label={`Scale 2^${scaleExp}. Tap to reset scale to 2^0.`}
+          title="Reset scale to 2^0"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss() }}
+          onPointerDown={(e) => {
+            e.preventDefault(); e.stopPropagation()
+            const s = useCyberspace.getState()
+            s.adjustScale(-s.scaleExp)
+          }}
         >2^{scaleExp}</button>
       </div>
 

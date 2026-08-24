@@ -154,7 +154,7 @@ export function LineScrubber(): JSX.Element {
             </div>
             <div className="linescrub__actions">
             <button
-              className="linescrub__set"
+              className={destination !== null ? 'linescrub__set linescrub__set--attached' : 'linescrub__set'}
               disabled={!stop}
               {...noCallout}
               onPointerDown={(e) => {

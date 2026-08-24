@@ -31,6 +31,7 @@ import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
+import { selectStopInScene } from '../hud/HyperspacePanel'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
 const TAP_SLOP = 8
@@ -47,6 +48,15 @@ const REACH = GRID_RADIUS * 8
  * stride is as unbiased a sample as any.
  */
 const MAX_POINTS = 120_000
+
+/**
+ * The landfall shell needs its own, far smaller budget. Ports fill a volume,
+ * so 120k of them read as dust; landfalls crowd one planet's surface, and at
+ * any zoom that shows the globe a generous budget paints it solid orange.
+ * A hash-uniform stride down to this many, drawn attenuated at a fixed
+ * world size, keeps the crust reading as individual dots at every zoom.
+ */
+const MAX_LANDFALL_POINTS = 9_000
 
 /**
  * Raycast threshold for GL_POINTS, in render units. Points have no surface, so
@@ -135,7 +145,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
     if (inRange.length === 0) return null
 
-    const stride = Math.max(1, Math.ceil(inRange.length / MAX_POINTS))
+    const stride = Math.max(1, Math.ceil(inRange.length / (wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS)))
     const count = Math.ceil(inRange.length / stride)
     const positions = new Float32Array(count * 3)
     const colors = new Float32Array(count * 3)
@@ -205,31 +215,49 @@ export function StopField({ axes }: Props): JSX.Element | null {
   useEffect(() => () => { highlightGeometry?.dispose() }, [highlightGeometry])
 
   if (!built) return null
+  const portView = anchorPlane === 1
 
   const pick = (e: ThreeEvent<MouseEvent>): void => {
     // An orbit-drag that happens to end on a dot is not a tap.
     if (e.delta > TAP_SLOP) return
-    if (e.index === undefined) return
-    const height = built.heights[e.index]
+    // Points raycasting returns every dot within the threshold, sorted by
+    // distance along the ray, so the event's own index is whichever
+    // qualifying dot sits closest to the CAMERA. On the crowded landfall
+    // shell that is routinely a neighbour of the dot under the pointer; the
+    // dot the user means is the one nearest the ray itself.
+    let bestIndex: number | undefined
+    let bestDist = Infinity
+    for (const hit of e.intersections) {
+      if (hit.object !== e.eventObject || hit.index === undefined) continue
+      const d = hit.distanceToRay ?? 0
+      if (d < bestDist) {
+        bestDist = d
+        bestIndex = hit.index
+      }
+    }
+    if (bestIndex === undefined) return
+    const height = built.heights[bestIndex]
     if (height === undefined) return
     e.stopPropagation()
-    useHyperspace.getState().setDestination(height)
+    selectStopInScene(height)
   }
 
   return (
     <group>
       <points geometry={built.geometry} onClick={pick} frustumCulled={false}>
         {/*
-          Pixel-sized like the terrain dust (sizeAttenuation off), so the cloud
-          reads at every zoom instead of vanishing with distance. toneMapped
-          and fog both off for the BlackSun reason: these colours are the
-          encoding, and half the field sits beyond where the scene fog has
-          already gone to black.
+          Ports: pixel-sized like the terrain dust (sizeAttenuation off), so
+          the cloud reads at every zoom instead of vanishing with distance.
+          Landfalls: world-sized and attenuated, so the crust shrinks with the
+          planet instead of blooming into a solid orange disc when the globe
+          is small on screen. toneMapped and fog both off for the BlackSun
+          reason: these colours are the encoding, and half the field sits
+          beyond where the scene fog has already gone to black.
         */}
         <pointsMaterial
           vertexColors
-          size={9}
-          sizeAttenuation={false}
+          size={portView ? 6 : 0.24}
+          sizeAttenuation={!portView}
           transparent
           opacity={0.95}
           depthWrite={false}

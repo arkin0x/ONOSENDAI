@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -68,6 +68,17 @@ const START_DISTANCE = 26
  * is applied whole, see the rig.
  */
 const FOLLOW_TAU = 0.09
+
+/**
+ * A click or scrub inside an owned hyperspace view is a move within one view
+ * of the world, not a change of subject, so the camera flies instead of
+ * cutting. The stretched time constant does the flying; the cell bound keeps
+ * a cross-space jump, whose start would be off in the dark anyway, an honest
+ * cut.
+ */
+const GLIDE_TAU = 0.45
+const GLIDE_SECONDS = 1.6
+const GLIDE_MAX_CELLS = 300
 
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
@@ -217,6 +228,11 @@ function Rig(): JSX.Element {
   const smooth = useRef(new Vector3())
   const prevOrigin = useRef<Position | null>(null)
   const prevScale = useRef(-1)
+  // Seconds of stretched follow left in a hyperspace fly-to, and the frame
+  // the previous focus effect saw, so the next one can tell a move within
+  // the same view from a change of subject.
+  const glideLeft = useRef(0)
+  const flyFrom = useRef<{ anchor: Position; plane: number; scaleExp: number; owned: boolean } | null>(null)
 
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
@@ -226,7 +242,29 @@ function Rig(): JSX.Element {
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    const [x, y, z] = useCyberspace.getState().cursorOffset()
+    const s = useCyberspace.getState()
+    const owned = useHyperspace.getState().viewOwned
+    const prev = flyFrom.current
+    flyFrom.current = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp, owned }
+    // Same plane, same zoom, both frames owned by hyperspace: skip the
+    // re-frame. The per-frame origin shift below carries the camera into the
+    // new frame still looking at the old stop, and the stretched follow
+    // eases it onto the new one, which is the fly.
+    if (owned && prev !== null && prev.owned && prev.plane === s.anchorPlane &&
+        prev.scaleExp === s.scaleExp && s.focus !== null) {
+      const cells = Math.max(
+        Math.abs(cellDelta(s.anchor.x, prev.anchor.x, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.y, prev.anchor.y, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.z, prev.anchor.z, s.scaleExp)),
+      )
+      if (cells > 0 && cells < GLIDE_MAX_CELLS) {
+        glideLeft.current = GLIDE_SECONDS
+        locked.current = true
+        return
+      }
+    }
+    glideLeft.current = 0
+    const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
     c.object.position.set(x, y, z + START_DISTANCE)
@@ -275,8 +313,11 @@ function Rig(): JSX.Element {
     prevScale.current = s.scaleExp
 
     // Cursor movement, by contrast, IS motion, and eases. Exponential rather
-    // than a fixed fraction so the rate does not change with frame rate.
-    const k = 1 - Math.exp(-dt / FOLLOW_TAU)
+    // than a fixed fraction so the rate does not change with frame rate. A
+    // hyperspace fly-to stretches the time constant so the camera sails to
+    // the selected stop instead of flicking.
+    if (glideLeft.current > 0) glideLeft.current = Math.max(0, glideLeft.current - dt)
+    const k = 1 - Math.exp(-dt / (glideLeft.current > 0 ? GLIDE_TAU : FOLLOW_TAU))
     const dx = (tx - smooth.current.x) * k
     const dy = (ty - smooth.current.y) * k
     const dz = (tz - smooth.current.z) * k

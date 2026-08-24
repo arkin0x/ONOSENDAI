@@ -105,7 +105,7 @@ export default function App(): JSX.Element {
       <SpectateBar />
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
-      {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
+      {showPad && <TouchControls />}
       {!crowded && !padOpen && atHead && (
         <button
           className="chip touchhint"

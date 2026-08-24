@@ -25,6 +25,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const spectate = useCyberspace((s) => s.spectate)
   const anchor = useCyberspace((s) => s.anchor)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  const focus = useCyberspace((s) => s.focus)
 
   // Whose trail: the spectated avatar's chain, else your own.
   const positionHistory = useMemo(
@@ -69,7 +70,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // the head: in history nothing is travelling.
   const lastVertex = useRef<Float32Array | null>(null)
   useFrame(() => {
-    if (exploreIndex !== null || spectate) return
+    if (exploreIndex !== null || spectate || focus !== null) return
     const attr = geometry?.walked?.attributes.position
     if (!attr) return
     const arr = attr.array as Float32Array
@@ -82,7 +83,12 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     attr.needsUpdate = true
   })
 
-  if (!geometry) return null
+  // A focus view (a hyperspace stop, EARTH, a shard) anchors the scene far
+  // from the chain, and the head-riding vertex above would pin the trail's
+  // last point to the render origin: a red line from your history straight
+  // into whatever is being viewed. The avatar hides under a focus; its trail
+  // does too.
+  if (!geometry || focus !== null) return null
 
   return (
     <>

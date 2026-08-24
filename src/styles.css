@@ -3347,12 +3347,21 @@ kbd {
 }
 
 .linescrub .explorer__body {
-  border-color: rgba(247, 147, 26, 0.35);
-  /* The meta row's content changes length between PORT and LANDFALL stops;
+  /* The border stays the chain explorer's colour on purpose: the two
+     expanded rails are the same instrument pointed at different lines.
+     The meta row's content changes length between PORT and LANDFALL stops;
      a fixed body width keeps the rail from resizing under the pointer. */
   width: 380px;
   max-width: calc(100vw - 28px);
   box-sizing: border-box;
+}
+
+/* The rail stretches to fill the row so the fast-forward button is the
+   rightmost thing in the UI, and the grab ball keeps clear air between
+   itself and the step buttons. */
+.linescrub .explorer__rail {
+  max-width: none;
+  margin: 0 1rem;
 }
 
 .linescrub .explorer__type {
@@ -3369,17 +3378,25 @@ kbd {
   white-space: nowrap;
 }
 
+/* The clear X docks onto SET DESTINATION's right edge as an attachment, so
+   the pair reads as one control and the X never floats on its own line. */
 .linescrub__clear {
   font-family: inherit;
   font-size: 9px;
   line-height: 1;
-  padding: 3px 6px;
-  border-radius: 5px;
+  padding: 3px 7px;
+  border-radius: 0 5px 5px 0;
   color: var(--danger);
   background: transparent;
   border: 1px solid var(--danger);
+  border-left: 0;
   cursor: pointer;
   touch-action: none;
+}
+
+.linescrub__set--attached {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .linescrub__kind--port {
@@ -3401,6 +3418,7 @@ kbd {
 
 .linescrub__info {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
@@ -3409,9 +3427,7 @@ kbd {
 .linescrub__actions {
   margin-left: auto;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-end;
+  align-items: stretch;
   flex-shrink: 0;
 }
 
@@ -3503,4 +3519,36 @@ kbd {
 
 .hyper__btn--earth:hover:not(:disabled) {
   background: rgba(47, 129, 247, 0.16);
+}
+
+/* VIEW NEAREST STOP: one full-width action under the station readout, in the
+   station's bitcoin orange so it reads as part of that group. */
+.hyper__btn--view {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  text-align: center;
+  color: #f7931a;
+  border-color: rgba(247, 147, 26, 0.5);
+  background: rgba(247, 147, 26, 0.06);
+}
+
+.hyper__btn--view:hover:not(:disabled) {
+  background: rgba(247, 147, 26, 0.16);
+}
+
+/* The group headings borrow the scrubber's voice (the world font at 9px):
+   the station in bitcoin orange, the destination in selected-block yellow. */
+.hyper__kicker {
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.hyper__kicker--nearest {
+  color: #f7931a;
+}
+
+.hyper__kicker--destination {
+  color: #ffff00;
 }

@@ -456,7 +456,9 @@ body {
   position: absolute;
   top: 12px;
   left: 8px;
-  z-index: 2;
+  /* Above the 3D compass (10) and its rotation submenu (101): the
+     instrument stack is what is being read, nothing may cover it. */
+  z-index: 102;
   pointer-events: none;
   display: flex;
   flex-direction: column;

@@ -3,8 +3,9 @@
  *
  * DECK-0001: hyperspace is a one-dimensional transit line threaded through
  * cyberspace by proof of work. While the identity is riding it (transit is
- * set) or the user is scrubbing the line (scrubHeight is set), the
- * environment should feel different.
+ * set) the environment should feel different; browsing the line instead gets
+ * per-block bursts (StopBurst), so the streaks read as living inside the
+ * blocks and boarding puts you among them.
  *
  * The first version was a full-screen additive cone: every pixel of every
  * frame paid transparent overdraw and then fed the bloom pass, which is why
@@ -23,7 +24,6 @@ import {
   ShaderMaterial,
 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
-import { useHyperspace } from '../store/useHyperspace'
 
 /** How many streaks; one draw call regardless. */
 const STREAKS = 420
@@ -80,12 +80,11 @@ const fragmentShader = /* glsl */ `
 `
 
 export function HyperspaceCone(): JSX.Element | null {
-  // The sky shows while the identity has boarded the line and not yet
-  // arrived (transit), or the user is scrubbing the line for a destination
-  // (scrubHeight). Both are browsing hyperspace, so both get its sky.
-  const inTransit = useCyberspace((s) => s.transit) !== null
-  const scrubbing = useHyperspace((s) => s.scrubHeight) !== null
-  const active = inTransit || scrubbing
+  // The sky belongs to being IN hyperspace: it shows only while boarded and
+  // not yet arrived. Browsing the line gets per-block bursts (StopBurst)
+  // instead, so the streaks read as living inside the blocks and boarding
+  // puts you among them.
+  const active = useCyberspace((s) => s.transit) !== null
 
   const geometry = useMemo(() => {
     const seeds = new Float32Array(STREAKS * 2)

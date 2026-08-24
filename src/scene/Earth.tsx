@@ -24,6 +24,7 @@ import { useMemo } from 'react'
 import { EARTH } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { ownHyperspaceView } from '../store/useHyperspace'
 import { WorldLabel } from './WorldLabel'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
@@ -86,6 +87,23 @@ export function Earth({ axes }: Props): JSX.Element | null {
 
   return (
     <group position={globe.centre}>
+      {/* The planet is drawn as wireframe, but it must still be a solid to
+          the depth buffer and the raycaster: this sphere writes depth without
+          colour, so far-hemisphere stops stop showing through the surface,
+          and a click on the globe recentres the orbit on Earth instead of
+          falling through to whatever point cloud is behind it. Slightly
+          under the true radius so surface landfalls are not z-fought away. */}
+      <mesh
+        onClick={(e) => {
+          if (e.delta > 8) return
+          e.stopPropagation()
+          ownHyperspaceView()
+          useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
+        }}
+      >
+        <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
+        <meshBasicMaterial colorWrite={false} />
+      </mesh>
       <mesh>
         <sphereGeometry args={[globe.radius, 48, 24]} />
         <meshBasicMaterial color={EARTH} wireframe transparent opacity={0.32} toneMapped={false} />

@@ -323,7 +323,15 @@ export function HyperspacePanel(): JSX.Element {
       </div>
       <button
         className="hyper__btn hyper__btn--earth"
-        onClick={() => { ownHyperspaceView(); useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52) }}
+        onClick={() => {
+          ownHyperspaceView()
+          const centre = { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }
+          if (destStop && destStop.kind === 'landfall') {
+            useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
+          } else {
+            useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
+          }
+        }}
       >EARTH</button>
       {viewOwned && (
         <button className="hyper__btn hyper__btn--earth" onClick={() => exitHyperspaceView()}>RETURN</button>

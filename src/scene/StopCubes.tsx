@@ -102,16 +102,18 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
           ) : null,
         )}
       </group>
-      {cubes.map(({ stop, centre }) => (
-        <WorldLabel
-          key={`l${stop.height}`}
-          text={`BLOCK ${stop.height}`}
-          color={stop.height === destination ? DEST_COLOR : CUBE_COLOR}
-          at={[centre[0], centre[1] + side * 0.9 + 0.3, centre[2]]}
-          px={11}
-          opacity={stop.height === destination ? 0.95 : 0.7}
-        />
-      ))}
+      {cubes
+        .filter(({ stop }) => stop.height === destination)
+        .map(({ stop, centre }) => (
+          <WorldLabel
+            key={`l${stop.height}`}
+            text={`BLOCK ${stop.height}`}
+            color={DEST_COLOR}
+            at={[centre[0], centre[1] + side * 0.9 + 0.3, centre[2]]}
+            px={11}
+            opacity={0.95}
+          />
+        ))}
     </>
   )
 }

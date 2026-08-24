@@ -31,6 +31,7 @@ import { GRID_RADIUS, claimScreenAxes, originShift, type Position } from '../lib
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
+import { useHyperspace } from '../store/useHyperspace'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
@@ -42,6 +43,7 @@ import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
+import { StopBurst } from './StopBurst'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
@@ -74,7 +76,10 @@ function World(): JSX.Element {
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const win = useViewWindow()
-  const volume = useTerrainVolume(win, axes)
+  // The gibson K field is meaningless wallpaper while an Earth or hyperspace
+  // view holds the camera, and its scans are real CPU: suspend both together.
+  const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
+  const volume = useTerrainVolume(win, axes, hyperView)
   const targets = useTargets()
 
   return (
@@ -84,7 +89,7 @@ function World(): JSX.Element {
       <TargetProjector axes={axes} targets={targets} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      <ShaderPointField volume={volume} win={win} />
+      {!hyperView && <ShaderPointField volume={volume} win={win} />}
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
       <Earth axes={axes} />
@@ -92,6 +97,7 @@ function World(): JSX.Element {
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />
       <StopCubes axes={axes} />
+      <StopBurst axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />

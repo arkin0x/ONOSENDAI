@@ -214,6 +214,12 @@ function Rig(): JSX.Element {
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
   const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
+  // Scrubbing the chain moves the anchor along history in steps that can be
+  // thousands of cells: the camera would stay parked (the orbit clamp holds
+  // it at maxDistance) while the place being looked at runs away. History is
+  // a cut, not a journey, so every explore step re-frames at START_DISTANCE,
+  // the same framing the app loads with.
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -271,7 +277,8 @@ function Rig(): JSX.Element {
     locked.current = true
     prevOrigin.current = null
     c.update()
-  }, [view, genesisId, focusPubkey, focusPoint])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, genesisId, focusPubkey, focusPoint, exploreIndex])
 
   useFrame((_, dt) => {
     const c = controls.current

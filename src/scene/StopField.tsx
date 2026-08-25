@@ -30,6 +30,7 @@ import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, p
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
 import { coverageRuns } from '../lib/hyperspace/station'
+import { drawnSet, hashHeight, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
@@ -46,9 +47,11 @@ const REACH = GRID_RADIUS * 8
  * Hard ceiling on points actually built. The chain is near a million blocks;
  * a full-cube view puts half of them (one plane's worth) in range at once, and
  * a million-vertex transparent point cloud under bloom is overdraw the frame
- * budget does not have. Past the cap the field is decimated to every Nth stop,
- * which preserves the cloud's shape — the positions are hash-uniform, so a
- * stride is as unbiased a sample as any.
+ * budget does not have. Past the cap the field keeps the stops whose hashed
+ * heights sort smallest (sample.ts): deterministic per block and nested as
+ * the line grows, so the sample fills in and thins at the margin but never
+ * reshuffles. The positions are hash-uniform, so a height-keyed subset is
+ * as unbiased a sample as any.
  */
 const MAX_POINTS = 120_000
 
@@ -56,7 +59,7 @@ const MAX_POINTS = 120_000
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
  * so 120k of them read as dust; landfalls crowd one planet's surface, and at
  * any zoom that shows the globe a generous budget paints it solid orange.
- * A hash-uniform stride down to this many, drawn attenuated at a fixed
+ * An identity-hash sample down to this many, drawn attenuated at a fixed
  * world size, keeps the crust reading as individual dots at every zoom.
  */
 const MAX_LANDFALL_POINTS = 9_000
@@ -100,8 +103,6 @@ interface Built {
   geometry: BufferGeometry
   /** Parallel to the geometry's vertices, so a picked index maps to its stop's height. */
   heights: number[]
-  /** 1 = every stop in range is drawn; N = every Nth survived the cap. */
-  stride: number
   /** The aligned origin the positions were computed against; the render
    * rebases the whole cloud by originShift when the anchor has since moved. */
   origin: Position
@@ -202,27 +203,26 @@ export function StopField({ axes }: Props): JSX.Element | null {
       return
     }
 
-    // Decimate BEFORE decoding: the run total already bounds the in-range
-    // population, so sampling down to about twice the point budget cuts a
-    // dense view's decode work by an order of magnitude, and the post-filter
-    // stride below still lands the budget. Row ids are copied out up front
-    // because a background merge may re-sort perm between slices; the rows
-    // themselves never move.
-    const preStride = Math.max(1, Math.floor(runTotal / (budget * 2)))
-    const rows = new Uint32Array(Math.ceil(runTotal / preStride))
-    let w = 0
-    {
-      let i = 0
-      let next = 0
-      for (const [runStart, runEnd] of runs) {
-        for (let pos = runStart; pos < runEnd; pos++, i++) {
-          if (i === next) {
-            rows[w++] = index.perm[pos]
-            next += preStride
-          }
-        }
+    // Filter BEFORE decoding, and by identity, not position: a block is a
+    // candidate iff its hashed height clears a threshold sized to admit
+    // about twice the point budget, which keeps a dense view's decode work
+    // an order of magnitude under the population; drawnSet in finish()
+    // lands the budget exactly. The old every-Nth stride re-dealt the whole
+    // visible sample whenever the population grew or the perm re-sorted,
+    // so the crust of Earth reshuffled on every growth rebuild during the
+    // sync. A height's hash never changes, so now a drawn block stays
+    // drawn (sample.ts has the nesting argument). Row ids are still copied
+    // out up front because a background merge may re-sort perm between
+    // slices; the rows themselves never move.
+    const threshold = sampleThreshold(runTotal, budget * 2)
+    const rows: number[] = []
+    for (const [runStart, runEnd] of runs) {
+      for (let pos = runStart; pos < runEnd; pos++) {
+        const row = index.perm[pos]
+        if (hashHeight(heightAt(index, row)) < threshold) rows.push(row)
       }
     }
+    const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
     // At occupancy zooms (cells of about a metre and finer) the handful of
@@ -241,13 +241,19 @@ export function StopField({ axes }: Props): JSX.Element | null {
         commit(null)
         return
       }
-      const stride = Math.max(1, Math.ceil(kept.length / budget))
-      const count = Math.ceil(kept.length / stride)
+      // The exact drawn set, by identity: up to budget heights with the
+      // smallest hashed priorities. Deterministic and nested, so a growth
+      // rebuild adds dots and at worst evicts the largest few; the old
+      // positional stride re-dealt the entire crust instead.
+      const keptHeights = kept.map((row) => heightAt(index, row))
+      const draw = drawnSet(keptHeights, budget)
+      const count = draw.size
       const positions = new Float32Array(count * 3)
       const colors = new Float32Array(count * 3)
       const heights: number[] = new Array(count)
       let v = 0
-      for (let k = 0; k < kept.length; k += stride) {
+      for (let k = 0; k < kept.length; k++) {
+        if (!draw.has(keptHeights[k])) continue
         positions[v * 3] = centres[k * 3]
         positions[v * 3 + 1] = centres[k * 3 + 1]
         positions[v * 3 + 2] = centres[k * 3 + 2]
@@ -255,7 +261,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         colors[v * 3] = col.r
         colors[v * 3 + 1] = col.g
         colors[v * 3 + 2] = col.b
-        heights[v] = heightAt(index, kept[k])
+        heights[v] = keptHeights[k]
         v++
       }
       const geometry = new BufferGeometry()
@@ -265,13 +271,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // read what actually reached the GPU, decimation factor included.
       if (import.meta.env.DEV) {
         ;(window as unknown as { __stopField?: unknown }).__stopField = {
-          rendered: count, inRange: kept.length, stride: preStride * stride, runTotal,
+          rendered: count, inRange: kept.length, threshold, runTotal,
         }
       }
       commit({
         geometry,
         heights,
-        stride: preStride * stride,
         origin,
         anchor: { ...anchor },
         frameKey,

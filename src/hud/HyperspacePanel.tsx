@@ -130,6 +130,17 @@ export async function startRide(): Promise<void> {
     progress: { done: 0, total: blocks.length, etaMs: null },
     path: { fromHeight: station.stop.height, toHeight: destination },
   })
+  // The ride is a spectacle: pull back to the whole cube so the path can be
+  // watched threading through it (RidePath). RETURN undoes the seat; the
+  // proof neither knows nor cares where the camera sits.
+  ownHyperspaceView()
+  markViewedStop(null)
+  useCyberspace.getState().focusOn(
+    { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n },
+    plane,
+    'THE RIDE',
+    81,
+  )
   try {
     const { rootHex, mp } = await computeRideProof(
       { previousEventIdHex: transit.enterEventId, blocks },

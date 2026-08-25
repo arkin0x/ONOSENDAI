@@ -117,6 +117,21 @@ export function rideVisualHeight(fromHeight: number, toHeight: number, done: num
   return fromHeight + step * k
 }
 
+/**
+ * The walked stretch of the line, oldest first, head last, capped to the
+ * most recent `cap` heights so an h18 ride cannot ask for a million-vertex
+ * trail: the comet keeps its tail, not its history.
+ */
+export function rideTrail(fromHeight: number, toHeight: number, done: number, total: number, cap: number): number[] {
+  const head = rideVisualHeight(fromHeight, toHeight, done, total)
+  const step = toHeight >= fromHeight ? 1 : -1
+  const walked = Math.abs(head - fromHeight) + 1
+  const count = Math.max(1, Math.min(walked, cap))
+  const out: number[] = new Array(count)
+  for (let i = 0; i < count; i++) out[count - 1 - i] = head - step * i
+  return out
+}
+
 export function paddedCount(n: number): number {
   if (n <= 1) return Math.max(n, 0)
   let p = 1

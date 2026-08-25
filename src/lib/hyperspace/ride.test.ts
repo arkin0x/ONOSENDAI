@@ -208,3 +208,15 @@ describe('rideVisualHeight', () => {
     expect(rideVisualHeight(10, 15, -1, 5)).toBe(10)
   })
 })
+
+import { rideTrail } from './ride'
+
+describe('rideTrail', () => {
+  it('is oldest-first with the head last, capped, in both directions', () => {
+    expect(rideTrail(10, 15, 3, 5, 100)).toEqual([10, 11, 12, 13])
+    expect(rideTrail(15, 10, 3, 5, 100)).toEqual([15, 14, 13, 12])
+    expect(rideTrail(10, 15, 3, 5, 2)).toEqual([12, 13])
+    expect(rideTrail(10, 15, 0, 5, 100)).toEqual([10])
+    expect(rideTrail(7, 7, 0, 0, 100)).toEqual([7])
+  })
+})

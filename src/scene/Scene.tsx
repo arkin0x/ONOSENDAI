@@ -45,6 +45,7 @@ import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TransitAvatar } from './TransitAvatar'
+import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
@@ -111,6 +112,7 @@ function World(): JSX.Element {
       <StopCubes axes={axes} />
       <StopBurst axes={axes} />
       <TransitAvatar axes={axes} />
+      <RidePath axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />

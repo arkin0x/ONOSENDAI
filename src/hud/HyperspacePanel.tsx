@@ -43,7 +43,12 @@ import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopC
  * signed hyperjump needs the exact coordinate.
  */
 export function stopPosition(stop: Stop): Position {
-  const { x, y, z } = coordToXyz(stop.coordApprox)
+  // Exact, not approx: the float64 landfall shortcut is good to about a
+  // nanometre, which is TENS OF GIBSONS, so at human zooms an approx marker
+  // renders visibly beside the avatar standing exactly on the stop. The
+  // decimal derivation is lazy and cached per stop, and everything that
+  // calls this touches a handful of stops, not the field.
+  const { x, y, z } = coordToXyz(stopCoordExact(stop))
   return { x, y, z }
 }
 

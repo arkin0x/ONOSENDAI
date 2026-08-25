@@ -19,7 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, BufferGeometry, Float32BufferAttribute, ShaderMaterial } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
-import { pointCentre, type ViewAxes } from '../lib/space'
+import { markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
@@ -233,7 +233,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
     if (height === null) return null
     const stop = getStopByHeight(height)
     if (!stop || stopPlane(stop) !== anchorPlane) return null
-    return pointCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
+    return markerCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }
   const sustainedCentre = useMemo(
     () => centreOf(sustained),

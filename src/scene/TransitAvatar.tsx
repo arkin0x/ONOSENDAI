@@ -13,7 +13,7 @@
 import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { EdgesGeometry, IcosahedronGeometry, LineBasicMaterial } from 'three'
-import { pointCentre, type ViewAxes } from '../lib/space'
+import { markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight } from '../store/useHyperspace'
 import { rideVisualHeight } from '../lib/hyperspace/ride'
@@ -47,7 +47,7 @@ export function TransitAvatar({ axes }: { axes: ViewAxes }): JSX.Element | null 
   const height = rideVisualHeight(path.fromHeight, path.toHeight, progress.done, progress.total)
   const stop = getStopByHeight(height)
   if (!stop || stopPlane(stop) !== anchorPlane) return null
-  const centre = pointCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
+  const centre = markerCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)
 
   // Sized like the stop cubes: honest at gibson scale, clamped to a landmark
   // at planetary zoom, so the ghost reads beside the blocks it is passing.

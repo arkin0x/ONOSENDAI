@@ -151,6 +151,27 @@ export function pointCentre(
 }
 
 /**
+ * Above this scale a stop marker is part of a distribution and renders as a
+ * continuous point (pointCentre); at or below it (cells of about a metre
+ * and finer) a stop is a place an avatar stands, so its marker snaps to its
+ * cell exactly the way the avatar does. Without the snap, a marker at a
+ * coordinate is drawn on the corner FACE of its cell cube, which at gibson
+ * zoom reads as belonging to no cell at all, least of all the one the
+ * avatar standing on it occupies.
+ */
+export const OCCUPANCY_SCALE_MAX = 33
+
+/** Placement for stop markers: the cell when you could stand there, the
+ * point when it is one of half a million. */
+export function markerCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return scaleExp <= OCCUPANCY_SCALE_MAX
+    ? cellCentre(p, origin, scaleExp, axes)
+    : pointCentre(p, origin, scaleExp, axes)
+}
+
+/**
  * How far every render coordinate moves when the render origin is re-anchored
  * from `prev` to `next`, per screen axis, in cells.
  *

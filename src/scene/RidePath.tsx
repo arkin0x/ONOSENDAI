@@ -15,11 +15,17 @@
  */
 import { useEffect, useMemo } from 'react'
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Line, LineBasicMaterial } from 'three'
-import { pointCentre, type ViewAxes } from '../lib/space'
+import { coordToXyz } from 'cyberspace-core'
+import { pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight } from '../store/useHyperspace'
 import { rideTrail } from '../lib/hyperspace/ride'
-import { stopPosition, useRideRun } from '../hud/HyperspacePanel'
+import { useRideRun } from '../hud/HyperspacePanel'
+
+function approxPosition(coord: bigint): Position {
+  const { x, y, z } = coordToXyz(coord)
+  return { x, y, z }
+}
 
 /** The comet keeps this much tail; older stops have already been proven. */
 const MAX_TRAIL = 4096
@@ -74,7 +80,10 @@ export function RidePath({ axes }: { axes: ViewAxes }): JSX.Element | null {
       // Every passed block has a stop (the ride refused to start without its
       // hash), but a mid-ride index rebuild can be briefly behind: reuse the
       // previous vertex rather than stitching in the origin.
-      const c = stop ? pointCentre(stopPosition(stop), origin, scaleExp, axes) : last
+      // Approx on purpose: the trail is thousands of stops at cube zoom,
+      // where the float shortcut's nanometre error is invisible, and the
+      // exact decimal derivation would cost seconds across the tail.
+      const c = stop ? pointCentre(approxPosition(stop.coordApprox), origin, scaleExp, axes) : last
       last = c
       pos.setXYZ(i, c[0], c[1], c[2])
       // Rainbow along the trail, brightest at the head, dying to black down

@@ -45,7 +45,7 @@ import {
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
-import {
+import { OCCUPANCY_SCALE_MAX,
   MAX_SCALE_EXP,
   alignTo,
   canonicalQuaternion,
@@ -1365,9 +1365,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // sub-cell fraction (always positive, so always the same corner). Frame
     // the point itself, with the same continuous math it is drawn with.
     if (focus !== null) {
+      // Same policy as markerCentre: at occupancy zooms the marker snaps to
+      // its cell, whose cube centre is the aligned origin itself.
+      if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
       const focusOrigin = alignedOrigin(anchor, scaleExp)
       return [focusAxes.right, focusAxes.up, focusAxes.out].map(
-        (a) => cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) * a.dir,
+        (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
     // Off your own head there is no cursor to frame; the camera sits on the anchor.

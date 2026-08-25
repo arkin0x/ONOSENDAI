@@ -131,13 +131,44 @@ export function cellCentre(
  * the +X+Y+Z octant of the globe and floated off the -X-Y-Z one. Markers
  * keep their sub-cell position instead, the same continuous math the Earth
  * sphere's own centre uses, so the shell hugs the wireframe exactly.
+ *
+ * The half-cell shift is the render convention made consistent: a cell cube
+ * drawn at integer index i spans [i - 0.5, i + 0.5], representing the
+ * points [i * 2^s, (i + 1) * 2^s). A raw fractional delta would therefore
+ * draw a point with axis fraction above one half inside the NEXT cell's
+ * cube: standing exactly on a stop, the stop rendered outside your own
+ * sector cage. Shifted, a point at its cell's corner sits on the cube's
+ * face and a point mid-cell sits at the cube's centre, which is where the
+ * things the cell convention draws (the avatar, the cursor, the cage) say
+ * they are.
  */
 export function pointCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
 ): [number, number, number] {
   return [axes.right, axes.up, axes.out].map((a) =>
-    cellDelta(p[a.axis], origin[a.axis], scaleExp) * a.dir,
+    (cellDelta(p[a.axis], origin[a.axis], scaleExp) - 0.5) * a.dir,
   ) as [number, number, number]
+}
+
+/**
+ * Above this scale a stop marker is part of a distribution and renders as a
+ * continuous point (pointCentre); at or below it (cells of about a metre
+ * and finer) a stop is a place an avatar stands, so its marker snaps to its
+ * cell exactly the way the avatar does. Without the snap, a marker at a
+ * coordinate is drawn on the corner FACE of its cell cube, which at gibson
+ * zoom reads as belonging to no cell at all, least of all the one the
+ * avatar standing on it occupies.
+ */
+export const OCCUPANCY_SCALE_MAX = 33
+
+/** Placement for stop markers: the cell when you could stand there, the
+ * point when it is one of half a million. */
+export function markerCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return scaleExp <= OCCUPANCY_SCALE_MAX
+    ? cellCentre(p, origin, scaleExp, axes)
+    : pointCentre(p, origin, scaleExp, axes)
 }
 
 /**

@@ -26,13 +26,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
-import { GRID_RADIUS, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
-import { heightAt, kindIsPort, xyzAt } from '../lib/hyperspace/compactIndex'
+import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
 import { coverageRuns } from '../lib/hyperspace/station'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
+import { stopCoordExact } from '../lib/hyperspace/stops'
+import { coordToXyz } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
 const TAP_SLOP = 8
@@ -223,6 +225,13 @@ export function StopField({ axes }: Props): JSX.Element | null {
     }
 
     const origin = alignedOrigin(anchor, scaleExp)
+    // At occupancy zooms (cells of about a metre and finer) the handful of
+    // stops in range render from their EXACT coordinates, snapped to their
+    // cells like the avatar: the float shortcut's nanometre error is tens
+    // of gibsons, which at these zooms put the dot for the block you are
+    // standing on visibly beside you. The coverage cull guarantees the
+    // exact decimal derivations stay countable on one hand here.
+    const occupancy = scaleExp <= OCCUPANCY_SCALE_MAX
     const kept: number[] = []
     const centres: number[] = []
     let i = 0
@@ -285,8 +294,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
           // anchor's plane shows one cloud instead of superimposing two
           // unrelated ones; the kind byte IS the plane bit.
           if (kindIsPort(index, row) !== wantPort) continue
-          const d = xyzAt(index, row)
-          const c = pointCentre(d, origin, scaleExp, axes)
+          const d = occupancy ? coordToXyz(stopCoordExact(stopAt(index, row))) : xyzAt(index, row)
+          const c = occupancy ? cellCentre(d, origin, scaleExp, axes) : pointCentre(d, origin, scaleExp, axes)
           if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
           kept.push(row)
           centres.push(c[0], c[1], c[2])

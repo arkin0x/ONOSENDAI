@@ -72,8 +72,11 @@ export function Earth({ axes }: Props): JSX.Element | null {
     if (radius * 2 > GRID_RADIUS * 8 || radius * 2 < 1) return null
 
     const origin = alignedOrigin(position, scaleExp)
+    // Minus one half: the continuous family's cell-cube convention, the same
+    // shift pointCentre applies, so the globe and its landfall shell stay
+    // glued to each other AND to the cell-drawn world around them.
     const centre = [axes.right, axes.up, axes.out].map(
-      (a) => cellDelta(CENTRE, origin[a.axis], scaleExp) * a.dir,
+      (a) => (cellDelta(CENTRE, origin[a.axis], scaleExp) - 0.5) * a.dir,
     ) as [number, number, number]
 
     // Off in the dark somewhere. Building a sphere nobody can see is wasted

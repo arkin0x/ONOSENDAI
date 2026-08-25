@@ -13,7 +13,9 @@
  * needs no label.
  */
 
+import { Earth } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
+import { viewEarth } from './HyperspacePanel'
 import type { RotateDirection } from '../lib/space'
 
 interface Props {
@@ -35,12 +37,16 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
 
   return (
     <div className="viewmenu" role="dialog" aria-label="View controls">
+      {/* Each arrow fires the OPPOSITE rotation: the pad steers the scene,
+          not the camera. Pressing right should bring the world's right side
+          around to face you, which is what dragging the camera LEFT does;
+          wiring the arrows like the drag made every press feel mirrored. */}
       <div className="viewmenu__pad">
-        <button className="viewmenu__key viewmenu__key--up" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('up'))} aria-label="Rotate up">▲</button>
-        <button className="viewmenu__key viewmenu__key--left" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('left'))} aria-label="Rotate left">◀</button>
+        <button className="viewmenu__key viewmenu__key--up" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('down'))} aria-label="Rotate up">▲</button>
+        <button className="viewmenu__key viewmenu__key--left" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('right'))} aria-label="Rotate left">◀</button>
         <span className="viewmenu__hub" aria-hidden="true">ROT</span>
-        <button className="viewmenu__key viewmenu__key--right" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('right'))} aria-label="Rotate right">▶</button>
-        <button className="viewmenu__key viewmenu__key--down" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('down'))} aria-label="Rotate down">▼</button>
+        <button className="viewmenu__key viewmenu__key--right" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('left'))} aria-label="Rotate right">▶</button>
+        <button className="viewmenu__key viewmenu__key--down" onContextMenu={noCallout.onContextMenu} onPointerDown={press(rotate('up'))} aria-label="Rotate down">▼</button>
       </div>
 
       <div className="viewmenu__row">
@@ -65,7 +71,15 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
         >{plane === 0 ? 'D-SPACE' : 'I-SPACE'}</button>
       </div>
 
-      <button className="viewmenu__close" onContextMenu={noCallout.onContextMenu} onPointerDown={press(onClose)} aria-label="Close view controls">CLOSE</button>
+      {/* EARTH replaces CLOSE: the menu already dismisses on a canvas tap
+          or a second compass tap, and going to the planet is worth a seat
+          this prominent. Same styling and behaviour as the panel's button;
+          navigating away also folds the menu. */}
+      <button
+        className="hyper__btn hyper__btn--earth"
+        onContextMenu={noCallout.onContextMenu}
+        onPointerDown={press(() => { onClose(); viewEarth() })}
+      ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
     </div>
   )
 }

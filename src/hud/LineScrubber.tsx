@@ -16,7 +16,7 @@ import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
-import { nearestStops } from '../lib/hyperspace/station'
+import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
 /** The coarse step: the line is ~900k blocks, single steps are the last few. */
@@ -33,14 +33,17 @@ export function LineScrubber(): JSX.Element {
   const plane = useCyberspace((s) => s.plane)
 
   // Your station: the block boarding sets you down at, recomputed as blocks
-  // sync in. The overlay leads with it because every ride runs FROM here.
+  // sync in. findStation, not a plain nearest query: §4.2 breaks distance
+  // ties to the lowest height, and at void distances the shells are coarse
+  // enough that ties are the normal case, so a sort-order nearest can name
+  // a different block than the one the ride actually departs from.
   const station = useMemo(() => {
     void indexVersion
     const index = getStopIndex()
     if (index.permCount === 0) return undefined
     const here = xyzToCoord(position.x, position.y, position.z, plane)
-    return nearestStops(index, here, 1)[0]?.stop
-  }, [position, plane, indexVersion])
+    return findStation(index, here, tipHeight ?? Number.MAX_SAFE_INTEGER)?.stop
+  }, [position, plane, indexVersion, tipHeight])
 
   const viewStation = (): void => {
     if (!station) return
@@ -145,7 +148,7 @@ export function LineScrubber(): JSX.Element {
 
       {open && ready && (
         <div className="explorer__body">
-          <span className="linescrub__headline">FROM NEAREST BLOCK</span>
+          <span className="linescrub__headline">FROM YOUR STATION</span>
           <div className="linescrub__fromrow">
             <span className="explorer__type">{station ? `BLOCK ${station.height}` : 'NO BLOCKS YET'}</span>
             {station && (

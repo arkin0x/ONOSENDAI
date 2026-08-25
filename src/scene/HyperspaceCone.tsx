@@ -24,6 +24,7 @@ import {
   ShaderMaterial,
 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
+import { useRideRun } from '../hud/HyperspacePanel'
 
 /** How many streaks; one draw call regardless. */
 const STREAKS = 420
@@ -40,14 +41,16 @@ const vertexShader = /* glsl */ `
   attribute float aLen;
   attribute float aEnd;
   uniform float uTime;
+  uniform float uBoost;
   varying float vSeed;
   varying float vFade;
 
   void main() {
     // The streak's head position cycles toward the camera; the tail trails
     // behind it by aLen. Everything lives in camera-pinned group space where
-    // -Z is ahead.
-    float speed = 260.0 + aSeed * 340.0;
+    // -Z is ahead. Boost is the ride: boarded idles at a drift, and the warp
+    // gathers speed as the proof accumulates.
+    float speed = (260.0 + aSeed * 340.0) * (1.0 + 1.4 * uBoost);
     float zHead = -${RANGE.toFixed(1)} + mod(aSeed * ${RANGE.toFixed(1)} + uTime * speed, ${RANGE.toFixed(1)});
     float z = zHead - aEnd * aLen;
     vec3 pos = vec3(cos(aAngle) * aRadius, sin(aAngle) * aRadius, z);
@@ -61,6 +64,7 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform float uTime;
+  uniform float uBoost;
   varying float vSeed;
   varying float vFade;
 
@@ -73,9 +77,11 @@ const fragmentShader = /* glsl */ `
     // Each streak keeps one hue, slowly drifting, so the field reads as a
     // moving rainbow without strobing. Kept dim: bloom amplifies everything.
     vec3 color = hue2rgb(fract(vSeed * 7.13 + uTime * 0.03));
-    float a = vFade * 0.55;
+    // The ride brightens the field: idle boarding stays a suggestion, a
+    // proof at full tilt fills the sky.
+    float a = vFade * (0.45 + 0.4 * uBoost);
     if (a < 0.02) discard;
-    gl_FragColor = vec4(color * 0.7, a);
+    gl_FragColor = vec4(color * (0.6 + 0.35 * uBoost), a);
   }
 `
 
@@ -122,7 +128,7 @@ export function HyperspaceCone(): JSX.Element | null {
       new ShaderMaterial({
         vertexShader,
         fragmentShader,
-        uniforms: { uTime: { value: 0 } },
+        uniforms: { uTime: { value: 0 }, uBoost: { value: 0 } },
         transparent: true,
         depthWrite: false,
         blending: AdditiveBlending,
@@ -133,12 +139,19 @@ export function HyperspaceCone(): JSX.Element | null {
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
 
   const group = useRef<Group>(null)
-  useFrame((state) => {
+  useFrame((state, dt) => {
     const g = group.current
     if (!g) return
     g.position.copy(state.camera.position)
     g.quaternion.copy(state.camera.quaternion)
     material.uniforms.uTime.value = state.clock.elapsedTime
+    // Strength follows the ride: a quarter on the first leaf so starting is
+    // felt, the rest with completion, eased so leaves landing out of order
+    // never make the sky flicker.
+    const p = useRideRun.getState().progress
+    const target = p ? (p.total > 0 ? 0.25 + 0.75 * (p.done / p.total) : 1) : 0
+    const u = material.uniforms.uBoost
+    u.value += (target - u.value) * Math.min(1, dt * 2.5)
   })
 
   if (!active) return null

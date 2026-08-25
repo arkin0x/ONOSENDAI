@@ -17,7 +17,8 @@
  * is done on byte arrays for the same reason.
  *
  * Landfalls enter the index with float64-approximate coordinates (about a
- * metre of error). That cannot change a distance decided at h47 and above,
+ * nanometre of error, which is still tens of gibsons). That cannot change
+ * a distance decided at h47 and above,
  * but to be safe against ties the finalists are re-derived exactly before
  * the winner is chosen.
  */

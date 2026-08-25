@@ -12,7 +12,7 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
-import { GRID_RADIUS, pointCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
@@ -75,7 +75,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     for (const stop of candidates) {
       if (out.length >= MAX_CUBES) break
       if (stopPlane(stop) !== anchorPlane) continue
-      const centre = pointCentre(stopPosition(stop), origin, scaleExp, axes)
+      const centre = markerCentre(stopPosition(stop), origin, scaleExp, axes)
       if (Math.abs(centre[0]) > REACH || Math.abs(centre[1]) > REACH || Math.abs(centre[2]) > REACH) continue
       let crowded = false
       for (const o of out) {
@@ -112,7 +112,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   return (
     <>
       {cubes.map(({ stop, centre }) =>
-        stop.height === destination ? null : (
+        stop.height === destination || stop.height === scrubHeight ? null : (
           <mesh
             key={stop.height}
             position={centre}
@@ -131,8 +131,12 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
         ),
       )}
       <group ref={spin}>
+        {/* The scrubbed block earns the selected look too (yellow, spinning,
+            no burst): stepping the line one block at a time on Earth needs
+            the current block to stand out of the crowd. Only the chosen
+            destination keeps the label. */}
         {cubes.map(({ stop, centre }) =>
-          stop.height === destination ? (
+          stop.height === destination || stop.height === scrubHeight ? (
             <mesh
               key={stop.height}
               position={centre}

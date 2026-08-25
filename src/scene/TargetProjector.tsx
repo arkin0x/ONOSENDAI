@@ -43,7 +43,7 @@ export function TargetProjector({ axes, targets }: Props): null {
 
     for (const t of targets) {
       const [x, y, z] = [axes.right, axes.up, axes.out].map(
-        (a) => cellDelta(t.at[a.axis], origin[a.axis], s.scaleExp) * a.dir,
+        (a) => (cellDelta(t.at[a.axis], origin[a.axis], s.scaleExp) - 0.5) * a.dir,
       )
       scratch.set(x, y, z)
 

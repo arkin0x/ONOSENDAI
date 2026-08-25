@@ -683,26 +683,26 @@ describe('origin re-anchor', () => {
 
 
 describe('pointCentre', () => {
-  // What would fail silently: a floor-snapped marker cloud reads as a
-  // systematic negative-octant skew at planetary zoom, sunk into one side of
-  // the globe and floating off the other, with nothing else looking wrong.
-  const axes = viewAxes(topDownQuaternion())
+  const AX = {
+    right: { axis: 'x', dir: 1 },
+    up: { axis: 'y', dir: 1 },
+    out: { axis: 'z', dir: 1 },
+  } as never
 
-  it('keeps the sub-cell fraction cellCentre floors away', () => {
-    const origin: Position = { x: 0n, y: 0n, z: 0n }
-    const half = stepFor(4) / 2n // mid-cell at scaleExp 4
-    const p: Position = { x: half, y: half, z: half }
-    const snapped = cellCentre(p, origin, 4, axes)
-    const exact = pointCentre(p, origin, 4, axes)
-    for (let i = 0; i < 3; i++) {
-      expect(Math.abs(Math.abs(exact[i]) - 0.5)).toBeLessThan(1e-9)
-      expect(snapped[i]).toBe(0)
-    }
+  it('draws a mid-cell point at its cell cube centre', () => {
+    // Cell cubes are centred on their integer index, so the continuous
+    // family shifts by half a cell: mid-cell lands ON the integer.
+    const origin = { x: 0n, y: 0n, z: 0n }
+    expect(pointCentre({ x: 8n, y: 8n, z: 8n }, origin, 4, AX)).toEqual([0, 0, 0])
   })
 
-  it('agrees with cellCentre exactly on aligned values', () => {
-    const origin: Position = { x: 16n, y: 32n, z: 48n }
-    const p: Position = { x: 64n, y: 128n, z: 192n }
-    expect(pointCentre(p, origin, 4, axes)).toEqual(cellCentre(p, origin, 4, axes))
+  it('draws a corner point on its cell cube face, never the next cube', () => {
+    const origin = { x: 0n, y: 0n, z: 0n }
+    expect(pointCentre({ x: 0n, y: 16n, z: 31n }, origin, 4, AX)).toEqual([-0.5, 0.5, 1.4375])
+  })
+
+  it('keeps sub-cell offsets exact at scale 0', () => {
+    const origin = { x: 100n, y: 200n, z: 300n }
+    expect(pointCentre({ x: 101n, y: 202n, z: 303n }, origin, 0, AX)).toEqual([0.5, 1.5, 2.5])
   })
 })

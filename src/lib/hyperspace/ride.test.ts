@@ -191,3 +191,32 @@ describe('cost estimates', () => {
     expect(exactRidePairs(hashes)).toBe(expected)
   })
 })
+
+import { rideVisualHeight } from './ride'
+
+describe('rideVisualHeight', () => {
+  it('walks the line in order, both directions, and clamps at the ends', () => {
+    expect(rideVisualHeight(10, 15, 0, 5)).toBe(10)
+    expect(rideVisualHeight(10, 15, 3, 5)).toBe(13)
+    expect(rideVisualHeight(10, 15, 5, 5)).toBe(15)
+    expect(rideVisualHeight(15, 10, 2, 5)).toBe(13)
+    expect(rideVisualHeight(15, 10, 5, 5)).toBe(10)
+    // A zero-length ride is already at the destination.
+    expect(rideVisualHeight(7, 7, 0, 0)).toBe(7)
+    // A stray count can never walk past the destination.
+    expect(rideVisualHeight(10, 15, 9, 5)).toBe(15)
+    expect(rideVisualHeight(10, 15, -1, 5)).toBe(10)
+  })
+})
+
+import { rideTrail } from './ride'
+
+describe('rideTrail', () => {
+  it('is oldest-first with the head last, capped, in both directions', () => {
+    expect(rideTrail(10, 15, 3, 5, 100)).toEqual([10, 11, 12, 13])
+    expect(rideTrail(15, 10, 3, 5, 100)).toEqual([15, 14, 13, 12])
+    expect(rideTrail(10, 15, 3, 5, 2)).toEqual([12, 13])
+    expect(rideTrail(10, 15, 0, 5, 100)).toEqual([10])
+    expect(rideTrail(7, 7, 0, 0, 100)).toEqual([7])
+  })
+})

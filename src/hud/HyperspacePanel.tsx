@@ -21,7 +21,7 @@ import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { expectedRidePairs, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
-import { findStation, nearestStops } from '../lib/hyperspace/station'
+import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
 
@@ -43,7 +43,12 @@ import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopC
  * signed hyperjump needs the exact coordinate.
  */
 export function stopPosition(stop: Stop): Position {
-  const { x, y, z } = coordToXyz(stop.coordApprox)
+  // Exact, not approx: the float64 landfall shortcut is good to about a
+  // nanometre, which is TENS OF GIBSONS, so at human zooms an approx marker
+  // renders visibly beside the avatar standing exactly on the stop. The
+  // decimal derivation is lazy and cached per stop, and everything that
+  // calls this touches a handful of stops, not the field.
+  const { x, y, z } = coordToXyz(stopCoordExact(stop))
   return { x, y, z }
 }
 
@@ -60,11 +65,13 @@ export function formatLatLon(stop: Stop): string {
 interface RideRun {
   /** Non-null while the worker pool is computing a ride proof. */
   progress: RideProgress | null
+  /** The endpoints of the ride being proven, for the scene's transit ghost. */
+  path: { fromHeight: number; toHeight: number } | null
   /** Why the last attempt did not produce a signed hyperjump. */
   error: string | null
 }
 
-export const useRideRun = create<RideRun>(() => ({ progress: null, error: null }))
+export const useRideRun = create<RideRun>(() => ({ progress: null, path: null, error: null }))
 
 let riding = false
 let rideAbort: AbortController | null = null
@@ -123,7 +130,22 @@ export async function startRide(): Promise<void> {
   riding = true
   const controller = new AbortController()
   rideAbort = controller
-  useRideRun.setState({ error: null, progress: { done: 0, total: blocks.length, etaMs: null } })
+  useRideRun.setState({
+    error: null,
+    progress: { done: 0, total: blocks.length, etaMs: null },
+    path: { fromHeight: station.stop.height, toHeight: destination },
+  })
+  // The ride is a spectacle: pull back to the whole cube so the path can be
+  // watched threading through it (RidePath). RETURN undoes the seat; the
+  // proof neither knows nor cares where the camera sits.
+  ownHyperspaceView()
+  markViewedStop(null)
+  useCyberspace.getState().focusOn(
+    { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n },
+    plane,
+    'THE RIDE',
+    81,
+  )
   try {
     const { rootHex, mp } = await computeRideProof(
       { previousEventIdHex: transit.enterEventId, blocks },
@@ -147,7 +169,7 @@ export async function startRide(): Promise<void> {
   } finally {
     riding = false
     rideAbort = null
-    useRideRun.setState({ progress: null })
+    useRideRun.setState({ progress: null, path: null })
   }
 }
 
@@ -175,12 +197,17 @@ export function HyperspacePanel(): JSX.Element {
     return () => { alive = false }
   }, [])
 
-  // Your station candidate, live: the stop you would appear at if you boarded
-  // here. indexVersion is the store's signal that stops arrived, because the
-  // index itself is a mutable structure, not state.
+  // Your station, live: from the same findStation the ride uses, so the
+  // panel can never promise one block and depart from another. §4.1 distance
+  // is the height of the smallest aligned cube holding both points, which
+  // ties routinely far from the line; §4.2 breaks ties to the lowest height,
+  // and a plain sort-order nearest can land on a different member of the tie.
+  // indexVersion is the store's signal that stops arrived, because the index
+  // itself is a mutable structure, not state.
   const nearest = useMemo(() => {
     const here = xyzToCoord(position.x, position.y, position.z, plane)
-    return nearestStops(getStopIndex(), here, 1)[0] ?? null
+    const asOf = useHyperspace.getState().tipHeight
+    return findStation(getStopIndex(), here, asOf ?? Number.MAX_SAFE_INTEGER)
   }, [position, plane, indexVersion])
 
   // The cost estimate for the chosen destination, from the same findStation
@@ -211,7 +238,7 @@ export function HyperspacePanel(): JSX.Element {
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest block</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">Station</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -244,7 +271,7 @@ export function HyperspacePanel(): JSX.Element {
                 // scale, so the stop reads as a place you could stand at.
                 34,
               ) }}
-            >VIEW NEAREST BLOCK</button>
+            >VIEW STATION</button>
           </>
         ) : (
           <p className="legend__note">No blocks in the index yet.</p>
@@ -285,8 +312,9 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <p className="legend__note">
               STATION is where boarding sets you down: your nearest block as
-              of the synced tip. The ride runs from it to the destination; all of
-              the per-block work runs locally and resumes if interrupted.
+              of the synced tip, ties to the lowest height. The ride runs from
+              it to the destination; all of the per-block work runs locally
+              and resumes if interrupted.
             </p>
           </>
         )}
@@ -337,28 +365,21 @@ export function HyperspacePanel(): JSX.Element {
       )}
       <button
         className="hyper__btn hyper__btn--earth"
-        onClick={() => {
-          ownHyperspaceView()
-          const centre = { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }
-          if (destStop && destStop.kind === 'landfall') {
-            markViewedStop(destStop.height)
-            useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
-          } else {
-            markViewedStop(null)
-            useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
-          }
-        }}
+        onClick={viewEarth}
       ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
 
       <p className="legend__note">
-        The nearest block is your station: the block boarding sets you down
-        at. VIEW NEAREST BLOCK flies the camera there; the viewing bar's
-        RETURN or Escape brings it home at your previous zoom. Boarding marks
-        your chain; the ride proves fresh work for every block passed and
-        sets you down exactly at the block. Leaving is an ordinary hop, so
-        the last mile from any block is normal movement.
+        Your STATION is your nearest block, ties to the lowest height:
+        distance is the size of the smallest aligned cube holding you both,
+        so far from the line several blocks are equally near and every
+        verifier must resolve to the same one. VIEW STATION flies the camera
+        there; the viewing bar's RETURN or Escape brings it home at your
+        previous zoom. Boarding marks your chain; the ride proves fresh work
+        for every block passed and sets you down exactly at the block.
+        Leaving is an ordinary hop, so the last mile from any block is
+        normal movement.
       </p>
     </section>
   )
@@ -390,4 +411,21 @@ export function selectStopInScene(height: number): void {
     stopPlane(stop),
     `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
   )
+}
+
+/**
+ * Fly to Earth: the chosen landfall destination when there is one, else the
+ * planet itself. Shared by the panel's EARTH button and the view menu's.
+ */
+export function viewEarth(): void {
+  ownHyperspaceView()
+  const destination = useHyperspace.getState().destination
+  const destStop = destination !== null ? getStopByHeight(destination) : undefined
+  if (destStop && destStop.kind === 'landfall') {
+    markViewedStop(destStop.height)
+    useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
+  } else {
+    markViewedStop(null)
+    useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
+  }
 }

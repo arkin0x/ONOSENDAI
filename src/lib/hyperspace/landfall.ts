@@ -8,7 +8,8 @@
  * mapping (precision 96, ROUND_HALF_EVEN, the exact PI_STR, Taylor sin/cos),
  * with every operation performed in the order the DECK lists.
  *
- * `landfallCoordApprox` is a float64 shortcut good to about a metre, for
+ * `landfallCoordApprox` is a float64 shortcut good to about a nanometre
+ * (float64 ulp at Earth-radius magnitudes, i.e. tens of gibsons), for
  * indexing and rendering hundreds of thousands of stops quickly. Anything a
  * verifier compares against MUST use the exact `landfallCoord`.
  */

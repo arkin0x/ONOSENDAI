@@ -46,6 +46,13 @@ export const LATTICE = '#4b3fa7'
  */
 export const EARTH = '#2f81f7'
 /**
+ * The geographic reference lines: equator and prime meridian, and their
+ * labels. This is v1's dataspace green (0x4bc9a7), revived on purpose: green
+ * against EARTH's blue is how v1 marked these two lines, and at the zooms a
+ * graticule appears nothing else is speaking green.
+ */
+export const MERIDIAN = '#4bc9a7'
+/**
  * The black sun: the one absolute bearing in cyberspace (§11.2).
  *
  * Purple per the spec, and its own constant rather than SIDESTEP, which is also

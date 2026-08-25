@@ -1,0 +1,204 @@
+/**
+ * EarthPatch.tsx - the ground: Earth's surface drawn where you actually are.
+ *
+ * The globe in Earth.tsx exists only while the whole planet fits the grid,
+ * which is scale 2^50 and coarser; below that the renderer used to draw
+ * nothing, and the planet you were standing on vanished. This fills that
+ * dead band. From 2^49 down to human scale the surface is a graticule
+ * PATCH: the piece of the true WGS84 ellipsoid within reach of the anchor,
+ * with vertices computed as float64 metre deltas from the render origin
+ * (earthSurface.ts), so precision holds at every zoom with no Decimal
+ * anywhere in the render path.
+ *
+ * The curvature is never approximated: the patch IS the ellipsoid,
+ * evaluated only where the view can see it. Across the grid the sagitta is
+ * about 0.4 cells at 2^40, 12 cells at 2^45, and the full hemispheric wrap
+ * by 2^49, so the band where Earth visibly curves is exactly the band the
+ * globe could never reach.
+ *
+ * Below human scale (2^34) the patch fades, gone at 2^31: a graticule is a
+ * map of places, and metre scale is where the view stops being about
+ * places. The fade is deliberate teaching, zooming past the shoreline is
+ * supposed to feel like leaving geography for the microscopic.
+ *
+ * Graticule lines sit on 1/2/5-decade degree rulings anchored to the
+ * planet, so moving slides you across a fixed grid rather than dragging
+ * one along. The equator and prime meridian draw in v1's green with v1's
+ * labels. A depth-only ground mesh sits a couple of cells beneath the
+ * lines, so the far side of the horizon hides what is beyond it.
+ */
+
+import { useEffect, useMemo } from 'react'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
+import { EARTH, MERIDIAN } from '../lib/palette'
+import { GRID_RADIUS, type ViewAxes } from '../lib/space'
+import { axesToLatLon } from '../lib/hyperspace/landfall'
+import {
+  EARTH_RADIUS_KM,
+  earthRadiusCells,
+  graticuleStep,
+  originCsMetres,
+  surfaceDetailOpacity,
+  surfaceVertex,
+} from '../lib/earthSurface'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { WorldLabel } from './WorldLabel'
+
+const REACH = GRID_RADIUS * 8
+
+/** Samples per graticule line: smooth at hemispheric spans, cheap always. */
+const SAMPLES = 48
+
+/** Ground occluder resolution, quads per side. */
+const GROUND_N = 24
+
+interface BuiltPatch {
+  grid: BufferGeometry
+  green: BufferGeometry | null
+  ground: BufferGeometry
+  equatorAt: [number, number, number] | null
+  meridianAt: [number, number, number] | null
+  opacity: number
+}
+
+export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
+  const anchor = useCyberspace((s) => s.anchor)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const plane = useCyberspace((s) => s.anchorPlane)
+
+  const built = useMemo((): BuiltPatch | null => {
+    // Ideaspace has no planet (§9.1); the globe regime belongs to Earth.tsx.
+    if (plane !== 0) return null
+    const opacity = surfaceDetailOpacity(scaleExp)
+    if (opacity <= 0) return null
+    if (earthRadiusCells(scaleExp) * 2 <= GRID_RADIUS * 8) return null
+
+    // Where the ground is: the geodetic foot of the anchor. If the surface
+    // is farther away than the view reaches, there is no ground in frame.
+    const geo = axesToLatLon(anchor.x, anchor.y, anchor.z)
+    const cellM = 2 ** (scaleExp - 33)
+    const reachM = REACH * cellM
+    if (Math.abs(geo.altM) > reachM * 1.5) return null
+
+    // The lat/lon window the reach can see, capped at a hemisphere: at the
+    // top of the regime the window IS the visible face of the planet, and
+    // the surface curling over the horizon is the point.
+    const radiusM = EARTH_RADIUS_KM * 1000
+    const halfLat = Math.min(90, (reachM / radiusM) * (180 / Math.PI) * 1.2)
+    const cosLat = Math.max(0.05, Math.cos((geo.lat * Math.PI) / 180))
+    const halfLon = Math.min(179.9, halfLat / cosLat)
+    const step = graticuleStep(halfLat * 2)
+
+    const originM = originCsMetres(alignedOrigin(anchor, scaleExp))
+    const at = (lat: number, lon: number, altM = 0): [number, number, number] =>
+      surfaceVertex(lat, lon, altM, originM, scaleExp, axes)
+
+    const blue: number[] = []
+    const greenArr: number[] = []
+    const polyline = (
+      out: number[], fix: 'lat' | 'lon', v: number, from: number, to: number,
+    ): void => {
+      let prev: [number, number, number] | null = null
+      for (let i = 0; i <= SAMPLES; i++) {
+        const t = from + ((to - from) * i) / SAMPLES
+        const p = fix === 'lat' ? at(v, t) : at(t, v)
+        if (prev) out.push(...prev, ...p)
+        prev = p
+      }
+    }
+
+    const latFrom = geo.lat - halfLat
+    const latTo = geo.lat + halfLat
+    const lonFrom = geo.lon - halfLon
+    const lonTo = geo.lon + halfLon
+    const latLo = Math.max(-90, latFrom)
+    const latHi = Math.min(90, latTo)
+
+    // Ruling multiples of the step, so the grid belongs to the planet. The
+    // zero rulings are the equator and the prime meridian, drawn in green.
+    for (let k = Math.ceil(latFrom / step); k * step <= latTo; k++) {
+      const lat = k * step
+      if (lat < -90 || lat > 90) continue
+      polyline(k === 0 ? greenArr : blue, 'lat', lat, lonFrom, lonTo)
+    }
+    for (let k = Math.ceil(lonFrom / step); k * step <= lonTo; k++) {
+      polyline(k === 0 ? greenArr : blue, 'lon', k * step, latLo, latHi)
+    }
+
+    // Labels ride a little above the ground so they never z-fight it.
+    const lift = 2 * cellM
+    const equatorAt = latFrom < 0 && latTo > 0 ? at(0, geo.lon, lift) : null
+    const meridianAt = lonFrom < 0 && lonTo > 0
+      ? at(Math.max(latLo, Math.min(latHi, geo.lat)), 0, lift)
+      : null
+
+    // The depth-only ground, sunk two cells under the lines: the camera can
+    // see the surface but not through it, so the far side of the horizon
+    // hides its stops the way the globe's occluder does at planetary zoom.
+    const ground: number[] = []
+    const idx: number[] = []
+    for (let r = 0; r <= GROUND_N; r++) {
+      const lat = latLo + ((latHi - latLo) * r) / GROUND_N
+      for (let c = 0; c <= GROUND_N; c++) {
+        const lon = lonFrom + ((lonTo - lonFrom) * c) / GROUND_N
+        ground.push(...at(lat, lon, -2 * cellM))
+      }
+    }
+    for (let r = 0; r < GROUND_N; r++) {
+      for (let c = 0; c < GROUND_N; c++) {
+        const a = r * (GROUND_N + 1) + c
+        const b = a + 1
+        const d = a + (GROUND_N + 1)
+        idx.push(a, b, d, b, d + 1, d)
+      }
+    }
+
+    const make = (v: number[]): BufferGeometry => {
+      const g = new BufferGeometry()
+      g.setAttribute('position', new Float32BufferAttribute(v, 3))
+      return g
+    }
+    const groundGeom = make(ground)
+    groundGeom.setIndex(idx)
+    return {
+      grid: make(blue),
+      green: greenArr.length > 0 ? make(greenArr) : null,
+      ground: groundGeom,
+      equatorAt,
+      meridianAt,
+      opacity,
+    }
+  }, [anchor, scaleExp, plane, axes])
+
+  // GPU buffers are not garbage collected; release each set when replaced.
+  useEffect(() => () => {
+    if (!built) return
+    built.grid.dispose()
+    built.green?.dispose()
+    built.ground.dispose()
+  }, [built])
+
+  if (!built) return null
+
+  return (
+    <group>
+      <mesh geometry={built.ground} frustumCulled={false} renderOrder={-1}>
+        <meshBasicMaterial colorWrite={false} side={DoubleSide} />
+      </mesh>
+      <lineSegments geometry={built.grid} frustumCulled={false}>
+        <lineBasicMaterial color={EARTH} transparent opacity={0.32 * built.opacity} toneMapped={false} />
+      </lineSegments>
+      {built.green && (
+        <lineSegments geometry={built.green} frustumCulled={false}>
+          <lineBasicMaterial color={MERIDIAN} transparent opacity={0.75 * built.opacity} toneMapped={false} />
+        </lineSegments>
+      )}
+      {built.equatorAt && (
+        <WorldLabel text="EQUATOR" color={MERIDIAN} at={built.equatorAt} px={10} opacity={0.85 * built.opacity} align="center" />
+      )}
+      {built.meridianAt && (
+        <WorldLabel text="PRIME MERIDIAN" color={MERIDIAN} at={built.meridianAt} px={10} opacity={0.85 * built.opacity} align="center" />
+      )}
+    </group>
+  )
+}

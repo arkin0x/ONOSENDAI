@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
@@ -347,9 +348,7 @@ export function HyperspacePanel(): JSX.Element {
             useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
           }
         }}
-      >{/* The astronomical symbol for Earth, matching the HUD's glyph
-          voice (the touchpad's vector marks, the badge glyphs). */}
-        <span aria-hidden="true">⊕</span> EARTH</button>
+      ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
 

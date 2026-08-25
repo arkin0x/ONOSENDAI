@@ -24,8 +24,11 @@
  * Graticule lines sit on 1/2/5-decade degree rulings anchored to the
  * planet, so moving slides you across a fixed grid rather than dragging
  * one along. The equator and prime meridian draw in v1's green with v1's
- * labels. A depth-only ground mesh sits a couple of cells beneath the
- * lines, so the far side of the horizon hides what is beyond it.
+ * labels, and the shorelines draw over the rulings from whichever Natural
+ * Earth tier the zoom deserves (coastline.ts), brighter than the grid:
+ * the graticule is reference, the coast is content. A depth-only ground
+ * mesh sits a couple of cells beneath the lines, so the far side of the
+ * horizon hides what is beyond it.
  */
 
 import { useEffect, useMemo } from 'react'
@@ -42,6 +45,8 @@ import {
   surfaceVertex,
 } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { coastTier, linesInWindow } from '../lib/coastline'
+import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
 
 const REACH = GRID_RADIUS * 8
@@ -55,6 +60,7 @@ const GROUND_N = 24
 interface BuiltPatch {
   grid: BufferGeometry
   green: BufferGeometry | null
+  coast: BufferGeometry | null
   ground: BufferGeometry
   equatorAt: [number, number, number] | null
   meridianAt: [number, number, number] | null
@@ -65,6 +71,14 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.anchorPlane)
+
+  // The shoreline tier this zoom deserves, fetched once per page. Null while
+  // the patch cannot draw at all, so ideaspace never pulls megabytes of coast.
+  const wantCoast =
+    plane === 0 &&
+    surfaceDetailOpacity(scaleExp) > 0 &&
+    earthRadiusCells(scaleExp) * 2 > GRID_RADIUS * 8
+  const coast = useCoastline(wantCoast ? coastTier(scaleExp) : null)
 
   const built = useMemo((): BuiltPatch | null => {
     // Ideaspace has no planet (§9.1); the globe regime belongs to Earth.tsx.
@@ -132,6 +146,33 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       ? at(Math.max(latLo, Math.min(latHi, geo.lat)), 0, lift)
       : null
 
+    // The shorelines crossing the window. Rendering is 3D, so a segment
+    // hopping the antimeridian is a short chord and needs no splitting;
+    // only the inside test walks longitude modulo a full turn. A segment
+    // draws when either end is inside, and the fringe a long segment adds
+    // past the edge is invisible against the reach.
+    const coastArr: number[] = []
+    if (coast) {
+      const lonSpan = lonTo - lonFrom
+      const insideLon = (lon: number): boolean => (((lon - lonFrom) % 360) + 360) % 360 <= lonSpan
+      const inside = (lat: number, lon: number): boolean =>
+        lat >= latLo && lat <= latHi && insideLon(lon)
+      for (const line of linesInWindow(coast, latLo, latHi, lonFrom, lonTo)) {
+        const n = line.pts.length / 2
+        let prev: [number, number, number] | null = null
+        let prevIn = false
+        for (let i = 0; i < n; i++) {
+          const lat = line.pts[i * 2]
+          const lon = line.pts[i * 2 + 1]
+          const curIn = inside(lat, lon)
+          const cur = curIn || prevIn ? at(lat, lon) : null
+          if (prev && cur && (curIn || prevIn)) coastArr.push(...prev, ...cur)
+          prev = cur ?? (curIn ? at(lat, lon) : null)
+          prevIn = curIn
+        }
+      }
+    }
+
     // The depth-only ground, sunk two cells under the lines: the camera can
     // see the surface but not through it, so the far side of the horizon
     // hides its stops the way the globe's occluder does at planetary zoom.
@@ -163,18 +204,20 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     return {
       grid: make(blue),
       green: greenArr.length > 0 ? make(greenArr) : null,
+      coast: coastArr.length > 0 ? make(coastArr) : null,
       ground: groundGeom,
       equatorAt,
       meridianAt,
       opacity,
     }
-  }, [anchor, scaleExp, plane, axes])
+  }, [anchor, scaleExp, plane, axes, coast])
 
   // GPU buffers are not garbage collected; release each set when replaced.
   useEffect(() => () => {
     if (!built) return
     built.grid.dispose()
     built.green?.dispose()
+    built.coast?.dispose()
     built.ground.dispose()
   }, [built])
 
@@ -188,6 +231,11 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       <lineSegments geometry={built.grid} frustumCulled={false}>
         <lineBasicMaterial color={EARTH} transparent opacity={0.32 * built.opacity} toneMapped={false} />
       </lineSegments>
+      {built.coast && (
+        <lineSegments geometry={built.coast} frustumCulled={false}>
+          <lineBasicMaterial color={EARTH} transparent opacity={0.6 * built.opacity} toneMapped={false} />
+        </lineSegments>
+      )}
       {built.green && (
         <lineSegments geometry={built.green} frustumCulled={false}>
           <lineBasicMaterial color={MERIDIAN} transparent opacity={0.75 * built.opacity} toneMapped={false} />

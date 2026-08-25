@@ -19,9 +19,10 @@
 
 import { useMemo } from 'react'
 import { BoxGeometry, EdgesGeometry } from 'three'
-import { sectorTag, xyzToSectorId, SECTOR_BITS_DEFAULT } from 'cyberspace-core'
+import { xyzToSectorId, SECTOR_BITS_DEFAULT } from 'cyberspace-core'
 import { GRID_RADIUS, cellDelta, type ViewAxes } from '../lib/space'
 import { SECTOR } from '../lib/palette'
+import { sectorName } from '../lib/sectorName'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
 
@@ -32,7 +33,11 @@ interface Props {
 export function SectorBox({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const sectorId = sectorTag(xyzToSectorId(position.x, position.y, position.z))
+  // The wall carries the NAME; the numeric triple stays in the position panel.
+  // A sector id is six digits short of unreadable and printing it is the CLI's
+  // job, but a place you can say out loud is what makes somewhere recognisable
+  // on return, which is the thing the world has to supply.
+  const name = sectorName(xyzToSectorId(position.x, position.y, position.z))
 
   const box = useMemo(() => {
     // Cells across, at the current zoom. Fractional above scaleExp 30, where a
@@ -79,7 +84,7 @@ export function SectorBox({ axes }: Props): JSX.Element | null {
           aligned subtree a sector IS, which ties it to the same ladder the
           lattice labels use rather than leaving it as an unrelated landmark. */}
       <WorldLabel
-        text={`SECTOR  h${SECTOR_BITS_DEFAULT}\n${sectorId}`}
+        text={`SECTOR  h${SECTOR_BITS_DEFAULT}\n${name}`}
         color={SECTOR}
         at={[box.centre[0], box.centre[1] + box.size / 2, box.centre[2]]}
         align="center"

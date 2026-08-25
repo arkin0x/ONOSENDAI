@@ -112,7 +112,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   return (
     <>
       {cubes.map(({ stop, centre }) =>
-        stop.height === destination ? null : (
+        stop.height === destination || stop.height === scrubHeight ? null : (
           <mesh
             key={stop.height}
             position={centre}
@@ -131,8 +131,12 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
         ),
       )}
       <group ref={spin}>
+        {/* The scrubbed block earns the selected look too (yellow, spinning,
+            no burst): stepping the line one block at a time on Earth needs
+            the current block to stand out of the crowd. Only the chosen
+            destination keeps the label. */}
         {cubes.map(({ stop, centre }) =>
-          stop.height === destination ? (
+          stop.height === destination || stop.height === scrubHeight ? (
             <mesh
               key={stop.height}
               position={centre}

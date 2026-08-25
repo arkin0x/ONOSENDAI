@@ -74,8 +74,16 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
   }
 
   const at = useMemo(() => {
+    const spawn = spawnPosition(pubkey)
+    // Only near its own doorstep: past 2^5 gibsons of separation the marker
+    // is a billboard for a place the view is not at, and at the whole-cube
+    // ride zoom it dwarfed the scene. Measured to the anchor, so spectating
+    // someone standing at their spawn still shows theirs.
+    const far = 1n << 5n
+    const gap = (a: bigint, b: bigint): bigint => (a > b ? a - b : b - a)
+    if (gap(position.x, spawn.x) > far || gap(position.y, spawn.y) > far || gap(position.z, spawn.z) > far) return null
     const origin = alignedOrigin(position, scaleExp)
-    const centre = cellCentre(spawnPosition(pubkey), origin, scaleExp, axes)
+    const centre = cellCentre(spawn, origin, scaleExp, axes)
     return Math.hypot(...centre) > REACH ? null : centre
   }, [pubkey, position, scaleExp, axes])
 

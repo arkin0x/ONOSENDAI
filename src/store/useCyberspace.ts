@@ -1367,7 +1367,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (focus !== null) {
       const focusOrigin = alignedOrigin(anchor, scaleExp)
       return [focusAxes.right, focusAxes.up, focusAxes.out].map(
-        (a) => cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) * a.dir,
+        (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
     // Off your own head there is no cursor to frame; the camera sits on the anchor.

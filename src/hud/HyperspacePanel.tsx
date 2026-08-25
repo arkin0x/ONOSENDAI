@@ -21,7 +21,7 @@ import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { expectedRidePairs, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
-import { findStation, nearestStops } from '../lib/hyperspace/station'
+import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
 
@@ -197,12 +197,17 @@ export function HyperspacePanel(): JSX.Element {
     return () => { alive = false }
   }, [])
 
-  // Your station candidate, live: the stop you would appear at if you boarded
-  // here. indexVersion is the store's signal that stops arrived, because the
-  // index itself is a mutable structure, not state.
+  // Your station, live: from the same findStation the ride uses, so the
+  // panel can never promise one block and depart from another. §4.1 distance
+  // is the height of the smallest aligned cube holding both points, which
+  // ties routinely far from the line; §4.2 breaks ties to the lowest height,
+  // and a plain sort-order nearest can land on a different member of the tie.
+  // indexVersion is the store's signal that stops arrived, because the index
+  // itself is a mutable structure, not state.
   const nearest = useMemo(() => {
     const here = xyzToCoord(position.x, position.y, position.z, plane)
-    return nearestStops(getStopIndex(), here, 1)[0] ?? null
+    const asOf = useHyperspace.getState().tipHeight
+    return findStation(getStopIndex(), here, asOf ?? Number.MAX_SAFE_INTEGER)
   }, [position, plane, indexVersion])
 
   // The cost estimate for the chosen destination, from the same findStation
@@ -233,7 +238,7 @@ export function HyperspacePanel(): JSX.Element {
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest block</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">Station</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -266,7 +271,7 @@ export function HyperspacePanel(): JSX.Element {
                 // scale, so the stop reads as a place you could stand at.
                 34,
               ) }}
-            >VIEW NEAREST BLOCK</button>
+            >VIEW STATION</button>
           </>
         ) : (
           <p className="legend__note">No blocks in the index yet.</p>
@@ -307,8 +312,9 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <p className="legend__note">
               STATION is where boarding sets you down: your nearest block as
-              of the synced tip. The ride runs from it to the destination; all of
-              the per-block work runs locally and resumes if interrupted.
+              of the synced tip, ties to the lowest height. The ride runs from
+              it to the destination; all of the per-block work runs locally
+              and resumes if interrupted.
             </p>
           </>
         )}
@@ -365,12 +371,15 @@ export function HyperspacePanel(): JSX.Element {
       {rideError && <p className="notice">{rideError}</p>}
 
       <p className="legend__note">
-        The nearest block is your station: the block boarding sets you down
-        at. VIEW NEAREST BLOCK flies the camera there; the viewing bar's
-        RETURN or Escape brings it home at your previous zoom. Boarding marks
-        your chain; the ride proves fresh work for every block passed and
-        sets you down exactly at the block. Leaving is an ordinary hop, so
-        the last mile from any block is normal movement.
+        Your STATION is your nearest block, ties to the lowest height:
+        distance is the size of the smallest aligned cube holding you both,
+        so far from the line several blocks are equally near and every
+        verifier must resolve to the same one. VIEW STATION flies the camera
+        there; the viewing bar's RETURN or Escape brings it home at your
+        previous zoom. Boarding marks your chain; the ride proves fresh work
+        for every block passed and sets you down exactly at the block.
+        Leaving is an ordinary hop, so the last mile from any block is
+        normal movement.
       </p>
     </section>
   )

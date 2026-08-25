@@ -22,7 +22,7 @@ import { xyzToCoord } from 'cyberspace-core'
 import { markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
-import { nearestStops } from '../lib/hyperspace/station'
+import { findStation } from '../lib/hyperspace/station'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
 
 const STREAKS = 220
@@ -208,6 +208,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const destination = useHyperspace((s) => s.destination)
   const viewedStop = useHyperspace((s) => s.viewedStop)
   const indexVersion = useHyperspace((s) => s.indexVersion)
+  const tipHeight = useHyperspace((s) => s.tipHeight)
 
   // The one-shot: exactly when a block is SET as the destination, never on a
   // scrub (browsing is looking, not choosing). The full warp owns transit,
@@ -217,16 +218,17 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
     if (destination !== null && !inTransit) setShot({ height: destination, bornAt: performance.now() })
   }, [destination, inTransit])
 
-  // The station: the stop nearest the avatar's committed position, i.e. the
-  // block boarding would set you down at. While the owned view is on it, it
-  // wears the aura persistently: that block is your entry point.
+  // The station: the stop boarding would set you down at, via findStation so
+  // the aura marks the SAME block the ride departs from (§4.2 ties go to the
+  // lowest height, and ties are the normal case at void distances). While the
+  // owned view is on it, it wears the aura persistently: your entry point.
   const station = useMemo(() => {
     void indexVersion
     const index = getStopIndex()
     if (index.permCount === 0) return null
     const here = xyzToCoord(position.x, position.y, position.z, plane)
-    return nearestStops(index, here, 1)[0]?.stop.height ?? null
-  }, [position, plane, indexVersion])
+    return findStation(index, here, tipHeight ?? Number.MAX_SAFE_INTEGER)?.stop.height ?? null
+  }, [position, plane, indexVersion, tipHeight])
   const sustained = viewedStop !== null && viewedStop === station ? station : null
 
   const centreOf = (height: number | null): [number, number, number] | null => {

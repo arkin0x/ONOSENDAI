@@ -21,9 +21,11 @@
  */
 
 import { useMemo } from 'react'
+import { BackSide } from 'three'
 import { EARTH } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { ownHyperspaceView } from '../store/useHyperspace'
 import { WorldLabel } from './WorldLabel'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
@@ -86,6 +88,26 @@ export function Earth({ axes }: Props): JSX.Element | null {
 
   return (
     <group position={globe.centre}>
+      {/* The planet is drawn as wireframe, but it must still be a solid to
+          the depth buffer and the raycaster. Back faces only: the far
+          hemisphere writes depth, so the camera sees INTO the globe but not
+          THROUGH it. Culling the near hemisphere keeps labels and stops
+          between the camera and the centre readable instead of cut off by
+          the curvature of a surface that is drawn as sparse wires anyway,
+          and a click on the globe still recentres the orbit on Earth.
+          Slightly under the true radius so surface landfalls are not
+          z-fought away. */}
+      <mesh
+        onClick={(e) => {
+          if (e.delta > 8) return
+          e.stopPropagation()
+          ownHyperspaceView()
+          useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
+        }}
+      >
+        <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
+        <meshBasicMaterial colorWrite={false} side={BackSide} />
+      </mesh>
       <mesh>
         <sphereGeometry args={[globe.radius, 48, 24]} />
         <meshBasicMaterial color={EARTH} wireframe transparent opacity={0.32} toneMapped={false} />

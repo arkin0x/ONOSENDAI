@@ -136,3 +136,61 @@ describe('covering box containment', () => {
     }
   })
 })
+
+/**
+ * clippedAxes names WHICH walls of a clipped box understate the extent, so the
+ * renderer can animate exactly those and leave the honest ones still.
+ */
+describe('clipped axes', () => {
+  /** Straddles a height-17 boundary on whichever axes it is stepped across. */
+  const STRADDLE = (1n << 16n) - 1n
+
+  it('is empty when nothing is clipped', () => {
+    const to: Position = { x: AVATAR.x + 3n, y: AVATAR.y - 2n, z: AVATAR.z + 1n }
+    for (const axes of VIEWS) {
+      const box = coveringBox(AVATAR, to, alignedOrigin(AVATAR, 0), 0, axes, MAX_CELLS)
+      expect(box.clipped).toBe(false)
+      expect(box.clippedAxes).toEqual([])
+    }
+  })
+
+  it('names exactly the one axis whose region outgrew the window', () => {
+    // A two-cell step across the boundary covers 131072 cells on x; y and z do
+    // not move, so their coverings stay one cell each.
+    const from: Position = { x: STRADDLE, y: 5n, z: 9n }
+    const to: Position = { x: from.x + 2n, y: from.y, z: from.z }
+    for (const axes of VIEWS) {
+      const box = coveringBox(from, to, alignedOrigin(from, 0), 0, axes, MAX_CELLS)
+      expect(box.clipped).toBe(true)
+      expect(box.clippedAxes).toEqual(['x'])
+    }
+  })
+
+  it('names every clipped axis when several outgrow the window', () => {
+    // x and y straddle the height-17 boundary; z steps within a 4-cell subtree.
+    const from: Position = { x: STRADDLE, y: STRADDLE, z: 9n }
+    const to: Position = { x: from.x + 2n, y: from.y + 2n, z: from.z + 1n }
+    for (const axes of VIEWS) {
+      const box = coveringBox(from, to, alignedOrigin(from, 0), 0, axes, MAX_CELLS)
+      // Sorted before comparing: the list is built in screen order, which the
+      // view reshuffles, while WHICH axes are clipped is view-independent.
+      expect([...box.clippedAxes].sort()).toEqual(['x', 'y'])
+    }
+  })
+
+  it('reports the same unclamped heights and ops clipped or not', () => {
+    const from: Position = { x: STRADDLE, y: STRADDLE, z: STRADDLE }
+    const to: Position = { x: from.x + 100n, y: from.y + 100n, z: from.z + 100n }
+    const origin = alignedOrigin(from, 0)
+    // Wide enough for the 131072-cell region, so nothing needs a stand-in.
+    const wide = coveringBox(from, to, origin, 0, VIEWS[0], 1_000_000)
+    const tight = coveringBox(from, to, origin, 0, VIEWS[0], MAX_CELLS)
+    expect(wide.clipped).toBe(false)
+    expect(wide.clippedAxes).toEqual([])
+    expect(tight.clipped).toBe(true)
+    expect([...tight.clippedAxes].sort()).toEqual(['x', 'y', 'z'])
+    expect(tight.heights).toEqual(wide.heights)
+    expect(tight.peak).toBe(wide.peak)
+    expect(tight.ops).toBe(wide.ops)
+  })
+})

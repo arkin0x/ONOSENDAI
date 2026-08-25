@@ -11,7 +11,8 @@
  * is down is a normal condition, not an exception.
  */
 
-import { SimplePool } from 'nostr-tools/pool'
+import { AbstractSimplePool } from 'nostr-tools/abstract-pool'
+import { verifyEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
@@ -24,7 +25,7 @@ export const CYBERSPACE_RELAY = DEFAULT_RELAY
 /** How long a publish or a one-shot query waits before giving up. */
 const MAX_WAIT_MS = 8000
 
-let pool: SimplePool | null = null
+let pool: AbstractSimplePool | null = null
 
 /**
  * Sign a relay's NIP-42 challenge with this identity's key, so a relay that
@@ -36,9 +37,23 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
   return useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
 }
 
-export function getPool(): SimplePool {
+export function getPool(): AbstractSimplePool {
   if (!pool) {
-    pool = new SimplePool()
+    // Signature checks run synchronously per arriving event, on the main
+    // thread, inside the pool. For the kind-321 anchor backfill that is a
+    // million schnorr verifications sprayed through the session as ~1 ms
+    // tasks: precisely the grain that makes an idle page judder (input
+    // gestures defer timer work, which is why dragging looked smooth).
+    // 321 has no publisher allowlist yet, so the signature proves nothing an
+    // attacker could not sign themselves; skip it there, verify everything
+    // else as before. (A publisher allowlist for anchors is the follow-up
+    // that would make relay-sourced stops authenticated at all.)
+    pool = new AbstractSimplePool({
+      verifyEvent: (ev) => (ev.kind === 321 ? true : verifyEvent(ev)),
+      // SimplePool's own default (3e3), restated because the abstract
+      // constructor requires the field.
+      maxWaitForConnection: 3000,
+    })
     // Not in SimplePool's constructor options, but the abstract pool honours it:
     // when a relay proactively sends an AUTH challenge, authenticate with it.
     ;(pool as unknown as { automaticallyAuth?: () => typeof authSign }).automaticallyAuth = () => authSign

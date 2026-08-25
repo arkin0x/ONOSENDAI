@@ -49,6 +49,7 @@ cd ../cyberspace-cli-js && npm install && npm run build
 | `P` | toggle dataspace and ideaspace |
 | `[` / `]` | chain explorer: one action back / forward (hold to repeat) |
 | `Home` / `End` | chain explorer: the spawn / the live head |
+| `H` | hyperspace line scrubber: browse the block line, set a destination |
 
 Movement is expressed in screen directions and resolved to world axes through
 the current view, so `W` is always "away from you" in any of the 24 reachable

@@ -17,17 +17,42 @@
  * shown and the thing you paid for are visibly the same object.
  */
 
-import { useMemo } from 'react'
-import { BoxGeometry, FrontSide } from 'three'
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { BoxGeometry, DoubleSide, FrontSide, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
 import { GRID_RADIUS, cellCentre, formatOps, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { ACCENT, DANGER } from '../lib/palette'
 import { MAX_COMPUTE_HEIGHT, alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
+import { useUiHints } from '../store/useUiHints'
 
 /** Clamp on the drawn extent; the reported cost is never clamped. */
 const MAX_CELLS = GRID_RADIUS * 3
+
+/** Seconds one outward breath of a clipped wall takes. */
+const WALL_CYCLE = 1.6
+
+/**
+ * Peak opacity of a breathing wall, well above the box fill's ceiling (0.09).
+ * The fill only whispers "this is a volume"; a breathing wall is the one active
+ * message in the scene, "the region continues past this face", and at fill
+ * strength it would read as a rendering artifact rather than a signal.
+ */
+const WALL_OPACITY = 0.25
+
+/** One face of the drawn box that the true region extends beyond. */
+interface Wall {
+  /** Render axis the face is perpendicular to: 0 right, 1 up, 2 out. */
+  slot: number
+  /** Which of the pair: +1 breathes toward +axis, -1 toward -axis. */
+  sign: 1 | -1
+  geometry: PlaneGeometry
+  rotation: [number, number, number]
+  /** Face centre at rest, in cells; each breath departs from here. */
+  base: [number, number, number]
+}
 
 interface Props {
   axes: ViewAxes
@@ -118,8 +143,94 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // Below it, because the cursor's own scale label hangs off the top right
       // and the two would otherwise print over each other.
       at: cellCentre(target, origin, scaleExp, axes),
+      // For the breathing walls: which faces to animate, and the extents to
+      // size their planes from.
+      size: c.size,
+      clippedAxes: c.clippedAxes,
     }
   }, [position, target, scaleExp, plane, axes, atHead])
+
+  // The HUD's zoom-out key echoes the clipped state (see useUiHints). Keyed on
+  // the boolean so it is written only when the state actually flips, never per
+  // frame and never per cursor step; the store guards once more on its side.
+  const clipped = box?.clipped ?? false
+  useEffect(() => {
+    useUiHints.getState().setCoveringClipped(clipped)
+  }, [clipped])
+  // The scene unmounting (view switch, controls torn down) must not strand the
+  // hint on with no covering box left to clear it.
+  useEffect(() => () => useUiHints.getState().setCoveringClipped(false), [])
+
+  // Walls that breathe outward on the clipped axes.
+  //
+  // A clipped box is drawn as a bracket around the endpoints, which is honest
+  // about where the region is and silent about how far it goes, and that
+  // silence was read as "small and broken" rather than "bigger than the view".
+  // So each wall perpendicular to a clipped axis repeatedly slides one cell
+  // outward while fading, then snaps back: motion pointing out of the box, on
+  // exactly the faces the true region continues through. The axis mapping is
+  // the box's own: coveringBox lays world axes out through [right, up, out],
+  // so a clipped world axis animates along the render slot that claimed it.
+  const walls = useMemo<Wall[]>(() => {
+    if (!box || !box.clipped) return []
+    const slots = [axes.right, axes.up, axes.out]
+    const out: Wall[] = []
+    for (const axis of box.clippedAxes) {
+      const slot = slots.findIndex((a) => a.axis === axis)
+      // PlaneGeometry faces +Z; rotate it to face the slot's render axis. Its
+      // extents are the face's own two render axes, so the plane is exactly
+      // the wall it stands in for.
+      const rotation: [number, number, number] =
+        slot === 0 ? [0, Math.PI / 2, 0] : slot === 1 ? [Math.PI / 2, 0, 0] : [0, 0, 0]
+      const w = slot === 0 ? box.size[2] : box.size[0]
+      const h = slot === 1 ? box.size[2] : box.size[1]
+      for (const sign of [1, -1] as const) {
+        const base: [number, number, number] = [box.centre[0], box.centre[1], box.centre[2]]
+        base[slot] += (sign * box.size[slot]) / 2
+        out.push({ slot, sign, geometry: new PlaneGeometry(w, h), rotation, base })
+      }
+    }
+    return out
+  }, [box, axes])
+
+  useEffect(() => () => { for (const w of walls) w.geometry.dispose() }, [walls])
+
+  // One material for all walls: every wall shares one phase, so they share one
+  // opacity, and the frame loop then touches a single object. DoubleSide,
+  // unlike the fill, because a breath that carries a wall past the camera
+  // still has to be readable from behind; depthWrite off, like the fill, so a
+  // translucent plane never punches a hole in what sits behind it.
+  const wallMaterial = useMemo(() => new MeshBasicMaterial({
+    color: ACCENT,
+    transparent: true,
+    opacity: WALL_OPACITY,
+    side: DoubleSide,
+    depthWrite: false,
+    toneMapped: false,
+  }), [])
+  useEffect(() => () => wallMaterial.dispose(), [wallMaterial])
+
+  const wallMeshes = useRef<Array<Mesh | null>>([])
+
+  useFrame((state) => {
+    if (walls.length === 0) return
+    // Free-running phase rather than a start time: the breath is a state, not
+    // an event, and a cycle restarted on every cursor step would stutter.
+    const t = (state.clock.elapsedTime % WALL_CYCLE) / WALL_CYCLE
+    // Ease-out: the wall departs briskly and decelerates as it fades, which
+    // reads as emanating from the box rather than drifting off it.
+    const eased = 1 - (1 - t) ** 3
+    wallMaterial.opacity = WALL_OPACITY * (1 - eased)
+    for (let i = 0; i < walls.length; i++) {
+      const mesh = wallMeshes.current[i]
+      if (!mesh) continue
+      const w = walls[i]
+      mesh.position.set(w.base[0], w.base[1], w.base[2])
+      // One cell exactly: the breath's reach names the lattice unit, so it
+      // reads as "at least one more cell that way", not as vague drift.
+      mesh.position.setComponent(w.slot, w.base[w.slot] + w.sign * eased)
+    }
+  })
 
   if (!box) return null
 
@@ -149,6 +260,21 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           opacity={box.clipped ? 0.4 : 0.85}
         />
       </lineSegments>
+      {walls.map((w, i) => (
+        <group key={`${w.slot}${w.sign}`}>
+          <mesh
+            ref={(m) => { wallMeshes.current[i] = m }}
+            geometry={w.geometry}
+            material={wallMaterial}
+            rotation={w.rotation}
+            position={w.base}
+            frustumCulled={false}
+          />
+          {/* The remedy, written on the thing asking for it. Small and the
+              box's own blue: an instruction, not an alert. */}
+          <WorldLabel text="ZOOM OUT" color={ACCENT} at={w.base} px={11} align="center" />
+        </group>
+      ))}
       <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />
     </group>
   )

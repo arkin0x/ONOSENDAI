@@ -29,8 +29,7 @@ import {
   trailingZeros,
   viewAxes,
   type Position,
-  type ViewAxes,
-} from './space'
+  type ViewAxes, pointCentre } from './space'
 import { alignedOrigin } from '../store/useCyberspace'
 
 describe('scale helpers', () => {
@@ -679,5 +678,31 @@ describe('origin re-anchor', () => {
       const shift = originShift(alignedOrigin(AVATAR, 20), alignedOrigin(to, 20), 20, axes)
       expect(shift.map((v) => v + 0)).toEqual([0, 0, 0])
     }
+  })
+})
+
+
+describe('pointCentre', () => {
+  // What would fail silently: a floor-snapped marker cloud reads as a
+  // systematic negative-octant skew at planetary zoom, sunk into one side of
+  // the globe and floating off the other, with nothing else looking wrong.
+  const axes = viewAxes(topDownQuaternion())
+
+  it('keeps the sub-cell fraction cellCentre floors away', () => {
+    const origin: Position = { x: 0n, y: 0n, z: 0n }
+    const half = stepFor(4) / 2n // mid-cell at scaleExp 4
+    const p: Position = { x: half, y: half, z: half }
+    const snapped = cellCentre(p, origin, 4, axes)
+    const exact = pointCentre(p, origin, 4, axes)
+    for (let i = 0; i < 3; i++) {
+      expect(Math.abs(Math.abs(exact[i]) - 0.5)).toBeLessThan(1e-9)
+      expect(snapped[i]).toBe(0)
+    }
+  })
+
+  it('agrees with cellCentre exactly on aligned values', () => {
+    const origin: Position = { x: 16n, y: 32n, z: 48n }
+    const p: Position = { x: 64n, y: 128n, z: 192n }
+    expect(pointCentre(p, origin, 4, axes)).toEqual(cellCentre(p, origin, 4, axes))
   })
 })

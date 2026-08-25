@@ -54,6 +54,12 @@ body {
   display: block;
   width: 100%;
   max-width: 290px;
+  /* The width/height ATTRIBUTES exist to hand the browser the intrinsic
+     aspect ratio before the file arrives (no layout shift). Without an
+     explicit CSS height the attribute's 354px applies literally against the
+     capped width and squashes the wordmark square; auto restores the ratio
+     while keeping the reservation. */
+  height: auto;
 }
 
 .brand p {
@@ -456,7 +462,9 @@ body {
   position: absolute;
   top: 12px;
   left: 8px;
-  z-index: 2;
+  /* Above the 3D compass (10) and its rotation submenu (101): the
+     instrument stack is what is being read, nothing may cover it. */
+  z-index: 102;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -1184,9 +1192,20 @@ kbd {
 }
 
 /* ---------- Secret modal (a hidden thing, tapped in the world) ---------- */
+/* Aligned to the top of the screen, not centred: the card's height varies
+   wildly with the message, and a fixed anchor keeps the close control where
+   the hand last found it. */
+.modal--top {
+  align-items: flex-start;
+}
+
 .modal__card.secret {
   border-color: rgba(0, 229, 255, 0.5);
   max-width: 440px;
+  /* Never taller than the screen; anything longer scrolls inside. */
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 
 .secret__head {
@@ -1227,7 +1246,12 @@ kbd {
   cursor: pointer;
 }
 
+/* A long message scrolls in place instead of growing the card past every
+   control that could close it. */
 .secret__message {
+  max-height: 40vh;
+  max-height: 40dvh;
+  overflow-y: auto;
   margin: 0 0 14px;
   padding: 10px 12px;
   font-size: 14px;
@@ -2423,8 +2447,8 @@ kbd {
 
 .hamburger-menu {
   position: fixed;
-  bottom: 24px;
-  left: 24px;
+  bottom: 12px;
+  left: 12px;
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -2703,6 +2727,29 @@ kbd {
 .touchops__cancel:active,
 .touchops__commit:active {
   transform: scale(0.95);
+}
+
+/* ---------- Zoom-out hint ----------
+ *
+ * The scene's covering box is clipped: the true region extends past the
+ * drawable window and its walls are breathing outward to say so. This key is
+ * the remedy (coarser scale IS zoom out), so it echoes the message in the same
+ * accent blue as the walls, at low alpha and a slow ease. A hint about where
+ * relief lives, not an alarm about a fault. */
+.touchpad__key.is-zoomhint {
+  animation: zoomhint-pulse 2s ease-in-out infinite;
+}
+
+@keyframes zoomhint-pulse {
+  0%, 100% {
+    border-color: var(--border, #1d3547);
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0);
+  }
+  50% {
+    border-color: rgba(0, 229, 255, 0.55);
+    box-shadow: 0 0 9px 1px rgba(0, 229, 255, 0.28);
+    color: var(--accent, #00e5ff);
+  }
 }
 
 /* The compass sat bottom-centre, directly under the action row, so the controls
@@ -3228,4 +3275,363 @@ kbd {
 .login__act:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---------- Hyperspace ---------- */
+
+/* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,
+ * stacked below it. Transit and spectate are mutually exclusive in practice
+ * (boarding requires your own head), but a collision would hide the one way
+ * out of one of them, so they get separate slots anyway. */
+.hyperbar {
+  /* The pill, unchanged from its floating days, now parked in the instrument
+     stack under the hyperspace scrubber. The instruments container is
+     pointer-events: none, so the bar must opt back in or its buttons die. */
+  position: relative;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 9px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.82);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  max-width: calc(100vw - 24px);
+}
+
+.hyperbar__glyph {
+  color: #f7931a;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.hyperbar__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hyperbar__label {
+  color: #f7931a;
+  font-weight: 700;
+}
+
+.hyperbar__meta {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.hyperbar__end {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: #05070d;
+  background: #f7931a;
+  border: 1px solid #f7931a;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hyperbar__end:hover {
+  background: #ffb04d;
+}
+
+@media (max-width: 1100px) {
+  /* In the instrument stack now; nothing to reposition on a phone. */
+  .hyperbar {
+    margin-top: 6px;
+  }
+
+  .hyperbar__meta {
+    white-space: normal;
+  }
+}
+
+/* The line scrubber: ChainExplorer's rail, retinted so a glance says which
+ * one-dimensional thing you are walking. Kind colours follow the scene's
+ * assignments: ideaspace purple for ports, Earth blue for landfalls. */
+.linescrub .explorer__walked {
+  background: #f7931a;
+  box-shadow: 0 0 6px rgba(247, 147, 26, 0.6);
+}
+
+.linescrub .explorer__mark {
+  background: #f7931a;
+  box-shadow: 0 0 8px #f7931a;
+}
+
+.linescrub .explorer__body {
+  /* The border stays the chain explorer's colour on purpose: the two
+     expanded rails are the same instrument pointed at different lines.
+     The meta row's content changes length between PORT and LANDFALL stops;
+     a fixed body width keeps the rail from resizing under the pointer. */
+  width: 380px;
+  max-width: calc(100vw - 28px);
+  box-sizing: border-box;
+}
+
+/* The rail stretches to fill the row so the fast-forward button is the
+   rightmost thing in the UI, and the grab ball keeps clear air between
+   itself and the step buttons. */
+.linescrub .explorer__rail {
+  max-width: none;
+  margin: 0 1rem;
+}
+
+.linescrub .explorer__type {
+  min-width: 96px;
+}
+
+.linescrub__kind {
+  display: inline-block;
+}
+
+.linescrub .explorer__when {
+  display: inline-block;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+/* The clear X docks onto SET DESTINATION's right edge as an attachment, so
+   the pair reads as one control and the X never floats on its own line. */
+.linescrub__clear {
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 0 5px 5px 0;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-left: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linescrub__set--attached {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* The overlay reads as a ticket: FROM your station at the top, TO the block
+   the rail is pointing at. Same voice as the panel's group headings: the
+   station in bitcoin orange, the destination in selected-block yellow. */
+.linescrub__headline {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #f7931a;
+}
+
+.linescrub__headline--to {
+  color: #ffff00;
+}
+
+.linescrub__hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.18);
+  margin: 4px 0 1px;
+}
+
+.linescrub__fromrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.linescrub__view {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #f7931a;
+  background: rgba(247, 147, 26, 0.06);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linescrub__view:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.linescrub__kind--port {
+  color: var(--sidestep);
+}
+
+.linescrub__kind--landfall {
+  color: #2f81f7;
+}
+
+/* The meta area: block, kind and place stacked on the left; the action
+   buttons in their own right-aligned column so they line up under the rail's
+   end button instead of being pushed below the text. */
+.linescrub__meta {
+  /* Stacked: the block readout, then the action row left-aligned under the
+     latlon line, so SET DESTINATION sits still when the clear X docks on. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.linescrub__info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.linescrub__actions {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.linescrub__set {
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #05070d;
+  background: #f7931a;
+  border: 1px solid #f7931a;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linescrub__set:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Panel groupings and actions. */
+.hyper__group {
+  margin-top: 12px;
+}
+
+.hyper__progress {
+  margin: 10px 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+}
+
+/* Why BOARD is dark right now, in one line. */
+.hyper__why {
+  margin: 6px 0 0;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+}
+
+.hyper__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.hyper__btn {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.5);
+  cursor: pointer;
+}
+
+.hyper__btn:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.16);
+}
+
+.hyper__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.hyper__btn--ride {
+  color: #05070d;
+  background: #f7931a;
+  border-color: #f7931a;
+  font-weight: 700;
+}
+
+.hyper__btn--ride:hover:not(:disabled) {
+  background: #ffb04d;
+}
+
+.hyper__btn--abort {
+  color: #05070d;
+  background: var(--danger);
+  border-color: var(--danger);
+  font-weight: 700;
+}
+
+.hyper__btn--earth {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+  color: #2f81f7;
+  border-color: rgba(47, 129, 247, 0.5);
+  background: rgba(47, 129, 247, 0.06);
+}
+
+.hyper__btn--earth:hover:not(:disabled) {
+  background: rgba(47, 129, 247, 0.16);
+}
+
+/* VIEW NEAREST STOP: one full-width action under the station readout, in the
+   station's bitcoin orange so it reads as part of that group. */
+.hyper__btn--view {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  text-align: center;
+  color: #f7931a;
+  border-color: rgba(247, 147, 26, 0.5);
+  background: rgba(247, 147, 26, 0.06);
+}
+
+.hyper__btn--view:hover:not(:disabled) {
+  background: rgba(247, 147, 26, 0.16);
+}
+
+/* The group headings borrow the scrubber's voice (the world font at 9px):
+   the station in bitcoin orange, the destination in selected-block yellow. */
+.hyper__kicker {
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.hyper__kicker--nearest {
+  color: #f7931a;
+}
+
+.hyper__kicker--destination {
+  color: #ffff00;
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { ChainExplorer } from './hud/ChainExplorer'
+import { HyperspaceBar } from './hud/HyperspaceBar'
+import { LineScrubber } from './hud/LineScrubber'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
@@ -18,10 +20,13 @@ import { useKeyboard } from './hooks/useKeyboard'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
+import { startCalibration } from './lib/calibration'
 import { startPublisher } from './lib/publisher'
 import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
+import { useHyperspace } from './store/useHyperspace'
+import { setSyncPriority } from './lib/hyperspace/anchors'
 import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
@@ -34,7 +39,8 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); void useCyberspace.getState().initSigner() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
+
   const isMobile = useIsMobile()
   const targets = useTargets()
   // Off your own head there is nothing to drive: the movement controls stand
@@ -61,9 +67,20 @@ export default function App(): JSX.Element {
     if (inspecting && isMobile) setPanelsOpen(false)
   }, [inspecting, isMobile])
 
+  // Reading a hidden thing owns the screen: the top-aligned modal sits where
+  // the instrument stack lives, so the stack stands aside and the hamburger
+  // folds instead of layering underneath it.
+  const secretOpen = useShards((s) => s.selectedSecret !== null)
+  useEffect(() => { if (secretOpen) setPanelsOpen(false) }, [secretOpen])
+
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
+
+  // The anchor backfill runs full tilt while the panels are open (the sync
+  // numbers are being watched) and breathes between batches while they are
+  // closed, so playing in the scene gets the frames.
+  useEffect(() => { setSyncPriority(showPanels) }, [showPanels])
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
@@ -84,17 +101,22 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {!crowded && <Targets targets={targets} />}
-      {!crowded && (
+      {!crowded && !secretOpen && (
         <div className="instruments">
-          <BitReadout />
+          {/* Ordered by how often each is reached for right now: hyperspace
+              on top with its status bar, the chain under it, the XOR readout
+              last. */}
+          <LineScrubber />
+          <HyperspaceBar />
           <ChainExplorer />
+          <BitReadout />
         </div>
       )}
       {showPanels && <Hud menuOpen={crowded} />}
       <SpectateBar />
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
-      {showPad && <TouchControls onDismiss={() => setPadOpen(false)} />}
+      {showPad && <TouchControls />}
       {!crowded && !padOpen && atHead && (
         <button
           className="chip touchhint"

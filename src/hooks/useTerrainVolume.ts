@@ -21,7 +21,9 @@ import {
   BLOCK_BITS, BLOCK_SIZE, cacheSize, inflightRuns, isPending,
   onTerrainData, readK, requestRun,
 } from '../lib/terrainCache'
+import { clearRunQueue } from '../lib/workers'
 import { UNKNOWN } from '../workers/terrain.worker'
+import { CURSOR_SETTLE_MS } from './useViewWindow'
 import type { Position } from '../lib/space'
 import type { ViewWindow } from './useViewWindow'
 import type { Plane } from 'cyberspace-core'
@@ -64,7 +66,7 @@ function cellAt(
   return p
 }
 
-export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume {
+export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = false): TerrainVolume {
   // The anchor: the terrain is around whoever the scene is anchored on.
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -77,14 +79,32 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
     // Throttled rather than per-frame. A volume resolves as hundreds of small
     // runs, and rescanning every cell on each arrival is what made filling it
     // take seconds: the sampling is milliseconds, the scanning is not.
+    //
+    // The flush also waits out cursor movement. Results requested before a run
+    // of keypresses keep arriving during it, and bumping dataVersion then puts
+    // a full rescan and geometry rebuild inside the movement itself, which is
+    // exactly the stutter the settle delay exists to remove. The data loses
+    // nothing by waiting: it lands in the cache the moment it arrives, and the
+    // rescan on settle picks it all up at once.
+    let lastMove = 0
+    const unsubMove = useCyberspace.subscribe((s, prev) => {
+      if (s.cursor !== prev.cursor) lastMove = performance.now()
+    })
+    const fire = (): void => {
+      const since = performance.now() - lastMove
+      if (since < CURSOR_SETTLE_MS) {
+        flushHandle.current = window.setTimeout(fire, CURSOR_SETTLE_MS - since)
+        return
+      }
+      flushHandle.current = null
+      setDataVersion((v) => v + 1)
+    }
     const unsubscribe = onTerrainData(() => {
       if (flushHandle.current !== null) return
-      flushHandle.current = window.setTimeout(() => {
-        flushHandle.current = null
-        setDataVersion((v) => v + 1)
-      }, FLUSH_MS)
+      flushHandle.current = window.setTimeout(fire, FLUSH_MS)
     })
     return () => {
+      unsubMove()
       unsubscribe()
       if (flushHandle.current !== null) clearTimeout(flushHandle.current)
     }
@@ -92,7 +112,17 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
 
   const originKey = `${position.x},${position.y},${position.z}`
 
+  // Suspended (an Earth or hyperspace view): drop any queued terrain work so
+  // the pool goes quiet, and hand back an empty volume. The memo below keys
+  // on `suspend`, so leaving the view rebuilds and rescans automatically.
+  useEffect(() => {
+    if (suspend) clearRunQueue()
+  }, [suspend])
+
   return useMemo(() => {
+    if (suspend) {
+      return { values: new Uint8Array(VOLUME_SIZE ** 3).fill(UNKNOWN), radius: VOLUME_RADIUS }
+    }
     const t0 = performance.now()
     const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
@@ -171,5 +201,5 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes): TerrainVolume
     return { values, radius: R }
     // originKey stands in for position, whose identity changes on every move.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originKey, scaleExp, plane, axes, win.right, win.up, win.out, dataVersion])
+  }, [originKey, scaleExp, plane, axes, win.right, win.up, win.out, dataVersion, suspend])
 }

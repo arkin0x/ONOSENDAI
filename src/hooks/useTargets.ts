@@ -22,6 +22,7 @@ const EARTH_RADIUS = 6371n * 1000n * (1n << 33n)
 export function useTargets(): CyberTarget[] {
   const plane = useCyberspace((s) => s.anchorPlane)
   const spectating = useCyberspace((s) => s.spectate !== null)
+  const focused = useCyberspace((s) => s.focus !== null)
   const position = useCyberspace((s) => s.position)
   const tracked = useCyberspace((s) => s.targets)
   const focus = useCyberspace((s) => s.focusPubkey())
@@ -31,9 +32,11 @@ export function useTargets(): CyberTarget[] {
     // Tracked pubkeys first, except the one the scene is looking through: a
     // marker for the avatar you are standing on would sit on your own centre.
     for (const t of useCyberspace.getState().targetList()) if (t.id !== focus) out.push(t)
-    // While you are looking through someone else's eyes, the way home is a
-    // thing worth pointing at from anywhere.
-    if (spectating) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
+    // While the camera is anywhere you are not (someone else's eyes, a
+    // hyperspace stop, EARTH, a shard), the way home is a thing worth
+    // pointing at from anywhere; the projector's distance readout doubles as
+    // how far the viewed place is from where you actually stand.
+    if (spectating || focused) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
     // Ideaspace has no physical mapping, so there is no planet in it to point at.
     if (plane === 0) {
       out.push({
@@ -47,5 +50,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, spectating, position, tracked, focus])
+  }, [plane, spectating, focused, position, tracked, focus])
 }

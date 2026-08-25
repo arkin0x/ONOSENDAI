@@ -27,10 +27,11 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
+import { useHyperspace } from '../store/useHyperspace'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
@@ -39,6 +40,10 @@ import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { Cursor } from './Cursor'
+import { HyperspaceCone } from './HyperspaceCone'
+import { StopField } from './StopField'
+import { StopCubes } from './StopCubes'
+import { StopBurst } from './StopBurst'
 import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
@@ -64,6 +69,17 @@ const START_DISTANCE = 26
  */
 const FOLLOW_TAU = 0.09
 
+/**
+ * A click or scrub inside an owned hyperspace view is a move within one view
+ * of the world, not a change of subject, so the camera flies instead of
+ * cutting. The stretched time constant does the flying; the cell bound keeps
+ * a cross-space jump, whose start would be off in the dark anyway, an honest
+ * cut.
+ */
+const GLIDE_TAU = 0.45
+const GLIDE_SECONDS = 1.6
+const GLIDE_MAX_CELLS = 300
+
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -71,7 +87,10 @@ function World(): JSX.Element {
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
   const win = useViewWindow()
-  const volume = useTerrainVolume(win, axes)
+  // The gibson K field is meaningless wallpaper while an Earth or hyperspace
+  // view holds the camera, and its scans are real CPU: suspend both together.
+  const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
+  const volume = useTerrainVolume(win, axes, hyperView)
   const targets = useTargets()
 
   return (
@@ -81,10 +100,15 @@ function World(): JSX.Element {
       <TargetProjector axes={axes} targets={targets} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      <ShaderPointField volume={volume} win={win} />
+      {!hyperView && <ShaderPointField volume={volume} win={win} />}
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
       <Earth axes={axes} />
+      {/* The hyperspace line's stops, placed true-size like the cage and the
+          planet: ports in ideaspace, landfalls on Earth's surface. */}
+      <StopField axes={axes} />
+      <StopCubes axes={axes} />
+      <StopBurst axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
@@ -152,6 +176,7 @@ function ScreenAxes(): null {
  * a React render per frame to move one HUD element is not worth it.
  */
 function CellMetric(): null {
+  const lastCellPx = useRef<string | null>(null)
   useFrame((state) => {
     // Share the camera's orientation with the compass, which renders in its own
     // Canvas and cannot reach this one's camera.
@@ -172,7 +197,13 @@ function CellMetric(): null {
     const [tx, ty, tz] = useCyberspace.getState().cursorOffset()
     const dist = Math.max(0.001, cam.position.distanceTo({ x: tx, y: ty, z: tz } as never))
     const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    document.documentElement.style.setProperty('--cell-px', `${(projScale / dist).toFixed(2)}px`)
+    // Writing the same value re-dirties style on the root element; with the
+    // camera at rest that was a per-frame style pass for nothing.
+    const next = `${(projScale / dist).toFixed(2)}px`
+    if (next !== lastCellPx.current) {
+      lastCellPx.current = next
+      document.documentElement.style.setProperty('--cell-px', next)
+    }
   })
   return null
 }
@@ -190,6 +221,12 @@ function Rig(): JSX.Element {
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
   const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
+  // Scrubbing the chain moves the anchor along history in steps that can be
+  // thousands of cells: the camera would stay parked (the orbit clamp holds
+  // it at maxDistance) while the place being looked at runs away. History is
+  // a cut, not a journey, so every explore step re-frames at START_DISTANCE,
+  // the same framing the app loads with.
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -204,6 +241,11 @@ function Rig(): JSX.Element {
   const smooth = useRef(new Vector3())
   const prevOrigin = useRef<Position | null>(null)
   const prevScale = useRef(-1)
+  // Seconds of stretched follow left in a hyperspace fly-to, and the frame
+  // the previous focus effect saw, so the next one can tell a move within
+  // the same view from a change of subject.
+  const glideLeft = useRef(0)
+  const flyFrom = useRef<{ anchor: Position; plane: number; scaleExp: number; owned: boolean } | null>(null)
 
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
@@ -213,14 +255,37 @@ function Rig(): JSX.Element {
   useEffect(() => {
     const c = controls.current
     if (!c) return
-    const [x, y, z] = useCyberspace.getState().cursorOffset()
+    const s = useCyberspace.getState()
+    const owned = useHyperspace.getState().viewOwned
+    const prev = flyFrom.current
+    flyFrom.current = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp, owned }
+    // Same plane, same zoom, both frames owned by hyperspace: skip the
+    // re-frame. The per-frame origin shift below carries the camera into the
+    // new frame still looking at the old stop, and the stretched follow
+    // eases it onto the new one, which is the fly.
+    if (owned && prev !== null && prev.owned && prev.plane === s.anchorPlane &&
+        prev.scaleExp === s.scaleExp && s.focus !== null) {
+      const cells = Math.max(
+        Math.abs(cellDelta(s.anchor.x, prev.anchor.x, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.y, prev.anchor.y, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.z, prev.anchor.z, s.scaleExp)),
+      )
+      if (cells > 0 && cells < GLIDE_MAX_CELLS) {
+        glideLeft.current = GLIDE_SECONDS
+        locked.current = true
+        return
+      }
+    }
+    glideLeft.current = 0
+    const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
     c.object.position.set(x, y, z + START_DISTANCE)
     locked.current = true
     prevOrigin.current = null
     c.update()
-  }, [view, genesisId, focusPubkey, focusPoint])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, genesisId, focusPubkey, focusPoint, exploreIndex])
 
   useFrame((_, dt) => {
     const c = controls.current
@@ -262,8 +327,11 @@ function Rig(): JSX.Element {
     prevScale.current = s.scaleExp
 
     // Cursor movement, by contrast, IS motion, and eases. Exponential rather
-    // than a fixed fraction so the rate does not change with frame rate.
-    const k = 1 - Math.exp(-dt / FOLLOW_TAU)
+    // than a fixed fraction so the rate does not change with frame rate. A
+    // hyperspace fly-to stretches the time constant so the camera sails to
+    // the selected stop instead of flicking.
+    if (glideLeft.current > 0) glideLeft.current = Math.max(0, glideLeft.current - dt)
+    const k = 1 - Math.exp(-dt / (glideLeft.current > 0 ? GLIDE_TAU : FOLLOW_TAU))
     const dx = (tx - smooth.current.x) * k
     const dy = (ty - smooth.current.y) * k
     const dz = (tz - smooth.current.z) * k
@@ -301,7 +369,9 @@ export function Scene(): JSX.Element {
     <Canvas
       camera={{ fov: 55, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
       dpr={[1, 2]}
-      gl={{ antialias: true }}
+      // high-performance: ask for the discrete GPU and against power-save
+      // clocking, so a visually quiet frame still ships on time.
+      gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop="always"
     >
@@ -313,6 +383,9 @@ export function Scene(): JSX.Element {
       <CellMetric />
       <ScreenAxes />
       <World />
+      {/* Camera-pinned, so it lives outside the world group: hyperspace is a
+          state, not a place. Mounts only while riding or browsing the line. */}
+      <HyperspaceCone />
       {/*
         Bloom is what makes line geometry read as emitted light, and it is also
         by far the most expensive thing on screen: measured at 6fps with levels 9

@@ -122,6 +122,25 @@ export function cellCentre(
 }
 
 /**
+ * Continuous placement for point-like markers (hyperspace stops, bursts).
+ *
+ * cellCentre floor-snaps to the aligned cell, which is right for everything
+ * that lives on the movement grid but puts a marker up to a whole cell
+ * toward negative on every axis. At planetary zoom that half-cell average
+ * bias is hundreds of kilometres: the landfall cloud sat visibly sunk into
+ * the +X+Y+Z octant of the globe and floated off the -X-Y-Z one. Markers
+ * keep their sub-cell position instead, the same continuous math the Earth
+ * sphere's own centre uses, so the shell hugs the wireframe exactly.
+ */
+export function pointCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return [axes.right, axes.up, axes.out].map((a) =>
+    cellDelta(p[a.axis], origin[a.axis], scaleExp) * a.dir,
+  ) as [number, number, number]
+}
+
+/**
  * How far every render coordinate moves when the render origin is re-anchored
  * from `prev` to `next`, per screen axis, in cells.
  *

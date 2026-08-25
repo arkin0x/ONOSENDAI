@@ -78,7 +78,9 @@ function toHex(binary: string): string {
 export function BitReadout(): JSX.Element {
   // Open by default: it is the readout that explains what everything else on
   // screen costs, so it has to be seen before anyone would think to dismiss it.
-  const [open, setOpen] = useState(true)
+  // Closed by default: screen space in the instrument stack is contested,
+  // and the readout is a thing you open when you want it, not a landlord.
+  const [open, setOpen] = useState(false)
   // The window can be read as binary, where the wall is a shape, or as hex,
   // where it is compact. Tapping the open grid flips between them.
   const [hex, setHex] = useState(false)

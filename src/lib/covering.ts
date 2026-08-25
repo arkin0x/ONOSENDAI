@@ -14,7 +14,7 @@
 
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { findLcaHeight, subtreeCantorOps } from 'cyberspace-core'
-import { alignTo, cellDelta, stepFor, type Position, type ViewAxes } from './space'
+import { alignTo, cellDelta, stepFor, type AxisName, type Position, type ViewAxes } from './space'
 
 export interface Covering {
   /** Render-space centre, in cells. */
@@ -31,6 +31,13 @@ export interface Covering {
   degenerate: boolean
   /** True when the real region is too large to draw and this is a stand-in. */
   clipped: boolean
+  /**
+   * Which world axes were too large to draw. `clipped` says the box understates
+   * its extent somewhere; this says where, so the renderer can put the "bigger
+   * than your view" motion on exactly the walls that understate it and leave
+   * the honest ones still.
+   */
+  clippedAxes: AxisName[]
 }
 
 /**
@@ -57,6 +64,7 @@ export function coveringBox(
   let peak = 0
   let ops = 0
   let clipped = false
+  const clippedAxes: AxisName[] = []
 
   for (let s = 0; s < 3; s++) {
     const axis = screen[s].axis
@@ -83,13 +91,14 @@ export function coveringBox(
     // Too big to draw. Bracket the endpoints instead, which always contains both
     // however far apart they are, and never lands somewhere neither of them is.
     clipped = true
+    clippedAxes.push(axis)
     const a = cellDelta(alignTo(from[axis], scaleExp), origin[axis], scaleExp)
     const b = cellDelta(alignTo(to[axis], scaleExp), origin[axis], scaleExp)
     size[s] = Math.max(1, Math.abs(b - a) + 1)
     centre[s] = ((a + b) / 2) * screen[s].dir
   }
 
-  return { centre, size, heights, peak, ops, degenerate: peak === 0, clipped }
+  return { centre, size, heights, peak, ops, degenerate: peak === 0, clipped, clippedAxes }
 }
 
 /** Edges of an axis-aligned box given its centre and per-axis size, in cells. */

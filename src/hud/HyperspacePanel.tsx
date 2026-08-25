@@ -359,17 +359,7 @@ export function HyperspacePanel(): JSX.Element {
       )}
       <button
         className="hyper__btn hyper__btn--earth"
-        onClick={() => {
-          ownHyperspaceView()
-          const centre = { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }
-          if (destStop && destStop.kind === 'landfall') {
-            markViewedStop(destStop.height)
-            useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
-          } else {
-            markViewedStop(null)
-            useCyberspace.getState().focusOn(centre, 0, 'EARTH', 52)
-          }
-        }}
+        onClick={viewEarth}
       ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
@@ -412,4 +402,21 @@ export function selectStopInScene(height: number): void {
     stopPlane(stop),
     `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
   )
+}
+
+/**
+ * Fly to Earth: the chosen landfall destination when there is one, else the
+ * planet itself. Shared by the panel's EARTH button and the view menu's.
+ */
+export function viewEarth(): void {
+  ownHyperspaceView()
+  const destination = useHyperspace.getState().destination
+  const destStop = destination !== null ? getStopByHeight(destination) : undefined
+  if (destStop && destStop.kind === 'landfall') {
+    markViewedStop(destStop.height)
+    useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
+  } else {
+    markViewedStop(null)
+    useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
+  }
 }

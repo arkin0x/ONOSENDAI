@@ -102,6 +102,21 @@ export function rideBlocks(fromHeight: number, toHeight: number): number[] {
   return out
 }
 
+/**
+ * Where along the line the ride visually IS after `done` of `total` blocks:
+ * the height whose stop the transit ghost stands at. Progress counts
+ * completed leaves, which can finish out of order; the ghost walks the line
+ * in order anyway, because "how far along" is what the count means to a
+ * rider. A zero-length ride is already there; done is clamped so a stray
+ * count can never walk past the destination.
+ */
+export function rideVisualHeight(fromHeight: number, toHeight: number, done: number, total: number): number {
+  if (total <= 0) return toHeight
+  const step = toHeight >= fromHeight ? 1 : -1
+  const k = Math.max(0, Math.min(total, done))
+  return fromHeight + step * k
+}
+
 export function paddedCount(n: number): number {
   if (n <= 1) return Math.max(n, 0)
   let p = 1

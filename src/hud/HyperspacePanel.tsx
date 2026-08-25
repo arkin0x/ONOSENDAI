@@ -60,11 +60,13 @@ export function formatLatLon(stop: Stop): string {
 interface RideRun {
   /** Non-null while the worker pool is computing a ride proof. */
   progress: RideProgress | null
+  /** The endpoints of the ride being proven, for the scene's transit ghost. */
+  path: { fromHeight: number; toHeight: number } | null
   /** Why the last attempt did not produce a signed hyperjump. */
   error: string | null
 }
 
-export const useRideRun = create<RideRun>(() => ({ progress: null, error: null }))
+export const useRideRun = create<RideRun>(() => ({ progress: null, path: null, error: null }))
 
 let riding = false
 let rideAbort: AbortController | null = null
@@ -123,7 +125,11 @@ export async function startRide(): Promise<void> {
   riding = true
   const controller = new AbortController()
   rideAbort = controller
-  useRideRun.setState({ error: null, progress: { done: 0, total: blocks.length, etaMs: null } })
+  useRideRun.setState({
+    error: null,
+    progress: { done: 0, total: blocks.length, etaMs: null },
+    path: { fromHeight: station.stop.height, toHeight: destination },
+  })
   try {
     const { rootHex, mp } = await computeRideProof(
       { previousEventIdHex: transit.enterEventId, blocks },
@@ -147,7 +153,7 @@ export async function startRide(): Promise<void> {
   } finally {
     riding = false
     rideAbort = null
-    useRideRun.setState({ progress: null })
+    useRideRun.setState({ progress: null, path: null })
   }
 }
 

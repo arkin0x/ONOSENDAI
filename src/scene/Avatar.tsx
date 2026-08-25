@@ -41,8 +41,13 @@ export function Avatar(): JSX.Element | null {
 
   return (
     <group ref={group} position={[0, 0, 0]}>
-      <lineSegments geometry={avatarGeometry} frustumCulled={false}>
-        <lineBasicMaterial color="#ff2323" toneMapped={false} />
+      {/* No depth test, drawn after the opaque pass: you must always be able
+          to find yourself. The selected block's solid cube is exactly one
+          cell, the icosahedron inscribes it exactly, and standing on your
+          own destination erased you; now the red edges composite on top of
+          whatever shares your gibson. */}
+      <lineSegments geometry={avatarGeometry} frustumCulled={false} renderOrder={10}>
+        <lineBasicMaterial color="#ff2323" toneMapped={false} depthTest={false} />
       </lineSegments>
     </group>
   )

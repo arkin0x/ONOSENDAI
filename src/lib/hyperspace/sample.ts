@@ -88,11 +88,21 @@ export function drawnSet(heights: ArrayLike<number>, budget: number): Set<number
  * finish. The cost is an honest one, a crust that fills in rather than one
  * that arrives dense and wrong.
  *
- * Blocks are uniform in space, so the in-range count grows with the loaded
- * fraction. Never returns less than the count already in range, and falls
- * back to it when the sync has no progress to report.
+ * `inRange` and `indexed` MUST be counted over the same population: the
+ * ratio between them is the fraction of the line that falls in the current
+ * window, which is a property of the VIEW and settles immediately, because
+ * blocks are spatially uniform. Scaling the fixed final length by that
+ * fraction is therefore stable from the first frame. Dividing by a progress
+ * counter instead compares an in-range count taken from the sorted view
+ * against a larger population (rows appended but not yet merged, headers
+ * verified but not yet appended), which understates the projection,
+ * loosens the threshold, and evicts on the next rebuild what the loose
+ * threshold drew.
+ *
+ * Never returns less than the count already in range, and falls back to it
+ * when the line's length is unknown or already reached.
  */
-export function projectedPopulation(inRange: number, loaded: number, total: number): number {
-  if (loaded <= 0 || total <= loaded) return inRange
-  return Math.max(inRange, Math.round((inRange * total) / loaded))
+export function projectedPopulation(inRange: number, indexed: number, total: number): number {
+  if (indexed <= 0 || total <= indexed) return inRange
+  return Math.max(inRange, Math.round((inRange * total) / indexed))
 }

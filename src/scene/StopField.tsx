@@ -62,7 +62,7 @@ const MAX_POINTS = 120_000
  * An identity-hash sample down to this many, drawn attenuated at a fixed
  * world size, keeps the crust reading as individual dots at every zoom.
  */
-const MAX_LANDFALL_POINTS = 9_000
+const MAX_LANDFALL_POINTS = 5_000
 
 /**
  * Raycast threshold for GL_POINTS, in render units. Points have no surface, so
@@ -86,6 +86,9 @@ const SLICE_MS = 12
  * proxy for "stops in range" — positions are uniform, so range population
  * grows in proportion.
  */
+/** DEV only: the previous rebuild's drawn set, for the eviction counter. */
+let lastDrawn: { frameKey: string; set: Set<number> } | null = null
+
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
 
@@ -221,8 +224,14 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // and every later rebuild thins it: half the crust replaced on the
     // second rebuild, a quarter on the fourth. Projected, the first frame
     // already draws the final sample, so loading only ever adds dots.
-    const sync = useHyperspace.getState().sync
-    const projected = projectedPopulation(runTotal, sync.loaded, sync.total)
+    // Against permCount, not the sync's progress counter: runTotal is
+    // counted over the sorted view, so runTotal/permCount is the fraction of
+    // the line in this window and nothing else. sync.loaded counts rows the
+    // view has not merged yet and headers not yet appended, so dividing by
+    // it understates the projection and the loose threshold it produces gets
+    // evicted on the next rebuild, which is the reshuffle coming back.
+    const total = useHyperspace.getState().sync.total
+    const projected = projectedPopulation(runTotal, index.permCount, total)
     const threshold = sampleThreshold(projected, budget * 2)
     const rows: number[] = []
     for (const [runStart, runEnd] of runs) {
@@ -280,9 +289,22 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // Same dev hook style as ShaderPointField: lets the browser harness
       // read what actually reached the GPU, decimation factor included.
       if (import.meta.env.DEV) {
-        ;(window as unknown as { __stopField?: unknown }).__stopField = {
-          rendered: count, inRange: kept.length, threshold, runTotal, projected,
+        // Churn is the whole point of the sampler, so measure it rather than
+        // eyeball it: a stable field evicts nothing, and any non-zero
+        // `removed` here is a dot that was drawn and then taken away.
+        const prev = lastDrawn
+        let removed = 0
+        if (prev && prev.frameKey === frameKey) for (const h of prev.set) if (!draw.has(h)) removed++
+        lastDrawn = { frameKey, set: draw }
+        const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
+        const entry = {
+          rendered: count, inRange: kept.length, threshold, runTotal,
+          projected, permCount: index.permCount, total, removed,
         }
+        w.__stopField = entry
+        const log = (w.__stopFieldLog ??= []) as unknown[]
+        log.push(entry)
+        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${prev?.set.size} dots`, entry)
       }
       commit({
         geometry,

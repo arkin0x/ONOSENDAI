@@ -39,6 +39,7 @@ import { BlackSun } from './BlackSun'
 import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
+import { EarthPatch } from './EarthPatch'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { StopField } from './StopField'
@@ -106,6 +107,7 @@ function World(): JSX.Element {
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
       <Earth axes={axes} />
+      <EarthPatch axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />

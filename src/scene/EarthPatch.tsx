@@ -33,7 +33,7 @@
 
 import { useEffect, useMemo } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
-import { EARTH, MERIDIAN } from '../lib/palette'
+import { EARTH, LAND, MERIDIAN, OCEAN } from '../lib/palette'
 import { GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { axesToLatLon } from '../lib/hyperspace/landfall'
 import {
@@ -46,7 +46,9 @@ import {
 } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { coastTier, linesInWindow } from '../lib/coastline'
+import { landTier, trianglesInWindow } from '../lib/land'
 import { useCoastline } from '../hooks/useCoastline'
+import { useLand } from '../hooks/useLand'
 import { WorldLabel } from './WorldLabel'
 
 const REACH = GRID_RADIUS * 8
@@ -61,6 +63,7 @@ interface BuiltPatch {
   grid: BufferGeometry
   green: BufferGeometry | null
   coast: BufferGeometry | null
+  land: BufferGeometry | null
   ground: BufferGeometry
   equatorAt: [number, number, number] | null
   meridianAt: [number, number, number] | null
@@ -79,6 +82,11 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     surfaceDetailOpacity(scaleExp) > 0 &&
     earthRadiusCells(scaleExp) * 2 > GRID_RADIUS * 8
   const coast = useCoastline(wantCoast ? coastTier(scaleExp) : null)
+  // The land fill stops two tiers before the lines do (see landTier): a 50m
+  // polygon edge sits a kilometre or two off the 10m shoreline it would be
+  // drawn under, which is nothing across a continent and obvious across a
+  // bay. Lines keep their own finer tiers; only the fill bows out.
+  const land = useLand(wantCoast ? landTier(scaleExp) : null)
 
   const built = useMemo((): BuiltPatch | null => {
     // Ideaspace has no planet (§9.1); the globe regime belongs to Earth.tsx.
@@ -173,9 +181,23 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       }
     }
 
-    // The depth-only ground, sunk two cells under the lines: the camera can
-    // see the surface but not through it, so the far side of the horizon
-    // hides its stops the way the globe's occluder does at planetary zoom.
+    // The land inside the window, drawn one cell above the water and one
+    // under the lines. Only the triangles the window touches are mapped,
+    // which at a regional zoom is a handful out of the tier's thousands.
+    const landArr: number[] = []
+    if (land) {
+      const tris = trianglesInWindow(land, latLo, latHi, lonFrom, lonTo)
+      for (let i = 0; i < tris.length; i++) {
+        const v = tris[i]
+        landArr.push(...at(land.pts[v * 2], land.pts[v * 2 + 1], -1 * cellM))
+      }
+    }
+
+    // The ground, sunk two cells under the lines: the camera can see the
+    // surface but not through it, so the far side of the horizon hides its
+    // stops the way the globe's occluder does at planetary zoom. It paints
+    // the oceans while it is there, which costs nothing it was not already
+    // drawing.
     const ground: number[] = []
     const idx: number[] = []
     for (let r = 0; r <= GROUND_N; r++) {
@@ -205,12 +227,13 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       grid: make(blue),
       green: greenArr.length > 0 ? make(greenArr) : null,
       coast: coastArr.length > 0 ? make(coastArr) : null,
+      land: landArr.length > 0 ? make(landArr) : null,
       ground: groundGeom,
       equatorAt,
       meridianAt,
       opacity,
     }
-  }, [anchor, scaleExp, plane, axes, coast])
+  }, [anchor, scaleExp, plane, axes, coast, land])
 
   // GPU buffers are not garbage collected; release each set when replaced.
   useEffect(() => () => {
@@ -218,6 +241,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     built.grid.dispose()
     built.green?.dispose()
     built.coast?.dispose()
+    built.land?.dispose()
     built.ground.dispose()
   }, [built])
 
@@ -225,9 +249,21 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   return (
     <group>
-      <mesh geometry={built.ground} frustumCulled={false} renderOrder={-1}>
-        <meshBasicMaterial colorWrite={false} side={DoubleSide} />
+      <mesh geometry={built.ground} frustumCulled={false} renderOrder={-2}>
+        <meshBasicMaterial color={OCEAN} side={DoubleSide} toneMapped={false} />
       </mesh>
+      {built.land && (
+        <mesh geometry={built.land} frustumCulled={false} renderOrder={-1}>
+          <meshBasicMaterial
+            color={LAND}
+            side={DoubleSide}
+            transparent
+            opacity={0.22 * built.opacity}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
       <lineSegments geometry={built.grid} frustumCulled={false}>
         <lineBasicMaterial color={EARTH} transparent opacity={0.32 * built.opacity} toneMapped={false} />
       </lineSegments>

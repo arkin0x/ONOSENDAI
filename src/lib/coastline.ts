@@ -81,10 +81,26 @@ export function parseCoastline(buf: ArrayBuffer): Coastline {
 }
 
 /**
- * The lines whose bounds touch a lat/lon window. The window's longitudes
- * may run past +-180 (a window centred near the seam does); each line is
- * tested at its stored longitudes and shifted a full turn either way.
+ * Whether a longitude span touches a window's. The window's longitudes may
+ * run past +-180 (a window centred near the seam does), so the span is tested
+ * where it sits and shifted a full turn either way. Exported because the land
+ * fill in land.ts selects its triangles by exactly this rule, and one seam is
+ * enough to get wrong once.
  */
+export function lonOverlaps(
+  minLon: number,
+  maxLon: number,
+  lonLo: number,
+  lonHi: number,
+): boolean {
+  return (
+    (maxLon >= lonLo && minLon <= lonHi) ||
+    (maxLon + 360 >= lonLo && minLon + 360 <= lonHi) ||
+    (maxLon - 360 >= lonLo && minLon - 360 <= lonHi)
+  )
+}
+
+/** The lines whose bounds touch a lat/lon window. */
 export function linesInWindow(
   coast: Coastline,
   latLo: number,
@@ -95,11 +111,7 @@ export function linesInWindow(
   const out: CoastLine[] = []
   for (const line of coast.lines) {
     if (line.maxLat < latLo || line.minLat > latHi) continue
-    const hit =
-      (line.maxLon >= lonLo && line.minLon <= lonHi) ||
-      (line.maxLon + 360 >= lonLo && line.minLon + 360 <= lonHi) ||
-      (line.maxLon - 360 >= lonLo && line.minLon - 360 <= lonHi)
-    if (hit) out.push(line)
+    if (lonOverlaps(line.minLon, line.maxLon, lonLo, lonHi)) out.push(line)
   }
   return out
 }

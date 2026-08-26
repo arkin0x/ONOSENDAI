@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drawnSet, hashHeight, sampleThreshold } from './sample'
+import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from './sample'
 
 const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
 
@@ -88,5 +88,42 @@ describe('drawnSet', () => {
         if (h < sizes[i - 1]) expect(a.has(h)).toBe(true)
       }
     }
+  })
+})
+
+describe('projectedPopulation', () => {
+  it('is the identity once the line has fully loaded', () => {
+    expect(projectedPopulation(1000, 900_000, 900_000)).toBe(1000)
+    expect(projectedPopulation(1000, 0, 0)).toBe(1000)
+  })
+
+  it('scales the in-range count by the sync completeness', () => {
+    expect(projectedPopulation(1000, 100_000, 900_000)).toBe(9000)
+    expect(projectedPopulation(500, 450_000, 900_000)).toBe(1000)
+  })
+
+  it('never projects fewer than are already in range', () => {
+    expect(projectedPopulation(1000, 900_000, 100)).toBe(1000)
+  })
+
+  it('holds the drawn set free of evictions across a whole sync', () => {
+    const TOTAL = 900_000
+    const BUDGET = 9_000
+    let prev = new Set<number>()
+    let evicted = 0
+    for (let loaded = 50_000; loaded <= TOTAL; loaded += 50_000) {
+      // Landfalls are the even heights; fmix32 is independent of parity.
+      const inRange: number[] = []
+      for (let h = 0; h < loaded; h += 2) inRange.push(h)
+      const t = sampleThreshold(projectedPopulation(loaded, loaded, TOTAL), BUDGET * 2)
+      const drawn = new Set(inRange.filter((h) => hashHeight(h) < t))
+      for (const h of prev) if (!drawn.has(h)) evicted++
+      expect(drawn.size).toBeGreaterThanOrEqual(prev.size)
+      prev = drawn
+    }
+    expect(evicted).toBe(0)
+    // And it converges on the budget rather than starving or overshooting it.
+    expect(prev.size).toBeGreaterThan(BUDGET * 0.8)
+    expect(prev.size).toBeLessThan(BUDGET * 1.2)
   })
 })

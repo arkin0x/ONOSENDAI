@@ -72,3 +72,27 @@ export function drawnSet(heights: ArrayLike<number>, budget: number): Set<number
   }
   return new Set(pre)
 }
+
+/**
+ * The population the in-range crowd will grow to once the whole line has
+ * loaded, from the count in range now and the sync's own progress.
+ *
+ * Sizing a sample from the LOADED population is the subtler half of the
+ * reshuffle: it is nested, so no dot ever moves and none ever returns, but
+ * early in a sync the loaded crowd is a fraction of the real one, so the
+ * threshold is far too generous and every later rebuild must thin what it
+ * drew. Measured against a 900k line at a 9k budget, that thinning still
+ * replaced half the crust on the second rebuild and a quarter on the
+ * fourth. Sizing from the PROJECTED population draws the final sample from
+ * the first frame, so loading only ever ADDS dots: 0 evictions, start to
+ * finish. The cost is an honest one, a crust that fills in rather than one
+ * that arrives dense and wrong.
+ *
+ * Blocks are uniform in space, so the in-range count grows with the loaded
+ * fraction. Never returns less than the count already in range, and falls
+ * back to it when the sync has no progress to report.
+ */
+export function projectedPopulation(inRange: number, loaded: number, total: number): number {
+  if (loaded <= 0 || total <= loaded) return inRange
+  return Math.max(inRange, Math.round((inRange * total) / loaded))
+}

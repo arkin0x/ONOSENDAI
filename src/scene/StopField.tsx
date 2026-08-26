@@ -30,7 +30,7 @@ import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, p
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
 import { coverageRuns } from '../lib/hyperspace/station'
-import { drawnSet, hashHeight, sampleThreshold } from '../lib/hyperspace/sample'
+import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
@@ -214,7 +214,16 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // drawn (sample.ts has the nesting argument). Row ids are still copied
     // out up front because a background merge may re-sort perm between
     // slices; the rows themselves never move.
-    const threshold = sampleThreshold(runTotal, budget * 2)
+    // ...and size that threshold from the population the line will END at,
+    // not the one loaded so far. A loaded-sized threshold is nested (no dot
+    // moves, none returns) yet still evicts, because early in a sync it
+    // draws a far more generous sample than the finished line can support
+    // and every later rebuild thins it: half the crust replaced on the
+    // second rebuild, a quarter on the fourth. Projected, the first frame
+    // already draws the final sample, so loading only ever adds dots.
+    const sync = useHyperspace.getState().sync
+    const projected = projectedPopulation(runTotal, sync.loaded, sync.total)
+    const threshold = sampleThreshold(projected, budget * 2)
     const rows: number[] = []
     for (const [runStart, runEnd] of runs) {
       for (let pos = runStart; pos < runEnd; pos++) {
@@ -241,10 +250,11 @@ export function StopField({ axes }: Props): JSX.Element | null {
         commit(null)
         return
       }
-      // The exact drawn set, by identity: up to budget heights with the
-      // smallest hashed priorities. Deterministic and nested, so a growth
-      // rebuild adds dots and at worst evicts the largest few; the old
-      // positional stride re-dealt the entire crust instead.
+      // The drawn set, by identity: up to budget heights with the smallest
+      // hashed priorities. With the threshold sized from the projected
+      // population this is a safety cap on the GPU, not the working
+      // decimation: the prefilter already lands within noise of the budget,
+      // so it bites only when the projection ran a little light.
       const keptHeights = kept.map((row) => heightAt(index, row))
       const draw = drawnSet(keptHeights, budget)
       const count = draw.size
@@ -271,7 +281,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // read what actually reached the GPU, decimation factor included.
       if (import.meta.env.DEV) {
         ;(window as unknown as { __stopField?: unknown }).__stopField = {
-          rendered: count, inRange: kept.length, threshold, runTotal,
+          rendered: count, inRange: kept.length, threshold, runTotal, projected,
         }
       }
       commit({

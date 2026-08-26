@@ -86,6 +86,12 @@ const SLICE_MS = 12
  * proxy for "stops in range" — positions are uniform, so range population
  * grows in proportion.
  */
+/**
+ * Headroom between the sample's target size and the hard buffer cap, so
+ * ordinary sampling noise never trips the cap. See the note at drawnSet.
+ */
+const HARD_CAP_SLACK = 1.1
+
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
 let lastDrawn: { frameKey: string; set: Set<number> } | null = null
 
@@ -221,22 +227,51 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // not the one loaded so far. A loaded-sized threshold is nested (no dot
     // moves, none returns) yet still evicts, because early in a sync it
     // draws a far more generous sample than the finished line can support
-    // and every later rebuild thins it: half the crust replaced on the
-    // second rebuild, a quarter on the fourth. Projected, the first frame
-    // already draws the final sample, so loading only ever adds dots.
-    // Against permCount, not the sync's progress counter: runTotal is
-    // counted over the sorted view, so runTotal/permCount is the fraction of
-    // the line in this window and nothing else. sync.loaded counts rows the
-    // view has not merged yet and headers not yet appended, so dividing by
-    // it understates the projection and the loose threshold it produces gets
-    // evicted on the next rebuild, which is the reshuffle coming back.
+    // and every later rebuild thins it. Projected, the first frame already
+    // draws the final sample, so loading only ever adds dots.
+    //
+    // Two things have to line up for that to hold, and both are ratios of
+    // counts taken over the SAME population:
+    //
+    //  - permCount, not the sync's progress counter, is the denominator.
+    //    runTotal is counted over the sorted view, so runTotal/permCount is
+    //    the fraction of the line inside this window and nothing else.
+    //    sync.loaded counts rows the view has not merged yet and headers not
+    //    yet appended, so dividing by it understates the projection.
+    //  - the count going in is IN-PLANE. The budget buys dots on one plane;
+    //    the coverage cubes hold whatever is spatially near, and at a globe
+    //    view that is every landfall and almost no port, since a port's
+    //    coordinate is its merkle root and lands anywhere in the 2^85 space.
+    //    Sizing off the raw run total therefore admitted roughly twice the
+    //    budget, and drawnSet's cap, which is sized from kept.length and so
+    //    moves on every rebuild, went back to being the working decimation.
+    //    That is why the crust held until the sync passed the point where
+    //    kept crossed the budget and then churned at the cut boundary: the
+    //    dots well inside the cut stayed, the ones near it did not.
+    //
+    // Counting the plane costs one byte read per row and no coordinate
+    // decode, which is why it can afford to run before the hash filter.
+    let planeTotal = 0
+    for (const [runStart, runEnd] of runs) {
+      for (let pos = runStart; pos < runEnd; pos++) {
+        if (kindIsPort(index, index.perm[pos]) === wantPort) planeTotal++
+      }
+    }
+    if (planeTotal === 0) {
+      commit(null)
+      return
+    }
     const total = useHyperspace.getState().sync.total
-    const projected = projectedPopulation(runTotal, index.permCount, total)
-    const threshold = sampleThreshold(projected, budget * 2)
+    const projected = projectedPopulation(planeTotal, index.permCount, total)
+    const threshold = sampleThreshold(projected, budget)
     const rows: number[] = []
     for (const [runStart, runEnd] of runs) {
       for (let pos = runStart; pos < runEnd; pos++) {
         const row = index.perm[pos]
+        // The kind byte IS the plane bit. Matching it here shows one cloud
+        // instead of superimposing two unrelated ones, and keeps the sample
+        // sized against the population it is actually drawn from.
+        if (kindIsPort(index, row) !== wantPort) continue
         if (hashHeight(heightAt(index, row)) < threshold) rows.push(row)
       }
     }
@@ -259,13 +294,17 @@ export function StopField({ axes }: Props): JSX.Element | null {
         commit(null)
         return
       }
-      // The drawn set, by identity: up to budget heights with the smallest
-      // hashed priorities. With the threshold sized from the projected
-      // population this is a safety cap on the GPU, not the working
-      // decimation: the prefilter already lands within noise of the budget,
-      // so it bites only when the projection ran a little light.
+      // The drawn set, by identity. With the threshold sized from the
+      // projected in-plane population this is a safety cap on the GPU, not
+      // the working decimation, so it gets headroom: the threshold targets
+      // the budget in EXPECTATION, and a sample of a few thousand out of
+      // half a million lands a percent either side of it. Capping at exactly
+      // the budget would trim that ordinary overshoot, and because the trim
+      // is sized from kept.length it moves on every rebuild, which is the
+      // reshuffle again for the dots nearest the cut. Ten percent of slack
+      // is many sigma of sampling noise and still bounds the buffer.
       const keptHeights = kept.map((row) => heightAt(index, row))
-      const draw = drawnSet(keptHeights, budget)
+      const draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
       const count = draw.size
       const positions = new Float32Array(count * 3)
       const colors = new Float32Array(count * 3)
@@ -299,7 +338,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
         const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
         const entry = {
           rendered: count, inRange: kept.length, threshold, runTotal,
-          projected, permCount: index.permCount, total, removed,
+          planeTotal, projected, permCount: index.permCount, total, removed,
+          cappedBy: kept.length > budget * HARD_CAP_SLACK ? 'cap' : 'threshold',
         }
         w.__stopField = entry
         const log = (w.__stopFieldLog ??= []) as unknown[]
@@ -327,10 +367,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
         const batchEnd = Math.min(w, i + 1024)
         for (; i < batchEnd; i++) {
           const row = rows[i]
-          // Ports live on plane 1, landfalls on plane 0, so matching the
-          // anchor's plane shows one cloud instead of superimposing two
-          // unrelated ones; the kind byte IS the plane bit.
-          if (kindIsPort(index, row) !== wantPort) continue
           const d = occupancy ? coordToXyz(stopCoordExact(stopAt(index, row))) : xyzAt(index, row)
           const c = occupancy ? cellCentre(d, origin, scaleExp, axes) : pointCentre(d, origin, scaleExp, axes)
           if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue

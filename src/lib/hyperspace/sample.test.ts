@@ -127,3 +127,51 @@ describe('projectedPopulation', () => {
     expect(prev.size).toBeLessThan(BUDGET * 1.2)
   })
 })
+
+describe('the field sizing, end to end', () => {
+  // The globe view: every landfall is inside the coverage cubes, and almost
+  // no port is, because a port's coordinate is its merkle root and lands
+  // anywhere in the space. So the in-plane count is the landfall count and
+  // the sorted view holds both planes.
+  const TOTAL = 900_000
+  const BUDGET = 5_000
+  const sweep = (): Array<{ f: number; kept: number; drawn: Set<number> }> => {
+    const out = []
+    for (let step = 1; step <= 20; step++) {
+      const f = step / 20
+      const permCount = Math.round(TOTAL * f)
+      const landfalls: number[] = []
+      for (let h = 0; h < permCount; h += 2) landfalls.push(h)
+      const projected = projectedPopulation(landfalls.length, permCount, TOTAL)
+      const t = sampleThreshold(projected, BUDGET)
+      const kept = landfalls.filter((h) => hashHeight(h) < t)
+      out.push({ f, kept: kept.length, drawn: drawnSet(kept, Math.ceil(BUDGET * 1.1)) })
+    }
+    return out
+  }
+
+  it('projects the final in-plane population from the first frame', () => {
+    for (const { f, kept } of sweep()) {
+      // kept tracks the sync fraction and arrives at the budget, not past it.
+      expect(kept).toBeLessThanOrEqual(BUDGET * 1.05)
+      expect(kept).toBeGreaterThan(BUDGET * f * 0.9)
+    }
+  })
+
+  it('never lets the budget cap become the decimation', () => {
+    // A cap that bites is sized from kept.length, which moves every rebuild,
+    // and that is the reshuffle: dots near the cut churn while the rest hold.
+    for (const { kept, drawn } of sweep()) expect(drawn.size).toBe(kept)
+  })
+
+  it('evicts nothing across the whole sync', () => {
+    let prev = new Set<number>()
+    let evicted = 0
+    for (const { drawn } of sweep()) {
+      for (const h of prev) if (!drawn.has(h)) evicted++
+      prev = drawn
+    }
+    expect(evicted).toBe(0)
+    expect(prev.size).toBeGreaterThan(BUDGET * 0.9)
+  })
+})

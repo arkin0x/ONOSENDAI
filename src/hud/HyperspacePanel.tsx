@@ -414,18 +414,19 @@ export function selectStopInScene(height: number): void {
 }
 
 /**
- * Fly to Earth: the chosen landfall destination when there is one, else the
- * planet itself. Shared by the panel's EARTH button and the view menu's.
+ * Fly to Earth: always the planet's centre, at the zoom that frames the
+ * whole globe. Shared by the panel's EARTH button and the view menu's.
+ *
+ * It used to divert to the chosen landfall destination when there was one,
+ * meaning to show you where your block comes down. But the focus IS the
+ * camera's pivot, so that made EARTH orbit a point on the surface instead
+ * of the planet, and there was no way back to a planet-centred view while a
+ * destination was picked. Every other control already flies to a block
+ * (VIEW STATION, a click in the field, the scrubber); EARTH is the only one
+ * that means the planet, so it means the planet unconditionally.
  */
 export function viewEarth(): void {
   ownHyperspaceView()
-  const destination = useHyperspace.getState().destination
-  const destStop = destination !== null ? getStopByHeight(destination) : undefined
-  if (destStop && destStop.kind === 'landfall') {
-    markViewedStop(destStop.height)
-    useCyberspace.getState().focusOn(stopPosition(destStop), 0, `BLOCK ${destStop.height}`, 52)
-  } else {
-    markViewedStop(null)
-    useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
-  }
+  markViewedStop(null)
+  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
 }

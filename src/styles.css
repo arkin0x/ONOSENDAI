@@ -2644,6 +2644,18 @@ kbd {
   border-radius: 9px;
   background: rgba(0, 229, 255, 0.08);
   border: 1px solid rgba(0, 229, 255, 0.22);
+  cursor: pointer;
+}
+
+/* The hub is clickable (it resets to 2^0), so it answers the pointer the way
+ * its neighbours do; before this it read as a passive readout. */
+.touchpad__hub:hover {
+  background: rgba(0, 229, 255, 0.16);
+}
+
+.touchpad__hub:active {
+  background: rgba(0, 229, 255, 0.3);
+  border-color: var(--accent, #00e5ff);
 }
 
 /* COMMIT is the only control here that spends anything, so it is the only one

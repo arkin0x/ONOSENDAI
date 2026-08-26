@@ -20,12 +20,14 @@
  * there, and until you do this draws nothing.
  */
 
-import { useMemo } from 'react'
-import { BackSide } from 'three'
-import { EARTH } from '../lib/palette'
+import { useEffect, useMemo } from 'react'
+import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
+import { EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
+import { EARTH_RADIUS_KM, originCsMetres, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { ownHyperspaceView } from '../store/useHyperspace'
+import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
@@ -58,6 +60,8 @@ export function Earth({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.anchorPlane)
+  // The coarsest shoreline tier, whole: 5k points, 41 KB, fetched once.
+  const coast = useCoastline(plane === 0 ? '110m' : null)
 
   const globe = useMemo(() => {
     // Ideaspace has no physical mapping at all (§9.1), so there is no planet in
@@ -87,43 +91,119 @@ export function Earth({ axes }: Props): JSX.Element | null {
     return { centre, radius }
   }, [position, scaleExp, plane, axes])
 
-  if (!globe) return null
+  // The graticule, replacing the old view-relative wireframe: a sphere
+  // mesh's poles follow the camera's up axis, so its "meridians" were
+  // decoration that reoriented with the view. These rings are geographic,
+  // poles where §9.4 puts them, so the lines MEAN latitude and longitude
+  // and the equator and prime meridian can be named. Vertices are float64
+  // metre deltas from the render origin on the true ellipsoid
+  // (earthSurface.ts), absolute in render space, so they live outside the
+  // centred group below.
+  const graticule = useMemo(() => {
+    if (!globe) return null
+    const originM = originCsMetres(alignedOrigin(position, scaleExp))
+    const at = (lat: number, lon: number, altM = 0): [number, number, number] =>
+      surfaceVertex(lat, lon, altM, originM, scaleExp, axes)
+    const blue: number[] = []
+    const green: number[] = []
+    const ring = (
+      out: number[], fix: 'lat' | 'lon', v: number, from: number, to: number, n: number,
+    ): void => {
+      let prev: [number, number, number] | null = null
+      for (let i = 0; i <= n; i++) {
+        const t = from + ((to - from) * i) / n
+        const p = fix === 'lat' ? at(v, t) : at(t, v)
+        if (prev) out.push(...prev, ...p)
+        prev = p
+      }
+    }
+    for (let lat = -75; lat <= 75; lat += 15) ring(lat === 0 ? green : blue, 'lat', lat, -180, 180, 96)
+    for (let lon = -165; lon <= 180; lon += 15) if (lon !== 0) ring(blue, 'lon', lon, -90, 90, 24)
+    // The prime meridian proper: the Greenwich half, pole to pole at lon 0.
+    ring(green, 'lon', 0, -90, 90, 24)
+    // The continents, whole: brighter than the rulings, because the
+    // graticule is reference and the coast is content. 3D chords, so lines
+    // crossing the antimeridian need no seam handling.
+    const coastArr: number[] = []
+    if (coast) {
+      for (const line of coast.lines) {
+        const n = line.pts.length / 2
+        let prev: [number, number, number] | null = null
+        for (let i = 0; i < n; i++) {
+          const pnt = at(line.pts[i * 2], line.pts[i * 2 + 1])
+          if (prev) coastArr.push(...prev, ...pnt)
+          prev = pnt
+        }
+      }
+    }
+    const lift = EARTH_RADIUS_KM * 1000 * 0.06
+    const make = (v: number[]): BufferGeometry => {
+      const g = new BufferGeometry()
+      g.setAttribute('position', new Float32BufferAttribute(v, 3))
+      return g
+    }
+    return {
+      blue: make(blue),
+      green: make(green),
+      coast: coastArr.length > 0 ? make(coastArr) : null,
+      equatorAt: at(0, 90, lift),
+      meridianAt: at(50, 0, lift),
+    }
+  }, [globe, position, scaleExp, axes, coast])
+
+  useEffect(() => () => {
+    if (!graticule) return
+    graticule.blue.dispose()
+    graticule.green.dispose()
+    graticule.coast?.dispose()
+  }, [graticule])
+
+  if (!globe || !graticule) return null
 
   return (
-    <group position={globe.centre}>
-      {/* The planet is drawn as wireframe, but it must still be a solid to
-          the depth buffer and the raycaster. Back faces only: the far
-          hemisphere writes depth, so the camera sees INTO the globe but not
-          THROUGH it. Culling the near hemisphere keeps labels and stops
-          between the camera and the centre readable instead of cut off by
-          the curvature of a surface that is drawn as sparse wires anyway,
-          and a click on the globe still recentres the orbit on Earth.
-          Slightly under the true radius so surface landfalls are not
-          z-fought away. */}
-      <mesh
-        onClick={(e) => {
-          if (e.delta > 8) return
-          e.stopPropagation()
-          ownHyperspaceView()
-          useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
-        }}
-      >
-        <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
-        <meshBasicMaterial colorWrite={false} side={BackSide} />
-      </mesh>
-      <mesh>
-        <sphereGeometry args={[globe.radius, 48, 24]} />
-        <meshBasicMaterial color={EARTH} wireframe transparent opacity={0.32} toneMapped={false} />
-      </mesh>
-      <WorldLabel
-        text={`EARTH\nr 6371 km`}
-        color={EARTH}
-        at={[0, globe.radius, 0]}
-        align="center"
-        offset={[0, 0.8, 0]}
-        px={11}
-        opacity={0.9}
-      />
-    </group>
+    <>
+      <group position={globe.centre}>
+        {/* The surface is drawn as lines, but the planet must still be a
+            solid to the depth buffer and the raycaster. Back faces only:
+            the far hemisphere writes depth, so the camera sees INTO the
+            globe but not THROUGH it, and stops between the camera and the
+            centre stay readable. Slightly under the true radius so surface
+            landfalls and the graticule are not z-fought away. A click
+            still recentres the orbit on Earth. */}
+        <mesh
+          onClick={(e) => {
+            if (e.delta > 8) return
+            e.stopPropagation()
+            ownHyperspaceView()
+            useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
+          }}
+        >
+          <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
+          <meshBasicMaterial colorWrite={false} side={BackSide} />
+        </mesh>
+        <WorldLabel
+          text={`EARTH\nr 6371 km`}
+          color={EARTH}
+          at={[0, globe.radius, 0]}
+          align="center"
+          offset={[0, 0.8, 0]}
+          px={11}
+          opacity={0.9}
+        />
+      </group>
+      <lineSegments geometry={graticule.blue} frustumCulled={false}>
+        <lineBasicMaterial color={EARTH} transparent opacity={0.32} toneMapped={false} />
+      </lineSegments>
+      {graticule.coast && (
+        <lineSegments geometry={graticule.coast} frustumCulled={false}>
+          <lineBasicMaterial color={EARTH} transparent opacity={0.55} toneMapped={false} />
+        </lineSegments>
+      )}
+      <lineSegments geometry={graticule.green} frustumCulled={false}>
+        <lineBasicMaterial color={MERIDIAN} transparent opacity={0.75} toneMapped={false} />
+      </lineSegments>
+      <WorldLabel text="EQUATOR" color={MERIDIAN} at={graticule.equatorAt} px={10} opacity={0.85} align="center" />
+      <WorldLabel text="PRIME MERIDIAN" color={MERIDIAN} at={graticule.meridianAt} px={10} opacity={0.85} align="center" />
+    </>
   )
 }

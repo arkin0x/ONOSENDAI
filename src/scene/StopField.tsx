@@ -30,6 +30,7 @@ import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, p
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
 import { coverageRuns } from '../lib/hyperspace/station'
+import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
@@ -46,9 +47,11 @@ const REACH = GRID_RADIUS * 8
  * Hard ceiling on points actually built. The chain is near a million blocks;
  * a full-cube view puts half of them (one plane's worth) in range at once, and
  * a million-vertex transparent point cloud under bloom is overdraw the frame
- * budget does not have. Past the cap the field is decimated to every Nth stop,
- * which preserves the cloud's shape — the positions are hash-uniform, so a
- * stride is as unbiased a sample as any.
+ * budget does not have. Past the cap the field keeps the stops whose hashed
+ * heights sort smallest (sample.ts): deterministic per block and nested as
+ * the line grows, so the sample fills in and thins at the margin but never
+ * reshuffles. The positions are hash-uniform, so a height-keyed subset is
+ * as unbiased a sample as any.
  */
 const MAX_POINTS = 120_000
 
@@ -56,10 +59,10 @@ const MAX_POINTS = 120_000
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
  * so 120k of them read as dust; landfalls crowd one planet's surface, and at
  * any zoom that shows the globe a generous budget paints it solid orange.
- * A hash-uniform stride down to this many, drawn attenuated at a fixed
+ * An identity-hash sample down to this many, drawn attenuated at a fixed
  * world size, keeps the crust reading as individual dots at every zoom.
  */
-const MAX_LANDFALL_POINTS = 9_000
+const MAX_LANDFALL_POINTS = 5_000
 
 /**
  * Raycast threshold for GL_POINTS, in render units. Points have no surface, so
@@ -83,6 +86,15 @@ const SLICE_MS = 12
  * proxy for "stops in range" — positions are uniform, so range population
  * grows in proportion.
  */
+/**
+ * Headroom between the sample's target size and the hard buffer cap, so
+ * ordinary sampling noise never trips the cap. See the note at drawnSet.
+ */
+const HARD_CAP_SLACK = 1.1
+
+/** DEV only: the previous rebuild's drawn set, for the eviction counter. */
+let lastDrawn: { frameKey: string; set: Set<number> } | null = null
+
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
 
@@ -100,8 +112,6 @@ interface Built {
   geometry: BufferGeometry
   /** Parallel to the geometry's vertices, so a picked index maps to its stop's height. */
   heights: number[]
-  /** 1 = every stop in range is drawn; N = every Nth survived the cap. */
-  stride: number
   /** The aligned origin the positions were computed against; the render
    * rebases the whole cloud by originShift when the anchor has since moved. */
   origin: Position
@@ -202,27 +212,70 @@ export function StopField({ axes }: Props): JSX.Element | null {
       return
     }
 
-    // Decimate BEFORE decoding: the run total already bounds the in-range
-    // population, so sampling down to about twice the point budget cuts a
-    // dense view's decode work by an order of magnitude, and the post-filter
-    // stride below still lands the budget. Row ids are copied out up front
-    // because a background merge may re-sort perm between slices; the rows
-    // themselves never move.
-    const preStride = Math.max(1, Math.floor(runTotal / (budget * 2)))
-    const rows = new Uint32Array(Math.ceil(runTotal / preStride))
-    let w = 0
-    {
-      let i = 0
-      let next = 0
-      for (const [runStart, runEnd] of runs) {
-        for (let pos = runStart; pos < runEnd; pos++, i++) {
-          if (i === next) {
-            rows[w++] = index.perm[pos]
-            next += preStride
-          }
-        }
+    // Filter BEFORE decoding, and by identity, not position: a block is a
+    // candidate iff its hashed height clears a threshold sized to admit
+    // about twice the point budget, which keeps a dense view's decode work
+    // an order of magnitude under the population; drawnSet in finish()
+    // lands the budget exactly. The old every-Nth stride re-dealt the whole
+    // visible sample whenever the population grew or the perm re-sorted,
+    // so the crust of Earth reshuffled on every growth rebuild during the
+    // sync. A height's hash never changes, so now a drawn block stays
+    // drawn (sample.ts has the nesting argument). Row ids are still copied
+    // out up front because a background merge may re-sort perm between
+    // slices; the rows themselves never move.
+    // ...and size that threshold from the population the line will END at,
+    // not the one loaded so far. A loaded-sized threshold is nested (no dot
+    // moves, none returns) yet still evicts, because early in a sync it
+    // draws a far more generous sample than the finished line can support
+    // and every later rebuild thins it. Projected, the first frame already
+    // draws the final sample, so loading only ever adds dots.
+    //
+    // Two things have to line up for that to hold, and both are ratios of
+    // counts taken over the SAME population:
+    //
+    //  - permCount, not the sync's progress counter, is the denominator.
+    //    runTotal is counted over the sorted view, so runTotal/permCount is
+    //    the fraction of the line inside this window and nothing else.
+    //    sync.loaded counts rows the view has not merged yet and headers not
+    //    yet appended, so dividing by it understates the projection.
+    //  - the count going in is IN-PLANE. The budget buys dots on one plane;
+    //    the coverage cubes hold whatever is spatially near, and at a globe
+    //    view that is every landfall and almost no port, since a port's
+    //    coordinate is its merkle root and lands anywhere in the 2^85 space.
+    //    Sizing off the raw run total therefore admitted roughly twice the
+    //    budget, and drawnSet's cap, which is sized from kept.length and so
+    //    moves on every rebuild, went back to being the working decimation.
+    //    That is why the crust held until the sync passed the point where
+    //    kept crossed the budget and then churned at the cut boundary: the
+    //    dots well inside the cut stayed, the ones near it did not.
+    //
+    // Counting the plane costs one byte read per row and no coordinate
+    // decode, which is why it can afford to run before the hash filter.
+    let planeTotal = 0
+    for (const [runStart, runEnd] of runs) {
+      for (let pos = runStart; pos < runEnd; pos++) {
+        if (kindIsPort(index, index.perm[pos]) === wantPort) planeTotal++
       }
     }
+    if (planeTotal === 0) {
+      commit(null)
+      return
+    }
+    const total = useHyperspace.getState().sync.total
+    const projected = projectedPopulation(planeTotal, index.permCount, total)
+    const threshold = sampleThreshold(projected, budget)
+    const rows: number[] = []
+    for (const [runStart, runEnd] of runs) {
+      for (let pos = runStart; pos < runEnd; pos++) {
+        const row = index.perm[pos]
+        // The kind byte IS the plane bit. Matching it here shows one cloud
+        // instead of superimposing two unrelated ones, and keeps the sample
+        // sized against the population it is actually drawn from.
+        if (kindIsPort(index, row) !== wantPort) continue
+        if (hashHeight(heightAt(index, row)) < threshold) rows.push(row)
+      }
+    }
+    const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
     // At occupancy zooms (cells of about a metre and finer) the handful of
@@ -241,13 +294,24 @@ export function StopField({ axes }: Props): JSX.Element | null {
         commit(null)
         return
       }
-      const stride = Math.max(1, Math.ceil(kept.length / budget))
-      const count = Math.ceil(kept.length / stride)
+      // The drawn set, by identity. With the threshold sized from the
+      // projected in-plane population this is a safety cap on the GPU, not
+      // the working decimation, so it gets headroom: the threshold targets
+      // the budget in EXPECTATION, and a sample of a few thousand out of
+      // half a million lands a percent either side of it. Capping at exactly
+      // the budget would trim that ordinary overshoot, and because the trim
+      // is sized from kept.length it moves on every rebuild, which is the
+      // reshuffle again for the dots nearest the cut. Ten percent of slack
+      // is many sigma of sampling noise and still bounds the buffer.
+      const keptHeights = kept.map((row) => heightAt(index, row))
+      const draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
+      const count = draw.size
       const positions = new Float32Array(count * 3)
       const colors = new Float32Array(count * 3)
       const heights: number[] = new Array(count)
       let v = 0
-      for (let k = 0; k < kept.length; k += stride) {
+      for (let k = 0; k < kept.length; k++) {
+        if (!draw.has(keptHeights[k])) continue
         positions[v * 3] = centres[k * 3]
         positions[v * 3 + 1] = centres[k * 3 + 1]
         positions[v * 3 + 2] = centres[k * 3 + 2]
@@ -255,7 +319,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         colors[v * 3] = col.r
         colors[v * 3 + 1] = col.g
         colors[v * 3 + 2] = col.b
-        heights[v] = heightAt(index, kept[k])
+        heights[v] = keptHeights[k]
         v++
       }
       const geometry = new BufferGeometry()
@@ -264,14 +328,27 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // Same dev hook style as ShaderPointField: lets the browser harness
       // read what actually reached the GPU, decimation factor included.
       if (import.meta.env.DEV) {
-        ;(window as unknown as { __stopField?: unknown }).__stopField = {
-          rendered: count, inRange: kept.length, stride: preStride * stride, runTotal,
+        // Churn is the whole point of the sampler, so measure it rather than
+        // eyeball it: a stable field evicts nothing, and any non-zero
+        // `removed` here is a dot that was drawn and then taken away.
+        const prev = lastDrawn
+        let removed = 0
+        if (prev && prev.frameKey === frameKey) for (const h of prev.set) if (!draw.has(h)) removed++
+        lastDrawn = { frameKey, set: draw }
+        const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
+        const entry = {
+          rendered: count, inRange: kept.length, threshold, runTotal,
+          planeTotal, projected, permCount: index.permCount, total, removed,
+          cappedBy: kept.length > budget * HARD_CAP_SLACK ? 'cap' : 'threshold',
         }
+        w.__stopField = entry
+        const log = (w.__stopFieldLog ??= []) as unknown[]
+        log.push(entry)
+        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${prev?.set.size} dots`, entry)
       }
       commit({
         geometry,
         heights,
-        stride: preStride * stride,
         origin,
         anchor: { ...anchor },
         frameKey,
@@ -290,10 +367,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
         const batchEnd = Math.min(w, i + 1024)
         for (; i < batchEnd; i++) {
           const row = rows[i]
-          // Ports live on plane 1, landfalls on plane 0, so matching the
-          // anchor's plane shows one cloud instead of superimposing two
-          // unrelated ones; the kind byte IS the plane bit.
-          if (kindIsPort(index, row) !== wantPort) continue
           const d = occupancy ? coordToXyz(stopCoordExact(stopAt(index, row))) : xyzAt(index, row)
           const c = occupancy ? cellCentre(d, origin, scaleExp, axes) : pointCentre(d, origin, scaleExp, axes)
           if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue

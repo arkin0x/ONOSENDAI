@@ -112,3 +112,15 @@ export function trianglesInWindow(
   }
   return Uint32Array.from(out)
 }
+
+/**
+ * How far a refined triangle's middle sags below the surface, in metres.
+ *
+ * pack-land.mjs splits until no edge spans more than eight degrees of arc, and
+ * a flat chord across eight degrees of a 6371 km sphere dips 15.5 km at its
+ * midpoint. The vertices are exactly on the surface, so a coastline drawn over
+ * the fill still lines up; it is only the interior that sits low. Anything
+ * drawn UNDER the fill has to be sunk past this or it will bury the middle of
+ * every large continent.
+ */
+export const LAND_CHORD_SAG_M = 15_600

@@ -58,20 +58,21 @@ export const MERIDIAN = '#4bc9a7'
  * Deep and desaturated on purpose. It has to sit far enough under EARTH's
  * blue that the graticule and the shorelines drawn on top of it stay legible
  * as lines, and far enough under the starfield that the planet reads as a
- * shape rather than as a lit surface. This is the same hue as EARTH at a
- * third of its lightness, so the family is obvious and the hierarchy is not
- * in question.
+ * shape rather than as a lit surface. This is EARTH's own hue at a sixth of
+ * its lightness, so the family is obvious and the hierarchy is not in
+ * question.
  */
-export const OCEAN = '#152b47'
+export const OCEAN = '#0a1624'
 /**
  * The land: MERIDIAN's green walked twenty degrees toward lime.
  *
  * Close enough to read as the same green family as the reference lines, far
- * enough that a continent is never mistaken for the equator. Drawn at low
- * opacity over OCEAN, so what reaches the eye is a tint on the water rather
- * than a second colour competing with it.
+ * enough that a continent is never mistaken for the equator, and half their
+ * lightness so a continent never competes with a line for attention. Drawn at
+ * low opacity over OCEAN on top of that, so what reaches the eye is a tint on
+ * the water rather than a second surface.
  */
-export const LAND = '#4bc97d'
+export const LAND = '#206a3d'
 /**
  * The black sun: the one absolute bearing in cyberspace (§11.2).
  *

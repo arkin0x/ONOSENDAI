@@ -32,7 +32,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
-import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
+import { BackSide, BufferGeometry, DoubleSide, Float32BufferAttribute, FrontSide } from 'three'
 import { EARTH, LAND, MERIDIAN, OCEAN } from '../lib/palette'
 import { GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { axesToLatLon } from '../lib/hyperspace/landfall'
@@ -41,12 +41,13 @@ import {
   earthRadiusCells,
   graticuleStep,
   originCsMetres,
+  outwardSide,
   surfaceDetailOpacity,
   surfaceVertex,
 } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { coastTier, linesInWindow } from '../lib/coastline'
-import { landTier, trianglesInWindow } from '../lib/land'
+import { LAND_CHORD_SAG_M, landTier, trianglesInWindow } from '../lib/land'
 import { useCoastline } from '../hooks/useCoastline'
 import { useLand } from '../hooks/useLand'
 import { WorldLabel } from './WorldLabel'
@@ -64,6 +65,7 @@ interface BuiltPatch {
   green: BufferGeometry | null
   coast: BufferGeometry | null
   land: BufferGeometry | null
+  landSide: typeof FrontSide | typeof BackSide
   ground: BufferGeometry
   equatorAt: [number, number, number] | null
   meridianAt: [number, number, number] | null
@@ -181,9 +183,9 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       }
     }
 
-    // The land inside the window, drawn one cell above the water and one
-    // under the lines. Only the triangles the window touches are mapped,
-    // which at a regional zoom is a handful out of the tier's thousands.
+    // The land inside the window, drawn one cell under the lines. Only the
+    // triangles the window touches are mapped, which at a regional zoom is a
+    // handful out of the tier's thousands.
     const landArr: number[] = []
     if (land) {
       const tris = trianglesInWindow(land, latLo, latHi, lonFrom, lonTo)
@@ -193,18 +195,24 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       }
     }
 
-    // The ground, sunk two cells under the lines: the camera can see the
-    // surface but not through it, so the far side of the horizon hides its
-    // stops the way the globe's occluder does at planetary zoom. It paints
-    // the oceans while it is there, which costs nothing it was not already
-    // drawing.
+    // The ground, sunk under the lines: the camera can see the surface but
+    // not through it, so the far side of the horizon hides its stops the way
+    // the globe's occluder does at planetary zoom. It paints the oceans while
+    // it is there, which costs nothing it was not already drawing.
+    //
+    // Sunk past the fill's chord sag as well as the two cells, because it is
+    // opaque: a refined triangle's middle sits up to 15.6 km below the
+    // surface its corners are on, and a ground plane any higher than that
+    // would bury the interior of every large continent while leaving its
+    // coast drawn. Depth is all this plane does, so a few more kilometres of
+    // it costs nothing to look at.
     const ground: number[] = []
     const idx: number[] = []
     for (let r = 0; r <= GROUND_N; r++) {
       const lat = latLo + ((latHi - latLo) * r) / GROUND_N
       for (let c = 0; c <= GROUND_N; c++) {
         const lon = lonFrom + ((lonTo - lonFrom) * c) / GROUND_N
-        ground.push(...at(lat, lon, -2 * cellM))
+        ground.push(...at(lat, lon, -2 * cellM - LAND_CHORD_SAG_M))
       }
     }
     for (let r = 0; r < GROUND_N; r++) {
@@ -228,6 +236,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       green: greenArr.length > 0 ? make(greenArr) : null,
       coast: coastArr.length > 0 ? make(coastArr) : null,
       land: landArr.length > 0 ? make(landArr) : null,
+      landSide: outwardSide(originM, scaleExp, axes),
       ground: groundGeom,
       equatorAt,
       meridianAt,
@@ -256,7 +265,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
         <mesh geometry={built.land} frustumCulled={false} renderOrder={-1}>
           <meshBasicMaterial
             color={LAND}
-            side={DoubleSide}
+            side={built.landSide}
             transparent
             opacity={0.22 * built.opacity}
             depthWrite={false}

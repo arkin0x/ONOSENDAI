@@ -22,10 +22,10 @@
 
 import { useEffect, useMemo } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
-import { BackSide, BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
+import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
 import { EARTH, LAND, MERIDIAN, OCEAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
-import { EARTH_RADIUS_KM, originCsMetres, surfaceVertex } from '../lib/earthSurface'
+import { EARTH_RADIUS_KM, originCsMetres, outwardSide, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { ownHyperspaceView } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
@@ -163,6 +163,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
   const landGeom = useMemo(() => {
     if (!globe || !land) return null
     const originM = originCsMetres(alignedOrigin(position, scaleExp))
+    const side = outwardSide(originM, scaleExp, axes)
     const v = new Float32Array((land.pts.length / 2) * 3)
     for (let i = 0; i < land.pts.length / 2; i++) {
       const p = surfaceVertex(land.pts[i * 2], land.pts[i * 2 + 1], 0, originM, scaleExp, axes)
@@ -173,10 +174,10 @@ export function Earth({ axes }: Props): JSX.Element | null {
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute(v, 3))
     g.setIndex(Array.from(land.tris))
-    return g
+    return { geometry: g, side }
   }, [globe, land, position, scaleExp, axes])
 
-  useEffect(() => () => { landGeom?.dispose() }, [landGeom])
+  useEffect(() => () => { landGeom?.geometry.dispose() }, [landGeom])
 
   useEffect(() => () => {
     if (!graticule) return
@@ -222,17 +223,18 @@ export function Earth({ axes }: Props): JSX.Element | null {
           opacity={0.9}
         />
       </group>
-      {/* The land, a tint on the water rather than a second surface. Depth
-          tested against the body, which is what culls the far hemisphere's
-          continents, but not depth WRITING, so the shorelines and rulings
-          drawn after it are never z-fought. Both sides, because the
-          triangulation is done in lat/lon and the winding that survives the
-          §9.4 permutation is not worth depending on. */}
+      {/* The land, a tint on the water rather than a second surface. The far
+          hemisphere's continents are removed by backface culling, which is
+          what the winding in pack-land.mjs and outwardSide exist for: a
+          depth test against the ocean sphere would work only while every
+          triangle stayed outside its radius, and the ones that did not were
+          the seams. No depth WRITING, so the shorelines and rulings drawn
+          after it are never z-fought. */}
       {landGeom && (
-        <mesh geometry={landGeom} frustumCulled={false} renderOrder={-1}>
+        <mesh geometry={landGeom.geometry} frustumCulled={false} renderOrder={-1}>
           <meshBasicMaterial
             color={LAND}
-            side={DoubleSide}
+            side={landGeom.side}
             transparent
             opacity={0.22}
             depthWrite={false}

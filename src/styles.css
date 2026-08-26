@@ -2552,7 +2552,8 @@ kbd {
  */
 
 .touchpad,
-.touchops {
+.touchops,
+.scalebar {
   position: fixed;
   right: 14px;
   z-index: 100;
@@ -2574,6 +2575,16 @@ kbd {
     "away  up    toward"
     "left  hub   right"
     "zoomout down zoomin";
+}
+
+/* Where the pad's bottom row sits, because that is the row it replaces: same
+ * three cells, same order, same place on the screen. */
+.scalebar {
+  bottom: 92px;
+  display: grid;
+  grid-template-columns: repeat(3, 38px);
+  grid-template-rows: 38px;
+  gap: 4px;
 }
 
 .touchpad__key {

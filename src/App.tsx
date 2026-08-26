@@ -12,6 +12,7 @@ import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
+import { ScaleBar } from './hud/ScaleBar'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { Scene } from './scene/Scene'
@@ -85,6 +86,10 @@ export default function App(): JSX.Element {
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
   const showPad = padOpen && !crowded && atHead
+  // Off your own head the pad stands down, but scale still decides what the
+  // scene draws, so its three cells come back on their own. Gated on the same
+  // canvas tap as the pad, so hiding the overlay stays one gesture.
+  const showScaleBar = padOpen && !crowded && !atHead
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -117,6 +122,7 @@ export default function App(): JSX.Element {
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls />}
+      {showScaleBar && <ScaleBar />}
       {!crowded && !padOpen && atHead && (
         <button
           className="chip touchhint"

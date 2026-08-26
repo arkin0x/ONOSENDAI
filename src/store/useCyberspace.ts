@@ -671,7 +671,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   cursor: initial.position,
   pendingTarget: null,
   scaleExp: 0,
-  view: topDownQuaternion(),
+  // Facing the black sun, the section 11.3 canonical orientation, the same
+  // one the SUN button restores. The spec's left/right/above/below language
+  // is defined against it, so it is what a first look should agree with; the
+  // map view is one TOP away and does not need to be where everyone starts.
+  view: canonicalQuaternion(),
   viewHistory: [],
   proof: IDLE_PROOF,
   publishError: null,

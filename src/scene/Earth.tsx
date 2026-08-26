@@ -211,7 +211,12 @@ export function Earth({ axes }: Props): JSX.Element | null {
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
-          <meshBasicMaterial color={OCEAN} side={BackSide} toneMapped={false} />
+          {/* Only tinted once the continents are here to sit on it. A blue
+              planet with no land on it for the moment the tier is in flight
+              would be a claim, not a loading state. */}
+          {land
+            ? <meshBasicMaterial color={OCEAN} side={BackSide} toneMapped={false} />
+            : <meshBasicMaterial colorWrite={false} side={BackSide} />}
         </mesh>
         <WorldLabel
           text={`EARTH\nr 6371 km`}

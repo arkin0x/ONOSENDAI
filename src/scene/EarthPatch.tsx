@@ -66,6 +66,7 @@ interface BuiltPatch {
   coast: BufferGeometry | null
   land: BufferGeometry | null
   landSide: typeof FrontSide | typeof BackSide
+  tinted: boolean
   ground: BufferGeometry
   equatorAt: [number, number, number] | null
   meridianAt: [number, number, number] | null
@@ -183,15 +184,22 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       }
     }
 
-    // The land inside the window, drawn one cell under the lines. Only the
-    // triangles the window touches are mapped, which at a regional zoom is a
-    // handful out of the tier's thousands.
+    // The land inside the window, ON the surface. Not one cell under it: a
+    // cell is 65.5 km at 2^49, and a fill sunk 65.5 km reads as a fill
+    // sitting 65.5 km sideways as soon as the camera is off vertical, which
+    // is why the green sat beside its own coastline everywhere below the
+    // globe regime while the globe itself, which always drew at altitude
+    // zero, looked right. Nothing has to be sunk to keep the lines legible:
+    // the fill does not write depth and renders before them.
+    //
+    // Only the triangles the window touches are mapped, which at a regional
+    // zoom is a handful out of the tier's thousands.
     const landArr: number[] = []
     if (land) {
       const tris = trianglesInWindow(land, latLo, latHi, lonFrom, lonTo)
       for (let i = 0; i < tris.length; i++) {
         const v = tris[i]
-        landArr.push(...at(land.pts[v * 2], land.pts[v * 2 + 1], -1 * cellM))
+        landArr.push(...at(land.pts[v * 2], land.pts[v * 2 + 1]))
       }
     }
 
@@ -237,6 +245,12 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       coast: coastArr.length > 0 ? make(coastArr) : null,
       land: landArr.length > 0 ? make(landArr) : null,
       landSide: outwardSide(originM, scaleExp, axes),
+      // Water is only worth colouring where the land is coloured too. Below
+      // the fill's floor every continent would vanish and the tint would
+      // quietly claim the whole planet is ocean, so the ground goes back to
+      // the depth-only occluder it has always been and the surface reads as
+      // it did before any of this: dark, with blue lines on it.
+      tinted: land !== null,
       ground: groundGeom,
       equatorAt,
       meridianAt,
@@ -259,7 +273,9 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
   return (
     <group>
       <mesh geometry={built.ground} frustumCulled={false} renderOrder={-2}>
-        <meshBasicMaterial color={OCEAN} side={DoubleSide} toneMapped={false} />
+        {built.tinted
+          ? <meshBasicMaterial color={OCEAN} side={DoubleSide} toneMapped={false} />
+          : <meshBasicMaterial colorWrite={false} side={DoubleSide} />}
       </mesh>
       {built.land && (
         <mesh geometry={built.land} frustumCulled={false} renderOrder={-1}>

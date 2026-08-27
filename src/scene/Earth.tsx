@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
 import { EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
@@ -174,6 +175,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
           onClick={(e) => {
             if (e.delta > 8) return
             e.stopPropagation()
+            markSceneTapHandled()
             ownHyperspaceView()
             useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
           }}

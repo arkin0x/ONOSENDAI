@@ -12,7 +12,6 @@ import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
-import { ScaleBar } from './hud/ScaleBar'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { Scene } from './scene/Scene'
@@ -44,9 +43,6 @@ export default function App(): JSX.Element {
 
   const isMobile = useIsMobile()
   const targets = useTargets()
-  // Off your own head there is nothing to drive: the movement controls stand
-  // down and the explorer's RETURN TO LIVE is the way back.
-  const atHead = useCyberspace((s) => s.atHead())
   // Spectating locks the panels: they describe you, and the scene is not about
   // you right now. The bar carries what matters and the way out.
   const spectating = useCyberspace((s) => s.spectate !== null)
@@ -85,11 +81,10 @@ export default function App(): JSX.Element {
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
-  const showPad = padOpen && !crowded && atHead
-  // Off your own head the pad stands down, but scale still decides what the
-  // scene draws, so its three cells come back on their own. Gated on the same
-  // canvas tap as the pad, so hiding the overlay stays one gesture.
-  const showScaleBar = padOpen && !crowded && !atHead
+  // The pad no longer depends on being at your own head. Off-head it empties
+  // its movement cells and keeps its scale ones (TouchControls), because scale
+  // is the one axis that still means something while viewing or spectating.
+  const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -122,8 +117,9 @@ export default function App(): JSX.Element {
       {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && <TouchControls />}
-      {showScaleBar && <ScaleBar />}
-      {!crowded && !padOpen && atHead && (
+      {/* Off-head too: tapping a block hides the pad like any scene tap, and
+          without this there was no way to bring it back while viewing. */}
+      {!crowded && !padOpen && (
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}

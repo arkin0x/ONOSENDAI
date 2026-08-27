@@ -9,6 +9,7 @@
  * small landmark rather than a billboard.
  */
 import { useMemo, useRef } from 'react'
+import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { useFrame } from '@react-three/fiber'
 import { Group } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
@@ -122,6 +123,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
             onClick={(e) => {
               if (e.delta > 8) return
               e.stopPropagation()
+              markSceneTapHandled()
               selectStopInScene(stop.height)
             }}
           >
@@ -143,6 +145,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
               onClick={(e) => {
                 if (e.delta > 8) return
                 e.stopPropagation()
+                markSceneTapHandled()
                 selectStopInScene(stop.height)
               }}
             >

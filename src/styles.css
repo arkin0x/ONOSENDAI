@@ -2552,11 +2552,14 @@ kbd {
  */
 
 .touchpad,
-.touchops,
-.scalebar {
+.touchops {
   position: fixed;
   right: 14px;
-  z-index: 100;
+  /* Above the instrument stack (102) and the spectate bar (101). Those grow
+     downward while viewing and spectating, which is exactly when the pad is
+     the only way to change scale, and a readout briefly overlapped is a
+     smaller loss than a control that cannot be reached. */
+  z-index: 103;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -2575,16 +2578,6 @@ kbd {
     "away  up    toward"
     "left  hub   right"
     "zoomout down zoomin";
-}
-
-/* Where the pad's bottom row sits, because that is the row it replaces: same
- * three cells, same order, same place on the screen. */
-.scalebar {
-  bottom: 92px;
-  display: grid;
-  grid-template-columns: repeat(3, 38px);
-  grid-template-rows: 38px;
-  gap: 4px;
 }
 
 .touchpad__key {
@@ -2759,6 +2752,13 @@ kbd {
  * the remedy (coarser scale IS zoom out), so it echoes the message in the same
  * accent blue as the walls, at low alpha and a slow ease. A hint about where
  * relief lives, not an alarm about a fault. */
+/* Stood down off your own head. Hidden rather than removed or disabled: the
+ * cell has to keep its place so the scale keys do not move, and a greyed key
+ * would promise something the viewing modes cannot deliver. */
+.touchpad__key.is-standdown {
+  visibility: hidden;
+}
+
 .touchpad__key.is-zoomhint {
   animation: zoomhint-pulse 2s ease-in-out infinite;
 }

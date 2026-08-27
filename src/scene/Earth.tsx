@@ -23,13 +23,12 @@
 import { useEffect, useMemo } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
-import { EARTH, LAND, MERIDIAN, OCEAN } from '../lib/palette'
+import { COAST, EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
-import { EARTH_RADIUS_KM, originCsMetres, outwardSide, surfaceVertex } from '../lib/earthSurface'
+import { EARTH_RADIUS_KM, originCsMetres, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { ownHyperspaceView } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
-import { useLand } from '../hooks/useLand'
 import { WorldLabel } from './WorldLabel'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
@@ -64,10 +63,6 @@ export function Earth({ axes }: Props): JSX.Element | null {
   const plane = useCyberspace((s) => s.anchorPlane)
   // The coarsest shoreline tier, whole: 5k points, 41 KB, fetched once.
   const coast = useCoastline(plane === 0 ? '110m' : null)
-  // And the matching land fill. The globe is never more than a couple of
-  // hundred cells across, so the coarsest tier is already finer than the
-  // pixels available to it; a heavier one would buy nothing.
-  const land = useLand(plane === 0 ? '110m' : null)
 
   const globe = useMemo(() => {
     // Ideaspace has no physical mapping at all (§9.1), so there is no planet in
@@ -157,28 +152,6 @@ export function Earth({ axes }: Props): JSX.Element | null {
     }
   }, [globe, position, scaleExp, axes, coast])
 
-  // The continents as a filled surface rather than an outline. Triangulated
-  // at pack time in lat/lon, so all that happens here is the same
-  // surfaceVertex mapping the graticule uses, applied to every vertex once.
-  const landGeom = useMemo(() => {
-    if (!globe || !land) return null
-    const originM = originCsMetres(alignedOrigin(position, scaleExp))
-    const side = outwardSide(originM, scaleExp, axes)
-    const v = new Float32Array((land.pts.length / 2) * 3)
-    for (let i = 0; i < land.pts.length / 2; i++) {
-      const p = surfaceVertex(land.pts[i * 2], land.pts[i * 2 + 1], 0, originM, scaleExp, axes)
-      v[i * 3] = p[0]
-      v[i * 3 + 1] = p[1]
-      v[i * 3 + 2] = p[2]
-    }
-    const g = new BufferGeometry()
-    g.setAttribute('position', new Float32BufferAttribute(v, 3))
-    g.setIndex(Array.from(land.tris))
-    return { geometry: g, side }
-  }, [globe, land, position, scaleExp, axes])
-
-  useEffect(() => () => { landGeom?.geometry.dispose() }, [landGeom])
-
   useEffect(() => () => {
     if (!graticule) return
     graticule.blue.dispose()
@@ -211,12 +184,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />
-          {/* Only tinted once the continents are here to sit on it. A blue
-              planet with no land on it for the moment the tier is in flight
-              would be a claim, not a loading state. */}
-          {land
-            ? <meshBasicMaterial color={OCEAN} side={BackSide} toneMapped={false} />
-            : <meshBasicMaterial colorWrite={false} side={BackSide} />}
+          <meshBasicMaterial colorWrite={false} side={BackSide} />
         </mesh>
         <WorldLabel
           text={`EARTH\nr 6371 km`}
@@ -228,31 +196,12 @@ export function Earth({ axes }: Props): JSX.Element | null {
           opacity={0.9}
         />
       </group>
-      {/* The land, a tint on the water rather than a second surface. The far
-          hemisphere's continents are removed by backface culling, which is
-          what the winding in pack-land.mjs and outwardSide exist for: a
-          depth test against the ocean sphere would work only while every
-          triangle stayed outside its radius, and the ones that did not were
-          the seams. No depth WRITING, so the shorelines and rulings drawn
-          after it are never z-fought. */}
-      {landGeom && (
-        <mesh geometry={landGeom.geometry} frustumCulled={false} renderOrder={-1}>
-          <meshBasicMaterial
-            color={LAND}
-            side={landGeom.side}
-            transparent
-            opacity={0.22}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-      )}
       <lineSegments geometry={graticule.blue} frustumCulled={false}>
         <lineBasicMaterial color={EARTH} transparent opacity={0.32} toneMapped={false} />
       </lineSegments>
       {graticule.coast && (
         <lineSegments geometry={graticule.coast} frustumCulled={false}>
-          <lineBasicMaterial color={EARTH} transparent opacity={0.55} toneMapped={false} />
+          <lineBasicMaterial color={COAST} transparent opacity={0.75} toneMapped={false} />
         </lineSegments>
       )}
       <lineSegments geometry={graticule.green} frustumCulled={false}>

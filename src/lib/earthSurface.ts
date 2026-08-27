@@ -21,7 +21,6 @@
  * and materials.
  */
 
-import { BackSide, FrontSide } from 'three'
 import type { AxisDirection, Position, ViewAxes } from './space'
 
 export const WGS84_A_M = 6378137
@@ -135,40 +134,3 @@ export function surfaceDetailOpacity(scaleExp: number): number {
   return (scaleExp - SURFACE_DETAIL_GONE) / (SURFACE_DETAIL_FULL - SURFACE_DETAIL_GONE)
 }
 
-/**
- * Which face of the land shell points away from the planet, in render space.
- *
- * The fill is a closed-ish shell on a ball, so the near hemisphere can be
- * separated from the far one by backface culling: it costs nothing, it does
- * not depend on the ocean sphere's radius the way a depth test would, and it
- * halves the fill rate. What it needs is to know which way is out, and that
- * is not a constant. §9.4 permutes two axes on the way from ECEF, which is a
- * reflection, and the view frame permutes and flips them again, so the sign
- * changes as the camera moves.
- *
- * Rather than track the signs by hand, this measures them. Walking east then
- * north from a point is a counter-clockwise turn seen from outside the
- * planet, and pack-land.mjs winds every triangle the same way, so the sign of
- * that turn against the local outward direction is exactly the answer.
- */
-export function outwardSide(
-  originM: CsMetres, scaleExp: number, axes: ViewAxes,
-): typeof FrontSide | typeof BackSide {
-  const at = (lat: number, lon: number, alt = 0): [number, number, number] =>
-    surfaceVertex(lat, lon, alt, originM, scaleExp, axes)
-  const a = at(0, 0)
-  const east = at(0, 1)
-  const north = at(1, 0)
-  // A kilometre straight up, which is out of the surface by construction.
-  const up = at(0, 0, 1000)
-  const u = [east[0] - a[0], east[1] - a[1], east[2] - a[2]]
-  const v = [north[0] - a[0], north[1] - a[1], north[2] - a[2]]
-  const n = [
-    u[1] * v[2] - u[2] * v[1],
-    u[2] * v[0] - u[0] * v[2],
-    u[0] * v[1] - u[1] * v[0],
-  ]
-  const outward = [up[0] - a[0], up[1] - a[1], up[2] - a[2]]
-  const agrees = n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2] > 0
-  return agrees ? FrontSide : BackSide
-}

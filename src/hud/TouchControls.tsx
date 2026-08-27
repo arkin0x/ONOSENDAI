@@ -33,6 +33,13 @@ export function TouchControls(): JSX.Element {
   // The scene's covering box reports when the region it draws is a clipped
   // stand-in; the zoom-out key is the remedy, so it echoes that (useUiHints).
   const coveringClipped = useUiHints((s) => s.coveringClipped)
+  // Off your own head there is nothing to drive: spectating, viewing a block
+  // and viewing Earth all anchor the scene somewhere that is not you. The six
+  // directions and the commit row stand down, but scale still decides how much
+  // of the line the field draws and which regime owns the frame, so the pad
+  // stays, at its own size and in its own place, with those cells emptied.
+  // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
+  const atHead = useCyberspace((s) => s.atHead())
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -47,7 +54,7 @@ export function TouchControls(): JSX.Element {
   // exactly how many cells a 3x3 pad has.
   const pad: Array<{
     cell: string; glyph: string; sub?: string; title: string
-    act: () => void; disabled?: boolean; hint?: boolean
+    act: () => void; disabled?: boolean; hint?: boolean; scale?: boolean
   }> = [
     // The physics convention for a vector through the page: a tail seen from
     // behind going in, an arrow tip seen head-on coming out. It is the right
@@ -71,9 +78,9 @@ export function TouchControls(): JSX.Element {
     // fix the scene is asking for. Not while disabled: a glowing dead key
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
-      hint: coveringClipped && scaleExp < MAX_SCALE_EXP },
+      hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
     { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
-    { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0 },
+    { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
   return (
@@ -82,7 +89,13 @@ export function TouchControls(): JSX.Element {
         {pad.map((b) => (
           <button
             key={b.cell}
-            className={`touchpad__key touchpad__key--${b.cell}${b.hint ? ' is-zoomhint' : ''}`}
+            className={
+              `touchpad__key touchpad__key--${b.cell}${b.hint ? ' is-zoomhint' : ''}` +
+              // Emptied rather than removed: the cell keeps its place in the
+              // grid, so the scale keys and the readout stay exactly where the
+              // hand already knows to find them.
+              (!atHead && !b.scale ? ' is-standdown' : '')
+            }
             title={b.title}
             aria-label={b.title}
             disabled={b.disabled}
@@ -108,7 +121,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      <div className="touchops">
+      {atHead && <div className="touchops">
         <button
           className="touchops__cancel"
           title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}
@@ -152,7 +165,7 @@ export function TouchControls(): JSX.Element {
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(true) }}
           >LIVE</button>
         </div>
-      </div>
+      </div>}
     </>
   )
 }

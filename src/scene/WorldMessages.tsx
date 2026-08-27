@@ -8,6 +8,7 @@
  */
 
 import { useMemo } from 'react'
+import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -73,6 +74,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         const open = (e: ThreeEvent<MouseEvent>): void => {
           if (e.delta > TAP_SLOP) return
           e.stopPropagation()
+          markSceneTapHandled()
           useShards.getState().selectSecret(w.key)
         }
         return (

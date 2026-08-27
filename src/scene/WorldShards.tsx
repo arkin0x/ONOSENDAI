@@ -9,6 +9,7 @@
  */
 
 import { useMemo } from 'react'
+import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -59,6 +60,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         const open = (e: ThreeEvent<MouseEvent>): void => {
           if (e.delta > TAP_SLOP) return
           e.stopPropagation()
+          markSceneTapHandled()
           useShards.getState().selectSecret(w.key)
         }
         return (

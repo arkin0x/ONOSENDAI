@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
 import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
@@ -456,6 +457,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const height = built.heights[bestIndex]
     if (height === undefined) return
     e.stopPropagation()
+    markSceneTapHandled()
     selectStopInScene(height)
   }
 

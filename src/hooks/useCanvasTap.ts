@@ -13,6 +13,27 @@
 
 import { useEffect } from 'react'
 
+/**
+ * Marks the current gesture as already meaning something.
+ *
+ * A tap on a block, a shard or the planet lands on the canvas like any other,
+ * so without this the same press both selected the thing and toggled the
+ * controls away. Scene handlers call stopPropagation, but that is R3F's own
+ * event and says nothing to a window listener, so they say it here instead.
+ *
+ * A timestamp rather than a flag: the scene handler runs during the pointerup
+ * that this hook is also watching, so the mark only has to outlive one event,
+ * and one that is never cleared cannot strand the gesture after it.
+ */
+let handledAt = 0
+
+export function markSceneTapHandled(): void {
+  handledAt = performance.now()
+}
+
+/** How long a scene handler's claim on the gesture lasts, in milliseconds. */
+const HANDLED_MS = 50
+
 /** How far a press may wander and still count as a tap, in CSS pixels. */
 const SLOP = 12
 /** How long it may last, in milliseconds. */
@@ -45,6 +66,7 @@ export function useCanvasTap(onTap: () => void, enabled = true): void {
       tracking = false
       if (e.timeStamp - startedAt > MAX_MS) return
       if (Math.hypot(e.clientX - startX, e.clientY - startY) > SLOP) return
+      if (performance.now() - handledAt < HANDLED_MS) return
       onTap()
     }
 

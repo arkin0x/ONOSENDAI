@@ -42,9 +42,15 @@
  * separated from the far one by backface culling, which needs every triangle
  * wound the same way. Each one is turned to face outward here, once.
  *
- * The 10m tier is deliberately absent: 446k points would pack to roughly 9 MB
- * for a fill that only ever backs the coastline. src/lib/land.ts stops asking
- * for a fill below the scale where 50m still reads as accurate.
+ * The 10m tier is simplified on the way in, because the fill has to match the
+ * SHAPE of the 10m coastline drawn over it, not its precision. Whole, it is
+ * 446k points and 8.6 MB. What actually shows at those zooms is topology: 50m
+ * carries 1421 polygons against 10m's 6838, so five thousand islands were
+ * outlined in blue with no land inside them. Douglas-Peucker at 600 m keeps
+ * every one of those rings and drops two thirds of the points, which is 3 MB,
+ * the same order as the 10m coastline it is drawn under. Position ends up two
+ * to three times better than 50m rather than ten, and at these zooms a fill
+ * edge is a wash under a bright line, so shape is what the eye checks.
  *
  * Run once when Natural Earth updates; the outputs are committed.
  */
@@ -143,6 +149,56 @@ function orientOutward(verts, tris) {
   }
 }
 
+/**
+ * How far a simplified ring may stray from the original, in metres, per tier.
+ *
+ * Only 10m needs it. 110m and 50m are already coarser than the tolerance
+ * would be, so simplifying them would cost shape and save nothing.
+ */
+const SIMPLIFY_M = { '110m': 0, '50m': 0, '10m': 600 }
+
+/**
+ * Douglas-Peucker on a lat/lon ring, to a tolerance given in metres.
+ *
+ * Distances are measured in degrees, so a degree of longitude has to be
+ * shrunk by the cosine of the latitude it sits at or the poles simplify far
+ * harder than the tropics. Endpoints are always kept, and a ring under four
+ * points is returned untouched: there is nothing in it to remove that would
+ * not destroy it.
+ */
+function simplify(ring, toleranceM) {
+  if (toleranceM <= 0 || ring.length < 4) return ring
+  const keep = new Array(ring.length).fill(false)
+  keep[0] = true
+  keep[ring.length - 1] = true
+  const stack = [[0, ring.length - 1]]
+  while (stack.length > 0) {
+    const [a, b] = stack.pop()
+    if (b <= a + 1) continue
+    const [ax, ay] = ring[a]
+    const [bx, by] = ring[b]
+    const dx = bx - ax
+    const dy = by - ay
+    const den = Math.hypot(dx, dy)
+    let best = -1
+    let bi = -1
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = ring[i]
+      const d = den > 0
+        ? Math.abs(dy * px - dx * py + bx * ay - by * ax) / den
+        : Math.hypot(px - ax, py - ay)
+      if (d > best) { best = d; bi = i }
+    }
+    const lat = ring[bi][1]
+    const tol = toleranceM / 111320 / Math.max(0.1, Math.cos((lat * Math.PI) / 180))
+    if (best > tol) {
+      keep[bi] = true
+      stack.push([a, bi], [bi, b])
+    }
+  }
+  return ring.filter((_, i) => keep[i])
+}
+
 const src = process.argv[2]
 if (!src) {
   console.error('usage: node scripts/pack-land.mjs <dir with ne_*_land.geojson>')
@@ -160,7 +216,7 @@ function open(ring) {
   return closed ? ring.slice(0, n - 1) : ring
 }
 
-for (const tier of ['110m', '50m']) {
+for (const tier of ['110m', '50m', '10m']) {
   const geo = JSON.parse(readFileSync(join(src, `ne_${tier}_land.geojson`), 'utf8'))
   const verts = [] // flat lat, lon, lat, lon, ...
   const tris = []
@@ -173,13 +229,14 @@ for (const tier of ['110m', '50m']) {
       // outer ring and their start vertices listed separately. Coordinates go
       // in the way GeoJSON stores them, x = lon and y = lat; the swap to lat
       // first happens only where they are written out.
-      const outer = open(rings[0] ?? [])
+      const tol = SIMPLIFY_M[tier] ?? 0
+      const outer = open(simplify(rings[0] ?? [], tol))
       if (outer.length < 3) continue
       const flat = []
       for (const [lon, lat] of outer) flat.push(lon, lat)
       const holes = []
       for (let h = 1; h < rings.length; h++) {
-        const hole = open(rings[h])
+        const hole = open(simplify(rings[h], tol))
         if (hole.length < 3) continue
         holes.push(flat.length / 2)
         for (const [lon, lat] of hole) flat.push(lon, lat)

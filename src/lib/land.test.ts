@@ -62,10 +62,15 @@ describe('landTier', () => {
   it('refines as the window closes in, then gives up', () => {
     expect(landTier(55)).toBe('110m')
     expect(landTier(50)).toBe('110m')
+    // The same boundaries coastTier uses, so the fill and the outline drawn
+    // over it are never from different generalisations of the same coast.
     expect(landTier(49)).toBe('50m')
-    expect(landTier(42)).toBe('50m')
-    // Below 42 the 50m outline would no longer line up with the drawn coast.
-    expect(landTier(41)).toBe(null)
+    expect(landTier(46)).toBe('50m')
+    expect(landTier(45)).toBe('10m')
+    expect(landTier(40)).toBe('10m')
+    // Below 40 even the simplified 10m fill stops agreeing with its own
+    // shoreline, and a fill that disagrees reads worse than no fill.
+    expect(landTier(39)).toBe(null)
     expect(landTier(20)).toBe(null)
   })
 })
@@ -99,10 +104,10 @@ describe('trianglesInWindow', () => {
   })
 })
 
-describe('the packed land-110m.bin on disk', () => {
+describe.each(['110m', '50m', '10m'])('the packed land-%s.bin on disk', (tier) => {
   // node hands back a view into a pooled buffer, so the bytes are copied into
   // an ArrayBuffer of their own before the parser is pointed at them.
-  const bytes: Uint8Array = readFileSync(new URL('../../public/land-110m.bin', import.meta.url))
+  const bytes: Uint8Array = readFileSync(new URL(`../../public/land-${tier}.bin`, import.meta.url))
   const buf = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buf).set(bytes)
   const land = parseLand(buf)
@@ -140,6 +145,14 @@ describe('the packed land-110m.bin on disk', () => {
   // Bounds checks would still pass if lat and lon had been swapped somewhere
   // between the pack script and the parser, or if the ears had been cut wrong.
   // Asking where the mesh actually says land is will not.
+  it('buckets every triangle into a band that can find it again', () => {
+    // The band index is the only reason the 10m tier is affordable to query,
+    // and an off-by-one in it would silently drop coastline rather than fail.
+    const all = new Set<number>()
+    for (const band of land.bands) for (const t of band) all.add(t)
+    expect(all.size).toBe(land.tris.length / 3)
+  })
+
   it('covers the continents and leaves the oceans open', () => {
     for (const [lat, lon] of [[39, -98], [23, 10], [62, 100], [-25, 134], [-80, 0]]) {
       expect(covers(land, lat, lon), `${lat}, ${lon} should be land`).toBe(true)

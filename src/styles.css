@@ -3658,3 +3658,40 @@ kbd {
 .hyper__kicker--destination {
   color: #ffff00;
 }
+
+/* Loot: what is hidden in cyberspace, one row per bag */
+.loot__row {
+  padding: 6px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 10px;
+}
+.loot__row:first-child {
+  border-top: 0;
+}
+.loot__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.loot__top .badge {
+  flex: 1;
+  min-width: 0;
+}
+.loot__top .avatars__when {
+  margin-left: auto;
+}
+.loot__meta {
+  margin-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.loot__riddle {
+  margin-top: 3px;
+  font-style: italic;
+  color: var(--fg);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

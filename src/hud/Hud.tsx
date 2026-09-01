@@ -12,6 +12,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
 import { AvatarsPanel } from './AvatarsPanel'
+import { LootPanel } from './LootPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
@@ -235,6 +236,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <IdentityPanel />
         <PositionPanel />
         <AvatarsPanel />
+        <LootPanel />
         <TargetsPanel />
         <ScalePanel />
         <LinksPanel />

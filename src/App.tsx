@@ -9,6 +9,7 @@ import { DeployBar } from './hud/DeployBar'
 import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
+import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
@@ -111,6 +112,7 @@ export default function App(): JSX.Element {
           <LineScrubber />
           <HyperspaceBar />
           <FocusBar />
+          <KeyFoundChip />
           <ChainExplorer />
           <BitReadout />
         </div>

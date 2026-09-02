@@ -7,11 +7,13 @@
  * shrinking to nothing. Culled past the same reach as everything else.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
-import type { ThreeEvent } from '@react-three/fiber'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
+import { useCeremony } from '../store/useCeremony'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -55,6 +57,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const mine = useShards((s) => s.mine)
   const discovered = useShards((s) => s.discovered)
+  const births = useCeremony((s) => s.births)
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -79,7 +82,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         }
         return (
           <group key={w.key}>
-            <WorldLabel text={wrap(w.text)} color={NOTE} at={w.centre} align="center" px={13} />
+            {births[w.key] !== undefined
+              ? <DecodingLabel text={wrap(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
+              : <WorldLabel text={wrap(w.text)} color={NOTE} at={w.centre} align="center" px={13} />}
             <WorldLabel text={`— ${shortAuthor(w.author, w.mine)}`} color={ACCENT} at={[w.centre[0], w.centre[1] - 0.9, w.centre[2]]} align="center" px={9} opacity={0.7} />
             <mesh position={w.centre} onClick={open}>
               <sphereGeometry args={[1, 8, 8]} />
@@ -90,4 +95,26 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       })}
     </>
   )
+}
+
+/**
+ * A message that was just found: its characters resolve out of glyphs over
+ * TEXT_DECODE_MS, each at its own moment, then it is an ordinary label.
+ */
+function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; birth: number; at: [number, number, number] }): JSX.Element {
+  const [shown, setShown] = useState(() => decodeText(text, 0, seed, 0))
+  const frame = useRef(0)
+  const last = useRef(0)
+  const done = useRef(false)
+  useFrame(() => {
+    if (done.current) return
+    const now = performance.now()
+    if (now - last.current < 40) return
+    last.current = now
+    frame.current++
+    const t = (now - birth) / TEXT_DECODE_MS
+    setShown(decodeText(text, t, seed, frame.current))
+    if (t >= 1) done.current = true
+  })
+  return <WorldLabel text={shown} color={NOTE} at={at} align="center" px={13} />
 }

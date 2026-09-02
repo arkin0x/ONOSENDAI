@@ -235,19 +235,19 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       <div className="hud__col hud__col--left">
         <Brand />
         <IdentityPanel />
-        <PositionPanel />
-        <AvatarsPanel />
         <LootPanel />
+        <ShardsPanel />
+        <AvatarsPanel />
         <TargetsPanel />
-        <ScalePanel />
         <LinksPanel />
       </div>
       <div className="hud__col hud__col--right">
+        <ScalePanel />
+        <PositionPanel />
         <ProofPanel />
         <ChainPanel />
         <HyperspacePanel />
         <Legend />
-        <ShardsPanel />
         <Controls />
         <DerezzPanel />
         <RelaysPanel />

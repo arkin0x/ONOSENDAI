@@ -48,13 +48,20 @@ export type ProofResponse =
       mode: ProofMode
       elapsedMs: number
       proofHash: string
-      regionN: string
+      /** The spatial region integer, decimal; null for a cloud hop, whose region never left the cloud. */
+      regionN: string | null
       terrainK: number
       lca: { x: number; y: number; z: number }
-      /** Cantor pairings for hops; SHA-256 evaluations for sidesteps. */
+      /** Cantor pairings for hops; SHA-256 evaluations for sidesteps; 0 for a cloud proof. */
       totalOps: number
       /** Present on sidesteps only. */
       sidestep?: SidestepTags
+      /** Where the proof was computed. Absent means this worker (lib/cloud.ts sets 'cloud'). */
+      source?: 'local' | 'cloud'
+      /** Cloud proofs only: the HOSAKA job, what it cost, and for a hop the region's lookup id (spec 7.2). */
+      jobId?: string
+      costMsats?: number
+      lookupId?: string
     }
   | { type: 'error'; id: number; message: string; elapsedMs: number }
 

@@ -75,6 +75,40 @@ import {
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 import { recommendedHopHeight } from '../lib/calibration'
+import {
+  createHosaka,
+  createWaker,
+  type CloudHopResult,
+  type HosakaAction,
+  type HosakaClient,
+  type HosakaJob,
+  type HosakaLimits,
+  type HosakaQuote,
+  type Waker,
+} from '../lib/hosaka'
+import {
+  clearCloudJob,
+  cloudProofResponse,
+  describeCloudError,
+  driveCloudJob,
+  hosakaCoord,
+  invoiceOf,
+  loadCloudJob,
+  loadCloudPrefs,
+  needsApproval,
+  positionFromWire,
+  retainsRecord,
+  routeCommit,
+  saveCloudJob,
+  saveCloudPrefs,
+  saveCloudRegionKey,
+  verifyCloudResult,
+  wirePosition,
+  type CloudInvoice,
+  type CloudMode,
+  type CloudPrefs,
+  type PendingCloudJob,
+} from '../lib/cloud'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -123,6 +157,12 @@ export interface ProofState {
   /** Cantor pairings for hops; SHA-256 evaluations for sidesteps. */
   totalOps: number | null
   message: string | null
+  /** Where the proof was computed: this machine, or HOSAKA. */
+  source: 'local' | 'cloud'
+  /** What a cloud proof cost, in msats; null for a local one. */
+  costMsats: number | null
+  /** A cloud hop's region lookup id (spec 7.2). The region key itself is stored, not shown. */
+  lookupId: string | null
 }
 
 const IDLE_PROOF: ProofState = {
@@ -136,6 +176,9 @@ const IDLE_PROOF: ProofState = {
   lca: null,
   totalOps: null,
   message: null,
+  source: 'local',
+  costMsats: null,
+  lookupId: null,
 }
 
 export interface ChainStats {
@@ -152,6 +195,59 @@ export interface ChainStats {
 }
 
 const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 }
+
+/**
+ * The cloud flow's stations. `quoting` covers every exchange before there is
+ * a job (the public quote, then the signed submit); `confirm` waits for PAY;
+ * the payment stages mirror the persisted job's stage; `verifying` is this
+ * client checking the result before it signs. `error` keeps its message until
+ * X or the next commit.
+ */
+export type CloudStatus = 'idle' | 'quoting' | 'confirm' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
+
+/** HOSAKA's price for the lined-up move, waiting for PAY or already approved. */
+export interface CloudQuote {
+  action: HosakaAction
+  /** Where the paid move lands: the cursor for a hop, past the wall for a sidestep. */
+  to: Position
+  costMsats: number
+  tier: string | null
+  estTime: string | null
+  maxHeight: number
+  K: number
+}
+
+export interface CloudState {
+  status: CloudStatus
+  quote: CloudQuote | null
+  invoice: CloudInvoice | null
+  /** The invoice modal is up. A tap outside folds it; the Cloud panel reopens it. */
+  invoiceOpen: boolean
+  /** The pending job record, as persisted; kept after a cancel once it is paid. */
+  job: PendingCloudJob | null
+  /** HOSAKA's own progress estimate while computing, 0..1; null when it has none. */
+  progress: number | null
+  message: string | null
+  /** GET /limits, fetched once per API URL; null until it answers, which means no cloud route. */
+  limits: HosakaLimits | null
+  /** Date.now() when this flow began, for the elapsed line. */
+  startedAt: number | null
+  /** The last cloud proof that landed, for the panel. */
+  last: { jobId: string; action: HosakaAction; costMsats: number; lookupId: string | null; at: number } | null
+}
+
+const IDLE_CLOUD: CloudState = {
+  status: 'idle',
+  quote: null,
+  invoice: null,
+  invoiceOpen: false,
+  job: null,
+  progress: null,
+  message: null,
+  limits: null,
+  startedAt: null,
+  last: null,
+}
 
 /**
  * Where an event is on its way to the relay. `queued` is the resting state in
@@ -331,6 +427,34 @@ export interface CyberspaceState {
   useBunker: (uri: string) => Promise<void>
   /** Clear a shown login error. */
   clearLoginError: () => void
+
+  /** HOSAKA cloud compute: the flow in progress and its pending job. */
+  cloud: CloudState
+  /** Persisted: the mode, the budget below which AUTO does not ask, and the API. */
+  cloudPrefs: CloudPrefs
+  /** PAY on the quote: submit the cloud move. */
+  approveCloud: () => void
+  /** CANCEL on the quote: nothing is submitted; the cursor stays lined up. */
+  declineCloud: () => void
+  /**
+   * Stop the cloud flow. Unpaid, the job is abandoned and expires server-side.
+   * Paid or computing, the watch stops but the record stays for RESUME: the
+   * money is spent and the result can still be claimed while the head holds.
+   */
+  cancelCloud: () => void
+  /**
+   * Pick up the persisted job (on load, after an identity switch, or from the
+   * panel) when its chain head is still ours; drop it when the head moved or
+   * its invoice expired. Also fetches the caps when cloud mode is on.
+   */
+  resumeCloudJob: () => Promise<void>
+  /** Forget a kept job without finishing it. */
+  discardCloudJob: () => void
+  /** Ask HOSAKA about the invoice now rather than at the next poll. */
+  checkCloudPayment: () => void
+  setCloudMode: (mode: CloudMode) => void
+  setCloudPrefs: (patch: Partial<CloudPrefs>) => void
+  setInvoiceOpen: (open: boolean) => void
 
   axes: () => ViewAxes
   /** Axes as they appear on screen right now, including free orbit. */
@@ -632,13 +756,291 @@ const initial = derive(loadChain(pubkeyHex) ?? freshSpawnSync(currentSigner))
 
 let requestId = 0
 
+/** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
+let cloudAbort: AbortController | null = null
+let cloudWaker: Waker | null = null
+let hosaka: { url: string; client: HosakaClient } | null = null
+let limitsInFlight: Promise<HosakaLimits | null> | null = null
+
+/** One client per API URL. It signs through `signEvent`, so it follows identity switches. */
+function cloudClient(apiUrl: string): HosakaClient {
+  if (!hosaka || hosaka.url !== apiUrl) hosaka = { url: apiUrl, client: createHosaka({ apiUrl, sign: signEvent }) }
+  return hosaka.client
+}
+
+/** Claim polls are signed. A local key signs silently, so every 4 s (the
+ * contract's 3 to 5); an extension or a bunker may prompt for each one, so
+ * it is asked less often and the invoice modal offers CHECK PAYMENT. */
+function claimIntervalFor(kind: SignerKind): number {
+  return kind === 'local' ? 4_000 : 10_000
+}
+
 export const useCyberspace = create<CyberspaceState>((set, get) => {
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
    * one spawns where its own bits land (spec §3.1). Either way the scene lets
    * go of whatever it was spectating and returns to the new head.
    */
+  /** Abort whatever cloud flow is running. The record's fate is the caller's call. */
+  const stopCloud = (): void => {
+    cloudAbort?.abort()
+    cloudAbort = null
+    cloudWaker = null
+  }
+
+  /** The cloud flow ended without a proof. The move does not happen; the message stays until X or the next commit. */
+  const cloudFail = (message: string, keepJob: boolean): void => {
+    const cloud = get().cloud
+    set({
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message },
+      cloud: {
+        ...cloud,
+        status: 'error',
+        message,
+        quote: null,
+        invoice: null,
+        invoiceOpen: false,
+        progress: null,
+        job: keepJob ? cloud.job : null,
+      },
+    })
+  }
+
+  /** GET /limits, once per API URL. null when HOSAKA cannot be reached, which routes every move locally. */
+  const ensureCloudLimits = (): Promise<HosakaLimits | null> => {
+    const cached = get().cloud.limits
+    if (cached) return Promise.resolve(cached)
+    if (limitsInFlight) return limitsInFlight
+    const url = get().cloudPrefs.apiUrl
+    limitsInFlight = cloudClient(url)
+      .limits()
+      .then((limits) => {
+        // The URL may have changed while this was out; a stale answer is dropped.
+        if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, limits } })
+        return limits
+      })
+      .catch(() => null)
+      .finally(() => { limitsInFlight = null })
+    return limitsInFlight
+  }
+
+  /**
+   * The cloud route, from the quote on. Public quote first (never a signer
+   * prompt), then PAY when the prefs want one, then the signed submit. The
+   * request id is the same discipline the worker path uses: a cancel or a
+   * respawn bumps it, and every await checks it before touching state.
+   */
+  const beginCloudMove = async (action: HosakaAction, to: Position, id: number): Promise<void> => {
+    const { position, plane, cloudPrefs } = get()
+    set({
+      pendingTarget: to,
+      proof: { ...IDLE_PROOF, status: 'computing', mode: action, source: 'cloud' },
+      cloud: {
+        ...get().cloud,
+        status: 'quoting',
+        quote: null,
+        invoice: null,
+        invoiceOpen: false,
+        job: null,
+        progress: null,
+        message: 'Asking HOSAKA for a quote.',
+        startedAt: Date.now(),
+      },
+    })
+    let quote: HosakaQuote
+    try {
+      quote = await cloudClient(cloudPrefs.apiUrl).quote(action, hosakaCoord(position, plane), hosakaCoord(to, plane))
+    } catch (err) {
+      if (id !== requestId) return
+      cloudFail(describeCloudError(err), false)
+      return
+    }
+    if (id !== requestId) return
+    if (!quote.within_cap || quote.cost_msats === null) {
+      cloudFail(quote.hint ?? `HOSAKA does not sell an h${quote.max_height} ${action}.`, false)
+      return
+    }
+    const q: CloudQuote = {
+      action,
+      to,
+      costMsats: quote.cost_msats,
+      tier: quote.tier,
+      estTime: quote.est_time,
+      maxHeight: quote.max_height,
+      K: quote.K,
+    }
+    if (needsApproval(q.costMsats, cloudPrefs)) {
+      set({ cloud: { ...get().cloud, status: 'confirm', quote: q, message: null } })
+      return
+    }
+    set({ cloud: { ...get().cloud, quote: q } })
+    await submitCloud(q, id)
+  }
+
+  /** The signed submit. Its 201 is either a funded job or an invoice; either way the record is on disk before anything is shown. */
+  const submitCloud = async (q: CloudQuote, id: number): Promise<void> => {
+    const { position, plane, prevEventId, identity, cloudPrefs } = get()
+    const client = cloudClient(cloudPrefs.apiUrl)
+    set({
+      cloud: {
+        ...get().cloud,
+        status: 'quoting',
+        message: currentSigner.kind === 'local' ? 'Submitting to HOSAKA.' : 'Waiting for your signer to approve the HOSAKA request.',
+      },
+    })
+    let job: HosakaJob
+    try {
+      const v1 = hosakaCoord(position, plane)
+      const v2 = hosakaCoord(q.to, plane)
+      job = q.action === 'hop'
+        ? await client.submitHop(v1, v2, prevEventId)
+        : await client.submitSidestep(v1, v2, prevEventId)
+    } catch (err) {
+      if (id !== requestId) return
+      cloudFail(describeCloudError(err), false)
+      return
+    }
+    if (id !== requestId) return
+    const paying = job.payment_required === true && job.deposit !== undefined
+    const record: PendingCloudJob = {
+      version: 1,
+      jobId: job.id,
+      pollToken: job.poll_token ?? '',
+      action: q.action,
+      pubkey: identity.pubkey,
+      from: wirePosition(position),
+      to: wirePosition(q.to),
+      plane,
+      prevEventId,
+      costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : q.costMsats,
+      createdAt: Date.now(),
+      stage: paying ? 'awaiting_payment' : 'computing',
+      deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+    }
+    // On disk before the invoice is on screen, so a reload mid-payment resumes.
+    saveCloudJob(record)
+    set({ cloud: { ...get().cloud, job: record, message: null } })
+    await runCloud(record, id)
+  }
+
+  /**
+   * From a persisted record to a signed event: pay and poll (lib/cloud.ts
+   * driveCloudJob), verify in a worker, refuse a moved head, then hand the
+   * result to applyProofMessage exactly as the worker would have.
+   */
+  const runCloud = async (record: PendingCloudJob, id: number): Promise<void> => {
+    const client = cloudClient(get().cloudPrefs.apiUrl)
+    stopCloud()
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    let outcome: { job: HosakaJob; record: PendingCloudJob }
+    try {
+      outcome = await driveCloudJob(client, record, {
+        claimIntervalMs: claimIntervalFor(currentSigner.kind),
+        onRecord: (r) => {
+          saveCloudJob(r)
+          if (id === requestId) set({ cloud: { ...get().cloud, job: r } })
+        },
+        onStage: (stage, d) => {
+          if (id !== requestId) return
+          const cloud = get().cloud
+          set({
+            cloud: {
+              ...cloud,
+              status: stage,
+              invoice: d.invoice === undefined ? cloud.invoice : d.invoice,
+              // A fresh invoice opens the modal; a poll while one is up leaves it as the user left it.
+              invoiceOpen: stage === 'awaiting_payment' ? (d.invoice ? true : cloud.invoiceOpen) : false,
+              progress: d.progress === undefined ? cloud.progress : d.progress,
+              message: d.message === undefined ? cloud.message : d.message,
+            },
+          })
+        },
+      }, abort.signal, waker)
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return
+      const keep = retainsRecord(err)
+      if (!keep) clearCloudJob()
+      cloudFail(describeCloudError(err), keep)
+      return
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
+    if (id !== requestId) return
+
+    const { job } = outcome
+    const final = outcome.record
+    if (job.status !== 'completed') {
+      clearCloudJob()
+      cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
+      return
+    }
+
+    set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: null } })
+    const move = { from: positionFromWire(final.from), to: positionFromWire(final.to), plane: final.plane, prevEventId: final.prevEventId }
+    let failed: string[]
+    try {
+      failed = await verifyCloudResult(final.action, job.result, move, Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()))
+    } catch (err) {
+      failed = [`verifier: ${err instanceof Error ? err.message : String(err)}`]
+    }
+    if (id !== requestId) return
+    if (failed.length > 0) {
+      clearCloudJob()
+      cloudFail(`Cloud proof rejected: ${failed.join(', ')}. Nothing was signed.`, false)
+      return
+    }
+    // The proof binds to the head it was quoted against (spec 5.3). A head
+    // that moved since makes it worthless, so it is refused, not appended.
+    if (get().prevEventId !== final.prevEventId) {
+      clearCloudJob()
+      cloudFail('The chain head moved while HOSAKA was computing; the cloud proof was discarded.', false)
+      return
+    }
+
+    const msg = cloudProofResponse(id, final, job, Date.now() - (get().cloud.startedAt ?? final.createdAt))
+    if (msg.type === 'done' && msg.mode === 'hop' && msg.lookupId) {
+      // The region key of the region entered (spec 7.2), which this machine could not derive.
+      const r = job.result as CloudHopResult
+      saveCloudRegionKey({
+        lookupId: msg.lookupId,
+        keyHex: r.region_n.secret_key,
+        height: r.max_height,
+        coordHex: positionHex(move.to, move.plane),
+        jobId: final.jobId,
+        at: Math.floor(Date.now() / 1000),
+      })
+    }
+    await get().applyProofMessage(msg)
+    if (id !== requestId) return
+    if (get().prevEventId === final.prevEventId) {
+      // The signer refused. The verified result is still good, so the record stays for RESUME.
+      set({ cloud: { ...get().cloud, status: 'error', message: `${get().proof.message ?? 'Signing failed.'} The verified cloud result is kept; RESUME to sign it again.` } })
+      return
+    }
+    clearCloudJob()
+    set({
+      cloud: {
+        ...IDLE_CLOUD,
+        limits: get().cloud.limits,
+        last: {
+          jobId: final.jobId,
+          action: final.action,
+          costMsats: msg.type === 'done' ? msg.costMsats ?? final.costMsats : final.costMsats,
+          lookupId: msg.type === 'done' ? msg.lookupId ?? null : null,
+          at: Date.now(),
+        },
+      },
+    })
+  }
+
   const switchTo = async (signer: Signer): Promise<void> => {
+    // A cloud flow in progress was signing as the old identity; it ends here.
+    stopCloud()
+    requestId++
     currentSigner = signer
     saveSignerPref(prefOf(signer))
     // No spawn is signed here. A returning identity loads from local storage now
@@ -659,8 +1061,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       spectate: null,
       focus: null,
       transit: null,
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits },
     })
     if (local) saveChain(base.events, base.published, base.chain)
+    // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
+    void get().resumeCloudJob()
   }
 
   return {
@@ -749,16 +1154,21 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (proof.status === 'computing') return
     // Nothing lined up: same cell, same plane.
     if (samePosition(position, cursor) && plane === headPlane) return
+    // A previous cloud failure has been read by now; a new commit starts
+    // clean. A kept job stays kept.
+    if (get().cloud.status === 'error') set({ cloud: { ...get().cloud, status: 'idle', message: null } })
 
     // Route by feasibility: a hop straight to the cursor when the Cantor tree
-    // fits, otherwise a Merkle sidestep across the blocking wall(s). The
-    // sidestep lands 1 gibson past the boundary, not at the cursor; the
-    // cursor keeps the rest of the journey for the next commit.
-    // The ceiling this commit will actually attempt: the protocol's hard cap,
-    // lowered to what calibration measured THIS machine finishing in budget
-    // (lib/calibration.ts). Routing, the sidestep landing and the worker all
-    // use the same number, so a hop the machine cannot finish becomes a
-    // sidestep at the real ceiling instead of a stalled tab.
+    // fits this machine; otherwise HOSAKA, when cloud mode is on and it sells
+    // the height (a cloud hop lands at the cursor, a cloud sidestep past the
+    // wall); otherwise a local Merkle sidestep across the blocking wall(s),
+    // landing 1 gibson past the boundary, not at the cursor, so the cursor
+    // keeps the rest of the journey for the next commit (lib/cloud.ts
+    // routeCommit). The ceiling this commit will actually attempt: the
+    // protocol's hard cap, lowered to what calibration measured THIS machine
+    // finishing in budget (lib/calibration.ts). Routing, the sidestep landing
+    // and the worker all use the same number, so a hop the machine cannot
+    // finish becomes a sidestep at the real ceiling instead of a stalled tab.
     const ceiling = Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight())
     const estimate = estimateHopCost(
       position.x, position.y, position.z,
@@ -766,6 +1176,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       plane,
       ceiling,
     )
+    // The caps are fetched at startup and cached; until HOSAKA has answered
+    // the cloud is not a route, and the proof panel's preview says the same.
+    const { cloudPrefs, cloud } = get()
+    if (estimate.exceedsLimit && cloudPrefs.mode !== 'off' && cloud.limits === null) void ensureCloudLimits()
+    const route = routeCommit({ maxHeight: estimate.maxHeight, ceiling, mode: cloudPrefs.mode, limits: cloud.limits })
+    if (route === 'cloud-hop' || route === 'cloud-sidestep') {
+      const to = route === 'cloud-hop' ? { ...cursor } : sidestepTarget(position, cursor, ceiling)
+      if (samePosition(position, to) && plane === headPlane) return
+      await beginCloudMove(route === 'cloud-hop' ? 'hop' : 'sidestep', to, ++requestId)
+      return
+    }
     const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
     const to = mode === 'sidestep' ? sidestepTarget(position, cursor, ceiling) : { ...cursor }
     if (samePosition(position, to) && plane === headPlane) return
@@ -788,7 +1209,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   cancel: () => {
-    const { proof, position, headPlane } = get()
+    const { proof, position, headPlane, cloud } = get()
+    // A cloud flow owns the commit while it runs, and its failure notice
+    // afterwards; X ends either the same way.
+    if (cloud.status !== 'idle') { get().cancelCloud(); return }
     if (proof.status === 'computing') {
       // A Cantor proof is one synchronous computation, so cancelling means
       // killing the worker thread. Position never moved; the chain is intact.
@@ -918,7 +1342,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       sidesteps: now.chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
       totalOps: now.chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
       totalHashes: now.chain.totalHashes + (msg.mode === 'sidestep' ? msg.totalOps : 0),
-      totalMs: now.chain.totalMs + msg.elapsedMs,
+      // Cloud wall time is HOSAKA's, not this machine's compute.
+      totalMs: now.chain.totalMs + (msg.source === 'cloud' ? 0 : msg.elapsedMs),
     }
     const nextEvents = [...now.events, event]
     const nextPublished = { ...now.published, [event.id]: 'queued' as const }
@@ -940,6 +1365,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         lca: msg.lca,
         totalOps: msg.totalOps,
         message: null,
+        source: msg.source ?? 'local',
+        costMsats: msg.costMsats ?? null,
+        lookupId: msg.lookupId ?? null,
       },
       events: nextEvents,
       prevEventId: event.id,
@@ -963,6 +1391,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       cancelProof()
       requestId++
     }
+    // So was any cloud job, paid or not: its temporal binding names a head
+    // that is about to stop being one.
+    if (get().cloud.status !== 'idle' || get().cloud.job !== null) {
+      stopCloud()
+      requestId++
+      clearCloudJob()
+    }
     const { events } = get()
     const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
     set({
@@ -971,6 +1406,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       pendingTarget: null,
       proof: IDLE_PROOF,
       publishError: null,
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits },
     })
     saveChain(fresh.events, fresh.published, fresh.chain)
   },
@@ -1295,6 +1731,113 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
   },
   clearLoginError: () => set({ loginError: null }),
+
+  cloud: IDLE_CLOUD,
+  cloudPrefs: loadCloudPrefs(),
+
+  approveCloud: () => {
+    const { cloud } = get()
+    if (cloud.status !== 'confirm' || !cloud.quote) return
+    void submitCloud(cloud.quote, requestId)
+  },
+
+  declineCloud: () => {
+    if (get().cloud.status !== 'confirm') return
+    requestId++
+    set({ pendingTarget: null, proof: IDLE_PROOF, cloud: { ...get().cloud, status: 'idle', quote: null, message: null, startedAt: null } })
+  },
+
+  cancelCloud: () => {
+    const { cloud } = get()
+    if (cloud.status === 'idle') return
+    requestId++
+    stopCloud()
+    // Unpaid, the job simply expires on the server. Paid or computing, the
+    // record is kept: the money is spent and the result can still be claimed.
+    // Dismissing an error keeps whatever the failure left behind.
+    const keep = cloud.job !== null && (cloud.status === 'error' || cloud.job.stage !== 'awaiting_payment')
+    if (!keep) clearCloudJob()
+    set({
+      pendingTarget: null,
+      proof: IDLE_PROOF,
+      cloud: {
+        ...IDLE_CLOUD,
+        limits: cloud.limits,
+        last: cloud.last,
+        job: keep ? cloud.job : null,
+        message: keep
+          ? 'Cloud job kept. RESUME finishes it; moving first makes it worthless.'
+          : cloud.status === 'awaiting_payment'
+            ? 'Cloud job abandoned. If you already paid, the deposit stays claimable on your HOSAKA balance.'
+            : null,
+      },
+    })
+  },
+
+  resumeCloudJob: async () => {
+    const { cloudPrefs, identity } = get()
+    if (cloudPrefs.mode !== 'off') void ensureCloudLimits()
+    const record = loadCloudJob()
+    // Another identity's job stays on disk for when it is back.
+    if (!record || record.pubkey !== identity.pubkey) return
+    if (get().proof.status === 'computing') return
+    if (record.prevEventId !== get().prevEventId) {
+      clearCloudJob()
+      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: the chain head moved since it was created.' } })
+      return
+    }
+    if (record.stage === 'awaiting_payment' && record.deposit && record.deposit.expiresAt * 1000 < Date.now()) {
+      clearCloudJob()
+      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: its invoice expired.' } })
+      return
+    }
+    const id = ++requestId
+    set({
+      pendingTarget: positionFromWire(record.to),
+      proof: { ...IDLE_PROOF, status: 'computing', mode: record.action, source: 'cloud' },
+      cloud: {
+        ...get().cloud,
+        status: record.stage,
+        quote: null,
+        invoice: record.deposit,
+        invoiceOpen: record.stage === 'awaiting_payment',
+        job: record,
+        progress: null,
+        message: null,
+        startedAt: record.createdAt,
+      },
+    })
+    await runCloud(record, id)
+  },
+
+  discardCloudJob: () => {
+    const { cloud, proof } = get()
+    if (cloud.status !== 'idle' && cloud.status !== 'error') return
+    clearCloudJob()
+    set({
+      cloud: { ...cloud, status: 'idle', job: null, message: null, quote: null, invoice: null, invoiceOpen: false },
+      ...(proof.status === 'infeasible' ? { proof: IDLE_PROOF } : {}),
+    })
+  },
+
+  checkCloudPayment: () => { cloudWaker?.wake() },
+
+  setCloudMode: (mode) => { get().setCloudPrefs({ mode }) },
+
+  setCloudPrefs: (patch) => {
+    const prev = get().cloudPrefs
+    const next: CloudPrefs = { ...prev, ...patch }
+    if (!Number.isFinite(next.autoMaxSats) || next.autoMaxSats < 0) next.autoMaxSats = prev.autoMaxSats
+    next.autoMaxSats = Math.floor(next.autoMaxSats)
+    next.apiUrl = next.apiUrl.trim().replace(/\/+$/, '')
+    saveCloudPrefs(next)
+    const urlChanged = next.apiUrl !== prev.apiUrl
+    if (urlChanged) limitsInFlight = null
+    set({ cloudPrefs: next, ...(urlChanged ? { cloud: { ...get().cloud, limits: null } } : {}) })
+    if (next.mode !== 'off' && get().cloud.limits === null) void ensureCloudLimits()
+  },
+
+  setInvoiceOpen: (open) => set({ cloud: { ...get().cloud, invoiceOpen: open } }),
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()

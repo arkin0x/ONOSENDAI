@@ -41,6 +41,8 @@ export interface WorkshopState {
   color: [number, number, number]
 
   openWorkshop: (id?: string) => void
+  /** Add a deep copy of a model from elsewhere (a found shard) to your Stash; returns its new id. */
+  importShard: (model: ShardModel) => string
   closeWorkshop: () => void
   create: (name?: string) => string
   select: (id: string | null) => void
@@ -132,6 +134,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map((v) => ({ p: [...v.p] as ShardVertex['p'], c: [...v.c] as ShardVertex['c'] })), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list, currentId: copy.id, selected: null, facePick: [] }); save(list)
+      return copy.id
+    },
+
+    importShard: (model) => {
+      const taken = new Set(get().shards.map((s) => s.name))
+      const name = taken.has(model.name) ? `${model.name} copy` : model.name
+      const copy: ShardModel = { ...model, id: uuid(), name, vertices: model.vertices.map((v) => ({ p: [...v.p] as ShardVertex['p'], c: [...v.c] as ShardVertex['c'] })), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      const list = [...get().shards, copy]
+      set({ shards: list }); save(list)
       return copy.id
     },
 

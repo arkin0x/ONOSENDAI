@@ -11,7 +11,7 @@
  * reached differently and answer different questions.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { formatCellSize } from '../lib/scale'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -21,6 +21,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
+import { useWorkshop } from '../store/useWorkshop'
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -29,6 +30,7 @@ export function SecretModal(): JSX.Element | null {
   const targeted = useCyberspace((s) => (item?.author ? !!s.targets[item.author] : false))
   const author = item?.author ?? ''
   const profile = useProfile(author || null)
+  const [copied, setCopied] = useState(false)
 
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
@@ -45,6 +47,13 @@ export function SecretModal(): JSX.Element | null {
     useCyberspace.getState().focusOn(item.at, item.plane, item.type === 'message' ? name : item.shard?.name ?? 'shard', item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
   const watch = (): void => { close(); void spectate(author) }
+  // A shard copies into your Stash as a model; a message copies its text.
+  const copy = (): void => {
+    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
+    else if (item.text) void navigator.clipboard?.writeText(item.text)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
   const target = (): void => useCyberspace.getState().toggleTarget(author, profile?.name ?? null)
 
   return (
@@ -86,6 +95,9 @@ export function SecretModal(): JSX.Element | null {
 
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo}>GO TO IT</button>
+          <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
+            {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO STASH' : 'COPY TEXT'}
+          </button>
           {!mine && (
             <>
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}>{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>

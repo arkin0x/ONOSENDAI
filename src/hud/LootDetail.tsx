@@ -14,6 +14,8 @@ import { nip19 } from 'nostr-tools'
 import type { Plane } from 'cyberspace-core'
 import { useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
+import type { ShardModel } from '../lib/shards'
+import { useWorkshop } from '../store/useWorkshop'
 import { messagePreview } from '../lib/hidden'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
 import type { Position } from '../lib/space'
@@ -33,6 +35,8 @@ interface OpenedItem {
   at: Position
   plane: Plane
   unit: number
+  shard?: ShardModel
+  text?: string
 }
 
 function safeNpub(pubkey: string): string {
@@ -67,6 +71,8 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
       at: h.at,
       plane: h.plane,
       unit: h.type === 'shard' ? h.shard?.unit ?? 0 : 0,
+      shard: h.shard,
+      text: h.text,
     })
   }
   for (const d of mine) {
@@ -78,6 +84,8 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
       at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) },
       plane: d.plane,
       unit: d.type === 'shard' ? d.shard?.unit ?? 0 : 0,
+      shard: d.shard,
+      text: d.text,
     })
   }
   return [...out.values()]
@@ -90,6 +98,9 @@ export function LootDetail(): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   const mine = useShards((s) => s.mine)
   const profile = useProfile(item?.author ?? null)
+  // Which item's COPY just fired, for its brief COPIED label. Declared before
+  // the early return below: hooks must run in the same order every render.
+  const [copied, setCopied] = useState<string | null>(null)
 
   if (!item) return null
 
@@ -102,6 +113,18 @@ export function LootDetail(): JSX.Element | null {
   const view = (o: OpenedItem): void => {
     close()
     useCyberspace.getState().focusOn(o.at, o.plane, o.label, o.unit)
+  }
+  // Fly there and open the item's own modal (SecretModal) on top.
+  const details = (o: OpenedItem): void => {
+    view(o)
+    useShards.getState().selectSecret(o.eventId)
+  }
+  // A shard copies into your Stash as a model; a message copies its text.
+  const copy = (o: OpenedItem): void => {
+    if (o.type === 'shard' && o.shard) useWorkshop.getState().importShard(o.shard)
+    else if (o.text) void navigator.clipboard?.writeText(o.text)
+    setCopied(o.eventId)
+    window.setTimeout(() => setCopied((c) => (c === o.eventId ? null : c)), 1400)
   }
   const watch = (): void => { close(); void spectate(item.author) }
   const target = (): void => useCyberspace.getState().toggleTarget(item.author, profile?.name ?? null)
@@ -143,7 +166,13 @@ export function LootDetail(): JSX.Element | null {
               <li key={o.eventId} className="lootd__item">
                 <span className={`secret__badge secret__badge--${o.type}`}>{o.type === 'message' ? '✎' : '◇'}</span>
                 <span className="lootd__item-label" title={o.label}>{o.label}</span>
-                <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>
+                <span className="lootd__acts">
+                  <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>
+                  <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>
+                  <button className="secret__act lootd__view" onClick={() => copy(o)} title={o.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
+                    {copied === o.eventId ? 'COPIED' : 'COPY'}
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

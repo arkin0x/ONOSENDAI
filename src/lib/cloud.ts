@@ -456,3 +456,72 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     costMsats,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Sats spent on this chain, on this device only.
+//
+// Never published and never synced: a private tally of what HOSAKA charged for
+// proofs that landed on the current chain, keyed by the chain's genesis so a
+// respawn starts at zero and an old chain keeps its number.
+// ---------------------------------------------------------------------------
+
+const SPENT_KEY = 'onosendai:spent'
+
+function spentTable(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(SPENT_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function loadSpent(genesisId: string): number {
+  const v = spentTable()[genesisId]
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+/** Add to the chain's tally and return the new total. */
+export function addSpent(genesisId: string, msats: number): number {
+  const table = spentTable()
+  const next = loadSpent(genesisId) + Math.max(0, Math.round(msats))
+  table[genesisId] = next
+  try { localStorage.setItem(SPENT_KEY, JSON.stringify(table)) } catch { /* storage unavailable: the number is still in memory */ }
+  return next
+}
+
+// ---------------------------------------------------------------------------
+// A route deposit in flight. Written before the invoice is shown: if the tab
+// closes after the wallet paid, the next load claims it so the sats land on
+// the HOSAKA balance instead of sitting unclaimed on the server.
+// ---------------------------------------------------------------------------
+
+const DEPOSIT_KEY = 'onosendai:cloudDeposit'
+
+export interface PendingCloudDeposit {
+  depositId: string
+  pubkey: string
+  amountMsats: number
+  expiresAt: number
+  bolt11: string
+}
+
+export function loadCloudDeposit(): PendingCloudDeposit | null {
+  try {
+    const raw = localStorage.getItem(DEPOSIT_KEY)
+    if (!raw) return null
+    const d = JSON.parse(raw) as PendingCloudDeposit
+    return d && typeof d.depositId === 'string' && typeof d.pubkey === 'string' ? d : null
+  } catch {
+    return null
+  }
+}
+
+export function saveCloudDeposit(d: PendingCloudDeposit): void {
+  try { localStorage.setItem(DEPOSIT_KEY, JSON.stringify(d)) } catch { /* storage unavailable */ }
+}
+
+export function clearCloudDeposit(): void {
+  try { localStorage.removeItem(DEPOSIT_KEY) } catch { /* storage unavailable */ }
+}

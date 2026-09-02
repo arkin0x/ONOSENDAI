@@ -1,15 +1,15 @@
 /**
- * cloud.test.ts - a commit beyond this machine goes to HOSAKA and comes back
- * as a signed event, through the store.
+ * cloud.test.ts - a commit beyond this machine becomes a route whose paid
+ * steps go to HOSAKA, funded once, and come back as signed events.
  *
- * The HOSAKA client is faked; everything else is real: the routing in
- * commit(), the quote and PAY gate, the record written before the invoice,
- * the verifier (cyberspace-core computes the "cloud" result at h13 so the
- * checks are exact), the refusal when the chain head moved, and
- * applyProofMessage signing the hop or sidestep exactly as it would a local
- * one. What would fail silently otherwise: a cloud proof appended to a chain
- * whose head has moved on, a record written only after the invoice is shown
- * (a reload mid-payment loses the job), or a cancelled flow landing late.
+ * The HOSAKA client is faked; everything else is real: the route planner
+ * with two ceilings, the route quote and PAY gate, the single deposit written
+ * to disk before its invoice is shown, the verifier (cyberspace-core computes
+ * the "cloud" result at h13 so the checks are exact), the refusal when the
+ * chain head moved, the local steps of a mixed route, and finishProof signing
+ * hops and sidesteps exactly as it would local ones. What would fail silently
+ * otherwise: a cloud proof appended to a chain whose head moved, a deposit
+ * paid but never claimed after a reload, or a cancelled flow landing late.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,9 +44,10 @@ vi.mock('../lib/workers', async (importOriginal) => {
   return { ...actual, postProof: vi.fn(), cancelProof: vi.fn() }
 })
 
-import { cantorPair, computeHopProof, computeSidestepProof, bytesToHex, hexToBytes, intToBytesBE, sha256Hex, sidestepLanding } from 'cyberspace-core'
+import { cantorPair, computeHopProof, computeSidestepProof, bytesToHex, hexToBytes, intToBytesBE, sha256Hex } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
-import { saveCloudJob, type PendingCloudJob } from '../lib/cloud'
+import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../lib/cloud'
+import { wallSource } from '../lib/movePlan'
 import { parseAction } from '../lib/events'
 import { HosakaError, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../lib/hosaka'
 import type { Position } from '../lib/space'
@@ -107,21 +108,27 @@ function lineUpH13(): Position {
 const S = useCyberspace.getState
 const idle = (): Promise<void> => vi.waitFor(() => { expect(S().cloud.status).toBe('idle') }, { timeout: 5000 })
 
-describe('cloud commits', () => {
+describe('cloud routes', () => {
   beforeEach(() => {
     // This machine stops at h12, so an h13 move is the cloud's, and the caps are already known.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
-    useCyberspace.setState({ cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake' } })
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake' }, plan: null })
     for (const fn of Object.values(fake)) if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset()
     fake.limits.mockResolvedValue(LIMITS)
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
+    vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:spent')
+    useCyberspace.setState({ spentMsats: 0 })
   })
   afterEach(() => {
+    S().cancelPlan()
     S().cancelCloud()
     S().discardCloudJob()
   })
 
-  it('a funded cloud hop lands at the cursor as a signed hop event, verified first', async () => {
+  it('a funded route of one cloud hop lands at the cursor as a signed hop event, verified first', async () => {
     const before = S().events.length
     const head = S().prevEventId
     const from = S().position
@@ -131,32 +138,42 @@ describe('cloud commits', () => {
     fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
 
     await S().commit()
+    await idle()
 
     const s = S()
     expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane })
+    expect(fake.balance).toHaveBeenCalled()
+    expect(fake.deposit).not.toHaveBeenCalled()          // the balance covered it
     expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head)
     expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
+    expect(s.plan).toBeNull()
     expect(s.events).toHaveLength(before + 1)
     expect(s.position).toEqual(to)
     expect(s.proof.status).toBe('done')
     expect(s.proof.source).toBe('cloud')
     expect(s.proof.costMsats).toBe(1000)
-    expect(s.proof.totalOps).toBe(0)
     const event = parseAction(s.events[s.events.length - 1])!
     expect(event.type).toBe('hop')
     expect(event.previousId).toBe(head)
-    expect(event.proofHash).toBe(s.proof.proofHash)
     const p = computeHopProof(from.x, from.y, from.z, to.x, to.y, to.z, s.headPlane, head, 20)
     expect(event.proofHash).toBe(p.proofHash)
     expect(s.proof.lookupId).toBe(sha256Hex(hexToBytes(sha256Hex(intToBytesBE(p.regionN)))))
-    expect(s.cloud.status).toBe('idle')
     expect(s.cloud.last?.jobId).toBe('job-1')
     expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+    // spent on this chain, on this device
+    expect(s.spentMsats).toBe(1000)
+    expect(JSON.parse(storage.getItem('onosendai:spent')!)[s.genesisId]).toBe(1000)
     const keys = JSON.parse(storage.getItem('onosendai:cloudRegionKeys') ?? '[]') as Array<{ lookupId: string }>
     expect(keys.some((k) => k.lookupId === s.proof.lookupId)).toBe(true)
   })
 
-  it('asks first in ask mode: CANCEL leaves the cursor lined up, PAY submits', async () => {
+  it('respawn starts the spent tally over for the new chain', async () => {
+    useCyberspace.setState({ spentMsats: 4000 })
+    await S().respawn()
+    expect(S().spentMsats).toBe(0)
+  })
+
+  it('asks first in ask mode: CANCEL drops the route, PAY funds and runs it', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'ask' } })
     const before = S().events.length
     const head = S().prevEventId
@@ -167,12 +184,13 @@ describe('cloud commits', () => {
     await S().commit()
     expect(S().cloud.status).toBe('confirm')
     expect(S().cloud.quote?.costMsats).toBe(2500)
-    expect(S().proof.status).toBe('computing')
-    expect(S().pendingTarget).toEqual(to)
+    expect(S().cloud.quote?.route).toEqual({ steps: 1, cloudSteps: 1 })
+    expect(S().plan?.status).toBe('funding')
     expect(fake.submitHop).not.toHaveBeenCalled()
 
     S().declineCloud()
     expect(S().cloud.status).toBe('idle')
+    expect(S().plan).toBeNull()
     expect(S().proof.status).toBe('idle')
     expect(S().pendingTarget).toBeNull()
     expect(S().cursor).toEqual(to)
@@ -188,41 +206,46 @@ describe('cloud commits', () => {
     expect(S().position).toEqual(to)
   })
 
-  it('writes the record before the invoice shows, then pays, starts and lands', async () => {
+  it('one invoice funds the route: the deposit is on disk before the invoice shows, then the step runs funded', async () => {
     const before = S().events.length
     const head = S().prevEventId
     const from = S().position
     const to = lineUpH13()
     fake.quote.mockResolvedValue(quote('hop'))
-    fake.submitHop.mockResolvedValue({ ...funded(), status: 'pending', payment_required: true, amount_due_msats: 1000, deposit: deposit('d1') })
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
+    fake.deposit.mockResolvedValue(deposit('d1'))
     const settle = deferred<HosakaDeposit>()
-    let recordAtInvoice: PendingCloudJob | null = null
+    let onDiskAtInvoice: string | null = null
     fake.waitForDeposit.mockImplementation(() => {
-      recordAtInvoice = JSON.parse(storage.getItem('onosendai:cloudJob') ?? 'null') as PendingCloudJob | null
+      onDiskAtInvoice = storage.getItem('onosendai:cloudDeposit')
       return settle.promise
     })
-    fake.startJob.mockResolvedValue(funded())
+    fake.submitHop.mockResolvedValue(funded())
     fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
 
     const committed = S().commit()
     await vi.waitFor(() => { expect(S().cloud.status).toBe('awaiting_payment') })
+    expect(fake.deposit).toHaveBeenCalledWith(1000, expect.anything())
     expect(S().cloud.invoice?.bolt11).toBe('lnbc-d1')
     expect(S().cloud.invoiceOpen).toBe(true)
-    expect(recordAtInvoice).not.toBeNull()
-    expect(recordAtInvoice!.stage).toBe('awaiting_payment')
-    expect(recordAtInvoice!.pollToken).toBe('tok-job-1')
-    expect(recordAtInvoice!.deposit?.depositId).toBe('d1')
-    expect(recordAtInvoice!.prevEventId).toBe(head)
+    expect(S().plan?.status).toBe('funding')
+    expect(onDiskAtInvoice).not.toBeNull()
+    expect(JSON.parse(onDiskAtInvoice!).depositId).toBe('d1')
+    expect(fake.submitHop).not.toHaveBeenCalled()
 
     S().setInvoiceOpen(false)
     expect(S().cloud.invoiceOpen).toBe(false)
 
     settle.resolve(deposit('d1', 'settled'))
     await committed
-    expect(fake.startJob).toHaveBeenCalledWith('job-1')
+    await idle()
+    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head)
+    expect(fake.startJob).not.toHaveBeenCalled()         // funded from the balance: it started at once
     expect(S().events).toHaveLength(before + 1)
     expect(S().position).toEqual(to)
+    expect(storage.getItem('onosendai:cloudDeposit')).toBeNull()
     expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+    expect(S().spentMsats).toBe(1000)
   })
 
   it('refuses to append when the chain head moved while HOSAKA computed', async () => {
@@ -240,11 +263,13 @@ describe('cloud commits', () => {
     useCyberspace.setState({ prevEventId: 'ff'.repeat(32) })
     finish.resolve(completed(hopResult(from, to, S().plane, head)))
     await committed
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
 
     expect(S().events).toHaveLength(before)
-    expect(S().cloud.status).toBe('error')
     expect(S().cloud.message).toMatch(/chain head moved/)
+    expect(S().plan?.status).toBe('failed')
     expect(S().proof.status).toBe('infeasible')
+    expect(S().spentMsats).toBe(0)
     expect(storage.getItem('onosendai:cloudJob')).toBeNull()
     useCyberspace.setState({ prevEventId: head })
   })
@@ -260,32 +285,36 @@ describe('cloud commits', () => {
     fake.waitForJob.mockResolvedValue(completed({ ...result, K: (result.K as number) + 1 }))
 
     await S().commit()
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
     expect(S().events).toHaveLength(before)
-    expect(S().cloud.status).toBe('error')
     expect(S().cloud.message).toMatch(/Cloud proof rejected: K\. Nothing was signed/)
     expect(S().position).toEqual(from)
+    expect(S().plan?.status).toBe('failed')
   })
 
-  it('X before payment abandons the job; X after payment keeps it for RESUME', async () => {
+  it('X while the route waits for its invoice abandons it; X while a step computes keeps the job for RESUME', async () => {
     const head = S().prevEventId
     const from = S().position
     const to = lineUpH13()
     fake.quote.mockResolvedValue(quote('hop'))
-    fake.submitHop.mockResolvedValue({ ...funded(), status: 'pending', payment_required: true, deposit: deposit('d1') })
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
+    fake.deposit.mockResolvedValue(deposit('d1'))
     fake.waitForDeposit.mockImplementation((_id: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {
       o.signal?.addEventListener('abort', () => reject(new HosakaError(0, 'aborted', 'cancelled')))
     }))
     const committed = S().commit()
     await vi.waitFor(() => { expect(S().cloud.status).toBe('awaiting_payment') })
-    expect(storage.getItem('onosendai:cloudJob')).not.toBeNull()
     S().cancel()
     await committed
+    expect(S().plan).toBeNull()
     expect(S().cloud.status).toBe('idle')
-    expect(S().cloud.job).toBeNull()
     expect(S().proof.status).toBe('idle')
     expect(S().pendingTarget).toBeNull()
-    expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+    // The deposit record stays: if the wallet paid anyway, the next load claims it.
+    expect(JSON.parse(storage.getItem('onosendai:cloudDeposit')!).depositId).toBe('d1')
+    storage.removeItem('onosendai:cloudDeposit')
 
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     fake.submitHop.mockResolvedValue(funded('job-3'))
     fake.waitForJob.mockImplementation((_id: string, _tok: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {
       o.signal?.addEventListener('abort', () => reject(new HosakaError(0, 'aborted', 'cancelled')))
@@ -294,6 +323,7 @@ describe('cloud commits', () => {
     await vi.waitFor(() => { expect(S().cloud.status).toBe('computing') })
     S().cancel()
     await committed2
+    expect(S().plan).toBeNull()
     expect(S().cloud.status).toBe('idle')
     expect(S().cloud.job?.jobId).toBe('job-3')
     expect(S().cloud.job?.stage).toBe('computing')
@@ -322,58 +352,92 @@ describe('cloud commits', () => {
     expect(fake.waitForJob).not.toHaveBeenCalled()
   })
 
-  it('beyond the cloud hop cap it commits a cloud sidestep past the wall, with the 8.5 tags', async () => {
+  it('a paid route deposit left by an interrupted commit is claimed on load', async () => {
+    saveCloudDeposit({ depositId: 'd9', pubkey: S().identity.pubkey, amountMsats: 1000, expiresAt: Math.floor(Date.now() / 1000) + 600, bolt11: 'lnbc-d9' })
+    fake.claimDeposit.mockResolvedValue({ ...deposit('d9', 'settled'), settled_msats: 1000 })
+    await S().resumeCloudJob()
+    expect(fake.claimDeposit).toHaveBeenCalledWith('d9')
+    expect(storage.getItem('onosendai:cloudDeposit')).toBeNull()
+    expect(S().cloud.message).toMatch(/1 sat route deposit .* credited/)
+  })
+
+  it('beyond the cloud hop cap: a local hop to the wall, a cloud sidestep through it, a local hop on', async () => {
+    // This machine hashes sidesteps only to h12 here, so the h13 crossing is HOSAKA's.
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: { ...LIMITS, max_hop_height: 12 } } })
     const before = S().events.length
-    const head = S().prevEventId
     const from = S().position
     const cursor = lineUpH13()
-    const landing = { ...from, x: sidestepLanding(from.x, cursor.x) }
+    const edge = wallSource(from.x, cursor.x, 13)
+    const landing = cursor.x > from.x ? edge + 1n : edge - 1n
+    expect(edge).not.toBe(from.x)                       // this identity spawned away from the wall
     fake.quote.mockResolvedValue(quote('sidestep', 300))
     fake.submitSidestep.mockResolvedValue(funded('job-4'))
-    fake.waitForJob.mockResolvedValue(completed(sidestepResult(from, landing, S().plane, head), 'job-4'))
+    fake.waitForJob.mockImplementation(async () => completed(sidestepResult({ ...from, x: edge }, { ...from, x: landing }, S().plane, S().prevEventId), 'job-4'))
 
     await S().commit()
+    // Quoted the sidestep only; funded; the first step is this machine's hop to the wall's edge.
+    const s0 = S()
+    expect(s0.plan?.summary).toMatchObject({ cloudSteps: 1, sidesteps: 1 })
+    expect(fake.quote).toHaveBeenCalledTimes(1)
+    expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane })
+    await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1) })
+    const req1 = vi.mocked(postProof).mock.calls[0][0]
+    expect(req1).toMatchObject({ mode: 'hop', from, to: { ...from, x: edge }, maxComputeHeight: 12 })
+    expect(S().plan?.step.source).toBe('local')
 
-    const s = S()
-    expect(fake.quote).toHaveBeenCalledWith('sidestep', expect.anything(), { ...landing, plane: s.headPlane })
-    expect(fake.submitHop).not.toHaveBeenCalled()
-    expect(s.events).toHaveLength(before + 1)
-    expect(s.position).toEqual(landing)
-    expect(s.cursor).toEqual(cursor)
-    const ev = s.events[s.events.length - 1]
-    const p = computeSidestepProof(from.x, from.y, from.z, landing.x, landing.y, landing.z, s.headPlane, head)
+    // The local hop lands (the worker's answer, fed by hand); the cloud sidestep follows and lands.
+    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), regionN: '1', terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
+    await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
+    expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
+    const ev = S().events[S().events.length - 1]
+    const p = computeSidestepProof(edge, from.y, from.z, landing, from.y, from.z, s0.headPlane, ev.tags.find((t) => t[0] === 'e' && t[3] === 'previous')![1])
     expect(ev.tags.find((t) => t[0] === 'A')?.[1]).toBe('sidestep')
     expect(ev.tags.find((t) => t[0] === 'proof')?.[1]).toBe(p.proofHash)
     expect(ev.tags.find((t) => t[0] === 'mr')?.[1]).toBe([p.merkleX, p.merkleY, p.merkleZ].map(bytesToHex).join(':'))
     expect(ev.tags.find((t) => t[0] === 'mp')?.[1]).toBe([p.inclusionProofs.x.map(bytesToHex).join(''), '', ''].join(':'))
     expect(ev.tags.find((t) => t[0] === 'hx')?.[1]).toBe('13')
-    expect(s.chain.sidesteps).toBeGreaterThan(0)
+
+    // Then the last local hop on to the cursor, which ends the route.
+    await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2) })
+    const req2 = vi.mocked(postProof).mock.calls[1][0]
+    expect(req2).toMatchObject({ mode: 'hop', to: cursor })
+    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), regionN: '1', terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
+    expect(S().plan).toBeNull()
+    expect(S().position).toEqual(cursor)
+    expect(S().events).toHaveLength(before + 3)
+    expect(S().spentMsats).toBe(1000)
   })
 
-  it('with cloud OFF, or no caps yet, the same move is a local sidestep', async () => {
+  it('with cloud OFF the same move is a local route; with no caps yet the commit fetches them first', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' } })
     const from = S().position
     const cursor = lineUpH13()
     await S().commit()
     expect(fake.quote).not.toHaveBeenCalled()
     expect(fake.limits).not.toHaveBeenCalled()
+    expect(S().plan).not.toBeNull()
+    expect(S().plan?.summary.cloudSteps).toBe(0)
     expect(S().proof.status).toBe('computing')
-    expect(S().proof.mode).toBe('sidestep')
+    expect(S().proof.mode).toBe('hop')
     expect(S().proof.source).toBe('local')
     expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(postProof).mock.calls[0][0]).toMatchObject({ mode: 'sidestep', from, to: { ...from, x: sidestepLanding(from.x, cursor.x) }, maxComputeHeight: 12 })
+    expect(vi.mocked(postProof).mock.calls[0][0]).toMatchObject({ mode: 'hop', from, to: { ...from, x: wallSource(from.x, cursor.x, 13) }, maxComputeHeight: 12 })
     S().cancel()
+    expect(S().plan).toBeNull()
     expect(S().proof.status).toBe('idle')
 
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' }, cloud: { ...S().cloud, limits: null } })
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded('job-5'))
+    fake.waitForJob.mockImplementation((_id: string, _tok: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {
+      o.signal?.addEventListener('abort', () => reject(new HosakaError(0, 'aborted', 'cancelled')))
+    }))
     await S().commit()
-    expect(fake.quote).not.toHaveBeenCalled()
-    // The caps are asked for, for next time; this commit does not wait for them.
+    // The caps were fetched before planning, so this commit already used the cloud.
     expect(fake.limits).toHaveBeenCalled()
-    expect(S().proof.mode).toBe('sidestep')
-    expect(S().proof.source).toBe('local')
-    expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2)
+    expect(fake.quote).toHaveBeenCalledTimes(1)
+    expect(S().plan?.summary.cloudSteps).toBe(1)
     S().cancel()
   })
 })

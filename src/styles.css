@@ -4012,3 +4012,38 @@ kbd {
 .invoice .modal__row {
   margin-top: 10px;
 }
+/* Movement route: the steps a commit beyond the ceiling runs one by one. */
+.route {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+}
+.route__step {
+  display: grid;
+  grid-template-columns: 1.6rem 5.5rem 3rem 1fr;
+  gap: 0.4rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid transparent;
+}
+.route__step--running { border-color: var(--accent); }
+.route__step--funding { border-color: var(--cloud, #ffd27d); }
+.route__step--paused { border-color: #e2b93b; }
+.route__step--failed { border-color: #d55; }
+.route__step--done, .route__step--next { opacity: 0.55; }
+.route__index { opacity: 0.7; }
+.route__row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+.route__button {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.route__button--resume { border-color: #e2b93b; color: #e2b93b; }

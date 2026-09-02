@@ -18,6 +18,7 @@ import { Explanation } from './Explanation'
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
+  const spentMsats = useCyberspace((s) => s.spentMsats)
   const prevEventId = useCyberspace((s) => s.prevEventId)
   const genesisId = useCyberspace((s) => s.genesisId)
   const events = useCyberspace((s) => s.events)
@@ -66,6 +67,10 @@ export function ChainPanel(): JSX.Element {
         <div>
           <dt>Compute time</dt>
           <dd>{formatMs(chain.totalMs)}</dd>
+        </div>
+        <div title="What HOSAKA charged for proofs on this chain. Counted on this device only, never published.">
+          <dt>Sats spent</dt>
+          <dd>{spentMsats === 0 ? '0' : `${Math.ceil(spentMsats / 1000).toLocaleString()} (local)`}</dd>
         </div>
         <div>
           <dt>Published</dt>

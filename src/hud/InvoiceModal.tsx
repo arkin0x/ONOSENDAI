@@ -25,16 +25,19 @@ export function CloudApproval(): JSX.Element | null {
   const q = cloud.quote
   const sats = satsOf(q.costMsats)
   const when = [q.tier, q.estTime].filter((s): s is string => !!s).join(', ')
-  const body =
-    `HOSAKA computes this h${q.maxHeight} ${q.action} for ${sats} sat${sats === 1 ? '' : 's'}${when ? ` (${when})` : ''}. ` +
-    (q.action === 'hop'
-      ? 'It lands at the cursor and returns the region key. '
-      : 'It lands 1 gibson past the wall; the cursor keeps the rest of the journey. ') +
-    'Any Lightning wallet pays the invoice. HOSAKA learns the coordinates of this move. ' +
-    'This client verifies the result before signing it into your chain.'
+  const body = q.route
+    ? `HOSAKA does ${q.route.cloudSteps} of the ${q.route.steps} steps of this route (tallest h${q.maxHeight}) for ${sats} sat${sats === 1 ? '' : 's'} in total${when ? ` (${when})` : ''}. ` +
+      'One invoice funds the whole route; whatever your HOSAKA balance already covers is not billed again. ' +
+      'Each step is verified here and signed as it lands. HOSAKA learns the coordinates of the moves it computes.'
+    : `HOSAKA computes this h${q.maxHeight} ${q.action} for ${sats} sat${sats === 1 ? '' : 's'}${when ? ` (${when})` : ''}. ` +
+      (q.action === 'hop'
+        ? 'It lands at the cursor and returns the region key. '
+        : 'It lands 1 gibson past the wall; the cursor keeps the rest of the journey. ') +
+      'Any Lightning wallet pays the invoice. HOSAKA learns the coordinates of this move. ' +
+      'This client verifies the result before signing it into your chain.'
   return (
     <ConfirmModal
-      title={`Cloud ${q.action}`}
+      title={q.route ? 'Cloud route' : `Cloud ${q.action}`}
       body={body}
       confirmLabel={`PAY ${sats} SATS`}
       danger={false}

@@ -74,7 +74,7 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
-import { recommendedHopHeight } from '../lib/calibration'
+import { recommendedHopHeight, recommendedSidestepHeight } from '../lib/calibration'
 import {
   createHosaka,
   createWaker,
@@ -83,7 +83,6 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type HosakaQuote,
   type Waker,
 } from '../lib/hosaka'
 import {
@@ -96,9 +95,9 @@ import {
   loadCloudJob,
   loadCloudPrefs,
   needsApproval,
+  satsOf,
   positionFromWire,
   retainsRecord,
-  routeCommit,
   saveCloudJob,
   saveCloudPrefs,
   saveCloudRegionKey,
@@ -108,7 +107,13 @@ import {
   type CloudMode,
   type CloudPrefs,
   type PendingCloudJob,
+  loadSpent,
+  addSpent,
+  loadCloudDeposit,
+  saveCloudDeposit,
+  clearCloudDeposit,
 } from '../lib/cloud'
+import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -181,6 +186,36 @@ const IDLE_PROOF: ProofState = {
   lookupId: null,
 }
 
+export type PlanStatus = 'funding' | 'running' | 'paused' | 'failed'
+
+/**
+ * A commit beyond the ceiling is a route, not one event: hops to the leaf
+ * touching the wall, a sidestep of exactly 1 gibson across it, hops on, for
+ * every wall between here and the cursor (spec 6.3, lib/movePlan.ts). The
+ * route runs one step at a time, each step its own proof and its own
+ * signature, and the next step is computed from wherever the last one
+ * landed. A declined signature pauses it with the finished proof kept, so
+ * RESUME asks for the signature again instead of recomputing.
+ */
+export interface MovePlan {
+  /** Where the route ends: the cursor at commit time. */
+  target: Position
+  /** What each primitive can reach here and in the cloud; every step was sized to these. */
+  ceilings: Ceilings
+  /** Counts for the whole route, taken at commit time. */
+  summary: PlanSummary
+  /** Steps already signed and appended. */
+  done: number
+  /** The step in progress, or the one the route is paused on. */
+  step: PlanStep
+  status: PlanStatus
+  /** Why the route paused or failed; null while it runs. */
+  message: string | null
+  /** A finished proof waiting for its signature across a pause. */
+  awaiting: ProofResponse | null
+  startedAt: number
+}
+
 export interface ChainStats {
   /** Completed hops. The chain is contiguous by construction. */
   hops: number
@@ -215,6 +250,8 @@ export interface CloudQuote {
   estTime: string | null
   maxHeight: number
   K: number
+  /** A whole route's quote: the sum over its cloud steps, paid with one deposit. */
+  route?: { steps: number; cloudSteps: number }
 }
 
 export interface CloudState {
@@ -295,6 +332,10 @@ export interface CyberspaceState {
   cursor: Position
   /** Destination of the in-flight proof; null when nothing is computing. */
   pendingTarget: Position | null
+  /** The route a commit beyond the ceiling is executing; null otherwise. */
+  plan: MovePlan | null
+  /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
+  spentMsats: number
   /**
    * The plane the next commit lands in. Part of the lined-up action, like the
    * cursor: toggling it costs nothing until committed, and a commit with the
@@ -357,6 +398,12 @@ export interface CyberspaceState {
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
   cancel: () => void
+  /** Continue a paused route: ask for the pending signature again, or restart the step. */
+  resumePlan: () => void
+  /** Abandon a route. Steps already signed stay on the chain; the avatar stays where they left it. */
+  cancelPlan: () => void
+  /** Sign and append a finished proof (the second half of applyProofMessage). */
+  finishProof: (msg: ProofResponse) => Promise<void>
   adjustScale: (delta: number) => void
   rotate: (dir: RotateDirection) => void
   popView: () => void
@@ -775,6 +822,9 @@ function claimIntervalFor(kind: SignerKind): number {
   return kind === 'local' ? 4_000 : 10_000
 }
 
+/** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
+let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+
 export const useCyberspace = create<CyberspaceState>((set, get) => {
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
@@ -791,8 +841,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   /** The cloud flow ended without a proof. The move does not happen; the message stays until X or the next commit. */
   const cloudFail = (message: string, keepJob: boolean): void => {
     const cloud = get().cloud
+    const plan = get().plan
     set({
       pendingTarget: null,
+      plan: plan ? { ...plan, status: 'failed', message, awaiting: null } : null,
       proof: { ...IDLE_PROOF, status: 'infeasible', message },
       cloud: {
         ...cloud,
@@ -825,80 +877,179 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     return limitsInFlight
   }
 
+  /** What each primitive can reach right now, here and (when on and known) in the cloud. */
+  const cloudCeilings = (): Ceilings => {
+    const { cloudPrefs, cloud } = get()
+    const on = cloudPrefs.mode !== 'off' && cloud.limits !== null
+    return {
+      hop: Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()),
+      sidestep: recommendedSidestepHeight(),
+      cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
+      cloudSidestep: on && cloud.limits ? cloud.limits.max_sidestep_height : 0,
+    }
+  }
+
+  /** The route's cloud steps, in order, from where it stands now. */
+  const cloudStepsOf = (from: Position, plan: MovePlan): PlanStep[] => {
+    const out: PlanStep[] = []
+    let cur = from
+    for (let n = 0; n < 100_000; n++) {
+      const step = nextStep(cur, plan.target, plan.ceilings)
+      if (!step) break
+      if (step.source === 'cloud') out.push(step)
+      cur = step.to
+    }
+    return out
+  }
+
   /**
-   * The cloud route, from the quote on. Public quote first (never a signer
-   * prompt), then PAY when the prefs want one, then the signed submit. The
-   * request id is the same discipline the worker path uses: a cancel or a
-   * respawn bumps it, and every await checks it before touching state.
+   * Quote every cloud step of the route (public, never a signer prompt), add
+   * them up, and either ask for PAY or fund straight away within the budget.
    */
-  const beginCloudMove = async (action: HosakaAction, to: Position, id: number): Promise<void> => {
-    const { position, plane, cloudPrefs } = get()
+  const quoteRoute = async (id: number): Promise<void> => {
+    const { position, plane, cloudPrefs, plan } = get()
+    if (!plan) return
     set({
-      pendingTarget: to,
-      proof: { ...IDLE_PROOF, status: 'computing', mode: action, source: 'cloud' },
+      cloud: { ...get().cloud, status: 'quoting', quote: null, invoice: null, invoiceOpen: false, job: null, progress: null, message: 'Asking HOSAKA for a quote.', startedAt: Date.now() },
+    })
+    const client = cloudClient(cloudPrefs.apiUrl)
+    const steps = cloudStepsOf(position, plan)
+    let total = 0
+    let tallest = 0
+    let estTime: string | null = null
+    try {
+      for (const step of steps) {
+        const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane))
+        if (id !== requestId) return
+        if (!q.within_cap || q.cost_msats === null) {
+          routeFail(q.hint ?? `HOSAKA does not sell an h${q.max_height} ${step.kind}.`)
+          return
+        }
+        total += q.cost_msats
+        if (q.max_height > tallest) { tallest = q.max_height; estTime = q.est_time }
+      }
+    } catch (err) {
+      if (id !== requestId) return
+      routeFail(describeCloudError(err))
+      return
+    }
+    const first = steps[0]
+    const quote: CloudQuote = {
+      action: first ? first.kind : 'hop',
+      to: plan.target,
+      costMsats: total,
+      tier: null,
+      estTime,
+      maxHeight: tallest,
+      K: 0,
+      route: { steps: plan.summary.steps, cloudSteps: steps.length },
+    }
+    if (needsApproval(total, cloudPrefs)) {
+      set({ cloud: { ...get().cloud, status: 'confirm', quote, message: null } })
+      return
+    }
+    set({ cloud: { ...get().cloud, quote } })
+    await fundRoute(total, id)
+  }
+
+  /** The route cannot be bought: the plan ends with the reason, nothing is signed. */
+  const routeFail = (message: string): void => {
+    const { plan, cloud } = get()
+    set({
+      pendingTarget: null,
+      plan: plan ? { ...plan, status: 'failed', message, awaiting: null } : null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message },
+      cloud: { ...cloud, status: 'error', message, quote: null, invoice: null, invoiceOpen: false, progress: null },
+    })
+  }
+
+  /**
+   * One deposit for the whole route: the balance covers what it can, an
+   * invoice covers the rest, and the route starts once the node reports the
+   * invoice settled. Nothing else asks for money while the route runs.
+   */
+  const fundRoute = async (totalMsats: number, id: number): Promise<void> => {
+    const { cloudPrefs, plan } = get()
+    if (!plan) return
+    const client = cloudClient(cloudPrefs.apiUrl)
+    stopCloud()
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    try {
+      set({ cloud: { ...get().cloud, status: 'quoting', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
+      const bal = await client.balance(abort.signal)
+      if (id !== requestId) return
+      const shortfall = Math.max(0, totalMsats - bal.balance_msats)
+      if (shortfall > 0) {
+        const dep = await client.deposit(shortfall, abort.signal)
+        if (id !== requestId) return
+        const invoice = invoiceOf(dep)
+        // On disk before the invoice is on screen: a reload after paying claims it.
+        saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+        set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null } })
+        const settled = await client.waitForDeposit(dep.deposit_id, {
+          signal: abort.signal,
+          expiresAt: invoice.expiresAt,
+          intervalMs: claimIntervalFor(currentSigner.kind),
+          waker,
+        })
+        if (id !== requestId) return
+        if (settled.status !== 'settled') {
+          clearCloudDeposit()
+          routeFail('The invoice expired unpaid. Commit again for a fresh quote.')
+          return
+        }
+        clearCloudDeposit()
+      }
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return
+      routeFail(describeCloudError(err))
+      return
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
+    set({
+      cloud: { ...get().cloud, status: 'paid', invoice: null, invoiceOpen: false, message: 'Route funded.' },
+      plan: { ...get().plan!, status: 'running', message: null },
+    })
+    startPlanStep()
+  }
+
+  /**
+   * One cloud step of the route: the signed submit (funded from the balance,
+   * so it starts at once), the poll, the verification here, then the same
+   * signature step a local proof gets. A short balance (the price moved) is
+   * paid through the job's own invoice, as before.
+   */
+  const startCloudStep = async (step: PlanStep, id: number): Promise<void> => {
+    const { plane, prevEventId, identity, cloudPrefs } = get()
+    const client = cloudClient(cloudPrefs.apiUrl)
+    set({
+      pendingTarget: step.to,
+      proof: { ...IDLE_PROOF, status: 'computing', mode: step.kind, source: 'cloud' },
       cloud: {
         ...get().cloud,
         status: 'quoting',
-        quote: null,
         invoice: null,
         invoiceOpen: false,
         job: null,
         progress: null,
-        message: 'Asking HOSAKA for a quote.',
-        startedAt: Date.now(),
-      },
-    })
-    let quote: HosakaQuote
-    try {
-      quote = await cloudClient(cloudPrefs.apiUrl).quote(action, hosakaCoord(position, plane), hosakaCoord(to, plane))
-    } catch (err) {
-      if (id !== requestId) return
-      cloudFail(describeCloudError(err), false)
-      return
-    }
-    if (id !== requestId) return
-    if (!quote.within_cap || quote.cost_msats === null) {
-      cloudFail(quote.hint ?? `HOSAKA does not sell an h${quote.max_height} ${action}.`, false)
-      return
-    }
-    const q: CloudQuote = {
-      action,
-      to,
-      costMsats: quote.cost_msats,
-      tier: quote.tier,
-      estTime: quote.est_time,
-      maxHeight: quote.max_height,
-      K: quote.K,
-    }
-    if (needsApproval(q.costMsats, cloudPrefs)) {
-      set({ cloud: { ...get().cloud, status: 'confirm', quote: q, message: null } })
-      return
-    }
-    set({ cloud: { ...get().cloud, quote: q } })
-    await submitCloud(q, id)
-  }
-
-  /** The signed submit. Its 201 is either a funded job or an invoice; either way the record is on disk before anything is shown. */
-  const submitCloud = async (q: CloudQuote, id: number): Promise<void> => {
-    const { position, plane, prevEventId, identity, cloudPrefs } = get()
-    const client = cloudClient(cloudPrefs.apiUrl)
-    set({
-      cloud: {
-        ...get().cloud,
-        status: 'quoting',
         message: currentSigner.kind === 'local' ? 'Submitting to HOSAKA.' : 'Waiting for your signer to approve the HOSAKA request.',
+        startedAt: Date.now(),
       },
     })
     let job: HosakaJob
     try {
-      const v1 = hosakaCoord(position, plane)
-      const v2 = hosakaCoord(q.to, plane)
-      job = q.action === 'hop'
+      const v1 = hosakaCoord(step.from, plane)
+      const v2 = hosakaCoord(step.to, plane)
+      job = step.kind === 'hop'
         ? await client.submitHop(v1, v2, prevEventId)
         : await client.submitSidestep(v1, v2, prevEventId)
     } catch (err) {
       if (id !== requestId) return
-      cloudFail(describeCloudError(err), false)
+      routeFail(describeCloudError(err))
       return
     }
     if (id !== requestId) return
@@ -907,27 +1058,28 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       version: 1,
       jobId: job.id,
       pollToken: job.poll_token ?? '',
-      action: q.action,
+      action: step.kind,
       pubkey: identity.pubkey,
-      from: wirePosition(position),
-      to: wirePosition(q.to),
+      from: wirePosition(step.from),
+      to: wirePosition(step.to),
       plane,
       prevEventId,
-      costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : q.costMsats,
+      costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0,
       createdAt: Date.now(),
       stage: paying ? 'awaiting_payment' : 'computing',
       deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
     }
-    // On disk before the invoice is on screen, so a reload mid-payment resumes.
     saveCloudJob(record)
     set({ cloud: { ...get().cloud, job: record, message: null } })
     await runCloud(record, id)
   }
 
   /**
-   * From a persisted record to a signed event: pay and poll (lib/cloud.ts
+   * From a persisted record to a signed event: pay if the job asks (a route is
+   * funded up front, so normally it does not), poll (lib/cloud.ts
    * driveCloudJob), verify in a worker, refuse a moved head, then hand the
-   * result to applyProofMessage exactly as the worker would have.
+   * result to finishProof exactly as the worker would have. The route, if one
+   * is running, continues from there.
    */
   const runCloud = async (record: PendingCloudJob, id: number): Promise<void> => {
     const client = cloudClient(get().cloudPrefs.apiUrl)
@@ -952,11 +1104,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
               ...cloud,
               status: stage,
               invoice: d.invoice === undefined ? cloud.invoice : d.invoice,
-              // A fresh invoice opens the modal; a poll while one is up leaves it as the user left it.
               invoiceOpen: stage === 'awaiting_payment' ? (d.invoice ? true : cloud.invoiceOpen) : false,
               progress: d.progress === undefined ? cloud.progress : d.progress,
               message: d.message === undefined ? cloud.message : d.message,
             },
+            ...(d.progress !== undefined && d.progress !== null ? { proof: { ...get().proof, progress: d.progress } } : {}),
           })
         },
       }, abort.signal, waker)
@@ -1014,28 +1166,40 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       })
     }
-    await get().applyProofMessage(msg)
-    if (id !== requestId) return
-    if (get().prevEventId === final.prevEventId) {
+    const before = get().events.length
+    await get().finishProof(msg)
+    if (get().events.length === before) {
+      if (id !== requestId) return
       // The signer refused. The verified result is still good, so the record stays for RESUME.
-      set({ cloud: { ...get().cloud, status: 'error', message: `${get().proof.message ?? 'Signing failed.'} The verified cloud result is kept; RESUME to sign it again.` } })
+      set({ cloud: { ...get().cloud, status: 'error', message: `${get().plan?.message ?? get().proof.message ?? 'Signing failed.'} The verified cloud result is kept.` } })
       return
     }
+    // The event landed, and a route may already have moved on to its next
+    // step (which bumps the request id): the bookkeeping below is about the
+    // step that landed, so it runs regardless.
     clearCloudJob()
+    const cost = msg.type === 'done' ? msg.costMsats ?? final.costMsats : final.costMsats
+    // Spent on this chain, on this device only.
+    set({ spentMsats: addSpent(get().genesisId, cost) })
     set({
       cloud: {
         ...IDLE_CLOUD,
         limits: get().cloud.limits,
+        // A route in progress keeps its funded status visible.
+        status: get().plan ? 'paid' : 'idle',
+        message: get().plan ? 'Route funded.' : null,
         last: {
           jobId: final.jobId,
           action: final.action,
-          costMsats: msg.type === 'done' ? msg.costMsats ?? final.costMsats : final.costMsats,
+          costMsats: cost,
           lookupId: msg.type === 'done' ? msg.lookupId ?? null : null,
           at: Date.now(),
         },
       },
     })
   }
+
+  cloudStepStarter = startCloudStep
 
   const switchTo = async (signer: Signer): Promise<void> => {
     // A cloud flow in progress was signing as the old identity; it ends here.
@@ -1056,6 +1220,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       ...base,
       cursor: base.position,
       pendingTarget: null,
+      plan: null,
+      spentMsats: loadSpent(base.genesisId),
       proof: IDLE_PROOF,
       publishError: null,
       spectate: null,
@@ -1078,6 +1244,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   targets: loadTargets(),
   cursor: initial.position,
   pendingTarget: null,
+  plan: null,
+  spentMsats: loadSpent(initial.genesisId),
   scaleExp: 0,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
@@ -1164,7 +1332,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // wall); otherwise a local Merkle sidestep across the blocking wall(s),
     // landing 1 gibson past the boundary, not at the cursor, so the cursor
     // keeps the rest of the journey for the next commit (lib/cloud.ts
-    // routeCommit). The ceiling this commit will actually attempt: the
+    // lib/movePlan.ts). The ceiling this commit will actually attempt: the
     // protocol's hard cap, lowered to what calibration measured THIS machine
     // finishing in budget (lib/calibration.ts). Routing, the sidestep landing
     // and the worker all use the same number, so a hop the machine cannot
@@ -1176,40 +1344,90 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       plane,
       ceiling,
     )
-    // The caps are fetched at startup and cached; until HOSAKA has answered
-    // the cloud is not a route, and the proof panel's preview says the same.
-    const { cloudPrefs, cloud } = get()
-    if (estimate.exceedsLimit && cloudPrefs.mode !== 'off' && cloud.limits === null) void ensureCloudLimits()
-    const route = routeCommit({ maxHeight: estimate.maxHeight, ceiling, mode: cloudPrefs.mode, limits: cloud.limits })
-    if (route === 'cloud-hop' || route === 'cloud-sidestep') {
-      const to = route === 'cloud-hop' ? { ...cursor } : sidestepTarget(position, cursor, ceiling)
-      if (samePosition(position, to) && plane === headPlane) return
-      await beginCloudMove(route === 'cloud-hop' ? 'hop' : 'sidestep', to, ++requestId)
+    if (!estimate.exceedsLimit) {
+      const to = { ...cursor }
+      const id = ++requestId
+      set({
+        pendingTarget: to,
+        plan: null,
+        proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop' },
+      })
+      postProof({ id, mode: 'hop', from: position, to, plane, prevEventId, maxComputeHeight: ceiling })
       return
     }
-    const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
-    const to = mode === 'sidestep' ? sidestepTarget(position, cursor, ceiling) : { ...cursor }
-    if (samePosition(position, to) && plane === headPlane) return
 
-    const id = ++requestId
+    // A wall is in the way. A sidestep buys exactly 1 gibson through a wall
+    // (spec 6.3), so the route is hops to the leaf touching the wall, the
+    // sidestep, hops on, for every wall and every block boundary above the
+    // ceiling between here and the cursor. HOSAKA, when it is on, raises the
+    // hop ceiling to its cap, so a paid hop replaces the walk wherever it
+    // reaches; its steps are quoted together and paid with one deposit before
+    // the route starts. Each step is its own event; the route runs them in
+    // order and pauses when a signature is declined.
+    if (get().cloudPrefs.mode !== 'off' && get().cloud.limits === null) {
+      set({ proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop', message: 'Asking HOSAKA for its caps.' } })
+      await ensureCloudLimits()
+      set({ proof: IDLE_PROOF })
+    }
+    const ceilings = cloudCeilings()
+    const summary = planSummary(position, cursor, ceilings)
+    if (summary.infeasibleAt !== null) {
+      set({
+        plan: null,
+        proof: {
+          ...IDLE_PROOF,
+          status: 'infeasible',
+          message: `Step ${summary.infeasibleAt + 1} of this route needs a wall taller than this machine${ceilings.cloudHop ? ' or HOSAKA' : ''} computes (sidestep cap h${Math.max(ceilings.sidestep, ceilings.cloudSidestep)}). Line up a nearer cursor${ceilings.cloudHop ? '' : ', or turn the cloud on'}.`,
+        },
+      })
+      return
+    }
+    const step = nextStep(position, cursor, ceilings)
+    if (!step) return
+    const funded = summary.cloudSteps === 0
     set({
-      pendingTarget: to,
-      proof: { ...IDLE_PROOF, status: 'computing', mode },
+      plan: {
+        target: { ...cursor },
+        ceilings,
+        summary,
+        done: 0,
+        step,
+        status: funded ? 'running' : 'funding',
+        message: null,
+        awaiting: null,
+        startedAt: Date.now(),
+      },
     })
+    if (funded) startPlanStep()
+    else await quoteRoute(++requestId)
+  },
 
-    postProof({
-      id,
-      mode,
-      from: position,
-      to,
-      plane,
-      prevEventId,
-      maxComputeHeight: ceiling,
-    })
+  resumePlan: () => {
+    const { plan } = get()
+    if (!plan || plan.status !== 'paused') return
+    if (plan.awaiting) {
+      const msg = plan.awaiting
+      set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      void get().finishProof(msg)
+      return
+    }
+    set({ plan: { ...plan, status: 'running', message: null } })
+    startPlanStep()
+  },
+
+  cancelPlan: () => {
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    if (get().cloud.status !== 'idle') {
+      // Ends the cloud flow the same way X does: a paid job is kept for RESUME.
+      get().cancelCloud()
+    }
+    set({ plan: null, pendingTarget: null, proof: IDLE_PROOF })
   },
 
   cancel: () => {
-    const { proof, position, headPlane, cloud } = get()
+    const { proof, position, headPlane, plan, cloud } = get()
+    if (plan) { get().cancelPlan(); return }
     // A cloud flow owns the commit while it runs, and its failure notice
     // afterwards; X ends either the same way.
     if (cloud.status !== 'idle') { get().cancelCloud(); return }
@@ -1277,8 +1495,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
 
     if (msg.type === 'error') {
+      const { plan } = get()
       set({
         pendingTarget: null,
+        plan: plan ? { ...plan, status: 'failed', message: msg.message, awaiting: null } : null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
@@ -1289,6 +1509,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
 
+    await get().finishProof(msg)
+  },
+
+  finishProof: async (msg) => {
+    if (msg.type !== 'done' || msg.id !== requestId) return
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
@@ -1311,7 +1536,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     let event: NostrEvent
     try {
-      event = await signEvent(
+      event = await get().signEvent(
         msg.mode === 'sidestep' && msg.sidestep
           ? sidestepTemplate({ ...link, ...msg.sidestep })
           : hopTemplate(link),
@@ -1320,13 +1545,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       // The signer refused, or a bunker dropped mid-handshake: the move does not
       // commit, and the avatar stays where the last committed hop left it.
       if (msg.id !== requestId) return
+      const reason = err instanceof Error ? err.message : String(err)
+      const { plan } = get()
+      if (plan) {
+        // The proof is done and kept; RESUME asks for the signature again.
+        set({
+          plan: { ...plan, status: 'paused', message: `Signature declined: ${reason}`, awaiting: msg },
+          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs },
+        })
+        return
+      }
       set({
         pendingTarget: null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: `Signing failed: ${err instanceof Error ? err.message : String(err)}`,
+          message: `Signing failed: ${reason}`,
         },
       })
       return
@@ -1377,6 +1612,20 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
 
     saveChain(nextEvents, nextPublished, stats)
+
+    // A route continues from where this step landed, or ends here.
+    const { plan } = get()
+    if (plan && plan.status === 'running') {
+      const next = nextStep(newPosition, plan.target, plan.ceilings)
+      if (!next) {
+        // The route is complete; a funded cloud flow has nothing left to do.
+        const cloud = get().cloud
+        set({ plan: null, ...(cloud.status === 'paid' ? { cloud: { ...cloud, status: 'idle', message: null } } : {}) })
+      } else {
+        set({ plan: { ...plan, done: plan.done + 1, step: next, awaiting: null } })
+        startPlanStep()
+      }
+    }
   },
 
   setLive: (live) => {
@@ -1398,6 +1647,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       requestId++
       clearCloudJob()
     }
+    if (get().plan) set({ plan: null })
     const { events } = get()
     const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
     set({
@@ -1406,6 +1656,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       pendingTarget: null,
       proof: IDLE_PROOF,
       publishError: null,
+      spentMsats: loadSpent(fresh.genesisId),
       cloud: { ...IDLE_CLOUD, limits: get().cloud.limits },
     })
     saveChain(fresh.events, fresh.published, fresh.chain)
@@ -1738,13 +1989,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   approveCloud: () => {
     const { cloud } = get()
     if (cloud.status !== 'confirm' || !cloud.quote) return
-    void submitCloud(cloud.quote, requestId)
+    void fundRoute(cloud.quote.costMsats, requestId)
   },
 
   declineCloud: () => {
     if (get().cloud.status !== 'confirm') return
     requestId++
-    set({ pendingTarget: null, proof: IDLE_PROOF, cloud: { ...get().cloud, status: 'idle', quote: null, message: null, startedAt: null } })
+    set({ plan: null, pendingTarget: null, proof: IDLE_PROOF, cloud: { ...get().cloud, status: 'idle', quote: null, message: null, startedAt: null } })
   },
 
   cancelCloud: () => {
@@ -1777,6 +2028,26 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   resumeCloudJob: async () => {
     const { cloudPrefs, identity } = get()
     if (cloudPrefs.mode !== 'off') void ensureCloudLimits()
+    // A route deposit that was paid (or not) while the tab was away: claim it
+    // so the sats reach the balance, or forget it once its invoice expired.
+    const dep = loadCloudDeposit()
+    if (dep && dep.pubkey === identity.pubkey) {
+      if (dep.expiresAt * 1000 < Date.now()) {
+        clearCloudDeposit()
+      } else {
+        try {
+          const claimed = await cloudClient(cloudPrefs.apiUrl).claimDeposit(dep.depositId)
+          if (claimed.status === 'settled') {
+            clearCloudDeposit()
+            set({ cloud: { ...get().cloud, message: `A ${satsOf(claimed.settled_msats ?? dep.amountMsats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.` } })
+          } else if (claimed.status === 'expired') {
+            clearCloudDeposit()
+          }
+        } catch {
+          // Unreachable now; the record stays for the next load.
+        }
+      }
+    }
     const record = loadCloudJob()
     // Another identity's job stays on disk for when it is back.
     if (!record || record.pubkey !== identity.pubkey) return
@@ -1964,6 +2235,35 @@ export { SPAWN }
 export function samePosition(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
 }
+
+/**
+ * Compute the route's current step: its proof request goes to the worker like
+ * any single commit, and applyProofMessage carries it through signing.
+ */
+function startPlanStep(): void {
+  const s = useCyberspace.getState()
+  const plan = s.plan
+  if (!plan || plan.status !== 'running') return
+  const id = ++requestId
+  if (plan.step.source === 'cloud') {
+    void cloudStepStarter?.(plan.step, id)
+    return
+  }
+  useCyberspace.setState({
+    pendingTarget: plan.step.to,
+    proof: { ...IDLE_PROOF, status: 'computing', mode: plan.step.kind, source: 'local' },
+  })
+  postProof({
+    id,
+    mode: plan.step.kind,
+    from: plan.step.from,
+    to: plan.step.to,
+    plane: s.plane,
+    prevEventId: s.prevEventId,
+    maxComputeHeight: plan.ceilings.hop,
+  })
+}
+
 
 /**
  * Where a sidestep commit toward `cursor` actually lands: each axis whose

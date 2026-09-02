@@ -28,6 +28,8 @@ import {
 import { useCalibration } from '../lib/calibration'
 import { nextStep, type PlanStep } from '../lib/movePlan'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
+/** Paid legs: the cloud's warm gold, the colour the HUD uses for HOSAKA. */
+const CLOUD = '#ffd27d'
 import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   MAX_COMPUTE_HEIGHT,
@@ -152,7 +154,15 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // The ceiling a commit would use right now, the same number the store
   // routes with: the hard cap lowered to what calibration measured.
   const hopCeil = useCalibration((s) => s.hopHeight)
+  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+  const cloudLimits = useCyberspace((s) => (s.cloudPrefs.mode === 'off' ? null : s.cloud.limits))
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  const ceilings = useMemo(() => ({
+    hop: ceiling,
+    sidestep: sidestepCeil,
+    cloudHop: cloudLimits?.max_hop_height ?? 0,
+    cloudSidestep: cloudLimits?.max_sidestep_height ?? 0,
+  }), [ceiling, sidestepCeil, cloudLimits])
 
   // The route Space would run, from the planner the store executes. Drawn
   // step by step up to DRAWN_STEPS; a longer route is marked capped and its
@@ -163,14 +173,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     let cur = position
     let capped = false
     for (;;) {
-      const step = nextStep(cur, target, ceiling)
+      const step = nextStep(cur, target, ceilings)
       if (!step) break
       if (steps.length >= DRAWN_STEPS) { capped = true; break }
       steps.push(step)
       cur = step.to
     }
     return { steps, capped, last: cur }
-  }, [active, position, target, ceiling])
+  }, [active, position, target, ceilings])
 
   // Screen-space endpoints, at cell CENTRES.
   //
@@ -185,14 +195,19 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
     const b = centre(target)
     const steps = route?.steps ?? []
+    const local = steps.filter((st) => st.source !== 'cloud')
+    const paid = steps.filter((st) => st.source === 'cloud')
+    const last = steps[steps.length - 1]
     return {
       a: centre(position),
       b,
-      hops: steps.filter((st) => st.kind === 'hop').map((st) => [centre(st.from), centre(st.to)] as const),
-      sidesteps: steps.filter((st) => st.kind === 'sidestep').map((st) => [centre(st.from), centre(st.to)] as const),
+      hops: local.filter((st) => st.kind === 'hop').map((st) => [centre(st.from), centre(st.to)] as const),
+      sidesteps: local.filter((st) => st.kind === 'sidestep').map((st) => [centre(st.from), centre(st.to)] as const),
+      cloud: paid.map((st) => [centre(st.from), centre(st.to)] as const),
       landings: steps.filter((st) => st.kind === 'sidestep').map((st) => centre(st.to)),
       rest: route?.capped ? ([centre(route.last), b] as const) : null,
-      lastIsHop: steps.length > 0 && steps[steps.length - 1].kind === 'hop' && !route?.capped,
+      lastIsHop: !!last && last.kind === 'hop' && last.source !== 'cloud' && !route?.capped,
+      lastIsCloud: !!last && last.source === 'cloud' && !route?.capped,
       targetCell: b,
     }
   }, [position, target, route, scaleExp, axes, anchor])
@@ -200,8 +215,10 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const hopGeometry = useMemo(() => new BufferGeometry(), [])
   const sideGeometry = useMemo(() => new BufferGeometry(), [])
   const restGeometry = useMemo(() => new BufferGeometry(), [])
+  const cloudGeometry = useMemo(() => new BufferGeometry(), [])
   const hopLegs = useMemo(() => makeDashedSegments(hopGeometry, WARN), [hopGeometry])
   const sideLegs = useMemo(() => makeSolidSegments(sideGeometry, SIDESTEP), [sideGeometry])
+  const cloudLegs = useMemo(() => makeDashedSegments(cloudGeometry, CLOUD), [cloudGeometry])
   const restLeg = useMemo(() => makeDashedLine(restGeometry), [restGeometry])
 
   // A cube, not a square: the view orbits now, so the target cell has to read
@@ -213,13 +230,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   useLayoutEffect(() => {
     setSegments(hopLegs, hopGeometry, points.hops)
     setSegments(sideLegs, sideGeometry, points.sidesteps)
+    setSegments(cloudLegs, cloudGeometry, points.cloud)
     if (points.rest) {
       setSegment(restLeg, restGeometry, points.rest[0], points.rest[1], DANGER)
       restLeg.visible = true
     } else {
       restLeg.visible = false
     }
-  }, [points, hopLegs, sideLegs, restLeg, hopGeometry, sideGeometry, restGeometry])
+  }, [points, hopLegs, sideLegs, cloudLegs, restLeg, hopGeometry, sideGeometry, cloudGeometry, restGeometry])
 
   // The cursor's position is driven per frame, straight from the store, rather
   // than waiting for a React commit.
@@ -240,6 +258,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
     else if (points.lastIsHop) setLastVertex(hopLegs, hopGeometry, b)
+    else if (points.lastIsCloud) setLastVertex(cloudLegs, cloudGeometry, b)
   })
 
   return (
@@ -271,6 +290,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         <>
           <primitive object={hopLegs} />
           <primitive object={sideLegs} />
+          <primitive object={cloudLegs} />
           <primitive object={restLeg} />
 
           {/* Every sidestep landing: 1 gibson through a wall */}

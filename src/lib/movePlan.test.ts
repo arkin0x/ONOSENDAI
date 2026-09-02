@@ -130,3 +130,33 @@ describe('buildMovePlan', () => {
     expect(nextStep(from, from, 2)).toBeNull()
   })
 })
+
+describe('two ceilings: local first, cloud second, infeasible named', () => {
+  const c = { hop: 17, sidestep: 24, cloudHop: 25, cloudSidestep: 29 }
+  it('a cursor within the cloud hop cap is one paid hop, no wall', () => {
+    const from = P(1000n)
+    const steps = buildMovePlan(from, P(1000n + (1n << 22n)), c)
+    expect(steps.map((s) => `${s.kind}:${s.source}`)).toEqual(['hop:cloud'])
+  })
+  it('within the local ceiling nothing is paid', () => {
+    expect(buildMovePlan(P(1000n), P(1000n + (1n << 10n)), c).map((s) => s.source)).toEqual(['local'])
+  })
+  it('above the cloud hop cap: paid hop to the edge, paid sidestep, hop on', () => {
+    const from = P(5n)
+    const to = P((1n << 26n) + 3n)   // wall at h27
+    const steps = buildMovePlan(from, to, c)
+    // the edge of the h27 wall is an h26 hop away, above the cloud cap, so the
+    // walk restarts at the cloud level: paid hop, paid sidestep, paid hop, paid sidestep, hop on
+    expect(steps.map((s) => `${s.kind}:${s.source}:h${s.maxHeight}`)).toEqual([
+      'hop:cloud:h25', 'sidestep:cloud:h26', 'hop:cloud:h25', 'sidestep:cloud:h27', 'hop:local:h2',
+    ])
+    expect(planSummary(from, to, c)).toMatchObject({ steps: 5, cloudSteps: 4, infeasibleAt: null })
+  })
+  it('a wall no one sells is named as the first infeasible step', () => {
+    const s = planSummary(P(5n), P((1n << 40n) + 3n), c)
+    expect(s.infeasibleAt).not.toBeNull()
+  })
+  it('a plain number still means local only', () => {
+    expect(buildMovePlan(P(0b0101n), P(0b1011n), 2).map((s) => s.source)).toEqual(['local', 'local', 'local'])
+  })
+})

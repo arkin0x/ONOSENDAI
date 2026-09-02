@@ -10,6 +10,7 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { LootDetail } from './hud/LootDetail'
+import { CloudApproval, InvoiceModal } from './hud/InvoiceModal'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
@@ -42,6 +43,9 @@ export default function App(): JSX.Element {
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
   useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
+  // A cloud job paid or computing when the tab last closed is picked up here,
+  // if the chain head is still the one it was bound to. Also fetches the caps.
+  useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
 
   const isMobile = useIsMobile()
   const targets = useTargets()
@@ -136,6 +140,8 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <SecretModal />
       <LootDetail />
+      <CloudApproval />
+      <InvoiceModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

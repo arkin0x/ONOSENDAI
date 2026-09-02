@@ -11,17 +11,25 @@
 import { useMemo } from 'react'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
-import { planSummary, type PlanSummary } from '../lib/movePlan'
+import { satsOf } from '../lib/cloud'
+import { planSummary, type Ceilings, type PlanSummary } from '../lib/movePlan'
 import { formatMs, formatOps } from '../lib/space'
-import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type MovePlan } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
 
 function StatusLabel({ status }: { status: string }): JSX.Element {
   const label: Record<string, string> = {
     idle: 'IDLE',
     uncommitted: 'UNCOMMITTED',
     'route-ready': 'ROUTE READY',
+    'cloud-route-ready': 'CLOUD ROUTE READY',
     computing: 'COMPUTING',
     hashing: 'HASHING',
+    'cloud-computing': 'HOSAKA COMPUTING',
+    quoting: 'QUOTING',
+    confirm: 'AWAITING YOUR PAY',
+    awaiting_payment: 'AWAITING PAYMENT',
+    paid: 'FUNDED',
+    verifying: 'VERIFYING',
     signing: 'SIGN TO CONTINUE',
     paused: 'ROUTE PAUSED',
     failed: 'ROUTE FAILED',
@@ -42,11 +50,21 @@ export function ProofPanel(): JSX.Element {
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
 
   const plan = useCyberspace((s) => s.plan)
+  const cloud = useCyberspace((s) => s.cloud)
+  const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
   const resumePlan = useCyberspace((s) => s.resumePlan)
   const cancelPlan = useCyberspace((s) => s.cancelPlan)
-  // The ceiling a commit would use right now: the hard cap lowered to what
-  // calibration measured, the same number the store routes with.
+  // What a commit would plan with right now: this machine's calibrated
+  // ceilings, and HOSAKA's caps when the cloud is on and has answered. The
+  // same numbers the store uses.
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  const cloudOn = cloudMode !== 'off' && cloud.limits !== null
+  const ceilings: Ceilings = useMemo(() => ({
+    hop: ceiling,
+    sidestep: sidestepCeil,
+    cloudHop: cloudOn && cloud.limits ? cloud.limits.max_hop_height : 0,
+    cloudSidestep: cloudOn && cloud.limits ? cloud.limits.max_sidestep_height : 0,
+  }), [ceiling, sidestepCeil, cloudOn, cloud.limits])
 
   // Live preview of the action the cursor is lining up. The hop estimate is
   // closed-form; the route summary walks the route's steps without keeping
@@ -60,19 +78,21 @@ export function ProofPanel(): JSX.Element {
       ceiling,
     )
     if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null }
-    return { hop, route: planSummary(position, cursor, ceiling, 20_000) }
-  }, [position, cursor, plane, ceiling])
+    return { hop, route: planSummary(position, cursor, ceilings, 20_000) }
+  }, [position, cursor, plane, ceiling, ceilings])
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const status =
     plan
       ? plan.status === 'paused' ? (plan.awaiting ? 'signing' : 'paused')
         : plan.status === 'failed' ? 'failed'
+        : plan.status === 'funding' ? (cloud.status === 'idle' ? 'quoting' : cloud.status)
+        : plan.step.source === 'cloud' ? (cloud.status === 'computing' || cloud.status === 'quoting' || cloud.status === 'paid' ? 'cloud-computing' : cloud.status)
         : plan.step.kind === 'sidestep' ? 'hashing' : 'computing'
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? preview.route ? 'route-ready' : 'uncommitted'
+          ? preview.route ? (preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
   return (
@@ -90,7 +110,7 @@ export function ProofPanel(): JSX.Element {
       </div>
 
       {plan ? (
-        <RouteView plan={plan} proof={proof} onResume={resumePlan} onCancel={cancelPlan} />
+        <RouteView plan={plan} proof={proof} cloud={cloud} onResume={resumePlan} onCancel={cancelPlan} />
       ) : previewing && preview.route ? (
         <>
           <dl className="stats">
@@ -112,15 +132,15 @@ export function ProofPanel(): JSX.Element {
             </div>
           </dl>
           <p className="notice notice--sidestep">
-            {`A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (h${ceiling}). `}
-            A sidestep buys exactly 1 gibson through a wall, so the route is hops
-            to the leaf touching the wall, the sidestep, then hops on, for every
-            wall on the way. Space runs the route one step at a time and asks for a
-            signature as each step lands. X stops it.
+            {preview.route.infeasibleAt !== null
+              ? `Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`
+              : preview.route.cloudSteps > 0
+                ? `Taller than this machine hops (h${ceiling}): ${preview.route.cloudSteps} of ${preview.route.steps} steps go to HOSAKA. Space quotes them together; one PAY, one invoice, then the route runs step by step and asks for a signature as each step lands. X stops it.`
+                : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (h${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
           </p>
-          {preview.route.steps > 64 && (
+          {preview.route.steps > 64 && preview.route.cloudSteps === 0 && (
             <p className="notice">
-              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps, each a signed event. A cloud hop from HOSAKA reaches the wall in one move once it is deployed.`}
+              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps, each a signed event. ${cloudMode === 'off' ? 'Turning the cloud on lets HOSAKA hop to the wall in one paid move.' : 'HOSAKA has not answered yet; its hop would replace the walk.'}`}
             </p>
           )}
         </>
@@ -192,17 +212,28 @@ function routeLabel(r: PlanSummary): string {
   return `${hops}, ${sides}`
 }
 
+const CLOUD_STAGE: Record<string, string> = {
+  quoting: 'asking HOSAKA',
+  confirm: 'waiting for your PAY',
+  awaiting_payment: 'waiting for the invoice to be paid',
+  paid: 'funded',
+  computing: 'HOSAKA computing',
+  verifying: 'verifying the cloud result here',
+  error: 'cloud error',
+}
+
 /** The running route: where it is, what it is doing, and the two buttons. */
-function RouteView({ plan, proof, onResume, onCancel }: {
+function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   plan: MovePlan
   proof: { progress: number; elapsedMs: number }
+  cloud: CloudState
   onResume: () => void
   onCancel: () => void
 }): JSX.Element {
   const total = plan.summary.steps
   const n = plan.done + 1
   const step = plan.step
-  const kind = step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'
+  const kind = `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`
   const what =
     step.kind === 'sidestep'
       ? `1 gibson through the wall at 2^${step.maxHeight}`
@@ -212,7 +243,12 @@ function RouteView({ plan, proof, onResume, onCancel }: {
       ? plan.awaiting ? 'proof done, waiting for your signature' : 'paused'
       : plan.status === 'failed'
         ? 'failed'
-        : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+        : plan.status === 'funding'
+          ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
+          : step.source === 'cloud'
+            ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
+            : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+  const routeCost = cloud.quote?.route ? satsOf(cloud.quote.costMsats) : null
   return (
     <>
       <dl className="stats">
@@ -228,6 +264,12 @@ function RouteView({ plan, proof, onResume, onCancel }: {
           <dt>Signed so far</dt>
           <dd>{`${plan.done} of ${total} (${plan.summary.hops} hops, ${plan.summary.sidesteps} sidesteps)`}</dd>
         </div>
+        {plan.summary.cloudSteps > 0 && (
+          <div>
+            <dt>HOSAKA</dt>
+            <dd>{`${plan.summary.cloudSteps} step${plan.summary.cloudSteps === 1 ? '' : 's'}${routeCost !== null ? `, ${routeCost} sats` : ''}`}</dd>
+          </div>
+        )}
         <div>
           <dt>Status</dt>
           <dd>{doing}</dd>
@@ -244,6 +286,7 @@ function RouteView({ plan, proof, onResume, onCancel }: {
         ))}
       </ol>
       {plan.message && <p className="notice">{plan.message}</p>}
+      {cloud.message && plan.status !== 'failed' && <p className="legend__note">{cloud.message}</p>}
       <div className="route__row">
         {plan.status === 'paused' && (
           <button className="route__button route__button--resume" onClick={onResume}>
@@ -269,10 +312,10 @@ function routeWindow(plan: MovePlan): Array<{ index: number; kind: string; heigh
   const s = plan.step
   rows.push({
     index: plan.done,
-    kind: s.kind === 'sidestep' ? 'SIDESTEP' : 'HOP',
+    kind: `${s.source === 'cloud' ? 'CLOUD ' : ''}${s.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`,
     height: `h${s.maxHeight}`,
     state: plan.status,
-    label: plan.status === 'running' ? 'now' : plan.status === 'paused' ? 'paused' : 'failed',
+    label: plan.status === 'running' ? 'now' : plan.status === 'paused' ? 'paused' : plan.status === 'funding' ? 'funding' : 'failed',
   })
   const remaining = plan.summary.steps - plan.done - 1
   if (remaining > 0) rows.push({ index: plan.done + 1, kind: '·', height: '', state: 'next', label: `${plan.summary.capped ? `${remaining}+` : remaining} more` })

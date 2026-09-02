@@ -22,6 +22,7 @@ import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
+import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
@@ -245,6 +246,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ScalePanel />
         <PositionPanel />
         <ProofPanel />
+        <CloudPanel />
         <ChainPanel />
         <HyperspacePanel />
         <Legend />

@@ -4,6 +4,18 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.hoisted(() => {
+  const m = new Map<string, string>()
+  ;(globalThis as { localStorage?: Storage }).localStorage = {
+    get length() { return m.size },
+    clear: () => m.clear(),
+    getItem: (k: string) => m.get(k) ?? null,
+    key: (i: number) => [...m.keys()][i] ?? null,
+    removeItem: (k: string) => { m.delete(k) },
+    setItem: (k: string, v: string) => { m.set(k, String(v)) },
+  }
+})
+
 const posted: Array<{ id: number; mode: string; from: { x: bigint }; to: { x: bigint }; maxComputeHeight: number }> = []
 vi.mock('../lib/workers', () => ({
   postProof: vi.fn((req: (typeof posted)[number]) => { posted.push(req) }),
@@ -33,6 +45,8 @@ async function land(): Promise<void> {
 describe('a commit beyond the ceiling', () => {
   beforeEach(async () => {
     posted.length = 0
+    // These routes are this machine's alone: the cloud stays off.
+    useCyberspace.setState({ cloudPrefs: { ...useCyberspace.getState().cloudPrefs, mode: 'off' } })
     await useCyberspace.getState().respawn()
   })
 

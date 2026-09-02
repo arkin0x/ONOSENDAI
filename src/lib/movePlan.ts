@@ -22,6 +22,9 @@ export interface Position {
 
 export type PlanStepKind = 'hop' | 'sidestep'
 
+/** Who does the work: this machine, HOSAKA, or nobody can. */
+export type StepSource = 'local' | 'cloud' | 'infeasible'
+
 export interface PlanStep {
   kind: PlanStepKind
   from: Position
@@ -30,6 +33,35 @@ export interface PlanStep {
   maxHeight: number
   /** Per-axis LCA heights, for the panel and for the sidestep tags. */
   heights: { x: number; y: number; z: number }
+  source: StepSource
+}
+
+/**
+ * What each primitive can reach, here and in the cloud. Cloud values are 0
+ * when the cloud is off or its limits are not known yet. Hops are planned
+ * with the taller hop ceiling, so a paid hop replaces a walk whenever HOSAKA
+ * reaches the wall; a step is local when this machine can do it and cloud
+ * otherwise; a sidestep taller than both sidestep ceilings makes the route
+ * infeasible at that step.
+ */
+export interface Ceilings {
+  hop: number
+  sidestep: number
+  cloudHop: number
+  cloudSidestep: number
+}
+
+export function localOnly(hop: number, sidestep: number = hop): Ceilings {
+  return { hop, sidestep, cloudHop: 0, cloudSidestep: 0 }
+}
+
+function asCeilings(c: number | Ceilings): Ceilings {
+  return typeof c === 'number' ? localOnly(c, Number.MAX_SAFE_INTEGER) : c
+}
+
+function sourceOf(kind: PlanStepKind, h: number, c: Ceilings): StepSource {
+  if (kind === 'hop') return h <= c.hop ? 'local' : h <= c.cloudHop ? 'cloud' : 'infeasible'
+  return h <= c.sidestep ? 'local' : h <= c.cloudSidestep ? 'cloud' : 'infeasible'
 }
 
 export type AxisMove =
@@ -91,12 +123,14 @@ export function nextAxisMove(current: bigint, target: bigint, ceiling: number): 
  * their walls (spec 6.9) and holds the others until it is done. Null when
  * `cur` is `to`.
  */
-export function nextStep(cur: Position, to: Position, ceiling: number): PlanStep | null {
-  if (ceiling < 1) throw new Error('ceiling must be at least 1')
+export function nextStep(cur: Position, to: Position, ceilings: number | Ceilings): PlanStep | null {
+  const c = asCeilings(ceilings)
+  const walk = Math.max(c.hop, c.cloudHop)
+  if (walk < 1) throw new Error('ceiling must be at least 1')
   if (cur.x === to.x && cur.y === to.y && cur.z === to.z) return null
-  const mx = nextAxisMove(cur.x, to.x, ceiling)
-  const my = nextAxisMove(cur.y, to.y, ceiling)
-  const mz = nextAxisMove(cur.z, to.z, ceiling)
+  const mx = nextAxisMove(cur.x, to.x, walk)
+  const my = nextAxisMove(cur.y, to.y, walk)
+  const mz = nextAxisMove(cur.z, to.z, walk)
   const crossing = mx.kind === 'sidestep' || my.kind === 'sidestep' || mz.kind === 'sidestep'
   const pick = (m: AxisMove, v: bigint): { to: bigint; h: number } => {
     if (crossing) return m.kind === 'sidestep' ? { to: m.to, h: m.height } : { to: v, h: 0 }
@@ -105,12 +139,15 @@ export function nextStep(cur: Position, to: Position, ceiling: number): PlanStep
   const px = pick(mx, cur.x)
   const py = pick(my, cur.y)
   const pz = pick(mz, cur.z)
+  const kind: PlanStepKind = crossing ? 'sidestep' : 'hop'
+  const maxHeight = Math.max(px.h, py.h, pz.h)
   return {
-    kind: crossing ? 'sidestep' : 'hop',
+    kind,
     from: cur,
     to: { x: px.to, y: py.to, z: pz.to },
-    maxHeight: Math.max(px.h, py.h, pz.h),
+    maxHeight,
     heights: { x: px.h, y: py.h, z: pz.h },
+    source: sourceOf(kind, maxHeight, c),
   }
 }
 
@@ -119,11 +156,11 @@ export function nextStep(cur: Position, to: Position, ceiling: number): PlanStep
  * (one sidestep per block boundary above the ceiling between here and every
  * wall's edge), so the list is capped; `planSummary` counts without building.
  */
-export function buildMovePlan(from: Position, to: Position, ceiling: number, cap: number = 10_000): PlanStep[] {
+export function buildMovePlan(from: Position, to: Position, ceilings: number | Ceilings, cap: number = 10_000): PlanStep[] {
   const steps: PlanStep[] = []
   let cur: Position = { ...from }
   for (let n = 0; n < cap; n++) {
-    const step = nextStep(cur, to, ceiling)
+    const step = nextStep(cur, to, ceilings)
     if (!step) return steps
     steps.push(step)
     cur = step.to
@@ -138,6 +175,9 @@ export interface PlanSummary {
   tallestWall: number
   /** True when counting stopped at `cap`; `steps` is then a floor. */
   capped: boolean
+  /** Steps HOSAKA would do, and the first step nobody can do (null when the whole route is feasible). */
+  cloudSteps: number
+  infeasibleAt: number | null
 }
 
 /**
@@ -145,22 +185,26 @@ export interface PlanSummary {
  * commit and the plan carries it while running. Walks the same steps the
  * plan will take, so it is exact up to `cap`.
  */
-export function planSummary(from: Position, to: Position, ceiling: number, cap: number = 100_000): PlanSummary {
+export function planSummary(from: Position, to: Position, ceilings: number | Ceilings, cap: number = 100_000): PlanSummary {
   let hops = 0
   let sidesteps = 0
   let tallestWall = 0
+  let cloudSteps = 0
+  let infeasibleAt: number | null = null
   let cur: Position = { ...from }
   for (let n = 0; n < cap; n++) {
-    const step = nextStep(cur, to, ceiling)
-    if (!step) return { steps: hops + sidesteps, hops, sidesteps, tallestWall, capped: false }
+    const step = nextStep(cur, to, ceilings)
+    if (!step) return { steps: hops + sidesteps, hops, sidesteps, tallestWall, capped: false, cloudSteps, infeasibleAt }
     if (step.kind === 'hop') hops++
     else {
       sidesteps++
       if (step.maxHeight > tallestWall) tallestWall = step.maxHeight
     }
+    if (step.source === 'cloud') cloudSteps++
+    if (step.source === 'infeasible' && infeasibleAt === null) infeasibleAt = n
     cur = step.to
   }
-  return { steps: hops + sidesteps, hops, sidesteps, tallestWall, capped: true }
+  return { steps: hops + sidesteps, hops, sidesteps, tallestWall, capped: true, cloudSteps, infeasibleAt }
 }
 
 /** Counts for a one-line summary: "3 hops, 1 sidestep". */

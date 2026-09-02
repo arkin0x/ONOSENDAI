@@ -227,12 +227,21 @@ function Rig(): JSX.Element {
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
   const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
-  // Scrubbing the chain moves the anchor along history in steps that can be
-  // thousands of cells: the camera would stay parked (the orbit clamp holds
-  // it at maxDistance) while the place being looked at runs away. History is
-  // a cut, not a journey, so every explore step re-frames at START_DISTANCE,
-  // the same framing the app loads with.
+  // Scrubbing the chain moves the anchor along history. A step within the fly
+  // bound glides there the way a hyperspace click does, and a step too far to
+  // fly cuts, but neither touches the orbit you have chosen: re-framing
+  // straight-on at START_DISTANCE on every step threw away the angle the user
+  // was looking from, which is what made scrubbing a spectated chain snap.
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  const prevDeps = useRef<{ view: unknown; genesisId: unknown; focusPubkey: unknown; focusPoint: string; exploreIndex: number | null } | null>(null)
+  // What the last rendered frame was anchored on. A chain step is judged
+  // against this, not against the last effect run: a spectated chain arriving
+  // moves the anchor (and can change plane) without any effect firing.
+  const lastSeen = useRef<{ anchor: Position; plane: number; scaleExp: number } | null>(null)
+  // The frame before the anchor last changed, and the frame after. A frame can
+  // render between the store update and this effect, in which case lastSeen
+  // already shows the new anchor and the old one is here.
+  const lastChange = useRef<{ from: { anchor: Position; plane: number; scaleExp: number }; to: { anchor: Position; plane: number; scaleExp: number } } | null>(null)
   const controls = useRef<{
     object: { position: Vector3 }
     target: Vector3
@@ -265,6 +274,49 @@ function Rig(): JSX.Element {
     const owned = useHyperspace.getState().viewOwned
     const prev = flyFrom.current
     flyFrom.current = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp, owned }
+    const before = prevDeps.current
+    prevDeps.current = { view, genesisId, focusPubkey, focusPoint, exploreIndex }
+    // A chain step: only the explored index changed. Keep the orbit. Near
+    // enough, the per-frame origin shift below carries the camera into the
+    // new frame still looking at the old action and the stretched follow
+    // eases it onto the new one; too far, cut to the new action with the
+    // same offset from it that the camera had from the old.
+    const stepOnly = before !== null && before.view === view && before.genesisId === genesisId &&
+      before.focusPubkey === focusPubkey && before.focusPoint === focusPoint && before.exploreIndex !== exploreIndex
+    const trace = (branch: string, extra: Record<string, unknown> = {}): void => {
+      if (import.meta.env.DEV) (window as unknown as { __rigLast?: unknown }).__rigLast = { branch, stepOnly, before, exploreIndex, prevPlane: prev?.plane, plane: s.anchorPlane, prevScale: prev?.scaleExp, scale: s.scaleExp, ...extra }
+    }
+    const same = (a: { anchor: Position; plane: number; scaleExp: number }): boolean =>
+      a.anchor.x === s.anchor.x && a.anchor.y === s.anchor.y && a.anchor.z === s.anchor.z && a.plane === s.anchorPlane && a.scaleExp === s.scaleExp
+    // Where the camera was looking before this step: the last frame if it has
+    // not rendered the new anchor yet, else the frame before the change.
+    const last = lastSeen.current
+    const seen = last === null ? null : !same(last) ? last : (lastChange.current !== null && same(lastChange.current.to) ? lastChange.current.from : null)
+    if (stepOnly && seen !== null) {
+      const sameFrame = seen.plane === s.anchorPlane && seen.scaleExp === s.scaleExp
+      const cells = sameFrame ? Math.max(
+        Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.y, seen.anchor.y, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.z, seen.anchor.z, s.scaleExp)),
+      ) : Infinity
+      trace(cells === 0 ? 'step-none' : cells < GLIDE_MAX_CELLS ? 'step-glide' : 'step-cut', { cells, sameFrame })
+      if (cells === 0) return
+      if (cells < GLIDE_MAX_CELLS) {
+        glideLeft.current = GLIDE_SECONDS
+        locked.current = true
+        return
+      }
+      const offset = c.object.position.clone().sub(c.target)
+      const [x, y, z] = s.cursorOffset()
+      glideLeft.current = 0
+      smooth.current.set(x, y, z)
+      c.target.copy(smooth.current)
+      c.object.position.copy(smooth.current).add(offset)
+      locked.current = true
+      prevOrigin.current = null
+      c.update()
+      return
+    }
     // Same plane, same zoom, both frames owned by hyperspace: skip the
     // re-frame. The per-frame origin shift below carries the camera into the
     // new frame still looking at the old stop, and the stretched follow
@@ -282,6 +334,7 @@ function Rig(): JSX.Element {
         return
       }
     }
+    trace('reframe')
     glideLeft.current = 0
     const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
@@ -293,6 +346,14 @@ function Rig(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, genesisId, focusPubkey, focusPoint, exploreIndex])
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    ;(window as unknown as { __rig?: unknown }).__rig = () => {
+      const c = controls.current
+      return c ? { position: c.object.position.toArray(), target: c.target.toArray() } : null
+    }
+  }, [])
+
   useFrame((_, dt) => {
     const c = controls.current
     if (!c) return
@@ -301,6 +362,12 @@ function Rig(): JSX.Element {
     // action being looked at, and the camera has to ride that the same way it
     // rides a commit.
     const origin = alignedOrigin(s.anchor, s.scaleExp)
+    const cur = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp }
+    const was = lastSeen.current
+    if (was !== null && (was.anchor.x !== cur.anchor.x || was.anchor.y !== cur.anchor.y || was.anchor.z !== cur.anchor.z || was.plane !== cur.plane || was.scaleExp !== cur.scaleExp)) {
+      lastChange.current = { from: was, to: cur }
+    }
+    lastSeen.current = cur
 
     // A commit re-anchors render space to the new avatar cell, so every
     // coordinate in the scene shifts at once. That is a change of frame, not

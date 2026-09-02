@@ -24,6 +24,7 @@ export function useTargets(): CyberTarget[] {
   const spectating = useCyberspace((s) => s.spectate !== null)
   const focused = useCyberspace((s) => s.focus !== null)
   const position = useCyberspace((s) => s.position)
+  const headPlane = useCyberspace((s) => s.headPlane)
   const tracked = useCyberspace((s) => s.targets)
   const focus = useCyberspace((s) => s.focusPubkey())
 
@@ -31,12 +32,19 @@ export function useTargets(): CyberTarget[] {
     const out: CyberTarget[] = []
     // Tracked pubkeys first, except the one the scene is looking through: a
     // marker for the avatar you are standing on would sit on your own centre.
-    for (const t of useCyberspace.getState().targetList()) if (t.id !== focus) out.push(t)
+    // Only targets in the plane the scene is showing: a coordinate in the
+    // other plane is not a place in this one (§2.4).
+    for (const t of useCyberspace.getState().targetList()) {
+      if (t.id === focus) continue
+      const tr = tracked[t.id]
+      if (tr && tr.plane !== plane) continue
+      out.push(t)
+    }
     // While the camera is anywhere you are not (someone else's eyes, a
     // hyperspace stop, EARTH, a shard), the way home is a thing worth
     // pointing at from anywhere; the projector's distance readout doubles as
     // how far the viewed place is from where you actually stand.
-    if (spectating || focused) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
+    if ((spectating || focused) && headPlane === plane) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
     // Ideaspace has no physical mapping, so there is no planet in it to point at.
     if (plane === 0) {
       out.push({
@@ -50,5 +58,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, spectating, focused, position, tracked, focus])
+  }, [plane, headPlane, spectating, focused, position, tracked, focus])
 }

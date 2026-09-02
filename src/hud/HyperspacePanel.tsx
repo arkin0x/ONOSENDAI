@@ -429,5 +429,8 @@ export function selectStopInScene(height: number): void {
 export function viewEarth(): void {
   ownHyperspaceView()
   markViewedStop(null)
+  // Earth is a dataspace thing (§9.1): looking at it lines up dataspace, so
+  // that RETURN, and the next commit, stay in the plane the planet is in.
+  useCyberspace.getState().setPlane(0)
   useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
 }

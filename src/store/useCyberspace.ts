@@ -267,6 +267,8 @@ export interface CyberspaceState {
   resetView: () => void
   canonicalView: () => void
   togglePlane: () => void
+  /** Line up a plane for the next commit; the scene switches to it at once. */
+  setPlane: (plane: Plane) => void
   applyProofMessage: (msg: ProofResponse) => void
   setLive: (live: boolean) => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
@@ -798,7 +800,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
     // Not computing: recall the cursor, plane included, to where you stand.
-    set({ cursor: { ...position }, plane: headPlane })
+    // The view follows the lined-up plane, so at your own head it comes back too.
+    const atHead = get().exploreIndex === null && get().focus === null && get().spectate === null
+    set(atHead ? { cursor: { ...position }, plane: headPlane, anchorPlane: headPlane } : { cursor: { ...position }, plane: headPlane })
   },
 
   adjustScale: (delta) => {
@@ -833,13 +837,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ view: canonicalQuaternion(), viewHistory: [...viewHistory, view.clone()] })
   },
 
-  togglePlane: () => {
+  setPlane: (plane) => {
     // A plane flip mid-proof would desync the in-flight terrain K.
     if (get().proof.status === 'computing') return
     // Someone else's plane is theirs; the terrain follows their chain.
     if (get().spectate) return
-    set({ plane: get().plane === 0 ? 1 : 0, proof: IDLE_PROOF })
+    if (get().plane === plane) return
+    // The view follows the lined-up plane the way it follows the cursor: at
+    // your own head, or in a focus view such as EARTH, the scene switches
+    // planes now, so the planet, the landfalls, other avatars and everything
+    // else of the other plane disappear at once. Only history keeps its own
+    // plane, because each action there records the plane it was in.
+    const next: Partial<CyberspaceState> = { plane, proof: IDLE_PROOF }
+    if (get().exploreIndex === null) next.anchorPlane = plane
+    set(next)
   },
+
+  togglePlane: () => { get().setPlane(get().plane === 0 ? 1 : 0) },
 
   applyProofMessage: async (msg) => {
     // Stale responses from a cancelled commit must not overwrite fresh state.
@@ -1038,8 +1052,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   endSpectate: () => {
-    const { position, headPlane } = get()
-    set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: headPlane })
+    // Back to your own head, in the plane you have lined up there.
+    const { position, plane } = get()
+    set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane })
   },
 
   focusOn: (position, plane, label, scaleExp) => {
@@ -1057,11 +1072,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   clearFocus: () => {
-    const { position, headPlane, focusReturnScale, scaleExp } = get()
+    // Home is your position in the plane you have lined up, which is what
+    // the scene showed before the focus began.
+    const { position, plane, focusReturnScale, scaleExp } = get()
     set({
       focus: null,
       anchor: position,
-      anchorPlane: headPlane,
+      anchorPlane: plane,
       // Back at the zoom the user left, not whatever the viewed thing chose.
       scaleExp: focusReturnScale ?? scaleExp,
       focusReturnScale: null,

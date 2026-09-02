@@ -1,7 +1,7 @@
 /**
  * DeploymentDetail.tsx — a deployed thing, on the wire.
  *
- * Opened by tapping a row in the Shards panel, which also flies the scene to
+ * Opened by tapping a row in the Stash panel, which also flies the scene to
  * where it sits. This is the record that lives on relays: its event id, which
  * relays hold it, the lookup id it is filed under, its coordinate, the height
  * it is hidden at, and what it is (a shard or a message). TEST DISCOVERY proves

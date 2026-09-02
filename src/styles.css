@@ -3695,3 +3695,94 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Loot rows open the bag's record; the button is the whole row */
+.loot__tags {
+  display: flex;
+  gap: 6px;
+}
+.loot__open {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.loot__open:hover .badge__name {
+  color: var(--accent);
+}
+
+/* Loot detail: a bag's record, on the secret modal's frame */
+.lootd__facts {
+  grid-template-columns: repeat(2, 1fr);
+}
+.lootd__dim {
+  color: var(--dim);
+}
+.lootd__items {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+.lootd__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+  font-size: 11px;
+}
+.lootd__item:first-child {
+  border-top: 0;
+}
+.lootd__item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lootd__view {
+  flex: 0 0 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+}
+.lootd__hidden {
+  margin: 0 0 14px;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+.lootd__wire {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0 0 14px;
+  font-size: 10px;
+}
+.lootd__wire dt {
+  align-self: center;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.lootd__wire dd {
+  margin: 0;
+}
+.lootd__copy {
+  padding: 0;
+  font: inherit;
+  font-size: 10px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}

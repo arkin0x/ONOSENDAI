@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NostrEvent } from './events'
-import { formatBytes, heightLabel, mergeLoot, payloadBytes, summarizeBag } from './loot'
+import { formatBytes, mergeLoot, payloadBytes, regionLabel, summarizeBag } from './loot'
 
 const pk = (n: number): string => n.toString(16).padStart(64, '0')
 const lookup = (n: number): string => (n + 1).toString(16).padStart(64, 'a')
@@ -60,9 +60,10 @@ describe('mergeLoot', () => {
 })
 
 describe('labels', () => {
-  it('names height 0 the exact gibson and larger heights by cell size', () => {
-    expect(heightLabel(0)).toBe('exact gibson')
-    expect(heightLabel(34)).toMatch(/^within /)
+  it('names the region as a size, never as a distance from the viewer', () => {
+    expect(regionLabel(0)).toBe('single gibson')
+    expect(regionLabel(34)).toBe('2 m cube')
+    expect(regionLabel(34)).not.toMatch(/within/)
   })
 
   it('formats bytes below a kilobyte and KB above', () => {

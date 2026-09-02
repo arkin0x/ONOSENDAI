@@ -78,9 +78,14 @@ export function mergeLoot(prev: LootItem[], incoming: LootItem[]): LootItem[] {
   return [...byKey.values()].sort((a, b) => b.createdAt - a.createdAt || a.key.localeCompare(b.key))
 }
 
-/** "exact gibson" at height 0, else the discovery radius as a cell size. */
-export function heightLabel(height: number): string {
-  return height === 0 ? 'exact gibson' : `within ${formatCellSize(height)}`
+/**
+ * The region a bag is encrypted to, as a size: a single gibson at height 0,
+ * else the side of the aligned cube. Deliberately not "within X": on someone
+ * else's bag that reads as a distance from the viewer, and where the bag is
+ * stays hidden until its hider adds a hint.
+ */
+export function regionLabel(height: number): string {
+  return height === 0 ? 'single gibson' : `${formatCellSize(height)} cube`
 }
 
 /** A payload size for a row: bytes below a kilobyte, one decimal of KB above. */

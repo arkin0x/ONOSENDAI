@@ -9,14 +9,16 @@ interface Props {
   body: string
   confirmLabel: string
   danger?: boolean
+  /** An extra class on the card, for a border that is not the destructive red. */
+  cardClassName?: string
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function ConfirmModal({ title, body, confirmLabel, danger = true, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ title, body, confirmLabel, danger = true, cardClassName, onConfirm, onCancel }: Props): JSX.Element {
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onCancel}>
-      <div className="modal__card" onPointerDown={(e) => e.stopPropagation()}>
+      <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         <h2 className="modal__title">{title}</h2>
         <p className="modal__body">{body}</p>
         <div className="modal__row">

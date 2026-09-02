@@ -21,6 +21,7 @@ import type { Position } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel, useProfiles } from '../store/useProfiles'
 import { ProfileBadge } from './ProfileBadge'
+import { Explanation } from './Explanation'
 
 export function TargetsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
@@ -179,13 +180,13 @@ export function TargetsPanel(): JSX.Element {
         )}
       </div>
 
-      <p className="legend__note">
+      <Explanation>
         A target is pointed at from anywhere, like Earth: reticle in frame,
         chevron on the edge, distance either way, and the avatar itself once
         you are near. Positions are chain heads on the relay, kept live; a key
         with no chain is pointed at its spawn coordinate. Follows come from
         kind 3 on {GENERAL_RELAYS.map((r) => r.replace('wss://', '')).join(', ')}.
-      </p>
+      </Explanation>
     </section>
   )
 }

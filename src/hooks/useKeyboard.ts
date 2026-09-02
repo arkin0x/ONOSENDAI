@@ -78,6 +78,8 @@ export function useKeyboard(): void {
         // Viewing a stop or EARTH: come home before anything else.
         const hs = useHyperspace.getState()
         if (hs.scrubHeight !== null || hs.viewOwned) { exitHyperspaceView(); return }
+        // Viewing a hidden thing or a loot item: same rule, come home first.
+        if (store.focus !== null && store.spectate === null) { store.clearFocus(); return }
         store.resetView()
         return
       }

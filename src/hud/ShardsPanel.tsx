@@ -1,5 +1,5 @@
 /**
- * ShardsPanel.tsx — your shards and hidden messages, in kinds.
+ * ShardsPanel.tsx — the Stash: your shards and hidden messages, in kinds.
  *
  * A MODEL is a named shard design that lives on this device; you open it in the
  * workshop and deploy copies. A DEPLOYED instance is one such copy, or a hidden
@@ -17,6 +17,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards, type MyDeployment } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
+import { Explanation } from './Explanation'
 
 function positionOf(d: MyDeployment): { x: bigint; y: bigint; z: bigint } {
   return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
@@ -38,7 +39,7 @@ export function ShardsPanel(): JSX.Element {
 
   const target = models.find((m) => m.id === deleteModel)
   const deployedCount = (id: string): number => mine.filter((d) => d.type === 'shard' && d.shard?.id === id).length
-  const nearby = Object.keys(discovered).length
+  const foundCount = Object.keys(discovered).length
 
   const goTo = (d: MyDeployment): void => {
     useShards.getState().inspect(d.eventId)
@@ -57,8 +58,8 @@ export function ShardsPanel(): JSX.Element {
   return (
     <section className="panel panel--shards">
       <header className="panel__head">
-        <h2>Shards &amp; messages</h2>
-        <span className={`tag ${scanning ? 'tag--scan' : ''}`}>{scanning ? 'SCANNING' : `${nearby} NEAR`}</span>
+        <h2>Stash</h2>
+        <span className={`tag ${scanning ? 'tag--scan' : ''}`}>{scanning ? 'SCANNING' : `${foundCount} FOUND`}</span>
       </header>
 
       <div className="shards__section">
@@ -128,12 +129,14 @@ export function ShardsPanel(): JSX.Element {
         </div>
       )}
 
-      <p className="legend__note">
-        A shard is coloured vertices (SOLID / POINTS / LINES); a message is text.
-        Both are hidden at a location and found only by someone who computes its
-        region key (spec section 7). Tap a deployment to fly to it and prove it
-        with TEST DISCOVERY.
-      </p>
+      <Explanation>
+        Encrypt by location: a shard is coloured vertices (SOLID / POINTS / LINES);
+        a message is text. Both are hidden at a location and found only by someone
+        who computes its region key (spec section 7). Tap a deployment to fly to it and prove it
+        with TEST DISCOVERY. FOUND counts the items your own scans have opened
+        this session, at every place you have looked, not only where you stand
+        now.
+      </Explanation>
 
       {target && (
         <ConfirmModal

@@ -14,6 +14,7 @@ import { formatMs, formatOps } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { useRelays } from '../store/useRelays'
+import { Explanation } from './Explanation'
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
@@ -86,12 +87,12 @@ export function ChainPanel(): JSX.Element {
 
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
 
-      <p className="legend__note">
+      <Explanation>
         Every committed action is a signed kind:3333 event naming the one
         before it (spec section 8). {live
           ? `Live publishes each one to your ${relayCount === 1 ? CYBERSPACE_RELAY.replace('wss://', '') : `${relayCount} relays`} as it lands.`
           : 'Local keeps them on this device; switching to Live publishes the whole chain in order.'}
-      </p>
+      </Explanation>
     </section>
   )
 }

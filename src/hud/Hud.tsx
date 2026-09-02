@@ -12,6 +12,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
 import { AvatarsPanel } from './AvatarsPanel'
+import { LootPanel } from './LootPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
@@ -21,6 +22,7 @@ import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
+import { Explanation } from './Explanation'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -71,14 +73,14 @@ function IdentityPanel(): JSX.Element {
         <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
       </div>
 
-      <p className="legend__note">
+      <Explanation>
         Spawned at this key's coordinate: the 256-bit pubkey decodes directly
         to x / y / z / plane (spec section 8.3). Persisted locally so
         refreshing keeps your identity and position.
         {live
           ? ' LIVE: every action is signed and published to cyberspace.nostr1.com as it completes.'
           : ' LOCAL: actions are signed but stay on this device. Going live publishes the whole chain.'}
-      </p>
+      </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
     </section>
@@ -170,10 +172,10 @@ function ScalePanel(): JSX.Element {
         </div>
       </div>
 
-      <p className="legend__note">
+      <Explanation>
         Looking along {signed(axes.out.axis, -axes.out.dir)}. R and F travel the
         axis into and out of the screen.
-      </p>
+      </Explanation>
     </section>
   )
 }
@@ -233,18 +235,19 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       <div className="hud__col hud__col--left">
         <Brand />
         <IdentityPanel />
-        <PositionPanel />
+        <LootPanel />
+        <ShardsPanel />
         <AvatarsPanel />
         <TargetsPanel />
-        <ScalePanel />
         <LinksPanel />
       </div>
       <div className="hud__col hud__col--right">
+        <ScalePanel />
+        <PositionPanel />
         <ProofPanel />
         <ChainPanel />
         <HyperspacePanel />
         <Legend />
-        <ShardsPanel />
         <Controls />
         <DerezzPanel />
         <RelaysPanel />

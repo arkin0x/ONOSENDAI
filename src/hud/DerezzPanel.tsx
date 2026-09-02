@@ -14,6 +14,7 @@
 
 import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
+import { Explanation } from './Explanation'
 
 export function DerezzPanel(): JSX.Element {
   const [armed, setArmed] = useState(false)
@@ -50,12 +51,12 @@ export function DerezzPanel(): JSX.Element {
         </>
       ) : (
         <>
-          <p className="legend__note">
+          <Explanation>
             Abandon this chain and spawn again at your pubkey. A new spawn event
             {live ? ' is published and ' : ' '}retires every action before it
             (spec section 3.2). Your identity and the relay's copy of the old
             chain are untouched.
-          </p>
+          </Explanation>
           <button className="derezz__arm" onClick={() => setArmed(true)}>DEREZZ</button>
         </>
       )}

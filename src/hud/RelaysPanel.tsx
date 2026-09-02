@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { connected } from '../lib/relay'
 import { getPool } from '../lib/relay'
 import { DEFAULT_RELAY, useRelays } from '../store/useRelays'
+import { Explanation } from './Explanation'
 
 export function RelaysPanel(): JSX.Element {
   const relays = useRelays((s) => s.relays)
@@ -71,10 +72,10 @@ export function RelaysPanel(): JSX.Element {
       </form>
       {error && <p className="notice">Not a valid ws:// or wss:// URL.</p>}
 
-      <p className="legend__note">
-        Everything the client does fans out across these. The default is shared
-        by everyone and stays; yours are added on top and kept on this device.
-      </p>
+      <Explanation>
+        Your actions are published to each relay, and cyberspace data is pulled
+        from each relay.
+      </Explanation>
     </section>
   )
 }

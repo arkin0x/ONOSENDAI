@@ -6,7 +6,7 @@
  * what you can do about the person: point at them, watch them, or go stand
  * where their content sits. Your own also offers to delete it.
  *
- * This is the "who is this and what do I do about them" view. The Shards panel's
+ * This is the "who is this and what do I do about them" view. The Stash panel's
  * deployment detail is the "manage my own on the wire" view; the two are
  * reached differently and answer different questions.
  */

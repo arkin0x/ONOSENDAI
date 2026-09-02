@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { formatCellSize } from '../lib/scale'
+import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { spectate } from '../lib/spectator'
 import { ProfilePic } from './ProfileBadge'
@@ -89,7 +89,7 @@ export function SecretModal(): JSX.Element | null {
 
         <dl className="secret__facts">
           <div><dt>Placed</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
-          <div><dt>Hidden at</dt><dd>{item.height === 0 ? 'exact gibson' : `within ${formatCellSize(item.height)}`}</dd></div>
+          <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
           <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
         </dl>
 

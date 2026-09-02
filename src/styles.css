@@ -3818,3 +3818,38 @@ kbd {
   background: rgba(0, 229, 255, 0.05);
   border: 1px solid rgba(0, 229, 255, 0.14);
 }
+
+/* A plain focus view (a hidden thing, a loot item): the same bar in the accent colour */
+.hyperbar--focus {
+  border-color: rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.16);
+}
+.hyperbar--focus .hyperbar__label {
+  color: var(--accent);
+}
+.hyperbar--focus .hyperbar__end {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.hyperbar--focus .hyperbar__end:hover {
+  background: #66f0ff;
+}
+
+/* Invisible scrollbars on every HUD scroll container. The areas still scroll by
+   wheel, trackpad and touch; on Windows the classic bar no longer takes width.
+   Plain CSS, since this project does not use Tailwind: scrollbar-width covers
+   Firefox and current Chromium, the WebKit pseudo-element covers the rest. */
+.hud, .hud *, .modal, .modal *, .detail, .detail *, .workshop, .workshop *, .instruments, .instruments * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hud::-webkit-scrollbar, .hud *::-webkit-scrollbar,
+.modal::-webkit-scrollbar, .modal *::-webkit-scrollbar,
+.detail::-webkit-scrollbar, .detail *::-webkit-scrollbar,
+.workshop::-webkit-scrollbar, .workshop *::-webkit-scrollbar,
+.instruments::-webkit-scrollbar, .instruments *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

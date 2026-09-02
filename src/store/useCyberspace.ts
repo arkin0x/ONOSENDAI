@@ -75,6 +75,7 @@ import {
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 import { recommendedHopHeight } from '../lib/calibration'
+import { nextStep, planSummary, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -138,6 +139,36 @@ const IDLE_PROOF: ProofState = {
   message: null,
 }
 
+export type PlanStatus = 'running' | 'paused' | 'failed'
+
+/**
+ * A commit beyond the ceiling is a route, not one event: hops to the leaf
+ * touching the wall, a sidestep of exactly 1 gibson across it, hops on, for
+ * every wall between here and the cursor (spec 6.3, lib/movePlan.ts). The
+ * route runs one step at a time, each step its own proof and its own
+ * signature, and the next step is computed from wherever the last one
+ * landed. A declined signature pauses it with the finished proof kept, so
+ * RESUME asks for the signature again instead of recomputing.
+ */
+export interface MovePlan {
+  /** Where the route ends: the cursor at commit time. */
+  target: Position
+  /** The compute ceiling every hop is sized to. */
+  ceiling: number
+  /** Counts for the whole route, taken at commit time. */
+  summary: PlanSummary
+  /** Steps already signed and appended. */
+  done: number
+  /** The step in progress, or the one the route is paused on. */
+  step: PlanStep
+  status: PlanStatus
+  /** Why the route paused or failed; null while it runs. */
+  message: string | null
+  /** A finished proof waiting for its signature across a pause. */
+  awaiting: ProofResponse | null
+  startedAt: number
+}
+
 export interface ChainStats {
   /** Completed hops. The chain is contiguous by construction. */
   hops: number
@@ -199,6 +230,8 @@ export interface CyberspaceState {
   cursor: Position
   /** Destination of the in-flight proof; null when nothing is computing. */
   pendingTarget: Position | null
+  /** The route a commit beyond the ceiling is executing; null otherwise. */
+  plan: MovePlan | null
   /**
    * The plane the next commit lands in. Part of the lined-up action, like the
    * cursor: toggling it costs nothing until committed, and a commit with the
@@ -261,6 +294,12 @@ export interface CyberspaceState {
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
   cancel: () => void
+  /** Continue a paused route: ask for the pending signature again, or restart the step. */
+  resumePlan: () => void
+  /** Abandon a route. Steps already signed stay on the chain; the avatar stays where they left it. */
+  cancelPlan: () => void
+  /** Sign and append a finished proof (the second half of applyProofMessage). */
+  finishProof: (msg: ProofResponse) => Promise<void>
   adjustScale: (delta: number) => void
   rotate: (dir: RotateDirection) => void
   popView: () => void
@@ -654,6 +693,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       ...base,
       cursor: base.position,
       pendingTarget: null,
+      plan: null,
       proof: IDLE_PROOF,
       publishError: null,
       spectate: null,
@@ -673,6 +713,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   targets: loadTargets(),
   cursor: initial.position,
   pendingTarget: null,
+  plan: null,
   scaleExp: 0,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
@@ -766,29 +807,63 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       plane,
       ceiling,
     )
-    const mode: ProofMode = estimate.exceedsLimit ? 'sidestep' : 'hop'
-    const to = mode === 'sidestep' ? sidestepTarget(position, cursor, ceiling) : { ...cursor }
-    if (samePosition(position, to) && plane === headPlane) return
+    if (!estimate.exceedsLimit) {
+      const to = { ...cursor }
+      const id = ++requestId
+      set({
+        pendingTarget: to,
+        plan: null,
+        proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop' },
+      })
+      postProof({ id, mode: 'hop', from: position, to, plane, prevEventId, maxComputeHeight: ceiling })
+      return
+    }
 
-    const id = ++requestId
+    // A wall is in the way. A sidestep buys exactly 1 gibson through a wall
+    // (spec 6.3), so the route is hops to the leaf touching the wall, the
+    // sidestep, hops on, for every wall and every block boundary above the
+    // ceiling between here and the cursor. Each step is its own event; the
+    // route runs them in order and pauses when a signature is declined.
+    const step = nextStep(position, cursor, ceiling)
+    if (!step) return
     set({
-      pendingTarget: to,
-      proof: { ...IDLE_PROOF, status: 'computing', mode },
+      plan: {
+        target: { ...cursor },
+        ceiling,
+        summary: planSummary(position, cursor, ceiling),
+        done: 0,
+        step,
+        status: 'running',
+        message: null,
+        awaiting: null,
+        startedAt: Date.now(),
+      },
     })
+    startPlanStep()
+  },
 
-    postProof({
-      id,
-      mode,
-      from: position,
-      to,
-      plane,
-      prevEventId,
-      maxComputeHeight: ceiling,
-    })
+  resumePlan: () => {
+    const { plan } = get()
+    if (!plan || plan.status !== 'paused') return
+    if (plan.awaiting) {
+      const msg = plan.awaiting
+      set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      void get().finishProof(msg)
+      return
+    }
+    set({ plan: { ...plan, status: 'running', message: null } })
+    startPlanStep()
+  },
+
+  cancelPlan: () => {
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    set({ plan: null, pendingTarget: null, proof: IDLE_PROOF })
   },
 
   cancel: () => {
-    const { proof, position, headPlane } = get()
+    const { proof, position, headPlane, plan } = get()
+    if (plan) { get().cancelPlan(); return }
     if (proof.status === 'computing') {
       // A Cantor proof is one synchronous computation, so cancelling means
       // killing the worker thread. Position never moved; the chain is intact.
@@ -853,8 +928,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
 
     if (msg.type === 'error') {
+      const { plan } = get()
       set({
         pendingTarget: null,
+        plan: plan ? { ...plan, status: 'failed', message: msg.message, awaiting: null } : null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
@@ -865,6 +942,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
 
+    await get().finishProof(msg)
+  },
+
+  finishProof: async (msg) => {
+    if (msg.type !== 'done' || msg.id !== requestId) return
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
@@ -887,7 +969,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     let event: NostrEvent
     try {
-      event = await signEvent(
+      event = await get().signEvent(
         msg.mode === 'sidestep' && msg.sidestep
           ? sidestepTemplate({ ...link, ...msg.sidestep })
           : hopTemplate(link),
@@ -896,13 +978,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       // The signer refused, or a bunker dropped mid-handshake: the move does not
       // commit, and the avatar stays where the last committed hop left it.
       if (msg.id !== requestId) return
+      const reason = err instanceof Error ? err.message : String(err)
+      const { plan } = get()
+      if (plan) {
+        // The proof is done and kept; RESUME asks for the signature again.
+        set({
+          plan: { ...plan, status: 'paused', message: `Signature declined: ${reason}`, awaiting: msg },
+          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs },
+        })
+        return
+      }
       set({
         pendingTarget: null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: `Signing failed: ${err instanceof Error ? err.message : String(err)}`,
+          message: `Signing failed: ${reason}`,
         },
       })
       return
@@ -949,6 +1041,18 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
 
     saveChain(nextEvents, nextPublished, stats)
+
+    // A route continues from where this step landed, or ends here.
+    const { plan } = get()
+    if (plan && plan.status === 'running') {
+      const next = nextStep(newPosition, plan.target, plan.ceiling)
+      if (!next) {
+        set({ plan: null })
+      } else {
+        set({ plan: { ...plan, done: plan.done + 1, step: next, awaiting: null } })
+        startPlanStep()
+      }
+    }
   },
 
   setLive: (live) => {
@@ -963,6 +1067,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       cancelProof()
       requestId++
     }
+    if (get().plan) set({ plan: null })
     const { events } = get()
     const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
     set({
@@ -1420,6 +1525,30 @@ export { SPAWN }
 /** Positions are equal when all three axes match. */
 export function samePosition(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
+/**
+ * Compute the route's current step: its proof request goes to the worker like
+ * any single commit, and applyProofMessage carries it through signing.
+ */
+function startPlanStep(): void {
+  const s = useCyberspace.getState()
+  const plan = s.plan
+  if (!plan || plan.status !== 'running') return
+  const id = ++requestId
+  useCyberspace.setState({
+    pendingTarget: plan.step.to,
+    proof: { ...IDLE_PROOF, status: 'computing', mode: plan.step.kind },
+  })
+  postProof({
+    id,
+    mode: plan.step.kind,
+    from: plan.step.from,
+    to: plan.step.to,
+    plane: s.plane,
+    prevEventId: s.prevEventId,
+    maxComputeHeight: plan.ceiling,
+  })
 }
 
 /**

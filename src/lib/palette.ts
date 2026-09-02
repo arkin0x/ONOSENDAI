@@ -53,26 +53,20 @@ export const EARTH = '#2f81f7'
  */
 export const MERIDIAN = '#4bc9a7'
 /**
- * The oceans: the planet's body, filled rather than left as empty space.
+ * The shoreline.
  *
- * Deep and desaturated on purpose. It has to sit far enough under EARTH's
- * blue that the graticule and the shorelines drawn on top of it stay legible
- * as lines, and far enough under the starfield that the planet reads as a
- * shape rather than as a lit surface. This is EARTH's own hue at a sixth of
- * its lightness, so the family is obvious and the hierarchy is not in
- * question.
- */
-export const OCEAN = '#0a1624'
-/**
- * The land: MERIDIAN's green walked twenty degrees toward lime.
+ * Green because a coastline is the edge of land, and green is what land is,
+ * where the graticule stays EARTH's blue because it is a coordinate ruling
+ * rather than a thing that exists. MERIDIAN's teal walked twenty degrees
+ * toward lime (hue 164 to 144): near enough to read as the same family as the
+ * equator and prime meridian, far enough that a continent's outline is never
+ * mistaken for one of them.
  *
- * Close enough to read as the same green family as the reference lines, far
- * enough that a continent is never mistaken for the equator, and half their
- * lightness so a continent never competes with a line for attention. Drawn at
- * low opacity over OCEAN on top of that, so what reaches the eye is a tint on
- * the water rather than a second surface.
+ * This was briefly a filled tint under the outline. The fill is gone and the
+ * colour survived it, which is the right way round: the line was always the
+ * content and the fill was always the decoration.
  */
-export const LAND = '#206a3d'
+export const COAST = '#4bc97d'
 /**
  * The black sun: the one absolute bearing in cyberspace (§11.2).
  *

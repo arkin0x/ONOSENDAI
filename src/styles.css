@@ -3786,3 +3786,35 @@ kbd {
   cursor: pointer;
   text-align: left;
 }
+
+/* Explanation: a panel's prose behind a pill, opened into a well */
+.explain {
+  margin-top: 8px;
+}
+.explain__pill {
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.25);
+  cursor: pointer;
+}
+.explain__pill:hover {
+  color: var(--fg);
+  border-color: rgba(200, 245, 255, 0.5);
+}
+.explain__pill.is-on {
+  color: var(--accent);
+  border-color: rgba(0, 229, 255, 0.5);
+  background: rgba(0, 229, 255, 0.06);
+}
+.explain__well {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.14);
+}

@@ -17,6 +17,7 @@ import { ProfileBadge } from './ProfileBadge'
 import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { Explanation } from './Explanation'
 
 export function AvatarsPanel(): JSX.Element {
   const { avatars, status } = useRecentAvatars()
@@ -92,11 +93,11 @@ export function AvatarsPanel(): JSX.Element {
         )}
       </ul>
 
-      <p className="legend__note">
+      <Explanation>
         Newest kind:3333 action per pubkey on {CYBERSPACE_RELAY.replace('wss://', '')}.
         Spectating anchors the scene on their chain head and gives the chain
         explorer their history; the controls stand down until you end it.
-      </p>
+      </Explanation>
     </section>
   )
 }

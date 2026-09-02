@@ -19,6 +19,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
 import { ProfileBadge } from './ProfileBadge'
+import { Explanation } from './Explanation'
 
 export function LootPanel(): JSX.Element {
   const { items, status } = useLoot()
@@ -65,11 +66,11 @@ export function LootPanel(): JSX.Element {
         )}
       </ul>
 
-      <p className="legend__note">
+      <Explanation>
         Every kind:33330 bag on {relayName}. The size is the region each bag is
         encrypted to, not its distance from you: where that region is stays hidden
         until its hider adds a hint. Tap a bag for its record.
-      </p>
+      </Explanation>
     </section>
   )
 }

@@ -36,6 +36,7 @@ function formatDuration(ms: number): string {
 }
 import { useCyberspace } from '../store/useCyberspace'
 import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { Explanation } from './Explanation'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -310,12 +311,12 @@ export function HyperspacePanel(): JSX.Element {
                 </>
               )}
             </dl>
-            <p className="legend__note">
+            <Explanation>
               STATION is where boarding sets you down: your nearest block as
               of the synced tip, ties to the lowest height. The ride runs from
               it to the destination; all of the per-block work runs locally
               and resumes if interrupted.
-            </p>
+            </Explanation>
           </>
         )}
       </div>
@@ -370,7 +371,7 @@ export function HyperspacePanel(): JSX.Element {
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
 
-      <p className="legend__note">
+      <Explanation>
         Your STATION is your nearest block, ties to the lowest height:
         distance is the size of the smallest aligned cube holding you both,
         so far from the line several blocks are equally near and every
@@ -380,7 +381,7 @@ export function HyperspacePanel(): JSX.Element {
         for every block passed and sets you down exactly at the block.
         Leaving is an ordinary hop, so the last mile from any block is
         normal movement.
-      </p>
+      </Explanation>
     </section>
   )
 }

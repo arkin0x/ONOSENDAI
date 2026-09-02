@@ -4,6 +4,7 @@
 
 import { boundaryColor, terrainColor } from '../lib/palette'
 import { useCyberspace } from '../store/useCyberspace'
+import { Explanation } from './Explanation'
 
 const TERRAIN_SAMPLES = [0, 4, 6, 8, 10, 12, 14, 16]
 const HEIGHT_SAMPLES = [5, 20, 40, 60, 80]
@@ -53,14 +54,14 @@ export function Legend(): JSX.Element {
         </span>
       </div>
 
-      <p className="legend__note">
+      <Explanation>
         The subtree lattice takes its colour from the height of its own walls, so
         the grid climbs this ramp as you zoom out. Committing flashes the region
         the proof covered, striking white and settling into the same ramp at the
         height you paid. Height is the power-of-two boundary you cross, not how
         far you travel. The cyan box is the move you are lining up. Current
         scale: {scaleExp}.
-      </p>
+      </Explanation>
     </section>
   )
 }

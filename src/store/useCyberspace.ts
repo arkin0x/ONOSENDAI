@@ -244,6 +244,8 @@ export interface CyberspaceState {
    * the panel it is reached from is hidden while spectating.
    */
   focus: { position: Position; plane: Plane; label: string } | null
+  /** The zoom before the standing focus began, restored by clearFocus. */
+  focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
   targets: Record<string, TrackedTarget>
   /**
@@ -666,6 +668,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   ...initial,
   spectate: null,
   focus: null,
+  focusReturnScale: null,
   transit: null,
   targets: loadTargets(),
   cursor: initial.position,
@@ -1042,6 +1045,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   focusOn: (position, plane, label, scaleExp) => {
     const next: Partial<CyberspaceState> = {
       focus: { position: { ...position }, plane, label },
+      // Remember the zoom once, at the first focus; later focus changes keep it.
+      focusReturnScale: get().focus === null ? get().scaleExp : get().focusReturnScale,
       spectate: null,
       exploreIndex: null,
       anchor: { ...position },
@@ -1052,8 +1057,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   clearFocus: () => {
-    const { position, headPlane } = get()
-    set({ focus: null, anchor: position, anchorPlane: headPlane })
+    const { position, headPlane, focusReturnScale, scaleExp } = get()
+    set({
+      focus: null,
+      anchor: position,
+      anchorPlane: headPlane,
+      // Back at the zoom the user left, not whatever the viewed thing chose.
+      scaleExp: focusReturnScale ?? scaleExp,
+      focusReturnScale: null,
+    })
   },
 
   boardHyperspace: async () => {

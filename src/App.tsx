@@ -8,6 +8,7 @@ import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
+import { FocusBar } from './hud/FocusBar'
 import { LootDetail } from './hud/LootDetail'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
@@ -109,6 +110,7 @@ export default function App(): JSX.Element {
               last. */}
           <LineScrubber />
           <HyperspaceBar />
+          <FocusBar />
           <ChainExplorer />
           <BitReadout />
         </div>

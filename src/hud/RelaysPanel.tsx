@@ -73,8 +73,8 @@ export function RelaysPanel(): JSX.Element {
       {error && <p className="notice">Not a valid ws:// or wss:// URL.</p>}
 
       <Explanation>
-        Everything the client does fans out across these. The default is shared
-        by everyone and stays; yours are added on top and kept on this device.
+        Your actions are published to each relay, and cyberspace data is pulled
+        from each relay.
       </Explanation>
     </section>
   )

@@ -1,14 +1,14 @@
 /**
  * Cursor.tsx - the uncommitted destination.
  *
- * WASD moves this, not you. The dashed tether from the avatar is the action
- * you are lining up. When the hop fits the Cantor ceiling it is one amber
- * leg straight to the cursor. When a wall blocks it, the tether splits: a
- * purple leg to the sidestep landing (1 gibson past the wall, where Space
- * actually takes you) and a second leg for the remaining journey, amber if a
- * hop can finish it, red if another wall still stands. While a proof is
- * computing the display locks to the committed target instead of the live
- * cursor.
+ * WASD moves this, not you. The tether from the avatar is the route Space
+ * would run, drawn from the same planner the store executes (lib/movePlan.ts)
+ * so what you see is what you get: amber dashed legs are hops, purple legs
+ * are sidesteps of exactly 1 gibson through a wall, and a purple mark sits on
+ * every sidestep landing. When the hop fits the ceiling the route is one
+ * amber leg straight to the cursor. A route too long to draw in full ends in
+ * a red leg to the cursor. While a proof is computing the display locks to
+ * the committed target instead of the live cursor.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
@@ -20,23 +20,81 @@ import {
   EdgesGeometry,
   Float32BufferAttribute,
   Line,
+  LineBasicMaterial,
   LineDashedMaterial,
   LineSegments,
   BoxGeometry,
 } from 'three'
-import { estimateHopCost } from 'cyberspace-core'
+import { useCalibration } from '../lib/calibration'
+import { nextStep, type PlanStep } from '../lib/movePlan'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
 import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   MAX_COMPUTE_HEIGHT,
   alignedOrigin,
   samePosition,
-  sidestepTarget,
   useCyberspace,
 } from '../store/useCyberspace'
 
+/** Steps drawn in full; past this the tether ends in one red leg. */
+const DRAWN_STEPS = 48
+
 interface Props {
   axes: ViewAxes
+}
+
+type Pt = readonly [number, number, number]
+
+function makeDashedSegments(geometry: BufferGeometry, color: number | string): LineSegments {
+  const legs = new LineSegments(
+    geometry,
+    new LineDashedMaterial({
+      color,
+      dashSize: 0.32,
+      gapSize: 0.2,
+      transparent: true,
+      opacity: 0.9,
+      toneMapped: false,
+      depthTest: false,
+    }),
+  )
+  legs.frustumCulled = false
+  legs.renderOrder = 10
+  return legs
+}
+
+function makeSolidSegments(geometry: BufferGeometry, color: number | string): LineSegments {
+  const legs = new LineSegments(
+    geometry,
+    new LineBasicMaterial({ color, transparent: true, opacity: 0.95, toneMapped: false, depthTest: false }),
+  )
+  legs.frustumCulled = false
+  legs.renderOrder = 10
+  return legs
+}
+
+/** Fill a segments geometry from (from, to) pairs; hidden when there are none. */
+function setSegments(legs: LineSegments, geometry: BufferGeometry, pairs: ReadonlyArray<readonly [Pt, Pt]>): void {
+  const arr = new Float32Array(pairs.length * 6)
+  pairs.forEach(([a, b], i) => {
+    arr[i * 6] = a[0]; arr[i * 6 + 1] = a[1]; arr[i * 6 + 2] = a[2]
+    arr[i * 6 + 3] = b[0]; arr[i * 6 + 4] = b[1]; arr[i * 6 + 5] = b[2]
+  })
+  geometry.setAttribute('position', new Float32BufferAttribute(arr, 3))
+  geometry.computeBoundingSphere()
+  legs.computeLineDistances()
+  legs.visible = pairs.length > 0
+}
+
+/** Move the final vertex of a segments geometry (the leg ending on the cursor). */
+function setLastVertex(legs: LineSegments, geometry: BufferGeometry, b: Pt): void {
+  const attr = geometry.getAttribute('position') as Float32BufferAttribute | undefined
+  if (!attr || attr.count === 0) return
+  const arr = attr.array as Float32Array
+  const i = (attr.count - 1) * 3
+  arr[i] = b[0]; arr[i + 1] = b[1]; arr[i + 2] = b[2]
+  attr.needsUpdate = true
+  legs.computeLineDistances()
 }
 
 function makeDashedLine(geometry: BufferGeometry): Line {
@@ -83,7 +141,6 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const cursor = useCyberspace((s) => s.cursor)
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const plane = useCyberspace((s) => s.plane)
   const anchor = useCyberspace((s) => s.anchor)
   const atHead = useCyberspace((s) => s.atHead())
 
@@ -92,27 +149,28 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const target = atHead ? (pendingTarget ?? cursor) : anchor
   const active = atHead && !samePosition(position, target)
 
-  // The action being lined up: null legs when inactive; a landing splits the
-  // journey when the direct hop is beyond the Cantor ceiling.
-  const plan = useMemo(() => {
+  // The ceiling a commit would use right now, the same number the store
+  // routes with: the hard cap lowered to what calibration measured.
+  const hopCeil = useCalibration((s) => s.hopHeight)
+  const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+
+  // The route Space would run, from the planner the store executes. Drawn
+  // step by step up to DRAWN_STEPS; a longer route is marked capped and its
+  // remainder becomes one red leg.
+  const route = useMemo(() => {
     if (!active) return null
-    const direct = estimateHopCost(
-      position.x, position.y, position.z,
-      target.x, target.y, target.z,
-      plane,
-      MAX_COMPUTE_HEIGHT,
-    )
-    if (!direct.exceedsLimit) return { landing: null, remainderBlocked: false }
-    const landing = sidestepTarget(position, target)
-    if (samePosition(landing, target)) return { landing: null, remainderBlocked: false }
-    const remainder = estimateHopCost(
-      landing.x, landing.y, landing.z,
-      target.x, target.y, target.z,
-      plane,
-      MAX_COMPUTE_HEIGHT,
-    )
-    return { landing, remainderBlocked: remainder.exceedsLimit }
-  }, [active, position, target, plane])
+    const steps: PlanStep[] = []
+    let cur = position
+    let capped = false
+    for (;;) {
+      const step = nextStep(cur, target, ceiling)
+      if (!step) break
+      if (steps.length >= DRAWN_STEPS) { capped = true; break }
+      steps.push(step)
+      cur = step.to
+    }
+    return { steps, capped, last: cur }
+  }, [active, position, target, ceiling])
 
   // Screen-space endpoints, at cell CENTRES.
   //
@@ -126,38 +184,42 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
     const b = centre(target)
+    const steps = route?.steps ?? []
     return {
       a: centre(position),
       b,
-      landing: plan?.landing ? centre(plan.landing) : null,
+      hops: steps.filter((st) => st.kind === 'hop').map((st) => [centre(st.from), centre(st.to)] as const),
+      sidesteps: steps.filter((st) => st.kind === 'sidestep').map((st) => [centre(st.from), centre(st.to)] as const),
+      landings: steps.filter((st) => st.kind === 'sidestep').map((st) => centre(st.to)),
+      rest: route?.capped ? ([centre(route.last), b] as const) : null,
+      lastIsHop: steps.length > 0 && steps[steps.length - 1].kind === 'hop' && !route?.capped,
       targetCell: b,
     }
-  }, [position, target, plan, scaleExp, axes, anchor])
+  }, [position, target, route, scaleExp, axes, anchor])
 
-  const leg1Geometry = useMemo(() => new BufferGeometry(), [])
-  const leg2Geometry = useMemo(() => new BufferGeometry(), [])
-  const leg1 = useMemo(() => makeDashedLine(leg1Geometry), [leg1Geometry])
-  const leg2 = useMemo(() => makeDashedLine(leg2Geometry), [leg2Geometry])
+  const hopGeometry = useMemo(() => new BufferGeometry(), [])
+  const sideGeometry = useMemo(() => new BufferGeometry(), [])
+  const restGeometry = useMemo(() => new BufferGeometry(), [])
+  const hopLegs = useMemo(() => makeDashedSegments(hopGeometry, WARN), [hopGeometry])
+  const sideLegs = useMemo(() => makeSolidSegments(sideGeometry, SIDESTEP), [sideGeometry])
+  const restLeg = useMemo(() => makeDashedLine(restGeometry), [restGeometry])
 
   // A cube, not a square: the view orbits now, so the target cell has to read
   // as a volume from any angle rather than as a plane seen face-on.
   const cellOutline = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
-  const targetColor = plan?.landing
-    ? plan.remainderBlocked ? DANGER : WARN
-    : WARN
+  const targetColor = route?.capped ? DANGER : WARN
 
   useLayoutEffect(() => {
-    const { a, b, landing } = points
-    if (landing) {
-      setSegment(leg1, leg1Geometry, a, landing, SIDESTEP)
-      setSegment(leg2, leg2Geometry, landing, b, targetColor)
-      leg2.visible = true
+    setSegments(hopLegs, hopGeometry, points.hops)
+    setSegments(sideLegs, sideGeometry, points.sidesteps)
+    if (points.rest) {
+      setSegment(restLeg, restGeometry, points.rest[0], points.rest[1], DANGER)
+      restLeg.visible = true
     } else {
-      setSegment(leg1, leg1Geometry, a, b, targetColor)
-      leg2.visible = false
+      restLeg.visible = false
     }
-  }, [points, targetColor, leg1, leg2, leg1Geometry, leg2Geometry])
+  }, [points, hopLegs, sideLegs, restLeg, hopGeometry, sideGeometry, restGeometry])
 
   // The cursor's position is driven per frame, straight from the store, rather
   // than waiting for a React commit.
@@ -175,7 +237,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const live = s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor
     const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
-    setSegmentEnd(leg2.visible ? leg2 : leg1, leg2.visible ? leg2Geometry : leg1Geometry, b)
+    // The leg that ends on the cursor follows it within the frame.
+    if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
+    else if (points.lastIsHop) setLastVertex(hopLegs, hopGeometry, b)
   })
 
   return (
@@ -205,16 +269,17 @@ export function Cursor({ axes }: Props): JSX.Element | null {
 
       {active && (
         <>
-          <primitive object={leg1} />
-          <primitive object={leg2} />
+          <primitive object={hopLegs} />
+          <primitive object={sideLegs} />
+          <primitive object={restLeg} />
 
-          {/* Sidestep landing: where Space actually takes you */}
-          {points.landing && (
-            <mesh position={points.landing} renderOrder={10}>
+          {/* Every sidestep landing: 1 gibson through a wall */}
+          {points.landings.map((p, i) => (
+            <mesh key={i} position={p} renderOrder={10}>
               <circleGeometry args={[0.14, 4]} />
               <meshBasicMaterial color={SIDESTEP} toneMapped={false} transparent depthTest={false} />
             </mesh>
-          )}
+          ))}
 
           {/* The cell the lined-up action targets */}
           <lineSegments ref={outline} geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>

@@ -10,6 +10,7 @@
  * Cloud panel brings it back); CANCEL JOB is the way out.
  */
 
+import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
@@ -37,6 +38,7 @@ export function CloudApproval(): JSX.Element | null {
       'This client verifies the result before signing it into your chain.'
   return (
     <ConfirmModal
+      banner={<HosakaBanner />}
       title={q.route ? 'Cloud route' : `Cloud ${q.action}`}
       body={body}
       confirmLabel={`PAY ${sats} SATS`}

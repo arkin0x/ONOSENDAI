@@ -12,6 +12,7 @@ import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
 import { CloudApproval, InvoiceModal } from './hud/InvoiceModal'
+import { HosakaOffer } from './hud/HosakaOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
@@ -142,6 +143,7 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <SecretModal />
       <LootDetail />
+      <HosakaOffer hidden={crowded || secretOpen} />
       <CloudApproval />
       <InvoiceModal />
       <button

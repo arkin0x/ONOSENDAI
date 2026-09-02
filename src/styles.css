@@ -4092,3 +4092,63 @@ kbd {
   cursor: pointer;
 }
 .route__button--resume { border-color: #e2b93b; color: #e2b93b; }
+
+/* ---------- HOSAKA offer: the card beside the scene when a move is beyond this machine ---------- */
+.offer {
+  position: fixed;
+  top: 72px; /* under the top chips, above the touch pad */
+  right: 356px; /* clear of the HUD's right column (300px + padding) */
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 240px); /* leaves the touch pad's corner free */
+  overflow-y: auto;
+  z-index: 50;
+  background: var(--panel);
+  border: 1px solid var(--cloud, #ffd27d);
+  border-radius: 3px;
+  box-shadow: 0 0 24px rgba(255, 210, 125, 0.18);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  opacity: 0;
+  animation: offer-in 420ms ease-out forwards;
+}
+@keyframes offer-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+@media (max-width: 1100px) {
+  .offer { right: 16px; max-height: calc(100vh - 200px); }
+}
+.hosaka-banner {
+  display: block;
+  width: 100%;
+  aspect-ratio: 8 / 5;
+  object-fit: cover;
+  background: #05070d;
+}
+.offer__body { padding: 10px 12px 12px; display: grid; gap: 8px; }
+.offer__title { margin: 0; font-size: 0.95rem; letter-spacing: 0.18em; color: var(--cloud, #ffd27d); }
+.offer__lead { margin: 0; font-size: 0.8rem; line-height: 1.45; }
+.offer__reach { margin: 0; display: grid; gap: 2px; font-size: 0.72rem; }
+.offer__reach div { display: flex; justify-content: space-between; gap: 8px; }
+.offer__reach dt { opacity: 0.7; }
+.offer__reach dd { margin: 0; text-align: right; }
+.offer__controls { display: grid; gap: 6px; }
+.offer__modes { display: flex; gap: 4px; }
+.offer__mode {
+  flex: 1; padding: 0.3rem 0; background: transparent; color: inherit;
+  border: 1px solid var(--border); font: inherit; font-size: 0.7rem; letter-spacing: 0.08em; cursor: pointer;
+}
+.offer__mode--on { border-color: var(--cloud, #ffd27d); color: var(--cloud, #ffd27d); }
+.offer__budget { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; }
+.offer__budget input { width: 5em; background: transparent; color: inherit; border: 1px solid var(--border); font: inherit; padding: 0.2rem 0.3rem; }
+.offer__row { display: flex; gap: 6px; }
+.offer__button {
+  flex: 1; padding: 0.45rem 0.5rem; background: transparent; color: inherit;
+  border: 1px solid currentColor; font: inherit; font-size: 0.74rem; letter-spacing: 0.1em; cursor: pointer;
+}
+.offer__button--go { border-color: var(--cloud, #ffd27d); color: var(--cloud, #ffd27d); background: rgba(255, 210, 125, 0.12); }
+.offer__button--go:disabled { opacity: 0.45; cursor: default; }
+.offer__button--later { opacity: 0.8; }
+.offer__note { margin: 0; font-size: 0.66rem; opacity: 0.7; line-height: 1.4; }
+.modal__card .hosaka-banner { margin: -16px -16px 12px; width: calc(100% + 32px); border-radius: 3px 3px 0 0; }

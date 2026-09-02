@@ -4,7 +4,11 @@
  * the whole point here (model vs instance), can be laid out and read.
  */
 
+import type { ReactNode } from 'react'
+
 interface Props {
+  /** Something to show above the title, such as the HOSAKA banner. */
+  banner?: ReactNode
   title: string
   body: string
   confirmLabel: string
@@ -15,10 +19,11 @@ interface Props {
   onCancel: () => void
 }
 
-export function ConfirmModal({ title, body, confirmLabel, danger = true, cardClassName, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, confirmLabel, danger = true, cardClassName, onConfirm, onCancel }: Props): JSX.Element {
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onCancel}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
+        {banner}
         <h2 className="modal__title">{title}</h2>
         <p className="modal__body">{body}</p>
         <div className="modal__row">

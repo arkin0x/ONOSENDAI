@@ -32,7 +32,6 @@ export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
   const inspecting = useShards((s) => s.inspecting)
   const scanning = useShards((s) => s.scanning)
-  const discovered = useShards((s) => s.discovered)
   const [deleteModel, setDeleteModel] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')

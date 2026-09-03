@@ -112,6 +112,9 @@ import {
   loadCloudDeposit,
   saveCloudDeposit,
   clearCloudDeposit,
+  loadBalance,
+  saveBalance,
+  type KnownBalance,
 } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
@@ -272,6 +275,11 @@ export interface CloudState {
   /** The last cloud proof that landed, for the panel. */
   last: { jobId: string; action: HosakaAction; costMsats: number; lookupId: string | null; at: number } | null
   /** CHECK PAYMENT was pressed and the node has not answered yet. */
+  /** HOSAKA's prepaid balance for this identity as last reported, from a
+   * balance check or from any response that carried one; null until known. */
+  balance: KnownBalance | null
+  balanceChecking: boolean
+  balanceError: string | null
   checking: boolean
   /** The node's last word on the invoice, so a check shows something even when nothing changed. */
   lastCheck: { at: number; status: string } | null
@@ -290,6 +298,9 @@ const IDLE_CLOUD: CloudState = {
   last: null,
   checking: false,
   lastCheck: null,
+  balance: null,
+  balanceChecking: false,
+  balanceError: null,
 }
 
 /**
@@ -497,6 +508,12 @@ export interface CyberspaceState {
    * money is spent and the result can still be claimed while the head holds.
    */
   cancelCloud: () => void
+  /** Remember a balance HOSAKA just reported for this identity. */
+  noteBalance: (msats: number) => void
+  /** Load the remembered balance for this identity, if the slice has none yet. */
+  ensureBalance: () => void
+  /** Ask HOSAKA for the balance (a signed request) and remember the answer. */
+  refreshBalance: () => Promise<void>
   /**
    * Pick up the persisted job (on load, after an identity switch, or from the
    * panel) when its chain head is still ours; drop it when the head moved or
@@ -988,6 +1005,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     try {
       set({ cloud: { ...get().cloud, status: 'funding', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
       const bal = await client.balance(abort.signal)
+      get().noteBalance(bal.balance_msats)
       if (id !== requestId) return
       // Whole sats: a node refuses an invoice for a fraction of one.
       const shortfall = Math.ceil(Math.max(0, totalMsats - bal.balance_msats) / 1000) * 1000
@@ -1005,6 +1023,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
           waker,
           onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
         })
+        if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
         if (id !== requestId) return
         if (settled.status !== 'settled') {
           clearCloudDeposit()
@@ -1057,6 +1076,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       job = step.kind === 'hop'
         ? await client.submitHop(v1, v2, prevEventId)
         : await client.submitSidestep(v1, v2, prevEventId)
+      const after = job.new_balance_msats ?? job.current_balance_msats
+      if (typeof after === 'number') get().noteBalance(after)
     } catch (err) {
       if (id !== requestId) return
       routeFail(describeCloudError(err))
@@ -1197,6 +1218,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({
       cloud: {
         ...IDLE_CLOUD,
+        balance: get().cloud.balance,
         limits: get().cloud.limits,
         // A route in progress keeps its funded status visible.
         status: get().plan ? 'paid' : 'idle',
@@ -1240,7 +1262,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       spectate: null,
       focus: null,
       transit: null,
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: loadBalance(signer.pubkey) },
     })
     if (local) saveChain(base.events, base.published, base.chain)
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
@@ -1682,7 +1704,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       proof: IDLE_PROOF,
       publishError: null,
       spentMsats: loadSpent(fresh.genesisId),
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
     })
     saveChain(fresh.events, fresh.published, fresh.chain)
   },
@@ -2023,6 +2045,31 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     void fundRoute(cloud.quote.costMsats, requestId)
   },
 
+  noteBalance: (msats) => {
+    set({ cloud: { ...get().cloud, balance: saveBalance(get().identity.pubkey, msats), balanceError: null } })
+  },
+
+  ensureBalance: () => {
+    const { cloud, identity } = get()
+    if (cloud.balance !== null) return
+    const known = loadBalance(identity.pubkey)
+    if (known) set({ cloud: { ...cloud, balance: known } })
+  },
+
+  refreshBalance: async () => {
+    const { cloud, cloudPrefs } = get()
+    if (cloud.balanceChecking) return
+    set({ cloud: { ...cloud, balanceChecking: true, balanceError: null } })
+    try {
+      const bal = await cloudClient(cloudPrefs.apiUrl).balance()
+      get().noteBalance(bal.balance_msats)
+    } catch (err) {
+      set({ cloud: { ...get().cloud, balanceError: describeCloudError(err) } })
+    } finally {
+      set({ cloud: { ...get().cloud, balanceChecking: false } })
+    }
+  },
+
   declineCloud: () => {
     if (get().cloud.status !== 'confirm') return
     requestId++
@@ -2045,6 +2092,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       cloud: {
         ...IDLE_CLOUD,
         limits: cloud.limits,
+        balance: cloud.balance,
         last: cloud.last,
         job: keep ? cloud.job : null,
         message: keep
@@ -2068,6 +2116,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       } else {
         try {
           const claimed = await cloudClient(cloudPrefs.apiUrl).claimDeposit(dep.depositId)
+          if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats)
           if (claimed.status === 'settled') {
             clearCloudDeposit()
             set({ cloud: { ...get().cloud, message: `A ${satsOf(claimed.settled_msats ?? dep.amountMsats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.` } })

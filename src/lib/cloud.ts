@@ -249,6 +249,12 @@ export function satsOf(msats: number): number {
   return Math.ceil(msats / 1000)
 }
 
+/** A balance is what you have, so it rounds DOWN: 4200 msats is "4 sats", never 5. */
+export function balanceLabel(msats: number): string {
+  const n = Math.floor(Math.max(0, msats) / 1000)
+  return `${n} sat${n === 1 ? '' : 's'}`
+}
+
 /** "1 sat", "15 sats": the unit agrees with the number everywhere it is shown. */
 export function satsLabel(msats: number): string {
   const n = satsOf(msats)
@@ -550,4 +556,51 @@ export function depositSettled(prev: CloudStatus, next: CloudStatus): boolean {
  * or the result is being verified here. Drives the pulsing mark. */
 export function jobInProgress(status: CloudStatus): boolean {
   return status === 'paid' || status === 'computing' || status === 'verifying'
+}
+
+// ---------------------------------------------------------------------------
+// The prepaid balance, remembered per identity
+// ---------------------------------------------------------------------------
+
+const BALANCE_KEY = 'onosendai:hosakaBalance'
+
+/** The balance HOSAKA last reported for an identity, and when. */
+export interface KnownBalance {
+  msats: number
+  at: number
+}
+
+function balanceTable(): Record<string, KnownBalance> {
+  try {
+    const raw = localStorage.getItem(BALANCE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, KnownBalance>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function loadBalance(pubkey: string): KnownBalance | null {
+  const v = balanceTable()[pubkey]
+  return v && typeof v.msats === 'number' && Number.isFinite(v.msats) && typeof v.at === 'number' ? v : null
+}
+
+/** Remember a balance HOSAKA just reported. Returns the record kept. */
+export function saveBalance(pubkey: string, msats: number, at = Date.now()): KnownBalance {
+  const table = balanceTable()
+  const rec = { msats: Math.max(0, Math.round(msats)), at }
+  table[pubkey] = rec
+  try { localStorage.setItem(BALANCE_KEY, JSON.stringify(table)) } catch { /* storage unavailable: the figure is still in memory */ }
+  return rec
+}
+
+/** How long ago, in the coarsest unit that is not zero: "just now", "4 min ago", "2 h ago", "3 d ago". */
+export function sinceLabel(at: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - at) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min ago`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h} h ago`
+  return `${Math.floor(h / 24)} d ago`
 }

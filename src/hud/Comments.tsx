@@ -3,8 +3,10 @@
  *
  * NIP-22 comments, threaded: each answers the item or another comment, and
  * the person answered is `p`-tagged, so their client tells them. The list
- * and a composer; REPLY opens a composer under a comment. The item is
- * hidden, the comments are not, and the composer says so.
+ * and a composer; REPLY opens a composer under a comment. The words are
+ * sealed to the place like the item (FF-1 derived-key events under the bag's
+ * region key): here they read as words, elsewhere as an invitation to come
+ * and find them. A comment this client could not open shows the placeholder.
  */
 
 import { useState } from 'react'
@@ -60,7 +62,7 @@ function CommentRow({ c, me, depth, posting, onPost }: { c: Comment; me: string;
         <Author pubkey={c.pubkey} mine={c.pubkey === me} />
         <span className="comment__when" title={formatStamp(c.createdAt)}>{formatAgo(c.createdAt)}</span>
       </div>
-      <p className="comment__text">{c.text}</p>
+      <p className={`comment__text ${c.sealed ? 'comment__text--sealed' : ''}`}>{c.text}</p>
       {!replying && <button className="comment__reply" onClick={() => setReplying(true)}>REPLY</button>}
       {replying && <Composer placeholder="Your reply" busy={posting} onPost={(t) => onPost(t, commentParent(c))} onCancel={() => setReplying(false)} />}
       {c.replies.length > 0 && (
@@ -92,7 +94,8 @@ export function Comments({ subject }: { subject: CommentSubject }): JSX.Element 
       <Composer placeholder={subject.author === me ? 'Add a note under your own' : 'Say something to the author'} busy={posting} onPost={(t) => post(t)} />
       {error && <p className="comments__error">{error}</p>}
       <p className="comments__note">
-        Comments are public, unlike what they answer. The author is tagged and gets told by their own client.
+        Comments are sealed to this place, like what they answer: other clients show only that a comment is
+        hiding somewhere in cyberspace. The author is tagged and gets told by their own client.
         {signerKind !== 'local' ? ' Your signer will be asked to sign it.' : ''}
       </p>
     </section>

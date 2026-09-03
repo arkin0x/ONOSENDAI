@@ -95,7 +95,7 @@ export function SecretModal(): JSX.Element | null {
         </dl>
 
         {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type }} />
+          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type, at: item.at, height: item.height }} />
         )}
 
         <div className="secret__actions">

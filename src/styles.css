@@ -4465,6 +4465,8 @@ kbd {
 .comment__name { font-size: 11px; letter-spacing: 0.05em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .comment__when { font-size: 9px; letter-spacing: 0.1em; color: var(--dim); white-space: nowrap; }
 .comment__text { margin: 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A comment this client could not open: the placeholder, dimmed. */
+.comment__text--sealed { color: var(--dim); font-style: italic; }
 .comment__reply {
   justify-self: start;
   padding: 0;

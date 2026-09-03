@@ -142,7 +142,7 @@ function saveDeleted(deleted: Record<string, true>): void {
   try { localStorage.setItem(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
 }
 
-function positionOf(d: { at: { x: string; y: string; z: string } }): Position {
+export function positionOf(d: { at: { x: string; y: string; z: string } }): Position {
   return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
 }
 

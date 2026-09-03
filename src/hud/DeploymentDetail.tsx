@@ -18,7 +18,7 @@ import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { positionOf, useShards } from '../store/useShards'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -89,7 +89,7 @@ export function DeploymentDetail(): JSX.Element | null {
         </button>
       )}
 
-      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type }} />
+      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, at: positionOf(dep), height: dep.height }} />
 
       <button className="detail__delete" onClick={() => setConfirm(true)}>DELETE FROM CYBERSPACE</button>
 

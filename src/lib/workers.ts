@@ -12,7 +12,7 @@ import type { ProofMode, ProofRequest, ProofResponse } from '../workers/proof.wo
 let proofWorker: Worker | null = null
 let proofHandler: ((msg: ProofResponse) => void) | null = null
 
-const TERRAIN_WORKER_COUNT = Math.max(1, (navigator.hardwareConcurrency || 4) - 1)
+const TERRAIN_WORKER_COUNT = Math.max(1, (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4) - 1)
 const terrainWorkers: Worker[] = []
 
 /**
@@ -44,7 +44,7 @@ function getProofWorker(): Worker {
 
 export function getTerrainWorkers(): Worker[] {
   if (terrainWorkers.length === 0) {
-    tlog(`[workers] pool: ${TERRAIN_WORKER_COUNT} workers (hardwareConcurrency=${navigator.hardwareConcurrency})`)
+    tlog(`[workers] pool: ${TERRAIN_WORKER_COUNT} workers (hardwareConcurrency=${typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 'unknown'})`)
     for (let i = 0; i < TERRAIN_WORKER_COUNT; i++) {
       const worker = new Worker(new URL('../workers/terrain.worker.ts', import.meta.url), {
         type: 'module',

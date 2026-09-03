@@ -58,7 +58,9 @@ function b64decode(s: string): Uint8Array {
 
 const subtle = (): SubtleCrypto => {
   const c = (globalThis as unknown as { crypto?: Crypto }).crypto
-  if (!c?.subtle) throw new Error('WebCrypto unavailable')
+  if (!c?.subtle) {
+    throw new Error('WebCrypto unavailable - this test environment needs a polyfill or a Node.js version with WebCrypto support')
+  }
   return c.subtle
 }
 

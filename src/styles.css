@@ -2391,6 +2391,118 @@ kbd {
   cursor: pointer;
 }
 
+.workshop__gap {
+  flex: 1 0 4px;
+}
+
+.workshop__shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.workshop__value--wide {
+  min-width: 70px;
+  text-align: left;
+}
+
+.workshop__mini--wide {
+  width: auto;
+  padding: 0 8px;
+}
+
+.workshop__list-row {
+  display: flex;
+  gap: 4px;
+}
+
+.workshop__list-row .workshop__new {
+  flex: 1;
+  width: auto;
+}
+
+.workshop__paste {
+  margin-top: 8px;
+}
+
+.workshop__paste-box {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 5px;
+  resize: vertical;
+}
+
+.workshop__paste-box:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.workshop__notice {
+  margin-top: 3px;
+  color: var(--accent);
+}
+
+/* The first-visit card: three steps, then never again. */
+.workshop__intro {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px 14px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.94);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.workshop__intro-title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+
+.workshop__intro-steps {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--fg);
+}
+
+.workshop__intro-steps li {
+  margin-bottom: 4px;
+}
+
+.workshop__intro-steps b {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.workshop__intro-ok {
+  color: var(--accent);
+}
+
+/* The EXPLAIN pill ends the tool row; its well, when open, takes a full row. */
+.workshop__tools .explain {
+  display: contents;
+}
+
+.workshop__tools .explain__well {
+  flex: 1 1 100%;
+  margin-top: 2px;
+}
+
 @media (max-width: 600px) {
   .workshop__help { display: none; }
   .workshop__label { min-width: 0; }
@@ -2415,6 +2527,11 @@ kbd {
   .workshop__list-btn { flex: 0 0 auto; }
   .workshop__deploy { flex: 1; }
   .workshop__close { flex: 0 0 auto; margin-left: 0; }
+
+  /* The tray's contextual row only shows the current tool's controls, so the
+   * bench keeps most of the screen; the explanation opens over a full row. */
+  .workshop__tools { gap: 5px; padding: 6px 8px 8px; }
+  .workshop__intro { top: 8px; right: 8px; left: 8px; width: auto; }
 }
 
 /* ---------- Relays panel ---------- */

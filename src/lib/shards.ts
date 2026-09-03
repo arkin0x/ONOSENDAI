@@ -57,8 +57,18 @@ export const GRID_HALF = 8
 export const MAX_VERTICES = 512
 export const MAX_FACES = 1024
 
+/**
+ * A new shard draws LINES: the first tap glows and the second draws a line,
+ * so the very first thing you do is visible. Faces switch it to SOLID when
+ * the first stamp with faces lands (see the workshop store).
+ */
 export function newShard(name = 'Untitled shard'): ShardModel {
-  return { id: uuid(), name, unit: 0, mode: 'solid', vertices: [], faces: [], updatedAt: Date.now() }
+  return { id: uuid(), name, unit: 0, mode: 'lines', vertices: [], faces: [], updatedAt: Date.now() }
+}
+
+/** A grid point as a map key, so "the same point" is one string compare. */
+export function pointKey(p: [number, number, number]): string {
+  return `${p[0]},${p[1]},${p[2]}`
 }
 
 export function uuid(): string {

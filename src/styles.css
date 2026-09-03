@@ -4211,6 +4211,8 @@ kbd {
   font-weight: 700;
   font-size: 1.4rem;
   color: var(--cloud, #ffd27d);
+}
+
 /* Loot: what a found bag holds, as glyphs; per-item actions in the record */
 .loot__kinds {
   letter-spacing: 0.06em;

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computeSidestepProof, bytesToHex } from 'cyberspace-core'
 import {
   CloudFlowError,
+  balanceLabel,
   clearCloudJob,
   cloudProofResponse,
   defaultCloudPrefs,
@@ -20,15 +21,19 @@ import {
   driveCloudJob,
   formatClock,
   jobInProgress,
+  loadBalance,
   loadCloudJob,
   loadCloudPrefs,
   needsApproval,
   positionFromWire,
   retainsRecord,
   routeCommit,
+  satsLabel,
   satsOf,
+  saveBalance,
   saveCloudJob,
   saveCloudPrefs,
+  sinceLabel,
   type PendingCloudJob,
   wirePosition,
 } from './cloud'
@@ -257,5 +262,29 @@ describe('jobInProgress', () => {
   it('is paid, computing or verifying, and no other status', () => {
     for (const st of ['paid', 'computing', 'verifying'] as const) expect(jobInProgress(st)).toBe(true)
     for (const st of ['idle', 'quoting', 'confirm', 'funding', 'awaiting_payment', 'error'] as const) expect(jobInProgress(st)).toBe(false)
+  })
+})
+
+describe('remembered balance', () => {
+  beforeEach(() => { vi.stubGlobal('localStorage', memoryStorage()) })
+  it('sinceLabel picks the coarsest non-zero unit', () => {
+    const t = 1_700_000_000_000
+    expect(sinceLabel(t, t + 30_000)).toBe('just now')
+    expect(sinceLabel(t, t + 4 * 60_000)).toBe('4 min ago')
+    expect(sinceLabel(t, t + 3 * 3_600_000)).toBe('3 h ago')
+    expect(sinceLabel(t, t + 5 * 86_400_000)).toBe('5 d ago')
+  })
+  it('balanceLabel rounds down, satsLabel rounds up', () => {
+    expect(balanceLabel(4200)).toBe('4 sats')
+    expect(balanceLabel(1000)).toBe('1 sat')
+    expect(balanceLabel(-5)).toBe('0 sats')
+    expect(satsLabel(4200)).toBe('5 sats')
+  })
+  it('saveBalance rounds, floors at zero and loads back per pubkey', () => {
+    const rec = saveBalance('pk-a', 1234.6, 42)
+    expect(rec).toEqual({ msats: 1235, at: 42 })
+    expect(loadBalance('pk-a')).toEqual({ msats: 1235, at: 42 })
+    expect(loadBalance('pk-b')).toBeNull()
+    expect(saveBalance('pk-b', -5, 1).msats).toBe(0)
   })
 })

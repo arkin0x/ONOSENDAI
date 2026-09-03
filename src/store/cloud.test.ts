@@ -120,6 +120,8 @@ describe('cloud routes', () => {
     storage.removeItem('onosendai:cloudJob')
     storage.removeItem('onosendai:cloudDeposit')
     storage.removeItem('onosendai:spent')
+    storage.removeItem('onosendai:hosakaBalance')
+    useCyberspace.setState({ cloud: { ...S().cloud, balance: null, balanceChecking: false, balanceError: null } })
     useCyberspace.setState({ spentMsats: 0 })
   })
   afterEach(() => {
@@ -440,5 +442,36 @@ describe('cloud routes', () => {
     expect(fake.quote).toHaveBeenCalledTimes(1)
     expect(S().plan?.summary.cloudSteps).toBe(1)
     S().cancel()
+  })
+
+  // ---- the prepaid balance ----
+
+  it('refreshBalance asks HOSAKA once, keeps the figure, and remembers it per identity', async () => {
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 7000, ledger: [] })
+    await S().refreshBalance()
+    expect(fake.balance).toHaveBeenCalledTimes(1)
+    expect(S().cloud.balance?.msats).toBe(7000)
+    expect(S().cloud.balanceChecking).toBe(false)
+    expect(JSON.parse(storage.getItem('onosendai:hosakaBalance') ?? '{}')[S().identity.pubkey].msats).toBe(7000)
+    useCyberspace.setState({ cloud: { ...S().cloud, balance: null } })
+    S().ensureBalance()
+    expect(S().cloud.balance?.msats).toBe(7000)
+  })
+  it('a failed check keeps the last figure and says why', async () => {
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 3000, ledger: [] })
+    await S().refreshBalance()
+    fake.balance.mockRejectedValue(new HosakaError(503, 'payments_unavailable', 'no wallet'))
+    await S().refreshBalance()
+    expect(S().cloud.balance?.msats).toBe(3000)
+    expect(S().cloud.balanceError).toMatch(/503|payments_unavailable|wallet/)
+  })
+  it('a funded route notes the balance it read on the way', async () => {
+    lineUpH13()
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(S().position, S().cursor, S().plane, S().prevEventId)))
+    await S().commit()
+    await idle()
+    expect(S().cloud.balance?.msats).toBe(5000)
   })
 })

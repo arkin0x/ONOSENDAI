@@ -10,8 +10,8 @@
  */
 
 import { CheckPaymentButton } from './InvoiceModal'
-import { useState } from 'react'
-import { formatClock, satsLabel, satsOf, type CloudMode } from '../lib/cloud'
+import { useEffect, useState } from 'react'
+import { balanceLabel, formatClock, satsLabel, satsOf, sinceLabel, type CloudMode } from '../lib/cloud'
 import { HOSAKA_DEFAULT_URL } from '../lib/hosaka'
 import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
@@ -42,6 +42,9 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return url }
 }
 
+/** A remembered balance older than this is refreshed on its own, local keys only. */
+const BALANCE_STALE_MS = 10 * 60 * 1000
+
 export function CloudPanel(): JSX.Element {
   const prefs = useCyberspace((s) => s.cloudPrefs)
   const cloud = useCyberspace((s) => s.cloud)
@@ -53,6 +56,19 @@ export function CloudPanel(): JSX.Element {
   const job = cloud.job
   // Elapsed and "ago" lines only exist while there is a job to describe.
   const now = useNow(job || cloud.status === 'awaiting_payment' ? 1000 : 0)
+  const pubkey = useCyberspace((s) => s.identity.pubkey)
+  const signerKind = useCyberspace((s) => s.signerKind)
+  const balance = cloud.balance
+  // The remembered balance for this identity, the moment the panel is up;
+  // and with a local key (no signer to ask) a fresh figure when the one we
+  // have is stale, once HOSAKA has answered the caps so it is known to be
+  // reachable.
+  useEffect(() => {
+    const st = useCyberspace.getState()
+    st.ensureBalance()
+    const known = st.cloud.balance
+    if (signerKind === 'local' && st.cloud.limits !== null && st.cloudPrefs.mode !== 'off' && (known === null || Date.now() - known.at > BALANCE_STALE_MS)) void st.refreshBalance()
+  }, [pubkey, signerKind, cloud.limits !== null])
   const tag = prefs.mode === 'off' ? 'OFF' : active || cloud.status === 'error' ? STATUS_LABEL[cloud.status] : prefs.mode.toUpperCase()
 
   const setUrl = (): void => {
@@ -116,7 +132,22 @@ export function CloudPanel(): JSX.Element {
           <dt>Cloud caps</dt>
           <dd>{cloud.limits ? `HOPS 2^${cloud.limits.max_hop_height} · SIDESTEPS 2^${cloud.limits.max_sidestep_height}` : prefs.mode === 'off' ? '—' : 'not fetched'}</dd>
         </div>
+        <div>
+          <dt>Prepaid balance</dt>
+          <dd>
+            {balance ? balanceLabel(balance.msats) : '—'}{' '}
+            <button
+              className="cloud__link"
+              onClick={() => { void useCyberspace.getState().refreshBalance() }}
+              disabled={cloud.balanceChecking}
+              title={signerKind === 'local' ? 'Ask HOSAKA for the balance' : 'Ask HOSAKA for the balance (your signer will be asked to sign the request)'}
+            >
+              {cloud.balanceChecking ? 'CHECKING…' : balance ? `REFRESH · ${sinceLabel(balance.at, now || Date.now())}` : 'CHECK'}
+            </button>
+          </dd>
+        </div>
       </dl>
+      {cloud.balanceError && <p className="legend__note">{cloud.balanceError}</p>}
 
       {editingUrl && (
         <form className="avatars__find cloud__url" onSubmit={(e) => { e.preventDefault(); setUrl() }}>

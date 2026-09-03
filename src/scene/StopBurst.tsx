@@ -24,6 +24,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { findStation } from '../lib/hyperspace/station'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
+import { stopsDrawn } from '../lib/hyperspace/stops'
 
 const STREAKS = 220
 /** Seconds from emission to gone (one pulse period when looping). */
@@ -232,7 +233,7 @@ export function StopBurst({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const sustained = viewedStop !== null && viewedStop === station ? station : null
 
   const centreOf = (height: number | null): [number, number, number] | null => {
-    if (height === null) return null
+    if (height === null || !stopsDrawn(anchorPlane, scaleExp)) return null
     const stop = getStopByHeight(height)
     if (!stop || stopPlane(stop) !== anchorPlane) return null
     return markerCentre(stopPosition(stop), alignedOrigin(anchor, scaleExp), scaleExp, axes)

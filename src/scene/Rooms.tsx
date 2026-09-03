@@ -182,7 +182,11 @@ export function Rooms({ axes }: Props): JSX.Element {
         // height. Every boundary of the height-3 lattice is at least height 4,
         // but the one at a multiple of 128 is height 8, and the ruler of
         // nested walls means a cell's six faces can each cost differently.
-        label: `h${height}  ${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
+        //
+        // Except the h85 box, which is the whole of cyberspace: there is no
+        // outside to leave to, so a price for leaving it is nonsense, and at
+        // the CYBERSPACE view it hung in the middle of the scene saying so.
+        label: height === AXIS_BITS ? null : `h${height}  ${formatOps(subtreeCantorOps(height + 1))}+ ops to leave`,
         // Dead centre of the cell. Each level captions its own box rather than
         // the three stacking into one block: a caption sitting inside the volume
         // it describes needs no reading order to connect it to its cell.
@@ -207,14 +211,16 @@ export function Rooms({ axes }: Props): JSX.Element {
           <lineSegments geometry={l.geometry} frustumCulled={false}>
             <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
           </lineSegments>
-          <WorldLabel
-            text={l.label}
-            color={l.color}
-            at={l.labelAt}
-            align="center"
-            px={9}
-            opacity={0.75}
-          />
+          {l.label !== null && (
+            <WorldLabel
+              text={l.label}
+              color={l.color}
+              at={l.labelAt}
+              align="center"
+              px={9}
+              opacity={0.75}
+            />
+          )}
         </group>
       ))}
     </group>

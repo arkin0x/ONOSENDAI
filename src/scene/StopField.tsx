@@ -35,7 +35,7 @@ import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../l
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
-import { stopCoordExact } from '../lib/hyperspace/stops'
+import { stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
 import { coordToXyz } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
@@ -47,14 +47,16 @@ const REACH = GRID_RADIUS * 8
 /**
  * Hard ceiling on points actually built. The chain is near a million blocks;
  * a full-cube view puts half of them (one plane's worth) in range at once, and
- * a million-vertex transparent point cloud under bloom is overdraw the frame
- * budget does not have. Past the cap the field keeps the stops whose hashed
- * heights sort smallest (sample.ts): deterministic per block and nested as
- * the line grows, so the sample fills in and thins at the margin but never
- * reshuffles. The positions are hash-uniform, so a height-keyed subset is
- * as unbiased a sample as any.
+ * even the 120k the cap used to allow painted the whole of ideaspace
+ * wall-to-wall at the top of the ladder: a solid pink block, not a field. A
+ * thousand reads as what it is, stops scattered through a space, and it is
+ * the number arkinox chose to start from. Past the cap the field keeps the
+ * stops whose hashed heights sort smallest (sample.ts): deterministic per
+ * block and nested as the line grows, so the sample fills in and thins at
+ * the margin but never reshuffles. The positions are hash-uniform, so a
+ * height-keyed subset is as unbiased a sample as any.
  */
-const MAX_POINTS = 120_000
+const MAX_POINTS = 1_000
 
 /**
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
@@ -187,6 +189,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
     const index = getStopIndex()
     const wantPort = anchorPlane === 1
+    // Nothing to build where the stops are not drawn (landfalls above 2^60).
+    if (!stopsDrawn(anchorPlane, scaleExp)) return
     const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
     const commit = (next: Built | null): void => {
       if (job.cancelled) return
@@ -425,6 +429,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
   useEffect(() => () => { highlightGeometry?.dispose() }, [highlightGeometry])
 
   if (!built || built.frameKey !== frameKey) return null
+  if (!stopsDrawn(anchorPlane, scaleExp)) return null
   const portView = anchorPlane === 1
   // Rebase the cloud into the current frame: a re-anchor is a change of
   // origin, not of where the stops are.

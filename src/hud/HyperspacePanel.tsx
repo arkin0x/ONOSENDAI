@@ -434,3 +434,15 @@ export function viewEarth(): void {
   useCyberspace.getState().setPlane(0)
   useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
 }
+
+/**
+ * The whole cube, camera on its centre, at a scale where its top and bottom
+ * lattices are drawn: the view a hyperjump gives, held still. Stays in the
+ * current plane; the lattices take that plane's colours.
+ */
+export function viewCyberspace(): void {
+  ownHyperspaceView()
+  markViewedStop(null)
+  const plane = useCyberspace.getState().plane
+  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, plane, 'CYBERSPACE', 82)
+}

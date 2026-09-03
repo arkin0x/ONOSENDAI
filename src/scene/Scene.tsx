@@ -42,6 +42,7 @@ import { Earth } from './Earth'
 import { EarthPatch } from './EarthPatch'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
+import { CyberspaceLattice } from './CyberspaceLattice'
 import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
@@ -107,6 +108,7 @@ function World(): JSX.Element {
       <Rooms axes={axes} />
       <SectorBox axes={axes} />
       <Earth axes={axes} />
+      <CyberspaceLattice axes={axes} />
       <EarthPatch axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}

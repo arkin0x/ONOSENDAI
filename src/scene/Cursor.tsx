@@ -145,6 +145,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const anchor = useCyberspace((s) => s.anchor)
   const atHead = useCyberspace((s) => s.atHead())
+  // Looking at a focus the cursor cannot be used, so its size label would
+  // just hang in the middle of the view.
+  const focused = useCyberspace((s) => s.focus !== null)
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
@@ -272,7 +275,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         vanished exactly when you stopped to think about it. It rides the cursor,
         which sits on the avatar while idle, so it has a home either way.
       */}
-      <WorldLabel
+      {!focused && <WorldLabel
         text={formatCellSize(scaleExp)}
         color={active ? targetColor : ACCENT}
         offset={[1.5, 0.7, 0]}
@@ -284,7 +287,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}
-      />
+      />}
 
       {active && (
         <>

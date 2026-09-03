@@ -3627,6 +3627,23 @@ kbd {
   background: rgba(47, 129, 247, 0.16);
 }
 
+/* CYBERSPACE: the whole cube, in v1's lattice purple. */
+.hyper__btn--cyberspace {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+  color: #a06bff;
+  border-color: rgba(104, 45, 181, 0.6);
+  background: rgba(104, 45, 181, 0.08);
+}
+
+.hyper__btn--cyberspace:hover:not(:disabled) {
+  background: rgba(104, 45, 181, 0.2);
+}
+
 /* VIEW NEAREST STOP: one full-width action under the station readout, in the
    station's bitcoin orange so it reads as part of that group. */
 .hyper__btn--view {

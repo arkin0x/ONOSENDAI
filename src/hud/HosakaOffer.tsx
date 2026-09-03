@@ -60,15 +60,15 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           Offload your work to HOSAKA's compute and get the result in seconds to minutes. Paid via bitcoin lightning.
         </p>
         <dl className="offer__reach">
-          <div><dt>This jump</dt><dd>{`wall of 2^${verdict.tallestWall}`}</dd></div>
-          <div><dt>Your machine</dt><dd>{`up to h${machine}`}</dd></div>
-          <div><dt>HOSAKA</dt><dd>{cloudKnown ? `up to h${cloud.limits!.max_hop_height} hops, h${cloud.limits!.max_sidestep_height} walls` : 'asking for its caps'}</dd></div>
+          <div><dt>This action</dt><dd>{`2^${verdict.tallestWall} calculations`}</dd></div>
+          <div><dt>Your machine</dt><dd>{`up to 2^${machine} calculations`}</dd></div>
+          <div><dt>HOSAKA</dt><dd>{cloudKnown ? `up to 2^${cloud.limits!.max_hop_height} hops, 2^${cloud.limits!.max_sidestep_height} sidesteps` : 'asking for its caps'}</dd></div>
         </dl>
         {verdict.tier === 'impossible' && (
           <p className="notice">Beyond HOSAKA too: no one computes a wall this tall yet. Line up a nearer cursor.</p>
         )}
         {verdict.tier === 'cloud' && (
-          <p className="legend__note">{`${verdict.cloudSteps} of ${verdict.steps} step${verdict.steps === 1 ? '' : 's'} would go to HOSAKA. GO quotes them; one invoice funds the whole route.`}</p>
+          <p className="legend__note">{`${verdict.cloudSteps} of ${verdict.steps} actions would offload to HOSAKA.`}</p>
         )}
         <div className="offer__controls">
           <div className="offer__modes" role="radiogroup" aria-label="Cloud mode">
@@ -87,7 +87,7 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
         <div className="offer__row">
           <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)}>NOT NOW</button>
           <button className="offer__button offer__button--go" onClick={() => void commit()} disabled={!canGo}>
-            {prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'GO' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
+            {prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'ESTIMATE \u2192' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
           </button>
         </div>
         <p className="offer__note">HOSAKA necessarily learns the cantor roots of the moves it computes. Every result is verified locally before you sign it.</p>

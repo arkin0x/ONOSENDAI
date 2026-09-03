@@ -4130,7 +4130,14 @@ kbd {
     to { opacity: 1; transform: translate(-50%, -50%); }
   }
 }
-.offer__tagline { margin: -4px 0 0; font-size: 0.66rem; letter-spacing: 0.04em; opacity: 0.8; }
+.offer__tagline {
+  margin: -2px 0 2px;
+  padding-bottom: 6px;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  border-bottom: 1px solid var(--cloud, #ffd27d);
+}
 .hosaka-banner {
   display: block;
   width: 100%;
@@ -4139,7 +4146,16 @@ kbd {
   background: #05070d;
 }
 .offer__body { padding: 10px 12px 12px; display: grid; gap: 8px; }
-.offer__title { margin: 0; font-size: 0.95rem; letter-spacing: 0.18em; color: var(--cloud, #ffd27d); }
+.offer__title {
+  margin: 0;
+  padding-bottom: 6px;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 1.55rem;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  color: var(--cloud, #ffd27d);
+  border-bottom: 1px solid var(--cloud, #ffd27d);
+}
 .offer__lead { margin: 0; font-size: 0.8rem; line-height: 1.45; }
 .offer__reach { margin: 0; display: grid; gap: 2px; font-size: 0.72rem; }
 .offer__reach div { display: flex; justify-content: space-between; gap: 8px; }

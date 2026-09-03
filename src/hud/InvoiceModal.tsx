@@ -14,7 +14,7 @@ import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
-import { formatClock, satsLabel } from '../lib/cloud'
+import { depositSettled, formatClock, satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
@@ -30,7 +30,7 @@ export function CloudApproval(): JSX.Element | null {
   const body = q.route
     ? (
       <>
-        {`HOSAKA will calculate ${steps.cloudSteps} of ${steps.steps} action${steps.steps === 1 ? '' : 's'}. Estimate wait is ${q.estTime ?? 'unknown'}.`}
+        {`HOSAKA will calculate ${steps.cloudSteps} of ${steps.steps} actions. Estimate wait is ${q.estTime ?? 'unknown'}.`}
         <br />
         Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
       </>
@@ -155,5 +155,36 @@ export function CheckPaymentButton({ className = 'secret__act' }: { className?: 
     <button className={`${className} ${checking ? 'is-busy' : ''} ${fresh && !checking ? 'is-checked' : ''}`} onClick={() => useCyberspace.getState().checkCloudPayment()} disabled={checking}>
       {checking && <span className="spin" aria-hidden="true" />}{label}
     </button>
+  )
+}
+
+/**
+ * The invoice was paid: one modal says so, since the invoice simply vanished
+ * the moment the payment was detected and the job went on in the menu, out
+ * of sight. Mounted permanently and watching the status, because the invoice
+ * modal itself unmounts on exactly the transition this needs to see.
+ */
+export function PaidModal(): JSX.Element | null {
+  const status = useCyberspace((s) => s.cloud.status)
+  const prev = useRef(status)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (depositSettled(prev.current, status)) setOpen(true)
+    prev.current = status
+  }, [status])
+  if (!open) return null
+  const close = (): void => setOpen(false)
+  return (
+    <ConfirmModal
+      banner={<HosakaBanner />}
+      title="Thanks for using HOSAKA!"
+      body="Open the menu to see the job's progress."
+      confirmLabel="OK"
+      cancelLabel={null}
+      danger={false}
+      cardClassName="cloud"
+      onConfirm={close}
+      onCancel={close}
+    />
   )
 }

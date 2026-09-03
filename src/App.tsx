@@ -11,7 +11,7 @@ import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
-import { CloudApproval, InvoiceModal } from './hud/InvoiceModal'
+import { CloudApproval, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -162,6 +162,7 @@ export default function App(): JSX.Element {
       <HosakaOffer hidden={crowded || secretOpen} />
       <CloudApproval />
       <InvoiceModal />
+      <PaidModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

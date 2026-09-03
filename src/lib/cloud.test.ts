@@ -13,9 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computeSidestepProof, bytesToHex } from 'cyberspace-core'
 import {
   CloudFlowError,
-  cloudProofResponse,
   clearCloudJob,
+  cloudProofResponse,
   defaultCloudPrefs,
+  depositSettled,
   driveCloudJob,
   formatClock,
   loadCloudJob,
@@ -24,11 +25,11 @@ import {
   positionFromWire,
   retainsRecord,
   routeCommit,
+  satsOf,
   saveCloudJob,
   saveCloudPrefs,
-  satsOf,
-  wirePosition,
   type PendingCloudJob,
+  wirePosition,
 } from './cloud'
 import { HosakaError, type HosakaClient, type HosakaDeposit, type HosakaJob, type HosakaLimits } from './hosaka'
 
@@ -235,5 +236,18 @@ describe('cloudProofResponse', () => {
       lcaHeights: [13, 0, 0],
     })
     expect(msg.source).toBe('cloud')
+  })
+})
+
+describe('depositSettled', () => {
+  it('is the invoice wait ending in a paid deposit, and nothing else', () => {
+    expect(depositSettled('awaiting_payment', 'paid')).toBe(true)
+    expect(depositSettled('awaiting_payment', 'computing')).toBe(true)
+    expect(depositSettled('awaiting_payment', 'verifying')).toBe(true)
+    expect(depositSettled('awaiting_payment', 'idle')).toBe(false)
+    expect(depositSettled('awaiting_payment', 'error')).toBe(false)
+    expect(depositSettled('awaiting_payment', 'awaiting_payment')).toBe(false)
+    expect(depositSettled('paid', 'computing')).toBe(false)
+    expect(depositSettled('funding', 'awaiting_payment')).toBe(false)
   })
 })

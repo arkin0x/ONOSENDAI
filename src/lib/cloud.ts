@@ -14,6 +14,7 @@
  * finds it and resumes; a chain whose head has moved since discards it,
  * because the temporal binding (5.3) makes the proof worthless anyway.
  */
+import type { CloudStatus } from '../store/useCyberspace'
 
 import { findLcaHeight, type Plane } from 'cyberspace-core'
 import type { ProofResponse } from '../workers/proof.worker'
@@ -533,4 +534,14 @@ export function saveCloudDeposit(d: PendingCloudDeposit): void {
 
 export function clearCloudDeposit(): void {
   try { localStorage.removeItem(DEPOSIT_KEY) } catch { /* storage unavailable */ }
+}
+
+/**
+ * Did this status change mean the invoice was paid? True exactly when the
+ * last status was the invoice waiting and the new one is the deposit moving
+ * on (paid, computing, or already verifying), never when the wait was
+ * cancelled (idle) or failed (error). Drives the one thank-you modal.
+ */
+export function depositSettled(prev: CloudStatus, next: CloudStatus): boolean {
+  return prev === 'awaiting_payment' && (next === 'paid' || next === 'computing' || next === 'verifying')
 }

@@ -19,7 +19,9 @@ import { buildRideProof, computeRideLeaf, rideBlocks, verifyRideLevel1 } from '.
 import {
   RIDE_CHUNK_SIZE,
   assembleLeaves,
+  calibrate,
   computeRideProof,
+  leafBenchmarkMs,
   leafKey,
   pendingBlocks,
   planChunks,
@@ -159,5 +161,16 @@ describe('computeRideProof (sequential fallback under node)', () => {
     await expect(
       computeRideProof({ previousEventIdHex: PREV, blocks: syntheticBlocks(6, 10) }, () => {}, controller.signal),
     ).rejects.toThrow('aborted')
+  })
+})
+
+describe('calibrate (no workers under node)', () => {
+  it('measures once, shares the measurement, and publishes it', async () => {
+    const first = calibrate()
+    expect(calibrate()).toBe(first)
+    const ms = await first
+    expect(Number.isFinite(ms) && ms > 0).toBe(true)
+    expect(leafBenchmarkMs()).toBe(ms)
+    expect(await calibrate()).toBe(ms)
   })
 })

@@ -25,15 +25,14 @@
  * settles, so an idle app holds no worker threads hostage.
  */
 
-import { bytesToHex, hexToBytes, sha256 } from 'cyberspace-core'
+import { bytesToHex, hexToBytes } from 'cyberspace-core'
 import {
   buildRideProof,
   computeRideLeaf,
-  exactRidePairs,
   expectedRidePairs,
-  lineTerrainK,
+  timeCalibrationSample,
 } from './ride'
-import type { RideChunkRequest, RideChunkResponse } from '../../workers/ride.worker'
+import type { CalibrateRequest, RideChunkRequest, RideChunkResponse } from '../../workers/ride.worker'
 
 export interface RideJob {
   /** 64 hex; the enter event id. Every leaf is seeded by it (§5.3). */
@@ -381,7 +380,7 @@ function computeInPool(
       const chunk = chunks[nextChunk++]
       const id = ++msgId
       remaining.set(id, chunk.length)
-      const request: RideChunkRequest = { id, previousEventIdHex, chunk }
+      const request: RideChunkRequest = { type: 'chunk', id, previousEventIdHex, chunk }
       worker.postMessage(request)
     }
 
@@ -403,6 +402,7 @@ function computeInPool(
           finish(new Error(msg.message))
           return
         }
+        if (msg.type !== 'leaf') return
         out.set(msg.height, msg.leafHex)
         persister.add(leafKey(previousEventIdHex, msg.height), msg.leafHex)
         progress.leafDone()
@@ -432,52 +432,86 @@ function computeInPool(
 // Calibration
 // ---------------------------------------------------------------------------
 
-let benchmarkMs: number | null = null
+/**
+ * Where the last measurement is kept between sessions. A phone's number is
+ * as good next week as today, and reading it back means the estimate shows a
+ * figure the moment the panel opens rather than CALIBRATING; the fresh
+ * measurement then replaces it.
+ */
+const BENCH_KEY = 'onosendai:ride-bench-ms'
+
+function loadBenchmark(): number | null {
+  try {
+    const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(BENCH_KEY)
+    const ms = raw === null ? NaN : Number(raw)
+    return Number.isFinite(ms) && ms > 0 ? ms : null
+  } catch {
+    return null
+  }
+}
+
+function storeBenchmark(ms: number): void {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(BENCH_KEY, String(ms))
+  } catch {
+    // Storage denied or full: the number still holds for this session.
+  }
+}
+
+let benchmarkMs: number | null = loadBenchmark()
 let calibrating: Promise<number> | null = null
 
-/**
- * The K values the calibration sample spans. Low through average, never the
- * heavy tail: a K=16 block alone is 2^22 pairings and would make calibration
- * itself seconds long. The measurement is normalized per pairing and scaled
- * to the binomial mean block, so excluding the tail does not bias the result,
- * it only bounds the cost.
- */
-const CALIBRATION_KS = [4, 5, 6, 7, 8, 9, 10, 11]
+/** ms per mean block from a timed sample (§5.7 expected pairings of one block). */
+function msPerBlock(sample: { elapsedMs: number; pairs: number }): number {
+  return (sample.elapsedMs / sample.pairs) * expectedRidePairs(1)
+}
 
-function calibrationHashes(): string[] {
-  const enc = new TextEncoder()
-  const found = new Map<number, string>()
-  for (let counter = 0; found.size < CALIBRATION_KS.length && counter < 100_000; counter++) {
-    const hex = bytesToHex(sha256(enc.encode(`ride-calibration-${counter}`)))
-    const k = lineTerrainK(hex)
-    if (CALIBRATION_KS.includes(k) && !found.has(k)) found.set(k, hex)
-  }
-  return CALIBRATION_KS.filter((k) => found.has(k)).map((k) => found.get(k) as string)
+/** The sample timed in a ride worker; the main thread only waits. */
+function timeSampleInWorker(): Promise<{ elapsedMs: number; pairs: number }> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../../workers/ride.worker.ts', import.meta.url), { type: 'module' })
+    const done = (fn: () => void) => { worker.terminate(); fn() }
+    worker.addEventListener('message', (event: MessageEvent<RideChunkResponse>) => {
+      const msg = event.data
+      if (msg.type === 'calibrated') done(() => resolve({ elapsedMs: msg.elapsedMs, pairs: msg.pairs }))
+      else if (msg.type === 'error') done(() => reject(new Error(msg.message)))
+    })
+    worker.addEventListener('error', (event) => done(() => reject(new Error(event.message || 'ride worker failed'))))
+    const request: CalibrateRequest = { type: 'calibrate', id: 1 }
+    worker.postMessage(request)
+  })
 }
 
 /**
- * Measure ms per average block on this machine, once. Times 8 synthetic
- * leaves on the main thread, derives ms per Cantor pairing, and scales to the
- * §5.7 expected pairings of the mean block. Idempotent; concurrent and later
- * calls share the first measurement.
+ * Measure ms per average block on this machine, once per session. Times 8
+ * synthetic leaves in a ride worker (on the main thread only where workers
+ * do not exist, or if the worker fails), derives ms per Cantor pairing, and
+ * scales to the §5.7 expected pairings of the mean block. Idempotent;
+ * concurrent and later calls share the first measurement. Until it resolves,
+ * leafBenchmarkMs() is the previous session's number, if there was one.
  */
 export function calibrate(): Promise<number> {
   if (calibrating) return calibrating
   calibrating = (async () => {
-    const previousEventIdHex = 'ca'.repeat(32)
-    const hashes = calibrationHashes()
-    const started = performance.now()
-    for (let i = 0; i < hashes.length; i++) {
-      computeRideLeaf(previousEventIdHex, 1_000 + i, hashes[i])
+    let sample: { elapsedMs: number; pairs: number }
+    if (typeof Worker === 'undefined') {
+      sample = timeCalibrationSample()
+    } else {
+      try {
+        sample = await timeSampleInWorker()
+      } catch {
+        sample = timeCalibrationSample()
+      }
     }
-    const elapsed = performance.now() - started
-    benchmarkMs = (elapsed / exactRidePairs(hashes)) * expectedRidePairs(1)
+    benchmarkMs = msPerBlock(sample)
+    storeBenchmark(benchmarkMs)
     return benchmarkMs
   })()
   return calibrating
 }
 
-/** The cached calibration, null until calibrate() first resolves. */
+/** The calibration: this session's once calibrate() resolves, else the
+ * stored one from an earlier session, else null. */
 export function leafBenchmarkMs(): number | null {
   return benchmarkMs
 }

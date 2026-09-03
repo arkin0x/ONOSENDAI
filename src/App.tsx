@@ -33,6 +33,9 @@ import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
 import { setSyncPriority } from './lib/hyperspace/anchors'
+
+/** How long after the panels open the anchor sync goes full tilt. */
+const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
@@ -90,8 +93,15 @@ export default function App(): JSX.Element {
 
   // The anchor backfill runs full tilt while the panels are open (the sync
   // numbers are being watched) and breathes between batches while they are
-  // closed, so playing in the scene gets the frames.
-  useEffect(() => { setSyncPriority(showPanels) }, [showPanels])
+  // closed, so playing in the scene gets the frames. Full tilt starts a
+  // moment after the panels open, not with them: on a phone the batches
+  // (index merges, signature checks) landed in the very frames the menu was
+  // trying to paint and the open took over a second.
+  useEffect(() => {
+    if (!showPanels) { setSyncPriority(false); return }
+    const t = window.setTimeout(() => setSyncPriority(true), SYNC_PRIORITY_DELAY_MS)
+    return () => window.clearTimeout(t)
+  }, [showPanels])
 
   const [padOpen, setPadOpen] = useState(true)
   const [viewMenuOpen, setViewMenuOpen] = useState(false)

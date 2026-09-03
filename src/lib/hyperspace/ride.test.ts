@@ -7,9 +7,11 @@
 import { describe, expect, it } from 'vitest'
 import { bytesToHex, sha256 } from 'cyberspace-core'
 import {
+  CALIBRATION_KS,
   K_LINE,
   SAMPLES,
   buildRideProof,
+  calibrationHashes,
   computeRideLeaf,
   decodeOpenings,
   encodeOpenings,
@@ -21,6 +23,7 @@ import {
   rideBlocks,
   rideSeed,
   sampleIndices,
+  timeCalibrationSample,
   verifyInclusion,
   verifyRideLevel1,
 } from './ride'
@@ -218,5 +221,18 @@ describe('rideTrail', () => {
     expect(rideTrail(10, 15, 3, 5, 2)).toEqual([12, 13])
     expect(rideTrail(10, 15, 0, 5, 100)).toEqual([10])
     expect(rideTrail(7, 7, 0, 0, 100)).toEqual([7])
+  })
+})
+
+describe('calibration sample', () => {
+  it('is one block per calibration K, in K order, and deterministic', () => {
+    const hashes = calibrationHashes()
+    expect(hashes.map(lineTerrainK)).toEqual(CALIBRATION_KS)
+    expect(calibrationHashes()).toEqual(hashes)
+  })
+  it('times the sample and reports its exact pairings', () => {
+    const { elapsedMs, pairs } = timeCalibrationSample()
+    expect(elapsedMs).toBeGreaterThan(0)
+    expect(pairs).toBe(exactRidePairs(calibrationHashes()))
   })
 })

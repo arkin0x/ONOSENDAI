@@ -239,7 +239,7 @@ export function HyperspacePanel(): JSX.Element {
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Station</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest station</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -282,7 +282,7 @@ export function HyperspacePanel(): JSX.Element {
       <div className="hyper__group">
         <span className="legend__label hyper__kicker hyper__kicker--destination">Destination</span>
         {destination === null ? (
-          <p className="legend__note">None set. Open the line scrubber (H) and pick a stop.</p>
+          <p className="legend__note">None set. Open the Hyperspace overlay (H) to see any block or tap one in the HUD.</p>
         ) : (
           <>
             <dl className="stats">
@@ -358,9 +358,7 @@ export function HyperspacePanel(): JSX.Element {
       {transit === null && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
-        ) : destination === null ? (
-          <p className="hyper__why">BOARD NEEDS A DESTINATION BLOCK: PICK ONE ON THE LINE (H)</p>
-        ) : !atHead ? (
+        ) : destination === null ? null : !atHead ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR AVATAR: RETURN TO IT FIRST</p>
         ) : null
       )}

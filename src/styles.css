@@ -4227,3 +4227,53 @@ kbd {
   padding: 0 8px;
   font-size: 8px;
 }
+
+/* The HOSAKA mark inline in the Cloud compute panel's title. Taller than
+   the 10px type so it can be read; the negative vertical margins keep the
+   header the height every other panel's is. */
+.panel__mark {
+  width: 16px;
+  height: auto;
+  vertical-align: middle;
+  margin: -4px 6px -4px 0;
+}
+
+/* ---------- HOSAKA pulse: the mark breathing while a job runs ----------
+ *
+ * Just above the menu button, on the instrument stack's left edge (the
+ * hyperspace, chain and XOR chips), so it reads as one more instrument and
+ * never covers a panel. The desktop block below moves both to the scene's
+ * left edge, as it does the stack and the button. */
+.hosaka-pulse {
+  position: fixed;
+  left: 8px;
+  bottom: 78px; /* the button's 12px + 56px, and a 10px gap */
+  width: 56px; /* the menu button's width, so the two read as one column */
+  height: auto;
+  z-index: 150;
+  pointer-events: none;
+  opacity: 0.1;
+  animation: hosaka-pulse 2.4s ease-in-out infinite;
+}
+
+/* Never fully there and never quite gone: 90% at the crest. Starting from
+   the trough, mounting is itself a fade-in. */
+@keyframes hosaka-pulse {
+  0%, 100% { opacity: 0.1; }
+  50% { opacity: 0.9; }
+}
+
+@media (min-width: 1101px) {
+  .hosaka-pulse {
+    left: 352px;
+    bottom: 70px; /* the button's 14px + 46px, and a 10px gap */
+    width: 46px; /* the desktop button's width */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hosaka-pulse {
+    animation: none;
+    opacity: 0.7;
+  }
+}

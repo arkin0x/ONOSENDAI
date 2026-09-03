@@ -13,6 +13,7 @@ import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
 import { CloudApproval, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
+import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
@@ -160,6 +161,7 @@ export default function App(): JSX.Element {
       <SecretModal />
       <LootDetail />
       <HosakaOffer hidden={crowded || secretOpen} />
+      <HosakaPulse />
       <CloudApproval />
       <InvoiceModal />
       <PaidModal />

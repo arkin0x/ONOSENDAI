@@ -19,6 +19,7 @@ import {
   depositSettled,
   driveCloudJob,
   formatClock,
+  jobInProgress,
   loadCloudJob,
   loadCloudPrefs,
   needsApproval,
@@ -249,5 +250,12 @@ describe('depositSettled', () => {
     expect(depositSettled('awaiting_payment', 'awaiting_payment')).toBe(false)
     expect(depositSettled('paid', 'computing')).toBe(false)
     expect(depositSettled('funding', 'awaiting_payment')).toBe(false)
+  })
+})
+
+describe('jobInProgress', () => {
+  it('is paid, computing or verifying, and no other status', () => {
+    for (const st of ['paid', 'computing', 'verifying'] as const) expect(jobInProgress(st)).toBe(true)
+    for (const st of ['idle', 'quoting', 'confirm', 'funding', 'awaiting_payment', 'error'] as const) expect(jobInProgress(st)).toBe(false)
   })
 })

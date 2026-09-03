@@ -545,3 +545,9 @@ export function clearCloudDeposit(): void {
 export function depositSettled(prev: CloudStatus, next: CloudStatus): boolean {
   return prev === 'awaiting_payment' && (next === 'paid' || next === 'computing' || next === 'verifying')
 }
+
+/** A HOSAKA job is under way: the deposit is in and the server is computing,
+ * or the result is being verified here. Drives the pulsing mark. */
+export function jobInProgress(status: CloudStatus): boolean {
+  return status === 'paid' || status === 'computing' || status === 'verifying'
+}

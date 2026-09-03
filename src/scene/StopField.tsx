@@ -35,7 +35,7 @@ import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../l
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
-import { stopCoordExact } from '../lib/hyperspace/stops'
+import { stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
 import { coordToXyz } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
@@ -189,6 +189,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
     const index = getStopIndex()
     const wantPort = anchorPlane === 1
+    // Nothing to build where the stops are not drawn (landfalls above 2^60).
+    if (!stopsDrawn(anchorPlane, scaleExp)) return
     const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
     const commit = (next: Built | null): void => {
       if (job.cancelled) return
@@ -427,6 +429,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
   useEffect(() => () => { highlightGeometry?.dispose() }, [highlightGeometry])
 
   if (!built || built.frameKey !== frameKey) return null
+  if (!stopsDrawn(anchorPlane, scaleExp)) return null
   const portView = anchorPlane === 1
   // Rebase the cloud into the current frame: a re-anchor is a change of
   // origin, not of where the stops are.

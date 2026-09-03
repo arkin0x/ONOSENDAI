@@ -17,7 +17,7 @@ import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
-import { type Stop } from '../lib/hyperspace/stops'
+import { stopsDrawn, type Stop } from '../lib/hyperspace/stops'
 import { selectStopInScene, stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
 
@@ -44,6 +44,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     void indexVersion
     const index = getStopIndex()
     if (index.size === 0) return []
+    if (!stopsDrawn(anchorPlane, scaleExp)) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const anchorCoord = xyzToCoord(anchor.x, anchor.y, anchor.z, anchorPlane)
     const candidates: Stop[] = []

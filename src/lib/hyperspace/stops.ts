@@ -102,3 +102,16 @@ export function stopCoordExact(stop: Stop): bigint {
 export function stopCoordHex(stop: Stop): string {
   return coordToHex(stopCoordExact(stop))
 }
+
+/**
+ * In dataspace the stops are landfalls on Earth's surface, and above this
+ * scale Earth itself is a speck: the shell drew as a clot of dots at the
+ * planet's position with nothing to be on, right through the CYBERSPACE
+ * view. Ports in ideaspace are points in a volume and draw at every scale.
+ */
+export const LANDFALL_SCALE_MAX = 60
+
+/** Whether the stop layers (field, cubes, burst) draw at all in this plane at this zoom. */
+export function stopsDrawn(plane: 0 | 1, scaleExp: number): boolean {
+  return plane === 1 || scaleExp <= LANDFALL_SCALE_MAX
+}

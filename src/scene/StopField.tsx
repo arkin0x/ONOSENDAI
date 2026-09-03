@@ -47,14 +47,16 @@ const REACH = GRID_RADIUS * 8
 /**
  * Hard ceiling on points actually built. The chain is near a million blocks;
  * a full-cube view puts half of them (one plane's worth) in range at once, and
- * a million-vertex transparent point cloud under bloom is overdraw the frame
- * budget does not have. Past the cap the field keeps the stops whose hashed
- * heights sort smallest (sample.ts): deterministic per block and nested as
- * the line grows, so the sample fills in and thins at the margin but never
- * reshuffles. The positions are hash-uniform, so a height-keyed subset is
- * as unbiased a sample as any.
+ * even the 120k the cap used to allow painted the whole of ideaspace
+ * wall-to-wall at the top of the ladder: a solid pink block, not a field. A
+ * thousand reads as what it is, stops scattered through a space, and it is
+ * the number arkinox chose to start from. Past the cap the field keeps the
+ * stops whose hashed heights sort smallest (sample.ts): deterministic per
+ * block and nested as the line grows, so the sample fills in and thins at
+ * the margin but never reshuffles. The positions are hash-uniform, so a
+ * height-keyed subset is as unbiased a sample as any.
  */
-const MAX_POINTS = 120_000
+const MAX_POINTS = 1_000
 
 /**
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,

@@ -17,6 +17,14 @@ import { WorldLabel } from './WorldLabel'
 /** Same cull as Earth and the spawn marker. */
 const REACH = GRID_RADIUS * 8
 
+/**
+ * Only at scales below 2^10 gibsons per cell. The icosahedron is a cell wide
+ * whatever the zoom, so at the top of the ladder it was an eighth of
+ * cyberspace, and it sits on the cell's centre while the HUD marker sits on
+ * the exact point, up to a cell apart. Far out, the marker is the target.
+ */
+const AVATAR_SCALE_LIMIT = 10
+
 interface Props {
   axes: ViewAxes
 }
@@ -30,6 +38,7 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
 
   const near = useMemo(() => {
+    if (scaleExp >= AVATAR_SCALE_LIMIT) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const list = useCyberspace.getState().targetList()
     return list

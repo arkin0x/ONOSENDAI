@@ -4212,3 +4212,18 @@ kbd {
   font-size: 1.4rem;
   color: var(--cloud, #ffd27d);
 }
+
+/* Loot: what a found bag holds, as glyphs; per-item actions in the record */
+.loot__kinds {
+  letter-spacing: 0.06em;
+}
+.lootd__acts {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.lootd__acts .lootd__view {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 8px;
+}

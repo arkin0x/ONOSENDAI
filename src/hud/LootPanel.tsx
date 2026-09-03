@@ -25,7 +25,19 @@ export function LootPanel(): JSX.Element {
   const { items, status } = useLoot()
   const me = useCyberspace((s) => s.identity.pubkey)
   const discovered = useShards((s) => s.discovered)
-  const found = useMemo(() => new Set(Object.values(discovered).map((h) => h.bagId)), [discovered])
+  // What each found bag holds, oldest item first, as glyphs: ◇ a shard, ✎ a message.
+  const kinds = useMemo(() => {
+    const by = new Map<string, { at: number; glyph: string }[]>()
+    for (const h of Object.values(discovered)) {
+      const list = by.get(h.bagId) ?? []
+      list.push({ at: h.createdAt, glyph: h.type === 'message' ? '✎' : '◇' })
+      by.set(h.bagId, list)
+    }
+    const out = new Map<string, string>()
+    for (const [bag, list] of by) out.set(bag, list.sort((a, b) => a.at - b.at).map((x) => x.glyph).join(''))
+    return out
+  }, [discovered])
+  const found = useMemo(() => new Set(kinds.keys()), [kinds])
   const foundCount = useMemo(() => items.filter((it) => found.has(it.bagId)).length, [items, found])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -53,7 +65,7 @@ export function LootPanel(): JSX.Element {
               <div className="loot__top">
                 <ProfileBadge pubkey={it.author} />
                 {it.author === me && <span className="avatars__you">YOURS</span>}
-                {found.has(it.bagId) && <span className="tag tag--live">FOUND</span>}
+                {found.has(it.bagId) && <span className="tag tag--live loot__kinds" title={`Found: ${kinds.get(it.bagId)?.length ?? 0} items`}>{kinds.get(it.bagId)}</span>}
                 <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
               </div>
               <div className="loot__meta">{regionLabel(it.height)} · {formatBytes(it.bytes)}</div>

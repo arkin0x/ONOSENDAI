@@ -1,6 +1,6 @@
 /**
  * HosakaPulse.tsx: the HOSAKA mark, breathing just above the menu button
- * while a job is under way. The job itself lives in the Cloud compute panel, which
+ * while a job is under way, the width of that button. The job itself lives in the Cloud compute panel, which
  * on a phone is behind the menu; this is the one sign on the scene that
  * something is being computed for you elsewhere.
  */

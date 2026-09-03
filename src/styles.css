@@ -4248,7 +4248,7 @@ kbd {
   position: fixed;
   left: 8px;
   bottom: 78px; /* the button's 12px + 56px, and a 10px gap */
-  width: 70px;
+  width: 56px; /* the menu button's width, so the two read as one column */
   height: auto;
   z-index: 150;
   pointer-events: none;
@@ -4267,6 +4267,7 @@ kbd {
   .hosaka-pulse {
     left: 352px;
     bottom: 70px; /* the button's 14px + 46px, and a 10px gap */
+    width: 46px; /* the desktop button's width */
   }
 }
 

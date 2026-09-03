@@ -588,7 +588,7 @@ body {
    * Nothing behind it but the point field, so every glyph carries its own
    * lighting: a tight dark halo for contrast against whatever it lands on, then
    * a wider bloom in currentColor, which means each row and the wall glow their
-   * own colour without this rule having to know the palette.
+   * own color without this rule having to know the palette.
    */
   text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
@@ -626,7 +626,7 @@ body {
 
 /*
  * One hue for the whole readout, so the eye reads brightness rather than
- * colour: where you stand is low key, where you are pointing is live, and the
+ * color: where you stand is low key, where you are pointing is live, and the
  * difference between them sits in between. The only warm thing on the block is
  * the wall, which is the one thing that costs money.
  */
@@ -648,7 +648,7 @@ body {
 
 /* The three things the XOR row has to keep apart: shared prefix, wall, and
  * divergence that fell outside the window. Everything else is diverged
- * territory and stays the row's own colour. */
+ * territory and stays the row's own color. */
 .bits__matched {
   color: #2c5670;
 }
@@ -727,7 +727,7 @@ body {
   text-shadow: none;
 }
 
-/* In history the block turns amber, the same colour the cursor goes when it is
+/* In history the block turns amber, the same color the cursor goes when it is
  * somewhere the avatar is not: you are looking at a place you are not at. */
 .explorer__body.is-history {
   border-color: rgba(255, 176, 32, 0.45);
@@ -1268,7 +1268,7 @@ kbd {
   border-color: var(--fg);
 }
 
-/* Lit in the target's own colour, set inline, so the row and the marker on
+/* Lit in the target's own color, set inline, so the row and the marker on
  * the scene agree about which one this is. */
 .targets__toggle.is-on {
   background: rgba(200, 245, 255, 0.06);
@@ -2376,7 +2376,7 @@ kbd {
 }
 
 /* The picker: a dashed swatch with a pipette on it, so it reads as "any
- * colour" beside the fixed ones. */
+ * color" beside the fixed ones. */
 .workshop__picker {
   position: relative;
   display: inline-flex;
@@ -3513,7 +3513,7 @@ kbd {
 }
 
 /* A circle that stays legible over any terrain: its own ring in the target's
- * colour and a dark halo. */
+ * color and a dark halo. */
 .target__body .pfp {
   border: 1px solid currentColor;
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
@@ -3763,7 +3763,7 @@ kbd {
 }
 
 /* The line scrubber: ChainExplorer's rail, retinted so a glance says which
- * one-dimensional thing you are walking. Kind colours follow the scene's
+ * one-dimensional thing you are walking. Kind colors follow the scene's
  * assignments: ideaspace purple for ports, Earth blue for landfalls. */
 .linescrub .explorer__walked {
   background: #f7931a;
@@ -3776,7 +3776,7 @@ kbd {
 }
 
 .linescrub .explorer__body {
-  /* The border stays the chain explorer's colour on purpose: the two
+  /* The border stays the chain explorer's color on purpose: the two
      expanded rails are the same instrument pointed at different lines.
      The meta row's content changes length between PORT and LANDFALL stops;
      a fixed body width keeps the rail from resizing under the pointer. */
@@ -4218,7 +4218,7 @@ kbd {
   border: 1px solid rgba(0, 229, 255, 0.14);
 }
 
-/* A plain focus view (a hidden thing, a loot item): the same bar in the accent colour */
+/* A plain focus view (a hidden thing, a loot item): the same bar in the accent color */
 .hyperbar--focus {
   border-color: rgba(0, 229, 255, 0.5);
   box-shadow: 0 0 14px rgba(0, 229, 255, 0.16);
@@ -4253,7 +4253,7 @@ kbd {
   height: 0;
 }
 
-/* KEY FOUND: the ceremony's chip, breathing in the accent colour */
+/* KEY FOUND: the ceremony's chip, breathing in the accent color */
 .hyperbar--found {
   border-color: rgba(0, 229, 255, 0.6);
   animation: found-breathe 1.6s ease-in-out infinite;
@@ -4289,7 +4289,7 @@ kbd {
 }
 /* ---------- Cloud compute (HOSAKA) ----------
  *
- * Paid movement has its own colour, a warm gold, so a cloud state never reads
+ * Paid movement has its own color, a warm gold, so a cloud state never reads
  * as the amber of local computing or the violet of a local sidestep. The
  * invoice card carries it too, over the modal's default destructive red. */
 :root {

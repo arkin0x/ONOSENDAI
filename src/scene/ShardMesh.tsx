@@ -7,7 +7,7 @@
  *
  * With a `birth`, the shard is one this client has just found, and it does not
  * simply appear: for SHARD_DECODE_MS its vertices sit scattered through the
- * volume the model occupies in cyan static, then settle into place and colour
+ * volume the model occupies in cyan static, then settle into place and color
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 

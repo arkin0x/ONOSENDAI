@@ -5,14 +5,14 @@
  * order a first visit meets them: STAMP lands a whole shape where you tap
  * (a block, a wedge, a pyramid, a column, a ring, a star, an arrow), sized in
  * whole units and turned a quarter at a time; ADD places one vertex; SELECT
- * picks a point so the pad can nudge it a unit along X, Y or Z, colour it or
+ * picks a point so the pad can nudge it a unit along X, Y or Z, color it or
  * delete it; FACE collects corners and FILL joins them into a face, any
- * number of corners, notches and all. Colour applies to the selection or to
+ * number of corners, notches and all. Color applies to the selection or to
  * everything. The mode, solid, points or lines, is part of the shard and
  * previews live. Every edit undoes.
  *
  * v1's modeller wanted a mouse: drag handles for every axis, bars to drag for
- * every colour channel. This wants a thumb. Every action is a tap or a button,
+ * every color channel. This wants a thumb. Every action is a tap or a button,
  * every position an integer, and the keyboard is a shortcut, not a requirement.
  * The tray shows the row the current tool needs and nothing else, so a phone
  * keeps most of its screen for the bench.
@@ -35,13 +35,13 @@ const TOOL_ICON: Record<Tool, LucideIcon> = { stamp: Stamp, add: Plus, select: M
 
 /** A press this long on a swatch asks to delete it rather than using it. */
 const LONG_PRESS_MS = 550
-/** The picker fires on every step through the wheel; the palette gets the colour you stop on. */
+/** The picker fires on every step through the wheel; the palette gets the color you stop on. */
 const SETTLE_MS = 500
 
 const TOOL_HELP: Record<Tool, string> = {
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
-  select: 'Tap a point, then nudge it with the pad, colour it, or delete it.',
+  select: 'Tap a point, then nudge it with the pad, color it, or delete it.',
   face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it.',
 }
 
@@ -75,7 +75,7 @@ function Swatch({ hex, on, onUse, onHold }: { hex: string; on: boolean; onUse: (
     <button
       className={`workshop__swatch ${on ? 'is-on' : ''}`}
       style={{ background: hex }}
-      aria-label={`Colour ${hex}`}
+      aria-label={`Color ${hex}`}
       aria-pressed={on}
       title={`${hex} (hold to delete)`}
       onPointerDown={() => { held.current = false; stop(); timer.current = window.setTimeout(() => { held.current = true; onHold() }, LONG_PRESS_MS) }}
@@ -121,7 +121,7 @@ export function Workshop(): JSX.Element | null {
   const canNudge = selected !== null
   const say = (notice: string): void => useWorkshop.setState({ notice })
 
-  // The picker paints live and, once the wheel has settled, puts the colour at
+  // The picker paints live and, once the wheel has settled, puts the color at
   // the front of the palette; leaving the picker settles it at once.
   const hex = rgbToHex(color)
   const pick = (value: string): void => {
@@ -258,11 +258,11 @@ export function Workshop(): JSX.Element | null {
           <button className="workshop__btn" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)">REDO</button>
           <span className="workshop__help">{TOOL_HELP[tool]}</span>
           <Explanation>
-            A shard is coloured points on a grid of whole units, drawn SOLID (faces, colours blending
+            A shard is colored points on a grid of whole units, drawn SOLID (faces, colors blending
             across them), POINTS (every point a light) or LINES (one line through the points in the
             order they were made). STAMP places a whole shape; ADD one point; SELECT a point to move,
-            colour or delete it; FACE picks corners and FILL joins them, and a tap on a face selects it
-            for DELETE FACE. The palette keeps every colour the picker settles on; hold a swatch to
+            color or delete it; FACE picks corners and FILL joins them, and a tap on a face selects it
+            for DELETE FACE. The palette keeps every color the picker settles on; hold a swatch to
             delete it. Stamps keep their own corners
             even where they touch, so a red block against a blue one keeps a crisp edge. UNIT says how
             big one grid unit is in the world, from a picometre to the width of a sector; DEPLOY shows
@@ -346,8 +346,8 @@ export function Workshop(): JSX.Element | null {
         </div>
 
         <div className="workshop__row">
-          <span className="workshop__label">COLOUR</span>
-          <span className="workshop__picker" title="Pick any colour; it joins the palette">
+          <span className="workshop__label">COLOR</span>
+          <span className="workshop__picker" title="Pick any color; it joins the palette">
             <input
               type="color"
               className="workshop__color"
@@ -355,7 +355,7 @@ export function Workshop(): JSX.Element | null {
               list="workshop-palette"
               onChange={(e) => pick(e.target.value)}
               onBlur={(e) => settled(e.target.value)}
-              aria-label="Pick a colour"
+              aria-label="Pick a color"
               {...noCallout}
             />
             <Pipette className="workshop__picker-icon" size={13} strokeWidth={2.25} aria-hidden />
@@ -367,13 +367,13 @@ export function Workshop(): JSX.Element | null {
               <Swatch key={h} hex={h} on={h === hex} onUse={() => w().colorSelected(hexToRgb(h))} onHold={() => setDeleteColor(h)} />
             ))}
           </div>
-          <button className="workshop__btn" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="Apply the colour to every vertex">ALL</button>
+          <button className="workshop__btn" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="Apply the color to every vertex">ALL</button>
         </div>
       </div>
 
       {deleteColor !== null && (
         <ConfirmModal
-          title="Delete colour from palette?"
+          title="Delete color from palette?"
           body={<><span className="workshop__swatch workshop__swatch--sample" style={{ background: deleteColor }} aria-hidden />{deleteColor} leaves the palette. Vertices already painted with it keep it.</>}
           confirmLabel="DELETE"
           onConfirm={() => { w().forgetColor(deleteColor); setDeleteColor(null) }}

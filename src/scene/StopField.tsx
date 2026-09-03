@@ -11,7 +11,7 @@
  *
  * Placement follows the house rule exactly: pointCentre against the anchor's
  * aligned origin, fixed-point bigint deltas, never a coordinate through
- * Number. One GL_POINTS draw for the whole cloud, coloured per vertex
+ * Number. One GL_POINTS draw for the whole cloud, colored per vertex
  * (landfall warm-blue EARTH, port purple SIDESTEP), and clicking a point
  * selects that stop as the ride's destination.
  *
@@ -101,7 +101,7 @@ let lastDrawn: { frameKey: string; set: Set<number> } | null = null
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
 
-/** Per-vertex colours: landfalls in Earth's blue, ports in ideaspace purple. */
+/** Per-vertex colors: landfalls in Earth's blue, ports in ideaspace purple. */
 // Landfalls read as embers of bitcoin orange on the globe; the old EARTH
 // blue made scrubbed stops look selected when nothing was.
 const LANDFALL_COLOR = new Color('#b06f14')
@@ -475,7 +475,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
           Landfalls: world-sized and attenuated, so the crust shrinks with the
           planet instead of blooming into a solid orange disc when the globe
           is small on screen. toneMapped and fog both off for the BlackSun
-          reason: these colours are the encoding, and half the field sits
+          reason: these colors are the encoding, and half the field sits
           beyond where the scene fog has already gone to black.
         */}
         <pointsMaterial

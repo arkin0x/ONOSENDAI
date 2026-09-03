@@ -18,7 +18,7 @@ export const DANGER = '#ff3b6b'
 /** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
 export const SIDESTEP = '#c07dff'
 /**
- * Sector lattice. Its own colour rather than WARN, which is amber and means
+ * Sector lattice. Its own color rather than WARN, which is amber and means
  * cost: a sector boundary is a fact about where you are, not a warning.
  *
  * Saturated orange because bloom desaturates. WARN sits at 255/176/32, already
@@ -63,7 +63,7 @@ export const MERIDIAN = '#4bc9a7'
  * mistaken for one of them.
  *
  * This was briefly a filled tint under the outline. The fill is gone and the
- * colour survived it, which is the right way round: the line was always the
+ * color survived it, which is the right way round: the line was always the
  * content and the fill was always the decoration.
  */
 export const COAST = '#4bc97d'
@@ -83,7 +83,7 @@ export const COAST = '#4bc97d'
  */
 export const BLACK_SUN = '#9258d1'
 /**
- * Colour for one level of the lattice: the LCA ramp for hue, lightness for level.
+ * Color for one level of the lattice: the LCA ramp for hue, lightness for level.
  *
  * The lattice belongs on the ramp. Its walls ARE crossings and their height is
  * exactly what the ramp was built to encode, so as you zoom out the grid should
@@ -96,11 +96,11 @@ export const BLACK_SUN = '#9258d1'
  * green, and the ramp does not reach orange until 55.
  *
  * The three levels are consecutive heights, so on a smooth ramp they land on
- * nearly the same colour, which is why hue alone cannot separate them. Lightness
+ * nearly the same color, which is why hue alone cannot separate them. Lightness
  * does that instead, and it darkens INWARD from the ramp rather than lightening
  * outward from it. Two reasons.
  *
- * The outermost box is then exactly the colour the legend swatch shows, so the
+ * The outermost box is then exactly the color the legend swatch shows, so the
  * key and the scene agree on one reading rather than on a family of them. And
  * lightening a saturated hue is how you get pastel: an orange lifted toward
  * white came out peach, which read as a different kind of thing rather than as
@@ -115,15 +115,15 @@ export function latticeShade(height: number, level: number): string {
   const c = boundaryColor(height).clone()
   const hsl = { h: 0, s: 0, l: 0 }
   c.getHSL(hsl)
-  // Hue and saturation held fixed: all three are the same colour at three
-  // weights, not three colours.
+  // Hue and saturation held fixed: all three are the same color at three
+  // weights, not three colors.
   c.setHSL(hsl.h, hsl.s, hsl.l * (LIGHTNESS[level] ?? 1))
   return `#${c.getHexString()}`
 }
 export const DIM = '#3a5566'
 
 /**
- * Terrain K colour ramp. K is Binomial(16, 0.5), so it clusters hard around 8;
+ * Terrain K color ramp. K is Binomial(16, 0.5), so it clusters hard around 8;
  * the ramp is tuned to spread the common 5..11 band rather than the full range.
  */
 const TERRAIN_STOPS: Array<[number, string]> = [
@@ -140,7 +140,7 @@ const TERRAIN_STOPS: Array<[number, string]> = [
 const cache = new Map<number, Color>()
 
 /**
- * Colour for a terrain K value in [0, 16].
+ * Color for a terrain K value in [0, 16].
  */
 export function terrainColor(k: number): Color {
   const hit = cache.get(k)
@@ -163,7 +163,7 @@ export function terrainColor(k: number): Color {
 }
 
 /**
- * Colour for an LCA boundary line.
+ * Color for an LCA boundary line.
  *
  * Uses a three-stop ramp from extremely dark blue (cheap crossings) through
  * purple (moderate cost) to light purple (expensive crossings). This gives

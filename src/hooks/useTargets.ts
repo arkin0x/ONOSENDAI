@@ -12,7 +12,7 @@ import { EARTH } from '../lib/palette'
 import type { CyberTarget } from '../lib/targets'
 import { useCyberspace } from '../store/useCyberspace'
 
-/** The avatar's own red, so the marker for you is the colour you are drawn in. */
+/** The avatar's own red, so the marker for you is the color you are drawn in. */
 const YOU = '#ff2323'
 
 /** §9.7: dataspace is centred on the half-axis point, 1 km = 1000 * 2^33. */

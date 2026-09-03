@@ -445,7 +445,7 @@ export function viewEarth(): void {
 /**
  * The whole cube, camera on its centre, at a scale where its top and bottom
  * lattices are drawn: the view a hyperjump gives, held still. Stays in the
- * current plane; the lattices take that plane's colours.
+ * current plane; the lattices take that plane's colors.
  */
 export function viewCyberspace(): void {
   ownHyperspaceView()

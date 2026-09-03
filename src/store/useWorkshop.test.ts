@@ -66,7 +66,7 @@ describe('workshop', () => {
     expect(w().notice).toBeNull()
   })
 
-  it('moves, colours and deletes every vertex on the selected point together', () => {
+  it('moves, colors and deletes every vertex on the selected point together', () => {
     w().placeStamp([0, 0, 0])
     w().setColor([1, 0, 0])
     w().placeStamp([1, 0, 0])
@@ -149,7 +149,7 @@ describe('workshop', () => {
     expect(w().current()!.id).toBe(other)
   })
 
-  it('colours the selection or everything', () => {
+  it('colors the selection or everything', () => {
     w().addVertex([0, 0, 0]); w().addVertex([1, 0, 0])
     w().selectVertex(1); w().colorSelected([1, 0, 0])
     expect(w().current()!.vertices[1].c).toEqual([1, 0, 0])
@@ -232,7 +232,7 @@ describe('faces and palette', () => {
     w().selectFace(0); w().setTool('select'); expect(w().selectedFace).toBeNull()
   })
 
-  it('remembers a picked colour at the front once, moves a repeat forward, ignores junk, forgets on request', () => {
+  it('remembers a picked color at the front once, moves a repeat forward, ignores junk, forgets on request', () => {
     w().rememberColor('#123456')
     expect(w().palette[0]).toBe('#123456')
     expect(w().palette).toHaveLength(DEFAULT_PALETTE.length + 1)
@@ -245,7 +245,7 @@ describe('faces and palette', () => {
     expect(w().palette).not.toContain('#123456')
   })
 
-  it('keeps 24 colours, the oldest falling off the end', () => {
+  it('keeps 24 colors, the oldest falling off the end', () => {
     for (let i = 0; i < 30; i++) w().rememberColor('#' + i.toString(16).padStart(6, '0'))
     expect(w().palette).toHaveLength(24)
     expect(w().palette[0]).toBe('#00001d')

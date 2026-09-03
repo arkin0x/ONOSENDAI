@@ -34,7 +34,7 @@ describe('payload', () => {
     expect(fromPayload({ ...p, faces: [[0, 1, 9]] }, 'x')).toBeNull()
   })
 
-  it('refuses mismatched colours, unknown modes, bad units and other types', () => {
+  it('refuses mismatched colors, unknown modes, bad units and other types', () => {
     const p = toPayload(tri)
     expect(fromPayload({ ...p, colors: p.colors.slice(1) }, 'x')).toBeNull()
     expect(fromPayload({ ...p, mode: 'voxels' }, 'x')).toBeNull()
@@ -43,7 +43,7 @@ describe('payload', () => {
     expect(fromPayload('nope', 'x')).toBeNull()
   })
 
-  it('clamps colours into 0..1', () => {
+  it('clamps colors into 0..1', () => {
     const p = toPayload(tri)
     const back = fromPayload({ ...p, colors: [[2, -1, 0.5], [0, 0, 0], [0, 0, 0]] }, 'x')
     expect(back!.vertices[0].c).toEqual([1, 0, 0.5])

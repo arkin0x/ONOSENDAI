@@ -22,7 +22,7 @@ import { WorldLabel } from './WorldLabel'
 const TAP_SLOP = 8
 
 const REACH = GRID_RADIUS * 8
-/** The message colour: a warm note against the cool field. */
+/** The message color: a warm note against the cool field. */
 const NOTE = '#ffd27d'
 
 interface Props {

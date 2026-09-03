@@ -5,13 +5,13 @@
  * and a deployed shard stays here too, so it can be deployed again somewhere
  * else or edited into a new one. The editing model is small and exact: stamp
  * a shape, place a vertex, select a point and nudge it a unit along an axis,
- * colour it, tap corners into a face. It fits a thumb.
+ * color it, tap corners into a face. It fits a thumb.
  *
  * Two rules about points. A vertex you ADD lands on an empty point or selects
  * the one already there, so hand placing never stacks vertices by accident. A
  * stamp brings its own vertices even onto occupied points (stamps.ts says
  * why), so from then on "a point" can be several vertices, and SELECT, the
- * nudge pad, the colour and DELETE act on every vertex at the selected point
+ * nudge pad, the color and DELETE act on every vertex at the selected point
  * together. What you see is one dot, and it behaves like one dot.
  *
  * Every change to the current shard goes through `edit`, which is also where
@@ -65,11 +65,11 @@ export interface WorkshopState {
   facePick: number[]
   /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
   selectedFace: number | null
-  /** Swatches to hand: newest first, every colour the picker ever settled on, then the defaults. */
+  /** Swatches to hand: newest first, every color the picker ever settled on, then the defaults. */
   palette: string[]
   /** The Y the add and stamp tools place on: the grid plane moves up and down. */
   level: number
-  /** The colour new vertices get, and the colour input shows. */
+  /** The color new vertices get, and the color input shows. */
   color: [number, number, number]
   stampKind: StampKind
   stampSize: number
@@ -105,7 +105,7 @@ export interface WorkshopState {
   selectVertex: (index: number | null) => void
   selectFace: (index: number | null) => void
   deleteSelectedFace: () => void
-  /** Put a colour at the front of the palette (moving it there if it is already in). */
+  /** Put a color at the front of the palette (moving it there if it is already in). */
   rememberColor: (hex: string) => void
   forgetColor: (hex: string) => void
   moveSelected: (axis: 0 | 1 | 2, delta: number) => void

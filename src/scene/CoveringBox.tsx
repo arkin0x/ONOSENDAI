@@ -102,7 +102,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // among wireframe boxes, and at some heights it lands exactly on a lattice
       // cell and competes with it outright. A volume and a grid are different
       // KINDS of mark, which the eye separates without being told; two
-      // wireframes only differ once you have decoded their colours.
+      // wireframes only differ once you have decoded their colors.
       fill: new BoxGeometry(c.size[0], c.size[1], c.size[2]),
       centre: c.centre,
       // Faint in proportion to how big it is. A covering box grows by powers of

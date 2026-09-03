@@ -31,7 +31,7 @@ import {
 import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
-/** Paid legs: the cloud's warm gold, the colour the HUD uses for HOSAKA. */
+/** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
@@ -248,7 +248,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // while the cube waited a render out, and every long frame widened the gap.
   // Reading both from the same store in the same frame makes them simultaneous
   // by construction rather than by luck. Only the cube, the label and the live
-  // end of the tether move here; which legs exist and what colour they are stay
+  // end of the tether move here; which legs exist and what color they are stay
   // in React, because those change with the plan, not with the cursor.
   const outline = useRef<LineSegments>(null)
   const ghost = useRef<LineSegments>(null)

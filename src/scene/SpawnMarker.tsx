@@ -103,7 +103,7 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     return Math.hypot(...centre) > REACH ? null : { centre, scale }
   }, [pubkey, position, scaleExp, axes])
 
-  // The GLB's materials are black with an emissive colour, which is what lets
+  // The GLB's materials are black with an emissive color, which is what lets
   // them glow under bloom. The scene's tone mapping would dull that, so it is
   // switched off here the way every other lit line in the scene switches it off.
   const materials = useMemo(() => {

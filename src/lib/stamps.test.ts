@@ -63,7 +63,7 @@ describe('stamps', () => {
     for (const kind of STAMPS) if (!FACED[kind]) expect(compile(kind, 2, 3, [0, 0, 0])).toEqual(compile(kind, 2, 0, [0, 0, 0]))
   })
 
-  it('appends its own vertices in the given colour and keeps the shard valid', () => {
+  it('appends its own vertices in the given color and keeps the shard valid', () => {
     const one = stamp(empty(), 'pyramid', 1, 0, [0, 0, 0], red)!
     expect(one.shard.vertices).toHaveLength(5)
     expect(one.shard.vertices.every((v) => v.c.join() === '1,0,0')).toBe(true)
@@ -86,7 +86,7 @@ describe('stamps', () => {
     expect(d.culled).toBe(0)
   })
 
-  it('never merges vertices, so a seam between colours stays crisp', () => {
+  it('never merges vertices, so a seam between colors stays crisp', () => {
     const a = stamp(empty(), 'block', 1, 0, [0, 0, 0], red)!
     const b = stamp(a.shard, 'block', 1, 0, [1, 0, 0], [0, 0, 1])!
     const at = b.shard.vertices.filter((v) => v.p.join() === '1,0,0')

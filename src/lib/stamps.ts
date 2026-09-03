@@ -9,7 +9,7 @@
  * asymmetric ones (wedge, star, arrow) a quarter turn at a time about Y.
  *
  * A stamp brings its own vertices even where the shard already has one on
- * that point. That is deliberate: colours live on vertices, so sharing a
+ * that point. That is deliberate: colors live on vertices, so sharing a
  * corner between a red block and a blue block would blend the seam, and a
  * seam is where you want the edge crisp. What sharing would have saved is
  * budget, so the two triangles that face each other where two stamps touch
@@ -225,7 +225,7 @@ export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: 
 
 /**
  * The stamp on its own at the origin: what the aim ghost draws, placed at
- * `landing`. It depends on the shape and colour only, never on the aim, so the
+ * `landing`. It depends on the shape and color only, never on the aim, so the
  * ghost's geometry is built once per shape and merely moved as the pointer
  * crosses cells; building it afresh per cell was the ghost's whole cost.
  */

@@ -91,7 +91,7 @@ function Ghost(): JSX.Element | null {
   const size = useWorkshop((s) => s.stampSize)
   const facing = useWorkshop((s) => s.stampFacing)
   const color = useWorkshop((s) => s.color)
-  // Built once per shape and colour; the aim only moves it. Built per cell, the
+  // Built once per shape and color; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
   const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color) : null), [tool, kind, size, facing, color])
   if (!aim) return null
@@ -184,7 +184,7 @@ function PickLoop(): JSX.Element | null {
   return line ? <primitive object={line} /> : null
 }
 
-/** The face tapped in FACE mode, lit in the selection colour so DELETE FACE has a visible target. */
+/** The face tapped in FACE mode, lit in the selection color so DELETE FACE has a visible target. */
 function FaceHighlight(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const face = useWorkshop((s) => s.selectedFace)
@@ -306,7 +306,7 @@ export function Bench(): JSX.Element {
       <OrbitControls makeDefault enablePan={false} minDistance={3} maxDistance={60} dampingFactor={0.12} />
       <Aim />
       <Keys />
-      {/* Axes, in the compass's colours, so X is red here and out there. */}
+      {/* Axes, in the compass's colors, so X is red here and out there. */}
       <axesHelper args={[GRID_HALF + 1]} />
       <Grid />
       {shard && <ShardMesh shard={shard} onFaceClick={tool === 'face' ? onFace : undefined} />}

@@ -15,7 +15,7 @@
  *
  * The leading run is the only part that means "shared". Zeroes below the highest
  * set bit are inside the differing region and buy nothing: 0b00001001 has three
- * interior zeroes and h is still 4. Colouring all zeroes alike would draw that
+ * interior zeroes and h is still 4. Coloring all zeroes alike would draw that
  * pattern as mostly-matched when it is nothing of the sort.
  */
 

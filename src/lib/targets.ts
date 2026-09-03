@@ -47,7 +47,7 @@ export interface TargetScreen {
 export const targetScreens: Record<string, TargetScreen> = {}
 
 /**
- * A colour for a pubkey, from its own bits, so a target keeps its colour
+ * A color for a pubkey, from its own bits, so a target keeps its color
  * across sessions and devices and two targets rarely share one. Hue only;
  * saturation and lightness are fixed so every one of them reads against the
  * dark field and none collides with Earth's blue or the avatar's red by being

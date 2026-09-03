@@ -372,15 +372,16 @@ export function HyperspacePanel(): JSX.Element {
       {rideError && <p className="notice">{rideError}</p>}
 
       <Explanation>
-        Your STATION is your nearest block, ties to the lowest height:
-        distance is the size of the smallest aligned cube holding you both,
-        so far from the line several blocks are equally near and every
-        verifier must resolve to the same one. VIEW STATION flies the camera
-        there; the viewing bar's RETURN or Escape brings it home at your
-        previous zoom. Boarding marks your chain; the ride proves fresh work
-        for every block passed and sets you down exactly at the block.
-        Leaving is an ordinary hop, so the last mile from any block is
-        normal movement.
+        Each block in the bitcoin blockchain is a railway station in cyberspace.
+        Identities can enter their nearest block for free, produce a nominally
+        easy proof to move between stations, and exit at the exact coordinate of
+        their desired station. This is called hyperspace. Blocks ending with a
+        binary 0 are mapped to Earth, and blocks ending with a binary 1 are
+        mapped to the rest of cyberspace. Without hyperspace, no identity would
+        be capable of traveling any significant distance. Bitcoin's blockchain
+        is used for stations because nobody can control where the next station
+        (block) will appear. The hyperspace railway grows consistently and
+        unpredictably and autonomously without the possibility of manipulation.
       </Explanation>
     </section>
   )

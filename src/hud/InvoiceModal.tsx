@@ -10,10 +10,11 @@
  * Cloud panel brings it back); CANCEL JOB is the way out.
  */
 
+import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
-import { formatClock, satsOf } from '../lib/cloud'
+import { formatClock, satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
@@ -21,25 +22,34 @@ import { ConfirmModal } from './ConfirmModal'
 /** The quote, waiting for a PAY. */
 export function CloudApproval(): JSX.Element | null {
   const cloud = useCyberspace((s) => s.cloud)
-  if (cloud.status !== 'confirm' || !cloud.quote) return null
+  if ((cloud.status !== 'confirm' && cloud.status !== 'funding') || !cloud.quote) return null
   const q = cloud.quote
-  const sats = satsOf(q.costMsats)
-  const when = [q.tier, q.estTime].filter((s): s is string => !!s).join(', ')
+  const price = satsLabel(q.costMsats)
+  const funding = cloud.status === 'funding'
+  const steps = q.route ?? { steps: 1, cloudSteps: 1 }
   const body = q.route
-    ? `HOSAKA does ${q.route.cloudSteps} of the ${q.route.steps} steps of this route (tallest h${q.maxHeight}) for ${sats} sat${sats === 1 ? '' : 's'} in total${when ? ` (${when})` : ''}. ` +
-      'One invoice funds the whole route; whatever your HOSAKA balance already covers is not billed again. ' +
-      'Each step is verified here and signed as it lands. HOSAKA learns the coordinates of the moves it computes.'
-    : `HOSAKA computes this h${q.maxHeight} ${q.action} for ${sats} sat${sats === 1 ? '' : 's'}${when ? ` (${when})` : ''}. ` +
-      (q.action === 'hop'
-        ? 'It lands at the cursor and returns the region key. '
-        : 'It lands 1 gibson past the wall; the cursor keeps the rest of the journey. ') +
-      'Any Lightning wallet pays the invoice. HOSAKA learns the coordinates of this move. ' +
-      'This client verifies the result before signing it into your chain.'
+    ? (
+      <>
+        {`HOSAKA will calculate ${steps.cloudSteps} of ${steps.steps} action${steps.steps === 1 ? '' : 's'}. Estimate wait is ${q.estTime ?? 'unknown'}.`}
+        <br />
+        Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
+      </>
+    )
+    : (
+      <>
+        {`HOSAKA will calculate this 2^${q.maxHeight} ${q.action}. Estimate wait is ${q.estTime ?? 'unknown'}.`}
+        <br />
+        Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
+      </>
+    )
   return (
     <ConfirmModal
-      title={q.route ? 'Cloud route' : `Cloud ${q.action}`}
+      banner={<HosakaBanner />}
+      title="Offload Estimate"
+      figure={<span className="modal__price">{price}</span>}
       body={body}
-      confirmLabel={`PAY ${sats} SATS`}
+      confirmLabel={`PAY ${price.toUpperCase()}`}
+      busy={funding}
       danger={false}
       cardClassName="cloud"
       onConfirm={() => useCyberspace.getState().approveCloud()}
@@ -74,7 +84,6 @@ export function InvoiceModal(): JSX.Element | null {
 
   if (!invoice || !bolt11) return null
 
-  const sats = satsOf(invoice.amountMsats)
   const remainingMs = invoice.expiresAt * 1000 - now
   const uri = `lightning:${bolt11}`
   const store = useCyberspace.getState
@@ -88,7 +97,7 @@ export function InvoiceModal(): JSX.Element | null {
     <div className="modal" role="dialog" aria-modal="true" aria-label="Lightning invoice" onPointerDown={hide}>
       <div className="modal__card cloud invoice" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
-          <h2 className="modal__title">Cloud {cloud.job?.action ?? 'move'}: pay {sats} sat{sats === 1 ? '' : 's'}</h2>
+          <h2 className="modal__title">HOSAKA Offload for {satsLabel(invoice.amountMsats)}</h2>
           <button className="secret__close" onClick={hide} aria-label="Hide">✕</button>
         </div>
 
@@ -96,8 +105,9 @@ export function InvoiceModal(): JSX.Element | null {
           <canvas ref={canvas} className="invoice__qr" width={264} height={264} />
         </div>
 
+        <p className="invoice__amount">{satsLabel(invoice.amountMsats)}</p>
         <p className={`invoice__meta ${remainingMs < 5 * 60_000 ? 'is-late' : ''}`}>
-          {sats} SATS · {remainingMs > 0 ? `EXPIRES IN ${formatClock(remainingMs)}` : 'EXPIRED'}
+          {remainingMs > 0 ? `EXPIRES IN ${formatClock(remainingMs)}` : 'EXPIRED'}
           {cloud.job ? ` · JOB ${cloud.job.jobId.slice(0, 8)}` : ''}
         </p>
 
@@ -106,7 +116,7 @@ export function InvoiceModal(): JSX.Element | null {
         <div className="secret__actions invoice__actions">
           <button className="secret__act" onClick={copy}>{copied ? 'COPIED' : 'COPY INVOICE'}</button>
           <a className="secret__act invoice__wallet" href={uri}>OPEN IN WALLET</a>
-          <button className="secret__act" onClick={() => store().checkCloudPayment()}>CHECK PAYMENT</button>
+          <CheckPaymentButton />
         </div>
 
         <p className="legend__note">
@@ -123,5 +133,27 @@ export function InvoiceModal(): JSX.Element | null {
       </div>
     </div>,
     document.body,
+  )
+}
+
+/**
+ * CHECK PAYMENT with something to show for it: a spinner while the node is
+ * asked, then the node's answer for a few seconds, even when the answer is
+ * "still unpaid".
+ */
+export function CheckPaymentButton({ className = 'secret__act' }: { className?: string }): JSX.Element {
+  const checking = useCyberspace((s) => s.cloud.checking)
+  const lastCheck = useCyberspace((s) => s.cloud.lastCheck)
+  const now = useNow(1000)
+  const fresh = lastCheck && now - lastCheck.at < 6000 ? lastCheck : null
+  const label = checking
+    ? 'CHECKING'
+    : fresh
+      ? fresh.status === 'pending' ? 'CHECKED: NOT PAID YET' : `CHECKED: ${fresh.status.toUpperCase()}`
+      : 'CHECK PAYMENT'
+  return (
+    <button className={`${className} ${checking ? 'is-busy' : ''} ${fresh && !checking ? 'is-checked' : ''}`} onClick={() => useCyberspace.getState().checkCloudPayment()} disabled={checking}>
+      {checking && <span className="spin" aria-hidden="true" />}{label}
+    </button>
   )
 }

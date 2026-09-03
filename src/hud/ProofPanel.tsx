@@ -27,6 +27,7 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
     'cloud-computing': 'HOSAKA COMPUTING',
     quoting: 'QUOTING',
     confirm: 'AWAITING YOUR PAY',
+    funding: 'FUNDING',
     awaiting_payment: 'AWAITING PAYMENT',
     paid: 'FUNDED',
     verifying: 'VERIFYING',
@@ -128,15 +129,15 @@ export function ProofPanel(): JSX.Element {
             </div>
             <div>
               <dt>Hop ceiling</dt>
-              <dd>h{ceiling}</dd>
+              <dd>2^{ceiling}</dd>
             </div>
           </dl>
           <p className="notice notice--sidestep">
             {preview.route.infeasibleAt !== null
               ? `Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`
               : preview.route.cloudSteps > 0
-                ? `Taller than this machine hops (h${ceiling}): ${preview.route.cloudSteps} of ${preview.route.steps} steps go to HOSAKA. Space quotes them together; one PAY, one invoice, then the route runs step by step and asks for a signature as each step lands. X stops it.`
-                : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (h${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
+                ? 'This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.'
+                : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
           </p>
           {preview.route.steps > 64 && preview.route.cloudSteps === 0 && (
             <p className="notice">
@@ -200,7 +201,7 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
-      <p className="legend__note">{`THIS MACHINE: HOP <= h${hopCeil} · SIDESTEP <= h${sidestepCeil}`}</p>
+      <p className="legend__note">{`THIS MACHINE: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
     </section>
   )
 }
@@ -215,6 +216,7 @@ function routeLabel(r: PlanSummary): string {
 const CLOUD_STAGE: Record<string, string> = {
   quoting: 'asking HOSAKA',
   confirm: 'waiting for your PAY',
+  funding: 'checking your balance, asking for the invoice',
   awaiting_payment: 'waiting for the invoice to be paid',
   paid: 'funded',
   computing: 'HOSAKA computing',
@@ -313,7 +315,7 @@ function routeWindow(plan: MovePlan): Array<{ index: number; kind: string; heigh
   rows.push({
     index: plan.done,
     kind: `${s.source === 'cloud' ? 'CLOUD ' : ''}${s.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`,
-    height: `h${s.maxHeight}`,
+    height: `2^${s.maxHeight}`,
     state: plan.status,
     label: plan.status === 'running' ? 'now' : plan.status === 'paused' ? 'paused' : plan.status === 'funding' ? 'funding' : 'failed',
   })

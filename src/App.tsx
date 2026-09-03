@@ -12,6 +12,8 @@ import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
 import { CloudApproval, InvoiceModal } from './hud/InvoiceModal'
+import { HosakaOffer } from './hud/HosakaOffer'
+import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
@@ -81,6 +83,11 @@ export default function App(): JSX.Element {
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
 
+  // While the HOSAKA offer card is up it has the screen to itself: the panels,
+  // instruments, compass and pad step aside until the cursor comes back
+  // within reach, NOT NOW, or the menu opens.
+  const offerUp = useOfferView(crowded || secretOpen) !== null
+
   // The anchor backfill runs full tilt while the panels are open (the sync
   // numbers are being watched) and breathes between batches while they are
   // closed, so playing in the scene gets the frames.
@@ -107,8 +114,8 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <Scene />
-      {!crowded && <Targets targets={targets} />}
-      {!crowded && !secretOpen && (
+      {!crowded && !offerUp && <Targets targets={targets} />}
+      {!crowded && !secretOpen && !offerUp && (
         <div className="instruments">
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
@@ -121,14 +128,14 @@ export default function App(): JSX.Element {
           <BitReadout />
         </div>
       )}
-      {showPanels && <Hud menuOpen={crowded} />}
+      {showPanels && !offerUp && <Hud menuOpen={crowded} />}
       <SpectateBar />
-      {!crowded && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
-      {!crowded && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
-      {showPad && <TouchControls />}
+      {!crowded && !offerUp && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {!crowded && !offerUp && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
+      {showPad && !offerUp && <TouchControls />}
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
-      {!crowded && !padOpen && (
+      {!crowded && !padOpen && !offerUp && (
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}
@@ -142,6 +149,7 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <SecretModal />
       <LootDetail />
+      <HosakaOffer hidden={crowded || secretOpen} />
       <CloudApproval />
       <InvoiceModal />
       <button

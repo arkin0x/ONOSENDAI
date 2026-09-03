@@ -212,7 +212,8 @@ describe('cloud routes', () => {
     const from = S().position
     const to = lineUpH13()
     fake.quote.mockResolvedValue(quote('hop'))
-    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
+    // 95 msats short of a sat: the invoice is still for whole sats.
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 95, ledger: [] })
     fake.deposit.mockResolvedValue(deposit('d1'))
     const settle = deferred<HosakaDeposit>()
     let onDiskAtInvoice: string | null = null

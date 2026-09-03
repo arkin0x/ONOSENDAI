@@ -253,7 +253,7 @@ export function HyperspacePanel(): JSX.Element {
               </div>
               <div>
                 <dt>Distance</dt>
-                <dd>h{nearest.distance}</dd>
+                <dd>2^{nearest.distance}</dd>
               </div>
               {nearest.stop.kind === 'landfall' && (
                 <div>

@@ -235,9 +235,13 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // With a destination picked, the ride is the thing you are doing: the
   // Hyperspace panel leads the left column until the destination is cleared.
   const rideSet = useHyperspace((s) => s.destination !== null)
+  // A payment waiting outranks even that; the cloud panel leads while it waits.
+  const paying = useCyberspace((s) => s.cloud.status === 'awaiting_payment')
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
+        {/* A payment waiting is the one thing to do; the cloud panel leads while it waits. */}
+        {paying && <CloudPanel />}
         <Brand />
         {rideSet && <HyperspacePanel />}
         <IdentityPanel />
@@ -251,7 +255,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ScalePanel />
         <PositionPanel />
         <ProofPanel />
-        <CloudPanel />
+        {!paying && <CloudPanel />}
         <ChainPanel />
         {!rideSet && <HyperspacePanel />}
         <Legend />

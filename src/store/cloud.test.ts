@@ -82,7 +82,7 @@ function sidestepResult(from: Position, to: Position, plane: 0 | 1, prev: string
   }
 }
 
-const quote = (action: 'hop' | 'sidestep', cost = 1000) => ({ action, cost_msats: cost, within_cap: true, cap: 25, max_height: 13, per_axis_heights: { x: 13, y: 0, z: 0 }, K: 7, tier: 'trivial', est_time: '<5 sec', hint: null })
+const quote = (action: 'hop' | 'sidestep', cost = 1000) => ({ action, cost_msats: cost, within_cap: true, cap: 25, max_height: 13, per_axis_heights: { x: 13, y: 0, z: 0 }, K: 7, tier: 'trivial', est_time: 'about 30 sec', est_seconds: 30, hint: null })
 const funded = (id = 'job-1'): HosakaJob => ({ id, status: 'computing', cost_msats: 1000, poll_token: `tok-${id}`, result: null, error: null, payment_required: false, balance_debited: true })
 const deposit = (id: string, status: HosakaDeposit['status'] = 'pending'): HosakaDeposit => ({
   deposit_id: id, status, amount_msats: 1000, bolt11: `lnbc-${id}`, payment_hash: 'h', created_at: 1, expires_at: Math.floor(Date.now() / 1000) + 3600, settled_at: null, settled_msats: null, preimage: null,

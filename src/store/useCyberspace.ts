@@ -114,8 +114,7 @@ import {
   clearCloudDeposit,
   loadBalance,
   saveBalance,
-  type KnownBalance,
-} from '../lib/cloud'
+  type KnownBalance, formatWait } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
@@ -248,7 +247,9 @@ export interface CloudQuote {
   to: Position
   costMsats: number
   tier: string | null
+  /** The whole route's wait: the steps' seconds added up when the server gives them. */
   estTime: string | null
+  estSeconds: number | null
   maxHeight: number
   K: number
   /** A whole route's quote: the sum over its cloud steps, paid with one deposit. */
@@ -957,6 +958,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     let total = 0
     let tallest = 0
     let estTime: string | null = null
+    // The steps run one after another, so their waits add, like their prices.
+    let seconds = 0
+    let secondsKnown = true
     try {
       for (const step of steps) {
         const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane))
@@ -966,6 +970,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
           return
         }
         total += q.cost_msats
+        if (typeof q.est_seconds === 'number') seconds += q.est_seconds
+        else secondsKnown = false
         if (q.max_height > tallest) { tallest = q.max_height; estTime = q.est_time }
       }
     } catch (err) {
@@ -979,7 +985,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       to: plan.target,
       costMsats: total,
       tier: null,
-      estTime,
+      estTime: secondsKnown && steps.length > 0 ? formatWait(seconds) : estTime,
+      estSeconds: secondsKnown && steps.length > 0 ? seconds : null,
       maxHeight: tallest,
       K: 0,
       route: { steps: plan.summary.steps, cloudSteps: steps.length },

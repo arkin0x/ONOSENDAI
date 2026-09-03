@@ -4,7 +4,9 @@
  * The card's own state is one thing: which cursor NOT NOW was pressed for.
  * Everything else that decides its visibility is read from the main store and
  * calibration, here, so App can clear the other overlays while the card is up
- * and the card itself renders from the same answer.
+ * and the card itself renders from the same answer. With the cloud OFF the
+ * card never shows: OFF on the card, or in the Cloud panel, is the answer
+ * until ASK or AUTO is chosen again in the panel.
  */
 
 import { create } from 'zustand'
@@ -41,8 +43,9 @@ export function useOfferView(hidden: boolean): OfferView | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const dismissedFor = useOffer((s) => s.dismissedFor)
+  const mode = useCyberspace((s) => s.cloudPrefs.mode)
 
-  if (hidden || !atHead || busy) return null
+  if (hidden || !atHead || busy || mode === 'off') return null
   const cursorKey = `${cursor.x}:${cursor.y}:${cursor.z}:${plane}`
   if (dismissedFor === cursorKey) return null
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)

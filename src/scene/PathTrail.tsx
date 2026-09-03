@@ -7,7 +7,7 @@
  * just standing somewhere along it, and the faint part is where it goes next.
  */
 
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
@@ -62,6 +62,8 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     }
     return { walked: make(walked), ahead: make(ahead) }
   }, [positionHistory, axes, scaleExp, anchor, split])
+  // Rebuilt on every hop and re-anchor; the old pair's GL buffers go with it.
+  useEffect(() => () => { geometry?.walked?.dispose(); geometry?.ahead?.dispose() }, [geometry])
 
   // The newest segment ends on the avatar, which is drawn trailing behind its
   // committed cell for a moment after a commit. Left alone, the trail would

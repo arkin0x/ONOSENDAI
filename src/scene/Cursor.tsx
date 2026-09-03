@@ -82,6 +82,10 @@ function setSegments(legs: LineSegments, geometry: BufferGeometry, pairs: Readon
     arr[i * 6] = a[0]; arr[i * 6 + 1] = a[1]; arr[i * 6 + 2] = a[2]
     arr[i * 6 + 3] = b[0]; arr[i * 6 + 4] = b[1]; arr[i * 6 + 5] = b[2]
   })
+  // Replacing an attribute leaves the old one's GL buffer allocated until the
+  // geometry is disposed; dispose first (the object stays usable and uploads
+  // the new buffer on the next frame), or every cursor move leaked one.
+  geometry.dispose()
   geometry.setAttribute('position', new Float32BufferAttribute(arr, 3))
   geometry.computeBoundingSphere()
   legs.computeLineDistances()
@@ -120,6 +124,7 @@ function makeDashedLine(geometry: BufferGeometry): Line {
 }
 
 function setSegment(line: Line, geometry: BufferGeometry, a: number[], b: number[], color: string): void {
+  geometry.dispose()
   geometry.setAttribute('position', new Float32BufferAttribute([...a, ...b], 3))
   geometry.attributes.position.needsUpdate = true
   // Dash rendering needs per-vertex distances recomputed on every reshape.

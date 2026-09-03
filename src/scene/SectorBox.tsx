@@ -17,7 +17,7 @@
  * reason the room nest stops drawing boxes larger than the window.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BoxGeometry, EdgesGeometry } from 'three'
 import { sectorTag, xyzToSectorId, SECTOR_BITS_DEFAULT } from 'cyberspace-core'
 import { GRID_RADIUS, cellDelta, type ViewAxes } from '../lib/space'
@@ -66,6 +66,8 @@ export function SectorBox({ axes }: Props): JSX.Element | null {
     () => (box ? new EdgesGeometry(new BoxGeometry(box.size, box.size, box.size)) : null),
     [box],
   )
+  // The previous cage's GL buffers, freed when a new one replaces it.
+  useEffect(() => () => geometry?.dispose(), [geometry])
 
   if (!box || !geometry) return null
 

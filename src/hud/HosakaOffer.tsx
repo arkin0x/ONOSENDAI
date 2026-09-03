@@ -1,7 +1,8 @@
 /**
  * HosakaOffer.tsx - the card that appears when the cursor is beyond this machine.
  *
- * Not part of the menu: it fades in on the right of the scene the moment a
+ * Not part of the menu: it fades in at the right edge of the screen (centred
+ * on a phone) the moment a
  * lined-up move is taller than this machine hops, says what HOSAKA is in
  * three sentences, and carries the two settings a person needs to say yes
  * (mode and budget) plus GO, so the operation completes without opening a
@@ -9,11 +10,10 @@
  * cloud flow takes over, when the menu opens, or on NOT NOW for this cursor.
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { useCalibration } from '../lib/calibration'
+import { useEffect } from 'react'
 import { type CloudMode } from '../lib/cloud'
-import { offerVerdict } from '../lib/offer'
-import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { useCyberspace } from '../store/useCyberspace'
+import { useOffer, useOfferView } from '../store/useOffer'
 
 const MODES: CloudMode[] = ['auto', 'ask', 'off']
 
@@ -28,56 +28,36 @@ export function HosakaBanner({ className = '' }: { className?: string }): JSX.El
 }
 
 export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Element | null {
-  const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
-  const plane = useCyberspace((s) => s.plane)
-  const atHead = useCyberspace((s) => s.atHead())
-  const plan = useCyberspace((s) => s.plan)
-  const proof = useCyberspace((s) => s.proof)
   const cloud = useCyberspace((s) => s.cloud)
   const prefs = useCyberspace((s) => s.cloudPrefs)
   const setCloudMode = useCyberspace((s) => s.setCloudMode)
   const setCloudPrefs = useCyberspace((s) => s.setCloudPrefs)
   const commit = useCyberspace((s) => s.commit)
   const fetchCaps = useCyberspace((s) => s.resumeCloudJob)
-  const hopCeil = useCalibration((s) => s.hopHeight)
-  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
-
+  const dismiss = useOffer((s) => s.dismiss)
+  const view = useOfferView(hidden)
   const cloudKnown = cloud.limits !== null
-  const verdict = useMemo(() => {
-    const ceilings = {
-      hop: Math.min(MAX_COMPUTE_HEIGHT, hopCeil),
-      sidestep: sidestepCeil,
-      cloudHop: cloud.limits?.max_hop_height ?? 0,
-      cloudSidestep: cloud.limits?.max_sidestep_height ?? 0,
-    }
-    return offerVerdict(position, cursor, plane, ceilings, cloudKnown)
-  }, [position, cursor, plane, hopCeil, sidestepCeil, cloud.limits, cloudKnown])
-
-  // NOT NOW is for this cursor; a new far cursor asks again.
-  const cursorKey = `${cursor.x}:${cursor.y}:${cursor.z}:${plane}`
-  const [dismissedFor, setDismissedFor] = useState<string | null>(null)
 
   // The caps come from HOSAKA; ask once when the offer first has a reason to exist.
   useEffect(() => {
-    if (verdict && !cloudKnown && prefs.mode !== 'off') void fetchCaps()
-  }, [verdict !== null, cloudKnown, prefs.mode, fetchCaps]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (view && !cloudKnown && prefs.mode !== 'off') void fetchCaps()
+  }, [view !== null, cloudKnown, prefs.mode, fetchCaps]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const busy = plan !== null || cloud.status !== 'idle' || proof.status === 'computing'
-  if (hidden || !atHead || !verdict || busy || dismissedFor === cursorKey) return null
-
-  const machine = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  if (!view) return null
+  const { verdict, cursorKey, machineCeiling: machine } = view
   const canGo = verdict.tier === 'cloud' && prefs.mode !== 'off'
-  const [budgetText, setBudgetText] = [String(prefs.autoMaxSats), (v: string) => setCloudPrefs({ autoMaxSats: Math.max(0, Math.floor(Number(v) || 0)) })]
+  const budgetText = String(prefs.autoMaxSats)
+  const setBudgetText = (v: string) => setCloudPrefs({ autoMaxSats: Math.max(0, Math.floor(Number(v) || 0)) })
 
   return (
     <aside className="offer" role="dialog" aria-label="HOSAKA cloud compute">
       <HosakaBanner />
       <div className="offer__body">
         <h2 className="offer__title">HOSAKA</h2>
+        <p className="offer__tagline">High-availability Offload Service for Advanced Kinematic Actions</p>
         <p className="offer__lead">
-          Your machine does not have the capacity to make this jump. HOSAKA can help.
-          Offload your work to HOSAKA's compute and get the result in minutes. Paid via bitcoin lightning.
+          Your machine does not have the capacity to calculate this action. HOSAKA can help.
+          Offload your work to HOSAKA's compute and get the result in seconds to minutes. Paid via bitcoin lightning.
         </p>
         <dl className="offer__reach">
           <div><dt>This jump</dt><dd>{`wall of 2^${verdict.tallestWall}`}</dd></div>
@@ -105,12 +85,12 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           </label>
         </div>
         <div className="offer__row">
-          <button className="offer__button offer__button--later" onClick={() => setDismissedFor(cursorKey)}>NOT NOW</button>
+          <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)}>NOT NOW</button>
           <button className="offer__button offer__button--go" onClick={() => void commit()} disabled={!canGo}>
             {prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'GO' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
           </button>
         </div>
-        <p className="offer__note">HOSAKA learns the coordinates of the moves it computes. Every result is verified here before it is signed.</p>
+        <p className="offer__note">HOSAKA necessarily learns the cantor roots of the moves it computes. Every result is verified locally before you sign it.</p>
       </div>
     </aside>
   )

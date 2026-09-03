@@ -983,7 +983,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       set({ cloud: { ...get().cloud, status: 'quoting', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
       const bal = await client.balance(abort.signal)
       if (id !== requestId) return
-      const shortfall = Math.max(0, totalMsats - bal.balance_msats)
+      // Whole sats: a node refuses an invoice for a fraction of one.
+      const shortfall = Math.ceil(Math.max(0, totalMsats - bal.balance_msats) / 1000) * 1000
       if (shortfall > 0) {
         const dep = await client.deposit(shortfall, abort.signal)
         if (id !== requestId) return

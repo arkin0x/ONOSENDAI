@@ -67,6 +67,8 @@ export interface WorldItem {
   shard?: ShardModel
   text?: string
   createdAt?: number
+  /** The bag's lookup id, for anything addressed to the bag (comments). */
+  lookupId?: string
 }
 
 /** What a deploy is placing, before it lands. */
@@ -345,11 +347,11 @@ export const useShards = create<ShardsState>((set, get) => {
       const me = useCyberspace.getState().identity.pubkey
       for (const d of get().mine) {
         seen.add(d.eventId)
-        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt })
+        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt, lookupId: d.lookupId })
       }
       for (const h of Object.values(get().discovered)) {
         if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt })
+        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt, lookupId: h.lookupId })
       }
       return out
     },

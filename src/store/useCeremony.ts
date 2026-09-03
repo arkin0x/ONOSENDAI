@@ -82,7 +82,7 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     const cell = 1n << BigInt(scaleExp)
     const plane: Plane = anchorPlane
     const now = Math.floor(Date.now() / 1000)
-    const base = { bagId: `preview-bag-${now}`, author: PREVIEW_AUTHOR, plane, height: 5, createdAt: now }
+    const base = { bagId: `preview-bag-${now}`, lookupId: '', author: PREVIEW_AUTHOR, plane, height: 5, createdAt: now }
     const shard: Hidden = {
       ...base,
       eventId: `preview-shard-${now}`,

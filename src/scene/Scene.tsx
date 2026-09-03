@@ -293,7 +293,11 @@ function Rig(): JSX.Element {
     const last = lastSeen.current
     const seen = last === null ? null : !same(last) ? last : (lastChange.current !== null && same(lastChange.current.to) ? lastChange.current.from : null)
     if (stepOnly && seen !== null) {
-      const sameFrame = seen.plane === s.anchorPlane && seen.scaleExp === s.scaleExp
+      // The plane is not part of the frame: the axes come from the camera and
+      // the origin from the anchor, so a hop that lands in the other plane
+      // has the same continuous path as any other and glides. Only its
+      // content swaps under the camera.
+      const sameFrame = seen.scaleExp === s.scaleExp
       const cells = sameFrame ? Math.max(
         Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
         Math.abs(cellDelta(s.anchor.y, seen.anchor.y, s.scaleExp)),

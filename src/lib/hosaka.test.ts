@@ -21,6 +21,7 @@ import {
   jsonWithBigints,
   type HosakaDeposit,
   type HosakaJob,
+  SIGN_TIMEOUT_MS,
 } from './hosaka'
 
 const sk = generateSecretKey()
@@ -225,7 +226,7 @@ describe('polling', () => {
     const done = c.waitForDeposit('d1', { onPollError: (e) => errors.push(e) })
     await vi.advanceTimersByTimeAsync(0)
     expect(calls).toHaveLength(0)
-    await vi.advanceTimersByTimeAsync(19_999)
+    await vi.advanceTimersByTimeAsync(SIGN_TIMEOUT_MS - 1)
     expect(errors).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(1)
     expect(errors).toHaveLength(1)

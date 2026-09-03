@@ -33,6 +33,8 @@ import {
   saveSignerPref,
   type Signer,
   type SignerKind,
+  SignerTimeout,
+  signWithin,
 } from '../lib/signers'
 import {
   coordToXyz,
@@ -721,8 +723,23 @@ function pickInitialSigner(): Signer {
   return localSigner(loadOrGenerateKey())
 }
 
-function signEvent(template: EventTemplate): Promise<NostrEvent> {
-  return currentSigner.signEvent(template)
+/**
+ * A local key signs at once. A remote signer gets SIGN_PATIENCE_MS; if it does
+ * not answer, its channel is presumed dead (the phone was in a wallet app)
+ * and it is rebuilt once and asked again. A payment poll used to await this
+ * forever, which left a paid invoice unrecognised until a reload.
+ */
+async function signEvent(template: EventTemplate): Promise<NostrEvent> {
+  const signer = currentSigner
+  if (signer.kind === 'local') return signer.signEvent(template)
+  try {
+    return await signWithin(signer, template)
+  } catch (err) {
+    if (!(err instanceof SignerTimeout) || !signer.reconnect) throw err
+    const fresh = await signer.reconnect()
+    if (currentSigner === signer) currentSigner = fresh
+    return await signWithin(fresh, template)
+  }
 }
 
 const pubkeyHex = currentSigner.pubkey

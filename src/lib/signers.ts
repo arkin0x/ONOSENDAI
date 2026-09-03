@@ -19,6 +19,7 @@ import { getPool } from './relay'
 import type { EventTemplate, NostrEvent } from './events'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
+export { SIGN_PATIENCE_MS, SignerTimeout, signWithin } from './signWithin'
 
 export interface Signer {
   kind: SignerKind
@@ -116,6 +117,13 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     clientSecretKey: clientSk,
     signEvent: (template) => bunker.signEvent(template) as unknown as Promise<NostrEvent>,
     close: () => bunker.close(),
+    // The bunker listens for answers on a relay subscription that dies with
+    // the socket, and a phone kills sockets while the tab is away. A fresh
+    // signer over a fresh connection, same client key, same pubkey.
+    reconnect: async () => {
+      try { await bunker.close() } catch { /* already gone */ }
+      return nip46Signer(bunkerUri, clientSk)
+    },
   }
 }
 

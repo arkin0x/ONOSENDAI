@@ -39,9 +39,9 @@ const REQUEST_TIMEOUT_MS = 20_000
  * is what left an invoice unrecognised after payment (the spinner stuck,
  * no further polls) until a reload claimed it.
  */
-const SIGN_TIMEOUT_MS = 20_000
+export const SIGN_TIMEOUT_MS = 45_000 // outlasts the store's own patience, one rebuild of the signer, and a second try
 /** A poll that has not settled by then is abandoned and the next one goes out. */
-const POLL_HANG_MS = SIGN_TIMEOUT_MS + REQUEST_TIMEOUT_MS + 5_000
+export const POLL_HANG_MS = SIGN_TIMEOUT_MS + REQUEST_TIMEOUT_MS + 5_000
 /** Contract: claim polls every 3 to 5 s. */
 export const CLAIM_INTERVAL_MS = 4_000
 /** Contract: job polls every 5 to 15 s; this ramps from the first to the second. */

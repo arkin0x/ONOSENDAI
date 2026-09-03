@@ -60,6 +60,12 @@ interface Props {
 
 export function CoveringBox({ axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.position)
+  // The render origin is the anchor's, as for every other thing in the scene.
+  // Looking at a focus (Earth, a stop, the whole of cyberspace) the anchor is
+  // the thing looked at, not the avatar, and a box drawn from the avatar's
+  // aligned cell sat whole cells away from the grids it should frame.
+  const anchor = useCyberspace((s) => s.anchor)
+  const focused = useCyberspace((s) => s.focus !== null)
   const cursor = useCyberspace((s) => s.cursor)
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -72,7 +78,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     // In history nothing is being lined up, and the box would be drawn against
     // an origin that is not the avatar's.
     if (!atHead) return null
-    const origin = alignedOrigin(position, scaleExp)
+    const origin = alignedOrigin(anchor, scaleExp)
     const c = coveringBox(position, target, origin, scaleExp, axes, MAX_CELLS)
     // Nothing is being crossed while the cursor sits on the avatar, and a box
     // around a single cell would just be a duplicate of the cursor outline.
@@ -148,7 +154,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       size: c.size,
       clippedAxes: c.clippedAxes,
     }
-  }, [position, target, scaleExp, plane, axes, atHead])
+  }, [position, anchor, target, scaleExp, plane, axes, atHead])
 
   // The HUD's zoom-out key echoes the clipped state (see useUiHints). Keyed on
   // the boolean so it is written only when the state actually flips, never per
@@ -275,7 +281,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           <WorldLabel text="ZOOM OUT" color={ACCENT} at={w.base} px={11} align="center" />
         </group>
       ))}
-      <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />
+      {!focused && <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />}
     </group>
   )
 }

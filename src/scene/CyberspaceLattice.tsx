@@ -21,7 +21,6 @@ interface Props {
 export function CyberspaceLattice({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const plane = useCyberspace((s) => s.anchorPlane)
   const opacity = latticeOpacity(scaleExp)
   const geometry = useMemo(() => new BufferGeometry(), [])
   const lines = useMemo(() => {
@@ -33,7 +32,7 @@ export function CyberspaceLattice({ axes }: Props): JSX.Element | null {
 
   useLayoutEffect(() => {
     if (opacity === 0) return
-    const segs = latticeSegments(alignedOrigin(anchor, scaleExp), scaleExp, axes, plane)
+    const segs = latticeSegments(alignedOrigin(anchor, scaleExp), scaleExp, axes)
     const pos = new Float32Array(segs.length * 6)
     const col = new Float32Array(segs.length * 6)
     const c = new Color()
@@ -45,7 +44,7 @@ export function CyberspaceLattice({ axes }: Props): JSX.Element | null {
     geometry.setAttribute('position', new Float32BufferAttribute(pos, 3))
     geometry.setAttribute('color', new Float32BufferAttribute(col, 3))
     geometry.computeBoundingSphere()
-  }, [anchor, scaleExp, axes, plane, opacity, geometry])
+  }, [anchor, scaleExp, axes, opacity, geometry])
 
   if (opacity === 0) return null
   return (

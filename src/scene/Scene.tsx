@@ -20,7 +20,7 @@
  * gone.
  */
 
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
@@ -460,6 +460,27 @@ function Rig(): JSX.Element {
   )
 }
 
+/**
+ * One console line every 30 s: what the renderer holds and what the heap
+ * weighs. A tab was seen at 10 GB after fifteen idle minutes and no probe here
+ * reproduces it; this puts the numbers where the person who sees it can read
+ * them. `localStorage.setItem('onosendai:memlog', '0')` silences it.
+ */
+function MemoryLog(): null {
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    try { if (localStorage.getItem('onosendai:memlog') === '0') return } catch { /* private mode: log anyway */ }
+    const tick = (): void => {
+      const m = gl.info.memory
+      const heap = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize
+      console.info(`[mem] geometries=${m.geometries} textures=${m.textures} programs=${gl.info.programs?.length ?? 0}${heap ? ` heap=${Math.round(heap / 1048576)}MB` : ''}`)
+    }
+    const t = window.setInterval(tick, 30_000)
+    return () => window.clearInterval(t)
+  }, [gl])
+  return null
+}
+
 export function Scene(): JSX.Element {
   return (
     <Canvas
@@ -471,6 +492,7 @@ export function Scene(): JSX.Element {
       style={{ background: BG }}
       frameloop="always"
     >
+      <MemoryLog />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}
       <fog attach="fog" args={[0x000000, GRID_RADIUS * 0.9, GRID_RADIUS * 4]} />
       <ambientLight intensity={0.8} />

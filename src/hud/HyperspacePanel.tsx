@@ -35,7 +35,7 @@ function formatDuration(ms: number): string {
   return `${(h / 24).toFixed(1)} d`
 }
 import { useCyberspace } from '../store/useCyberspace'
-import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 
 /**
@@ -235,7 +235,15 @@ export function HyperspacePanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Hyperspace</h2>
-        <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
+        {ready ? (
+          <button
+            className="tag tag--tap"
+            title="Open the Hyperspace overlay (H)"
+            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else exitHyperspaceView() }}
+          >{tag}</button>
+        ) : (
+          <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
+        )}
       </header>
 
       <div className="hyper__group">

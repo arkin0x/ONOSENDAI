@@ -214,6 +214,7 @@ const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
   { href: 'https://straylight.cafe', name: 'straylight.cafe', what: 'cyberspace enthusiast community hub' },
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
+  { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
 ]
 
 function LinksPanel(): JSX.Element {

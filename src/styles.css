@@ -225,6 +225,23 @@ body {
   color: var(--ok);
 }
 
+/* A tag that opens something when tapped: the same pill, a hand cursor, and
+ * the accent on hover so it reads as a control. */
+.tag--tap {
+  font-family: inherit;
+  line-height: inherit;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tag--tap:hover,
+.tag--tap:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
 .tag--local {
   color: var(--dim);
 }

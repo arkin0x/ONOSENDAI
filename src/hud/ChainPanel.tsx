@@ -24,7 +24,7 @@ export function ChainPanel(): JSX.Element {
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
-  const actions = chain.hops + chain.sidesteps
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
 
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
@@ -40,9 +40,16 @@ export function ChainPanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Proof chain</h2>
-        <span className="tag">
-          {actions} ACTION{actions === 1 ? '' : 'S'}
-        </span>
+        {/* The whole chain, spawn included, not this session's proofs; a tap
+            opens the chain explorer at the head, a second tap puts it away. */}
+        <button
+          className="tag tag--tap"
+          onClick={() => useCyberspace.getState().explore(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
+          aria-pressed={exploreIndex !== null}
+          title="Open the chain explorer"
+        >
+          {events.length} ACTION{events.length === 1 ? '' : 'S'}
+        </button>
       </header>
 
       <dl className="stats">
@@ -84,7 +91,7 @@ export function ChainPanel(): JSX.Element {
         <code>{genesisId}</code>
       </div>
       <div className="hash">
-        <span className="hash__label">chain head{actions === 0 ? ' (spawn)' : ''}</span>
+        <span className="hash__label">chain head{events.length <= 1 ? ' (spawn)' : ''}</span>
         <code>{prevEventId}</code>
       </div>
 

@@ -142,16 +142,18 @@ function turn(p: P3, k: number): P3 {
   return [x, y, z]
 }
 
-/**
- * The shape as it lands: turned to FACING, moved to the tap, and pushed back
- * inside the grid if any of it would poke out. Nothing here is wider than
- * the grid, so the push always succeeds.
- */
-export function compile(kind: StampKind, size: number, facing: Facing, origin: P3): Shape {
+/** The shape turned to FACING and sitting on the origin, before any push into the grid. */
+function turned(kind: StampKind, size: number, facing: Facing): Shape {
   const s = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size)))
   const base = local(kind, s)
   const k = FACED[kind] ? facing : 0
-  const points = base.points.map((p) => { const t = turn(p, k); return [t[0] + origin[0], t[1] + origin[1], t[2] + origin[2]] as P3 })
+  return { points: base.points.map((p) => turn(p, k)), faces: base.faces }
+}
+
+const moved = (points: P3[], by: P3): P3[] => points.map((p) => [p[0] + by[0], p[1] + by[1], p[2] + by[2]] as P3)
+
+/** The push that brings a shape back inside the grid: zero on an axis it already fits. */
+function fit(points: P3[]): P3 {
   const shift: P3 = [0, 0, 0]
   for (let a = 0; a < 3; a++) {
     let lo = Infinity, hi = -Infinity
@@ -159,7 +161,24 @@ export function compile(kind: StampKind, size: number, facing: Facing, origin: P
     if (lo < -GRID_HALF) shift[a] = -GRID_HALF - lo
     else if (hi > GRID_HALF) shift[a] = GRID_HALF - hi
   }
-  return { points: points.map((p) => [p[0] + shift[0], p[1] + shift[1], p[2] + shift[2]] as P3), faces: base.faces }
+  return shift
+}
+
+/**
+ * The shape as it lands: turned to FACING, moved to the tap, and pushed back
+ * inside the grid if any of it would poke out. Nothing here is wider than
+ * the grid, so the push always succeeds.
+ */
+export function compile(kind: StampKind, size: number, facing: Facing, origin: P3): Shape {
+  const t = turned(kind, size, facing)
+  const points = moved(t.points, origin)
+  return { points: moved(points, fit(points)), faces: t.faces }
+}
+
+/** Where a stamp aimed at `origin` lands: `origin` itself unless the grid's edge pushed it back. */
+export function landing(kind: StampKind, size: number, facing: Facing, origin: P3): P3 {
+  const shift = fit(moved(turned(kind, size, facing).points, origin))
+  return [origin[0] + shift[0], origin[1] + shift[1], origin[2] + shift[2]]
 }
 
 /** The corners of a triangle as one order-free key. */
@@ -204,9 +223,14 @@ export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: 
   return { shard: { ...shard, vertices, faces }, culled: drop.size * 2 }
 }
 
-/** What the stamp would be on its own: what the aim ghost draws. */
-export function preview(kind: StampKind, size: number, facing: Facing, origin: P3, color: [number, number, number]): ShardModel {
-  const shape = compile(kind, size, facing, origin)
+/**
+ * The stamp on its own at the origin: what the aim ghost draws, placed at
+ * `landing`. It depends on the shape and colour only, never on the aim, so the
+ * ghost's geometry is built once per shape and merely moved as the pointer
+ * crosses cells; building it afresh per cell was the ghost's whole cost.
+ */
+export function preview(kind: StampKind, size: number, facing: Facing, color: [number, number, number]): ShardModel {
+  const shape = turned(kind, size, facing)
   return {
     id: 'ghost',
     name: kind,

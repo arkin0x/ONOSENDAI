@@ -6,13 +6,13 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useWorkshop } from './useWorkshop'
+import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 
 const w = () => useWorkshop.getState()
 
 describe('workshop', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selected: null, facePick: [], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    useWorkshop.setState({ shards: [], currentId: null, selected: null, selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
   })
 
@@ -199,5 +199,56 @@ describe('workshop', () => {
     const n = w().current()!.vertices.length
     expect(n).toBeLessThanOrEqual(512)
     expect(w().notice).toMatch(/No room/)
+  })
+})
+
+describe('faces and palette', () => {
+  beforeEach(() => {
+    useWorkshop.setState({ shards: [], currentId: null, selected: null, selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], past: [], future: [], tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0, color: [0, 0.9, 1] })
+    w().create('t')
+    w().placeStamp([0, 0, 0])
+    w().setTool('face')
+  })
+
+  it('selects a tapped face instead of the point, and DELETE FACE removes just that face, undoably', () => {
+    const before = w().current()!.faces.length
+    w().selectVertex(0)
+    w().selectFace(3)
+    expect(w().selected).toBeNull()
+    expect(w().selectedFace).toBe(3)
+    const gone = w().current()!.faces[3]
+    w().deleteSelectedFace()
+    expect(w().selectedFace).toBeNull()
+    expect(w().current()!.faces).toHaveLength(before - 1)
+    expect(w().current()!.faces).not.toContainEqual(gone)
+    w().undo()
+    expect(w().current()!.faces).toHaveLength(before)
+  })
+
+  it('drops the face when a point is selected, a corner picked, or the tool changes', () => {
+    w().selectFace(0); w().selectVertex(1); expect(w().selectedFace).toBeNull()
+    w().selectFace(0); w().pickForFace(2); expect(w().selectedFace).toBeNull()
+    w().clearFacePick()
+    w().selectFace(0); w().setTool('select'); expect(w().selectedFace).toBeNull()
+  })
+
+  it('remembers a picked colour at the front once, moves a repeat forward, ignores junk, forgets on request', () => {
+    w().rememberColor('#123456')
+    expect(w().palette[0]).toBe('#123456')
+    expect(w().palette).toHaveLength(DEFAULT_PALETTE.length + 1)
+    w().rememberColor('#FFFFFF')
+    expect(w().palette[0]).toBe('#ffffff')
+    expect(w().palette.filter((h) => h === '#ffffff')).toHaveLength(1)
+    w().rememberColor('nonsense')
+    expect(w().palette).toHaveLength(DEFAULT_PALETTE.length + 1)
+    w().forgetColor('#123456')
+    expect(w().palette).not.toContain('#123456')
+  })
+
+  it('keeps 24 colours, the oldest falling off the end', () => {
+    for (let i = 0; i < 30; i++) w().rememberColor('#' + i.toString(16).padStart(6, '0'))
+    expect(w().palette).toHaveLength(24)
+    expect(w().palette[0]).toBe('#00001d')
+    expect(w().palette).not.toContain('#ffffff')
   })
 })

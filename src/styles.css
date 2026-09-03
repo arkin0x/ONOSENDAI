@@ -2188,6 +2188,13 @@ kbd {
   cursor: default;
 }
 
+/* A tool is an icon and a word. */
+.workshop__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .workshop__mode.is-on,
 .workshop__tool.is-on {
   color: #05070d;
@@ -2368,27 +2375,78 @@ kbd {
   border-color: rgba(255, 59, 107, 0.4);
 }
 
+/* The picker: a dashed swatch with a pipette on it, so it reads as "any
+ * colour" beside the fixed ones. */
+.workshop__picker {
+  position: relative;
+  display: inline-flex;
+}
+
 .workshop__color {
   width: 38px;
   height: 30px;
   padding: 0;
-  border: 1px solid rgba(0, 229, 255, 0.25);
+  border: 1px dashed rgba(255, 255, 255, 0.6);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
 }
 
+.workshop__picker-icon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  pointer-events: none;
+  color: #fff;
+  filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);
+}
+
 .workshop__swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
+/* A swatch is tapped to use and held to delete, so the long press must not
+ * select text, raise a callout or scroll. */
 .workshop__swatch {
   width: 22px;
   height: 22px;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The swatch in use. */
+.workshop__swatch.is-on {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.workshop__swatch--sample {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* Between LEVEL and UNIT, which read as one control without it. */
+.workshop__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 8px;
+  background: rgba(0, 229, 255, 0.25);
+}
+
+/* What the unit exponent means, so changing it visibly changes something. */
+.workshop__unit-size {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
 }
 
 .workshop__gap {

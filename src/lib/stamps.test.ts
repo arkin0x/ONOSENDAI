@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { GRID_HALF, MAX_VERTICES, newShard, validFace, validPoint, type ShardModel } from './shards'
-import { STAMPS, FACED, compile, preview, stamp, type Facing, type StampKind } from './stamps'
+import { STAMPS, FACED, compile, landing, preview, stamp, type Facing, type StampKind } from './stamps'
 
 const red: [number, number, number] = [1, 0, 0]
 const empty = (): ShardModel => ({ ...newShard('t'), mode: 'solid' })
@@ -101,7 +101,24 @@ describe('stamps', () => {
   })
 
   it('previews as a solid when it has faces and as lines when it does not', () => {
-    expect(preview('block', 1, 0, [0, 0, 0], red).mode).toBe('solid')
-    expect(preview('ring', 1, 0, [0, 0, 0], red).mode).toBe('lines')
+    expect(preview('block', 1, 0, red).mode).toBe('solid')
+    expect(preview('ring', 1, 0, red).mode).toBe('lines')
+  })
+})
+
+describe('ghost placement', () => {
+  const red: [number, number, number] = [1, 0, 0]
+  it('the preview moved to its landing is exactly the stamp, edge pushes included', () => {
+    for (const kind of STAMPS) {
+      for (const origin of [[0, 0, 0], [GRID_HALF, 0, GRID_HALF], [-GRID_HALF, 3, 2]] as Array<[number, number, number]>) {
+        const at = landing(kind, 4, 1, origin)
+        const ghost = preview(kind, 4, 1, red).vertices.map((v) => [v.p[0] + at[0], v.p[1] + at[1], v.p[2] + at[2]])
+        expect(ghost).toEqual(compile(kind, 4, 1, origin).points)
+      }
+    }
+  })
+  it('lands on the aim unless the grid edge pushes it back', () => {
+    expect(landing('block', 2, 0, [1, 0, 1])).toEqual([1, 0, 1])
+    expect(landing('block', 4, 0, [GRID_HALF, 0, GRID_HALF])[0]).toBeLessThan(GRID_HALF)
   })
 })

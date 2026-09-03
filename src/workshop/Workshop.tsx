@@ -18,8 +18,10 @@
  * keeps most of its screen for the bench.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { MousePointer2, Pipette, Plus, Stamp, Triangle, type LucideIcon } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
 import { GRID_HALF, MODES, hexToRgb, rgbToHex, toPayload, type ShardMode } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
@@ -28,15 +30,19 @@ import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 
-const PALETTE = ['#00e5ff', '#ff2323', '#52e39f', '#ffb020', '#c07dff', '#f7931a', '#ffffff', '#2f81f7']
-
 const TOOLS: Tool[] = ['stamp', 'add', 'select', 'face']
+const TOOL_ICON: Record<Tool, LucideIcon> = { stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
+
+/** A press this long on a swatch asks to delete it rather than using it. */
+const LONG_PRESS_MS = 550
+/** The picker fires on every step through the wheel; the palette gets the colour you stop on. */
+const SETTLE_MS = 500
 
 const TOOL_HELP: Record<Tool, string> = {
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap a point, then nudge it with the pad, colour it, or delete it.',
-  face: 'Tap the corners of a face in order, then tap the first again, or FILL.',
+  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it.',
 }
 
 /** Shown once, the first time the workshop opens on this device. */
@@ -59,6 +65,29 @@ function Intro(): JSX.Element | null {
   )
 }
 
+/** A swatch: tap to use it, hold to be asked whether to delete it. */
+function Swatch({ hex, on, onUse, onHold }: { hex: string; on: boolean; onUse: () => void; onHold: () => void }): JSX.Element {
+  const timer = useRef<number>()
+  const held = useRef(false)
+  const stop = (): void => { window.clearTimeout(timer.current); timer.current = undefined }
+  useEffect(() => stop, [])
+  return (
+    <button
+      className={`workshop__swatch ${on ? 'is-on' : ''}`}
+      style={{ background: hex }}
+      aria-label={`Colour ${hex}`}
+      aria-pressed={on}
+      title={`${hex} (hold to delete)`}
+      onPointerDown={() => { held.current = false; stop(); timer.current = window.setTimeout(() => { held.current = true; onHold() }, LONG_PRESS_MS) }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+      onClick={() => { if (!held.current) onUse() }}
+      {...noCallout}
+    />
+  )
+}
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
@@ -66,6 +95,8 @@ export function Workshop(): JSX.Element | null {
   const tool = useWorkshop((s) => s.tool)
   const selected = useWorkshop((s) => s.selected)
   const facePick = useWorkshop((s) => s.facePick)
+  const selectedFace = useWorkshop((s) => s.selectedFace)
+  const palette = useWorkshop((s) => s.palette)
   const level = useWorkshop((s) => s.level)
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
@@ -77,6 +108,10 @@ export function Workshop(): JSX.Element | null {
   const [listOpen, setListOpen] = useState(false)
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
+  const [deleteColor, setDeleteColor] = useState<string | null>(null)
+  const settle = useRef<number>()
+  const picked = useRef(false)
+  useEffect(() => () => window.clearTimeout(settle.current), [])
   const bind = useRepeatable()
 
   if (!open) return null
@@ -85,6 +120,22 @@ export function Workshop(): JSX.Element | null {
   const nudge = (axis: 0 | 1 | 2, d: number) => () => w().moveSelected(axis, d)
   const canNudge = selected !== null
   const say = (notice: string): void => useWorkshop.setState({ notice })
+
+  // The picker paints live and, once the wheel has settled, puts the colour at
+  // the front of the palette; leaving the picker settles it at once.
+  const hex = rgbToHex(color)
+  const pick = (value: string): void => {
+    w().colorSelected(hexToRgb(value))
+    picked.current = true
+    window.clearTimeout(settle.current)
+    settle.current = window.setTimeout(() => { picked.current = false; w().rememberColor(value) }, SETTLE_MS)
+  }
+  const settled = (value: string): void => {
+    if (!picked.current) return
+    window.clearTimeout(settle.current)
+    picked.current = false
+    w().rememberColor(value)
+  }
 
   const copy = (id: string): void => {
     const s = w().shards.find((x) => x.id === id)
@@ -184,6 +235,7 @@ export function Workshop(): JSX.Element | null {
             {selected !== null && shard.vertices[selected] && (
               <> · selected ({shard.vertices[selected].p.join(', ')})</>
             )}
+            {selectedFace !== null && <> · face {selectedFace + 1} selected</>}
             {tool === 'face' && facePick.length > 0 && <> · {facePick.length} corner{facePick.length === 1 ? '' : 's'}</>}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
             {notice && <div className="workshop__notice">{notice}</div>}
@@ -193,11 +245,14 @@ export function Workshop(): JSX.Element | null {
 
       <div className="workshop__tools">
         <div className="workshop__row" role="group" aria-label="Tool">
-          {TOOLS.map((t, i) => (
-            <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${t} (${i + 1})`}>
-              {t.toUpperCase()}
-            </button>
-          ))}
+          {TOOLS.map((t, i) => {
+            const Icon = TOOL_ICON[t]
+            return (
+              <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${t} (${i + 1})`}>
+                <Icon size={12} strokeWidth={2.25} aria-hidden />{t.toUpperCase()}
+              </button>
+            )
+          })}
           <span className="workshop__gap" />
           <button className="workshop__btn" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)">UNDO</button>
           <button className="workshop__btn" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)">REDO</button>
@@ -206,7 +261,9 @@ export function Workshop(): JSX.Element | null {
             A shard is coloured points on a grid of whole units, drawn SOLID (faces, colours blending
             across them), POINTS (every point a light) or LINES (one line through the points in the
             order they were made). STAMP places a whole shape; ADD one point; SELECT a point to move,
-            colour or delete it; FACE picks corners and FILL joins them. Stamps keep their own corners
+            colour or delete it; FACE picks corners and FILL joins them, and a tap on a face selects it
+            for DELETE FACE. The palette keeps every colour the picker settles on; hold a swatch to
+            delete it. Stamps keep their own corners
             even where they touch, so a red block against a blue one keeps a crisp edge. UNIT says how
             big one grid unit is in the world, from a picometre to the width of a sector; DEPLOY shows
             the shard at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD /
@@ -253,7 +310,16 @@ export function Workshop(): JSX.Element | null {
           </div>
         )}
 
-        {tool === 'face' && (
+        {tool === 'face' && selectedFace !== null && (
+          <div className="workshop__row">
+            <span className="workshop__label">FACE</span>
+            <span className="workshop__value workshop__value--wide">face {selectedFace + 1} of {shard?.faces.length ?? 0}</span>
+            <button className="workshop__btn workshop__btn--danger" onClick={() => w().deleteSelectedFace()} title="Remove this face (Del)">DELETE FACE</button>
+            <button className="workshop__btn" onClick={() => w().selectFace(null)} title="Keep it (Esc)">CANCEL</button>
+          </div>
+        )}
+
+        {tool === 'face' && selectedFace === null && (
           <div className="workshop__row">
             <span className="workshop__label">FACE</span>
             <span className="workshop__value workshop__value--wide">{facePick.length} corner{facePick.length === 1 ? '' : 's'}</span>
@@ -268,32 +334,52 @@ export function Workshop(): JSX.Element | null {
           <span className="workshop__value">{level}</span>
           <button className="workshop__btn" {...bind(() => w().setLevel(w().level + 1))} disabled={level >= GRID_HALF} aria-label="Level up">+</button>
 
-          <span className="workshop__label workshop__label--gap">UNIT 2^</span>
-          <button className="workshop__btn" {...bind(() => w().setUnit((shard?.unit ?? 0) - 1))} disabled={!shard || shard.unit <= 0} aria-label="Smaller unit">−</button>
+          <span className="workshop__sep" aria-hidden />
+          <span className="workshop__label">UNIT 2^</span>
+          {/* Read the unit from the store, not the render: held, the button repeats, and the closure's shard is the one from before the first step. */}
+          <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) - 1))} disabled={!shard || shard.unit <= 0} aria-label="Smaller unit">−</button>
           <span className="workshop__value">{shard?.unit ?? 0}</span>
-          <button className="workshop__btn" {...bind(() => w().setUnit((shard?.unit ?? 0) + 1))} disabled={!shard || shard.unit >= 84} aria-label="Larger unit">+</button>
+          <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={!shard || shard.unit >= 84} aria-label="Larger unit">+</button>
+          <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the shard at this size.">= {formatCellSize(shard?.unit ?? 0)}</span>
           <span className="workshop__gap" />
           <button className="workshop__btn workshop__btn--danger" disabled={!shard || shard.vertices.length === 0} onClick={() => { if (window.confirm('Clear every vertex and face of this shard? (UNDO brings it back.)')) w().clearShard() }}>CLEAR</button>
         </div>
 
         <div className="workshop__row">
           <span className="workshop__label">COLOUR</span>
-          <input
-            type="color"
-            className="workshop__color"
-            value={rgbToHex(color)}
-            onChange={(e) => w().colorSelected(hexToRgb(e.target.value))}
-            aria-label="Vertex colour"
-            {...noCallout}
-          />
+          <span className="workshop__picker" title="Pick any colour; it joins the palette">
+            <input
+              type="color"
+              className="workshop__color"
+              value={hex}
+              list="workshop-palette"
+              onChange={(e) => pick(e.target.value)}
+              onBlur={(e) => settled(e.target.value)}
+              aria-label="Pick a colour"
+              {...noCallout}
+            />
+            <Pipette className="workshop__picker-icon" size={13} strokeWidth={2.25} aria-hidden />
+            {/* Browsers that honour it (Chrome, desktop and Android) offer these inside the picker as starting points. */}
+            <datalist id="workshop-palette">{palette.map((h) => <option key={h} value={h} />)}</datalist>
+          </span>
           <div className="workshop__swatches">
-            {PALETTE.map((hex) => (
-              <button key={hex} className="workshop__swatch" style={{ background: hex }} aria-label={`Colour ${hex}`} onClick={() => w().colorSelected(hexToRgb(hex))} />
+            {palette.map((h) => (
+              <Swatch key={h} hex={h} on={h === hex} onUse={() => w().colorSelected(hexToRgb(h))} onHold={() => setDeleteColor(h)} />
             ))}
           </div>
           <button className="workshop__btn" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="Apply the colour to every vertex">ALL</button>
         </div>
       </div>
+
+      {deleteColor !== null && (
+        <ConfirmModal
+          title="Delete colour from palette?"
+          body={<><span className="workshop__swatch workshop__swatch--sample" style={{ background: deleteColor }} aria-hidden />{deleteColor} leaves the palette. Vertices already painted with it keep it.</>}
+          confirmLabel="DELETE"
+          onConfirm={() => { w().forgetColor(deleteColor); setDeleteColor(null) }}
+          onCancel={() => setDeleteColor(null)}
+        />
+      )}
     </div>
   )
 }

@@ -42,8 +42,14 @@ import { triangulate } from '../lib/triangulate'
 export type Tool = 'stamp' | 'add' | 'select' | 'face'
 
 const STORAGE = 'onosendai:shards'
+const PALETTE_STORAGE = 'onosendai:palette'
 /** Undo depth per shard. */
 const HISTORY = 64
+/** The swatches every workshop starts with. */
+export const DEFAULT_PALETTE = ['#00e5ff', '#ff2323', '#52e39f', '#ffb020', '#c07dff', '#f7931a', '#ffffff', '#2f81f7']
+/** Swatches the palette keeps before the oldest falls off the end. */
+const PALETTE_MAX = 24
+const HEX = /^#[0-9a-f]{6}$/
 
 type P3 = [number, number, number]
 
@@ -57,6 +63,10 @@ export interface WorkshopState {
   selected: number | null
   /** Corners picked so far for the next face, in order. */
   facePick: number[]
+  /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
+  selectedFace: number | null
+  /** Swatches to hand: newest first, every colour the picker ever settled on, then the defaults. */
+  palette: string[]
   /** The Y the add and stamp tools place on: the grid plane moves up and down. */
   level: number
   /** The colour new vertices get, and the colour input shows. */
@@ -91,7 +101,13 @@ export interface WorkshopState {
   setAim: (p: P3 | null) => void
   placeStamp: (at: P3) => void
   addVertex: (p: P3) => void
+  /** Also drops any selected face: a point and a face are never selected together. */
   selectVertex: (index: number | null) => void
+  selectFace: (index: number | null) => void
+  deleteSelectedFace: () => void
+  /** Put a colour at the front of the palette (moving it there if it is already in). */
+  rememberColor: (hex: string) => void
+  forgetColor: (hex: string) => void
   moveSelected: (axis: 0 | 1 | 2, delta: number) => void
   colorSelected: (c: [number, number, number]) => void
   colorAll: (c: [number, number, number]) => void
@@ -124,6 +140,18 @@ function load(): ShardModel[] {
 
 function save(shards: ShardModel[]): void {
   try { localStorage.setItem(STORAGE, JSON.stringify(shards)) } catch { /* quota or private mode */ }
+}
+
+function loadPalette(): string[] {
+  try {
+    const raw = localStorage.getItem(PALETTE_STORAGE)
+    const list: unknown = raw ? JSON.parse(raw) : null
+    return Array.isArray(list) && list.every((h) => typeof h === 'string' && HEX.test(h)) ? list : DEFAULT_PALETTE
+  } catch { return DEFAULT_PALETTE }
+}
+
+function savePalette(palette: string[]): void {
+  try { localStorage.setItem(PALETTE_STORAGE, JSON.stringify(palette)) } catch { /* quota or private mode */ }
 }
 
 /** Every vertex on the same point as vertex `index`, itself included. */
@@ -166,6 +194,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     tool: 'stamp',
     selected: null,
     facePick: [],
+    selectedFace: null,
+    palette: loadPalette(),
     level: 0,
     color: [0, 0.9, 1],
     stampKind: 'block',
@@ -179,20 +209,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? shards[0]?.id ?? get().create()
-      set({ open: true, currentId, selected: null, facePick: [], tool: 'stamp', aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, selected: null, selectedFace: null, facePick: [], tool: 'stamp', aim: null, past: [], future: [], notice: null })
     },
 
-    closeWorkshop: () => set({ open: false, selected: null, facePick: [], aim: null }),
+    closeWorkshop: () => set({ open: false, selected: null, selectedFace: null, facePick: [], aim: null }),
 
     create: (name) => {
       const s = newShard(name ?? `Shard ${get().shards.length + 1}`)
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selected: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    select: (id) => set({ currentId: id, selected: null, facePick: [], past: [], future: [], notice: null }),
+    select: (id) => set({ currentId: id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }),
 
     rename: (id, name) => {
       const list = get().shards.map((s) => (s.id === id ? { ...s, name: name.slice(0, 64), updatedAt: Date.now() } : s))
@@ -204,19 +234,19 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!src) return id
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map((v) => ({ p: [...v.p] as P3, c: [...v.c] as ShardVertex['c'] })), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
-      set({ shards: list, currentId: copy.id, selected: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId: copy.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id
     },
 
     remove: (id) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? (list[0]?.id ?? null) : get().currentId
-      set({ shards: list, currentId, selected: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setUnit: (unit) => edit((s) => ({ ...s, unit: Math.max(0, Math.min(84, Math.round(unit))) })),
-    setTool: (tool) => set({ tool, facePick: [], aim: null }),
+    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null }),
     setLevel: (level) => set({ level: Math.max(-GRID_HALF, Math.min(GRID_HALF, Math.round(level))) }),
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind }),
@@ -237,7 +267,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!res) { set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
       edit(() => ({ ...res.shard, mode }), notice)
-      set({ selected: null, facePick: [] })
+      set({ selected: null, selectedFace: null, facePick: [] })
     },
 
     addVertex: (p) => {
@@ -253,7 +283,28 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (added >= 0) set({ selected: added })
     },
 
-    selectVertex: (index) => set({ selected: index }),
+    selectVertex: (index) => set({ selected: index, selectedFace: null }),
+
+    selectFace: (index) => set({ selectedFace: index, selected: index === null ? get().selected : null }),
+
+    deleteSelectedFace: () => {
+      const { selectedFace } = get()
+      if (selectedFace === null) return
+      get().removeFace(selectedFace)
+      set({ selectedFace: null })
+    },
+
+    rememberColor: (hex) => {
+      const h = hex.toLowerCase()
+      if (!HEX.test(h)) return
+      const palette = [h, ...get().palette.filter((x) => x !== h)].slice(0, PALETTE_MAX)
+      set({ palette }); savePalette(palette)
+    },
+
+    forgetColor: (hex) => {
+      const palette = get().palette.filter((x) => x !== hex.toLowerCase())
+      set({ palette }); savePalette(palette)
+    },
 
     moveSelected: (axis, delta) => {
       const { selected } = get()
@@ -301,7 +352,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
           .map((f) => f.map((i) => remap.get(i) as number) as [number, number, number])
         return { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }
       })
-      set({ selected: null, facePick: [] })
+      set({ selected: null, selectedFace: null, facePick: [] })
     },
 
     pickForFace: (index) => {
@@ -313,8 +364,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const at = facePick.findIndex((i) => pointKey(s.vertices[i].p) === key)
       // Tapping the first corner again closes the loop.
       if (at === 0 && facePick.length >= 3) { get().fill(); return }
-      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at) }); return }
-      set({ facePick: [...facePick, index] })
+      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFace: null }); return }
+      set({ facePick: [...facePick, index], selectedFace: null })
     },
 
     clearFacePick: () => set({ facePick: [] }),
@@ -339,7 +390,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),
 
-    clearShard: () => { edit((s) => ({ ...s, vertices: [], faces: [] })); set({ selected: null, facePick: [] }) },
+    clearShard: () => { edit((s) => ({ ...s, vertices: [], faces: [] })); set({ selected: null, selectedFace: null, facePick: [] }) },
 
     undo: () => {
       const { past, shards, currentId } = get()
@@ -347,7 +398,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !past.length) return
       const list = shards.slice()
       list[i] = past[past.length - 1]
-      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selected: null, facePick: [], notice: null })
+      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selected: null, selectedFace: null, facePick: [], notice: null })
       save(list)
     },
 
@@ -357,7 +408,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !future.length) return
       const list = shards.slice()
       list[i] = future[future.length - 1]
-      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selected: null, facePick: [], notice: null })
+      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selected: null, selectedFace: null, facePick: [], notice: null })
       save(list)
     },
 
@@ -372,7 +423,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = fromPayload(raw, uuid())
       if (!s) return null
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selected: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },

@@ -4,7 +4,8 @@
  * A grid at the current level, the shard drawn live in its mode, a handle on
  * every point, and a ghost of what the next tap would make. Taps do the work:
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
- * a handle, SELECT picks it and FACE collects it. Dragging orbits. R3F
+ * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
+ * so DELETE can take it. Dragging orbits. R3F
  * reports how far the pointer travelled between down and up, which is what
  * separates a tap from an orbit, so a thumb that wobbles still taps.
  *
@@ -17,10 +18,10 @@
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, Float32BufferAttribute, Line, LineBasicMaterial, Vector3 } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, centroid, pointKey, rgbToHex } from '../lib/shards'
-import { preview } from '../lib/stamps'
+import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
 
@@ -90,10 +91,9 @@ function Ghost(): JSX.Element | null {
   const size = useWorkshop((s) => s.stampSize)
   const facing = useWorkshop((s) => s.stampFacing)
   const color = useWorkshop((s) => s.color)
-  const shard = useMemo(
-    () => (aim && tool === 'stamp' ? preview(kind, size, facing, aim, color) : null),
-    [aim, tool, kind, size, facing, color],
-  )
+  // Built once per shape and colour; the aim only moves it. Built per cell, the
+  // ghost cost a fresh geometry every time the pointer crossed a grid line.
+  const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color) : null), [tool, kind, size, facing, color])
   if (!aim) return null
   if (tool === 'add') {
     return (
@@ -103,7 +103,12 @@ function Ghost(): JSX.Element | null {
       </mesh>
     )
   }
-  return shard ? <ShardMesh shard={shard} ghost /> : null
+  if (!model) return null
+  return (
+    <group position={landing(kind, size, facing, aim)}>
+      <ShardMesh shard={model} ghost />
+    </group>
+  )
 }
 
 /**
@@ -175,7 +180,35 @@ function PickLoop(): JSX.Element | null {
     l.frustumCulled = false
     return l
   }, [shard, facePick])
+  useEffect(() => () => { line?.geometry.dispose(); line?.material.dispose() }, [line])
   return line ? <primitive object={line} /> : null
+}
+
+/** The face tapped in FACE mode, lit in the selection colour so DELETE FACE has a visible target. */
+function FaceHighlight(): JSX.Element | null {
+  const shard = useWorkshop((s) => s.current())
+  const face = useWorkshop((s) => s.selectedFace)
+  const lit = useMemo(() => {
+    const f = face === null ? undefined : shard?.faces[face]
+    if (!shard || !f) return null
+    const pts = f.map((i) => shard.vertices[i].p)
+    // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
+    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false }))
+    edge.frustumCulled = false
+    return { g, edge }
+  }, [shard, face])
+  useEffect(() => () => { lit?.g.dispose(); lit?.edge.material.dispose() }, [lit])
+  if (!lit) return null
+  return (
+    <>
+      <mesh geometry={lit.g} frustumCulled={false}>
+        <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
+      </mesh>
+      <primitive object={lit.edge} />
+    </>
+  )
 }
 
 /**
@@ -222,9 +255,9 @@ function Keys(): null {
         KeyR: [1, 1], KeyF: [1, -1],
       }
       if (nudge[e.code]) { e.preventDefault(); w.moveSelected(...nudge[e.code]); return }
-      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); w.deleteSelected(); return }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { if (w.facePick.length >= 3) { e.preventDefault(); w.fill() } return }
-      if (e.code === 'Escape') { e.preventDefault(); if (w.selected !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      if (e.code === 'Escape') { e.preventDefault(); if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
       if (e.code === 'Digit1') w.setTool('stamp')
       if (e.code === 'Digit2') w.setTool('add')
       if (e.code === 'Digit3') w.setTool('select')
@@ -241,8 +274,17 @@ function Keys(): null {
 
 export function Bench(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
+  const tool = useWorkshop((s) => s.tool)
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
+
+  // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
+  // spheres stand proud of the face, so the raycast meets them first.
+  const onFace = (e: ThreeEvent<MouseEvent>): void => {
+    if (e.delta > TAP_SLOP || e.faceIndex === undefined) return
+    e.stopPropagation()
+    useWorkshop.getState().selectFace(e.faceIndex)
+  }
 
   return (
     <Canvas
@@ -257,7 +299,7 @@ export function Bench(): JSX.Element {
       onPointerMissed={(e) => {
         if ((e as PointerEvent).button !== 0) return
         const w = useWorkshop.getState()
-        if (w.selected !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
+        if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
       }}
     >
       <ambientLight intensity={1} />
@@ -267,9 +309,10 @@ export function Bench(): JSX.Element {
       {/* Axes, in the compass's colours, so X is red here and out there. */}
       <axesHelper args={[GRID_HALF + 1]} />
       <Grid />
-      {shard && <ShardMesh shard={shard} />}
+      {shard && <ShardMesh shard={shard} onFaceClick={tool === 'face' ? onFace : undefined} />}
       <Ghost />
       <PickLoop />
+      <FaceHighlight />
       <Handles />
     </Canvas>
   )

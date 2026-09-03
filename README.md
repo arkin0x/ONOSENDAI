@@ -88,7 +88,10 @@ turned a quarter at a time; a ghost shows where it will land before it does.
 ADD places one vertex at the current level; SELECT picks a point for the nudge
 pad (a unit along X, Y or Z), the colour input and DELETE; FACE picks corners
 in order and FILL joins them into a face, any number of corners, notches and
-all (tap the first corner again to close). A shard renders SOLID (triangles,
+all (tap the first corner again to close), and a tap on a drawn face selects
+it for DELETE FACE. The colour picker paints live and puts each colour it
+settles on at the front of the palette, which persists; hold a swatch to be
+asked whether to delete it. A shard renders SOLID (triangles,
 colours blended across faces), POINTS (every vertex a light) or LINES (a
 polyline through the vertices, colours blending along it), chosen per shard
 and previewed live; a new shard starts in LINES and switches itself to SOLID
@@ -96,7 +99,10 @@ the first time it gets faces. Stamps keep their own vertices even where they
 touch, so a red block against a blue one keeps a crisp seam (the wall between
 them is dropped rather than paid for), and a point that several vertices share
 moves, colours and deletes as one. `unit` says what one grid unit is in
-gibsons (2^unit). Every edit undoes. Shards persist in localStorage; COPY and
+gibsons (2^unit), shown beside the control as a real size. Every edit undoes.
+While the bench is up the world canvas behind it stops drawing (its frameloop
+goes to `never`, with the clock kept across the pause), which on a phone was
+most of every frame. Shards persist in localStorage; COPY and
 PASTE in the shard list carry one through the clipboard in its wire form.
 Keys on the bench: 1 2 3 4 pick tools, Q turns a stamp, WASD / RF or arrows
 nudge, Del deletes, Enter fills, [ ] change the level, Ctrl+Z / Ctrl+Shift+Z

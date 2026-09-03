@@ -188,3 +188,28 @@ export function PaidModal(): JSX.Element | null {
     />
   )
 }
+
+/**
+ * A payment that arrived while the tab was away. On a phone the wallet is
+ * another app, and the PWA is often dropped while it is up: on return the
+ * route is gone, but the deposit was on disk, claimed at startup and
+ * credited. Without this it looked as if the payment was never seen.
+ */
+export function CreditedModal(): JSX.Element | null {
+  const credited = useCyberspace((s) => s.cloud.credited)
+  if (!credited) return null
+  const close = (): void => useCyberspace.getState().dismissCredited()
+  return (
+    <ConfirmModal
+      banner={<HosakaBanner />}
+      title="Payment received"
+      body={`${satsLabel(credited.msats)} paid while you were away are on your HOSAKA balance. Line up the move again and GO: the balance covers it.`}
+      confirmLabel="OK"
+      cancelLabel={null}
+      danger={false}
+      cardClassName="cloud"
+      onConfirm={close}
+      onCancel={close}
+    />
+  )
+}

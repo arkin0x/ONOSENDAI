@@ -11,7 +11,7 @@ import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { LootDetail } from './hud/LootDetail'
-import { CloudApproval, InvoiceModal, PaidModal } from './hud/InvoiceModal'
+import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
@@ -53,6 +53,16 @@ export default function App(): JSX.Element {
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
+  // Back from the wallet: a phone suspends the tab while another app is up,
+  // so the invoice poll's timer is still counting when the tab returns. Ask
+  // HOSAKA at once instead of waiting the interval out; harmless otherwise.
+  useEffect(() => {
+    const back = (): void => { if (document.visibilityState === 'visible') useCyberspace.getState().checkCloudPayment() }
+    document.addEventListener('visibilitychange', back)
+    window.addEventListener('pageshow', back)
+    window.addEventListener('focus', back)
+    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('pageshow', back); window.removeEventListener('focus', back) }
+  }, [])
 
   const isMobile = useIsMobile()
   const targets = useTargets()
@@ -165,6 +175,7 @@ export default function App(): JSX.Element {
       <CloudApproval />
       <InvoiceModal />
       <PaidModal />
+      <CreditedModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

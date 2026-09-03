@@ -283,6 +283,9 @@ export interface CloudState {
   checking: boolean
   /** The node's last word on the invoice, so a check shows something even when nothing changed. */
   lastCheck: { at: number; status: string } | null
+  /** A route deposit paid while the tab was away and claimed at startup:
+   * the sats now on the balance, announced once, then dismissed. */
+  credited: { msats: number; at: number } | null
 }
 
 const IDLE_CLOUD: CloudState = {
@@ -301,6 +304,7 @@ const IDLE_CLOUD: CloudState = {
   balance: null,
   balanceChecking: false,
   balanceError: null,
+  credited: null,
 }
 
 /**
@@ -524,6 +528,8 @@ export interface CyberspaceState {
   discardCloudJob: () => void
   /** Ask HOSAKA about the invoice now rather than at the next poll. */
   checkCloudPayment: () => void
+  /** The credited-while-away notice was read. */
+  dismissCredited: () => void
   setCloudMode: (mode: CloudMode) => void
   setCloudPrefs: (patch: Partial<CloudPrefs>) => void
   setInvoiceOpen: (open: boolean) => void
@@ -2119,7 +2125,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
           if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats)
           if (claimed.status === 'settled') {
             clearCloudDeposit()
-            set({ cloud: { ...get().cloud, message: `A ${satsOf(claimed.settled_msats ?? dep.amountMsats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.` } })
+            const msats = claimed.settled_msats ?? dep.amountMsats
+            set({ cloud: { ...get().cloud, message: `A ${satsOf(msats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.`, credited: { msats, at: Date.now() } } })
           } else if (claimed.status === 'expired') {
             clearCloudDeposit()
           }
@@ -2170,6 +2177,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       ...(proof.status === 'infeasible' ? { proof: IDLE_PROOF } : {}),
     })
   },
+
+  dismissCredited: () => { set({ cloud: { ...get().cloud, credited: null } }) },
 
   checkCloudPayment: () => {
     if (get().cloud.status !== 'awaiting_payment') return

@@ -24,7 +24,7 @@
  * be drawn.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
@@ -203,6 +203,10 @@ export function Rooms({ axes }: Props): JSX.Element {
       }
     })
   }, [position, scaleExp, axes])
+  // A rebuilt lattice replaces the geometry prop; nothing disposes the old
+  // one, and a BufferGeometry's GL buffers live until dispose() or context
+  // loss. Every anchor change and zoom leaked three of them.
+  useEffect(() => () => { for (const l of levels) l.geometry.dispose() }, [levels])
 
   return (
     <group>

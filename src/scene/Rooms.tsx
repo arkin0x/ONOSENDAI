@@ -92,7 +92,13 @@ function latticeOffsets(
 
   const out: number[] = []
   for (let k = -span; k <= span + 1; k++) {
-    out.push(Number((base + BigInt(k) * stride - origin) / step))
+    // Half a cell back: a cell drawn at integer index i spans [i - 0.5, i + 0.5]
+    // (pointCentre in lib/space.ts is the convention's statement), so a block
+    // boundary, which is the FACE between two cells, sits on a half-integer.
+    // The sector cage, the covering box and the markers already draw it there;
+    // these walls used to sit on the integers, half a cell into the block,
+    // cutting through the cell they should have bounded.
+    out.push(Number((base + BigInt(k) * stride - origin) / step) - 0.5)
   }
   return out
 }

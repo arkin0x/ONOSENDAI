@@ -17,6 +17,7 @@ import { query } from '../lib/relay'
 import { unbag, HIDDEN_KIND } from '../lib/hidden'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { useCeremony } from '../store/useCeremony'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 
@@ -81,8 +82,12 @@ export function useDiscovery(): void {
         found.push(...await unbag(ev, hexToBytes(keyHex)))
       }
       if (id === reqId.current) {
+        const known = useShards.getState().discovered
+        const fresh = found.filter((h) => !known[h.eventId])
         useShards.getState().addDiscovered(found)
         useShards.getState().setScanning(false)
+        // The ceremony: only for what this scan opened for the first time.
+        useCeremony.getState().mark(fresh)
       }
     }
 

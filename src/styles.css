@@ -3876,6 +3876,29 @@ kbd {
   height: 0;
 }
 
+/* KEY FOUND: the ceremony's chip, breathing in the accent colour */
+.hyperbar--found {
+  border-color: rgba(0, 229, 255, 0.6);
+  animation: found-breathe 1.6s ease-in-out infinite;
+  cursor: pointer;
+}
+.hyperbar--found .hyperbar__label {
+  color: var(--accent);
+}
+.foundchip__decode {
+  margin-left: auto;
+  max-width: 46ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--fg);
+}
+@keyframes found-breathe {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 229, 255, 0.12); }
+  50% { box-shadow: 0 0 22px rgba(0, 229, 255, 0.34); }
+}
 /* ---------- Cloud compute (HOSAKA) ----------
  *
  * Paid movement has its own colour, a warm gold, so a cloud state never reads

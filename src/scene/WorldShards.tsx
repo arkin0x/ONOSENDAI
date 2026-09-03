@@ -13,6 +13,7 @@ import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
 
@@ -32,6 +33,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   // Subscribed so the set re-renders when a deploy or a discovery lands.
   const mine = useShards((s) => s.mine)
   const discovered = useShards((s) => s.discovered)
+  const births = useCeremony((s) => s.births)
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -65,7 +67,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         }
         return (
           <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} />
+            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} />
             {/* An invisible, generous tap target: shards can be a few pixels. */}
             <mesh onClick={open}>
               <sphereGeometry args={[hit, 8, 8]} />

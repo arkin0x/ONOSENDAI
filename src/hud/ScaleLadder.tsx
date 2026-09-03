@@ -9,7 +9,7 @@
  *
  * So the range is drawn once with its landmarks fixed on it and the current zoom
  * riding it. The landmarks are not decoration; each is a consequence of the
- * spec's one anchor, Cantor height 34 = 2 metres (§9.2), which makes a gibson
+ * spec's one anchor, Cantor height 34 = 2 meters (§9.2), which makes a gibson
  * 2^-33 m. Everything else follows by arithmetic, including the one that
  * surprises people: a sector is 2^30 gibsons, which is 12.5 cm.
  */
@@ -29,7 +29,7 @@ const LANDMARKS: Array<{ h: number; name: string }> = [
   { h: 0, name: 'gibson' },
   { h: 30, name: 'sector' },
   { h: 34, name: 'human' },
-  { h: 43, name: 'kilometre' },
+  { h: 43, name: 'kilometer' },
   { h: 56.6, name: 'Earth' },
   { h: MAX_SCALE_EXP + 1, name: 'axis' },
 ]
@@ -49,9 +49,11 @@ export function ScaleLadder(): JSX.Element {
             <span className="ladder__tick-name">{l.name}</span>
           </span>
         ))}
+        {/* The reading sits left of the rail, the landmarks right of it, so
+            neither ever covers the other. */}
         <span className="ladder__here" style={{ bottom: `${pct(scaleExp)}%` }}>
-          <span className="ladder__here-dot" />
           <span className="ladder__here-text">{formatCellSize(scaleExp)}</span>
+          <span className="ladder__here-dot" />
         </span>
       </div>
     </div>

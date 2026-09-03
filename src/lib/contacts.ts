@@ -6,11 +6,11 @@
  * separate from the fetch so it can be tested without a socket.
  */
 
-import { queryAny, CYBERSPACE_RELAY } from './relay'
+import { queryAny, relaySet } from './relay'
 import type { NostrEvent } from './events'
 
 /** Where kind 3 is most likely to be found. */
-export const GENERAL_RELAYS = ['wss://purplepag.es', 'wss://relay.damus.io', 'wss://nos.lol']
+export const GENERAL_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io', 'wss://nos.lol']
 
 export interface Contact {
   pubkey: string
@@ -32,7 +32,8 @@ export function parseContacts(ev: NostrEvent): Contact[] {
 
 /** The newest kind 3 for a pubkey across the general relays and ours. */
 export async function fetchContacts(pubkey: string): Promise<Contact[]> {
-  const events = await queryAny([...GENERAL_RELAYS, CYBERSPACE_RELAY], { kinds: [3], authors: [pubkey] })
+  // The general relays and every configured one: the cyberspace relay and any you added.
+  const events = await queryAny([...new Set([...GENERAL_RELAYS, ...relaySet()])], { kinds: [3], authors: [pubkey] })
   const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
   return newest ? parseContacts(newest) : []
 }

@@ -5,7 +5,8 @@
  * nip05. Components ask for one by pubkey; this batches the misses into a
  * single relay query, caches what comes back, and keeps it in localStorage so
  * a reload does not refetch the world. Profiles live on the general relays
- * (purplepag.es aggregates them), so it asks those alongside ours.
+ * (primal, damus, nos.lol), so it asks those alongside every configured one:
+ * the cyberspace relay and any you added.
  *
  * The whole cache is one reactive record: a component that reads get(pubkey)
  * re-renders when that profile arrives, without every row holding a
@@ -13,7 +14,7 @@
  */
 
 import { create } from 'zustand'
-import { queryAny } from '../lib/relay'
+import { queryAny, relaySet } from '../lib/relay'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 
@@ -100,7 +101,7 @@ export const useProfiles = create<ProfilesState>((set, get) => {
       const authors = want.slice(i, i + CHUNK)
       let events: NostrEvent[] = []
       try {
-        events = await queryAny(GENERAL_RELAYS, { kinds: [0], authors }, PROFILE_WAIT_MS)
+        events = await queryAny([...new Set([...GENERAL_RELAYS, ...relaySet()])], { kinds: [0], authors }, PROFILE_WAIT_MS)
       } catch { /* relays down */ }
 
       const newest = new Map<string, Profile>()

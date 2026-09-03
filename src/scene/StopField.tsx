@@ -283,9 +283,9 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
-    // At occupancy zooms (cells of about a metre and finer) the handful of
+    // At occupancy zooms (cells of about a meter and finer) the handful of
     // stops in range render from their EXACT coordinates, snapped to their
-    // cells like the avatar: the float shortcut's nanometre error is tens
+    // cells like the avatar: the float shortcut's nanometer error is tens
     // of gibsons, which at these zooms put the dot for the block you are
     // standing on visibly beside you. The coverage cull guarantees the
     // exact decimal derivations stay countable on one hand here.

@@ -30,7 +30,7 @@ describe('landfall derivation (DECK-0001 v3 §1.2)', () => {
     }
   })
 
-  it('float64 approximation agrees with the exact derivation to within a few metres', () => {
+  it('float64 approximation agrees with the exact derivation to within a few meters', () => {
     for (const [, hash] of VECTORS) {
       const exact = landfallCoord(hash)
       const approx = landfallCoordApprox(hash)

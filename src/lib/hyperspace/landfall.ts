@@ -8,7 +8,7 @@
  * mapping (precision 96, ROUND_HALF_EVEN, the exact PI_STR, Taylor sin/cos),
  * with every operation performed in the order the DECK lists.
  *
- * `landfallCoordApprox` is a float64 shortcut good to about a nanometre
+ * `landfallCoordApprox` is a float64 shortcut good to about a nanometer
  * (float64 ulp at Earth-radius magnitudes, i.e. tens of gibsons), for
  * indexing and rendering hundreds of thousands of stops quickly. Anything a
  * verifier compares against MUST use the exact `landfallCoord`.
@@ -156,7 +156,7 @@ const B_F = A_F * (1 - F_F)
 const CENTER_F = 2 ** 84
 
 /**
- * Float64 landfall approximation, about a metre of error (2^33 G), for the
+ * Float64 landfall approximation, about a meter of error (2^33 G), for the
  * index and the renderer. Never use for anything a verifier will check.
  */
 export function landfallXyzApprox(blockHashHex: string): { x: bigint; y: bigint; z: bigint } {
@@ -179,7 +179,7 @@ export function landfallCoordApprox(blockHashHex: string): bigint {
   return xyzToCoord(x, y, z, PLANE_DATASPACE)
 }
 
-/** Float64 inverse for labels: dataspace axis values to WGS84 lat/lon/alt (metres). */
+/** Float64 inverse for labels: dataspace axis values to WGS84 lat/lon/alt (meters). */
 export function axesToLatLon(x: bigint, y: bigint, z: bigint): { lat: number; lon: number; altM: number } {
   const xm = Number(x - AXIS_CENTER) / G_PER_M
   const ym = Number(y - AXIS_CENTER) / G_PER_M

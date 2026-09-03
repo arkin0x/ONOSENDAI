@@ -13,7 +13,6 @@
 import { formatMs, formatOps } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
-import { useRelays } from '../store/useRelays'
 import { Explanation } from './Explanation'
 
 export function ChainPanel(): JSX.Element {
@@ -25,8 +24,7 @@ export function ChainPanel(): JSX.Element {
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
-  const relayCount = useRelays((s) => s.relays.length)
-  const actions = chain.hops + chain.sidesteps
+  const exploreIndex = useCyberspace((s) => s.exploreIndex)
 
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
@@ -42,9 +40,16 @@ export function ChainPanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Proof chain</h2>
-        <span className="tag">
-          {actions} ACTION{actions === 1 ? '' : 'S'}
-        </span>
+        {/* The whole chain, spawn included, not this session's proofs; a tap
+            opens the chain explorer at the head, a second tap puts it away. */}
+        <button
+          className="tag tag--tap"
+          onClick={() => useCyberspace.getState().explore(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
+          aria-pressed={exploreIndex !== null}
+          title="Open the chain explorer"
+        >
+          {events.length} ACTION{events.length === 1 ? '' : 'S'}
+        </button>
       </header>
 
       <dl className="stats">
@@ -86,17 +91,18 @@ export function ChainPanel(): JSX.Element {
         <code>{genesisId}</code>
       </div>
       <div className="hash">
-        <span className="hash__label">chain head{actions === 0 ? ' (spawn)' : ''}</span>
+        <span className="hash__label">chain head{events.length <= 1 ? ' (spawn)' : ''}</span>
         <code>{prevEventId}</code>
       </div>
 
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
 
       <Explanation>
-        Every committed action is a signed kind:3333 event naming the one
-        before it (spec section 8). {live
-          ? `Live publishes each one to your ${relayCount === 1 ? CYBERSPACE_RELAY.replace('wss://', '') : `${relayCount} relays`} as it lands.`
-          : 'Local keeps them on this device; switching to Live publishes the whole chain in order.'}
+        To alter your position in cyberspace, you must compute the cantor root for
+        the region containing your origin and destination, and publish a root proof
+        naming the proof that came before it. This forms a personal "hash chain" for
+        your identity that mathematically proves a valid history of your actions
+        without relying on a central authority to enforce movement rules.
       </Explanation>
     </section>
   )

@@ -162,6 +162,41 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A readout that copies on a tap: looks like the text it wraps, and says so
+ * for a moment through its label. */
+.copy {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.stats dt.is-copied,
+.hash__label.is-copied {
+  color: var(--accent);
+}
+
+/* An explanation in paragraphs. */
+.explain__well p {
+  margin: 0;
+}
+
+.explain__well p + p {
+  margin-top: 6px;
+}
+
 .stats--axes {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -188,6 +223,23 @@ body {
 /* Live is the state worth noticing. Local is not an error, it is just quiet. */
 .tag--live {
   color: var(--ok);
+}
+
+/* A tag that opens something when tapped: the same pill, a hand cursor, and
+ * the accent on hover so it reads as a control. */
+.tag--tap {
+  font-family: inherit;
+  line-height: inherit;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tag--tap:hover,
+.tag--tap:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
 }
 
 .tag--local {
@@ -295,24 +347,44 @@ body {
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
 }
 
+/* Scale & view in two columns: the key and the view facts beside the ladder,
+ * which is as tall as both of them together. */
+.scale__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 14px;
+  align-items: start;
+}
+
+.scale__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stats--stack {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
 .axis-legend {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  margin-bottom: 0.75rem;
+  gap: 6px;
+  margin-top: 2px;
 }
 
 .axis-legend-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
+  gap: 8px;
+  font-size: 11px;
 }
 
 .axis-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -333,7 +405,7 @@ body {
 }
 
 .axis-name {
-  color: var(--text-primary);
+  color: var(--fg);
 }
 
 .plane--0 {
@@ -834,6 +906,35 @@ body {
   color: var(--dim);
 }
 
+/* The non-terrain things drawn in the world, one glyph and one line each. */
+.legend__keys {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.legend__key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--fg);
+}
+
+.legend__glyph {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+}
+
+.legend__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
 .legend__note {
   margin: 8px 0 0;
   font-size: 10px;
@@ -1021,6 +1122,46 @@ kbd {
   letter-spacing: 0.14em;
   color: #ff2323;
   padding: 0 9px;
+}
+
+/* The five newest show; the rest wait behind VIEW MORE. */
+.avatars__more {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 0;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.avatars__more:hover {
+  background: rgba(0, 229, 255, 0.08);
+}
+
+/* The overlay with every avatar: a calm border (the card's own rule, later in
+ * this file, would otherwise keep the confirm red), and the list is what scrolls. */
+.modal__card.modal__card--list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(80vh, 640px);
+  border-color: var(--border);
+}
+
+.modal__card--list .modal__cancel {
+  width: 100%;
+}
+
+.avatars__list--all {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
 }
 
 .avatars__empty {
@@ -2443,6 +2584,20 @@ kbd {
   pointer-events: auto;
 }
 
+.panel--links .panel__head {
+  margin-bottom: 1px;
+}
+
+.links__row {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.links__what {
+  color: var(--dim);
+}
+
 .panel--links a:hover {
   color: var(--fg);
   text-decoration: underline;
@@ -3028,7 +3183,7 @@ kbd {
 .ladder__rail {
   position: relative;
   height: 132px;
-  margin-left: 6px;
+  margin-left: 64px; /* room for the reading, which hangs left of the rail */
   border-left: 1px solid var(--border, #1d3547);
 }
 
@@ -3056,8 +3211,11 @@ kbd {
   opacity: 0.75;
 }
 
-/* The marker rides above the ticks: it is the one thing here that moves. */
+/* The marker rides above the ticks, on the other side of the rail: it is the
+ * one thing here that moves, and it must never cover a landmark's name. */
 .ladder__here {
+  left: auto;
+  right: 100%;
   z-index: 1;
 }
 
@@ -3067,7 +3225,7 @@ kbd {
   border-radius: 2px;
   background: var(--accent, #00e5ff);
   box-shadow: 0 0 8px rgba(0, 229, 255, 0.7);
-  margin-left: -6px;
+  margin-right: -7px; /* straddles the rail */
 }
 
 .ladder__here-text {
@@ -4231,11 +4389,26 @@ kbd {
 /* The HOSAKA mark inline in the Cloud compute panel's title. Taller than
    the 10px type so it can be read; the negative vertical margins keep the
    header the height every other panel's is. */
-.panel__mark {
-  width: 16px;
+/* The HOSAKA mark as a watermark in the panel's corner: the pulse mark's
+ * width, steady, so the panel is signed rather than decorated. */
+.panel--cloud {
+  position: relative;
+}
+
+.cloud__watermark {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 56px;
   height: auto;
-  vertical-align: middle;
-  margin: -4px 6px -4px 0;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+@media (min-width: 1101px) {
+  .cloud__watermark {
+    width: 46px;
+  }
 }
 
 /* ---------- HOSAKA pulse: the mark breathing while a job runs ----------

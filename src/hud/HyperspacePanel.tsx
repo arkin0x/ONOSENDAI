@@ -35,17 +35,17 @@ function formatDuration(ms: number): string {
   return `${(h / 24).toFixed(1)} d`
 }
 import { useCyberspace } from '../store/useCyberspace'
-import { markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
- * within a metre of the exact one, invisible at any spectate scale; only the
+ * within a meter of the exact one, invisible at any spectate scale; only the
  * signed hyperjump needs the exact coordinate.
  */
 export function stopPosition(stop: Stop): Position {
   // Exact, not approx: the float64 landfall shortcut is good to about a
-  // nanometre, which is TENS OF GIBSONS, so at human zooms an approx marker
+  // nanometer, which is TENS OF GIBSONS, so at human zooms an approx marker
   // renders visibly beside the avatar standing exactly on the stop. The
   // decimal derivation is lazy and cached per stop, and everything that
   // calls this touches a handful of stops, not the field.
@@ -235,11 +235,19 @@ export function HyperspacePanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Hyperspace</h2>
-        <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
+        {ready ? (
+          <button
+            className="tag tag--tap"
+            title="Open the Hyperspace overlay (H)"
+            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else exitHyperspaceView() }}
+          >{tag}</button>
+        ) : (
+          <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
+        )}
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Station</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest station</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -268,7 +276,7 @@ export function HyperspacePanel(): JSX.Element {
                 stopPosition(nearest.stop),
                 stopPlane(nearest.stop),
                 `STATION · BLOCK ${nearest.stop.height}`,
-                // 2^34: one render cell is 2 metres, the spec's h34 human
+                // 2^34: one render cell is 2 meters, the spec's h34 human
                 // scale, so the stop reads as a place you could stand at.
                 34,
               ) }}
@@ -282,7 +290,7 @@ export function HyperspacePanel(): JSX.Element {
       <div className="hyper__group">
         <span className="legend__label hyper__kicker hyper__kicker--destination">Destination</span>
         {destination === null ? (
-          <p className="legend__note">None set. Open the line scrubber (H) and pick a stop.</p>
+          <p className="legend__note">None set. Open the Hyperspace overlay (H) to see any block or tap one in the HUD.</p>
         ) : (
           <>
             <dl className="stats">
@@ -358,9 +366,7 @@ export function HyperspacePanel(): JSX.Element {
       {transit === null && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
-        ) : destination === null ? (
-          <p className="hyper__why">BOARD NEEDS A DESTINATION BLOCK: PICK ONE ON THE LINE (H)</p>
-        ) : !atHead ? (
+        ) : destination === null ? null : !atHead ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR AVATAR: RETURN TO IT FIRST</p>
         ) : null
       )}
@@ -372,15 +378,16 @@ export function HyperspacePanel(): JSX.Element {
       {rideError && <p className="notice">{rideError}</p>}
 
       <Explanation>
-        Your STATION is your nearest block, ties to the lowest height:
-        distance is the size of the smallest aligned cube holding you both,
-        so far from the line several blocks are equally near and every
-        verifier must resolve to the same one. VIEW STATION flies the camera
-        there; the viewing bar's RETURN or Escape brings it home at your
-        previous zoom. Boarding marks your chain; the ride proves fresh work
-        for every block passed and sets you down exactly at the block.
-        Leaving is an ordinary hop, so the last mile from any block is
-        normal movement.
+        Each block in the bitcoin blockchain is a railway station in cyberspace.
+        Identities can enter their nearest block for free, produce a nominally
+        easy proof to move between stations, and exit at the exact coordinate of
+        their desired station. This is called hyperspace. Blocks ending with a
+        binary 0 are mapped to Earth, and blocks ending with a binary 1 are
+        mapped to the rest of cyberspace. Without hyperspace, no identity would
+        be capable of traveling any significant distance. Bitcoin's blockchain
+        is used for stations because nobody can control where the next station
+        (block) will appear. The hyperspace railway grows consistently and
+        unpredictably and autonomously without the possibility of manipulation.
       </Explanation>
     </section>
   )

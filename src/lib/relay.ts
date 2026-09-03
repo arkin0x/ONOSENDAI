@@ -158,9 +158,30 @@ export function query(filter: Filter): Promise<NostrEvent[]> {
   return collect(relaySet(), filter)
 }
 
-/** Query an explicit set, for the few things that live elsewhere (contact lists). */
-export function queryAny(relays: string[], filter: Filter, maxWait?: number): Promise<NostrEvent[]> {
-  return collect(relays, filter, maxWait)
+/** How long a general relay that refused a connection is left alone. */
+const DEAD_MS = 5 * 60_000
+const deadUntil = new Map<string, number>()
+
+/**
+ * The relays in `relays` that will take a connection now. One that refuses is
+ * skipped for DEAD_MS: every profile and contact lookup used to knock on it
+ * again, and a relay that is down turned each lookup into a failed socket in
+ * the console and a 3 s wait for nothing.
+ */
+async function reachable(relays: string[]): Promise<string[]> {
+  const now = Date.now()
+  const out: string[] = []
+  await Promise.all(relays.map(async (url) => {
+    if ((deadUntil.get(url) ?? 0) > now) return
+    try { await getPool().ensureRelay(url); out.push(url) } catch { deadUntil.set(url, now + DEAD_MS) }
+  }))
+  return out
+}
+
+/** Query an explicit set, for the few things that live elsewhere (profiles, contact lists). */
+export async function queryAny(relays: string[], filter: Filter, maxWait?: number): Promise<NostrEvent[]> {
+  const up = await reachable(relays)
+  return up.length ? collect(up, filter, maxWait) : []
 }
 
 /** A live subscription across the configured relays; the returned function closes it. */

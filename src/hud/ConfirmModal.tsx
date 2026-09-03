@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Props {
   /** Something to show above the title, such as the HOSAKA banner. */
@@ -27,7 +28,10 @@ interface Props {
 }
 
 export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onConfirm, onCancel }: Props): JSX.Element {
-  return (
+  // Through a portal: every .panel has a backdrop-filter, which makes it a
+  // stacking context, so a fixed modal rendered inside one panel would be
+  // painted under the panels that follow it in the column.
+  return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onCancel}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
@@ -41,6 +45,7 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

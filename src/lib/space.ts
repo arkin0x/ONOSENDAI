@@ -127,7 +127,7 @@ export function cellCentre(
  * cellCentre floor-snaps to the aligned cell, which is right for everything
  * that lives on the movement grid but puts a marker up to a whole cell
  * toward negative on every axis. At planetary zoom that half-cell average
- * bias is hundreds of kilometres: the landfall cloud sat visibly sunk into
+ * bias is hundreds of kilometers: the landfall cloud sat visibly sunk into
  * the +X+Y+Z octant of the globe and floated off the -X-Y-Z one. Markers
  * keep their sub-cell position instead, the same continuous math the Earth
  * sphere's own centre uses, so the shell hugs the wireframe exactly.
@@ -152,7 +152,7 @@ export function pointCentre(
 
 /**
  * Above this scale a stop marker is part of a distribution and renders as a
- * continuous point (pointCentre); at or below it (cells of about a metre
+ * continuous point (pointCentre); at or below it (cells of about a meter
  * and finer) a stop is a place an avatar stands, so its marker snaps to its
  * cell exactly the way the avatar does. Without the snap, a marker at a
  * coordinate is drawn on the corner FACE of its cell cube, which at gibson
@@ -451,12 +451,12 @@ export function formatBig(v: bigint): string {
 }
 
 /**
- * Compact scale label, e.g. "1 G", "1.02 KG", "2^40 G".
+ * The step at a scale, in gibsons: "1 gibson", "1,024 gibsons", "2^40 gibsons".
  */
 export function formatStep(scaleExp: number): string {
-  if (scaleExp === 0) return '1 G'
-  if (scaleExp < 20) return `${formatBig(stepFor(scaleExp))} G`
-  return `2^${scaleExp} G`
+  if (scaleExp === 0) return '1 gibson'
+  if (scaleExp < 20) return `${formatBig(stepFor(scaleExp))} gibsons`
+  return `2^${scaleExp} gibsons`
 }
 
 /**

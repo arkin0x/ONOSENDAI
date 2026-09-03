@@ -114,7 +114,9 @@ import {
   clearCloudDeposit,
   loadBalance,
   saveBalance,
-  type KnownBalance, formatWait } from '../lib/cloud'
+  type KnownBalance,
+  formatWait,
+} from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'

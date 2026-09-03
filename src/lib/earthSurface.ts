@@ -10,9 +10,9 @@
  * The way out is the render convention the whole scene already lives by:
  * never hand a large absolute to the GPU. Surface vertices are produced as
  * DELTAS from the render origin, computed in float64 METRES. Both the vertex
- * and the origin carry about a nanometre of representation error at
+ * and the origin carry about a nanometer of representation error at
  * Earth-radius magnitudes (float64 ulp, tens of gibsons), so their
- * difference does too, and a few nanometres is invisible at every scale the
+ * difference does too, and a few nanometers is invisible at every scale the
  * surface draws at. No Decimal derivation is needed anywhere in the render
  * path; the consensus-critical decimal profile stays in landfall.ts where
  * verifiers need it.
@@ -28,7 +28,7 @@ export const WGS84_F = 1 / 298.257223563
 export const WGS84_B_M = WGS84_A_M * (1 - WGS84_F)
 const E2 = WGS84_F * (2 - WGS84_F)
 
-/** §9.7: 1 metre = 2^33 gibsons (Cantor height 34 is 2 metres). */
+/** §9.7: 1 meter = 2^33 gibsons (Cantor height 34 is 2 meters). */
 export const GIBSONS_PER_M = 2 ** 33
 
 /** §9.7: the WGS84 mapping is centred on the half-axis point. */
@@ -37,7 +37,7 @@ const CENTRE = 1n << 84n
 /** Mean radius in km, the same summary Earth.tsx has always drawn. */
 export const EARTH_RADIUS_KM = 6371
 
-/** Cyberspace axis values in metres from the mapping centre (float64). */
+/** Cyberspace axis values in meters from the mapping centre (float64). */
 export interface CsMetres {
   x: number
   y: number
@@ -46,7 +46,7 @@ export interface CsMetres {
 
 /**
  * Geodetic latitude/longitude (degrees) and height above the ellipsoid
- * (metres) to cyberspace axis metres. Standard geodetic-to-ECEF, then the
+ * (meters) to cyberspace axis meters. Standard geodetic-to-ECEF, then the
  * §9.4 permutation: X_cs = X_ecef, Y_cs = Z_ecef, Z_cs = Y_ecef.
  */
 export function latLonToCsMetres(latDeg: number, lonDeg: number, altM = 0): CsMetres {
@@ -62,7 +62,7 @@ export function latLonToCsMetres(latDeg: number, lonDeg: number, altM = 0): CsMe
 }
 
 /**
- * The render origin's axis values in metres from the mapping centre. The
+ * The render origin's axis values in meters from the mapping centre. The
  * bigint subtraction happens first, so the Number conversion sees a value
  * of Earth-radius magnitude (or the origin's true offset), never 2^84.
  */
@@ -75,7 +75,7 @@ export function originCsMetres(origin: Position): CsMetres {
 }
 
 /**
- * A surface point as a render-space vertex: metre deltas from the origin,
+ * A surface point as a render-space vertex: meter deltas from the origin,
  * to cells at this scale, through the screen axis mapping, with the
  * continuous family's -0.5 shift (the one pointCentre and the globe's own
  * centre apply), so the surface stays glued to the landfall shell and the
@@ -121,7 +121,7 @@ export function graticuleStep(windowDeg: number, minLines = 6): number {
 /**
  * How strongly surface detail (the graticule patch, and later the
  * coastlines) is drawn at this scale. Full strength down to 2^34, the
- * spec's human scale, then fading out through metre scale: below that the
+ * spec's human scale, then fading out through meter scale: below that the
  * shore and the grid of places stop being what the view is about, and the
  * fade is the scale itself teaching that. Zero at and below 2^31.
  */

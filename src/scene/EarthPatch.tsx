@@ -6,7 +6,7 @@
  * nothing, and the planet you were standing on vanished. This fills that
  * dead band. From 2^49 down to human scale the surface is a graticule
  * PATCH: the piece of the true WGS84 ellipsoid within reach of the anchor,
- * with vertices computed as float64 metre deltas from the render origin
+ * with vertices computed as float64 meter deltas from the render origin
  * (earthSurface.ts), so precision holds at every zoom with no Decimal
  * anywhere in the render path.
  *
@@ -17,7 +17,7 @@
  * globe could never reach.
  *
  * Below human scale (2^34) the patch fades, gone at 2^31: a graticule is a
- * map of places, and metre scale is where the view stops being about
+ * map of places, and meter scale is where the view stops being about
  * places. The fade is deliberate teaching, zooming past the shoreline is
  * supposed to feel like leaving geography for the microscopic.
  *
@@ -182,7 +182,7 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     // opaque: a refined triangle's middle sits up to 15.6 km below the
     // surface its corners are on, and a ground plane any higher than that
     // would bury the interior of every large continent while leaving its
-    // coast drawn. Depth is all this plane does, so a few more kilometres of
+    // coast drawn. Depth is all this plane does, so a few more kilometers of
     // it costs nothing to look at.
     const ground: number[] = []
     const idx: number[] = []

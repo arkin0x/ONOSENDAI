@@ -184,12 +184,12 @@ function ScalePanel(): JSX.Element {
               <dd>{formatCellSizeLong(scaleExp)}</dd>
             </div>
             <div>
-              <dt>Screen right</dt>
-              <dd>{signed(axes.right.axis, axes.right.dir)}</dd>
-            </div>
-            <div>
               <dt>Screen up</dt>
               <dd>{signed(axes.up.axis, axes.up.dir)}</dd>
+            </div>
+            <div>
+              <dt>Screen right</dt>
+              <dd>{signed(axes.right.axis, axes.right.dir)}</dd>
             </div>
             <div>
               <dt>Looking along</dt>

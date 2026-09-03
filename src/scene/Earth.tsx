@@ -4,7 +4,7 @@
  * Dataspace (plane 0) maps WGS84 onto the axes, and §9.7 fixes both the scale
  * and the placement exactly:
  *
- *   units_per_km = 1000 * 2^33      (from Cantor height 34 = 2 metres)
+ *   units_per_km = 1000 * 2^33      (from Cantor height 34 = 2 meters)
  *   u = km * units_per_km + 2^84
  *
  * So the planet's centre is the half-axis point on all three axes, and its
@@ -97,7 +97,7 @@ export function Earth({ axes }: Props): JSX.Element | null {
   // decoration that reoriented with the view. These rings are geographic,
   // poles where §9.4 puts them, so the lines MEAN latitude and longitude
   // and the equator and prime meridian can be named. Vertices are float64
-  // metre deltas from the render origin on the true ellipsoid
+  // meter deltas from the render origin on the true ellipsoid
   // (earthSurface.ts), absolute in render space, so they live outside the
   // centred group below.
   const graticule = useMemo(() => {

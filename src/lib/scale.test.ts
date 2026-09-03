@@ -10,10 +10,10 @@ import { formatStep } from './space'
 describe('cell size', () => {
   it('spells the unit out for the readout and abbreviates it for the ladder', () => {
     expect(formatCellSize(0)).toBe('116 pm')
-    expect(formatCellSizeLong(0)).toBe('116 picometres')
-    expect(formatCellSizeLong(33)).toBe('1 metre')
-    expect(formatCellSizeLong(34)).toBe('2 metres')
-    expect(formatCellSizeLong(43)).toBe('1.02 kilometres')
+    expect(formatCellSizeLong(0)).toBe('116 picometers')
+    expect(formatCellSizeLong(33)).toBe('1 meter')
+    expect(formatCellSizeLong(34)).toBe('2 meters')
+    expect(formatCellSizeLong(43)).toBe('1.02 kilometers')
     expect(formatCellSizeLong(84)).toMatch(/astronomical units$/)
   })
 })

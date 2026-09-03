@@ -127,7 +127,7 @@ export function cellCentre(
  * cellCentre floor-snaps to the aligned cell, which is right for everything
  * that lives on the movement grid but puts a marker up to a whole cell
  * toward negative on every axis. At planetary zoom that half-cell average
- * bias is hundreds of kilometres: the landfall cloud sat visibly sunk into
+ * bias is hundreds of kilometers: the landfall cloud sat visibly sunk into
  * the +X+Y+Z octant of the globe and floated off the -X-Y-Z one. Markers
  * keep their sub-cell position instead, the same continuous math the Earth
  * sphere's own centre uses, so the shell hugs the wireframe exactly.
@@ -152,7 +152,7 @@ export function pointCentre(
 
 /**
  * Above this scale a stop marker is part of a distribution and renders as a
- * continuous point (pointCentre); at or below it (cells of about a metre
+ * continuous point (pointCentre); at or below it (cells of about a meter
  * and finer) a stop is a place an avatar stands, so its marker snaps to its
  * cell exactly the way the avatar does. Without the snap, a marker at a
  * coordinate is drawn on the corner FACE of its cell cube, which at gibson

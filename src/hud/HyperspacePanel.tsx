@@ -40,12 +40,12 @@ import { Explanation } from './Explanation'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
- * within a metre of the exact one, invisible at any spectate scale; only the
+ * within a meter of the exact one, invisible at any spectate scale; only the
  * signed hyperjump needs the exact coordinate.
  */
 export function stopPosition(stop: Stop): Position {
   // Exact, not approx: the float64 landfall shortcut is good to about a
-  // nanometre, which is TENS OF GIBSONS, so at human zooms an approx marker
+  // nanometer, which is TENS OF GIBSONS, so at human zooms an approx marker
   // renders visibly beside the avatar standing exactly on the stop. The
   // decimal derivation is lazy and cached per stop, and everything that
   // calls this touches a handful of stops, not the field.
@@ -268,7 +268,7 @@ export function HyperspacePanel(): JSX.Element {
                 stopPosition(nearest.stop),
                 stopPlane(nearest.stop),
                 `STATION · BLOCK ${nearest.stop.height}`,
-                // 2^34: one render cell is 2 metres, the spec's h34 human
+                // 2^34: one render cell is 2 meters, the spec's h34 human
                 // scale, so the stop reads as a place you could stand at.
                 34,
               ) }}

@@ -49,7 +49,7 @@ describe('latLonToCsMetres', () => {
 })
 
 describe('originCsMetres', () => {
-  it('is exact at the mapping centre and metre-true nearby', () => {
+  it('is exact at the mapping centre and meter-true nearby', () => {
     const at = originCsMetres({ x: CENTRE, y: CENTRE, z: CENTRE })
     expect(at).toEqual({ x: 0, y: 0, z: 0 })
     const oneKm = originCsMetres({ x: CENTRE + BigInt(1000 * GIBSONS_PER_M), y: CENTRE, z: CENTRE })
@@ -84,7 +84,7 @@ describe('graticuleStep', () => {
 })
 
 describe('surfaceDetailOpacity', () => {
-  it('is full at human scale, gone below metre scale', () => {
+  it('is full at human scale, gone below meter scale', () => {
     expect(surfaceDetailOpacity(49)).toBe(1)
     expect(surfaceDetailOpacity(34)).toBe(1)
     expect(surfaceDetailOpacity(33)).toBeCloseTo(2 / 3, 5)

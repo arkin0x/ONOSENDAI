@@ -9,7 +9,7 @@
  *
  * Legacy anchors (published before v3) carry C = merkle root for every block
  * and no M tag. For a plane-0 legacy anchor the landfall coordinate must be
- * derived from H; we derive the float64 approximation eagerly (about a metre
+ * derived from H; we derive the float64 approximation eagerly (about a meter
  * of error, fine for the index and the renderer) and the exact decimal
  * coordinate lazily, only when a verifier-visible value is needed.
  */

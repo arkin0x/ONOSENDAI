@@ -3137,7 +3137,7 @@ kbd {
 .ladder__rail {
   position: relative;
   height: 132px;
-  margin-left: 6px;
+  margin-left: 64px; /* room for the reading, which hangs left of the rail */
   border-left: 1px solid var(--border, #1d3547);
 }
 
@@ -3165,8 +3165,11 @@ kbd {
   opacity: 0.75;
 }
 
-/* The marker rides above the ticks: it is the one thing here that moves. */
+/* The marker rides above the ticks, on the other side of the rail: it is the
+ * one thing here that moves, and it must never cover a landmark's name. */
 .ladder__here {
+  left: auto;
+  right: 100%;
   z-index: 1;
 }
 
@@ -3176,7 +3179,7 @@ kbd {
   border-radius: 2px;
   background: var(--accent, #00e5ff);
   box-shadow: 0 0 8px rgba(0, 229, 255, 0.7);
-  margin-left: -6px;
+  margin-right: -7px; /* straddles the rail */
 }
 
 .ladder__here-text {

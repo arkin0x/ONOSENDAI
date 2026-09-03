@@ -81,7 +81,7 @@ export function RidePath({ axes }: { axes: ViewAxes }): JSX.Element | null {
       // hash), but a mid-ride index rebuild can be briefly behind: reuse the
       // previous vertex rather than stitching in the origin.
       // Approx on purpose: the trail is thousands of stops at cube zoom,
-      // where the float shortcut's nanometre error is invisible, and the
+      // where the float shortcut's nanometer error is invisible, and the
       // exact decimal derivation would cost seconds across the tail.
       const c = stop ? pointCentre(approxPosition(stop.coordApprox), origin, scaleExp, axes) : last
       last = c

@@ -388,7 +388,7 @@ describe('cloud routes', () => {
     expect(S().plan?.step.source).toBe('local')
 
     // The local hop lands (the worker's answer, fed by hand); the cloud sidestep follows and lands.
-    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), regionN: '1', terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
     await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
     expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
     const ev = S().events[S().events.length - 1]
@@ -403,7 +403,7 @@ describe('cloud routes', () => {
     await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2) })
     const req2 = vi.mocked(postProof).mock.calls[1][0]
     expect(req2).toMatchObject({ mode: 'hop', to: cursor })
-    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), regionN: '1', terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
     expect(S().plan).toBeNull()
     expect(S().position).toEqual(cursor)
     expect(S().events).toHaveLength(before + 3)

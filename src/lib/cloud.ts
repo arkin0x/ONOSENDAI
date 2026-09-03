@@ -434,7 +434,6 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       elapsedMs,
       proofHash: r.hop_n.public_proof,
       // The region integer never left the cloud; its lookup id did.
-      regionN: null,
       terrainK: r.K,
       lca,
       totalOps: 0,
@@ -451,7 +450,6 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     mode: 'sidestep',
     elapsedMs,
     proofHash: r.proof_hash,
-    regionN: /^[0-9a-f]+$/.test(r.region_m_hex ?? '') ? BigInt('0x' + r.region_m_hex).toString() : null,
     terrainK: r.terrain_k,
     lca,
     totalOps: 0,

@@ -92,6 +92,21 @@ vertices, colours blending along it), chosen per shard and previewed live.
 localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
 1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
 
+**Comments.** A found shard or message, and each of your own deployments,
+carries a comment section: NIP-22 `kind:1111` events whose root scope is the
+bag by address (`A`, `K`, `P`) and whose parent is the inner item (`e`, `k`,
+`p`), replies parenting the comment they answer, every one tagged
+`["client", "ONOSENDAI"]`. The author is p-tagged, so any nostr client tells
+them. The words are sealed to the place like the item they answer: per FF-1
+(a derived-key event) the public `.content` is the placeholder "This comment
+is hidden at an undisclosed location in cyberspace. Happy hunting:
+https://onosendai.tech" and the text sits in
+`["encrypted", "aes-256-gcm", <ciphertext>, "cyberspace:region"]` under the
+bag's region key, with no `d` tag. Other clients show the invitation; this
+one derives the key from where the bag is, as it did to open the bag, and
+shows the words. A comment the key does not open shows the placeholder,
+dimmed.
+
 **Hidden content is a bag of signed events.** A hidden thing is a full signed
 nostr event — a shard (`kind:3330`, geometry in the content) or a message
 (`kind:1`, text). All the things one author hides in one region-and-height live

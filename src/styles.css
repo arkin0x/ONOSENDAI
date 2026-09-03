@@ -889,6 +889,35 @@ body {
   color: var(--dim);
 }
 
+/* The non-terrain things drawn in the world, one glyph and one line each. */
+.legend__keys {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.legend__key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--fg);
+}
+
+.legend__glyph {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+}
+
+.legend__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
 .legend__note {
   margin: 8px 0 0;
   font-size: 10px;

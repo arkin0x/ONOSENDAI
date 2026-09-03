@@ -8,10 +8,10 @@
  * you have flown to never vanishes into a subpixel while still reading as a
  * small landmark rather than a billboard.
  */
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { useFrame } from '@react-three/fiber'
-import { Group } from 'three'
+import { Group, Mesh, type MeshBasicMaterial } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
 import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -30,6 +30,12 @@ const DEST_COLOR = '#ffff00'
 const MAX_CUBES = 24
 /** A cube never renders smaller than this many cells (visibility floor). */
 const MIN_CELLS = 0.15
+/** How long a fleet cube takes to fade in, in seconds. They used to pop:
+ * the anti-clump filter releases them as you zoom, and a cube appearing
+ * from nothing read as an event rather than a neighbour coming into view. */
+const FADE_SECONDS = 0.3
+/** The fleet's resting opacity. */
+const FLEET_OPACITY = 0.75
 const REACH = GRID_RADIUS * 8
 
 export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -96,14 +102,46 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   }, [indexVersion, anchor, anchorPlane, scaleExp, axes, scrubHeight, destination])
 
   const spin = useRef<Group>(null)
-  useFrame((_, dt) => {
+  const fleet = useRef<Group>(null)
+  // When each fleet cube first appeared, by height, for the fade-in. Kept
+  // outside React state: it changes every frame while a cube fades and
+  // nothing but the material needs to know.
+  const born = useRef(new Map<number, number>())
+  useFrame(({ clock }, dt) => {
     const g = spin.current
-    if (!g) return
-    for (const child of g.children) {
-      child.rotation.y += dt * 0.9
-      child.rotation.x += dt * 0.45
+    if (g) {
+      for (const child of g.children) {
+        child.rotation.y += dt * 0.9
+        child.rotation.x += dt * 0.45
+      }
     }
+    const f = fleet.current
+    if (!f) return
+    const now = clock.elapsedTime
+    const present = new Set<number>()
+    for (const child of f.children) {
+      if (!(child instanceof Mesh)) continue
+      const height = child.userData.height as number
+      present.add(height)
+      let t0 = born.current.get(height)
+      if (t0 === undefined) { t0 = now; born.current.set(height, now) }
+      const k = Math.min(1, (now - t0) / FADE_SECONDS)
+      ;(child.material as MeshBasicMaterial).opacity = FLEET_OPACITY * k
+    }
+    for (const height of born.current.keys()) if (!present.has(height)) born.current.delete(height)
   })
+  // The labels follow the cubes in after the fade rather than popping ahead
+  // of them: one state update per batch, not one per frame.
+  const fleetKey = cubes
+    .filter(({ stop }) => stop.height !== destination && stop.height !== scrubHeight)
+    .map(({ stop }) => stop.height)
+    .join(',')
+  const [labelled, setLabelled] = useState('')
+  useEffect(() => {
+    const t = window.setTimeout(() => setLabelled(fleetKey), FADE_SECONDS * 1000)
+    return () => window.clearTimeout(t)
+  }, [fleetKey])
+  const labelledSet = useMemo(() => new Set(labelled.split(',').filter(Boolean).map(Number)), [labelled])
 
   if (cubes.length === 0) return null
   const side = Math.max(2 ** -scaleExp, MIN_CELLS)
@@ -113,26 +151,46 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   return (
     <>
-      {cubes.map(({ stop, centre }) =>
-        stop.height === destination || stop.height === scrubHeight ? null : (
-          <mesh
-            key={stop.height}
-            position={centre}
-            // A cube is an exact target in a way the point cloud is not:
-            // the raycast hits its faces, so a click selects THIS stop and
-            // never a neighbour within some threshold of the ray.
-            onClick={(e) => {
-              if (e.delta > 8) return
-              e.stopPropagation()
-              markSceneTapHandled()
-              selectStopInScene(stop.height)
-            }}
-          >
-            <boxGeometry args={[inertSide, inertSide, inertSide]} />
-            <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0.75} />
-          </mesh>
-        ),
-      )}
+      <group ref={fleet}>
+        {cubes.map(({ stop, centre }) =>
+          stop.height === destination || stop.height === scrubHeight ? null : (
+            <mesh
+              key={stop.height}
+              position={centre}
+              userData={{ height: stop.height }}
+              // A cube is an exact target in a way the point cloud is not:
+              // the raycast hits its faces, so a click selects THIS stop and
+              // never a neighbour within some threshold of the ray.
+              onClick={(e) => {
+                if (e.delta > 8) return
+                e.stopPropagation()
+                markSceneTapHandled()
+                selectStopInScene(stop.height)
+              }}
+            >
+              <boxGeometry args={[inertSide, inertSide, inertSide]} />
+              <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0} />
+            </mesh>
+          ),
+        )}
+      </group>
+      {/* Each fleet cube says which block it is: the number the Hyperspace
+          panel's nearest list shows, so cubes and list read against each
+          other. Unlabelled, a clump of orange cubes around the selection
+          was a mystery. */}
+      {cubes
+        .filter(({ stop }) => stop.height !== destination && stop.height !== scrubHeight && labelledSet.has(stop.height))
+        .map(({ stop, centre }) => (
+          <WorldLabel
+            key={`f${stop.height}`}
+            text={String(stop.height)}
+            color={CUBE_COLOR}
+            at={[centre[0], centre[1] + inertSide * 0.5 + 0.22, centre[2]]}
+            align="center"
+            px={9}
+            opacity={0.8}
+          />
+        ))}
       <group ref={spin}>
         {/* The scrubbed block earns the selected look too (yellow, spinning,
             no burst): stepping the line one block at a time on Earth needs

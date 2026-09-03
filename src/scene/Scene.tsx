@@ -262,7 +262,6 @@ function Rig(): JSX.Element {
   // the previous focus effect saw, so the next one can tell a move within
   // the same view from a change of subject.
   const glideLeft = useRef(0)
-  const flyFrom = useRef<{ anchor: Position; plane: number; scaleExp: number; owned: boolean } | null>(null)
 
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
@@ -273,9 +272,6 @@ function Rig(): JSX.Element {
     const c = controls.current
     if (!c) return
     const s = useCyberspace.getState()
-    const owned = useHyperspace.getState().viewOwned
-    const prev = flyFrom.current
-    flyFrom.current = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp, owned }
     const before = prevDeps.current
     prevDeps.current = { view, genesisId, focusPubkey, focusPoint, exploreIndex }
     // A chain step: only the explored index changed. Keep the orbit. Near
@@ -286,7 +282,7 @@ function Rig(): JSX.Element {
     const stepOnly = before !== null && before.view === view && before.genesisId === genesisId &&
       before.focusPubkey === focusPubkey && before.focusPoint === focusPoint && before.exploreIndex !== exploreIndex
     const trace = (branch: string, extra: Record<string, unknown> = {}): void => {
-      if (import.meta.env.DEV) (window as unknown as { __rigLast?: unknown }).__rigLast = { branch, stepOnly, before, exploreIndex, prevPlane: prev?.plane, plane: s.anchorPlane, prevScale: prev?.scaleExp, scale: s.scaleExp, ...extra }
+      if (import.meta.env.DEV) (window as unknown as { __rigLast?: unknown }).__rigLast = { branch, stepOnly, before, exploreIndex, seenPlane: seen?.plane, plane: s.anchorPlane, seenScale: seen?.scaleExp, scale: s.scaleExp, ...extra }
     }
     const same = (a: { anchor: Position; plane: number; scaleExp: number }): boolean =>
       a.anchor.x === s.anchor.x && a.anchor.y === s.anchor.y && a.anchor.z === s.anchor.z && a.plane === s.anchorPlane && a.scaleExp === s.scaleExp
@@ -323,22 +319,43 @@ function Rig(): JSX.Element {
       c.update()
       return
     }
-    // Same plane, same zoom, both frames owned by hyperspace: skip the
-    // re-frame. The per-frame origin shift below carries the camera into the
-    // new frame still looking at the old stop, and the stretched follow
-    // eases it onto the new one, which is the fly.
-    if (owned && prev !== null && prev.owned && prev.plane === s.anchorPlane &&
-        prev.scaleExp === s.scaleExp && s.focus !== null) {
+    // A change of focus at the same zoom: a stop clicked from another, RETURN
+    // to the avatar, a shard picked from the panel. Keep the orbit, exactly as
+    // a chain step does: near enough, the per-frame origin shift below
+    // carries the camera into the new frame still looking at the old point
+    // and the stretched follow eases it onto the new one, which is the fly;
+    // too far, cut to the new point with the same offset the camera had from
+    // the old. This used to demand that hyperspace owned the view on both
+    // sides of the change and that the zoom had not moved since the LAST
+    // focus, so a stop clicked after any wheel zoom re-framed straight on
+    // at the default distance instead: the scene jumped and the click read
+    // as having gone nowhere. `seen` is frame-accurate, so a zoom in between
+    // no longer disqualifies the fly; only a zoom in the same change does.
+    const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
+      before.exploreIndex === exploreIndex && (before.focusPubkey !== focusPubkey || before.focusPoint !== focusPoint)
+    if (focusOnly && seen !== null && seen.scaleExp === s.scaleExp) {
       const cells = Math.max(
-        Math.abs(cellDelta(s.anchor.x, prev.anchor.x, s.scaleExp)),
-        Math.abs(cellDelta(s.anchor.y, prev.anchor.y, s.scaleExp)),
-        Math.abs(cellDelta(s.anchor.z, prev.anchor.z, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.y, seen.anchor.y, s.scaleExp)),
+        Math.abs(cellDelta(s.anchor.z, seen.anchor.z, s.scaleExp)),
       )
-      if (cells > 0 && cells < GLIDE_MAX_CELLS) {
+      trace(cells === 0 ? 'focus-none' : cells < GLIDE_MAX_CELLS ? 'focus-glide' : 'focus-cut', { cells })
+      if (cells === 0) return
+      if (cells < GLIDE_MAX_CELLS) {
         glideLeft.current = GLIDE_SECONDS
         locked.current = true
         return
       }
+      const offset = c.object.position.clone().sub(c.target)
+      const [x, y, z] = s.cursorOffset()
+      glideLeft.current = 0
+      smooth.current.set(x, y, z)
+      c.target.copy(smooth.current)
+      c.object.position.copy(smooth.current).add(offset)
+      locked.current = true
+      prevOrigin.current = null
+      c.update()
+      return
     }
     trace('reframe')
     glideLeft.current = 0

@@ -1037,6 +1037,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
           intervalMs: claimIntervalFor(currentSigner.kind),
           waker,
           onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
+          onPollError: () => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false } }) },
         })
         if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
         if (id !== requestId) return
@@ -1144,6 +1145,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         },
         onDepositPoll: (d) => {
           if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } })
+        },
+        // A failed poll must not leave CHECK PAYMENT spinning: the wait goes on and the button is live again.
+        onDepositPollError: () => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false } })
         },
         onStage: (stage, d) => {
           if (id !== requestId) return

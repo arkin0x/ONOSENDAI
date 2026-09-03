@@ -317,6 +317,8 @@ export interface CloudStageDetail {
 export interface CloudDriverHooks {
   /** Each answer from the node about the job's own invoice. */
   onDepositPoll?: (dep: HosakaDeposit) => void
+  /** A claim poll failed; the wait continues. */
+  onDepositPollError?: (err: unknown) => void
   /** The record changed (a stage or a new invoice): persist and show it. */
   onRecord: (record: PendingCloudJob) => void
   /** A stage began, with what the HUD needs for it. */
@@ -358,6 +360,7 @@ export async function driveCloudJob(
         intervalMs: hooks.claimIntervalMs,
         waker,
         onPoll: hooks.onDepositPoll,
+        onPollError: hooks.onDepositPollError,
       })
       if (dep.status !== 'settled') throw new CloudFlowError('invoice_expired', 'The invoice expired unpaid. Commit again for a fresh quote.')
       record = { ...record, stage: 'paid' }

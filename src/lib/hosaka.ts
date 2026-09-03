@@ -32,6 +32,16 @@ export function defaultHosakaUrl(): string {
 
 /** One request outstanding longer than this is a dead connection, not a slow one. */
 const REQUEST_TIMEOUT_MS = 20_000
+/**
+ * How long a signer gets to sign one request. An extension or a bunker
+ * answers over a channel the phone can drop while the tab is in the wallet
+ * app; a request that never comes back must not hang the claim poll, which
+ * is what left an invoice unrecognised after payment (the spinner stuck,
+ * no further polls) until a reload claimed it.
+ */
+const SIGN_TIMEOUT_MS = 20_000
+/** A poll that has not settled by then is abandoned and the next one goes out. */
+const POLL_HANG_MS = SIGN_TIMEOUT_MS + REQUEST_TIMEOUT_MS + 5_000
 /** Contract: claim polls every 3 to 5 s. */
 export const CLAIM_INTERVAL_MS = 4_000
 /** Contract: job polls every 5 to 15 s; this ramps from the first to the second. */
@@ -279,7 +289,8 @@ export interface WaitForDepositOptions {
   intervalMs?: number
   waker?: Waker
   /** Every answer from the node, settled or not, so a manual check can show it landed. */
-  onPoll?: (dep: HosakaDeposit) => void
+  onPoll?: (dep: HosakaDeposit) => void  /** A poll that failed (timed out, 5xx, dropped socket); the wait goes on, the UI can stop spinning. */
+  onPollError?: (err: unknown) => void
 }
 
 export interface WaitForJobOptions {
@@ -335,13 +346,36 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
    * sent twice; the nonce tag makes two requests signed in the same second
    * distinct events, which nostr-tools' template alone would not.
    */
-  const authorization = (url: string, method: string): Promise<string> =>
-    nip98.getToken(
+  const authorization = async (url: string, method: string): Promise<string> => {
+    const token = nip98.getToken(
       url,
       method,
       (template) => opts.sign({ ...template, tags: [...template.tags, ['nonce', randomNonce()]] }),
       true,
     )
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new HosakaError(0, 'sign_timeout', 'the signer did not answer in time')), SIGN_TIMEOUT_MS)
+    })
+    try {
+      return await Promise.race([token, late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** The promise, or a poll_timeout once POLL_HANG_MS has passed without it settling. */
+  const guarded = async <T>(work: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new HosakaError(0, 'poll_timeout', 'HOSAKA did not answer in time')), POLL_HANG_MS)
+    })
+    try {
+      return await Promise.race([work, late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   const request = async <T>(path: string, init: RequestInit): Promise<T> => {
     const url = apiUrl + path
@@ -417,12 +451,13 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
       for (;;) {
         if (o.signal?.aborted) throw abortError()
         try {
-          last = await claimDeposit(depositId, o.signal)
+          last = await guarded(claimDeposit(depositId, o.signal))
           failures = 0
           o.onPoll?.(last)
           if (last.status === 'settled' || last.status === 'expired') return last
         } catch (err) {
           if (err instanceof HosakaError && err.code === 'aborted') throw err
+          o.onPollError?.(err)
           // The node blinking (503 payments_unavailable) or a dropped socket
           // is not the payer's problem; keep asking for a while.
           if (!(err instanceof HosakaError && err.transient) || ++failures >= POLL_FAILURE_LIMIT + 2) throw err
@@ -444,7 +479,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
       for (;;) {
         if (o.signal?.aborted) throw abortError()
         try {
-          const job = await getJob(jobId, pollToken, o.signal)
+          const job = await guarded(getJob(jobId, pollToken, o.signal))
           failures = 0
           o.onPoll?.(job)
           if (job.status === 'completed' || job.status === 'failed') return job

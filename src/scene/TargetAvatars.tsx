@@ -24,6 +24,7 @@ interface Props {
 export function TargetAvatars({ axes }: Props): JSX.Element | null {
   const targets = useCyberspace((s) => s.targets)
   const anchor = useCyberspace((s) => s.anchor)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const focus = useCyberspace((s) => s.focusPubkey())
   const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
@@ -32,12 +33,13 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     const list = useCyberspace.getState().targetList()
     return list
-      .filter((t) => t.id !== focus)
+      // Someone standing in the other plane is not here (§2.4).
+      .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane)
       .map((t) => ({ ...t, centre: cellCentre(t.at, origin, scaleExp, axes) }))
       .filter((t) => Math.hypot(...t.centre) <= REACH)
     // targets is what targetList reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, anchor, scaleExp, axes, focus])
+  }, [targets, anchor, anchorPlane, scaleExp, axes, focus])
 
   if (near.length === 0) return null
 

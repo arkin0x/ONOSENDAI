@@ -20,7 +20,7 @@
 
 import { Suspense, useMemo } from 'react'
 import { useGLTF } from '@react-three/drei'
-import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import type { Material, Mesh, MeshStandardMaterial } from 'three'
 import { GRID_RADIUS, cellCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -63,6 +63,11 @@ const PARTS: Array<[node: string, material: string]> = [
   ['SmallTriadBottom', 'SmallTriad'],
 ]
 
+/** The plane a pubkey spawns in: the coordinate's plane bit. */
+export function spawnPlane(pubkey: string): Plane {
+  return coordToXyz(hexToCoord(pubkey)).plane
+}
+
 /** Where a pubkey spawns: its own bits, read as a coordinate. */
 export function spawnPosition(pubkey: string): Position {
   const { x, y, z } = coordToXyz(hexToCoord(pubkey))
@@ -76,6 +81,7 @@ interface Props {
 
 function Model({ pubkey, axes }: Props): JSX.Element | null {
   const position = useCyberspace((s) => s.anchor)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gltf = useGLTF(MODEL) as unknown as {
     nodes: Record<string, Mesh>
@@ -83,6 +89,8 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
   }
 
   const at = useMemo(() => {
+    // A spawn is a coordinate in one plane; in the other plane it is not here.
+    if (spawnPlane(pubkey) !== anchorPlane) return null
     const spawn = spawnPosition(pubkey)
     // Physical scaling, the shard rule: 2^(0 - scaleExp) render cells per
     // model unit. Zooming out shrinks the mark smoothly to nothing, which

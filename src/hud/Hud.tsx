@@ -16,6 +16,7 @@ import { LootPanel } from './LootPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
+import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
@@ -231,10 +232,14 @@ function Controls(): JSX.Element {
 }
 
 export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
+  // With a destination picked, the ride is the thing you are doing: the
+  // Hyperspace panel leads the left column until the destination is cleared.
+  const rideSet = useHyperspace((s) => s.destination !== null)
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
         <Brand />
+        {rideSet && <HyperspacePanel />}
         <IdentityPanel />
         <LootPanel />
         <ShardsPanel />
@@ -248,7 +253,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ProofPanel />
         <CloudPanel />
         <ChainPanel />
-        <HyperspacePanel />
+        {!rideSet && <HyperspacePanel />}
         <Legend />
         <Controls />
         <DerezzPanel />

@@ -262,6 +262,15 @@ function Rig(): JSX.Element {
   // the previous focus effect saw, so the next one can tell a move within
   // the same view from a change of subject.
   const glideLeft = useRef(0)
+  // The camera's offset from its target as last drawn. A cut that keeps the
+  // orbit reads it from here rather than from the controls at effect time: by
+  // then the frame loop's origin shift has moved camera and target by the
+  // whole change of anchor, and for a far change (another avatar, a universe
+  // away at 2^0) both sit at the same astronomical coordinate with their
+  // 26-unit difference gone to double precision. OrbitControls clamped that
+  // zero offset to its minimum distance straight overhead: the avatar seen
+  // from two units above, looking down.
+  const lastOffset = useRef(new Vector3(0, 0, START_DISTANCE))
 
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
@@ -290,6 +299,7 @@ function Rig(): JSX.Element {
     // not rendered the new anchor yet, else the frame before the change.
     const last = lastSeen.current
     const seen = last === null ? null : !same(last) ? last : (lastChange.current !== null && same(lastChange.current.to) ? lastChange.current.from : null)
+    const keptOffset = (): Vector3 => (lastOffset.current.lengthSq() >= 1 ? lastOffset.current.clone() : new Vector3(0, 0, START_DISTANCE))
     if (stepOnly && seen !== null) {
       // The plane is not part of the frame: the axes come from the camera and
       // the origin from the anchor, so a hop that lands in the other plane
@@ -308,7 +318,7 @@ function Rig(): JSX.Element {
         locked.current = true
         return
       }
-      const offset = c.object.position.clone().sub(c.target)
+      const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
       smooth.current.set(x, y, z)
@@ -331,8 +341,11 @@ function Rig(): JSX.Element {
     // at the default distance instead: the scene jumped and the click read
     // as having gone nowhere. `seen` is frame-accurate, so a zoom in between
     // no longer disqualifies the fly; only a zoom in the same change does.
+    // A change of spectated identity is not a change of focus: the two
+    // avatars are a universe apart and there is no orbit worth keeping, so
+    // SPECTATE and RETURN re-frame straight on, as boot does.
     const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
-      before.exploreIndex === exploreIndex && (before.focusPubkey !== focusPubkey || before.focusPoint !== focusPoint)
+      before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
     if (focusOnly && seen !== null && seen.scaleExp === s.scaleExp) {
       const cells = Math.max(
         Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
@@ -346,7 +359,7 @@ function Rig(): JSX.Element {
         locked.current = true
         return
       }
-      const offset = c.object.position.clone().sub(c.target)
+      const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
       smooth.current.set(x, y, z)
@@ -381,6 +394,7 @@ function Rig(): JSX.Element {
     const c = controls.current
     if (!c) return
     const s = useCyberspace.getState()
+    lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the
     // action being looked at, and the camera has to ride that the same way it
     // rides a commit.

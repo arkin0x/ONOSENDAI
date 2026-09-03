@@ -25,6 +25,7 @@ import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
+import { jobInProgress } from '../lib/cloud'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -235,14 +236,14 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // With a destination picked, the ride is the thing you are doing: the
   // Hyperspace panel leads the left column until the destination is cleared.
   const rideSet = useHyperspace((s) => s.destination !== null)
-  // A payment waiting outranks even that; the cloud panel leads while it waits.
-  const paying = useCyberspace((s) => s.cloud.status === 'awaiting_payment')
+  // HOSAKA outranks even that: while a payment is awaited or a job is under
+  // way the cloud panel takes the first panel position, under the brand.
+  const cloudLeads = useCyberspace((s) => s.cloud.status === 'awaiting_payment' || jobInProgress(s.cloud.status))
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
-        {/* A payment waiting is the one thing to do; the cloud panel leads while it waits. */}
-        {paying && <CloudPanel />}
         <Brand />
+        {cloudLeads && <CloudPanel />}
         {rideSet && <HyperspacePanel />}
         <IdentityPanel />
         <LootPanel />
@@ -255,7 +256,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <ScalePanel />
         <PositionPanel />
         <ProofPanel />
-        {!paying && <CloudPanel />}
+        {!cloudLeads && <CloudPanel />}
         <ChainPanel />
         {!rideSet && <HyperspacePanel />}
         <Legend />

@@ -4228,6 +4228,14 @@ kbd {
   font-size: 8px;
 }
 
+/* The HOSAKA mark inline in the Cloud compute panel's title. */
+.panel__mark {
+  width: 13px;
+  height: auto;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
 /* ---------- HOSAKA pulse: the mark breathing while a job runs ----------
  *
  * Just above the menu button, on the instrument stack's left edge (the

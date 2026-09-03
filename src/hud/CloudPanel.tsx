@@ -65,7 +65,9 @@ export function CloudPanel(): JSX.Element {
   return (
     <section className={`panel panel--cloud ${active ? 'is-active' : ''}`}>
       <header className="panel__head">
-        <h2>Cloud compute</h2>
+        {/* The HOSAKA mark, small, so this panel is not one more panel: it is
+            the one whose work happens on someone else's machine. */}
+        <h2><img className="panel__mark" src="/hosaka-mark.png" alt="" aria-hidden="true" width={424} height={437} decoding="async" />Cloud compute</h2>
         <span className={`tag tag--cloud ${cloud.status === 'error' ? 'tag--danger' : active ? 'tag--live' : ''}`}>{tag}</span>
       </header>
 

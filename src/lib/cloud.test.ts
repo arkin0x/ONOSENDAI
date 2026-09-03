@@ -216,7 +216,7 @@ describe('cloudProofResponse', () => {
     }
     const msg = cloudProofResponse(7, base, job('completed', { result, cost_msats: 1234 }), 5000)
     expect(msg).toEqual({
-      type: 'done', id: 7, mode: 'hop', elapsedMs: 5000, proofHash: 'aa'.repeat(32), regionN: null, terrainK: 11,
+      type: 'done', id: 7, mode: 'hop', elapsedMs: 5000, proofHash: 'aa'.repeat(32), terrainK: 11,
       lca: { x: 13, y: 0, z: 0 }, totalOps: 0, source: 'cloud', jobId: 'job-1', costMsats: 1234, lookupId: 'cc'.repeat(32),
     })
   })
@@ -234,7 +234,6 @@ describe('cloudProofResponse', () => {
     if (msg.type !== 'done') return
     expect(msg.mode).toBe('sidestep')
     expect(msg.proofHash).toBe(p.proofHash)
-    expect(msg.regionN).toBe(p.regionM.toString())
     expect(msg.lca).toEqual({ x: 13, y: 0, z: 0 })
     expect(msg.sidestep).toEqual({
       merkleRoots: [bytesToHex(p.merkleX), bytesToHex(p.merkleY), bytesToHex(p.merkleZ)],

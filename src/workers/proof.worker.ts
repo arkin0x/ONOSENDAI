@@ -48,8 +48,6 @@ export type ProofResponse =
       mode: ProofMode
       elapsedMs: number
       proofHash: string
-      /** The spatial region integer, decimal; null for a cloud hop, whose region never left the cloud. */
-      regionN: string | null
       terrainK: number
       lca: { x: number; y: number; z: number }
       /** Cantor pairings for hops; SHA-256 evaluations for sidesteps; 0 for a cloud proof. */
@@ -108,7 +106,6 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         mode,
         elapsedMs: performance.now() - started,
         proofHash: proof.proofHash,
-        regionN: proof.regionM.toString(),
         terrainK: proof.terrainK,
         lca: { x: proof.lcaHeights[0], y: proof.lcaHeights[1], z: proof.lcaHeights[2] },
         totalOps: estimate.totalHashes,
@@ -165,7 +162,6 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
       mode,
       elapsedMs: performance.now() - started,
       proofHash: proof.proofHash,
-      regionN: proof.regionN.toString(),
       terrainK: proof.terrainK,
       lca: { x: estimate.lcaX, y: estimate.lcaY, z: estimate.lcaZ },
       totalOps: estimate.totalOps,

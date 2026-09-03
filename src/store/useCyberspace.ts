@@ -159,7 +159,6 @@ export interface ProofState {
   progress: number
   elapsedMs: number
   proofHash: string | null
-  regionN: string | null
   terrainK: number | null
   lca: { x: number; y: number; z: number } | null
   /** Cantor pairings for hops; SHA-256 evaluations for sidesteps. */
@@ -179,7 +178,6 @@ const IDLE_PROOF: ProofState = {
   progress: 0,
   elapsedMs: 0,
   proofHash: null,
-  regionN: null,
   terrainK: null,
   lca: null,
   totalOps: null,
@@ -1642,7 +1640,6 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         progress: 1,
         elapsedMs: msg.elapsedMs,
         proofHash: msg.proofHash,
-        regionN: msg.regionN,
         terrainK: msg.terrainK,
         lca: msg.lca,
         totalOps: msg.totalOps,

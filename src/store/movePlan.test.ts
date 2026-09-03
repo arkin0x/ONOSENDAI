@@ -34,7 +34,7 @@ function done(req: (typeof posted)[number]) {
   const sidestep = req.mode === 'sidestep'
     ? { merkleRoots: ['aa'.repeat(32), 'bb'.repeat(32), 'cc'.repeat(32)] as [string, string, string], inclusionProofs: ['', '', ''] as [string, string, string], lcaHeights: [1, 0, 0] as [number, number, number] }
     : undefined
-  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, proofHash: 'dd'.repeat(32), regionN: '1', terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4, sidestep }
+  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4, sidestep }
 }
 
 async function land(): Promise<void> {

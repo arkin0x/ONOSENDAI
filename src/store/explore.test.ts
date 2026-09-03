@@ -15,7 +15,7 @@ async function land(dx: bigint): Promise<void> {
   useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + dx } })
   await s.applyProofMessage({
     type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32),
-    regionN: '1', terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
+    terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
   })
 }
 

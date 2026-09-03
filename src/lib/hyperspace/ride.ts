@@ -6,14 +6,7 @@
  *
  * Everything here is consensus-critical and pure; the worker pool wraps it.
  */
-import {
-  sha256,
-  hexToBytes,
-  bytesToHex,
-  intToBytesBE,
-  alignedBase,
-  computeSubtreeCantor,
-} from 'cyberspace-core'
+import { alignedBase, bytesToHex, computeSubtreeCantor, hexToBytes, intToBytesBE, sha256 } from 'cyberspace-core'
 
 export const K_LINE = 6
 export const RIDE_MAX_HEIGHT = 16 + K_LINE
@@ -296,4 +289,37 @@ export function exactRidePairs(blockHashes: string[]): number {
   let total = 0
   for (const h of blockHashes) total += 2 ** (lineTerrainK(h) + K_LINE)
   return total
+}
+
+/**
+ * The K values the calibration sample spans. Low through average, never the
+ * heavy tail: a K=16 block alone is 2^22 pairings and would make calibration
+ * itself seconds long. The measurement is normalized per pairing and scaled
+ * to the binomial mean block, so excluding the tail does not bias the result,
+ * it only bounds the cost.
+ */
+export const CALIBRATION_KS = [4, 5, 6, 7, 8, 9, 10, 11]
+
+/** One synthetic block hash per calibration K, in K order. Deterministic. */
+export function calibrationHashes(): string[] {
+  const enc = new TextEncoder()
+  const found = new Map<number, string>()
+  for (let counter = 0; found.size < CALIBRATION_KS.length && counter < 100_000; counter++) {
+    const hex = bytesToHex(sha256(enc.encode(`ride-calibration-${counter}`)))
+    const k = lineTerrainK(hex)
+    if (CALIBRATION_KS.includes(k) && !found.has(k)) found.set(k, hex)
+  }
+  return CALIBRATION_KS.filter((k) => found.has(k)).map((k) => found.get(k) as string)
+}
+
+/** The calibration sample, timed wherever it runs: elapsed wall-clock and the
+ * exact pairings it took, from which ms per mean block follows. */
+export function timeCalibrationSample(): { elapsedMs: number; pairs: number } {
+  const previousEventIdHex = 'ca'.repeat(32)
+  const hashes = calibrationHashes()
+  const started = performance.now()
+  for (let i = 0; i < hashes.length; i++) {
+    computeRideLeaf(previousEventIdHex, 1_000 + i, hashes[i])
+  }
+  return { elapsedMs: performance.now() - started, pairs: exactRidePairs(hashes) }
 }

@@ -51,6 +51,8 @@ export interface Hidden {
   eventId: string
   /** The envelope (bag) currently holding it; changes when the bag is rewritten. */
   bagId: string
+  /** The bag's `d` tag (spec §8.6 lookup id): with the author it is the bag's address. */
+  lookupId: string
   /** The author, from the inner (and envelope) pubkey. */
   author: string
   at: Position
@@ -139,6 +141,7 @@ function fromInner(inner: NostrEvent, outer: NostrEvent): Hidden | null {
   const base = {
     eventId: inner.id,
     bagId: outer.id,
+    lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
     at: { x, y, z },
     plane,

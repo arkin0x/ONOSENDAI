@@ -16,8 +16,9 @@ import { formatCellSize } from '../lib/scale'
 import { messagePreview } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
+import { Comments } from './Comments'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { positionOf, useShards } from '../store/useShards'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -34,6 +35,7 @@ function Field({ label, value, full }: { label: string; value: string; full?: st
 
 export function DeploymentDetail(): JSX.Element | null {
   const inspecting = useShards((s) => s.inspecting)
+  const me = useCyberspace((s) => s.identity.pubkey)
   const dep = useShards((s) => s.mine.find((d) => d.eventId === s.inspecting) ?? null)
   const [confirm, setConfirm] = useState(false)
   const [test, setTest] = useState<'idle' | 'testing' | 'found' | 'missing'>('idle')
@@ -86,6 +88,8 @@ export function DeploymentDetail(): JSX.Element | null {
           {test === 'missing' && '✗ NOT FOUND — TAP TO RETRY'}
         </button>
       )}
+
+      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, at: positionOf(dep), height: dep.height }} />
 
       <button className="detail__delete" onClick={() => setConfirm(true)}>DELETE FROM CYBERSPACE</button>
 

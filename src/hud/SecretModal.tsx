@@ -17,6 +17,7 @@ import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { spectate } from '../lib/spectator'
 import { ProfilePic } from './ProfileBadge'
+import { Comments } from './Comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
@@ -92,6 +93,10 @@ export function SecretModal(): JSX.Element | null {
           <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
           <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
         </dl>
+
+        {item.author && item.lookupId && (
+          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type, at: item.at, height: item.height }} />
+        )}
 
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo}>GO TO IT</button>

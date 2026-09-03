@@ -4450,3 +4450,48 @@ kbd {
     opacity: 0.7;
   }
 }
+
+/* ---------- Comments (NIP-22) under a hidden shard or message ---------- */
+.comments {
+  margin: 12px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+.comments__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.comments__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.comment { display: grid; gap: 3px; }
+.comment__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.comment__author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.comment__name { font-size: 11px; letter-spacing: 0.05em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.comment__when { font-size: 9px; letter-spacing: 0.1em; color: var(--dim); white-space: nowrap; }
+.comment__text { margin: 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A comment this client could not open: the placeholder, dimmed. */
+.comment__text--sealed { color: var(--dim); font-style: italic; }
+.comment__reply {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+.comment__reply:disabled { opacity: 0.5; cursor: default; }
+.comments__form { display: grid; gap: 6px; margin-top: 8px; }
+.comments__input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.comments__row { display: flex; justify-content: flex-end; gap: 6px; }
+.comments__empty, .comments__note { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
+.comments__error { margin: 4px 0 0; font-size: 10px; color: #ff6b6b; }

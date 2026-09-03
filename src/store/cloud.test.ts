@@ -486,4 +486,43 @@ describe('cloud routes', () => {
     expect(S().cloud.credited).toBeNull()
     expect(storage.getItem('onosendai:cloudDeposit')).toBeNull()
   })
+
+  it('a caps request out for another API URL is not reused: the current URL gets its own (#69)', async () => {
+    const old = deferred<HosakaLimits>()
+    fake.limits.mockReturnValueOnce(old.promise).mockResolvedValueOnce(LIMITS)
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://old' } })
+    const first = S().resumeCloudJob()
+    await vi.waitFor(() => expect(fake.limits).toHaveBeenCalledTimes(1))
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, apiUrl: 'http://fake' } })
+    await S().resumeCloudJob()
+    expect(fake.limits).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(S().cloud.limits).toEqual(LIMITS))
+    old.resolve({ ...LIMITS, max_hop_height: 3 })
+    await first
+    // The answer for the old URL arrived late and was dropped.
+    expect(S().cloud.limits).toEqual(LIMITS)
+  })
+
+  it('with the cloud on but HOSAKA unreachable, a long local walk is refused rather than started (#69)', async () => {
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: null } })
+    fake.limits.mockRejectedValue(new Error('down'))
+    const s = S()
+    // An h24 crossing on x: a dozen walls above this machine's h12, a walk of many steps.
+    useCyberspace.setState({ cursor: { ...s.position, x: s.position.x ^ (1n << 23n) } })
+    await S().commit()
+    expect(S().proof.status).toBe('infeasible')
+    expect(S().proof.message).toMatch(/HOSAKA did not answer/)
+    expect(S().plan).toBeNull()
+    expect(vi.mocked(postProof)).not.toHaveBeenCalled()
+  })
+
+  it('with the cloud on but HOSAKA unreachable, a short walk still goes ahead locally', async () => {
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: null } })
+    fake.limits.mockRejectedValue(new Error('down'))
+    lineUpH13()
+    await S().commit()
+    expect(S().proof.status).not.toBe('infeasible')
+    expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1)
+    S().cancel()
+  })
 })

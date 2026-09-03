@@ -37,7 +37,7 @@ export function CloudApproval(): JSX.Element | null {
     )
     : (
       <>
-        {`HOSAKA will calculate this h${q.maxHeight} ${q.action}. Estimate wait is ${q.estTime ?? 'unknown'}.`}
+        {`HOSAKA will calculate this 2^${q.maxHeight} ${q.action}. Estimate wait is ${q.estTime ?? 'unknown'}.`}
         <br />
         Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
       </>

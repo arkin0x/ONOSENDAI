@@ -50,8 +50,9 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
   const { verdict, cursorKey, machineCeiling: machine } = view
   const estimating = cloud.status === 'quoting'
   const paying = cloud.status === 'awaiting_payment'
-  const funding = cloud.status === 'funding' || cloud.status === 'confirm'
-  const canGo = verdict.tier === 'cloud' && prefs.mode !== 'off' && !estimating && !paying && !funding
+  const estimated = cloud.status === 'confirm'
+  const funding = cloud.status === 'funding'
+  const canGo = verdict.tier === 'cloud' && prefs.mode !== 'off' && !estimating && !paying && !funding && !estimated
   const budgetText = String(prefs.autoMaxSats)
   const setBudgetText = (v: string) => setCloudPrefs({ autoMaxSats: Math.max(0, Math.floor(Number(v) || 0)) })
 
@@ -102,10 +103,10 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           </div>
         ) : (
         <div className="offer__row">
-          <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)} disabled={estimating || funding}>NOT NOW</button>
-          <button className={`offer__button offer__button--go ${estimating ? 'is-busy' : ''}`} onClick={() => void commit()} disabled={!canGo}>
-            {estimating && <span className="spin" aria-hidden="true" />}
-            {estimating ? 'ESTIMATING' : funding ? 'FUNDING' : prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'ESTIMATE \u2192' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
+          <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)} disabled={estimating || funding || estimated}>NOT NOW</button>
+          <button className={`offer__button offer__button--go ${estimating || funding ? 'is-busy' : ''}`} onClick={() => void commit()} disabled={!canGo}>
+            {(estimating || funding) && <span className="spin" aria-hidden="true" />}
+            {estimating ? 'ESTIMATING' : estimated ? 'ESTIMATED' : funding ? 'FUNDING' : prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'ESTIMATE \u2192' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
           </button>
         </div>
         )}

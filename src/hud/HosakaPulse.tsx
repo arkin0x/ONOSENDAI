@@ -17,8 +17,8 @@ export function HosakaPulse(): JSX.Element | null {
       src="/hosaka-mark.png"
       alt="HOSAKA job in progress"
       role="status"
-      width={424}
-      height={437}
+      width={308}
+      height={334}
       decoding="async"
     />
   )

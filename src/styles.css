@@ -4228,12 +4228,14 @@ kbd {
   font-size: 8px;
 }
 
-/* The HOSAKA mark inline in the Cloud compute panel's title. */
+/* The HOSAKA mark inline in the Cloud compute panel's title. Taller than
+   the 10px type so it can be read; the negative vertical margins keep the
+   header the height every other panel's is. */
 .panel__mark {
-  width: 13px;
+  width: 16px;
   height: auto;
-  vertical-align: -2px;
-  margin-right: 6px;
+  vertical-align: middle;
+  margin: -4px 6px -4px 0;
 }
 
 /* ---------- HOSAKA pulse: the mark breathing while a job runs ----------

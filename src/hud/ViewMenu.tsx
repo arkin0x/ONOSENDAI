@@ -13,9 +13,9 @@
  * needs no label.
  */
 
-import { Earth } from 'lucide-react'
+import { Box, Earth } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { viewEarth } from './HyperspacePanel'
+import { viewCyberspace, viewEarth } from './HyperspacePanel'
 import type { RotateDirection } from '../lib/space'
 
 interface Props {
@@ -80,6 +80,12 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
         onContextMenu={noCallout.onContextMenu}
         onPointerDown={press(() => { onClose(); viewEarth() })}
       ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
+      {/* The whole cube, centre tracked, with v1's top and bottom lattices. */}
+      <button
+        className="hyper__btn hyper__btn--cyberspace"
+        onContextMenu={noCallout.onContextMenu}
+        onPointerDown={press(() => { onClose(); viewCyberspace() })}
+      ><Box size={12} strokeWidth={2.25} aria-hidden /> CYBERSPACE</button>
     </div>
   )
 }

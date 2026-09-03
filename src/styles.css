@@ -48,12 +48,17 @@ body {
 
 .brand {
   pointer-events: none;
+  /* Centred: the wordmark is capped below the column's width, and left-aligned
+     it left a strip of dead space on its right, widest on the phone where the
+     column is the whole screen. The line under it follows. */
+  text-align: center;
 }
 
 .brand img {
   display: block;
   width: 100%;
   max-width: 290px;
+  margin: 0 auto;
   /* The width/height ATTRIBUTES exist to hand the browser the intrinsic
      aspect ratio before the file arrives (no layout shift). Without an
      explicit CSS height the attribute's 354px applies literally against the

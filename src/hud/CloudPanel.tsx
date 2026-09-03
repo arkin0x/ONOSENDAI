@@ -81,9 +81,7 @@ export function CloudPanel(): JSX.Element {
   return (
     <section className={`panel panel--cloud ${active ? 'is-active' : ''}`}>
       <header className="panel__head">
-        {/* The HOSAKA mark, small, so this panel is not one more panel: it is
-            the one whose work happens on someone else's machine. */}
-        <h2><img className="panel__mark" src="/hosaka-mark.png" alt="" aria-hidden="true" width={308} height={334} decoding="async" />Cloud compute</h2>
+        <h2>Cloud compute</h2>
         <span className={`tag tag--cloud ${cloud.status === 'error' ? 'tag--danger' : active ? 'tag--live' : ''}`}>{tag}</span>
       </header>
 
@@ -238,16 +236,23 @@ export function CloudPanel(): JSX.Element {
       )}
 
       <Explanation>
-        Beyond this machine's ceiling, Space asks HOSAKA for a quote instead of
-        stalling: a cloud hop lands at the cursor and returns the region key, a
-        cloud sidestep crosses a wall taller than the cloud's hop cap. AUTO
-        submits without asking up to the budget and asks above it; ASK always
-        asks; OFF keeps every proof local. You pay a Lightning invoice from
-        any wallet (this app has none); a job that fails is refunded to your
-        HOSAKA balance. HOSAKA learns the coordinates of each cloud move and
-        holds the region key of every region it computes for you. Every result
-        is verified here before it is signed.
+        <p>
+          Actions may require hardware resources beyond your machine's capacity.
+          Cloud services can compute actions on your behalf and return the data
+          for assembly into a valid proof. ONOSENDAI's own compute provider is
+          HOSAKA, but you can switch it to any provider.
+        </p>
+        <p>
+          HOSAKA quotes prices in satoshis paid via lightning, and holds a balance
+          for your identity to order compute jobs against. HOSAKA necessarily
+          learns the cantor root of every region it computes for you.
+        </p>
       </Explanation>
+
+      {/* The HOSAKA mark as a watermark, the pulse mark's size, so this panel is
+          not one more panel: it is the one whose work happens on someone else's
+          machine. */}
+      <img className="cloud__watermark" src="/hosaka-mark.png" alt="" aria-hidden="true" width={308} height={334} decoding="async" />
     </section>
   )
 }

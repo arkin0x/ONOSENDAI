@@ -8,17 +8,26 @@
 /** Gibson size in metres: 2^-33. */
 const GIBSON_METERS = 2 ** -33
 
-const UNITS: Array<{ threshold: number; symbol: string; scale: number }> = [
-  { threshold: 1e-9, symbol: 'pm', scale: 1e12 },
-  { threshold: 1e-6, symbol: 'nm', scale: 1e9 },
-  { threshold: 1e-3, symbol: '\u03bcm', scale: 1e6 },
-  { threshold: 1e-2, symbol: 'mm', scale: 1e3 },
-  { threshold: 1e-1, symbol: 'cm', scale: 1e2 },
-  { threshold: 1e3, symbol: 'm', scale: 1 },
-  { threshold: 1e6, symbol: 'km', scale: 1e-3 },
-  { threshold: 1e9, symbol: 'Mm', scale: 1e-6 },
-  { threshold: 1.496e11, symbol: 'AU', scale: 1 / 1.496e11 },
+const UNITS: Array<{ threshold: number; symbol: string; name: string; scale: number }> = [
+  { threshold: 1e-9, symbol: 'pm', name: 'picometres', scale: 1e12 },
+  { threshold: 1e-6, symbol: 'nm', name: 'nanometres', scale: 1e9 },
+  { threshold: 1e-3, symbol: '\u03bcm', name: 'micrometres', scale: 1e6 },
+  { threshold: 1e-2, symbol: 'mm', name: 'millimetres', scale: 1e3 },
+  { threshold: 1e-1, symbol: 'cm', name: 'centimetres', scale: 1e2 },
+  { threshold: 1e3, symbol: 'm', name: 'metres', scale: 1 },
+  { threshold: 1e6, symbol: 'km', name: 'kilometres', scale: 1e-3 },
+  { threshold: 1e9, symbol: 'Mm', name: 'megametres', scale: 1e-6 },
+  { threshold: 1.496e11, symbol: 'AU', name: 'astronomical units', scale: 1 / 1.496e11 },
 ]
+
+/** The unit a length in metres is best read in, and the figure in it to three significant digits. */
+function inUnit(meters: number): { figure: number; unit: (typeof UNITS)[number] } {
+  for (let i = 0; i < UNITS.length; i++) {
+    const u = UNITS[i]
+    if (meters < u.threshold || i === UNITS.length - 1) return { figure: parseFloat((meters * u.scale).toPrecision(3)), unit: u }
+  }
+  return { figure: meters, unit: UNITS[5] }
+}
 
 /**
  * A gibson count as a human distance.
@@ -42,12 +51,12 @@ export function formatDistance(gibsons: bigint): string {
 
 /** One cell at this scale, as a short human string like "1.91 \u03bcm". */
 export function formatCellSize(scaleExp: number): string {
-  const meters = 2 ** scaleExp * GIBSON_METERS
-  for (let i = 0; i < UNITS.length; i++) {
-    const u = UNITS[i]
-    if (meters < u.threshold || i === UNITS.length - 1) {
-      return `${parseFloat((meters * u.scale).toPrecision(3))} ${u.symbol}`
-    }
-  }
-  return `${meters} m`
+  const { figure, unit } = inUnit(2 ** scaleExp * GIBSON_METERS)
+  return `${figure} ${unit.symbol}`
+}
+
+/** The same, with the unit spelled out: "1.91 micrometres", "1 metre", "2 astronomical units". */
+export function formatCellSizeLong(scaleExp: number): string {
+  const { figure, unit } = inUnit(2 ** scaleExp * GIBSON_METERS)
+  return `${figure} ${figure === 1 ? unit.name.replace(/s$/, '') : unit.name}`
 }

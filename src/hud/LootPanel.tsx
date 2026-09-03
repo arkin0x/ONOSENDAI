@@ -79,9 +79,11 @@ export function LootPanel(): JSX.Element {
       </ul>
 
       <Explanation>
-        Every kind:33330 bag on {relayName}. The size is the region each bag is
-        encrypted to, not its distance from you: where that region is stays hidden
-        until its hider adds a hint. Tap a bag for its record.
+        Identities can encrypt messages, 3D objects (shards), or other data by
+        location. These encrypted bundles are called "bags" and might have clues
+        as to where they can be found. The size is the area wherein the bag can be
+        found; larger is more work to decrypt but easier to find, smaller is less
+        work to decrypt but harder to find.
       </Explanation>
     </section>
   )

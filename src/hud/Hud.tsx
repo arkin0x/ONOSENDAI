@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
+import { formatCellSizeLong } from '../lib/scale'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -50,6 +51,21 @@ const SIGNER_LABEL: Record<string, string> = {
   nip46: 'BUNKER',
 }
 
+/** How long a tapped readout says COPIED before its label returns. */
+const COPIED_MS = 1200
+
+/** Tap to copy: which key was copied last, and the copier. The clipboard gets the raw text. */
+function useCopied(): [string | null, (key: string, text: string) => void] {
+  const [copied, setCopied] = useState<string | null>(null)
+  const copy = (key: string, text: string): void => {
+    navigator.clipboard?.writeText(text).then(
+      () => { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) },
+      () => { /* no clipboard here: the value stays selectable */ },
+    )
+  }
+  return [copied, copy]
+}
+
 function IdentityPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
   const signerKind = useCyberspace((s) => s.signerKind)
@@ -77,12 +93,10 @@ function IdentityPanel(): JSX.Element {
       </div>
 
       <Explanation>
-        Spawned at this key's coordinate: the 256-bit pubkey decodes directly
-        to x / y / z / plane (spec section 8.3). Persisted locally so
-        refreshing keeps your identity and position.
-        {live
-          ? ' LIVE: every action is signed and published to cyberspace.nostr1.com as it completes.'
-          : ' LOCAL: actions are signed but stay on this device. Going live publishes the whole chain.'}
+        Your spawn location is equal to your public key. Use the generated key or
+        sign in with your nostr keypair. LIVE indicates your proofs are being
+        published so other identities can see your movements. LOCAL means proofs
+        are stored on this device until you switch to LIVE.
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
@@ -95,6 +109,16 @@ function PositionPanel(): JSX.Element {
   const plane = useCyberspace((s) => s.plane)
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
+  const [copied, copy] = useCopied()
+
+  // Every figure copies on a tap, raw: the grouping commas are for reading,
+  // not for pasting into a filter or a script.
+  const readout = (key: string, label: string, shown: string, raw: string): JSX.Element => (
+    <div key={key}>
+      <dt className={copied === key ? 'is-copied' : ''}>{copied === key ? 'Copied' : label}</dt>
+      <dd><button className="copy" onClick={() => copy(key, raw)} title="Tap to copy">{shown}</button></dd>
+    </div>
+  )
 
   return (
     <section className="panel">
@@ -106,28 +130,16 @@ function PositionPanel(): JSX.Element {
       </header>
 
       <dl className="stats stats--axes">
-        <div>
-          <dt>X</dt>
-          <dd>{formatBig(position.x)}</dd>
-        </div>
-        <div>
-          <dt>Y</dt>
-          <dd>{formatBig(position.y)}</dd>
-        </div>
-        <div>
-          <dt>Z</dt>
-          <dd>{formatBig(position.z)}</dd>
-        </div>
-        <div>
-          <dt>Sector</dt>
-          <dd>{sector}</dd>
-        </div>
+        {readout('x', 'X', formatBig(position.x), position.x.toString())}
+        {readout('y', 'Y', formatBig(position.y), position.y.toString())}
+        {readout('z', 'Z', formatBig(position.z), position.z.toString())}
+        {readout('sector', 'Sector', sector, sector)}
       </dl>
 
-      <div className="hash">
-        <span className="hash__label">coord</span>
+      <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
+        <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
         <code>{coordHex}</code>
-      </div>
+      </button>
     </section>
   )
 }
@@ -143,55 +155,79 @@ function ScalePanel(): JSX.Element {
         <span className="scale-exp">2^{scaleExp}</span>
       </header>
 
-      <dl className="stats">
-        <div>
-          <dt>Step</dt>
-          <dd>{formatStep(scaleExp)}</dd>
+      {/* Two columns: the axis key and the view facts on the left, the whole
+          scale range on the right, so the ladder's height is not empty space
+          beside three lines of text. */}
+      <div className="scale__cols">
+        <div className="scale__facts">
+          <div className="axis-legend">
+            <div className="axis-legend-item">
+              <span className="axis-dot axis-dot--x"></span>
+              <span className="axis-name">X axis</span>
+            </div>
+            <div className="axis-legend-item">
+              <span className="axis-dot axis-dot--y"></span>
+              <span className="axis-name">Y axis</span>
+            </div>
+            <div className="axis-legend-item">
+              <span className="axis-dot axis-dot--z"></span>
+              <span className="axis-name">Z axis (forward)</span>
+            </div>
+          </div>
+          <dl className="stats stats--stack">
+            <div>
+              <dt>Step</dt>
+              <dd>{formatStep(scaleExp)}</dd>
+            </div>
+            <div>
+              <dt>Cursor</dt>
+              <dd>{formatCellSizeLong(scaleExp)}</dd>
+            </div>
+            <div>
+              <dt>Screen right</dt>
+              <dd>{signed(axes.right.axis, axes.right.dir)}</dd>
+            </div>
+            <div>
+              <dt>Screen up</dt>
+              <dd>{signed(axes.up.axis, axes.up.dir)}</dd>
+            </div>
+            <div>
+              <dt>Looking along</dt>
+              <dd>{signed(axes.out.axis, -axes.out.dir)}</dd>
+            </div>
+          </dl>
         </div>
-        <div>
-          <dt>Screen right</dt>
-          <dd>{signed(axes.right.axis, axes.right.dir)}</dd>
-        </div>
-        <div>
-          <dt>Screen up</dt>
-          <dd>{signed(axes.up.axis, axes.up.dir)}</dd>
-        </div>
-      </dl>
-
-      <ScaleLadder />
-
-      <div className="axis-legend">
-        <div className="axis-legend-item">
-          <span className="axis-dot axis-dot--x"></span>
-          <span className="axis-name">X axis</span>
-        </div>
-        <div className="axis-legend-item">
-          <span className="axis-dot axis-dot--y"></span>
-          <span className="axis-name">Y axis</span>
-        </div>
-        <div className="axis-legend-item">
-          <span className="axis-dot axis-dot--z"></span>
-          <span className="axis-name">Z axis (forward)</span>
-        </div>
+        <ScaleLadder />
       </div>
 
       <Explanation>
-        Looking along {signed(axes.out.axis, -axes.out.dir)}. R and F travel the
-        axis into and out of the screen.
+        2^0 is the atomic-scale view of cyberspace; things don't get any smaller.
+        Your view can scale up exponentially until 2^85, which is the full size of
+        cyberspace (along each axis). The cursor represents a cubic meter at 2^33.
+        Earth is visible around 2^50.
       </Explanation>
     </section>
   )
 }
 
+const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
+  { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
+  { href: 'https://straylight.cafe', name: 'straylight.cafe', what: 'cyberspace enthusiast community hub' },
+  { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
+]
+
 function LinksPanel(): JSX.Element {
   return (
     <section className="panel panel--links">
-      <a href="https://straylight.cafe" target="_blank" rel="noopener noreferrer">
-        straylight.cafe
-      </a>
-      <a href="https://cyberspace.international" target="_blank" rel="noopener noreferrer">
-        cyberspace.international
-      </a>
+      <header className="panel__head">
+        <h2>Official</h2>
+      </header>
+      {OFFICIAL.map((l) => (
+        <p key={l.href} className="links__row">
+          <a href={l.href} target="_blank" rel="noopener noreferrer">{l.name}</a>
+          <span className="links__what"> - {l.what}</span>
+        </p>
+      ))}
     </section>
   )
 }

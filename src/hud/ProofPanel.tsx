@@ -120,7 +120,7 @@ export function ProofPanel(): JSX.Element {
               <dd>{routeLabel(preview.route)}</dd>
             </div>
             <div>
-              <dt>Tallest wall</dt>
+              <dt>Highest boundary</dt>
               <dd>2^{preview.route.tallestWall}</dd>
             </div>
             <div>
@@ -201,7 +201,7 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
-      <p className="legend__note">{`THIS MACHINE: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
+      <p className="legend__note">{`THIS MACHINE BENCHMARK: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
     </section>
   )
 }

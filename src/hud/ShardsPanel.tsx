@@ -129,11 +129,8 @@ export function ShardsPanel(): JSX.Element {
       )}
 
       <Explanation>
-        Encrypt by location: a shard is coloured vertices (SOLID / POINTS / LINES);
-        a message is text. Both are hidden at a location and found only by someone
-        who computes its region key (spec section 7). Tap a deployment to fly to it and prove it
-        with TEST DISCOVERY. The tag counts what you have hidden; what your scans
-        have found is on the Loot panel.
+        Build 3D objects (shards), messages, and encrypt them at a location in
+        cyberspace for others to find.
       </Explanation>
 
       {target && (

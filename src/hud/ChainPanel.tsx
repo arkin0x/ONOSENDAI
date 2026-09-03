@@ -13,7 +13,6 @@
 import { formatMs, formatOps } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
-import { useRelays } from '../store/useRelays'
 import { Explanation } from './Explanation'
 
 export function ChainPanel(): JSX.Element {
@@ -25,7 +24,6 @@ export function ChainPanel(): JSX.Element {
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
-  const relayCount = useRelays((s) => s.relays.length)
   const actions = chain.hops + chain.sidesteps
 
   const statuses = events.map((e) => published[e.id])
@@ -93,10 +91,11 @@ export function ChainPanel(): JSX.Element {
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
 
       <Explanation>
-        Every committed action is a signed kind:3333 event naming the one
-        before it (spec section 8). {live
-          ? `Live publishes each one to your ${relayCount === 1 ? CYBERSPACE_RELAY.replace('wss://', '') : `${relayCount} relays`} as it lands.`
-          : 'Local keeps them on this device; switching to Live publishes the whole chain in order.'}
+        To alter your position in cyberspace, you must compute the cantor root for
+        the region containing your origin and destination, and publish a root proof
+        naming the proof that came before it. This forms a personal "hash chain" for
+        your identity that mathematically proves a valid history of your actions
+        without relying on a central authority to enforce movement rules.
       </Explanation>
     </section>
   )

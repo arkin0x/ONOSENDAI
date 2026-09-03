@@ -451,12 +451,12 @@ export function formatBig(v: bigint): string {
 }
 
 /**
- * Compact scale label, e.g. "1 G", "1.02 KG", "2^40 G".
+ * The step at a scale, in gibsons: "1 gibson", "1,024 gibsons", "2^40 gibsons".
  */
 export function formatStep(scaleExp: number): string {
-  if (scaleExp === 0) return '1 G'
-  if (scaleExp < 20) return `${formatBig(stepFor(scaleExp))} G`
-  return `2^${scaleExp} G`
+  if (scaleExp === 0) return '1 gibson'
+  if (scaleExp < 20) return `${formatBig(stepFor(scaleExp))} gibsons`
+  return `2^${scaleExp} gibsons`
 }
 
 /**

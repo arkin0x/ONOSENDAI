@@ -71,14 +71,16 @@ export function watchAuthor(pubkey: string, since: number, onEvent: (ev: NostrEv
   return subscribe({ kinds: [KIND], authors: [pubkey], '#A': V2_ACTIONS, since }, onEvent)
 }
 
-/** Accepts an npub or 64-char hex; returns hex, or null when it is neither. */
+/** Accepts an npub, an nprofile (its relay hints dropped) or 64-char hex; returns hex, or null when it is none of them. */
 export function parsePubkey(input: string): string | null {
   const v = input.trim()
   if (/^[0-9a-f]{64}$/i.test(v)) return v.toLowerCase()
-  if (!/^npub1/i.test(v)) return null
+  if (!/^(npub|nprofile)1/i.test(v)) return null
   try {
     const decoded = nip19.decode(v.toLowerCase())
-    return decoded.type === 'npub' ? decoded.data : null
+    if (decoded.type === 'npub') return decoded.data
+    if (decoded.type === 'nprofile') return decoded.data.pubkey
+    return null
   } catch {
     return null
   }

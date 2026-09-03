@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { latestByPubkey, parsePubkey, V2_ACTIONS } from '../lib/chains'
-import { fetchContacts, GENERAL_RELAYS, type Contact } from '../lib/contacts'
+import { fetchContacts, type Contact } from '../lib/contacts'
 import { query } from '../lib/relay'
 import { spectate } from '../lib/spectator'
 import { targetColor } from '../lib/targets'
@@ -127,7 +127,7 @@ export function TargetsPanel(): JSX.Element {
 
       <form className="avatars__find" onSubmit={(e) => { e.preventDefault(); if (typed) { useCyberspace.getState().addTarget(typed); setInput('') } }}>
         <input className="avatars__input" value={input} onChange={(e) => setInput(e.target.value)}
-          placeholder="npub or hex pubkey" spellCheck={false} autoComplete="off" aria-label="Pubkey to target" />
+          placeholder="npub, nprofile or hex pubkey" spellCheck={false} autoComplete="off" aria-label="Pubkey to target" />
         <button className="avatars__go" type="submit" disabled={!typed}>TARGET</button>
       </form>
 
@@ -153,7 +153,7 @@ export function TargetsPanel(): JSX.Element {
         <span className="legend__label">Follows of</span>
         <form className="avatars__find" onSubmit={(e) => { e.preventDefault(); void loadContacts() }}>
           <input className="avatars__input" value={who} onChange={(e) => setWho(e.target.value)}
-            placeholder="npub or hex pubkey" spellCheck={false} autoComplete="off" aria-label="Whose follows to list" />
+            placeholder="npub, nprofile or hex pubkey" spellCheck={false} autoComplete="off" aria-label="Whose follows to list" />
           <button className="avatars__go" type="submit" disabled={!whoHex || contactsState === 'loading'}>
             {contactsState === 'loading' ? 'LOADING' : 'LOAD'}
           </button>
@@ -181,11 +181,7 @@ export function TargetsPanel(): JSX.Element {
       </div>
 
       <Explanation>
-        A target is pointed at from anywhere, like Earth: reticle in frame,
-        chevron on the edge, distance either way, and the avatar itself once
-        you are near. Positions are chain heads on the relay, kept live; a key
-        with no chain is pointed at its spawn coordinate. Follows come from
-        kind 3 on {GENERAL_RELAYS.map((r) => r.replace('wss://', '')).join(', ')}.
+        Target an identity to mark their location on your HUD.
       </Explanation>
     </section>
   )

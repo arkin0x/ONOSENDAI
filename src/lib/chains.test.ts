@@ -39,11 +39,15 @@ describe('mergeEvents', () => {
 })
 
 describe('parsePubkey', () => {
-  it('accepts hex and npub, rejects the rest', () => {
+  it('accepts hex, npub and nprofile, rejects the rest', () => {
     expect(parsePubkey(pa)).toBe(pa)
     expect(parsePubkey(pa.toUpperCase())).toBe(pa)
     expect(parsePubkey(`  ${nip19.npubEncode(pa)} `)).toBe(pa)
+    expect(parsePubkey(nip19.nprofileEncode({ pubkey: pa, relays: ['wss://relay.example'] }))).toBe(pa)
+    expect(parsePubkey(nip19.nprofileEncode({ pubkey: pa }).toUpperCase())).toBe(pa)
     expect(parsePubkey('npub1notakey')).toBeNull()
+    expect(parsePubkey('nprofile1notakey')).toBeNull()
+    expect(parsePubkey(nip19.noteEncode(pa))).toBeNull()
     expect(parsePubkey('xyz')).toBeNull()
   })
 })

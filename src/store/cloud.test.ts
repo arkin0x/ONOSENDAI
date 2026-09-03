@@ -473,6 +473,8 @@ describe('cloud routes', () => {
     await S().commit()
     await idle()
     expect(S().cloud.balance?.msats).toBe(5000)
+  })
+
   it('a deposit paid while the tab was away is claimed at startup, credited and announced once', async () => {
     saveCloudDeposit({ depositId: 'dep-away', pubkey: S().identity.pubkey, amountMsats: 15000, expiresAt: Math.floor(Date.now() / 1000) + 3600, bolt11: 'lnbc-dep-away' })
     fake.claimDeposit.mockResolvedValue({ ...deposit('dep-away', 'settled'), settled_msats: 15000 })

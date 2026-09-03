@@ -10,7 +10,7 @@ import { queryAny, CYBERSPACE_RELAY } from './relay'
 import type { NostrEvent } from './events'
 
 /** Where kind 3 is most likely to be found. */
-export const GENERAL_RELAYS = ['wss://purplepag.es', 'wss://relay.damus.io', 'wss://nos.lol']
+export const GENERAL_RELAYS = ['wss://relay.primal.net', 'wss://relay.damus.io', 'wss://nos.lol']
 
 export interface Contact {
   pubkey: string

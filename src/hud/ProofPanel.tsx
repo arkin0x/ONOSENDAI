@@ -27,6 +27,7 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
     'cloud-computing': 'HOSAKA COMPUTING',
     quoting: 'QUOTING',
     confirm: 'AWAITING YOUR PAY',
+    funding: 'FUNDING',
     awaiting_payment: 'AWAITING PAYMENT',
     paid: 'FUNDED',
     verifying: 'VERIFYING',
@@ -215,6 +216,7 @@ function routeLabel(r: PlanSummary): string {
 const CLOUD_STAGE: Record<string, string> = {
   quoting: 'asking HOSAKA',
   confirm: 'waiting for your PAY',
+  funding: 'checking your balance, asking for the invoice',
   awaiting_payment: 'waiting for the invoice to be paid',
   paid: 'funded',
   computing: 'HOSAKA computing',

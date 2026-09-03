@@ -4180,3 +4180,35 @@ kbd {
 .offer__button--later { opacity: 0.8; }
 .offer__note { margin: 0; font-size: 0.66rem; opacity: 0.7; line-height: 1.4; }
 .modal__card .hosaka-banner { margin: -16px -16px 12px; width: calc(100% + 32px); border-radius: 3px 3px 0 0; }
+
+/* ---------- Busy buttons and the estimate figure ---------- */
+.spin {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.45em;
+  vertical-align: -0.1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.is-busy { opacity: 0.85; cursor: progress; }
+.is-checked { border-color: var(--cloud, #ffd27d); color: var(--cloud, #ffd27d); }
+.modal__figure { margin: 4px 0 10px; text-align: left; }
+.modal__price {
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-weight: 700;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+  color: var(--cloud, #ffd27d);
+}
+.invoice__amount {
+  margin: 8px 0 2px;
+  text-align: center;
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--cloud, #ffd27d);
+}

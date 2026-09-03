@@ -238,7 +238,7 @@ const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashe
  * client checking the result before it signs. `error` keeps its message until
  * X or the next commit.
  */
-export type CloudStatus = 'idle' | 'quoting' | 'confirm' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
+export type CloudStatus = 'idle' | 'quoting' | 'confirm' | 'funding' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
 
 /** HOSAKA's price for the lined-up move, waiting for PAY or already approved. */
 export interface CloudQuote {
@@ -271,6 +271,10 @@ export interface CloudState {
   startedAt: number | null
   /** The last cloud proof that landed, for the panel. */
   last: { jobId: string; action: HosakaAction; costMsats: number; lookupId: string | null; at: number } | null
+  /** CHECK PAYMENT was pressed and the node has not answered yet. */
+  checking: boolean
+  /** The node's last word on the invoice, so a check shows something even when nothing changed. */
+  lastCheck: { at: number; status: string } | null
 }
 
 const IDLE_CLOUD: CloudState = {
@@ -284,6 +288,8 @@ const IDLE_CLOUD: CloudState = {
   limits: null,
   startedAt: null,
   last: null,
+  checking: false,
+  lastCheck: null,
 }
 
 /**
@@ -980,7 +986,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     cloudAbort = abort
     cloudWaker = waker
     try {
-      set({ cloud: { ...get().cloud, status: 'quoting', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
+      set({ cloud: { ...get().cloud, status: 'funding', message: currentSigner.kind === 'local' ? 'Checking your HOSAKA balance.' : 'Waiting for your signer to approve the HOSAKA balance check.' } })
       const bal = await client.balance(abort.signal)
       if (id !== requestId) return
       // Whole sats: a node refuses an invoice for a fraction of one.
@@ -991,12 +997,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         const invoice = invoiceOf(dep)
         // On disk before the invoice is on screen: a reload after paying claims it.
         saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
-        set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null } })
+        set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
         const settled = await client.waitForDeposit(dep.deposit_id, {
           signal: abort.signal,
           expiresAt: invoice.expiresAt,
           intervalMs: claimIntervalFor(currentSigner.kind),
           waker,
+          onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
         })
         if (id !== requestId) return
         if (settled.status !== 'settled') {
@@ -1098,6 +1105,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         onRecord: (r) => {
           saveCloudJob(r)
           if (id === requestId) set({ cloud: { ...get().cloud, job: r } })
+        },
+        onDepositPoll: (d) => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } })
         },
         onStage: (stage, d) => {
           if (id !== requestId) return
@@ -2007,6 +2017,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   approveCloud: () => {
     const { cloud } = get()
     if (cloud.status !== 'confirm' || !cloud.quote) return
+    // The estimate modal stays up with PAY locked until the invoice (or the
+    // funded route) takes over.
+    set({ cloud: { ...cloud, status: 'funding', message: null } })
     void fundRoute(cloud.quote.costMsats, requestId)
   },
 
@@ -2109,7 +2122,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
   },
 
-  checkCloudPayment: () => { cloudWaker?.wake() },
+  checkCloudPayment: () => {
+    if (get().cloud.status !== 'awaiting_payment') return
+    set({ cloud: { ...get().cloud, checking: true } })
+    cloudWaker?.wake()
+  },
 
   setCloudMode: (mode) => { get().setCloudPrefs({ mode }) },
 

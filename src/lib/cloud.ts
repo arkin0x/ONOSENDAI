@@ -248,6 +248,12 @@ export function satsOf(msats: number): number {
   return Math.ceil(msats / 1000)
 }
 
+/** "1 sat", "15 sats": the unit agrees with the number everywhere it is shown. */
+export function satsLabel(msats: number): string {
+  const n = satsOf(msats)
+  return `${n} sat${n === 1 ? '' : 's'}`
+}
+
 /** Whether a quote at this price stops for a PAY button first. */
 export function needsApproval(costMsats: number, prefs: CloudPrefs): boolean {
   if (prefs.mode === 'ask') return true
@@ -302,6 +308,8 @@ export interface CloudStageDetail {
 }
 
 export interface CloudDriverHooks {
+  /** Each answer from the node about the job's own invoice. */
+  onDepositPoll?: (dep: HosakaDeposit) => void
   /** The record changed (a stage or a new invoice): persist and show it. */
   onRecord: (record: PendingCloudJob) => void
   /** A stage began, with what the HUD needs for it. */
@@ -342,6 +350,7 @@ export async function driveCloudJob(
         expiresAt: record.deposit.expiresAt,
         intervalMs: hooks.claimIntervalMs,
         waker,
+        onPoll: hooks.onDepositPoll,
       })
       if (dep.status !== 'settled') throw new CloudFlowError('invoice_expired', 'The invoice expired unpaid. Commit again for a fresh quote.')
       record = { ...record, stage: 'paid' }

@@ -34,7 +34,9 @@ export function useOfferView(hidden: boolean): OfferView | null {
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
   const atHead = useCyberspace((s) => s.atHead())
-  const busy = useCyberspace((s) => s.plan !== null || s.cloud.status !== 'idle' || s.proof.status === 'computing')
+  // A route being quoted or funded keeps the card up (its ESTIMATE is what started it);
+  // anything running takes the screen.
+  const busy = useCyberspace((s) => (s.plan !== null && s.plan.status !== 'funding') || (s.plan === null && s.cloud.status !== 'idle') || s.proof.status === 'computing')
   const limits = useCyberspace((s) => s.cloud.limits)
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)

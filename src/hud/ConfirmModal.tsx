@@ -10,7 +10,11 @@ interface Props {
   /** Something to show above the title, such as the HOSAKA banner. */
   banner?: ReactNode
   title: string
-  body: string
+  body: ReactNode
+  /** A large figure between the title and the body, such as a price. */
+  figure?: ReactNode
+  /** The confirm is in progress: locked, with a spinner. */
+  busy?: boolean
   confirmLabel: string
   danger?: boolean
   /** An extra class on the card, for a border that is not the destructive red. */
@@ -19,16 +23,19 @@ interface Props {
   onCancel: () => void
 }
 
-export function ConfirmModal({ banner, title, body, confirmLabel, danger = true, cardClassName, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, onConfirm, onCancel }: Props): JSX.Element {
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onCancel}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
         <h2 className="modal__title">{title}</h2>
+        {figure !== undefined && <div className="modal__figure">{figure}</div>}
         <p className="modal__body">{body}</p>
         <div className="modal__row">
-          <button className="modal__cancel" onClick={onCancel}>CANCEL</button>
-          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''}`} onClick={onConfirm}>{confirmLabel}</button>
+          <button className="modal__cancel" onClick={onCancel} disabled={busy}>CANCEL</button>
+          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy}>
+            {busy && <span className="spin" aria-hidden="true" />}{confirmLabel}
+          </button>
         </div>
       </div>
     </div>

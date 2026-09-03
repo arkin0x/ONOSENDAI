@@ -9,8 +9,9 @@
  * elsewhere, which can be resumed while the chain head still matches it.
  */
 
+import { CheckPaymentButton } from './InvoiceModal'
 import { useState } from 'react'
-import { formatClock, satsOf, type CloudMode } from '../lib/cloud'
+import { formatClock, satsLabel, satsOf, type CloudMode } from '../lib/cloud'
 import { HOSAKA_DEFAULT_URL } from '../lib/hosaka'
 import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
@@ -34,6 +35,7 @@ const STATUS_LABEL: Record<string, string> = {
   computing: 'COMPUTING',
   verifying: 'VERIFYING',
   error: 'FAILED',
+  funding: 'FUNDING',
 }
 
 function hostOf(url: string): string {
@@ -50,7 +52,7 @@ export function CloudPanel(): JSX.Element {
   const active = cloud.status !== 'idle' && cloud.status !== 'error'
   const job = cloud.job
   // Elapsed and "ago" lines only exist while there is a job to describe.
-  const now = useNow(job ? 1000 : 0)
+  const now = useNow(job || cloud.status === 'awaiting_payment' ? 1000 : 0)
   const tag = prefs.mode === 'off' ? 'OFF' : active || cloud.status === 'error' ? STATUS_LABEL[cloud.status] : prefs.mode.toUpperCase()
 
   const setUrl = (): void => {
@@ -110,7 +112,7 @@ export function CloudPanel(): JSX.Element {
         </div>
         <div>
           <dt>Cloud caps</dt>
-          <dd>{cloud.limits ? `HOP h${cloud.limits.max_hop_height} · SIDESTEP h${cloud.limits.max_sidestep_height}` : prefs.mode === 'off' ? '—' : 'not fetched'}</dd>
+          <dd>{cloud.limits ? `HOPS 2^${cloud.limits.max_hop_height} · SIDESTEPS 2^${cloud.limits.max_sidestep_height}` : prefs.mode === 'off' ? '—' : 'not fetched'}</dd>
         </div>
       </dl>
 
@@ -128,6 +130,27 @@ export function CloudPanel(): JSX.Element {
           <button className="avatars__go" type="submit" disabled={!/^https?:\/\/\S+$/.test(urlDraft.trim())}>SET</button>
           <button className="avatars__go" type="button" onClick={() => { setUrlDraft(HOSAKA_DEFAULT_URL); store().setCloudPrefs({ apiUrl: HOSAKA_DEFAULT_URL }); setEditingUrl(false) }}>RESET</button>
         </form>
+      )}
+
+      {!job && cloud.status === 'awaiting_payment' && cloud.invoice && (
+        <div className="cloud__job">
+          <dl className="stats">
+            <div>
+              <dt>Route deposit</dt>
+              <dd>{satsLabel(cloud.invoice.amountMsats)}</dd>
+            </div>
+            <div>
+              <dt>Invoice</dt>
+              <dd>{cloud.invoice.expiresAt * 1000 > now ? `expires in ${formatClock(cloud.invoice.expiresAt * 1000 - now)}` : 'expired'}</dd>
+            </div>
+          </dl>
+          <div className="secret__actions">
+            {!cloud.invoiceOpen && <button className="secret__act" onClick={() => store().setInvoiceOpen(true)}>SHOW INVOICE</button>}
+            <CheckPaymentButton />
+            <button className="secret__act secret__act--danger" onClick={() => store().cancelCloud()}>CANCEL</button>
+          </div>
+          <p className="legend__note">One invoice funds the whole route; the steps start the moment your node reports it paid.</p>
+        </div>
       )}
 
       {job && (
@@ -159,9 +182,7 @@ export function CloudPanel(): JSX.Element {
             {cloud.status === 'awaiting_payment' && !cloud.invoiceOpen && (
               <button className="secret__act" onClick={() => store().setInvoiceOpen(true)}>SHOW INVOICE</button>
             )}
-            {cloud.status === 'awaiting_payment' && (
-              <button className="secret__act" onClick={() => store().checkCloudPayment()}>CHECK PAYMENT</button>
-            )}
+            {cloud.status === 'awaiting_payment' && <CheckPaymentButton />}
             {active && <button className="secret__act secret__act--danger" onClick={() => store().cancelCloud()}>CANCEL</button>}
             {!active && <button className="secret__act" onClick={() => void store().resumeCloudJob()}>RESUME</button>}
             {!active && <button className="secret__act secret__act--danger" onClick={() => store().discardCloudJob()}>DISCARD</button>}

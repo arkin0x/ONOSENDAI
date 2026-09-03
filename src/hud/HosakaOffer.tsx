@@ -14,6 +14,7 @@ import { useEffect } from 'react'
 import { type CloudMode } from '../lib/cloud'
 import { useCyberspace } from '../store/useCyberspace'
 import { useOffer, useOfferView } from '../store/useOffer'
+import { CheckPaymentButton } from './InvoiceModal'
 
 const MODES: CloudMode[] = ['auto', 'ask', 'off']
 
@@ -32,6 +33,8 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
   const prefs = useCyberspace((s) => s.cloudPrefs)
   const setCloudMode = useCyberspace((s) => s.setCloudMode)
   const setCloudPrefs = useCyberspace((s) => s.setCloudPrefs)
+  const setInvoiceOpen = useCyberspace((s) => s.setInvoiceOpen)
+  const cancelCloud = useCyberspace((s) => s.cancelCloud)
   const commit = useCyberspace((s) => s.commit)
   const fetchCaps = useCyberspace((s) => s.resumeCloudJob)
   const dismiss = useOffer((s) => s.dismiss)
@@ -45,7 +48,10 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
 
   if (!view) return null
   const { verdict, cursorKey, machineCeiling: machine } = view
-  const canGo = verdict.tier === 'cloud' && prefs.mode !== 'off'
+  const estimating = cloud.status === 'quoting'
+  const paying = cloud.status === 'awaiting_payment'
+  const funding = cloud.status === 'funding' || cloud.status === 'confirm'
+  const canGo = verdict.tier === 'cloud' && prefs.mode !== 'off' && !estimating && !paying && !funding
   const budgetText = String(prefs.autoMaxSats)
   const setBudgetText = (v: string) => setCloudPrefs({ autoMaxSats: Math.max(0, Math.floor(Number(v) || 0)) })
 
@@ -87,12 +93,22 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
             </label>
           )}
         </div>
+        {paying ? (
+          // The invoice is out. This card is the desktop's control surface for it.
+          <div className="offer__row">
+            {!cloud.invoiceOpen && <button className="offer__button" onClick={() => setInvoiceOpen(true)}>SHOW INVOICE</button>}
+            <CheckPaymentButton className="offer__button" />
+            <button className="offer__button offer__button--later" onClick={() => cancelCloud()}>CANCEL</button>
+          </div>
+        ) : (
         <div className="offer__row">
-          <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)}>NOT NOW</button>
-          <button className="offer__button offer__button--go" onClick={() => void commit()} disabled={!canGo}>
-            {prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'ESTIMATE \u2192' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
+          <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)} disabled={estimating || funding}>NOT NOW</button>
+          <button className={`offer__button offer__button--go ${estimating ? 'is-busy' : ''}`} onClick={() => void commit()} disabled={!canGo}>
+            {estimating && <span className="spin" aria-hidden="true" />}
+            {estimating ? 'ESTIMATING' : funding ? 'FUNDING' : prefs.mode === 'off' ? 'CLOUD IS OFF' : verdict.tier === 'cloud' ? 'ESTIMATE \u2192' : verdict.tier === 'cloud-unknown' ? 'CONNECTING' : 'IMPOSSIBLE'}
           </button>
         </div>
+        )}
         <p className="offer__note">HOSAKA necessarily learns the cantor roots of the moves it computes. Every result is verified locally before you sign it.</p>
       </div>
     </aside>

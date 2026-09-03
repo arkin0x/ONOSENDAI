@@ -278,6 +278,8 @@ export interface WaitForDepositOptions {
   expiresAt?: number
   intervalMs?: number
   waker?: Waker
+  /** Every answer from the node, settled or not, so a manual check can show it landed. */
+  onPoll?: (dep: HosakaDeposit) => void
 }
 
 export interface WaitForJobOptions {
@@ -417,6 +419,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
         try {
           last = await claimDeposit(depositId, o.signal)
           failures = 0
+          o.onPoll?.(last)
           if (last.status === 'settled' || last.status === 'expired') return last
         } catch (err) {
           if (err instanceof HosakaError && err.code === 'aborted') throw err

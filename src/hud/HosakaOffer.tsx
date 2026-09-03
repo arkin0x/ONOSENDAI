@@ -78,11 +78,14 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
               </button>
             ))}
           </div>
-          <label className="offer__budget">
-            <span>Pay without asking up to</span>
-            <input type="number" min={0} step={1} inputMode="numeric" value={budgetText} onChange={(e) => setBudgetText(e.target.value)} aria-label="Auto-pay budget in sats" />
-            <span>sats</span>
-          </label>
+          {/* The budget only means something in AUTO: ASK always asks, OFF never pays. */}
+          {prefs.mode === 'auto' && (
+            <label className="offer__budget">
+              <span>Pay without asking up to</span>
+              <input type="number" min={0} step={1} inputMode="numeric" value={budgetText} onChange={(e) => setBudgetText(e.target.value)} aria-label="Auto-pay budget in sats" />
+              <span>sats</span>
+            </label>
+          )}
         </div>
         <div className="offer__row">
           <button className="offer__button offer__button--later" onClick={() => dismiss(cursorKey)}>NOT NOW</button>

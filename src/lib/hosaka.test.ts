@@ -21,6 +21,7 @@ import {
   jsonWithBigints,
   type HosakaDeposit,
   type HosakaJob,
+  SIGN_TIMEOUT_MS,
 } from './hosaka'
 
 const sk = generateSecretKey()
@@ -214,6 +215,41 @@ describe('polling', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(calls).toHaveLength(2)
     expect((await done).status).toBe('expired')
+  })
+
+  it('a signer that never answers does not hang the claim poll: the poll times out, is reported, and the next one goes out', async () => {
+    let hang = true
+    const flaky = (template: Parameters<typeof sign>[0]): ReturnType<typeof sign> => (hang ? new Promise(() => { /* the bunker never answers */ }) : sign(template))
+    const { fetch, calls } = scripted({ 'POST /api/v1/deposit/d1/claim': () => ({ body: { ...pending, status: 'settled', settled_msats: 1000 } }) })
+    const c = createHosaka({ apiUrl: API, sign: flaky, fetch })
+    const errors: unknown[] = []
+    const done = c.waitForDeposit('d1', { onPollError: (e) => errors.push(e) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(calls).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(SIGN_TIMEOUT_MS - 1)
+    expect(errors).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(errors).toHaveLength(1)
+    expect((errors[0] as HosakaError).code).toBe('sign_timeout')
+    hang = false
+    await vi.advanceTimersByTimeAsync(CLAIM_INTERVAL_MS)
+    expect(calls).toHaveLength(1)
+    expect((await done).status).toBe('settled')
+  })
+
+  it('a failed poll is reported and the wait goes on', async () => {
+    let n = 0
+    const { fetch, calls } = scripted({
+      'POST /api/v1/deposit/d1/claim': () => (++n === 1 ? { status: 503, body: { detail: { error: 'payments_unavailable' } } } : { body: { ...pending, status: 'settled', settled_msats: 1000 } }),
+    })
+    const c = createHosaka({ apiUrl: API, sign, fetch })
+    const errors: unknown[] = []
+    const done = c.waitForDeposit('d1', { onPollError: (e) => errors.push(e) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(errors).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(CLAIM_INTERVAL_MS)
+    expect(calls).toHaveLength(2)
+    expect((await done).status).toBe('settled')
   })
 
   it('an abort stops a claim poll with code aborted', async () => {

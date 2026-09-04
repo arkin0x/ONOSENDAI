@@ -3031,7 +3031,7 @@ kbd {
   right: 14px;
   bottom: 226px;
   z-index: 103;
-  width: 236px;
+  width: 282px;
   max-height: 38vh;
   overflow: hidden;
   padding: 6px 8px 7px;
@@ -3061,9 +3061,10 @@ kbd {
   letter-spacing: 0.04em;
 }
 .route--overlay .route__step {
-  grid-template-columns: 1.1rem 4.9rem 2.4rem 1fr;
+  grid-template-columns: 1.1rem 6.4rem 2.6rem 1fr;
   gap: 0.3rem;
   padding: 0.06rem 0.2rem;
+  white-space: nowrap;
 }
 
 /* COMMIT is the only control here that spends anything, so it is the only one

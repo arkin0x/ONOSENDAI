@@ -1,14 +1,16 @@
 /**
- * Cursor.tsx - the uncommitted destination.
+ * Cursor.tsx - the uncommitted destination, and where the next commit lands.
  *
- * WASD moves this, not you. The tether from the avatar is the route Space
- * would run, drawn from the same planner the store executes (lib/movePlan.ts)
- * so what you see is what you get: amber dashed legs are hops, purple legs
- * are sidesteps of exactly 1 gibson through a wall, and a purple mark sits on
- * every sidestep landing. When the hop fits the ceiling the route is one
- * amber leg straight to the cursor. A route too long to draw in full ends in
- * a red leg to the cursor. While a proof is computing the display locks to
- * the committed target instead of the live cursor.
+ * WASD moves this, not you. A commit takes one step toward it, the one the
+ * COMMIT button names (useOffer), and the scene shows exactly that: a ghost
+ * of the avatar, in the cursor's colour, standing where the step lands, with
+ * the tether from the avatar ending on the ghost. When the step reaches the
+ * cursor the ghost sits inside its cell; at a boundary this machine cannot
+ * hop across the ghost stops at the leaf touching it, and the sidestep after
+ * that leaves it one gibson past, however far the cursor has gone on. Amber
+ * dashed is a hop, purple solid a sidestep, gold dashed HOSAKA's step; a red
+ * dashed leg to the cursor, and no ghost, means nobody computes the way.
+ * While a proof is computing the display locks to the committed target.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
@@ -18,6 +20,7 @@ import { WorldLabel } from './WorldLabel'
 import {
   BufferGeometry,
   EdgesGeometry,
+  IcosahedronGeometry,
   Float32BufferAttribute,
   Line,
   LineBasicMaterial,
@@ -26,20 +29,18 @@ import {
   BoxGeometry,
 } from 'three'
 import { useCalibration } from '../lib/calibration'
-import { nextStep, type PlanStep } from '../lib/movePlan'
+import { nextActionFor } from '../store/useOffer'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
 /** Paid legs: the cloud's warm gold, the colour the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { cellCentre, type Position, type ViewAxes } from '../lib/space'
 import {
-  MAX_COMPUTE_HEIGHT,
   alignedOrigin,
   samePosition,
   useCyberspace,
 } from '../store/useCyberspace'
 
 /** Steps drawn in full; past this the tether ends in one red leg. */
-const DRAWN_STEPS = 48
 
 interface Props {
   axes: ViewAxes
@@ -159,36 +160,18 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const target = atHead ? (pendingTarget ?? cursor) : anchor
   const active = atHead && !samePosition(position, target)
 
-  // The ceiling a commit would use right now, the same number the store
-  // routes with: the hard cap lowered to what calibration measured.
+  // The one action the next commit takes, exactly as the button names it
+  // (useOffer): where it lands is where the ghost stands and where the tether
+  // ends. The cursor may sit far beyond; the ghost says how far this commit
+  // actually goes.
+  const plane = useCyberspace((s) => s.plane)
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
-  const cloudLimits = useCyberspace((s) => (s.cloudPrefs.mode === 'off' ? null : s.cloud.limits))
-  const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const ceilings = useMemo(() => ({
-    hop: ceiling,
-    sidestep: sidestepCeil,
-    cloudHop: cloudLimits?.max_hop_height ?? 0,
-    cloudSidestep: cloudLimits?.max_sidestep_height ?? 0,
-  }), [ceiling, sidestepCeil, cloudLimits])
-
-  // The route Space would run, from the planner the store executes. Drawn
-  // step by step up to DRAWN_STEPS; a longer route is marked capped and its
-  // remainder becomes one red leg.
-  const route = useMemo(() => {
-    if (!active) return null
-    const steps: PlanStep[] = []
-    let cur = position
-    let capped = false
-    for (;;) {
-      const step = nextStep(cur, target, ceilings)
-      if (!step) break
-      if (steps.length >= DRAWN_STEPS) { capped = true; break }
-      steps.push(step)
-      cur = step.to
-    }
-    return { steps, capped, last: cur }
-  }, [active, position, target, ceilings])
+  const limits = useCyberspace((s) => s.cloud.limits)
+  const next = useMemo(
+    () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits) : null),
+    [active, position, target, plane, hopCeil, sidestepCeil, limits],
+  )
 
   // Screen-space endpoints, at cell CENTRES.
   //
@@ -201,24 +184,30 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const points = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
     const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
+    const a = centre(position)
     const b = centre(target)
-    const steps = route?.steps ?? []
-    const local = steps.filter((st) => st.source !== 'cloud')
-    const paid = steps.filter((st) => st.source === 'cloud')
-    const last = steps[steps.length - 1]
+    const action = next?.action ?? null
+    // Where this commit lands: the step's end, or the cursor itself when the
+    // step is not known (HOSAKA's caps not answered yet) or the move is too
+    // far, in which case the leg is red and there is no ghost.
+    const landing = next?.step ? centre(next.step.to) : b
+    const leg = [a, landing] as const
+    const onCursor = next?.step ? samePosition(next.step.to, target) : true
     return {
-      a: centre(position),
+      a,
       b,
-      hops: local.filter((st) => st.kind === 'hop').map((st) => [centre(st.from), centre(st.to)] as const),
-      sidesteps: local.filter((st) => st.kind === 'sidestep').map((st) => [centre(st.from), centre(st.to)] as const),
-      cloud: paid.map((st) => [centre(st.from), centre(st.to)] as const),
-      landings: steps.filter((st) => st.kind === 'sidestep').map((st) => centre(st.to)),
-      rest: route?.capped ? ([centre(route.last), b] as const) : null,
-      lastIsHop: !!last && last.kind === 'hop' && last.source !== 'cloud' && !route?.capped,
-      lastIsCloud: !!last && last.source === 'cloud' && !route?.capped,
+      hops: action === 'hop' || action === 'hop-to-boundary' ? [leg] : [],
+      sidesteps: action === 'sidestep' ? [leg] : [],
+      cloud: action === 'offload' ? [leg] : [],
+      rest: action === 'too-far' ? leg : null,
+      // A leg that ends on the cursor follows it within the frame.
+      lastIsHop: (action === 'hop' || action === 'hop-to-boundary') && onCursor,
+      lastIsCloud: action === 'offload' && onCursor,
+      ghost: action !== null && action !== 'too-far' && next?.step ? landing : null,
+      ghostOnCursor: onCursor,
       targetCell: b,
     }
-  }, [position, target, route, scaleExp, axes, anchor])
+  }, [position, target, next, scaleExp, axes, anchor])
 
   const hopGeometry = useMemo(() => new BufferGeometry(), [])
   const sideGeometry = useMemo(() => new BufferGeometry(), [])
@@ -232,8 +221,12 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // A cube, not a square: the view orbits now, so the target cell has to read
   // as a volume from any angle rather than as a plane seen face-on.
   const cellOutline = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
+  // The ghost: the avatar's own shape, faint, in the cursor's colour, standing
+  // where this commit lands. Inside the cursor's cell when the commit goes all
+  // the way; short of it at a boundary, or one gibson past one.
+  const ghostShape = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.42, 1)), [])
 
-  const targetColor = route?.capped ? DANGER : WARN
+  const targetColor = next?.action === 'too-far' ? DANGER : WARN
 
   useLayoutEffect(() => {
     setSegments(hopLegs, hopGeometry, points.hops)
@@ -258,11 +251,13 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // end of the tether move here; which legs exist and what colour they are stay
   // in React, because those change with the plan, not with the cursor.
   const outline = useRef<LineSegments>(null)
+  const ghost = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
     const live = s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor
     const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
+    if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
     else if (points.lastIsHop) setLastVertex(hopLegs, hopGeometry, b)
@@ -301,16 +296,15 @@ export function Cursor({ axes }: Props): JSX.Element | null {
           <primitive object={cloudLegs} />
           <primitive object={restLeg} />
 
-          {/* Every sidestep landing: 1 gibson through a wall */}
-          {points.landings.map((p, i) => (
-            <mesh key={i} position={p} renderOrder={10}>
-              <circleGeometry args={[0.14, 4]} />
-              <meshBasicMaterial color={SIDESTEP} toneMapped={false} transparent depthTest={false} />
-            </mesh>
-          ))}
+          {/* Where this commit lands */}
+          {points.ghost && (
+            <lineSegments ref={ghost} name="landing-ghost" geometry={ghostShape} position={points.ghost} frustumCulled={false} renderOrder={10}>
+              <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.8} depthTest={false} />
+            </lineSegments>
+          )}
 
           {/* The cell the lined-up action targets */}
-          <lineSegments ref={outline} geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
+          <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
             <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
           </lineSegments>
         </>

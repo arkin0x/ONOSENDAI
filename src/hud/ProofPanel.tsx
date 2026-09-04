@@ -9,10 +9,12 @@
  */
 
 import { useMemo } from 'react'
+import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
+import { Explanation } from './Explanation'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
-import { planSummary, type Ceilings, type PlanSummary } from '../lib/movePlan'
+import { buildMovePlan, localOnly, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { formatMs, formatOps } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
 
@@ -52,20 +54,21 @@ export function ProofPanel(): JSX.Element {
 
   const plan = useCyberspace((s) => s.plan)
   const cloud = useCyberspace((s) => s.cloud)
-  const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
   const resumePlan = useCyberspace((s) => s.resumePlan)
   const cancelPlan = useCyberspace((s) => s.cancelPlan)
   // What a commit would plan with right now: this machine's calibrated
   // ceilings, and HOSAKA's caps when the cloud is on and has answered. The
   // same numbers the store uses.
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const cloudOn = cloudMode !== 'off' && cloud.limits !== null
+  // HOSAKA's caps whatever the cloud mode: what a move needs does not depend
+  // on a setting, and the button (useOffer) reads it the same way.
+  const cloudOn = cloud.limits !== null
   const ceilings: Ceilings = useMemo(() => ({
     hop: ceiling,
     sidestep: sidestepCeil,
-    cloudHop: cloudOn && cloud.limits ? cloud.limits.max_hop_height : 0,
-    cloudSidestep: cloudOn && cloud.limits ? cloud.limits.max_sidestep_height : 0,
-  }), [ceiling, sidestepCeil, cloudOn, cloud.limits])
+    cloudHop: cloud.limits?.max_hop_height ?? 0,
+    cloudSidestep: cloud.limits?.max_sidestep_height ?? 0,
+  }), [ceiling, sidestepCeil, cloud.limits])
 
   // Live preview of the action the cursor is lining up. The hop estimate is
   // closed-form; the route summary walks the route's steps without keeping
@@ -78,9 +81,19 @@ export function ProofPanel(): JSX.Element {
       plane,
       ceiling,
     )
-    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null }
-    return { hop, route: planSummary(position, cursor, ceilings, 20_000) }
-  }, [position, cursor, plane, ceiling, ceilings])
+    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null, steps: null as PlanStep[] | null, needsCloud: false }
+    // Local first, as the commit and the button are: when this machine can
+    // walk there, that is the way shown, however long. HOSAKA's caps enter
+    // only when no local way exists, which is when the cloud is needed.
+    const local = localOnly(ceiling, sidestepCeil)
+    const way = planSummary(position, cursor, local, 20_000).infeasibleAt === null ? local : ceilings
+    // The steps themselves, for the list the running route shows, so a route
+    // reads the same before COMMIT as after. A walk longer than the list
+    // could show is summarised only.
+    let steps: PlanStep[] | null = null
+    try { steps = buildMovePlan(position, cursor, way, PREVIEW_STEPS_MAX) } catch { steps = null }
+    return { hop, route: planSummary(position, cursor, way, 20_000), steps, needsCloud: way !== local }
+  }, [position, cursor, plane, ceiling, sidestepCeil, ceilings])
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const status =
@@ -93,7 +106,7 @@ export function ProofPanel(): JSX.Element {
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? preview.route ? (preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
+          ? preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
   return (
@@ -121,7 +134,11 @@ export function ProofPanel(): JSX.Element {
             </div>
             <div>
               <dt>Highest boundary</dt>
-              <dd>2^{preview.route.tallestWall}</dd>
+              {/* The tallest power-of-two boundary the move crosses: the max
+                  LCA height. The summary's tallestWall counts only walls a
+                  sidestep goes through, which a one-hop cloud route has none
+                  of, and read 2^0. */}
+              <dd>2^{Math.max(preview.hop.maxHeight, preview.route.tallestWall)}</dd>
             </div>
             <div>
               <dt>LCA x / y / z</dt>
@@ -132,16 +149,42 @@ export function ProofPanel(): JSX.Element {
               <dd>2^{ceiling}</dd>
             </div>
           </dl>
-          <p className="notice notice--sidestep">
-            {preview.route.infeasibleAt !== null
-              ? `Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`
-              : preview.route.cloudSteps > 0
-                ? 'This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.'
-                : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
-          </p>
+          {preview.route.infeasibleAt !== null ? (
+            <div className="notice">
+              <p className="notice__head"><OctagonAlert size={13} strokeWidth={2.25} aria-hidden /> OUT OF REACH</p>
+              <p className="notice__body">{`Step ${preview.route.infeasibleAt + 1} crosses a boundary higher than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`}</p>
+            </div>
+          ) : preview.route.cloudSteps > 0 ? (
+            <div className="notice notice--offload">
+              <p className="notice__head"><CloudUpload size={13} strokeWidth={2.25} aria-hidden /> HOSAKA CAN TAKE THIS</p>
+              <p className="notice__body">This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.</p>
+            </div>
+          ) : (
+            <div className="notice notice--sidestep">
+              <p className="notice__head"><Footprints size={13} strokeWidth={2.25} aria-hidden /> A WALK, NOT A HOP</p>
+              <p className="notice__body">{`A 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} boundary lies between you and the cursor, higher than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through it, so the way is hops to the boundary, the sidestep, and hops on.`}</p>
+            </div>
+          )}
+          {preview.steps && (
+            <ol className="route route--preview" aria-label="The route this cursor would take">
+              {previewWindow(preview.steps).map((r, i) => typeof r === 'number' ? (
+                <li key={`gap-${i}`} className="route__step route__step--gap">
+                  <span className="route__index">…</span>
+                  <span className="route__kind">{`${r} more`}</span>
+                </li>
+              ) : (
+                <li key={r.index} className={`route__step route__step--${r.state}`}>
+                  <span className="route__index">{r.index + 1}</span>
+                  <span className="route__kind">{r.kind}</span>
+                  <span className="route__height">{r.height}</span>
+                  <span className="route__state">{r.label}</span>
+                </li>
+              ))}
+            </ol>
+          )}
           {preview.route.steps > 64 && preview.route.cloudSteps === 0 && (
             <p className="notice">
-              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps, each a signed event. ${cloudMode === 'off' ? 'Turning the cloud on lets HOSAKA hop to the wall in one paid move.' : 'HOSAKA has not answered yet; its hop would replace the walk.'}`}
+              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps and ${preview.route.hops} hops, one commit and one signature each. HOSAKA is offered only where this machine cannot go; a nearer cursor, or hyperspace, is the shorter way.`}
             </p>
           )}
         </>
@@ -165,6 +208,14 @@ export function ProofPanel(): JSX.Element {
               <dd>{preview.hop.terrainK}</dd>
             </div>
           </dl>
+          <ol className="route route--preview" aria-label="The route this cursor would take">
+            <li className="route__step route__step--next">
+              <span className="route__index">1</span>
+              <span className="route__kind">HOP</span>
+              <span className="route__height">{`2^${preview.hop.maxHeight}`}</span>
+              <span className="route__state">this machine</span>
+            </li>
+          </ol>
           <p className="legend__note">Space commits this hop. X recalls the cursor.</p>
         </>
       ) : (
@@ -201,9 +252,66 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
-      <p className="legend__note">{`THIS MACHINE BENCHMARK: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
+      <p className="legend__note">
+        THIS MACHINE BENCHMARK
+        <br />{`HOP <= 2^${hopCeil}`}
+        <br />{`SIDESTEP <= 2^${sidestepCeil}`}
+      </p>
+
+      <Explanation>
+        A hop is the standard movement action in cyberspace. You choose a
+        destination and calculate a spatial proof containing your position and
+        destination. Once complete, you move. A hop is a storage/IO bound
+        proof-of-work operation. A sidestep is an alternative movement action
+        that only moves 1 Gibson in a single direction; it is used to cross
+        boundaries that are too large to cross with a hop action. Sidestep is a
+        hashpower-bound proof-of-work operation. The downside of a sidestep is
+        that you do not attain the cantor root of the region you enter, so you
+        cannot decrypt the region's contents if anything is hidden there.
+      </Explanation>
     </section>
   )
+}
+
+/** The preview lists this many steps at most; beyond it, the first and last few with a gap. */
+const PREVIEW_STEPS_MAX = 2_000
+const PREVIEW_HEAD = 6
+const PREVIEW_TAIL = 3
+
+interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }
+
+function previewRow(step: PlanStep, index: number): PreviewRow {
+  return {
+    index,
+    kind: `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`,
+    height: `2^${step.maxHeight}`,
+    state: step.source === 'cloud' ? 'funding' : step.source === 'infeasible' ? 'failed' : 'next',
+    label: step.source === 'cloud' ? 'HOSAKA' : step.source === 'infeasible' ? 'beyond reach' : 'this machine',
+  }
+}
+
+/**
+ * Every step when the route is short. When it is not, the first and last few
+ * with the count of the rest between them (a number is a gap), and the step
+ * nobody can do always shown, however deep in the walk it sits: the notice
+ * names it, so the list must too.
+ */
+function previewWindow(steps: PlanStep[]): Array<PreviewRow | number> {
+  if (steps.length <= PREVIEW_HEAD + PREVIEW_TAIL + 1) return steps.map(previewRow)
+  const keep = new Set<number>()
+  for (let i = 0; i < PREVIEW_HEAD; i++) keep.add(i)
+  for (let i = steps.length - PREVIEW_TAIL; i < steps.length; i++) keep.add(i)
+  const blocked = steps.findIndex((s) => s.source === 'infeasible')
+  if (blocked >= 0) keep.add(blocked)
+  const out: Array<PreviewRow | number> = []
+  let skipped = 0
+  steps.forEach((s, i) => {
+    if (keep.has(i)) {
+      if (skipped) { out.push(skipped); skipped = 0 }
+      out.push(previewRow(s, i))
+    } else skipped++
+  })
+  return out
 }
 
 function routeLabel(r: PlanSummary): string {
@@ -238,7 +346,7 @@ function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   const kind = `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`
   const what =
     step.kind === 'sidestep'
-      ? `1 gibson through the wall at 2^${step.maxHeight}`
+      ? `1 gibson through the 2^${step.maxHeight} boundary`
       : `up to the ${step.maxHeight === 0 ? 'same block' : `2^${step.maxHeight} block edge`}`
   const doing =
     plan.status === 'paused'

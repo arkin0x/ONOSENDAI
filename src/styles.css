@@ -588,7 +588,7 @@ body {
    * Nothing behind it but the point field, so every glyph carries its own
    * lighting: a tight dark halo for contrast against whatever it lands on, then
    * a wider bloom in currentColor, which means each row and the wall glow their
-   * own colour without this rule having to know the palette.
+   * own color without this rule having to know the palette.
    */
   text-shadow: 0 0 3px var(--bg), 0 0 4px currentColor, 0 0 12px currentColor;
 }
@@ -626,7 +626,7 @@ body {
 
 /*
  * One hue for the whole readout, so the eye reads brightness rather than
- * colour: where you stand is low key, where you are pointing is live, and the
+ * color: where you stand is low key, where you are pointing is live, and the
  * difference between them sits in between. The only warm thing on the block is
  * the wall, which is the one thing that costs money.
  */
@@ -648,7 +648,7 @@ body {
 
 /* The three things the XOR row has to keep apart: shared prefix, wall, and
  * divergence that fell outside the window. Everything else is diverged
- * territory and stays the row's own colour. */
+ * territory and stays the row's own color. */
 .bits__matched {
   color: #2c5670;
 }
@@ -727,7 +727,7 @@ body {
   text-shadow: none;
 }
 
-/* In history the block turns amber, the same colour the cursor goes when it is
+/* In history the block turns amber, the same color the cursor goes when it is
  * somewhere the avatar is not: you are looking at a place you are not at. */
 .explorer__body.is-history {
   border-color: rgba(255, 176, 32, 0.45);
@@ -1268,7 +1268,7 @@ kbd {
   border-color: var(--fg);
 }
 
-/* Lit in the target's own colour, set inline, so the row and the marker on
+/* Lit in the target's own color, set inline, so the row and the marker on
  * the scene agree about which one this is. */
 .targets__toggle.is-on {
   background: rgba(200, 245, 255, 0.06);
@@ -2188,6 +2188,13 @@ kbd {
   cursor: default;
 }
 
+/* A tool is an icon and a word. */
+.workshop__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .workshop__mode.is-on,
 .workshop__tool.is-on {
   color: #05070d;
@@ -2368,27 +2375,190 @@ kbd {
   border-color: rgba(255, 59, 107, 0.4);
 }
 
+/* The picker: a dashed swatch with a pipette on it, so it reads as "any
+ * color" beside the fixed ones. */
+.workshop__picker {
+  position: relative;
+  display: inline-flex;
+}
+
 .workshop__color {
   width: 38px;
   height: 30px;
   padding: 0;
-  border: 1px solid rgba(0, 229, 255, 0.25);
+  border: 1px dashed rgba(255, 255, 255, 0.6);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
 }
 
+.workshop__picker-icon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  pointer-events: none;
+  color: #fff;
+  filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);
+}
+
 .workshop__swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
+/* A swatch is tapped to use and held to delete, so the long press must not
+ * select text, raise a callout or scroll. */
 .workshop__swatch {
   width: 22px;
   height: 22px;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The swatch in use. */
+.workshop__swatch.is-on {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.workshop__swatch--sample {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* Between LEVEL and UNIT, which read as one control without it. */
+.workshop__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 8px;
+  background: rgba(0, 229, 255, 0.25);
+}
+
+/* What the unit exponent means, so changing it visibly changes something. */
+.workshop__unit-size {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.workshop__gap {
+  flex: 1 0 4px;
+}
+
+.workshop__shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.workshop__value--wide {
+  min-width: 70px;
+  text-align: left;
+}
+
+.workshop__mini--wide {
+  width: auto;
+  padding: 0 8px;
+}
+
+.workshop__list-row {
+  display: flex;
+  gap: 4px;
+}
+
+.workshop__list-row .workshop__new {
+  flex: 1;
+  width: auto;
+}
+
+.workshop__paste {
+  margin-top: 8px;
+}
+
+.workshop__paste-box {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 5px;
+  resize: vertical;
+}
+
+.workshop__paste-box:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.workshop__notice {
+  margin-top: 3px;
+  color: var(--accent);
+}
+
+/* The first-visit card: three steps, then never again. */
+.workshop__intro {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px 14px 10px;
+  border-radius: 8px;
+  background: rgba(6, 14, 22, 0.94);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.workshop__intro-title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+
+.workshop__intro-steps {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--fg);
+}
+
+.workshop__intro-steps li {
+  margin-bottom: 4px;
+}
+
+.workshop__intro-steps b {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.workshop__intro-ok {
+  color: var(--accent);
+}
+
+/* The EXPLAIN pill ends the tool row; its well, when open, takes a full row. */
+.workshop__tools .explain {
+  display: contents;
+}
+
+.workshop__tools .explain__well {
+  flex: 1 1 100%;
+  margin-top: 2px;
 }
 
 @media (max-width: 600px) {
@@ -2415,6 +2585,11 @@ kbd {
   .workshop__list-btn { flex: 0 0 auto; }
   .workshop__deploy { flex: 1; }
   .workshop__close { flex: 0 0 auto; margin-left: 0; }
+
+  /* The tray's contextual row only shows the current tool's controls, so the
+   * bench keeps most of the screen; the explanation opens over a full row. */
+  .workshop__tools { gap: 5px; padding: 6px 8px 8px; }
+  .workshop__intro { top: 8px; right: 8px; left: 8px; width: auto; }
 }
 
 /* ---------- Relays panel ---------- */
@@ -3338,7 +3513,7 @@ kbd {
 }
 
 /* A circle that stays legible over any terrain: its own ring in the target's
- * colour and a dark halo. */
+ * color and a dark halo. */
 .target__body .pfp {
   border: 1px solid currentColor;
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
@@ -3588,7 +3763,7 @@ kbd {
 }
 
 /* The line scrubber: ChainExplorer's rail, retinted so a glance says which
- * one-dimensional thing you are walking. Kind colours follow the scene's
+ * one-dimensional thing you are walking. Kind colors follow the scene's
  * assignments: ideaspace purple for ports, Earth blue for landfalls. */
 .linescrub .explorer__walked {
   background: #f7931a;
@@ -3601,7 +3776,7 @@ kbd {
 }
 
 .linescrub .explorer__body {
-  /* The border stays the chain explorer's colour on purpose: the two
+  /* The border stays the chain explorer's color on purpose: the two
      expanded rails are the same instrument pointed at different lines.
      The meta row's content changes length between PORT and LANDFALL stops;
      a fixed body width keeps the rail from resizing under the pointer. */
@@ -4043,7 +4218,7 @@ kbd {
   border: 1px solid rgba(0, 229, 255, 0.14);
 }
 
-/* A plain focus view (a hidden thing, a loot item): the same bar in the accent colour */
+/* A plain focus view (a hidden thing, a loot item): the same bar in the accent color */
 .hyperbar--focus {
   border-color: rgba(0, 229, 255, 0.5);
   box-shadow: 0 0 14px rgba(0, 229, 255, 0.16);
@@ -4078,7 +4253,7 @@ kbd {
   height: 0;
 }
 
-/* KEY FOUND: the ceremony's chip, breathing in the accent colour */
+/* KEY FOUND: the ceremony's chip, breathing in the accent color */
 .hyperbar--found {
   border-color: rgba(0, 229, 255, 0.6);
   animation: found-breathe 1.6s ease-in-out infinite;
@@ -4114,7 +4289,7 @@ kbd {
 }
 /* ---------- Cloud compute (HOSAKA) ----------
  *
- * Paid movement has its own colour, a warm gold, so a cloud state never reads
+ * Paid movement has its own color, a warm gold, so a cloud state never reads
  * as the amber of local computing or the violet of a local sidestep. The
  * invoice card carries it too, over the modal's default destructive red. */
 :root {

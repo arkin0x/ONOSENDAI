@@ -7,12 +7,12 @@
  *
  * With a `birth`, the shard is one this client has just found, and it does not
  * simply appear: for SHARD_DECODE_MS its vertices sit scattered through the
- * volume the model occupies in cyan static, then settle into place and colour
+ * volume the model occupies in cyan static, then settle into place and color
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AdditiveBlending,
   BufferGeometry,
@@ -32,11 +32,13 @@ interface Props {
   ghost?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
+  /** A tap on a SOLID face (its index is `e.faceIndex`); the workshop's FACE tool. */
+  onFaceClick?: (e: ThreeEvent<MouseEvent>) => void
 }
 
 const STATIC = [0, 0.9, 1] as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth }: Props): JSX.Element | null {
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => flatten(shard), [shard.vertices, shard.faces])
 
   // Live copies: the decode writes into these, the targets stay untouched.
@@ -64,6 +66,12 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth }: Props): JS
     l.frustumCulled = false
     return l
   }, [plain, ghost])
+
+  // A rebuild replaces these; nothing else lets the GPU buffers go. The line
+  // is a primitive, which R3F never disposes, so its material is ours too.
+  useEffect(() => () => { plain.dispose() }, [plain])
+  useEffect(() => () => { indexed.dispose() }, [indexed])
+  useEffect(() => () => { line.material.dispose() }, [line])
 
   // The scrambled start: each vertex thrown somewhere in the model's extent.
   const noise = useMemo(() => {
@@ -113,7 +121,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth }: Props): JS
   return (
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
-        <mesh geometry={indexed} frustumCulled={false}>
+        <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
           <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} />
         </mesh>
       )}

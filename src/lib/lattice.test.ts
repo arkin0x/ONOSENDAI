@@ -24,7 +24,7 @@ describe('lattice', () => {
     const ys = new Set(segs.map((s) => s.a[1]))
     expect([...ys].sort((a, b) => a - b)).toEqual([-0.5, 7.5])
     // v1's GridHelper: the two centre lines of each face are light purple,
-    // every other line the face's own colour: the logo's blue on top, its
+    // every other line the face's own color: the logo's blue on top, its
     // purple on the floor
     const centre = segs.filter((s) => s.color === 0x682db5)
     expect(centre).toHaveLength(4)

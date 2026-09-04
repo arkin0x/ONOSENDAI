@@ -1,7 +1,7 @@
 /**
  * ProfileBadge.tsx — a pubkey as a face and a name.
  *
- * A round avatar (the kind:0 picture, or a colour-from-the-key fallback with an
+ * A round avatar (the kind:0 picture, or a color-from-the-key fallback with an
  * initial) and the name, or a shortened npub until the profile arrives. One
  * component so every list — follows, avatars, targets, a secret's creator —
  * shows a person the same way.

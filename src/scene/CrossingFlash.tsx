@@ -111,7 +111,7 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     const k = 1 - t
     material.current.opacity = k * k
 
-    // Strikes white, then resolves into its cost colour over the first third.
+    // Strikes white, then resolves into its cost color over the first third.
     // The lattice and the covering box now hold fixed hues so they can be told
     // apart at a glance, which leaves the LCA ramp free to mean what it was
     // written to mean, here, where the number genuinely varies: a cheap crossing

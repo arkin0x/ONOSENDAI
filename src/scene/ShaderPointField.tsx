@@ -1,7 +1,7 @@
 /**
  * ShaderPointField.tsx — the terrain K field as GL_POINTS.
  *
- * One vertex per visible cell, sized and coloured by K in the shaders. The field
+ * One vertex per visible cell, sized and colored by K in the shaders. The field
  * is a cube around the view window, so this is at most VOLUME_SIZE^3 points, and
  * the CPU emits only cells it actually has.
  *
@@ -149,7 +149,7 @@ const vertexShader = /* glsl */ `
 `
 
 /**
- * Fragment shader: a solid disc, coloured by K. Stops match TERRAIN_STOPS.
+ * Fragment shader: a solid disc, colored by K. Stops match TERRAIN_STOPS.
  *
  * The disc is computed from gl_PointCoord rather than sampled from a gradient
  * texture. The texture faded linearly from the centre, so alpha was already

@@ -20,7 +20,7 @@ import { rideVisualHeight } from '../lib/hyperspace/ride'
 import { stopPlane, stopPosition, useRideRun } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
 
-/** The avatar's own red; the ghost is you, so it wears your colour. */
+/** The avatar's own red; the ghost is you, so it wears your color. */
 const YOU = '#ff2323'
 
 export function TransitAvatar({ axes }: { axes: ViewAxes }): JSX.Element | null {

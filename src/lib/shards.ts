@@ -1,9 +1,9 @@
 /**
  * shards.ts — the shape of a shard, and nothing about where it goes.
  *
- * A shard is a small 3D object: vertices with colours, optional triangles,
+ * A shard is a small 3D object: vertices with colors, optional triangles,
  * and a render mode. The mesh is only one way to draw it. Vertices alone can
- * be lights, and a polyline through them blends their colours along the line
+ * be lights, and a polyline through them blends their colors along the line
  * the way a mesh blends across a face, so the same vertex list carries all
  * three and the mode is a property of the shard, not of the viewer.
  *
@@ -57,8 +57,18 @@ export const GRID_HALF = 8
 export const MAX_VERTICES = 512
 export const MAX_FACES = 1024
 
+/**
+ * A new shard draws LINES: the first tap glows and the second draws a line,
+ * so the very first thing you do is visible. Faces switch it to SOLID when
+ * the first stamp with faces lands (see the workshop store).
+ */
 export function newShard(name = 'Untitled shard'): ShardModel {
-  return { id: uuid(), name, unit: 0, mode: 'solid', vertices: [], faces: [], updatedAt: Date.now() }
+  return { id: uuid(), name, unit: 0, mode: 'lines', vertices: [], faces: [], updatedAt: Date.now() }
+}
+
+/** A grid point as a map key, so "the same point" is one string compare. */
+export function pointKey(p: [number, number, number]): string {
+  return `${p[0]},${p[1]},${p[2]}`
 }
 
 export function uuid(): string {
@@ -151,7 +161,7 @@ export function centroid(s: ShardModel): [number, number, number] {
   return sum.map((x) => x / s.vertices.length) as [number, number, number]
 }
 
-/** Hex <-> 0..1 triple, for the colour input. */
+/** Hex <-> 0..1 triple, for the color input. */
 export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace('#', ''), 16)
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]

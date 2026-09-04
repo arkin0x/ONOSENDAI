@@ -82,15 +82,31 @@ movement controls stand down and RETURN TO LIVE brings them back. The same
 instrument walks any other avatar's chain while spectating.
 
 **Shards.** The Shards panel opens the workshop: a full-screen bench where a
-shard is built from coloured vertices on an integer grid. ADD places a vertex
-where you tap, at the current level; SELECT picks one for the nudge pad
-(a unit along X, Y or Z), the colour input and DELETE; FACE joins three taps
-into a triangle. A shard renders SOLID (triangles, colours blended across
-faces), POINTS (every vertex a light) or LINES (a polyline through the
-vertices, colours blending along it), chosen per shard and previewed live.
-`unit` says what one grid unit is in gibsons (2^unit). Shards persist in
-localStorage. Keys on the bench: WASD / RF or arrows nudge, Del deletes,
-1 2 3 pick tools, [ ] change the level, Esc deselects then closes.
+shard is built on an integer grid. STAMP places a whole shape where you tap
+(BLOCK, WEDGE, PYRAMID, COLUMN, RING, STAR, ARROW), sized in whole units and
+turned a quarter at a time; a ghost shows where it will land before it does.
+ADD places one vertex at the current level; SELECT picks a point for the nudge
+pad (a unit along X, Y or Z), the color input and DELETE; FACE picks corners
+in order and FILL joins them into a face, any number of corners, notches and
+all (tap the first corner again to close), and a tap on a drawn face selects
+it for DELETE FACE. The color picker paints live and puts each color it
+settles on at the front of the palette, which persists; hold a swatch to be
+asked whether to delete it. A shard renders SOLID (triangles,
+colors blended across faces), POINTS (every vertex a light) or LINES (a
+polyline through the vertices, colors blending along it), chosen per shard
+and previewed live; a new shard starts in LINES and switches itself to SOLID
+the first time it gets faces. Stamps keep their own vertices even where they
+touch, so a red block against a blue one keeps a crisp seam (the wall between
+them is dropped rather than paid for), and a point that several vertices share
+moves, colors and deletes as one. `unit` says what one grid unit is in
+gibsons (2^unit), shown beside the control as a real size. Every edit undoes.
+While the bench is up the world canvas behind it stops drawing (its frameloop
+goes to `never`, with the clock kept across the pause), which on a phone was
+most of every frame. Shards persist in localStorage; COPY and
+PASTE in the shard list carry one through the clipboard in its wire form.
+Keys on the bench: 1 2 3 4 pick tools, Q turns a stamp, WASD / RF or arrows
+nudge, Del deletes, Enter fills, [ ] change the level, Ctrl+Z / Ctrl+Shift+Z
+undo and redo, Esc deselects then closes.
 
 **Comments.** A found shard or message, and each of your own deployments,
 carries a comment section: NIP-22 `kind:1111` events whose root scope is the
@@ -161,7 +177,7 @@ when you cross a region boundary (spec section 7.5).
 **Targets.** The Targets panel points at any number of pubkeys the way the
 HUD points at Earth: a reticle in frame, a chevron on the nearest edge out of
 frame, the distance either way, and the avatar itself (a wireframe icosahedron
-in the target's own colour, named) once you are near. Add a key, toggle one
+in the target's own color, named) once you are near. Add a key, toggle one
 from the Avatars list, or load a kind 3 contact list for any npub and toggle
 follows. Positions are chain heads on the relay, kept live by a per-target
 subscription; a key with no chain is pointed at its spawn coordinate. Targets

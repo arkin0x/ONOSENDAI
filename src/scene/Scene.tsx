@@ -32,6 +32,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
+import { useWorkshop } from '../store/useWorkshop'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
@@ -495,7 +496,27 @@ function MemoryLog(): null {
   return null
 }
 
+/**
+ * R3F zeroes the clock whenever the frameloop changes. Several things here
+ * time themselves from clock.elapsedTime (fleet cube fades, the crossing
+ * flash, a glide), so a pause would leave them waiting for a time that had
+ * already passed. This keeps the last elapsed time seen and puts it back when
+ * drawing resumes: to everything in the scene the pause never happened.
+ */
+function ClockKeeper(): null {
+  const clock = useThree((s) => s.clock)
+  const frameloop = useThree((s) => s.frameloop)
+  const last = useRef(0)
+  useFrame(() => { last.current = clock.elapsedTime })
+  useEffect(() => { if (frameloop !== 'never' && last.current > 0) clock.elapsedTime = last.current }, [frameloop, clock])
+  return null
+}
+
 export function Scene(): JSX.Element {
+  // The workshop is an opaque, full-screen bench with its own canvas. Drawing
+  // the world under it is pure cost, and on a phone it was most of the frame:
+  // the bench measured 3 fps with the world running behind it.
+  const covered = useWorkshop((s) => s.open)
   return (
     <Canvas
       camera={{ fov: 55, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
@@ -504,9 +525,10 @@ export function Scene(): JSX.Element {
       // clocking, so a visually quiet frame still ships on time.
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: BG }}
-      frameloop="always"
+      frameloop={covered ? 'never' : 'always'}
     >
       <MemoryLog />
+      <ClockKeeper />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}
       <fog attach="fog" args={[0x000000, GRID_RADIUS * 0.9, GRID_RADIUS * 4]} />
       <ambientLight intensity={0.8} />

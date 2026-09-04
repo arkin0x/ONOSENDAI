@@ -3,7 +3,7 @@
  *
  * The HUD marker says where a target is from any distance; this is the thing
  * itself when it is inside the drawn world: the same wireframe icosahedron you
- * are drawn as, in the target's own colour, with its name over it. The
+ * are drawn as, in the target's own color, with its name over it. The
  * position is the chain head the tracker keeps current, so a target that hops
  * while you watch moves here the same frame its marker does.
  */

@@ -20,6 +20,7 @@ import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { TouchControls } from './hud/TouchControls'
+import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { Scene } from './scene/Scene'
@@ -161,6 +162,7 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {!crowded && !offerUp && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
+      {showPad && !offerUp && <RouteOverlay />}
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
       {!crowded && !padOpen && !offerUp && (

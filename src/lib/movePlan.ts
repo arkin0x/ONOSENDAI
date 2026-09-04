@@ -81,6 +81,17 @@ export function routeFeasible(from: Position, to: Position, ceilings: number | C
   return h <= Math.max(c.hop, c.cloudHop) || h <= Math.max(c.sidestep, c.cloudSidestep)
 }
 
+/**
+ * Whether any step of the route is HOSAKA's: true when the tallest boundary
+ * on the way is above both of this machine's ceilings, so no local step
+ * crosses it. Constant time, like `routeFeasible`, and asked as often.
+ */
+export function routeNeedsCloud(from: Position, to: Position, ceilings: number | Ceilings): boolean {
+  const c = asCeilings(ceilings)
+  const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
+  return h > c.hop && h > c.sidestep
+}
+
 export type AxisMove =
   | { kind: 'none' }
   | { kind: 'hop'; to: bigint; height: number }

@@ -193,16 +193,22 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const landing = next?.step ? centre(next.step.to) : b
     const leg = [a, landing] as const
     const onCursor = next?.step ? samePosition(next.step.to, target) : true
+    // The leg is coloured by the step it draws, not by the button's word:
+    // OFFLOAD can name a route whose first step is still this machine's hop.
+    const src = next?.step?.source ?? null
+    const kind = next?.step?.kind ?? null
+    const localHop = src === 'local' && kind === 'hop'
+    const cloud = src === 'cloud' || (action === 'offload' && !next?.step)
     return {
       a,
       b,
-      hops: action === 'hop' || action === 'hop-to-boundary' ? [leg] : [],
-      sidesteps: action === 'sidestep' ? [leg] : [],
-      cloud: action === 'offload' ? [leg] : [],
+      hops: localHop ? [leg] : [],
+      sidesteps: src === 'local' && kind === 'sidestep' ? [leg] : [],
+      cloud: cloud ? [leg] : [],
       rest: action === 'too-far' ? leg : null,
       // A leg that ends on the cursor follows it within the frame.
-      lastIsHop: (action === 'hop' || action === 'hop-to-boundary') && onCursor,
-      lastIsCloud: action === 'offload' && onCursor,
+      lastIsHop: localHop && onCursor,
+      lastIsCloud: cloud && onCursor,
       ghost: action !== null && action !== 'too-far' && next?.step ? landing : null,
       ghostOnCursor: onCursor,
       targetCell: b,

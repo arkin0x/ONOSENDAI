@@ -67,7 +67,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         }
         return (
           <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} />
+            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world />
             {/* An invisible, generous tap target: shards can be a few pixels. */}
             <mesh onClick={open}>
               <sphereGeometry args={[hit, 8, 8]} />

@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AdditiveBlending,
+  NormalBlending,
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -30,6 +31,15 @@ interface Props {
   scale?: number
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
+  /**
+   * Drawn in the world, under its bloom. The bloom adds a blurred copy of
+   * everything lit, several times over for a filled face, so a face drawn at
+   * its own colour came out white with a tint. At WORLD_FACE of the colour the
+   * bloom's addition lands near the colour itself: the shard glows, and it is
+   * still red or green. Points lose the additive blend for the same reason.
+   * The bench has no bloom and draws everything at full strength.
+   */
+  world?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
   /** A tap on a SOLID face (its index is `e.faceIndex`); the workshop's FACE tool. */
@@ -38,7 +48,12 @@ interface Props {
 
 const STATIC = [0, 0.9, 1] as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick }: Props): JSX.Element | null {
+/** Face brightness under the world's bloom (a multiplier on the vertex colours). */
+const WORLD_FACE = '#2e2e2e'
+/** Point brightness under the world's bloom. */
+const WORLD_POINT = '#808080'
+
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => flatten(shard), [shard.vertices, shard.faces])
 
   // Live copies: the decode writes into these, the targets stay untouched.
@@ -122,7 +137,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick 
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
-          <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} />
+          <meshBasicMaterial vertexColors color={world ? WORLD_FACE : '#ffffff'} side={DoubleSide} toneMapped={false} transparent opacity={opacity} />
         </mesh>
       )}
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
@@ -134,7 +149,8 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick 
             sizeAttenuation
             transparent
             opacity={shard.mode === 'points' ? opacity : opacity * 0.9}
-            blending={AdditiveBlending}
+            color={world ? WORLD_POINT : '#ffffff'}
+            blending={world ? NormalBlending : AdditiveBlending}
             depthWrite={false}
             toneMapped={false}
           />

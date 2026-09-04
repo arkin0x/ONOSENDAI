@@ -117,7 +117,7 @@ import {
   saveBalance,
   type KnownBalance,
 } from '../lib/cloud'
-import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
+import { localOnly, nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -869,13 +869,6 @@ let cloudWaker: Waker | null = null
 let hosaka: { url: string; client: HosakaClient } | null = null
 /** The caps request out right now, and the API URL it was sent to. */
 let limitsInFlight: { url: string; promise: Promise<HosakaLimits | null> } | null = null
-/**
- * With the cloud on but HOSAKA unreachable, a local walk longer than this is
- * refused rather than started. Without the caps the planner falls back to
- * hops and sidesteps for every wall, which for a distant cursor is hundreds
- * of steps and many minutes (#69); a short walk is what it always was.
- */
-const WALK_WITHOUT_CLOUD_MAX = 8
 
 /** One client per API URL. It signs through `signEvent`, so it follows identity switches. */
 function cloudClient(apiUrl: string): HosakaClient {
@@ -1454,24 +1447,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       set({ proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop', message: 'Asking HOSAKA for its caps.' } })
       await ensureCloudLimits()
       set({ proof: IDLE_PROOF })
-      // Still no caps: HOSAKA did not answer. A long walk in its place is
-      // refused; the person asked for the cloud, and can turn it off to walk.
-      if (get().cloud.limits === null) {
-        const walk = planSummary(position, cursor, cloudCeilings())
-        if (walk.steps > WALK_WITHOUT_CLOUD_MAX) {
-          set({
-            plan: null,
-            proof: {
-              ...IDLE_PROOF,
-              status: 'infeasible',
-              message: `HOSAKA did not answer, and without it this route is a local walk of ${walk.steps} steps (${walk.sidesteps} sidesteps). Try again when it is reachable, or turn the cloud OFF to walk it.`,
-            },
-          })
-          return
-        }
-      }
     }
-    const ceilings = cloudCeilings()
+    // Local first, as the button promised: HOSAKA's ceilings enter only when
+    // no local way to the cursor exists (nextActionFor makes the same choice).
+    const machineOnly = localOnly(ceiling, recommendedSidestepHeight())
+    const ceilings = planSummary(position, cursor, machineOnly).infeasibleAt === null ? machineOnly : cloudCeilings()
     const summary = planSummary(position, cursor, ceilings)
     if (summary.infeasibleAt !== null) {
       set({
@@ -1479,19 +1459,28 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
-          message: `Step ${summary.infeasibleAt + 1} of this route needs a wall taller than this machine${ceilings.cloudHop ? ' or HOSAKA' : ''} computes (sidestep cap h${Math.max(ceilings.sidestep, ceilings.cloudSidestep)}). Line up a nearer cursor${ceilings.cloudHop ? '' : ', or turn the cloud on'}.`,
+          message: `Step ${summary.infeasibleAt + 1} of the way there crosses a boundary higher than this machine${ceilings.cloudHop ? ' or HOSAKA' : ''} computes (sidestep cap h${Math.max(ceilings.sidestep, ceilings.cloudSidestep)}). Line up a nearer cursor${ceilings.cloudHop ? '' : ', or turn the cloud on'}.`,
         },
       })
       return
     }
     const step = nextStep(position, cursor, ceilings)
     if (!step) return
-    const funded = summary.cloudSteps === 0
+    // One action per commit. The cursor may sit any distance away; this
+    // commit executes only the first step of the way there, the one the
+    // button named (a hop to the cursor, a hop to the boundary, a sidestep
+    // through it, or HOSAKA's version of either), and lands where that step
+    // lands. The cursor stays, so the next commit names the next step. The
+    // whole path is shown, never run: a route that signs step after step in
+    // the background was harder to follow than to walk.
+    const target = { ...step.to }
+    const one = planSummary(position, target, ceilings)
+    const funded = one.cloudSteps === 0
     set({
       plan: {
-        target: { ...cursor },
+        target,
         ceilings,
-        summary,
+        summary: one,
         done: 0,
         step,
         status: funded ? 'running' : 'funding',

@@ -2909,6 +2909,16 @@ kbd {
   font-weight: 700;
 }
 
+/* Nobody computes a boundary this high: the button says so and takes no press. */
+.touchops__commit.is-too-far,
+.touchops__commit.is-too-far:disabled {
+  color: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  background: rgba(255, 59, 107, 0.1);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
 .touchops__cancel:active,
 .touchops__commit:active {
   transform: scale(0.95);

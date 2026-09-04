@@ -19,7 +19,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
-import { offloadWanted, useOffer, useOfferNeed } from '../store/useOffer'
+import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 
@@ -44,11 +44,14 @@ export function TouchControls(): JSX.Element {
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
-  // A move this machine cannot do reads OFFLOAD, in blue: pressing it brings
-  // up the HOSAKA card instead of committing; pressing again goes.
-  const need = useOfferNeed()
-  const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
-  const offload = armed && !deploying && !computing && offloadWanted(need, cloudMode)
+  // The button names the one action the next commit takes: COMMIT for a hop
+  // to the cursor, HOP TO BOUNDARY or SIDESTEP for a step of the way, OFFLOAD
+  // in blue when the step is HOSAKA's (pressing it brings up the card;
+  // pressing again goes), TOO FAR in red, disabled, when nobody computes it.
+  const next = useNextAction()
+  const action = armed && !deploying && !computing ? next?.action ?? null : null
+  const offload = action === 'offload'
+  const tooFar = action === 'too-far'
 
   const move = (name: MoveName) => () => {
     const s = useCyberspace.getState()
@@ -140,18 +143,18 @@ export function TouchControls(): JSX.Element {
           {computing ? 'STOP' : 'RECALL'}
         </button>
         <button
-          className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
-          disabled={!deploying && !armed && !computing}
-          title={deploying ? 'Place shard here' : offload ? 'This move needs HOSAKA: see the offer (Space)' : 'Commit hop (Space)'}
+          className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
+          disabled={(!deploying && !armed && !computing) || tooFar}
+          title={deploying ? 'Place shard here' : tooFar ? 'Higher than anyone computes: bring the cursor nearer, or ride hyperspace' : offload ? 'This step needs HOSAKA: see the offer (Space)' : action === 'hop-to-boundary' ? 'Hop to the boundary on the way (Space)' : action === 'sidestep' ? 'Sidestep one gibson through the boundary (Space)' : 'Commit hop (Space)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
             if (deploying) void useShards.getState().deploy()
-            else if (offload && need && useOffer.getState().requestedFor !== need.cursorKey) useOffer.getState().request(need.cursorKey)
+            else if (offload && next && useOffer.getState().requestedFor !== next.cursorKey) useOffer.getState().request(next.cursorKey)
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : offload ? 'OFFLOAD' : 'COMMIT'}
+          {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
         {/* Whether a commit leaves the device. Under COMMIT because that is the
             only control whose meaning it changes, and a switch rather than a

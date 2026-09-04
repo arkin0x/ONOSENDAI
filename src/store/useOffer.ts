@@ -13,8 +13,7 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
-import type { CloudMode } from '../lib/cloud'
-import { localOnly, planSummary } from '../lib/movePlan'
+import { localOnly, nextStep, planSummary, type Ceilings, type PlanStep } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -84,16 +83,78 @@ export function useOfferNeed(): OfferView | null {
 }
 
 /**
- * COMMIT reads OFFLOAD only when HOSAKA is actually needed: some wall on the
- * way is taller than this machine's sidestep ceiling, so no local walk
- * crosses it. A wall above the hop ceiling alone is not that: the machine
- * hops to it, sidesteps through, and hops on, in more steps and more time,
- * which the proof panel's preview shows. Whether the cloud is ON, ASK or OFF
- * does not change what is needed, so the mode is not consulted here; the
- * card's own mode control turns it on.
+ * The one action the next commit would take toward the cursor, which is what
+ * the COMMIT button names:
+ *
+ * - `hop`: this machine hops to the cursor.
+ * - `hop-to-boundary`: this machine hops to the leaf touching the boundary
+ *   it cannot hop across; the cursor stays where it is.
+ * - `sidestep`: this machine sidesteps one gibson through that boundary.
+ * - `offload`: the step is HOSAKA's (a hop or a sidestep past this machine),
+ *   or might be, until HOSAKA's caps are known.
+ * - `too-far`: some boundary on the way is higher than anyone computes.
+ *
+ * HOSAKA's caps are used whatever the cloud mode: what the move needs does
+ * not depend on a setting, and the card's mode control turns the cloud on.
  */
-export function offloadWanted(need: OfferView | null, _mode?: CloudMode): boolean {
-  return need !== null && !need.localFeasible
+export type NextAction = 'hop' | 'hop-to-boundary' | 'sidestep' | 'offload' | 'too-far'
+
+export interface NextActionView {
+  action: NextAction
+  /** The step itself, for local actions and HOSAKA's; null when too far. */
+  step: PlanStep | null
+  cursorKey: string
+}
+
+export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null): NextActionView | null {
+  if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
+  const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  const cursorKey = cursorKeyOf(cursor, plane)
+  // Local first: when this machine can walk there, the next step is its own,
+  // however long the walk (the proof panel shows the length). HOSAKA enters
+  // only when no local way exists, which is when it is actually needed.
+  const local = localOnly(machineCeiling, sidestepCeil)
+  let ceilings: Ceilings = local
+  if (planSummary(position, cursor, local, 20_000).infeasibleAt !== null) {
+    ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
+    if (planSummary(position, cursor, ceilings, 20_000).infeasibleAt !== null) {
+      // Nobody known can: too far. Unless HOSAKA has not said what it can yet.
+      return { action: limits === null ? 'offload' : 'too-far', step: null, cursorKey }
+    }
+  }
+  const step = nextStep(position, cursor, ceilings)
+  if (!step) return null
+  if (step.source === 'cloud') return { action: 'offload', step, cursorKey }
+  if (step.kind === 'sidestep') return { action: 'sidestep', step, cursorKey }
+  const lands = step.to.x === cursor.x && step.to.y === cursor.y && step.to.z === cursor.z
+  return { action: lands ? 'hop' : 'hop-to-boundary', step, cursorKey }
+}
+
+/** The next action, read from the stores. Not a hook: for the keyboard. */
+export function nextAction(): NextActionView | null {
+  const s = useCyberspace.getState()
+  const cal = useCalibration.getState()
+  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits)
+}
+
+/** The same, for a component. */
+export function useNextAction(): NextActionView | null {
+  const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
+  const plane = useCyberspace((s) => s.plane)
+  const limits = useCyberspace((s) => s.cloud.limits)
+  const hopCeil = useCalibration((s) => s.hopHeight)
+  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+  return nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits)
+}
+
+/** What the COMMIT button says for each next action. */
+export const ACTION_LABEL: Record<NextAction, string> = {
+  hop: 'COMMIT',
+  'hop-to-boundary': 'HOP TO BOUNDARY',
+  sidestep: 'SIDESTEP',
+  offload: 'OFFLOAD',
+  'too-far': 'TOO FAR',
 }
 
 /** The offer to show right now, or null. `hidden` is the caller's veto (a menu, a secret). */

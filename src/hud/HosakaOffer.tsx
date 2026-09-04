@@ -74,7 +74,7 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           <div><dt>HOSAKA</dt><dd>{cloudKnown ? `up to 2^${cloud.limits!.max_hop_height} hops, 2^${cloud.limits!.max_sidestep_height} sidesteps` : 'asking for its caps'}</dd></div>
         </dl>
         {verdict.tier === 'impossible' && (
-          <p className="notice">Beyond HOSAKA too: no one computes a wall this tall yet. Line up a nearer cursor.</p>
+          <p className="notice">Beyond HOSAKA too: no one computes a boundary this high yet. Line up a nearer cursor.</p>
         )}
         {verdict.tier === 'cloud' && (
           <p className="legend__note">{`${verdict.cloudSteps} of ${verdict.steps} actions would offload to HOSAKA.`}</p>

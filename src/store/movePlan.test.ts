@@ -1,6 +1,7 @@
 /**
- * movePlan.test.ts - a commit beyond the ceiling runs a route step by step,
- * one signature per step, pausing on a declined signature.
+ * movePlan.test.ts - a commit beyond the ceiling takes exactly one step of the
+ * way there, one signature, pausing on a declined signature; the next commit
+ * takes the next step.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -50,28 +51,33 @@ describe('a commit beyond the ceiling', () => {
     await useCyberspace.getState().respawn()
   })
 
-  it('walks to the wall, sidesteps one gibson, hops on, signing each step', async () => {
+  it('walks to the boundary, sidesteps one gibson, hops on: one step per commit, one signature each', async () => {
     const s = useCyberspace.getState()
     const x0 = (s.position.x >> 4n) << 4n            // block base at h4
     useCyberspace.setState({ position: { ...s.position, x: x0 + 5n }, cursor: { ...s.position, x: x0 + 11n } })
     await useCyberspace.getState().commit()
     let st = useCyberspace.getState()
     expect(st.plan).not.toBeNull()
-    expect(st.plan!.summary).toMatchObject({ hops: 2, sidesteps: 1, tallestWall: 4 })
+    // Only the first step of the way is committed: the hop to the boundary.
+    expect(st.plan!.summary).toMatchObject({ hops: 1, sidesteps: 0 })
     expect(posted).toHaveLength(1)
     expect(posted[0]).toMatchObject({ mode: 'hop', to: { x: x0 + 7n }, maxComputeHeight: 2 })
 
     await land()
     st = useCyberspace.getState()
     expect(st.position.x).toBe(x0 + 7n)
-    expect(st.plan!.done).toBe(1)
-    expect(posted[1]).toMatchObject({ mode: 'sidestep', from: { x: x0 + 7n }, to: { x: x0 + 8n } })
+    expect(st.plan).toBeNull()                          // the one-step route is done
+    expect(st.cursor.x).toBe(x0 + 11n)                  // the cursor stays where it was put
+    expect(posted).toHaveLength(1)                      // nothing runs on its own
 
+    await useCyberspace.getState().commit()             // the next commit is the sidestep
+    expect(posted[1]).toMatchObject({ mode: 'sidestep', from: { x: x0 + 7n }, to: { x: x0 + 8n } })
     await land()
     st = useCyberspace.getState()
     expect(st.position.x).toBe(x0 + 8n)
-    expect(posted[2]).toMatchObject({ mode: 'hop', from: { x: x0 + 8n }, to: { x: x0 + 11n } })
 
+    await useCyberspace.getState().commit()             // and the hop on to the cursor
+    expect(posted[2]).toMatchObject({ mode: 'hop', from: { x: x0 + 8n }, to: { x: x0 + 11n } })
     await land()
     st = useCyberspace.getState()
     expect(st.position.x).toBe(x0 + 11n)
@@ -109,7 +115,9 @@ describe('a commit beyond the ceiling', () => {
     await new Promise((r) => setTimeout(r, 0))
     st = useCyberspace.getState()
     expect(st.position.x).toBe(x0 + 8n)
-    expect(posted).toHaveLength(2)                     // the next step was posted, not the old one again
+    expect(st.plan).toBeNull()                         // that one step was the whole commit
+    expect(posted).toHaveLength(1)                     // the next step waits for the next commit
+    await useCyberspace.getState().commit()
     expect(posted[1]).toMatchObject({ mode: 'hop', to: { x: x0 + 9n } })
   })
 

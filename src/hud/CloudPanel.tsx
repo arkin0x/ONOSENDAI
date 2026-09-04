@@ -85,6 +85,11 @@ export function CloudPanel(): JSX.Element {
         <span className={`tag tag--cloud ${cloud.status === 'error' ? 'tag--danger' : active ? 'tag--live' : ''}`}>{tag}</span>
       </header>
 
+      {/* The provider's mark, first thing under the title: this is the panel
+          whose work happens on someone else's machine. HOSAKA's for now; the
+          plan is for the connected provider to serve its own (hosaka-api #6). */}
+      <img className="cloud__mark" src="/hosaka-mark.png" alt="HOSAKA" width={308} height={334} decoding="async" />
+
       <div className="cloud__modes" role="radiogroup" aria-label="Cloud mode">
         {MODES.map(([mode, label]) => (
           <button
@@ -248,11 +253,6 @@ export function CloudPanel(): JSX.Element {
           learns the cantor root of every region it computes for you.
         </p>
       </Explanation>
-
-      {/* The HOSAKA mark as a watermark, the pulse mark's size, so this panel is
-          not one more panel: it is the one whose work happens on someone else's
-          machine. */}
-      <img className="cloud__watermark" src="/hosaka-mark.png" alt="" aria-hidden="true" width={308} height={334} decoding="async" />
     </section>
   )
 }

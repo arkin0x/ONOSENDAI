@@ -53,6 +53,7 @@ import { HosakaError, type HosakaDeposit, type HosakaJob, type HosakaLimits } fr
 import type { Position } from '../lib/space'
 import { postProof } from '../lib/workers'
 import { useCyberspace } from './useCyberspace'
+import { useToast } from './useToast'
 
 const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5e9, invoice_ttl_seconds: 3600 }
 
@@ -161,6 +162,8 @@ describe('cloud routes', () => {
     expect(s.plan).toBeNull()
     expect(s.events).toHaveLength(before + 1)
     expect(s.position).toEqual(to)
+    expect(useToast.getState().toast?.label).toMatch(/^CLOUD COMPUTE JOB COMPLETE - [0-9a-z-]{1,8}$/)
+    expect(useToast.getState().toast?.meta).toBe('Thanks for using HOSAKA!')
     expect(s.proof.status).toBe('done')
     expect(s.proof.source).toBe('cloud')
     expect(s.proof.costMsats).toBe(1000)

@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
-import { localOnly, nextStep, planSummary, type Ceilings, type PlanStep } from '../lib/movePlan'
+import { localOnly, nextStep, routeFeasible, type Ceilings, type PlanStep } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -46,7 +46,7 @@ export interface OfferView {
 }
 
 const localFeasibleFor = (position: Position, cursor: Position, hop: number, sidestep: number): boolean =>
-  planSummary(position, cursor, localOnly(hop, sidestep), 20_000).infeasibleAt === null
+  routeFeasible(position, cursor, localOnly(hop, sidestep))
 
 const cursorKeyOf = (c: { x: bigint; y: bigint; z: bigint }, plane: number): string => `${c.x}:${c.y}:${c.z}:${plane}`
 
@@ -110,20 +110,17 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
   if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   const cursorKey = cursorKeyOf(cursor, plane)
-  // Local first: when this machine can walk there, the next step is its own,
-  // however long the walk (the proof panel shows the length). HOSAKA enters
-  // only when no local way exists, which is when it is actually needed.
-  const local = localOnly(machineCeiling, sidestepCeil)
-  let ceilings: Ceilings = local
-  if (planSummary(position, cursor, local, 20_000).infeasibleAt !== null) {
-    ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
-    if (planSummary(position, cursor, ceilings, 20_000).infeasibleAt !== null) {
-      // Nobody known can: too far. Unless HOSAKA has not said what it can yet.
-      return { action: limits === null ? 'offload' : 'too-far', step: null, cursorKey }
-    }
-  }
+  // Local first, per step (lib/movePlan.ts): the next step is this machine's
+  // whenever it has one, however long the walk (the proof panel shows the
+  // length). HOSAKA enters only at a boundary this machine cannot cross,
+  // which is when it is actually needed. A cursor no one reaches is TOO FAR
+  // as soon as HOSAKA's caps are known; until they are, the walk goes on and
+  // OFFLOAD at the boundary asks.
+  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
+  if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
   const step = nextStep(position, cursor, ceilings)
   if (!step) return null
+  if (step.source === 'infeasible') return { action: 'offload', step: null, cursorKey }
   if (step.source === 'cloud') return { action: 'offload', step, cursorKey }
   if (step.kind === 'sidestep') return { action: 'sidestep', step, cursorKey }
   const lands = step.to.x === cursor.x && step.to.y === cursor.y && step.to.z === cursor.z

@@ -38,11 +38,13 @@ export interface PlanStep {
 
 /**
  * What each primitive can reach, here and in the cloud. Cloud values are 0
- * when the cloud is off or its limits are not known yet. Hops are planned
- * with the taller hop ceiling, so a paid hop replaces a walk whenever HOSAKA
- * reaches the wall; a step is local when this machine can do it and cloud
- * otherwise; a sidestep taller than both sidestep ceilings makes the route
- * infeasible at that step.
+ * when the cloud is off or its limits are not known yet. A step is this
+ * machine's whenever this machine can take it, however long the walk that
+ * makes; HOSAKA takes a step only where no local step exists, which is a
+ * boundary above the local sidestep ceiling. Its step is then planned with
+ * its own caps: a paid hop across the boundary, landing at the cursor when
+ * the cursor is within its hop cap, else a paid sidestep of one gibson. A
+ * boundary above both sidestep ceilings makes the route infeasible there.
  */
 export interface Ceilings {
   hop: number
@@ -62,6 +64,21 @@ function asCeilings(c: number | Ceilings): Ceilings {
 function sourceOf(kind: PlanStepKind, h: number, c: Ceilings): StepSource {
   if (kind === 'hop') return h <= c.hop ? 'local' : h <= c.cloudHop ? 'cloud' : 'infeasible'
   return h <= c.sidestep ? 'local' : h <= c.cloudSidestep ? 'cloud' : 'infeasible'
+}
+
+/**
+ * Whether anyone in `c` can take the whole route, in constant time. The
+ * tallest boundary the route crosses on an axis is the LCA height of that
+ * axis, crossed once; every other boundary on the way is lower. So the route
+ * is feasible exactly when its tallest boundary fits a hop ceiling or a
+ * sidestep ceiling. `planSummary` walks the same route and agrees, but a
+ * long walk costs a step per block boundary and this is asked on every
+ * cursor move.
+ */
+export function routeFeasible(from: Position, to: Position, ceilings: number | Ceilings): boolean {
+  const c = asCeilings(ceilings)
+  const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
+  return h <= Math.max(c.hop, c.cloudHop) || h <= Math.max(c.sidestep, c.cloudSidestep)
 }
 
 export type AxisMove =
@@ -121,10 +138,17 @@ export function nextAxisMove(current: bigint, target: bigint, ceiling: number): 
  * The next step of the route from `cur` to `to`. Hops move every axis that
  * can move at once; a sidestep moves exactly the axes that are standing at
  * their walls (spec 6.9) and holds the others until it is done. Null when
- * `cur` is `to`.
+ * `cur` is `to`. With cloud ceilings the step is this machine's whenever it
+ * has one, and HOSAKA's only at a wall this machine cannot cross.
  */
 export function nextStep(cur: Position, to: Position, ceilings: number | Ceilings): PlanStep | null {
   const c = asCeilings(ceilings)
+  // Local first, per step: the cloud plans a step only when this machine has
+  // none, so a walk this machine can make is never a paid hop.
+  if (c.cloudHop > 0 || c.cloudSidestep > 0) {
+    const mine = nextStep(cur, to, localOnly(c.hop, c.sidestep))
+    if (mine === null || mine.source === 'local') return mine
+  }
   const walk = Math.max(c.hop, c.cloudHop)
   if (walk < 1) throw new Error('ceiling must be at least 1')
   if (cur.x === to.x && cur.y === to.y && cur.z === to.z) return null

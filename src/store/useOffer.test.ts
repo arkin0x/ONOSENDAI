@@ -23,10 +23,16 @@ describe('nextActionFor', () => {
     expect(a && ['hop-to-boundary', 'sidestep'].includes(a.action)).toBe(true)
     expect(a?.step).not.toBeNull()
   })
-  it('is OFFLOAD when the step is HOSAKA\'s, and when HOSAKA has not said what it can', () => {
-    // Across an h26 boundary: above the local sidestep ceiling, within HOSAKA's hop cap.
-    expect(next(1n << 25n)?.action).toBe('offload')
-    expect(next(1n << 25n, null)?.action).toBe('offload')
+  it('walks toward a boundary only HOSAKA crosses, and is OFFLOAD only on reaching it', () => {
+    // An h26 boundary on the way: above the local sidestep ceiling, within HOSAKA's hop cap.
+    expect(next(1n << 25n)?.action).toBe('hop-to-boundary')
+    expect(next(1n << 25n, null)?.action).toBe('hop-to-boundary')
+    const atWall = (limits: typeof CAPS | null) => nextActionFor(at((1n << 25n) - 1n), at(1n << 25n), 0, 17, 24, limits)
+    expect(atWall(CAPS)?.action).toBe('offload')
+    expect(atWall(CAPS)?.step?.source).toBe('cloud')
+    // HOSAKA has not said what it can: the press asks.
+    expect(atWall(null)?.action).toBe('offload')
+    expect(atWall(null)?.step).toBeNull()
   })
   it('is TOO FAR past every cap', () => {
     // An h31 boundary: above HOSAKA's sidestep cap too.

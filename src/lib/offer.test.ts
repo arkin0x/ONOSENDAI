@@ -10,8 +10,14 @@ describe('offerVerdict', () => {
     expect(offerVerdict(P(1000n), P(1000n), 0, C, true)).toBeNull()
   })
   it('the cloud can, with the counts', () => {
+    // On the leaf touching an h25 wall: above this machine's h24 sidestep, within HOSAKA's h25 hop cap, so one paid hop.
+    const v = offerVerdict(P((1n << 24n) - 1n), P(1n << 24n), 0, C, true)
+    expect(v).toMatchObject({ tier: 'cloud', tallestWall: 25, cloudSteps: 1, steps: 1 })
+  })
+  it('a walk this machine can make counts no cloud step', () => {
     const v = offerVerdict(P(1000n), P(1000n + (1n << 20n)), 0, C, true)
-    expect(v).toMatchObject({ tier: 'cloud', tallestWall: 21, cloudSteps: 1, steps: 1 })
+    expect(v?.cloudSteps).toBe(0)
+    expect(v?.steps).toBeGreaterThan(1)
   })
   it('the cloud could, caps unknown', () => {
     const v = offerVerdict(P(1000n), P(1000n + (1n << 20n)), 0, { ...C, cloudHop: 0, cloudSidestep: 0 }, false)

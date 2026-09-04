@@ -117,7 +117,7 @@ import {
   saveBalance,
   type KnownBalance,
 } from '../lib/cloud'
-import { localOnly, nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
+import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 
@@ -1448,24 +1448,24 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       await ensureCloudLimits()
       set({ proof: IDLE_PROOF })
     }
-    // Local first, as the button promised: HOSAKA's ceilings enter only when
-    // no local way to the cursor exists (nextActionFor makes the same choice).
-    const machineOnly = localOnly(ceiling, recommendedSidestepHeight())
-    const ceilings = planSummary(position, cursor, machineOnly).infeasibleAt === null ? machineOnly : cloudCeilings()
-    const summary = planSummary(position, cursor, ceilings)
-    if (summary.infeasibleAt !== null) {
+    // Local first, per step, as the button promised (lib/movePlan.ts): the
+    // step is this machine's whenever it has one; HOSAKA's caps enter only
+    // at a boundary this machine cannot cross (nextActionFor makes the same
+    // choice). Only a step nobody can take is refused here.
+    const ceilings = cloudCeilings()
+    const step = nextStep(position, cursor, ceilings)
+    if (!step) return
+    if (step.source === 'infeasible') {
       set({
         plan: null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
-          message: `Step ${summary.infeasibleAt + 1} of the way there crosses a boundary higher than this machine${ceilings.cloudHop ? ' or HOSAKA' : ''} computes (sidestep cap h${Math.max(ceilings.sidestep, ceilings.cloudSidestep)}). Line up a nearer cursor${ceilings.cloudHop ? '' : ', or turn the cloud on'}.`,
+          message: `The next step crosses a boundary (h${step.maxHeight}) higher than this machine${ceilings.cloudHop ? ' or HOSAKA' : ''} computes (sidestep cap h${Math.max(ceilings.sidestep, ceilings.cloudSidestep)}). Line up a nearer cursor${ceilings.cloudHop ? '' : ', or turn the cloud on'}.`,
         },
       })
       return
     }
-    const step = nextStep(position, cursor, ceilings)
-    if (!step) return
     // One action per commit. The cursor may sit any distance away; this
     // commit executes only the first step of the way there, the one the
     // button named (a hop to the cursor, a hop to the boundary, a sidestep

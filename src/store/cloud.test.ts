@@ -97,11 +97,20 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: 
   return { promise, resolve, reject }
 }
 
-/** The cursor one h13 wall away from the avatar, on x. */
-function lineUpH13(): Position {
+/**
+ * The cursor one h13 wall away from the avatar, on x. By default the avatar
+ * is first stood on the leaf touching that wall: a step is HOSAKA's only
+ * where this machine has none, so the crossing is the very next commit.
+ * `atWall: false` stands it mid-block instead, an h12 hop short of the leaf.
+ * (Earlier tests leave the avatar wherever their route ended, so both stand
+ * it explicitly.)
+ */
+function lineUpH13(atWall = true): Position {
   const s = useCyberspace.getState()
-  const cursor = { ...s.position, x: s.position.x ^ (1n << 12n) }
-  useCyberspace.setState({ cursor })
+  const block = (s.position.x >> 13n) << 13n
+  const position = { ...s.position, x: atWall ? block + 4095n : block + 2053n }
+  const cursor = { ...position, x: position.x ^ (1n << 12n) }
+  useCyberspace.setState({ position, cursor })
   return cursor
 }
 
@@ -134,8 +143,8 @@ describe('cloud routes', () => {
   it('a funded route of one cloud hop lands at the cursor as a signed hop event, verified first', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
@@ -180,8 +189,8 @@ describe('cloud routes', () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'ask' } })
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop', 2500))
 
     await S().commit()
@@ -212,8 +221,8 @@ describe('cloud routes', () => {
   it('one invoice funds the route: the deposit is on disk before the invoice shows, then the step runs funded', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     // 95 msats short of a sat: the invoice is still for whole sats.
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 95, ledger: [] })
@@ -255,8 +264,8 @@ describe('cloud routes', () => {
   it('refuses to append when the chain head moved while HOSAKA computed', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     const finish = deferred<HosakaJob>()
@@ -281,8 +290,8 @@ describe('cloud routes', () => {
   it('refuses a result that fails verification, and signs nothing', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     const result = hopResult(from, to, S().plane, head)
@@ -298,8 +307,8 @@ describe('cloud routes', () => {
 
   it('X while the route waits for its invoice abandons it; X while a step computes keeps the job for RESUME', async () => {
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
     fake.deposit.mockResolvedValue(deposit('d1'))
@@ -370,8 +379,8 @@ describe('cloud routes', () => {
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: { ...LIMITS, max_hop_height: 12 } } })
     const before = S().events.length
+    const cursor = lineUpH13(false)
     const from = S().position
-    const cursor = lineUpH13()
     const edge = wallSource(from.x, cursor.x, 13)
     const landing = cursor.x > from.x ? edge + 1n : edge - 1n
     expect(edge).not.toBe(from.x)                       // this identity spawned away from the wall
@@ -426,8 +435,8 @@ describe('cloud routes', () => {
     // A machine that sidesteps to h24 has a local way across the h13 boundary.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' } })
+    const cursor = lineUpH13(false)
     const from = S().position
-    const cursor = lineUpH13()
     await S().commit()
     expect(fake.quote).not.toHaveBeenCalled()
     expect(fake.limits).not.toHaveBeenCalled()
@@ -445,6 +454,7 @@ describe('cloud routes', () => {
     // Now a machine with no local way across (sidesteps stop at h12): the move is the cloud's, whose caps are not known yet.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' }, cloud: { ...S().cloud, limits: null } })
+    lineUpH13()   // on the leaf touching the wall: the crossing is the next commit
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded('job-5'))
     fake.waitForJob.mockImplementation((_id: string, _tok: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {

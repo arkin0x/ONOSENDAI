@@ -2900,6 +2900,15 @@ kbd {
   border-color: var(--warn, #ffb020);
 }
 
+/* The move needs HOSAKA: the button says so in Earth blue (palette EARTH) and
+ * opens the offer instead of committing. */
+.touchops__commit.is-offload {
+  color: #05070d;
+  background: #2f81f7;
+  border-color: #2f81f7;
+  font-weight: 700;
+}
+
 .touchops__cancel:active,
 .touchops__commit:active {
   transform: scale(0.95);

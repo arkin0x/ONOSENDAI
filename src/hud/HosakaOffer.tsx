@@ -7,7 +7,9 @@
  * three sentences, and carries the two settings a person needs to say yes
  * (mode and budget) plus GO, so the operation completes without opening a
  * panel. It leaves when the cursor comes back within reach, when a route or
- * cloud flow takes over, when the menu opens, or on NOT NOW for this cursor.
+ * cloud flow takes over, when the menu opens, when the cursor moves, or on
+ * NOT NOW for this cursor. It appears only after OFFLOAD is pressed for the
+ * cursor (useOffer), never on its own.
  */
 
 import { useEffect } from 'react'

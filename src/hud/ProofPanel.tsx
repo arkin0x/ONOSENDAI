@@ -14,7 +14,7 @@ import { Explanation } from './Explanation'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
-import { buildMovePlan, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
+import { buildMovePlan, localOnly, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { formatMs, formatOps } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
 
@@ -61,13 +61,15 @@ export function ProofPanel(): JSX.Element {
   // ceilings, and HOSAKA's caps when the cloud is on and has answered. The
   // same numbers the store uses.
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const cloudOn = cloudMode !== 'off' && cloud.limits !== null
+  // HOSAKA's caps whatever the cloud mode: what a move needs does not depend
+  // on a setting, and the button (useOffer) reads it the same way.
+  const cloudOn = cloud.limits !== null
   const ceilings: Ceilings = useMemo(() => ({
     hop: ceiling,
     sidestep: sidestepCeil,
-    cloudHop: cloudOn && cloud.limits ? cloud.limits.max_hop_height : 0,
-    cloudSidestep: cloudOn && cloud.limits ? cloud.limits.max_sidestep_height : 0,
-  }), [ceiling, sidestepCeil, cloudOn, cloud.limits])
+    cloudHop: cloud.limits?.max_hop_height ?? 0,
+    cloudSidestep: cloud.limits?.max_sidestep_height ?? 0,
+  }), [ceiling, sidestepCeil, cloud.limits])
 
   // Live preview of the action the cursor is lining up. The hop estimate is
   // closed-form; the route summary walks the route's steps without keeping
@@ -80,14 +82,19 @@ export function ProofPanel(): JSX.Element {
       plane,
       ceiling,
     )
-    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null, steps: null as PlanStep[] | null }
+    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null, steps: null as PlanStep[] | null, needsCloud: false }
+    // Local first, as the commit and the button are: when this machine can
+    // walk there, that is the way shown, however long. HOSAKA's caps enter
+    // only when no local way exists, which is when the cloud is needed.
+    const local = localOnly(ceiling, sidestepCeil)
+    const way = planSummary(position, cursor, local, 20_000).infeasibleAt === null ? local : ceilings
     // The steps themselves, for the list the running route shows, so a route
     // reads the same before COMMIT as after. A walk longer than the list
     // could show is summarised only.
     let steps: PlanStep[] | null = null
-    try { steps = buildMovePlan(position, cursor, ceilings, PREVIEW_STEPS_MAX) } catch { steps = null }
-    return { hop, route: planSummary(position, cursor, ceilings, 20_000), steps }
-  }, [position, cursor, plane, ceiling, ceilings])
+    try { steps = buildMovePlan(position, cursor, way, PREVIEW_STEPS_MAX) } catch { steps = null }
+    return { hop, route: planSummary(position, cursor, way, 20_000), steps, needsCloud: way !== local }
+  }, [position, cursor, plane, ceiling, sidestepCeil, ceilings])
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const status =
@@ -178,7 +185,7 @@ export function ProofPanel(): JSX.Element {
           )}
           {preview.route.steps > 64 && preview.route.cloudSteps === 0 && (
             <p className="notice">
-              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps, each a signed event. ${cloudMode === 'off' ? 'Turning the cloud on lets HOSAKA hop to the wall in one paid move.' : 'HOSAKA has not answered yet; its hop would replace the walk.'}`}
+              {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps and ${preview.route.hops} hops, one commit and one signature each. HOSAKA is offered only where this machine cannot go; a nearer cursor, or hyperspace, is the shorter way.`}
             </p>
           )}
         </>
@@ -246,7 +253,11 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
-      <p className="legend__note">{`THIS MACHINE BENCHMARK: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
+      <p className="legend__note">
+        THIS MACHINE BENCHMARK
+        <br />{`HOP <= 2^${hopCeil}`}
+        <br />{`SIDESTEP <= 2^${sidestepCeil}`}
+      </p>
 
       <Explanation>
         A hop is the standard movement action in cyberspace. You choose a

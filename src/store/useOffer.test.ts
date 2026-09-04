@@ -9,11 +9,11 @@ import { offloadWanted, useOffer, type OfferView } from './useOffer'
 const need = (tier: OfferView['verdict']['tier']): OfferView => ({ verdict: { tallestWall: 24, tier, cloudSteps: 1, steps: 1 }, cursorKey: 'k', machineCeiling: 17 })
 
 describe('offloadWanted', () => {
-  it('wants OFFLOAD for a cloud move, or one the caps have not answered for, unless the cloud is off', () => {
+  it('wants OFFLOAD whenever this machine cannot do the move, the impossible case included, unless the cloud is off', () => {
     expect(offloadWanted(need('cloud'), 'auto')).toBe(true)
     expect(offloadWanted(need('cloud-unknown'), 'ask')).toBe(true)
+    expect(offloadWanted(need('impossible'), 'auto')).toBe(true)
     expect(offloadWanted(need('cloud'), 'off')).toBe(false)
-    expect(offloadWanted(need('impossible'), 'auto')).toBe(false)
     expect(offloadWanted(null, 'auto')).toBe(false)
   })
 })

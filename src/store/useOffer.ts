@@ -72,9 +72,15 @@ export function useOfferNeed(): OfferView | null {
   return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling } : null
 }
 
-/** The move needs HOSAKA (or may, until its caps are known) and the cloud is not OFF: COMMIT reads OFFLOAD. */
+/**
+ * This machine cannot do the move and the cloud is not OFF: COMMIT reads
+ * OFFLOAD. Every tier but "machine" counts, the impossible one included: the
+ * card is where that verdict is explained (beyond HOSAKA too, line up a
+ * nearer cursor), and a button that flipped back to COMMIT as the cursor
+ * went further read as the cloud no longer being needed.
+ */
 export function offloadWanted(need: OfferView | null, mode: CloudMode): boolean {
-  return need !== null && mode !== 'off' && (need.verdict.tier === 'cloud' || need.verdict.tier === 'cloud-unknown')
+  return need !== null && mode !== 'off'
 }
 
 /** The offer to show right now, or null. `hidden` is the caller's veto (a menu, a secret). */

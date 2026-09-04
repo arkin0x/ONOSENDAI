@@ -14,8 +14,11 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
+  AddEquation,
   AdditiveBlending,
-  NormalBlending,
+  CustomBlending,
+  OneFactor,
+  ZeroFactor,
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -33,11 +36,12 @@ interface Props {
   ghost?: boolean
   /**
    * Drawn in the world, under its bloom. The bloom adds a blurred copy of
-   * everything lit, several times over for a filled face, so a face drawn at
-   * its own colour came out white with a tint. At WORLD_FACE of the colour the
-   * bloom's addition lands near the colour itself: the shard glows, and it is
-   * still red or green. Points lose the additive blend for the same reason.
-   * The bench has no bloom and draws everything at full strength.
+   * everything lit back onto the frame, and across a filled face that is
+   * several times the face's own colour, so faces came out white with a
+   * tint. Out there the faces write their colour with alpha 0, a tag the
+   * scene's bloom is blind to (Scene.tsx WorldBloom), so they draw at their
+   * own colours, as on the bench; points and lines are untagged and glow as
+   * they always did. Not for a ghost, whose translucency needs real alpha.
    */
   world?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
@@ -48,10 +52,11 @@ interface Props {
 
 const STATIC = [0, 0.9, 1] as const
 
-/** Face brightness under the world's bloom (a multiplier on the vertex colours). */
-const WORLD_FACE = '#2e2e2e'
-/** Point brightness under the world's bloom. */
-const WORLD_POINT = '#808080'
+/**
+ * Colour written opaque, alpha written as 0: the tag. (Blending needs the
+ * material transparent, which the face already is for its opacity.)
+ */
+const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
 export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => flatten(shard), [shard.vertices, shard.faces])
@@ -137,7 +142,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
-          <meshBasicMaterial vertexColors color={world ? WORLD_FACE : '#ffffff'} side={DoubleSide} toneMapped={false} transparent opacity={opacity} />
+          <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />
         </mesh>
       )}
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
@@ -149,8 +154,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
             sizeAttenuation
             transparent
             opacity={shard.mode === 'points' ? opacity : opacity * 0.9}
-            color={world ? WORLD_POINT : '#ffffff'}
-            blending={world ? NormalBlending : AdditiveBlending}
+            blending={AdditiveBlending}
             depthWrite={false}
             toneMapped={false}
           />

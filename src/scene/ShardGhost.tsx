@@ -64,7 +64,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
 
   return (
     <group ref={group}>
-      <ShardMesh shard={shard} scale={scale} ghost world />
+      <ShardMesh shard={shard} scale={scale} ghost />
     </group>
   )
 }

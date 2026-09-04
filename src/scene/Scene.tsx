@@ -23,7 +23,7 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
-import type { BloomEffect } from 'postprocessing'
+import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
@@ -513,6 +513,26 @@ function ClockKeeper(): null {
   return null
 }
 
+/**
+ * The last word on a tagged texel: alpha 1. The tag (colour with alpha 0)
+ * is valid inside the composer's buffers but not on the canvas, which
+ * composites premultiplied: a compositor is free to clamp colour to alpha,
+ * and one did, drawing the faces black except where a halo lent them some.
+ * Merged into the bloom's own pass by postprocessing, so it costs nothing.
+ * Only the tag is touched; every other texel leaves exactly as it came.
+ */
+const OPAQUE_TAGGED_FRAGMENT = `
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec4 o = texture(inputBuffer, uv);
+  float tagged = step(o.a, 0.0) * step(0.0005, max(o.r, max(o.g, o.b)));
+  outputColor = vec4(inputColor.rgb, max(inputColor.a, tagged));
+}`
+class OpaqueTaggedEffect extends Effect {
+  constructor() {
+    super('OpaqueTagged', OPAQUE_TAGGED_FRAGMENT, { blendFunction: BlendFunction.SET })
+  }
+}
+
 /** The luminance line the bloom ships with, and the same line blind to tagged texels. */
 const LUMINANCE_LINE = 'float l=luminance(texel.rgb);'
 const LUMINANCE_TAG_AWARE = 'float l=luminance(texel.rgb)*step(0.0005,texel.a);'
@@ -546,7 +566,13 @@ function WorldBloom(): JSX.Element {
     m.userData.tagAware = true
     m.needsUpdate = true
   })
-  return <Bloom ref={ref} mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
+  const opaque = useMemo(() => new OpaqueTaggedEffect(), [])
+  return (
+    <>
+      <Bloom ref={ref} mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
+      <primitive object={opaque} />
+    </>
+  )
 }
 
 export function Scene(): JSX.Element {

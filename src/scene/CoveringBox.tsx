@@ -156,6 +156,13 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     }
   }, [position, anchor, target, scaleExp, plane, axes, atHead])
 
+  // Every cursor step builds a fresh outline and fill, and a geometry the
+  // renderer has drawn once stays in its cache, buffers and all, until it is
+  // disposed: sixty steps left a hundred and twenty of them behind, and a
+  // session's worth of steering left thousands. The walls below already do
+  // this; the box itself did not.
+  useEffect(() => () => { if (box) { box.geometry.dispose(); box.fill.dispose() } }, [box])
+
   // The HUD's zoom-out key echoes the clipped state (see useUiHints). Keyed on
   // the boolean so it is written only when the state actually flips, never per
   // frame and never per cursor step; the store guards once more on its side.

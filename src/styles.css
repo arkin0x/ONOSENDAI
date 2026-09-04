@@ -2305,6 +2305,15 @@ kbd {
   min-height: 0;
 }
 
+/* The SELECT tool's drag box, drawn over the bench canvas (Bench.tsx Marquee). */
+.bench__marquee {
+  position: absolute;
+  border: 1px solid var(--accent, #00e5ff);
+  background: rgba(0, 229, 255, 0.08);
+  pointer-events: none;
+  z-index: 5;
+}
+
 .workshop__bench canvas {
   display: block;
 }

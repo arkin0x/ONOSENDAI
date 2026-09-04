@@ -12,7 +12,7 @@ const w = () => useWorkshop.getState()
 
 describe('workshop', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selected: null, selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
   })
 
@@ -27,7 +27,7 @@ describe('workshop', () => {
     w().addVertex([1, 2, 3])
     expect(w().current()!.vertices).toHaveLength(1)
     expect(w().current()!.vertices[0].p).toEqual([1, 2, 3])
-    expect(w().selected).toBe(0)
+    expect(w().selection).toEqual([0])
     w().addVertex([9, 0, 0])
     expect(w().current()!.vertices).toHaveLength(1)
   })
@@ -85,7 +85,50 @@ describe('workshop', () => {
     expect(after.vertices).toHaveLength(14)
     expect(after.faces.length).toBeLessThan(facesBefore)
     for (const f of after.faces) for (const i of f) expect(i).toBeLessThan(14)
-    expect(w().selected).toBeNull()
+    expect(w().selection).toEqual([])
+  })
+
+  it('selects many points: tap toggles, a box replaces, whole points always', () => {
+    w().placeStamp([0, 0, 0])          // a block: 8 corners
+    w().addVertex([5, 0, 5])
+    const s = w().current()!
+    const corner = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
+    w().selectVertex(null)
+    w().toggleVertex(corner); w().toggleVertex(s.vertices.length - 1)
+    expect(new Set(w().selection.map((i) => s.vertices[i].p.join()))).toEqual(new Set(['0,0,0', '5,0,5']))
+    w().toggleVertex(corner)
+    expect(w().selection.map((i) => s.vertices[i].p.join())).toEqual(['5,0,5'])
+    w().setSelection([corner])
+    expect(w().selection).toEqual([corner])
+  })
+
+  it('nudges, colors and deletes a whole selection at once, refusing a move that would leave the grid', () => {
+    w().addVertex([0, 0, 0]); w().addVertex([8, 0, 0]); w().addVertex([3, 0, 3])
+    w().setSelection([0, 1, 2])
+    w().moveSelected(0, 1)               // 8 -> 9 is off the grid: nothing moves
+    expect(w().current()!.vertices.map((v) => v.p[0])).toEqual([0, 8, 3])
+    w().moveSelected(2, 1)
+    expect(w().current()!.vertices.map((v) => v.p[2])).toEqual([1, 1, 4])
+    w().colorSelected([1, 0, 0])
+    expect(w().current()!.vertices.every((v) => v.c.join() === '1,0,0')).toBe(true)
+    w().setSelection([0, 2]); w().deleteSelected()
+    expect(w().current()!.vertices.map((v) => v.p.join())).toEqual(['8,0,1'])
+    expect(w().selection).toEqual([])
+  })
+
+  it('CONNECTED grows the selection along faces and shared points, and no further', () => {
+    w().placeStamp([0, 0, 0])            // one block, 8 corners joined by faces
+    w().placeStamp([5, 0, 5])            // another, apart
+    w().addVertex([-4, 0, -4])           // a lone point
+    const s = w().current()!
+    const a = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
+    w().setSelection([a]); w().selectConnected()
+    const points = new Set(w().selection.map((i) => s.vertices[i].p.join()))
+    expect(points.size).toBe(8)
+    expect(points.has('5,0,5')).toBe(false)
+    expect(points.has('-4,0,-4')).toBe(false)
+    w().setSelection([s.vertices.length - 1]); w().selectConnected()
+    expect(w().selection).toEqual([s.vertices.length - 1])
   })
 
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
@@ -204,7 +247,7 @@ describe('workshop', () => {
 
 describe('faces and palette', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selected: null, selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], past: [], future: [], tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0, color: [0, 0.9, 1] })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], past: [], future: [], tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0, color: [0, 0.9, 1] })
     w().create('t')
     w().placeStamp([0, 0, 0])
     w().setTool('face')
@@ -214,7 +257,7 @@ describe('faces and palette', () => {
     const before = w().current()!.faces.length
     w().selectVertex(0)
     w().selectFace(3)
-    expect(w().selected).toBeNull()
+    expect(w().selection).toEqual([])
     expect(w().selectedFace).toBe(3)
     const gone = w().current()!.faces[3]
     w().deleteSelectedFace()

@@ -11,8 +11,9 @@
  * the one already there, so hand placing never stacks vertices by accident. A
  * stamp brings its own vertices even onto occupied points (stamps.ts says
  * why), so from then on "a point" can be several vertices, and SELECT, the
- * nudge pad, the color and DELETE act on every vertex at the selected point
- * together. What you see is one dot, and it behaves like one dot.
+ * nudge pad, the color and DELETE act on every vertex at every selected point
+ * together. What you see is one dot, and it behaves like one dot; a box
+ * dragged on the bench, or CONNECTED, selects many at once.
  *
  * Every change to the current shard goes through `edit`, which is also where
  * undo lives: the shard as it was is pushed onto a stack, redo holds what
@@ -59,8 +60,13 @@ export interface WorkshopState {
   /** The workshop overlay is up. */
   open: boolean
   tool: Tool
-  /** Selected vertex index; every vertex on the same point moves with it. */
-  selected: number | null
+  /**
+   * Selected vertex indices, always whole points: selecting a vertex selects
+   * every vertex on its point, and the nudge pad, the color and DELETE act on
+   * all of them together. Built by tapping points, dragging a box on the
+   * bench, or CONNECTED.
+   */
+  selection: number[]
   /** Corners picked so far for the next face, in order. */
   facePick: number[]
   /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
@@ -101,8 +107,14 @@ export interface WorkshopState {
   setAim: (p: P3 | null) => void
   placeStamp: (at: P3) => void
   addVertex: (p: P3) => void
-  /** Also drops any selected face: a point and a face are never selected together. */
+  /** Select one point only (null clears). Also drops any selected face: a point and a face are never selected together. */
   selectVertex: (index: number | null) => void
+  /** Add the point to the selection, or take it out if it is in. */
+  toggleVertex: (index: number) => void
+  /** Replace the selection; whole points, whatever indices are given. */
+  setSelection: (indices: number[]) => void
+  /** Grow the selection to every vertex joined to it by faces (and by shared points). */
+  selectConnected: () => void
   selectFace: (index: number | null) => void
   deleteSelectedFace: () => void
   /** Put a color at the front of the palette (moving it there if it is already in). */
@@ -192,7 +204,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     currentId: null,
     open: false,
     tool: 'stamp',
-    selected: null,
+    selection: [],
     facePick: [],
     selectedFace: null,
     palette: loadPalette(),
@@ -209,20 +221,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? shards[0]?.id ?? get().create()
-      set({ open: true, currentId, selected: null, selectedFace: null, facePick: [], tool: 'stamp', aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, selection: [], selectedFace: null, facePick: [], tool: 'stamp', aim: null, past: [], future: [], notice: null })
     },
 
-    closeWorkshop: () => set({ open: false, selected: null, selectedFace: null, facePick: [], aim: null }),
+    closeWorkshop: () => set({ open: false, selection: [], selectedFace: null, facePick: [], aim: null }),
 
     create: (name) => {
       const s = newShard(name ?? `Shard ${get().shards.length + 1}`)
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    select: (id) => set({ currentId: id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }),
+    select: (id) => set({ currentId: id, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }),
 
     rename: (id, name) => {
       const list = get().shards.map((s) => (s.id === id ? { ...s, name: name.slice(0, 64), updatedAt: Date.now() } : s))
@@ -234,14 +246,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!src) return id
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map((v) => ({ p: [...v.p] as P3, c: [...v.c] as ShardVertex['c'] })), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
-      set({ shards: list, currentId: copy.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId: copy.id, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id
     },
 
     remove: (id) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? (list[0]?.id ?? null) : get().currentId
-      set({ shards: list, currentId, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
@@ -267,7 +279,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!res) { set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
       edit(() => ({ ...res.shard, mode }), notice)
-      set({ selected: null, selectedFace: null, facePick: [] })
+      set({ selection: [], selectedFace: null, facePick: [] })
     },
 
     addVertex: (p) => {
@@ -280,12 +292,48 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         added = s.vertices.length
         return { ...s, vertices: [...s.vertices, { p: [...p] as P3, c: [...get().color] as ShardVertex['c'] }] }
       })
-      if (added >= 0) set({ selected: added })
+      if (added >= 0) set({ selection: group(get().current()!, added), selectedFace: null })
     },
 
-    selectVertex: (index) => set({ selected: index, selectedFace: null }),
+    selectVertex: (index) => {
+      const s = get().current()
+      set({ selection: index === null || !s ? [] : group(s, index), selectedFace: null })
+    },
 
-    selectFace: (index) => set({ selectedFace: index, selected: index === null ? get().selected : null }),
+    toggleVertex: (index) => {
+      const s = get().current()
+      if (!s || !s.vertices[index]) return
+      const g = group(s, index)
+      const has = get().selection.includes(index)
+      set({ selection: has ? get().selection.filter((i) => !g.includes(i)) : [...get().selection, ...g], selectedFace: null })
+    },
+
+    setSelection: (indices) => {
+      const s = get().current()
+      if (!s) { set({ selection: [] }); return }
+      const out = new Set<number>()
+      for (const i of indices) if (s.vertices[i]) for (const j of group(s, i)) out.add(j)
+      set({ selection: [...out].sort((a, b) => a - b), selectedFace: null })
+    },
+
+    selectConnected: () => {
+      const s = get().current()
+      const { selection } = get()
+      if (!s || selection.length === 0) return
+      // Union-find over vertices: a shared point joins, a face joins its three corners.
+      const parent = s.vertices.map((_, i) => i)
+      const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
+      const join = (a: number, b: number): void => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+      const byPoint = new Map<string, number>()
+      s.vertices.forEach((v, i) => { const k = pointKey(v.p); const first = byPoint.get(k); if (first === undefined) byPoint.set(k, i); else join(first, i) })
+      for (const f of s.faces) { join(f[0], f[1]); join(f[1], f[2]) }
+      const roots = new Set(selection.map(find))
+      const out = s.vertices.map((_, i) => i).filter((i) => roots.has(find(i)))
+      const grew = out.length > selection.length
+      set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(s.vertices[i].p))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
+    },
+
+    selectFace: (index) => set({ selectedFace: index, selection: index === null ? get().selection : [] }),
 
     deleteSelectedFace: () => {
       const { selectedFace } = get()
@@ -307,28 +355,33 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     moveSelected: (axis, delta) => {
-      const { selected } = get()
-      if (selected === null) return
+      const { selection } = get()
+      if (selection.length === 0) return
       edit((s) => {
-        const v = s.vertices[selected]
-        if (!v) return null
-        const p = [...v.p] as P3
-        p[axis] += delta
-        if (!validPoint(p)) return null
+        // Every selected point moves the same unit; if any would leave the
+        // grid the whole move is refused, so a shape never tears.
+        const chosen = new Set(selection.filter((i) => s.vertices[i]))
+        if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
-        for (const i of group(s, selected)) vertices[i] = { ...vertices[i], p: [...p] as P3 }
+        for (const i of chosen) {
+          const p = [...vertices[i].p] as P3
+          p[axis] += delta
+          if (!validPoint(p)) return null
+          vertices[i] = { ...vertices[i], p }
+        }
         return { ...s, vertices }
       })
     },
 
     colorSelected: (c) => {
-      const { selected } = get()
+      const { selection } = get()
       set({ color: clampColor(c) })
-      if (selected === null) return
+      if (selection.length === 0) return
       edit((s) => {
-        if (!s.vertices[selected]) return null
+        const chosen = new Set(selection.filter((i) => s.vertices[i]))
+        if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
-        for (const i of group(s, selected)) vertices[i] = { ...vertices[i], c: clampColor(c) }
+        for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }
         return { ...s, vertices }
       })
     },
@@ -339,12 +392,12 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     deleteSelected: () => {
-      const { selected } = get()
-      if (selected === null) return
+      const { selection } = get()
+      if (selection.length === 0) return
       edit((s) => {
-        if (!s.vertices[selected]) return null
-        // Every vertex on the point goes; faces that used any of them go; the rest renumber.
-        const gone = new Set(group(s, selected))
+        // Every selected vertex goes; faces that used any of them go; the rest renumber.
+        const gone = new Set(selection.filter((i) => s.vertices[i]))
+        if (gone.size === 0) return null
         const remap = new Map<number, number>()
         s.vertices.forEach((_, i) => { if (!gone.has(i)) remap.set(i, remap.size) })
         const faces = s.faces
@@ -352,7 +405,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
           .map((f) => f.map((i) => remap.get(i) as number) as [number, number, number])
         return { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }
       })
-      set({ selected: null, selectedFace: null, facePick: [] })
+      set({ selection: [], selectedFace: null, facePick: [] })
     },
 
     pickForFace: (index) => {
@@ -390,7 +443,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),
 
-    clearShard: () => { edit((s) => ({ ...s, vertices: [], faces: [] })); set({ selected: null, selectedFace: null, facePick: [] }) },
+    clearShard: () => { edit((s) => ({ ...s, vertices: [], faces: [] })); set({ selection: [], selectedFace: null, facePick: [] }) },
 
     undo: () => {
       const { past, shards, currentId } = get()
@@ -398,7 +451,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !past.length) return
       const list = shards.slice()
       list[i] = past[past.length - 1]
-      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selected: null, selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selection: [], selectedFace: null, facePick: [], notice: null })
       save(list)
     },
 
@@ -408,7 +461,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !future.length) return
       const list = shards.slice()
       list[i] = future[future.length - 1]
-      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selected: null, selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selection: [], selectedFace: null, facePick: [], notice: null })
       save(list)
     },
 
@@ -423,7 +476,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = fromPayload(raw, uuid())
       if (!s) return null
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selected: null, selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },

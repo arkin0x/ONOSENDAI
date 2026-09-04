@@ -117,9 +117,10 @@ function Ghost(): JSX.Element | null {
  */
 function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const selected = useWorkshop((s) => s.selected)
+  const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
     shard?.vertices.forEach((v, i) => { const k = pointKey(v.p); m.set(k, [...(m.get(k) ?? []), i]) })
@@ -132,6 +133,8 @@ function Handles(): JSX.Element | null {
     e.stopPropagation()
     const w = useWorkshop.getState()
     if (tool === 'face') w.pickForFace(first)
+    // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
+    else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
   }
 
@@ -140,7 +143,7 @@ function Handles(): JSX.Element | null {
       {groups.map((g) => {
         const first = g[0]
         const v = shard.vertices[first]
-        const isSel = selected !== null && g.includes(selected)
+        const isSel = g.some((i) => chosen.has(i))
         const picked = facePick.some((i) => g.includes(i))
         return (
           <group key={first} position={v.p}>
@@ -237,6 +240,80 @@ function Aim(): null {
 }
 
 /** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
+/**
+ * A box dragged on the bench in SELECT: every point whose projection falls
+ * inside is selected, live as the box grows; shift keeps what was selected.
+ * The box is a plain element over the canvas, drawn here without React. A
+ * tap (no drag) is left to the handles and to onPointerMissed; orbit is off
+ * in SELECT (Bench), so the drag is the box's alone.
+ */
+function Marquee(): null {
+  const gl = useThree((s) => s.gl)
+  const camera = useThree((s) => s.camera)
+  const tool = useWorkshop((s) => s.tool)
+  useEffect(() => {
+    if (tool !== 'select') return
+    const canvas = gl.domElement
+    const host = canvas.parentElement
+    if (!host) return
+    const box = document.createElement('div')
+    box.className = 'bench__marquee'
+    box.hidden = true
+    host.appendChild(box)
+    let start: { x: number; y: number } | null = null
+    let base: number[] = []
+    let active = false
+    const local = (e: PointerEvent): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect()
+      return { x: e.clientX - r.left, y: e.clientY - r.top }
+    }
+    const v = new Vector3()
+    const inside = (x0: number, y0: number, x1: number, y1: number): number[] => {
+      const shard = useWorkshop.getState().current()
+      if (!shard) return []
+      const r = canvas.getBoundingClientRect()
+      const out: number[] = []
+      shard.vertices.forEach((vert, i) => {
+        v.set(vert.p[0], vert.p[1], vert.p[2]).project(camera)
+        if (v.z > 1) return
+        const px = ((v.x + 1) / 2) * r.width
+        const py = ((1 - v.y) / 2) * r.height
+        if (px >= x0 && px <= x1 && py >= y0 && py <= y1) out.push(i)
+      })
+      return out
+    }
+    const down = (e: PointerEvent): void => {
+      if (e.button !== 0 || !e.isPrimary) return
+      start = local(e)
+      base = e.shiftKey ? useWorkshop.getState().selection : []
+      active = false
+    }
+    const move = (e: PointerEvent): void => {
+      if (!start) return
+      const { x, y } = local(e)
+      if (!active && Math.hypot(x - start.x, y - start.y) < TAP_SLOP) return
+      active = true
+      const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
+      box.hidden = false
+      box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
+      useWorkshop.getState().setSelection([...base, ...inside(x0, y0, x1, y1)])
+    }
+    const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
+    canvas.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      canvas.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      box.remove()
+    }
+  }, [tool, gl, camera])
+  return null
+}
+
 function Keys(): null {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -257,7 +334,8 @@ function Keys(): null {
       if (nudge[e.code]) { e.preventDefault(); w.moveSelected(...nudge[e.code]); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { if (w.facePick.length >= 3) { e.preventDefault(); w.fill() } return }
-      if (e.code === 'Escape') { e.preventDefault(); if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      if (e.code === 'KeyC') { w.selectConnected(); return }
       if (e.code === 'Digit1') w.setTool('stamp')
       if (e.code === 'Digit2') w.setTool('add')
       if (e.code === 'Digit3') w.setTool('select')
@@ -299,11 +377,13 @@ export function Bench(): JSX.Element {
       onPointerMissed={(e) => {
         if ((e as PointerEvent).button !== 0) return
         const w = useWorkshop.getState()
-        if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
+        if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
       }}
     >
       <ambientLight intensity={1} />
-      <OrbitControls makeDefault enablePan={false} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+      {/* In SELECT the drag belongs to the marquee; orbit comes back with any other tool. Pinch still zooms. */}
+      <OrbitControls makeDefault enablePan={false} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+      <Marquee />
       <Aim />
       <Keys />
       {/* Axes, in the compass's colors, so X is red here and out there. */}

@@ -41,7 +41,7 @@ const SETTLE_MS = 500
 const TOOL_HELP: Record<Tool, string> = {
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
-  select: 'Tap a point, then nudge it with the pad, color it, or delete it.',
+  select: 'Tap points, or drag a box around them, then nudge, color or delete them together. CONNECTED takes everything joined by faces.',
   face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it.',
 }
 
@@ -93,7 +93,7 @@ export function Workshop(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const shards = useWorkshop((s) => s.shards)
   const tool = useWorkshop((s) => s.tool)
-  const selected = useWorkshop((s) => s.selected)
+  const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
@@ -118,7 +118,8 @@ export function Workshop(): JSX.Element | null {
   const w = useWorkshop.getState
 
   const nudge = (axis: 0 | 1 | 2, d: number) => () => w().moveSelected(axis, d)
-  const canNudge = selected !== null
+  const canNudge = selection.length > 0
+  const selectedPoints = shard ? new Set(selection.map((i) => shard.vertices[i]?.p.join(','))).size : 0
   const say = (notice: string): void => useWorkshop.setState({ notice })
 
   // The picker paints live and, once the wheel has settled, puts the color at
@@ -232,9 +233,10 @@ export function Workshop(): JSX.Element | null {
         {shard && (
           <div className="workshop__stats">
             {shard.vertices.length} vertices · {shard.faces.length} faces · unit 2^{shard.unit} = {formatCellSize(shard.unit)}
-            {selected !== null && shard.vertices[selected] && (
-              <> · selected ({shard.vertices[selected].p.join(', ')})</>
+            {selection.length === 1 && shard.vertices[selection[0]] && (
+              <> · selected ({shard.vertices[selection[0]].p.join(', ')})</>
             )}
+            {selectedPoints > 1 && <> · {selectedPoints} points selected</>}
             {selectedFace !== null && <> · face {selectedFace + 1} selected</>}
             {tool === 'face' && facePick.length > 0 && <> · {facePick.length} corner{facePick.length === 1 ? '' : 's'}</>}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
@@ -306,7 +308,9 @@ export function Workshop(): JSX.Element | null {
               <button className="workshop__btn workshop__btn--z" disabled={!canNudge} {...bind(nudge(2, -1))} title="−Z (W)">−Z</button>
               <button className="workshop__btn workshop__btn--z" disabled={!canNudge} {...bind(nudge(2, 1))} title="+Z (S)">+Z</button>
             </div>
-            <button className="workshop__btn workshop__btn--danger" disabled={!canNudge} onClick={() => w().deleteSelected()} title="Delete point (Del)">DELETE</button>
+            <button className="workshop__btn" disabled={!canNudge} onClick={() => w().selectConnected()} title="Select everything joined to the selection by faces (C)">CONNECTED</button>
+            <button className="workshop__btn" disabled={!canNudge} onClick={() => w().selectVertex(null)} title="Clear the selection (Esc)">CLEAR</button>
+            <button className="workshop__btn workshop__btn--danger" disabled={!canNudge} onClick={() => w().deleteSelected()} title="Delete the selected points (Del)">DELETE</button>
           </div>
         )}
 

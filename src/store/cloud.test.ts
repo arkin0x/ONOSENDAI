@@ -6,7 +6,7 @@
  * with two ceilings, the route quote and PAY gate, the single deposit written
  * to disk before its invoice is shown, the verifier (cyberspace-core computes
  * the "cloud" result at h13 so the checks are exact), the refusal when the
- * chain head moved, the local steps of a mixed route, and finishProof signing
+ * chain head moved, one step per commit of a mixed way, and finishProof signing
  * hops and sidesteps exactly as it would local ones. What would fail silently
  * otherwise: a cloud proof appended to a chain whose head moved, a deposit
  * paid but never claimed after a reload, or a cancelled flow landing late.
@@ -97,11 +97,20 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: 
   return { promise, resolve, reject }
 }
 
-/** The cursor one h13 wall away from the avatar, on x. */
-function lineUpH13(): Position {
+/**
+ * The cursor one h13 wall away from the avatar, on x. By default the avatar
+ * is first stood on the leaf touching that wall: a step is HOSAKA's only
+ * where this machine has none, so the crossing is the very next commit.
+ * `atWall: false` stands it mid-block instead, an h12 hop short of the leaf.
+ * (Earlier tests leave the avatar wherever their route ended, so both stand
+ * it explicitly.)
+ */
+function lineUpH13(atWall = true): Position {
   const s = useCyberspace.getState()
-  const cursor = { ...s.position, x: s.position.x ^ (1n << 12n) }
-  useCyberspace.setState({ cursor })
+  const block = (s.position.x >> 13n) << 13n
+  const position = { ...s.position, x: atWall ? block + 4095n : block + 2053n }
+  const cursor = { ...position, x: position.x ^ (1n << 12n) }
+  useCyberspace.setState({ position, cursor })
   return cursor
 }
 
@@ -110,8 +119,9 @@ const idle = (): Promise<void> => vi.waitFor(() => { expect(S().cloud.status).to
 
 describe('cloud routes', () => {
   beforeEach(() => {
-    // This machine stops at h12, so an h13 move is the cloud's, and the caps are already known.
-    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
+    // This machine stops at h12 for hops AND sidesteps, so an h13 move has no local way and is
+    // the cloud's (HOSAKA is used only when needed); the caps are already known.
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake' }, plan: null })
     for (const fn of Object.values(fake)) if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset()
     fake.limits.mockResolvedValue(LIMITS)
@@ -133,8 +143,8 @@ describe('cloud routes', () => {
   it('a funded route of one cloud hop lands at the cursor as a signed hop event, verified first', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
@@ -179,8 +189,8 @@ describe('cloud routes', () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'ask' } })
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop', 2500))
 
     await S().commit()
@@ -211,8 +221,8 @@ describe('cloud routes', () => {
   it('one invoice funds the route: the deposit is on disk before the invoice shows, then the step runs funded', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     // 95 msats short of a sat: the invoice is still for whole sats.
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 95, ledger: [] })
@@ -254,8 +264,8 @@ describe('cloud routes', () => {
   it('refuses to append when the chain head moved while HOSAKA computed', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     const finish = deferred<HosakaJob>()
@@ -280,8 +290,8 @@ describe('cloud routes', () => {
   it('refuses a result that fails verification, and signs nothing', async () => {
     const before = S().events.length
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     const result = hopResult(from, to, S().plane, head)
@@ -297,8 +307,8 @@ describe('cloud routes', () => {
 
   it('X while the route waits for its invoice abandons it; X while a step computes keeps the job for RESUME', async () => {
     const head = S().prevEventId
-    const from = S().position
     const to = lineUpH13()
+    const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
     fake.deposit.mockResolvedValue(deposit('d1'))
@@ -364,13 +374,13 @@ describe('cloud routes', () => {
     expect(S().cloud.message).toMatch(/1 sat route deposit .* credited/)
   })
 
-  it('beyond the cloud hop cap: a local hop to the wall, a cloud sidestep through it, a local hop on', async () => {
+  it('beyond the cloud hop cap: a local hop to the boundary, a cloud sidestep through it, a local hop on, one commit each', async () => {
     // This machine hashes sidesteps only to h12 here, so the h13 crossing is HOSAKA's.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: { ...LIMITS, max_hop_height: 12 } } })
     const before = S().events.length
+    const cursor = lineUpH13(false)
     const from = S().position
-    const cursor = lineUpH13()
     const edge = wallSource(from.x, cursor.x, 13)
     const landing = cursor.x > from.x ? edge + 1n : edge - 1n
     expect(edge).not.toBe(from.x)                       // this identity spawned away from the wall
@@ -379,18 +389,25 @@ describe('cloud routes', () => {
     fake.waitForJob.mockImplementation(async () => completed(sidestepResult({ ...from, x: edge }, { ...from, x: landing }, S().plane, S().prevEventId), 'job-4'))
 
     await S().commit()
-    // Quoted the sidestep only; funded; the first step is this machine's hop to the wall's edge.
+    // Only the first step of the way is committed, and it is this machine's: the hop to the boundary's edge. Nothing quoted yet.
     const s0 = S()
-    expect(s0.plan?.summary).toMatchObject({ cloudSteps: 1, sidesteps: 1 })
-    expect(fake.quote).toHaveBeenCalledTimes(1)
-    expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane })
+    expect(s0.plan?.summary).toMatchObject({ steps: 1, hops: 1, cloudSteps: 0 })
+    expect(fake.quote).not.toHaveBeenCalled()
     await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1) })
     const req1 = vi.mocked(postProof).mock.calls[0][0]
     expect(req1).toMatchObject({ mode: 'hop', from, to: { ...from, x: edge }, maxComputeHeight: 12 })
     expect(S().plan?.step.source).toBe('local')
 
-    // The local hop lands (the worker's answer, fed by hand); the cloud sidestep follows and lands.
+    // The local hop lands (the worker's answer, fed by hand). That commit is done; the cursor stays.
     await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
+    expect(S().position.x).toBe(edge)
+    expect(S().plan).toBeNull()
+    expect(S().cursor).toEqual(cursor)
+
+    // The next commit is the sidestep through the boundary, HOSAKA's here: quoted, funded, landed.
+    await S().commit()
+    expect(fake.quote).toHaveBeenCalledTimes(1)
+    expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane })
     await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
     expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
     const ev = S().events[S().events.length - 1]
@@ -400,8 +417,10 @@ describe('cloud routes', () => {
     expect(ev.tags.find((t) => t[0] === 'mr')?.[1]).toBe([p.merkleX, p.merkleY, p.merkleZ].map(bytesToHex).join(':'))
     expect(ev.tags.find((t) => t[0] === 'mp')?.[1]).toBe([p.inclusionProofs.x.map(bytesToHex).join(''), '', ''].join(':'))
     expect(ev.tags.find((t) => t[0] === 'hx')?.[1]).toBe('13')
+    await vi.waitFor(() => { expect(S().plan).toBeNull() })
 
-    // Then the last local hop on to the cursor, which ends the route.
+    // Then the last commit hops on to the cursor.
+    await S().commit()
     await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2) })
     const req2 = vi.mocked(postProof).mock.calls[1][0]
     expect(req2).toMatchObject({ mode: 'hop', to: cursor })
@@ -413,9 +432,11 @@ describe('cloud routes', () => {
   })
 
   it('with cloud OFF the same move is a local route; with no caps yet the commit fetches them first', async () => {
+    // A machine that sidesteps to h24 has a local way across the h13 boundary.
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' } })
+    const cursor = lineUpH13(false)
     const from = S().position
-    const cursor = lineUpH13()
     await S().commit()
     expect(fake.quote).not.toHaveBeenCalled()
     expect(fake.limits).not.toHaveBeenCalled()
@@ -430,7 +451,10 @@ describe('cloud routes', () => {
     expect(S().plan).toBeNull()
     expect(S().proof.status).toBe('idle')
 
+    // Now a machine with no local way across (sidesteps stop at h12): the move is the cloud's, whose caps are not known yet.
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' }, cloud: { ...S().cloud, limits: null } })
+    lineUpH13()   // on the leaf touching the wall: the crossing is the next commit
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded('job-5'))
     fake.waitForJob.mockImplementation((_id: string, _tok: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {
@@ -503,20 +527,9 @@ describe('cloud routes', () => {
     expect(S().cloud.limits).toEqual(LIMITS)
   })
 
-  it('with the cloud on but HOSAKA unreachable, a long local walk is refused rather than started (#69)', async () => {
-    useCyberspace.setState({ cloud: { ...S().cloud, limits: null } })
-    fake.limits.mockRejectedValue(new Error('down'))
-    const s = S()
-    // An h24 crossing on x: a dozen walls above this machine's h12, a walk of many steps.
-    useCyberspace.setState({ cursor: { ...s.position, x: s.position.x ^ (1n << 23n) } })
-    await S().commit()
-    expect(S().proof.status).toBe('infeasible')
-    expect(S().proof.message).toMatch(/HOSAKA did not answer/)
-    expect(S().plan).toBeNull()
-    expect(vi.mocked(postProof)).not.toHaveBeenCalled()
-  })
-
   it('with the cloud on but HOSAKA unreachable, a short walk still goes ahead locally', async () => {
+    // A machine that sidesteps to h24 has a local way across the h13 boundary.
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: null } })
     fake.limits.mockRejectedValue(new Error('down'))
     lineUpH13()

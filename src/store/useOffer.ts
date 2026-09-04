@@ -13,8 +13,9 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
-import type { CloudMode } from '../lib/cloud'
+import { localOnly, nextStep, routeFeasible, type Ceilings, type PlanStep } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
+import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 
 interface OfferState {
@@ -36,7 +37,16 @@ export interface OfferView {
   verdict: OfferVerdict
   cursorKey: string
   machineCeiling: number
+  /**
+   * This machine can walk it without the cloud: hops to each wall and a
+   * Merkle sidestep through it. False only when some wall is taller than the
+   * machine's sidestep ceiling, which is the one case nothing local crosses.
+   */
+  localFeasible: boolean
 }
+
+const localFeasibleFor = (position: Position, cursor: Position, hop: number, sidestep: number): boolean =>
+  routeFeasible(position, cursor, localOnly(hop, sidestep))
 
 const cursorKeyOf = (c: { x: bigint; y: bigint; z: bigint }, plane: number): string => `${c.x}:${c.y}:${c.z}:${plane}`
 
@@ -51,7 +61,7 @@ export function offerNeed(): OfferView | null {
     cloudHop: s.cloud.limits?.max_hop_height ?? 0,
     cloudSidestep: s.cloud.limits?.max_sidestep_height ?? 0,
   }, s.cloud.limits !== null)
-  return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling } : null
+  return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling, localFeasible: localFeasibleFor(s.position, s.cursor, machineCeiling, cal.sidestepHeight) } : null
 }
 
 /** The same, for a component: recomputed as the cursor, the caps or the ceilings change. */
@@ -69,12 +79,79 @@ export function useOfferNeed(): OfferView | null {
     cloudHop: limits?.max_hop_height ?? 0,
     cloudSidestep: limits?.max_sidestep_height ?? 0,
   }, limits !== null)
-  return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling } : null
+  return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling, localFeasible: localFeasibleFor(position, cursor, machineCeiling, sidestepCeil) } : null
 }
 
-/** The move needs HOSAKA (or may, until its caps are known) and the cloud is not OFF: COMMIT reads OFFLOAD. */
-export function offloadWanted(need: OfferView | null, mode: CloudMode): boolean {
-  return need !== null && mode !== 'off' && (need.verdict.tier === 'cloud' || need.verdict.tier === 'cloud-unknown')
+/**
+ * The one action the next commit would take toward the cursor, which is what
+ * the COMMIT button names:
+ *
+ * - `hop`: this machine hops to the cursor.
+ * - `hop-to-boundary`: this machine hops to the leaf touching the boundary
+ *   it cannot hop across; the cursor stays where it is.
+ * - `sidestep`: this machine sidesteps one gibson through that boundary.
+ * - `offload`: the step is HOSAKA's (a hop or a sidestep past this machine),
+ *   or might be, until HOSAKA's caps are known.
+ * - `too-far`: some boundary on the way is higher than anyone computes.
+ *
+ * HOSAKA's caps are used whatever the cloud mode: what the move needs does
+ * not depend on a setting, and the card's mode control turns the cloud on.
+ */
+export type NextAction = 'hop' | 'hop-to-boundary' | 'sidestep' | 'offload' | 'too-far'
+
+export interface NextActionView {
+  action: NextAction
+  /** The step itself, for local actions and HOSAKA's; null when too far. */
+  step: PlanStep | null
+  cursorKey: string
+}
+
+export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null): NextActionView | null {
+  if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
+  const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  const cursorKey = cursorKeyOf(cursor, plane)
+  // Local first, per step (lib/movePlan.ts): the next step is this machine's
+  // whenever it has one, however long the walk (the proof panel shows the
+  // length). HOSAKA enters only at a boundary this machine cannot cross,
+  // which is when it is actually needed. A cursor no one reaches is TOO FAR
+  // as soon as HOSAKA's caps are known; until they are, the walk goes on and
+  // OFFLOAD at the boundary asks.
+  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
+  if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
+  const step = nextStep(position, cursor, ceilings)
+  if (!step) return null
+  if (step.source === 'infeasible') return { action: 'offload', step: null, cursorKey }
+  if (step.source === 'cloud') return { action: 'offload', step, cursorKey }
+  if (step.kind === 'sidestep') return { action: 'sidestep', step, cursorKey }
+  const lands = step.to.x === cursor.x && step.to.y === cursor.y && step.to.z === cursor.z
+  return { action: lands ? 'hop' : 'hop-to-boundary', step, cursorKey }
+}
+
+/** The next action, read from the stores. Not a hook: for the keyboard. */
+export function nextAction(): NextActionView | null {
+  const s = useCyberspace.getState()
+  const cal = useCalibration.getState()
+  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits)
+}
+
+/** The same, for a component. */
+export function useNextAction(): NextActionView | null {
+  const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
+  const plane = useCyberspace((s) => s.plane)
+  const limits = useCyberspace((s) => s.cloud.limits)
+  const hopCeil = useCalibration((s) => s.hopHeight)
+  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+  return nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits)
+}
+
+/** What the COMMIT button says for each next action. */
+export const ACTION_LABEL: Record<NextAction, string> = {
+  hop: 'COMMIT',
+  'hop-to-boundary': 'HOP TO BOUNDARY',
+  sidestep: 'SIDESTEP',
+  offload: 'OFFLOAD',
+  'too-far': 'TOO FAR',
 }
 
 /** The offer to show right now, or null. `hidden` is the caller's veto (a menu, a secret). */
@@ -85,10 +162,11 @@ export function useOfferView(hidden: boolean): OfferView | null {
   const busy = useCyberspace((s) => (s.plan !== null && s.plan.status !== 'funding') || (s.plan === null && s.cloud.status !== 'idle') || s.proof.status === 'computing')
   const dismissedFor = useOffer((s) => s.dismissedFor)
   const requestedFor = useOffer((s) => s.requestedFor)
-  const mode = useCyberspace((s) => s.cloudPrefs.mode)
   const need = useOfferNeed()
 
-  if (hidden || !atHead || busy || mode === 'off' || need === null) return null
+  // The cloud mode is not a veto here: the card appears only when asked for,
+  // and its mode control is how the cloud is turned on when a move needs it.
+  if (hidden || !atHead || busy || need === null) return null
   if (dismissedFor === need.cursorKey) return null
   // Only for the cursor OFFLOAD was pressed for: a moved cursor puts it away.
   if (requestedFor !== need.cursorKey) return null

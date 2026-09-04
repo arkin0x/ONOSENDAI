@@ -12,7 +12,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
-import { offerNeed, offloadWanted, useOffer } from '../store/useOffer'
+import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 
@@ -90,9 +90,11 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
-        // A move this machine cannot do brings up the HOSAKA card first; Space again goes.
-        const need = offerNeed()
-        if (offloadWanted(need, store.cloudPrefs.mode) && need && useOffer.getState().requestedFor !== need.cursorKey) useOffer.getState().request(need.cursorKey)
+        // The next action, as the button names it: HOSAKA's step brings up the
+        // card first (Space again goes); too far does nothing; the rest commit.
+        const next = nextAction()
+        if (next?.action === 'too-far') return
+        if (next?.action === 'offload' && useOffer.getState().requestedFor !== next.cursorKey) useOffer.getState().request(next.cursorKey)
         else store.commit()
         return
       }

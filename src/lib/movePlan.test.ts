@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findLcaHeight } from 'cyberspace-core'
-import { buildMovePlan, isSpecSidestep, isSpecSidestepMove, nextAxisMove, nextStep, planSummary, summarizePlan, wallSource, type PlanStep, type Position } from './movePlan'
+import { buildMovePlan, isSpecSidestep, isSpecSidestepMove, nextAxisMove, nextStep, planSummary, routeFeasible, summarizePlan, wallSource, type PlanStep, type Position } from './movePlan'
 
 const P = (x: bigint, y: bigint = 5n, z: bigint = 5n): Position => ({ x, y, z })
 
@@ -131,30 +131,46 @@ describe('buildMovePlan', () => {
   })
 })
 
-describe('two ceilings: local first, cloud second, infeasible named', () => {
+describe('two ceilings: local first per step, cloud only where no local step exists', () => {
   const c = { hop: 17, sidestep: 24, cloudHop: 25, cloudSidestep: 29 }
-  it('a cursor within the cloud hop cap is one paid hop, no wall', () => {
-    const from = P(1000n)
-    const steps = buildMovePlan(from, P(1000n + (1n << 22n)), c)
-    expect(steps.map((s) => `${s.kind}:${s.source}`)).toEqual(['hop:cloud'])
+  const localStep = (s: PlanStep) => s.source === 'local' && (s.kind === 'hop' ? s.maxHeight <= c.hop : s.maxHeight <= c.sidestep)
+  const cloudStep = (s: PlanStep) => s.source === 'cloud' && (s.kind === 'hop' ? s.maxHeight > c.hop : s.maxHeight > c.sidestep)
+  it('a walk this machine can make is never paid, however long', () => {
+    const steps = buildMovePlan(P(1000n), P(1000n + (1n << 22n)), c)
+    expect(steps.length).toBeGreaterThan(5)
+    expect(steps.every(localStep)).toBe(true)
   })
   it('within the local ceiling nothing is paid', () => {
     expect(buildMovePlan(P(1000n), P(1000n + (1n << 10n)), c).map((s) => s.source)).toEqual(['local'])
   })
-  it('above the cloud hop cap: paid hop to the edge, paid sidestep, hop on', () => {
+  it('at a wall this machine cannot cross HOSAKA hops to the cursor when its cap reaches', () => {
+    // Standing on the leaf touching the h25 wall: the local sidestep is above h24.
+    const steps = buildMovePlan(P((1n << 24n) - 1n), P((1n << 24n) + 5n), c)
+    expect(steps.map((s) => `${s.kind}:${s.source}:h${s.maxHeight}`)).toEqual(['hop:cloud:h25'])
+  })
+  it('above the cloud hop cap HOSAKA sidesteps, and the walk goes on locally', () => {
+    const steps = buildMovePlan(P((1n << 25n) - 1n), P((1n << 25n) + 5n), c)
+    expect(steps.map((s) => `${s.kind}:${s.source}:h${s.maxHeight}`)).toEqual(['sidestep:cloud:h26', 'hop:local:h3'])
+  })
+  it('a far cursor: local walk, paid crossing, local walk, for every wall this machine cannot cross', () => {
     const from = P(5n)
     const to = P((1n << 26n) + 3n)   // wall at h27
     const steps = buildMovePlan(from, to, c)
-    // the edge of the h27 wall is an h26 hop away, above the cloud cap, so the
-    // walk restarts at the cloud level: paid hop, paid sidestep, paid hop, paid sidestep, hop on
-    expect(steps.map((s) => `${s.kind}:${s.source}:h${s.maxHeight}`)).toEqual([
-      'hop:cloud:h25', 'sidestep:cloud:h26', 'hop:cloud:h25', 'sidestep:cloud:h27', 'hop:local:h2',
+    expect(steps.every((s) => localStep(s) || cloudStep(s))).toBe(true)
+    expect(steps.filter((s) => s.source === 'cloud').map((s) => `${s.kind}:h${s.maxHeight}`)).toEqual([
+      'hop:h25', 'sidestep:h26', 'hop:h25', 'sidestep:h27',
     ])
-    expect(planSummary(from, to, c)).toMatchObject({ steps: 5, cloudSteps: 4, infeasibleAt: null })
+    expect(steps[0].source).toBe('local')
+    expect(planSummary(from, to, c)).toMatchObject({ cloudSteps: 4, infeasibleAt: null })
   })
   it('a wall no one sells is named as the first infeasible step', () => {
     const s = planSummary(P(5n), P((1n << 40n) + 3n), c)
     expect(s.infeasibleAt).not.toBeNull()
+  })
+  it('routeFeasible agrees with the walk, in constant time', () => {
+    const cases: Array<[bigint, bigint]> = [[5n, (1n << 40n) + 3n], [5n, (1n << 26n) + 3n], [1000n, 1000n + (1n << 22n)], [(1n << 28n) - 1n, 1n << 28n], [(1n << 29n) - 1n, 1n << 29n]]
+    for (const [a, b] of cases) expect(routeFeasible(P(a), P(b), c)).toBe(planSummary(P(a), P(b), c).infeasibleAt === null)
+    expect(routeFeasible(P(0n), P(1n << 30n), 17)).toBe(true) // a number: sidesteps unbounded
   })
   it('a plain number still means local only', () => {
     expect(buildMovePlan(P(0b0101n), P(0b1011n), 2).map((s) => s.source)).toEqual(['local', 'local', 'local'])

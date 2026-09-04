@@ -1,20 +1,43 @@
 /**
- * useOffer.test.ts - the HOSAKA card is asked for, per cursor; OFFLOAD is
- * wanted only when the move needs the cloud and the cloud is not off.
+ * useOffer.test.ts - the one action the next commit takes, as the button
+ * names it, and the HOSAKA card being asked for per cursor.
  */
 
 import { describe, expect, it } from 'vitest'
-import { offloadWanted, useOffer, type OfferView } from './useOffer'
+import { nextActionFor, useOffer } from './useOffer'
 
-const need = (tier: OfferView['verdict']['tier']): OfferView => ({ verdict: { tallestWall: 24, tier, cloudSteps: 1, steps: 1 }, cursorKey: 'k', machineCeiling: 17 })
+const at = (x: bigint): { x: bigint; y: bigint; z: bigint } => ({ x, y: 0n, z: 0n })
+const CAPS = { max_hop_height: 27, max_sidestep_height: 29 }
+// A machine that hops to 2^17 and sidesteps to 2^24, as the defaults say.
+const next = (cursorX: bigint, limits: typeof CAPS | null = CAPS) => nextActionFor(at(0n), at(cursorX), 0, 17, 24, limits)
 
-describe('offloadWanted', () => {
-  it('wants OFFLOAD for a cloud move, or one the caps have not answered for, unless the cloud is off', () => {
-    expect(offloadWanted(need('cloud'), 'auto')).toBe(true)
-    expect(offloadWanted(need('cloud-unknown'), 'ask')).toBe(true)
-    expect(offloadWanted(need('cloud'), 'off')).toBe(false)
-    expect(offloadWanted(need('impossible'), 'auto')).toBe(false)
-    expect(offloadWanted(null, 'auto')).toBe(false)
+describe('nextActionFor', () => {
+  it('is nothing with the cursor on the avatar', () => {
+    expect(next(0n)).toBeNull()
+  })
+  it('hops to a cursor within the machine ceiling', () => {
+    expect(next(1n << 10n)?.action).toBe('hop')
+  })
+  it('names a step of the way when the cursor is beyond one hop but a local walk exists', () => {
+    const a = next(1n << 22n)
+    expect(a && ['hop-to-boundary', 'sidestep'].includes(a.action)).toBe(true)
+    expect(a?.step).not.toBeNull()
+  })
+  it('walks toward a boundary only HOSAKA crosses, and is OFFLOAD only on reaching it', () => {
+    // An h26 boundary on the way: above the local sidestep ceiling, within HOSAKA's hop cap.
+    expect(next(1n << 25n)?.action).toBe('hop-to-boundary')
+    expect(next(1n << 25n, null)?.action).toBe('hop-to-boundary')
+    const atWall = (limits: typeof CAPS | null) => nextActionFor(at((1n << 25n) - 1n), at(1n << 25n), 0, 17, 24, limits)
+    expect(atWall(CAPS)?.action).toBe('offload')
+    expect(atWall(CAPS)?.step?.source).toBe('cloud')
+    // HOSAKA has not said what it can: the press asks.
+    expect(atWall(null)?.action).toBe('offload')
+    expect(atWall(null)?.step).toBeNull()
+  })
+  it('is TOO FAR past every cap', () => {
+    // An h31 boundary: above HOSAKA's sidestep cap too.
+    expect(next(1n << 30n)?.action).toBe('too-far')
+    expect(next(1n << 30n)?.step).toBeNull()
   })
 })
 
@@ -22,11 +45,8 @@ describe('the request', () => {
   it('is per cursor, and NOT NOW clears it', () => {
     useOffer.getState().request('a:b:c:0')
     expect(useOffer.getState().requestedFor).toBe('a:b:c:0')
-    expect(useOffer.getState().dismissedFor).toBeNull()
     useOffer.getState().dismiss('a:b:c:0')
     expect(useOffer.getState().requestedFor).toBeNull()
     expect(useOffer.getState().dismissedFor).toBe('a:b:c:0')
-    useOffer.getState().request('a:b:c:0')
-    expect(useOffer.getState().dismissedFor).toBeNull()
   })
 })

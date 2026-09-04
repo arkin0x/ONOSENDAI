@@ -9,6 +9,7 @@
  */
 
 import { useMemo } from 'react'
+import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
@@ -141,13 +142,22 @@ export function ProofPanel(): JSX.Element {
               <dd>2^{ceiling}</dd>
             </div>
           </dl>
-          <p className="notice notice--sidestep">
-            {preview.route.infeasibleAt !== null
-              ? `Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`
-              : preview.route.cloudSteps > 0
-                ? 'This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.'
-                : `A wall of 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
-          </p>
+          {preview.route.infeasibleAt !== null ? (
+            <div className="notice">
+              <p className="notice__head"><OctagonAlert size={13} strokeWidth={2.25} aria-hidden /> OUT OF REACH</p>
+              <p className="notice__body">{`Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`}</p>
+            </div>
+          ) : preview.route.cloudSteps > 0 ? (
+            <div className="notice notice--offload">
+              <p className="notice__head"><CloudUpload size={13} strokeWidth={2.25} aria-hidden /> HOSAKA CAN TAKE THIS</p>
+              <p className="notice__body">This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.</p>
+            </div>
+          ) : (
+            <div className="notice notice--sidestep">
+              <p className="notice__head"><Footprints size={13} strokeWidth={2.25} aria-hidden /> A WALK, NOT A HOP</p>
+              <p className="notice__body">{`A wall of 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}</p>
+            </div>
+          )}
           {preview.steps && (
             <ol className="route route--preview" aria-label="The route this cursor would take">
               {previewWindow(preview.steps).map((r, i) => typeof r === 'number' ? (

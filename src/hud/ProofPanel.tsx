@@ -8,15 +8,13 @@
  * the real computation.
  */
 
-import { useMemo } from 'react'
 import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
-import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
-import { buildMovePlan, localOnly, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
+import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
 
 function StatusLabel({ status }: { status: string }): JSX.Element {
   const label: Record<string, string> = {
@@ -44,56 +42,25 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
 
 export function ProofPanel(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
-  const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
-  const plane = useCyberspace((s) => s.plane)
   // What calibration measured this machine finishing in budget: conservative
   // defaults until the quiet benchmark lands, then the line updates in place.
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+  // This machine's hop ceiling as the commit attempts it: the protocol cap,
+  // lowered to what calibration measured (the preview hook uses the same).
+  const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
 
   const plan = useCyberspace((s) => s.plan)
   const cloud = useCyberspace((s) => s.cloud)
   const resumePlan = useCyberspace((s) => s.resumePlan)
   const cancelPlan = useCyberspace((s) => s.cancelPlan)
-  // What a commit would plan with right now: this machine's calibrated
-  // ceilings, and HOSAKA's caps when the cloud is on and has answered. The
-  // same numbers the store uses.
-  const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   // HOSAKA's caps whatever the cloud mode: what a move needs does not depend
   // on a setting, and the button (useOffer) reads it the same way.
   const cloudOn = cloud.limits !== null
-  const ceilings: Ceilings = useMemo(() => ({
-    hop: ceiling,
-    sidestep: sidestepCeil,
-    cloudHop: cloud.limits?.max_hop_height ?? 0,
-    cloudSidestep: cloud.limits?.max_sidestep_height ?? 0,
-  }), [ceiling, sidestepCeil, cloud.limits])
 
-  // Live preview of the action the cursor is lining up. The hop estimate is
-  // closed-form; the route summary walks the route's steps without keeping
-  // them, cheap for anything a person would line up.
-  const preview = useMemo(() => {
-    if (samePosition(position, cursor)) return null
-    const hop = estimateHopCost(
-      position.x, position.y, position.z,
-      cursor.x, cursor.y, cursor.z,
-      plane,
-      ceiling,
-    )
-    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null, steps: null as PlanStep[] | null, needsCloud: false }
-    // Local first, as the commit and the button are: when this machine can
-    // walk there, that is the way shown, however long. HOSAKA's caps enter
-    // only when no local way exists, which is when the cloud is needed.
-    const local = localOnly(ceiling, sidestepCeil)
-    const way = planSummary(position, cursor, local, 20_000).infeasibleAt === null ? local : ceilings
-    // The steps themselves, for the list the running route shows, so a route
-    // reads the same before COMMIT as after. A walk longer than the list
-    // could show is summarised only.
-    let steps: PlanStep[] | null = null
-    try { steps = buildMovePlan(position, cursor, way, PREVIEW_STEPS_MAX) } catch { steps = null }
-    return { hop, route: planSummary(position, cursor, way, 20_000), steps, needsCloud: way !== local }
-  }, [position, cursor, plane, ceiling, sidestepCeil, ceilings])
+  // Live preview of the action the cursor is lining up: the same data the
+  // route overlay above the controls shows (routePreview.ts).
+  const preview = useRoutePreview()
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const status =
@@ -271,54 +238,6 @@ export function ProofPanel(): JSX.Element {
       </Explanation>
     </section>
   )
-}
-
-/** The preview lists this many steps at most; beyond it, the first and last few with a gap. */
-const PREVIEW_STEPS_MAX = 2_000
-const PREVIEW_HEAD = 6
-const PREVIEW_TAIL = 3
-
-interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }
-
-function previewRow(step: PlanStep, index: number): PreviewRow {
-  return {
-    index,
-    kind: `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`,
-    height: `2^${step.maxHeight}`,
-    state: step.source === 'cloud' ? 'funding' : step.source === 'infeasible' ? 'failed' : 'next',
-    label: step.source === 'cloud' ? 'HOSAKA' : step.source === 'infeasible' ? 'beyond reach' : 'this machine',
-  }
-}
-
-/**
- * Every step when the route is short. When it is not, the first and last few
- * with the count of the rest between them (a number is a gap), and the step
- * nobody can do always shown, however deep in the walk it sits: the notice
- * names it, so the list must too.
- */
-function previewWindow(steps: PlanStep[]): Array<PreviewRow | number> {
-  if (steps.length <= PREVIEW_HEAD + PREVIEW_TAIL + 1) return steps.map(previewRow)
-  const keep = new Set<number>()
-  for (let i = 0; i < PREVIEW_HEAD; i++) keep.add(i)
-  for (let i = steps.length - PREVIEW_TAIL; i < steps.length; i++) keep.add(i)
-  const blocked = steps.findIndex((s) => s.source === 'infeasible')
-  if (blocked >= 0) keep.add(blocked)
-  const out: Array<PreviewRow | number> = []
-  let skipped = 0
-  steps.forEach((s, i) => {
-    if (keep.has(i)) {
-      if (skipped) { out.push(skipped); skipped = 0 }
-      out.push(previewRow(s, i))
-    } else skipped++
-  })
-  return out
-}
-
-function routeLabel(r: PlanSummary): string {
-  const more = r.capped ? '+' : ''
-  const hops = `${r.hops}${more} hop${r.hops === 1 ? '' : 's'}`
-  const sides = `${r.sidesteps}${more} sidestep${r.sidesteps === 1 ? '' : 's'}`
-  return `${hops}, ${sides}`
 }
 
 const CLOUD_STAGE: Record<string, string> = {

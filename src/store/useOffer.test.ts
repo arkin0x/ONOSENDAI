@@ -23,10 +23,12 @@ describe('nextActionFor', () => {
     expect(a && ['hop-to-boundary', 'sidestep'].includes(a.action)).toBe(true)
     expect(a?.step).not.toBeNull()
   })
-  it('walks toward a boundary only HOSAKA crosses, and is OFFLOAD only on reaching it', () => {
+  it('is OFFLOAD from the start when any step of the way is HOSAKA\'s, with the next step still this machine\'s', () => {
     // An h26 boundary on the way: above the local sidestep ceiling, within HOSAKA's hop cap.
-    expect(next(1n << 25n)?.action).toBe('hop-to-boundary')
-    expect(next(1n << 25n, null)?.action).toBe('hop-to-boundary')
+    const a = next(1n << 25n)
+    expect(a?.action).toBe('offload')
+    expect(a?.step?.source).toBe('local')   // the hop to the boundary is this machine's
+    expect(next(1n << 25n, null)?.action).toBe('offload')
     const atWall = (limits: typeof CAPS | null) => nextActionFor(at((1n << 25n) - 1n), at(1n << 25n), 0, 17, 24, limits)
     expect(atWall(CAPS)?.action).toBe('offload')
     expect(atWall(CAPS)?.step?.source).toBe('cloud')

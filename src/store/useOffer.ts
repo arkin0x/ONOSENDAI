@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
-import { localOnly, nextStep, routeFeasible, type Ceilings, type PlanStep } from '../lib/movePlan'
+import { localOnly, nextStep, routeFeasible, routeNeedsCloud, type Ceilings, type PlanStep } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -111,17 +111,19 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   const cursorKey = cursorKeyOf(cursor, plane)
   // Local first, per step (lib/movePlan.ts): the next step is this machine's
-  // whenever it has one, however long the walk (the proof panel shows the
-  // length). HOSAKA enters only at a boundary this machine cannot cross,
-  // which is when it is actually needed. A cursor no one reaches is TOO FAR
-  // as soon as HOSAKA's caps are known; until they are, the walk goes on and
-  // OFFLOAD at the boundary asks.
+  // whenever it has one. HOSAKA enters only at a boundary this machine cannot
+  // cross, which is when it is actually needed; a route with such a boundary
+  // anywhere on it reads OFFLOAD from the start. A cursor no one reaches is
+  // TOO FAR as soon as HOSAKA's caps are known; until they are, OFFLOAD asks.
   const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
   if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
   const step = nextStep(position, cursor, ceilings)
   if (!step) return null
+  // OFFLOAD whenever any step of the way is HOSAKA's, not only when the next
+  // one is: the button names what the route costs. The step is still the
+  // next one, local or not, so the ghost stands where this commit lands.
   if (step.source === 'infeasible') return { action: 'offload', step: null, cursorKey }
-  if (step.source === 'cloud') return { action: 'offload', step, cursorKey }
+  if (routeNeedsCloud(position, cursor, ceilings)) return { action: 'offload', step, cursorKey }
   if (step.kind === 'sidestep') return { action: 'sidestep', step, cursorKey }
   const lands = step.to.x === cursor.x && step.to.y === cursor.y && step.to.z === cursor.z
   return { action: lands ? 'hop' : 'hop-to-boundary', step, cursorKey }

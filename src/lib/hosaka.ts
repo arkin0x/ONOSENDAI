@@ -359,6 +359,11 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     })
     try {
       return await Promise.race([token, late])
+    } catch (err) {
+      // Whatever the signer's failure, a poll must not die of it: as a
+      // transient HosakaError the loop asks again.
+      if (err instanceof HosakaError) throw err
+      throw new HosakaError(0, 'sign_failed', err instanceof Error ? err.message : String(err))
     } finally {
       clearTimeout(timer)
     }

@@ -33,7 +33,6 @@ import {
   saveSignerPref,
   type Signer,
   type SignerKind,
-  SignerTimeout,
   signWithin,
 } from '../lib/signers'
 import {
@@ -528,6 +527,8 @@ export interface CyberspaceState {
   discardCloudJob: () => void
   /** Ask HOSAKA about the invoice now rather than at the next poll. */
   checkCloudPayment: () => void
+  /** Back from another app: drop a remote signer's sockets before the next request. */
+  wakeSigner: () => void
   /** The credited-while-away notice was read. */
   dismissCredited: () => void
   setCloudMode: (mode: CloudMode) => void
@@ -735,11 +736,24 @@ async function signEvent(template: EventTemplate): Promise<NostrEvent> {
   try {
     return await signWithin(signer, template)
   } catch (err) {
-    if (!(err instanceof SignerTimeout) || !signer.reconnect) throw err
+    // A timeout, or a publish that gave up ("All promises were rejected"):
+    // either way the signer's sockets are presumed dead. Drop them and ask
+    // once more over fresh ones.
+    if (!signer.reconnect) throw err
     const fresh = await signer.reconnect()
     if (currentSigner === signer) currentSigner = fresh
     return await signWithin(fresh, template)
   }
+}
+
+/**
+ * The tab is back from another app. A remote signer's sockets are presumed
+ * half-open and dropped now, before the first request, so the payment check
+ * that follows goes out over live connections.
+ */
+function wakeSigner(): void {
+  if (currentSigner.kind === 'local') return
+  void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
 }
 
 const pubkeyHex = currentSigner.pubkey
@@ -2225,6 +2239,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   dismissCredited: () => { set({ cloud: { ...get().cloud, credited: null } }) },
+
+  wakeSigner: () => wakeSigner(),
 
   checkCloudPayment: () => {
     if (get().cloud.status !== 'awaiting_payment') return

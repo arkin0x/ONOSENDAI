@@ -121,6 +121,7 @@ import {
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
+import { useToast } from './useToast'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -1268,6 +1269,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       set({ cloud: { ...get().cloud, status: 'error', message: `${get().plan?.message ?? get().proof.message ?? 'Signing failed.'} The verified cloud result is kept.` } })
       return
     }
+    useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${final.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
     // The event landed, and a route may already have moved on to its next
     // step (which bumps the request id): the bookkeeping below is about the
     // step that landed, so it runs regardless.

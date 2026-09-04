@@ -10,6 +10,7 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { ToastChip } from './hud/ToastChip'
 import { LootDetail } from './hud/LootDetail'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
@@ -150,6 +151,7 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
+          <ToastChip />
           <ChainExplorer />
           <BitReadout />
         </div>
@@ -176,7 +178,8 @@ export default function App(): JSX.Element {
       <SecretModal />
       <LootDetail />
       <HosakaOffer hidden={crowded || secretOpen} />
-      <HosakaPulse />
+      {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
+      {!showPanels && <HosakaPulse />}
       <CloudApproval />
       <InvoiceModal />
       <PaidModal />

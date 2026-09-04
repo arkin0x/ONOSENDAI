@@ -4052,6 +4052,17 @@ kbd {
 .hyperbar--found .hyperbar__label {
   color: var(--accent);
 }
+/* A chip for a cloud job that just finished: the found chip's pill, with the
+ * provider's mark where the glyph goes. */
+.hyperbar__mark {
+  flex: none;
+  width: 20px;
+  height: auto;
+}
+.hyperbar--toast .hyperbar__label {
+  color: var(--accent);
+}
+
 .foundchip__decode {
   margin-left: auto;
   max-width: 46ch;
@@ -4395,28 +4406,18 @@ kbd {
   font-size: 8px;
 }
 
-/* The HOSAKA mark inline in the Cloud compute panel's title. Taller than
-   the 10px type so it can be read; the negative vertical margins keep the
-   header the height every other panel's is. */
-/* The HOSAKA mark as a watermark in the panel's corner: the pulse mark's
- * width, steady, so the panel is signed rather than decorated. */
-.panel--cloud {
-  position: relative;
-}
-
-.cloud__watermark {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  width: 56px;
+/* The provider's mark at the head of the Cloud compute panel, centered,
+ * a little larger than the pulse so it reads as the panel's sign. */
+.cloud__mark {
+  display: block;
+  width: 72px;
   height: auto;
-  opacity: 0.9;
-  pointer-events: none;
+  margin: 2px auto 12px;
 }
 
 @media (min-width: 1101px) {
-  .cloud__watermark {
-    width: 46px;
+  .cloud__mark {
+    width: 64px;
   }
 }
 
@@ -4428,10 +4429,11 @@ kbd {
  * left edge, as it does the stack and the button. */
 .hosaka-pulse {
   position: fixed;
-  left: 8px;
+  left: 12px; /* the menu button's left, so the two share one axis */
   bottom: 78px; /* the button's 12px + 56px, and a 10px gap */
   width: 56px; /* the menu button's width, so the two read as one column */
   height: auto;
+  object-fit: contain;
   z-index: 150;
   pointer-events: none;
   opacity: 0.1;

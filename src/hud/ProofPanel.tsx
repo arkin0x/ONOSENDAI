@@ -54,7 +54,6 @@ export function ProofPanel(): JSX.Element {
 
   const plan = useCyberspace((s) => s.plan)
   const cloud = useCyberspace((s) => s.cloud)
-  const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
   const resumePlan = useCyberspace((s) => s.resumePlan)
   const cancelPlan = useCyberspace((s) => s.cancelPlan)
   // What a commit would plan with right now: this machine's calibrated

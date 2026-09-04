@@ -10,6 +10,7 @@
 
 import { useMemo } from 'react'
 import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
+import { Explanation } from './Explanation'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
@@ -246,6 +247,18 @@ export function ProofPanel(): JSX.Element {
       )}
 
       <p className="legend__note">{`THIS MACHINE BENCHMARK: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
+
+      <Explanation>
+        A hop is the standard movement action in cyberspace. You choose a
+        destination and calculate a spatial proof containing your position and
+        destination. Once complete, you move. A hop is a storage/IO bound
+        proof-of-work operation. A sidestep is an alternative movement action
+        that only moves 1 Gibson in a single direction; it is used to cross
+        boundaries that are too large to cross with a hop action. Sidestep is a
+        hashpower-bound proof-of-work operation. The downside of a sidestep is
+        that you do not attain the cantor root of the region you enter, so you
+        cannot decrypt the region's contents if anything is hidden there.
+      </Explanation>
     </section>
   )
 }

@@ -145,7 +145,7 @@ export function ProofPanel(): JSX.Element {
           {preview.route.infeasibleAt !== null ? (
             <div className="notice">
               <p className="notice__head"><OctagonAlert size={13} strokeWidth={2.25} aria-hidden /> OUT OF REACH</p>
-              <p className="notice__body">{`Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`}</p>
+              <p className="notice__body">{`Step ${preview.route.infeasibleAt + 1} crosses a boundary higher than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`}</p>
             </div>
           ) : preview.route.cloudSteps > 0 ? (
             <div className="notice notice--offload">
@@ -323,7 +323,7 @@ function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   const kind = `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`
   const what =
     step.kind === 'sidestep'
-      ? `1 gibson through the wall at 2^${step.maxHeight}`
+      ? `1 gibson through the 2^${step.maxHeight} boundary`
       : `up to the ${step.maxHeight === 0 ? 'same block' : `2^${step.maxHeight} block edge`}`
   const doing =
     plan.status === 'paused'

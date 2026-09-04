@@ -155,7 +155,7 @@ export function ProofPanel(): JSX.Element {
           ) : (
             <div className="notice notice--sidestep">
               <p className="notice__head"><Footprints size={13} strokeWidth={2.25} aria-hidden /> A WALK, NOT A HOP</p>
-              <p className="notice__body">{`A wall of 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}</p>
+              <p className="notice__body">{`A 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} boundary lies between you and the cursor, higher than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through it, so the way is hops to the boundary, the sidestep, and hops on.`}</p>
             </div>
           )}
           {preview.steps && (

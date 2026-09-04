@@ -98,7 +98,7 @@ export function ProofPanel(): JSX.Element {
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? preview.route ? (preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
+          ? preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
   return (
@@ -146,10 +146,10 @@ export function ProofPanel(): JSX.Element {
           </p>
           {preview.steps && (
             <ol className="route route--preview" aria-label="The route this cursor would take">
-              {previewWindow(preview.steps).map((r) => r === null ? (
-                <li key="gap" className="route__step route__step--gap">
+              {previewWindow(preview.steps).map((r, i) => typeof r === 'number' ? (
+                <li key={`gap-${i}`} className="route__step route__step--gap">
                   <span className="route__index">…</span>
-                  <span className="route__kind">{`${preview.steps!.length - PREVIEW_HEAD - PREVIEW_TAIL} more`}</span>
+                  <span className="route__kind">{`${r} more`}</span>
                 </li>
               ) : (
                 <li key={r.index} className={`route__step route__step--${r.state}`}>
@@ -253,14 +253,28 @@ function previewRow(step: PlanStep, index: number): PreviewRow {
   }
 }
 
-/** Every step when the route is short; the first and last few around a gap when it is not. */
-function previewWindow(steps: PlanStep[]): Array<PreviewRow | null> {
+/**
+ * Every step when the route is short. When it is not, the first and last few
+ * with the count of the rest between them (a number is a gap), and the step
+ * nobody can do always shown, however deep in the walk it sits: the notice
+ * names it, so the list must too.
+ */
+function previewWindow(steps: PlanStep[]): Array<PreviewRow | number> {
   if (steps.length <= PREVIEW_HEAD + PREVIEW_TAIL + 1) return steps.map(previewRow)
-  return [
-    ...steps.slice(0, PREVIEW_HEAD).map(previewRow),
-    null,
-    ...steps.slice(steps.length - PREVIEW_TAIL).map((s, i) => previewRow(s, steps.length - PREVIEW_TAIL + i)),
-  ]
+  const keep = new Set<number>()
+  for (let i = 0; i < PREVIEW_HEAD; i++) keep.add(i)
+  for (let i = steps.length - PREVIEW_TAIL; i < steps.length; i++) keep.add(i)
+  const blocked = steps.findIndex((s) => s.source === 'infeasible')
+  if (blocked >= 0) keep.add(blocked)
+  const out: Array<PreviewRow | number> = []
+  let skipped = 0
+  steps.forEach((s, i) => {
+    if (keep.has(i)) {
+      if (skipped) { out.push(skipped); skipped = 0 }
+      out.push(previewRow(s, i))
+    } else skipped++
+  })
+  return out
 }
 
 function routeLabel(r: PlanSummary): string {

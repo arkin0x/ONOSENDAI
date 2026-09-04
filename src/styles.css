@@ -434,34 +434,6 @@ body {
   color: var(--sidestep);
 }
 
-.notice--sidestep {
-  color: var(--sidestep);
-  background: rgba(192, 125, 255, 0.08);
-  border-left-color: var(--sidestep);
-}
-
-/* An offer, not an alarm: HOSAKA can take the move. Light blue. */
-.notice--offload {
-  color: #8fd3ff;
-  background: rgba(47, 129, 247, 0.1);
-  border-left-color: #2f81f7;
-}
-
-/* A notice with a headline: the icon and a few words say what kind of news
- * it is before the sentence does. */
-.notice__head {
-  margin: 0 0 3px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.notice__body {
-  margin: 0;
-}
 
 .status--computing {
   color: var(--warn);
@@ -535,6 +507,36 @@ body {
   color: var(--danger);
   background: rgba(255, 59, 107, 0.08);
   border-left: 2px solid var(--danger);
+}
+
+/* Variants after the base rule, which otherwise wins the tie. */
+.notice--sidestep {
+  color: var(--sidestep);
+  background: rgba(192, 125, 255, 0.08);
+  border-left-color: var(--sidestep);
+}
+
+/* An offer, not an alarm: HOSAKA can take the move. Light blue. */
+.notice--offload {
+  color: #8fd3ff;
+  background: rgba(47, 129, 247, 0.1);
+  border-left-color: #2f81f7;
+}
+
+/* A notice with a headline: the icon and a few words say what kind of news
+ * it is before the sentence does. */
+.notice__head {
+  margin: 0 0 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notice__body {
+  margin: 0;
 }
 
 /* ---------- XOR bit readout ---------- */

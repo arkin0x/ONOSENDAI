@@ -14,7 +14,9 @@
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
 import type { CloudMode } from '../lib/cloud'
+import { localOnly, planSummary } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
+import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 
 interface OfferState {
@@ -36,7 +38,16 @@ export interface OfferView {
   verdict: OfferVerdict
   cursorKey: string
   machineCeiling: number
+  /**
+   * This machine can walk it without the cloud: hops to each wall and a
+   * Merkle sidestep through it. False only when some wall is taller than the
+   * machine's sidestep ceiling, which is the one case nothing local crosses.
+   */
+  localFeasible: boolean
 }
+
+const localFeasibleFor = (position: Position, cursor: Position, hop: number, sidestep: number): boolean =>
+  planSummary(position, cursor, localOnly(hop, sidestep), 20_000).infeasibleAt === null
 
 const cursorKeyOf = (c: { x: bigint; y: bigint; z: bigint }, plane: number): string => `${c.x}:${c.y}:${c.z}:${plane}`
 
@@ -51,7 +62,7 @@ export function offerNeed(): OfferView | null {
     cloudHop: s.cloud.limits?.max_hop_height ?? 0,
     cloudSidestep: s.cloud.limits?.max_sidestep_height ?? 0,
   }, s.cloud.limits !== null)
-  return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling } : null
+  return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling, localFeasible: localFeasibleFor(s.position, s.cursor, machineCeiling, cal.sidestepHeight) } : null
 }
 
 /** The same, for a component: recomputed as the cursor, the caps or the ceilings change. */
@@ -69,18 +80,20 @@ export function useOfferNeed(): OfferView | null {
     cloudHop: limits?.max_hop_height ?? 0,
     cloudSidestep: limits?.max_sidestep_height ?? 0,
   }, limits !== null)
-  return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling } : null
+  return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling, localFeasible: localFeasibleFor(position, cursor, machineCeiling, sidestepCeil) } : null
 }
 
 /**
- * This machine cannot do the move and the cloud is not OFF: COMMIT reads
- * OFFLOAD. Every tier but "machine" counts, the impossible one included: the
- * card is where that verdict is explained (beyond HOSAKA too, line up a
- * nearer cursor), and a button that flipped back to COMMIT as the cursor
- * went further read as the cloud no longer being needed.
+ * COMMIT reads OFFLOAD only when HOSAKA is actually needed: some wall on the
+ * way is taller than this machine's sidestep ceiling, so no local walk
+ * crosses it. A wall above the hop ceiling alone is not that: the machine
+ * hops to it, sidesteps through, and hops on, in more steps and more time,
+ * which the proof panel's preview shows. Whether the cloud is ON, ASK or OFF
+ * does not change what is needed, so the mode is not consulted here; the
+ * card's own mode control turns it on.
  */
-export function offloadWanted(need: OfferView | null, mode: CloudMode): boolean {
-  return need !== null && mode !== 'off'
+export function offloadWanted(need: OfferView | null, _mode?: CloudMode): boolean {
+  return need !== null && !need.localFeasible
 }
 
 /** The offer to show right now, or null. `hidden` is the caller's veto (a menu, a secret). */
@@ -91,10 +104,11 @@ export function useOfferView(hidden: boolean): OfferView | null {
   const busy = useCyberspace((s) => (s.plan !== null && s.plan.status !== 'funding') || (s.plan === null && s.cloud.status !== 'idle') || s.proof.status === 'computing')
   const dismissedFor = useOffer((s) => s.dismissedFor)
   const requestedFor = useOffer((s) => s.requestedFor)
-  const mode = useCyberspace((s) => s.cloudPrefs.mode)
   const need = useOfferNeed()
 
-  if (hidden || !atHead || busy || mode === 'off' || need === null) return null
+  // The cloud mode is not a veto here: the card appears only when asked for,
+  // and its mode control is how the cloud is turned on when a move needs it.
+  if (hidden || !atHead || busy || need === null) return null
   if (dismissedFor === need.cursorKey) return null
   // Only for the cursor OFFLOAD was pressed for: a moved cursor puts it away.
   if (requestedFor !== need.cursorKey) return null

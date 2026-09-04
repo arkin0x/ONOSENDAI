@@ -6,14 +6,16 @@
 import { describe, expect, it } from 'vitest'
 import { offloadWanted, useOffer, type OfferView } from './useOffer'
 
-const need = (tier: OfferView['verdict']['tier']): OfferView => ({ verdict: { tallestWall: 24, tier, cloudSteps: 1, steps: 1 }, cursorKey: 'k', machineCeiling: 17 })
+const need = (tier: OfferView['verdict']['tier'], localFeasible: boolean): OfferView => ({ verdict: { tallestWall: 24, tier, cloudSteps: 1, steps: 1 }, cursorKey: 'k', machineCeiling: 17, localFeasible })
 
 describe('offloadWanted', () => {
-  it('wants OFFLOAD whenever this machine cannot do the move, the impossible case included, unless the cloud is off', () => {
-    expect(offloadWanted(need('cloud'), 'auto')).toBe(true)
-    expect(offloadWanted(need('cloud-unknown'), 'ask')).toBe(true)
-    expect(offloadWanted(need('impossible'), 'auto')).toBe(true)
-    expect(offloadWanted(need('cloud'), 'off')).toBe(false)
+  it('wants OFFLOAD only when no local walk crosses: a wall above the sidestep ceiling, whatever the cloud mode', () => {
+    expect(offloadWanted(need('cloud', false), 'auto')).toBe(true)
+    expect(offloadWanted(need('cloud', false), 'off')).toBe(true)
+    expect(offloadWanted(need('impossible', false), 'auto')).toBe(true)
+    // A wall above the hop ceiling only: the machine hops, sidesteps, hops on. COMMIT.
+    expect(offloadWanted(need('cloud', true), 'auto')).toBe(false)
+    expect(offloadWanted(need('cloud-unknown', true), 'ask')).toBe(false)
     expect(offloadWanted(null, 'auto')).toBe(false)
   })
 })

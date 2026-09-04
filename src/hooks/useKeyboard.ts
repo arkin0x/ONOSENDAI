@@ -12,6 +12,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
+import { offerNeed, offloadWanted, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 
@@ -88,7 +89,10 @@ export function useKeyboard(): void {
       // deploying, Space places the shard at the cursor instead of moving.
       if (event.code === 'Space') {
         event.preventDefault()
-        if (useShards.getState().pending) void useShards.getState().deploy()
+        if (useShards.getState().pending) { void useShards.getState().deploy(); return }
+        // A move this machine cannot do brings up the HOSAKA card first; Space again goes.
+        const need = offerNeed()
+        if (offloadWanted(need, store.cloudPrefs.mode) && need && useOffer.getState().requestedFor !== need.cursorKey) useOffer.getState().request(need.cursorKey)
         else store.commit()
         return
       }

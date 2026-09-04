@@ -126,7 +126,11 @@ export function ProofPanel(): JSX.Element {
             </div>
             <div>
               <dt>Highest boundary</dt>
-              <dd>2^{preview.route.tallestWall}</dd>
+              {/* The tallest power-of-two boundary the move crosses: the max
+                  LCA height. The summary's tallestWall counts only walls a
+                  sidestep goes through, which a one-hop cloud route has none
+                  of, and read 2^0. */}
+              <dd>2^{Math.max(preview.hop.maxHeight, preview.route.tallestWall)}</dd>
             </div>
             <div>
               <dt>LCA x / y / z</dt>
@@ -142,7 +146,7 @@ export function ProofPanel(): JSX.Element {
               ? `Step ${preview.route.infeasibleAt + 1} needs a wall taller than ${cloudOn ? 'this machine or HOSAKA' : 'this machine'} computes. Line up a nearer cursor${cloudOn ? '' : ', or turn the cloud on'}.`
               : preview.route.cloudSteps > 0
                 ? 'This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.'
-                : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
+                : `A wall of 2^${Math.max(preview.hop.maxHeight, preview.route.tallestWall)} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
           </p>
           {preview.steps && (
             <ol className="route route--preview" aria-label="The route this cursor would take">

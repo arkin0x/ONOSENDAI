@@ -57,7 +57,12 @@ export default function App(): JSX.Element {
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.
   useEffect(() => {
-    const back = (): void => { if (document.visibilityState === 'visible') useCyberspace.getState().checkCloudPayment() }
+    const back = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const s = useCyberspace.getState()
+      s.wakeSigner()
+      s.checkCloudPayment()
+    }
     document.addEventListener('visibilitychange', back)
     window.addEventListener('pageshow', back)
     window.addEventListener('focus', back)

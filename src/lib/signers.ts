@@ -110,21 +110,26 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: getPool() as never })
   await bunker.connect()
   const pubkey = await bunker.getPublicKey()
-  return {
+  const signer: Signer = {
     kind: 'nip46',
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
     signEvent: (template) => bunker.signEvent(template) as unknown as Promise<NostrEvent>,
     close: () => bunker.close(),
-    // The bunker listens for answers on a relay subscription that dies with
-    // the socket, and a phone kills sockets while the tab is away. A fresh
-    // signer over a fresh connection, same client key, same pubkey.
+    // A phone that suspends the tab leaves its relay sockets half-open: the
+    // browser still calls them connected, so the pool reuses them and a
+    // request goes into the void, to be answered never or to fail with
+    // "All promises were rejected". Closing the bunker's relays in the pool
+    // drops those sockets; the same signer opens fresh ones on its next
+    // request (nostr-tools re-subscribes when its subscription is gone), so
+    // nothing is rebuilt and the bunker sees no new connect handshake.
     reconnect: async () => {
-      try { await bunker.close() } catch { /* already gone */ }
-      return nip46Signer(bunkerUri, clientSk)
+      getPool().close([...bp.relays])
+      return signer
     },
   }
+  return signer
 }
 
 /** What we persist to bring a signer back on reload. */

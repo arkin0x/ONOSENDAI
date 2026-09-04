@@ -12,7 +12,7 @@ import { useMemo } from 'react'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
-import { planSummary, type Ceilings, type PlanSummary } from '../lib/movePlan'
+import { buildMovePlan, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { formatMs, formatOps } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
 
@@ -78,8 +78,13 @@ export function ProofPanel(): JSX.Element {
       plane,
       ceiling,
     )
-    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null }
-    return { hop, route: planSummary(position, cursor, ceilings, 20_000) }
+    if (!hop.exceedsLimit) return { hop, route: null as PlanSummary | null, steps: null as PlanStep[] | null }
+    // The steps themselves, for the list the running route shows, so a route
+    // reads the same before COMMIT as after. A walk longer than the list
+    // could show is summarised only.
+    let steps: PlanStep[] | null = null
+    try { steps = buildMovePlan(position, cursor, ceilings, PREVIEW_STEPS_MAX) } catch { steps = null }
+    return { hop, route: planSummary(position, cursor, ceilings, 20_000), steps }
   }, [position, cursor, plane, ceiling, ceilings])
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
@@ -139,6 +144,23 @@ export function ProofPanel(): JSX.Element {
                 ? 'This machine does not have the memory to compute the target. HOSAKA Cloud Compute has the capacity to offload this calculation and return the result.'
                 : `A wall of 2^${preview.route.tallestWall} stands between you and the cursor, taller than this machine hops (2^${ceiling}). A sidestep buys exactly 1 gibson through a wall, so the route is hops to the leaf touching the wall, the sidestep, then hops on, for every wall on the way. Space runs the route one step at a time and asks for a signature as each step lands. X stops it.`}
           </p>
+          {preview.steps && (
+            <ol className="route route--preview" aria-label="The route this cursor would take">
+              {previewWindow(preview.steps).map((r) => r === null ? (
+                <li key="gap" className="route__step route__step--gap">
+                  <span className="route__index">…</span>
+                  <span className="route__kind">{`${preview.steps!.length - PREVIEW_HEAD - PREVIEW_TAIL} more`}</span>
+                </li>
+              ) : (
+                <li key={r.index} className={`route__step route__step--${r.state}`}>
+                  <span className="route__index">{r.index + 1}</span>
+                  <span className="route__kind">{r.kind}</span>
+                  <span className="route__height">{r.height}</span>
+                  <span className="route__state">{r.label}</span>
+                </li>
+              ))}
+            </ol>
+          )}
           {preview.route.steps > 64 && preview.route.cloudSteps === 0 && (
             <p className="notice">
               {`That is a long walk: ${preview.route.capped ? 'more than ' : ''}${preview.route.sidesteps} sidesteps, each a signed event. ${cloudMode === 'off' ? 'Turning the cloud on lets HOSAKA hop to the wall in one paid move.' : 'HOSAKA has not answered yet; its hop would replace the walk.'}`}
@@ -165,6 +187,14 @@ export function ProofPanel(): JSX.Element {
               <dd>{preview.hop.terrainK}</dd>
             </div>
           </dl>
+          <ol className="route route--preview" aria-label="The route this cursor would take">
+            <li className="route__step route__step--next">
+              <span className="route__index">1</span>
+              <span className="route__kind">HOP</span>
+              <span className="route__height">{`2^${preview.hop.maxHeight}`}</span>
+              <span className="route__state">this machine</span>
+            </li>
+          </ol>
           <p className="legend__note">Space commits this hop. X recalls the cursor.</p>
         </>
       ) : (
@@ -204,6 +234,33 @@ export function ProofPanel(): JSX.Element {
       <p className="legend__note">{`THIS MACHINE BENCHMARK: HOP <= 2^${hopCeil} · SIDESTEP <= 2^${sidestepCeil}`}</p>
     </section>
   )
+}
+
+/** The preview lists this many steps at most; beyond it, the first and last few with a gap. */
+const PREVIEW_STEPS_MAX = 2_000
+const PREVIEW_HEAD = 6
+const PREVIEW_TAIL = 3
+
+interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }
+
+function previewRow(step: PlanStep, index: number): PreviewRow {
+  return {
+    index,
+    kind: `${step.source === 'cloud' ? 'CLOUD ' : ''}${step.kind === 'sidestep' ? 'SIDESTEP' : 'HOP'}`,
+    height: `2^${step.maxHeight}`,
+    state: step.source === 'cloud' ? 'funding' : step.source === 'infeasible' ? 'failed' : 'next',
+    label: step.source === 'cloud' ? 'HOSAKA' : step.source === 'infeasible' ? 'beyond reach' : 'this machine',
+  }
+}
+
+/** Every step when the route is short; the first and last few around a gap when it is not. */
+function previewWindow(steps: PlanStep[]): Array<PreviewRow | null> {
+  if (steps.length <= PREVIEW_HEAD + PREVIEW_TAIL + 1) return steps.map(previewRow)
+  return [
+    ...steps.slice(0, PREVIEW_HEAD).map(previewRow),
+    null,
+    ...steps.slice(steps.length - PREVIEW_TAIL).map((s, i) => previewRow(s, steps.length - PREVIEW_TAIL + i)),
+  ]
 }
 
 function routeLabel(r: PlanSummary): string {

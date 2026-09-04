@@ -4245,6 +4245,11 @@ kbd {
 .route__step--paused { border-color: #e2b93b; }
 .route__step--failed { border-color: #d55; }
 .route__step--done, .route__step--next { opacity: 0.55; }
+/* Before COMMIT the same list shows what the cursor would take; nothing is
+ * running, so the rows are not dimmed as "next", and a long walk shows its
+ * ends around a gap. */
+.route--preview .route__step--next { opacity: 0.85; }
+.route__step--gap { opacity: 0.55; font-style: italic; }
 .route__index { opacity: 0.7; }
 .route__row { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
 .route__button {

@@ -23,6 +23,7 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
@@ -512,6 +513,68 @@ function ClockKeeper(): null {
   return null
 }
 
+/**
+ * The last word on a tagged texel: alpha 1. The tag (colour with alpha 0)
+ * is valid inside the composer's buffers but not on the canvas, which
+ * composites premultiplied: a compositor is free to clamp colour to alpha,
+ * and one did, drawing the faces black except where a halo lent them some.
+ * Merged into the bloom's own pass by postprocessing, so it costs nothing.
+ * Only the tag is touched; every other texel leaves exactly as it came.
+ */
+const OPAQUE_TAGGED_FRAGMENT = `
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec4 o = texture(inputBuffer, uv);
+  float tagged = step(o.a, 0.0) * step(0.0005, max(o.r, max(o.g, o.b)));
+  outputColor = vec4(inputColor.rgb, max(inputColor.a, tagged));
+}`
+class OpaqueTaggedEffect extends Effect {
+  constructor() {
+    super('OpaqueTagged', OPAQUE_TAGGED_FRAGMENT, { blendFunction: BlendFunction.SET })
+  }
+}
+
+/** The luminance line the bloom ships with, and the same line blind to tagged texels. */
+const LUMINANCE_LINE = 'float l=luminance(texel.rgb);'
+const LUMINANCE_TAG_AWARE = 'float l=luminance(texel.rgb)*step(0.0005,texel.a);'
+
+/**
+ * The bloom, blind to the world's shard faces.
+ *
+ * Those faces write their colour with alpha 0 (ShardMesh `world`), a tag
+ * nothing else in the frame carries: everything visible writes alpha above
+ * zero, and the untouched background is black. The bloom's luminance pass,
+ * patched here, treats a tagged texel as dark, so the faces draw at their
+ * own colours, as on the bench, while every line, ring, label and point
+ * field blooms exactly as it always has: same numbers, same passes, no depth
+ * texture, nothing drawn twice. The canvas composites premultiplied, which is
+ * how the bloom's own halos already show over alpha-0 background, so a
+ * tagged texel shows its colour too.
+ */
+function WorldBloom(): JSX.Element {
+  // The wrapper types its ref as the class; what it holds is the instance.
+  const ref = useRef<typeof BloomEffect>(null)
+  // After every render, not once: the wrapper rebuilds its effect when a prop changes.
+  useEffect(() => {
+    const m = (ref.current as unknown as BloomEffect | null)?.luminanceMaterial
+    if (!m || m.userData.tagAware) return
+    if (!m.fragmentShader.includes(LUMINANCE_LINE)) {
+      console.warn('[bloom] the luminance shader is not the one expected; shard faces will bloom')
+      m.userData.tagAware = true
+      return
+    }
+    m.fragmentShader = m.fragmentShader.replace(LUMINANCE_LINE, LUMINANCE_TAG_AWARE)
+    m.userData.tagAware = true
+    m.needsUpdate = true
+  })
+  const opaque = useMemo(() => new OpaqueTaggedEffect(), [])
+  return (
+    <>
+      <Bloom ref={ref} mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
+      <primitive object={opaque} />
+    </>
+  )
+}
+
 export function Scene(): JSX.Element {
   // The workshop is an opaque, full-screen bench with its own canvas. Drawing
   // the world under it is pure cost, and on a phone it was most of the frame:
@@ -548,7 +611,7 @@ export function Scene(): JSX.Element {
         and is invisible because the effect is a blur to begin with.
       */}
       <EffectComposer resolutionScale={0.25}>
-        <Bloom mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
+        <WorldBloom />
       </EffectComposer>
     </Canvas>
   )

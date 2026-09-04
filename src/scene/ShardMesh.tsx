@@ -14,7 +14,11 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
+  AddEquation,
   AdditiveBlending,
+  CustomBlending,
+  OneFactor,
+  ZeroFactor,
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -30,6 +34,16 @@ interface Props {
   scale?: number
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
+  /**
+   * Drawn in the world, under its bloom. The bloom adds a blurred copy of
+   * everything lit back onto the frame, and across a filled face that is
+   * several times the face's own colour, so faces came out white with a
+   * tint. Out there the faces write their colour with alpha 0, a tag the
+   * scene's bloom is blind to (Scene.tsx WorldBloom), so they draw at their
+   * own colours, as on the bench; points and lines are untagged and glow as
+   * they always did. Not for a ghost, whose translucency needs real alpha.
+   */
+  world?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
   /** A tap on a SOLID face (its index is `e.faceIndex`); the workshop's FACE tool. */
@@ -38,7 +52,13 @@ interface Props {
 
 const STATIC = [0, 0.9, 1] as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick }: Props): JSX.Element | null {
+/**
+ * Colour written opaque, alpha written as 0: the tag. (Blending needs the
+ * material transparent, which the face already is for its opacity.)
+ */
+const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
+
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => flatten(shard), [shard.vertices, shard.faces])
 
   // Live copies: the decode writes into these, the targets stay untouched.
@@ -122,7 +142,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick 
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
-          <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} />
+          <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />
         </mesh>
       )}
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}

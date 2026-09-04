@@ -87,6 +87,8 @@ export interface HosakaQuote {
   K: number
   tier: string | null
   est_time: string | null
+  /** The wait in seconds, so a route's steps can be added up; older servers omit it. */
+  est_seconds?: number | null
   hint: string | null
 }
 

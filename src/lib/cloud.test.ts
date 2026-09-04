@@ -36,6 +36,7 @@ import {
   sinceLabel,
   type PendingCloudJob,
   wirePosition,
+  formatWait,
 } from './cloud'
 import { HosakaError, type HosakaClient, type HosakaDeposit, type HosakaJob, type HosakaLimits } from './hosaka'
 
@@ -55,6 +56,17 @@ describe('routeCommit', () => {
     [18, 12, 'auto', { ...LIMITS, max_hop_height: 12 }, 'cloud-sidestep'],
   ] as const)('h%d, ceiling %d, mode %s -> %s', (maxHeight, ceiling, mode, limits, route) => {
     expect(routeCommit({ maxHeight, ceiling, mode, limits })).toBe(route)
+  })
+})
+
+describe('formatWait', () => {
+  it('reads coarse, the way the server words one step', () => {
+    expect(formatWait(3)).toBe('under 10 sec')
+    expect(formatWait(30)).toBe('about 30 sec')
+    expect(formatWait(31)).toBe('about 40 sec')
+    expect(formatWait(60)).toBe('about 1 min')
+    expect(formatWait(61)).toBe('about 2 min')
+    expect(formatWait(5400)).toBe('about 1.5 hr')
   })
 })
 

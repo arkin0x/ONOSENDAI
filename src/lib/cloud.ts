@@ -245,6 +245,17 @@ export function routeCommit(i: RouteInput): CloudRoute {
 }
 
 /** Whole sats, rounded up: the only unit a person is asked to pay in. */
+/**
+ * A wait a person can plan around, coarse on purpose, and the same words the
+ * server uses for one step, so a route's summed estimate reads like a quote.
+ */
+export function formatWait(seconds: number): string {
+  if (seconds < 10) return 'under 10 sec'
+  if (seconds < 60) return `about ${Math.ceil(seconds / 10) * 10} sec`
+  if (seconds < 3600) return `about ${Math.ceil(seconds / 60)} min`
+  return `about ${(seconds / 3600).toFixed(1)} hr`
+}
+
 export function satsOf(msats: number): number {
   return Math.ceil(msats / 1000)
 }

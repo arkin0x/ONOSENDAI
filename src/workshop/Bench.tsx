@@ -245,7 +245,8 @@ function Aim(): null {
  * inside is selected, live as the box grows; shift keeps what was selected.
  * The box is a plain element over the canvas, drawn here without React. A
  * tap (no drag) is left to the handles and to onPointerMissed; orbit is off
- * in SELECT (Bench), so the drag is the box's alone.
+ * in SELECT (Bench), so a one-finger drag is the box's alone. A second
+ * finger means a pan: the box cancels and the selection is put back.
  */
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
@@ -262,6 +263,7 @@ function Marquee(): null {
     host.appendChild(box)
     let start: { x: number; y: number } | null = null
     let base: number[] = []
+    let shift = false
     let active = false
     const local = (e: PointerEvent): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect()
@@ -282,10 +284,20 @@ function Marquee(): null {
       })
       return out
     }
+    const cancel = (): void => {
+      // A second finger has landed: this is a pan, not a box. Put the
+      // selection back as it was when the first finger touched.
+      if (start && active) useWorkshop.getState().setSelection(base)
+      start = null
+      active = false
+      box.hidden = true
+    }
     const down = (e: PointerEvent): void => {
-      if (e.button !== 0 || !e.isPrimary) return
+      if (!e.isPrimary) { cancel(); return }
+      if (e.button !== 0) return
       start = local(e)
-      base = e.shiftKey ? useWorkshop.getState().selection : []
+      base = useWorkshop.getState().selection
+      shift = e.shiftKey
       active = false
     }
     const move = (e: PointerEvent): void => {
@@ -296,7 +308,7 @@ function Marquee(): null {
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
       box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
-      useWorkshop.getState().setSelection([...base, ...inside(x0, y0, x1, y1)])
+      useWorkshop.getState().setSelection([...(shift ? base : []), ...inside(x0, y0, x1, y1)])
     }
     const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
     canvas.addEventListener('pointerdown', down)
@@ -381,8 +393,10 @@ export function Bench(): JSX.Element {
       }}
     >
       <ambientLight intensity={1} />
-      {/* In SELECT the drag belongs to the marquee; orbit comes back with any other tool. Pinch still zooms. */}
-      <OrbitControls makeDefault enablePan={false} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+      {/* One finger or left drag orbits, except in SELECT where that drag is the
+          marquee's. Two fingers, or the right button, pan the view in the screen
+          plane; pinch or the wheel dollies. These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
       <Marquee />
       <Aim />
       <Keys />

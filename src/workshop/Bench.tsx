@@ -15,12 +15,13 @@
  * guessing.
  */
 
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, centroid, pointKey, rgbToHex } from '../lib/shards'
+import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
@@ -37,6 +38,7 @@ function snap(p: Vector3, level: number): P3 {
 
 function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
+  const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
 
@@ -65,7 +67,7 @@ function Grid(): JSX.Element {
   return (
     <group position={[0, level, 0]}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
-      <gridHelper args={[GRID_HALF * 2, GRID_HALF * 2, ACCENT, '#1d3547']} />
+      <gridHelper key={extent} args={[extent * 2, extent * 2, ACCENT, '#1d3547']} />
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
@@ -75,7 +77,7 @@ function Grid(): JSX.Element {
       */}
       {places && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} onClick={onClick} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => useWorkshop.getState().setAim(null)}>
-          <planeGeometry args={[GRID_HALF * 2 + 1, GRID_HALF * 2 + 1]} />
+          <planeGeometry key={extent} args={[extent * 2 + 1, extent * 2 + 1]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
@@ -94,6 +96,7 @@ function Ghost(): JSX.Element | null {
   // Built once per shape and color; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
   const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color) : null), [tool, kind, size, facing, color])
+  const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   if (!aim) return null
   if (tool === 'add') {
     return (
@@ -105,7 +108,7 @@ function Ghost(): JSX.Element | null {
   }
   if (!model) return null
   return (
-    <group position={landing(kind, size, facing, aim)}>
+    <group position={landing(kind, size, facing, aim, extent)}>
       <ShardMesh shard={model} ghost />
     </group>
   )
@@ -327,6 +330,7 @@ function Marquee(): null {
 }
 
 function Keys(): null {
+  const camera = useThree((s) => s.camera)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement | null)?.tagName
@@ -338,12 +342,15 @@ function Keys(): null {
         return
       }
       if (e.altKey) return
-      const nudge: Record<string, [0 | 1 | 2, number]> = {
-        ArrowRight: [0, 1], ArrowLeft: [0, -1], KeyD: [0, 1], KeyA: [0, -1],
-        ArrowUp: [2, -1], ArrowDown: [2, 1], KeyW: [2, -1], KeyS: [2, 1],
-        KeyR: [1, 1], KeyF: [1, -1],
+      // Screen directions, as the cursor's keys are in the world: W up, S down,
+      // A left, D right, R into the screen, F out of it, whatever way the bench
+      // camera has been turned.
+      const nudge: Record<string, NudgeName> = {
+        ArrowRight: 'right', ArrowLeft: 'left', KeyD: 'right', KeyA: 'left',
+        ArrowUp: 'up', ArrowDown: 'down', KeyW: 'up', KeyS: 'down',
+        KeyR: 'away', KeyF: 'toward',
       }
-      if (nudge[e.code]) { e.preventDefault(); w.moveSelected(...nudge[e.code]); return }
+      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { if (w.facePick.length >= 3) { e.preventDefault(); w.fill() } return }
       if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
@@ -358,13 +365,24 @@ function Keys(): null {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [camera])
+  return null
+}
+
+/** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
+function AxesReporter(): null {
+  const camera = useThree((s) => s.camera)
+  useFrame(() => {
+    const axes = benchAxes(camera)
+    if (!sameAxes(axes, useBenchView.getState().axes)) useBenchView.setState({ axes })
+  })
   return null
 }
 
 export function Bench(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
+  const extent = shard?.extent ?? GRID_HALF
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
@@ -400,8 +418,9 @@ export function Bench(): JSX.Element {
       <Marquee />
       <Aim />
       <Keys />
+      <AxesReporter />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
-      <axesHelper args={[GRID_HALF + 1]} />
+      <axesHelper key={extent} args={[extent + 1]} />
       <Grid />
       {shard && <ShardMesh shard={shard} onFaceClick={tool === 'face' ? onFace : undefined} />}
       <Ghost />

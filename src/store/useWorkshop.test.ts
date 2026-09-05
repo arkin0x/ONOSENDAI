@@ -131,6 +131,26 @@ describe('workshop', () => {
     expect(w().selection).toEqual([s.vertices.length - 1])
   })
 
+  it('keeps a grid scale per shard, never below what its points need, and carries it in the payload', () => {
+    w().addVertex([5, 0, 0])
+    expect(w().current()!.extent).toBe(8)
+    w().setExtent(3)
+    expect(w().current()!.extent).toBe(5)        // the point at x=5 holds it
+    w().setExtent(999)
+    expect(w().current()!.extent).toBe(64)
+    w().setLevel(50); expect(w().level).toBe(50)
+    w().setExtent(6)
+    expect(w().level).toBe(6)                    // the level follows the grid down
+    expect(w().addVertex([7, 0, 0]), 'outside the grid').toBeUndefined()
+    expect(w().current()!.vertices).toHaveLength(1)
+    const text = w().exportCurrent()!
+    expect(JSON.parse(text).extent).toBe(6)
+    const id = w().importText(text)!
+    expect(w().shards.find((s) => s.id === id)!.extent).toBe(6)
+    expect(w().importText(JSON.stringify({ ...JSON.parse(text), extent: undefined }))).not.toBeNull()
+    expect(w().current()!.extent).toBe(8)        // an older payload lands on the default
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

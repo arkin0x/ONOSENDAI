@@ -153,13 +153,13 @@ function turned(kind: StampKind, size: number, facing: Facing): Shape {
 const moved = (points: P3[], by: P3): P3[] => points.map((p) => [p[0] + by[0], p[1] + by[1], p[2] + by[2]] as P3)
 
 /** The push that brings a shape back inside the grid: zero on an axis it already fits. */
-function fit(points: P3[]): P3 {
+function fit(points: P3[], extent: number = GRID_HALF): P3 {
   const shift: P3 = [0, 0, 0]
   for (let a = 0; a < 3; a++) {
     let lo = Infinity, hi = -Infinity
     for (const p of points) { lo = Math.min(lo, p[a]); hi = Math.max(hi, p[a]) }
-    if (lo < -GRID_HALF) shift[a] = -GRID_HALF - lo
-    else if (hi > GRID_HALF) shift[a] = GRID_HALF - hi
+    if (lo < -extent) shift[a] = -extent - lo
+    else if (hi > extent) shift[a] = extent - hi
   }
   return shift
 }
@@ -169,15 +169,15 @@ function fit(points: P3[]): P3 {
  * inside the grid if any of it would poke out. Nothing here is wider than
  * the grid, so the push always succeeds.
  */
-export function compile(kind: StampKind, size: number, facing: Facing, origin: P3): Shape {
+export function compile(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF): Shape {
   const t = turned(kind, size, facing)
   const points = moved(t.points, origin)
-  return { points: moved(points, fit(points)), faces: t.faces }
+  return { points: moved(points, fit(points, extent)), faces: t.faces }
 }
 
 /** Where a stamp aimed at `origin` lands: `origin` itself unless the grid's edge pushed it back. */
-export function landing(kind: StampKind, size: number, facing: Facing, origin: P3): P3 {
-  const shift = fit(moved(turned(kind, size, facing).points, origin))
+export function landing(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF): P3 {
+  const shift = fit(moved(turned(kind, size, facing).points, origin), extent)
   return [origin[0] + shift[0], origin[1] + shift[1], origin[2] + shift[2]]
 }
 
@@ -199,7 +199,7 @@ export interface Stamped {
  * one corner for corner is dropped along with the one it matched.
  */
 export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: Facing, origin: P3, color: [number, number, number]): Stamped | null {
-  const shape = compile(kind, size, facing, origin)
+  const shape = compile(kind, size, facing, origin, shard.extent)
   const base = shard.vertices.length
   const vertices: ShardVertex[] = [
     ...shard.vertices,
@@ -235,6 +235,7 @@ export function preview(kind: StampKind, size: number, facing: Facing, color: [n
     id: 'ghost',
     name: kind,
     unit: 0,
+    extent: GRID_HALF,
     mode: shape.faces.length ? 'solid' : 'lines',
     vertices: shape.points.map((p) => ({ p, c: [...color] as [number, number, number] })),
     faces: shape.faces,

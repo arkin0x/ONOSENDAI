@@ -30,6 +30,8 @@ export interface ShardModel {
   name: string
   /** One model unit is 2^unit gibsons. */
   unit: number
+  /** Half-width of this shard's build grid, in units: the grid runs from -extent to +extent on every axis. */
+  extent: number
   mode: ShardMode
   vertices: ShardVertex[]
   /** Triangles as vertex indices; drawn in `solid` mode only. */
@@ -43,6 +45,8 @@ export interface ShardPayload {
   type: 'shard'
   name: string
   unit: number
+  /** Grid half-width the shard was built on; absent in older payloads (8). */
+  extent?: number
   mode: ShardMode
   vertices: Array<[number, number, number]>
   colors: Array<[number, number, number]>
@@ -51,8 +55,10 @@ export interface ShardPayload {
 
 export const MODES: ShardMode[] = ['solid', 'points', 'lines']
 
-/** Half-width of the build grid, in units. */
+/** Default half-width of the build grid, in units; each shard keeps its own (`extent`). */
 export const GRID_HALF = 8
+export const MIN_EXTENT = 1
+export const MAX_EXTENT = 64
 
 export const MAX_VERTICES = 512
 export const MAX_FACES = 1024
@@ -63,7 +69,7 @@ export const MAX_FACES = 1024
  * the first stamp with faces lands (see the workshop store).
  */
 export function newShard(name = 'Untitled shard'): ShardModel {
-  return { id: uuid(), name, unit: 0, mode: 'lines', vertices: [], faces: [], updatedAt: Date.now() }
+  return { id: uuid(), name, unit: 0, extent: GRID_HALF, mode: 'lines', vertices: [], faces: [], updatedAt: Date.now() }
 }
 
 /** A grid point as a map key, so "the same point" is one string compare. */
@@ -77,8 +83,15 @@ export function uuid(): string {
 }
 
 /** Integers inside the grid; anything else is not a vertex. */
-export function validPoint(p: [number, number, number]): boolean {
-  return p.every((v) => Number.isInteger(v) && Math.abs(v) <= GRID_HALF)
+export function validPoint(p: [number, number, number], extent: number = GRID_HALF): boolean {
+  return p.every((v) => Number.isInteger(v) && Math.abs(v) <= extent)
+}
+
+/** The grid half-width a shard needs to hold every vertex it has. */
+export function neededExtent(s: Pick<ShardModel, 'vertices'>): number {
+  let m = MIN_EXTENT
+  for (const v of s.vertices) for (const c of v.p) m = Math.max(m, Math.abs(c))
+  return m
 }
 
 export function clampColor(c: [number, number, number]): [number, number, number] {
@@ -96,6 +109,7 @@ export function toPayload(s: ShardModel): ShardPayload {
     type: 'shard',
     name: s.name,
     unit: s.unit,
+    extent: s.extent,
     mode: s.mode,
     vertices: s.vertices.map((v) => v.p),
     colors: s.vertices.map((v) => v.c),
@@ -131,10 +145,12 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
     if (!validFace(face, vertices.length)) return null
     faces.push(face)
   }
+  const extent = Number.isInteger(p.extent) && (p.extent as number) >= MIN_EXTENT && (p.extent as number) <= MAX_EXTENT ? (p.extent as number) : GRID_HALF
   return {
     id,
     name: typeof p.name === 'string' ? p.name.slice(0, 64) : 'shard',
     unit: p.unit as number,
+    extent: Math.max(extent, neededExtent({ vertices })),
     mode: p.mode as ShardMode,
     vertices,
     faces,

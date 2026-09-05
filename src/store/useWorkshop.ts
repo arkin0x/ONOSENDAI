@@ -23,6 +23,9 @@
 import { create } from 'zustand'
 import {
   GRID_HALF,
+  MAX_EXTENT,
+  MIN_EXTENT,
+  neededExtent,
   MAX_FACES,
   MAX_VERTICES,
   clampColor,
@@ -98,6 +101,8 @@ export interface WorkshopState {
   remove: (id: string) => void
   setMode: (mode: ShardMode) => void
   setUnit: (unit: number) => void
+  /** The build grid's half-width for the current shard, never below what its vertices need. */
+  setExtent: (extent: number) => void
   setTool: (tool: Tool) => void
   setLevel: (level: number) => void
   setColor: (c: [number, number, number]) => void
@@ -146,7 +151,9 @@ function load(): ShardModel[] {
     const raw = localStorage.getItem(STORAGE)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.vertices)) : []
+    return Array.isArray(list)
+      ? list.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.vertices)).map((s) => ({ ...s, extent: Number.isInteger(s.extent) ? s.extent : Math.max(GRID_HALF, neededExtent(s)) }))
+      : []
   } catch { return [] }
 }
 
@@ -259,7 +266,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setUnit: (unit) => edit((s) => ({ ...s, unit: Math.max(0, Math.min(84, Math.round(unit))) })),
     setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null }),
-    setLevel: (level) => set({ level: Math.max(-GRID_HALF, Math.min(GRID_HALF, Math.round(level))) }),
+    setExtent: (extent) => {
+      const s = get().current()
+      if (!s) return
+      const e = Math.max(Math.max(MIN_EXTENT, neededExtent(s)), Math.min(MAX_EXTENT, Math.round(extent)))
+      if (e === s.extent) return
+      edit((cur) => ({ ...cur, extent: e }))
+      set({ level: Math.max(-e, Math.min(e, get().level)) })
+    },
+    setLevel: (level) => {
+      const e = get().current()?.extent ?? GRID_HALF
+      set({ level: Math.max(-e, Math.min(e, Math.round(level))) })
+    },
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind }),
     setStampSize: (size) => set({ stampSize: Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size))) }),
@@ -274,7 +292,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     placeStamp: (at) => {
       const { stampKind, stampSize, stampFacing, color } = get()
       const s = get().current()
-      if (!s || !validPoint(at)) return
+      if (!s || !validPoint(at, s.extent)) return
       const res = stamp(s, stampKind, stampSize, stampFacing, at, color)
       if (!res) { set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
@@ -283,7 +301,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     addVertex: (p) => {
-      if (!validPoint(p)) return
+      if (!validPoint(p, get().current()?.extent ?? GRID_HALF)) return
       let added = -1
       edit((s) => {
         // One vertex per point by hand: adding where one already is selects it instead.
@@ -366,7 +384,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         for (const i of chosen) {
           const p = [...vertices[i].p] as P3
           p[axis] += delta
-          if (!validPoint(p)) return null
+          if (!validPoint(p, s.extent)) return null
           vertices[i] = { ...vertices[i], p }
         }
         return { ...s, vertices }

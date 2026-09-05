@@ -2134,21 +2134,9 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--mono);
-}
-
-.workshop__head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
 }
 
 .workshop__list-btn,
@@ -2203,11 +2191,6 @@ kbd {
   font-weight: 700;
 }
 
-.workshop__close {
-  margin-left: auto;
-  color: var(--dim);
-}
-
 .workshop__name {
   flex: 1 1 120px;
   min-width: 80px;
@@ -2231,18 +2214,11 @@ kbd {
 }
 
 .workshop__list {
-  position: absolute;
-  top: 48px;
-  left: 10px;
-  z-index: 1;
-  width: min(320px, calc(100vw - 20px));
-  max-height: 60vh;
-  overflow-y: auto;
-  padding: 8px;
-  border-radius: 8px;
-  background: rgba(6, 14, 22, 0.96);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
 }
 
 .workshop__list ul {
@@ -2301,8 +2277,8 @@ kbd {
 }
 
 .workshop__bench {
-  position: relative;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
 }
 
 /* The SELECT tool's drag box, drawn over the bench canvas (Bench.tsx Marquee). */
@@ -2316,26 +2292,6 @@ kbd {
 
 .workshop__bench canvas {
   display: block;
-}
-
-.workshop__stats {
-  position: absolute;
-  left: 10px;
-  bottom: 8px;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: var(--dim);
-  pointer-events: none;
-  text-shadow: 0 0 4px var(--bg);
-}
-
-.workshop__tools {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
 }
 
 .workshop__row {
@@ -2367,12 +2323,6 @@ kbd {
   flex: 1 1 200px;
   font-size: 9px;
   color: var(--dim);
-}
-
-.workshop__pad {
-  display: grid;
-  grid-template-columns: repeat(6, auto);
-  gap: 4px;
 }
 
 .workshop__btn--x { color: #ff4444; }
@@ -2521,7 +2471,7 @@ kbd {
 /* The first-visit card: three steps, then never again. */
 .workshop__intro {
   position: absolute;
-  top: 12px;
+  top: 56px;
   right: 12px;
   z-index: 2;
   width: min(300px, calc(100vw - 24px));
@@ -2560,14 +2510,190 @@ kbd {
   color: var(--accent);
 }
 
-/* The EXPLAIN pill ends the tool row; its well, when open, takes a full row. */
-.workshop__tools .explain {
-  display: contents;
+/* ---------- Workshop overlays: chips, panels, corner pad, color bar ----------
+ *
+ * The bench fills the screen; everything else floats on it the way the
+ * instruments float on the world. Top left, the chip row and the history;
+ * top right, DEPLOY and the way out; bottom right, the CONTROLS pad and the
+ * COLOR bar. One panel at a time opens under the chip row. */
+.ws__top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
 }
-
-.workshop__tools .explain__well {
-  flex: 1 1 100%;
-  margin-top: 2px;
+.ws__top > * { pointer-events: auto; }
+/* Room on the right for DEPLOY and the way out, which share the top edge. */
+.ws__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-right: 124px;
+}
+.ws__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+}
+.ws__chip.is-on {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.ws__history {
+  display: inline-flex;
+  gap: 6px;
+}
+.ws__icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.ws__icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ws__exit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws__exit .workshop__deploy {
+  height: 34px;
+  border-radius: 9px;
+}
+.ws__panel {
+  width: min(380px, 100%);
+  box-sizing: border-box;
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Rules written for the old toolbar rows gave these a flex basis; in a column panel that becomes height. */
+.ws__panel .workshop__help,
+.ws__panel .workshop__name {
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ws__panel-title {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+  margin-top: 4px;
+}
+.ws__stats {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.ws__toast {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 7px 10px;
+  border-radius: 9px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  background: rgba(6, 14, 22, 0.88);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+.ws__corner {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+/* The main pad's nine cells, for the selection: CONNECT and DELETE take the
+ * corners the scale keys have out there. */
+.benchpad {
+  display: grid;
+  grid-template-columns: repeat(3, 38px);
+  grid-template-rows: repeat(3, 38px);
+  gap: 4px;
+  grid-template-areas:
+    "away    up   toward"
+    "left    hub  right"
+    "connect down delete";
+}
+.benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
+.benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
+.benchpad .touchpad__key--connect .touchpad__sub,
+.benchpad .touchpad__key--delete .touchpad__sub { font-size: 6px; }
+.benchops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: rgba(6, 14, 22, 0.85);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.ws__color {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(440px, calc(100vw - 28px));
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(6, 14, 22, 0.85);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.ws__color .workshop__label { min-width: 0; }
+@media (max-width: 640px) {
+  .ws__corner {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0 10px 10px;
+  }
+  .ws__color {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    border-radius: 10px;
+  }
+  .ws__panel {
+    max-height: calc(100vh - 260px);
+  }
 }
 
 @media (max-width: 600px) {

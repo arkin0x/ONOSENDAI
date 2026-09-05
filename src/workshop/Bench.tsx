@@ -15,12 +15,13 @@
  * guessing.
  */
 
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, centroid, pointKey, rgbToHex } from '../lib/shards'
+import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
@@ -37,6 +38,7 @@ function snap(p: Vector3, level: number): P3 {
 
 function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
+  const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
 
@@ -65,7 +67,7 @@ function Grid(): JSX.Element {
   return (
     <group position={[0, level, 0]}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
-      <gridHelper args={[GRID_HALF * 2, GRID_HALF * 2, ACCENT, '#1d3547']} />
+      <gridHelper key={extent} args={[extent * 2, extent * 2, ACCENT, '#1d3547']} />
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
@@ -75,7 +77,7 @@ function Grid(): JSX.Element {
       */}
       {places && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} onClick={onClick} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => useWorkshop.getState().setAim(null)}>
-          <planeGeometry args={[GRID_HALF * 2 + 1, GRID_HALF * 2 + 1]} />
+          <planeGeometry key={extent} args={[extent * 2 + 1, extent * 2 + 1]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
@@ -94,6 +96,7 @@ function Ghost(): JSX.Element | null {
   // Built once per shape and color; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
   const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color) : null), [tool, kind, size, facing, color])
+  const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   if (!aim) return null
   if (tool === 'add') {
     return (
@@ -105,7 +108,7 @@ function Ghost(): JSX.Element | null {
   }
   if (!model) return null
   return (
-    <group position={landing(kind, size, facing, aim)}>
+    <group position={landing(kind, size, facing, aim, extent)}>
       <ShardMesh shard={model} ghost />
     </group>
   )
@@ -117,9 +120,10 @@ function Ghost(): JSX.Element | null {
  */
 function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const selected = useWorkshop((s) => s.selected)
+  const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
     shard?.vertices.forEach((v, i) => { const k = pointKey(v.p); m.set(k, [...(m.get(k) ?? []), i]) })
@@ -132,6 +136,8 @@ function Handles(): JSX.Element | null {
     e.stopPropagation()
     const w = useWorkshop.getState()
     if (tool === 'face') w.pickForFace(first)
+    // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
+    else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
   }
 
@@ -140,7 +146,7 @@ function Handles(): JSX.Element | null {
       {groups.map((g) => {
         const first = g[0]
         const v = shard.vertices[first]
-        const isSel = selected !== null && g.includes(selected)
+        const isSel = g.some((i) => chosen.has(i))
         const picked = facePick.some((i) => g.includes(i))
         return (
           <group key={first} position={v.p}>
@@ -237,7 +243,94 @@ function Aim(): null {
 }
 
 /** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
+/**
+ * A box dragged on the bench in SELECT: every point whose projection falls
+ * inside is selected, live as the box grows; shift keeps what was selected.
+ * The box is a plain element over the canvas, drawn here without React. A
+ * tap (no drag) is left to the handles and to onPointerMissed; orbit is off
+ * in SELECT (Bench), so a one-finger drag is the box's alone. A second
+ * finger means a pan: the box cancels and the selection is put back.
+ */
+function Marquee(): null {
+  const gl = useThree((s) => s.gl)
+  const camera = useThree((s) => s.camera)
+  const tool = useWorkshop((s) => s.tool)
+  useEffect(() => {
+    if (tool !== 'select') return
+    const canvas = gl.domElement
+    const host = canvas.parentElement
+    if (!host) return
+    const box = document.createElement('div')
+    box.className = 'bench__marquee'
+    box.hidden = true
+    host.appendChild(box)
+    let start: { x: number; y: number } | null = null
+    let base: number[] = []
+    let shift = false
+    let active = false
+    const local = (e: PointerEvent): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect()
+      return { x: e.clientX - r.left, y: e.clientY - r.top }
+    }
+    const v = new Vector3()
+    const inside = (x0: number, y0: number, x1: number, y1: number): number[] => {
+      const shard = useWorkshop.getState().current()
+      if (!shard) return []
+      const r = canvas.getBoundingClientRect()
+      const out: number[] = []
+      shard.vertices.forEach((vert, i) => {
+        v.set(vert.p[0], vert.p[1], vert.p[2]).project(camera)
+        if (v.z > 1) return
+        const px = ((v.x + 1) / 2) * r.width
+        const py = ((1 - v.y) / 2) * r.height
+        if (px >= x0 && px <= x1 && py >= y0 && py <= y1) out.push(i)
+      })
+      return out
+    }
+    const cancel = (): void => {
+      // A second finger has landed: this is a pan, not a box. Put the
+      // selection back as it was when the first finger touched.
+      if (start && active) useWorkshop.getState().setSelection(base)
+      start = null
+      active = false
+      box.hidden = true
+    }
+    const down = (e: PointerEvent): void => {
+      if (!e.isPrimary) { cancel(); return }
+      if (e.button !== 0) return
+      start = local(e)
+      base = useWorkshop.getState().selection
+      shift = e.shiftKey
+      active = false
+    }
+    const move = (e: PointerEvent): void => {
+      if (!start) return
+      const { x, y } = local(e)
+      if (!active && Math.hypot(x - start.x, y - start.y) < TAP_SLOP) return
+      active = true
+      const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
+      box.hidden = false
+      box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
+      useWorkshop.getState().setSelection([...(shift ? base : []), ...inside(x0, y0, x1, y1)])
+    }
+    const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
+    canvas.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      canvas.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      box.remove()
+    }
+  }, [tool, gl, camera])
+  return null
+}
+
 function Keys(): null {
+  const camera = useThree((s) => s.camera)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement | null)?.tagName
@@ -249,15 +342,19 @@ function Keys(): null {
         return
       }
       if (e.altKey) return
-      const nudge: Record<string, [0 | 1 | 2, number]> = {
-        ArrowRight: [0, 1], ArrowLeft: [0, -1], KeyD: [0, 1], KeyA: [0, -1],
-        ArrowUp: [2, -1], ArrowDown: [2, 1], KeyW: [2, -1], KeyS: [2, 1],
-        KeyR: [1, 1], KeyF: [1, -1],
+      // Screen directions, as the cursor's keys are in the world: W up, S down,
+      // A left, D right, R into the screen, F out of it, whatever way the bench
+      // camera has been turned.
+      const nudge: Record<string, NudgeName> = {
+        ArrowRight: 'right', ArrowLeft: 'left', KeyD: 'right', KeyA: 'left',
+        ArrowUp: 'up', ArrowDown: 'down', KeyW: 'up', KeyS: 'down',
+        KeyR: 'away', KeyF: 'toward',
       }
-      if (nudge[e.code]) { e.preventDefault(); w.moveSelected(...nudge[e.code]); return }
+      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { if (w.facePick.length >= 3) { e.preventDefault(); w.fill() } return }
-      if (e.code === 'Escape') { e.preventDefault(); if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      if (e.code === 'KeyC') { w.selectConnected(); return }
       if (e.code === 'Digit1') w.setTool('stamp')
       if (e.code === 'Digit2') w.setTool('add')
       if (e.code === 'Digit3') w.setTool('select')
@@ -268,13 +365,24 @@ function Keys(): null {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [camera])
+  return null
+}
+
+/** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
+function AxesReporter(): null {
+  const camera = useThree((s) => s.camera)
+  useFrame(() => {
+    const axes = benchAxes(camera)
+    if (!sameAxes(axes, useBenchView.getState().axes)) useBenchView.setState({ axes })
+  })
   return null
 }
 
 export function Bench(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
+  const extent = shard?.extent ?? GRID_HALF
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
@@ -299,15 +407,20 @@ export function Bench(): JSX.Element {
       onPointerMissed={(e) => {
         if ((e as PointerEvent).button !== 0) return
         const w = useWorkshop.getState()
-        if (w.selected !== null || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
+        if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
       }}
     >
       <ambientLight intensity={1} />
-      <OrbitControls makeDefault enablePan={false} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+      {/* One finger or left drag orbits, except in SELECT where that drag is the
+          marquee's. Two fingers, or the right button, pan the view in the screen
+          plane; pinch or the wheel dollies. These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+      <Marquee />
       <Aim />
       <Keys />
+      <AxesReporter />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
-      <axesHelper args={[GRID_HALF + 1]} />
+      <axesHelper key={extent} args={[extent + 1]} />
       <Grid />
       {shard && <ShardMesh shard={shard} onFaceClick={tool === 'face' ? onFace : undefined} />}
       <Ghost />

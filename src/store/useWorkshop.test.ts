@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
+import { TICKS_PER_UNIT as T } from '../lib/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 
 const w = () => useWorkshop.getState()
@@ -22,26 +23,26 @@ describe('workshop', () => {
   })
 
   it('adds vertices at the level, never twice on one point by hand, and selects them', () => {
-    w().setLevel(2)
-    w().addVertex([1, 2, 3])
-    w().addVertex([1, 2, 3])
+    w().setLevel(2 * T)
+    w().addVertex([T, 2 * T, 3 * T])
+    w().addVertex([T, 2 * T, 3 * T])
     expect(w().current()!.vertices).toHaveLength(1)
-    expect(w().current()!.vertices[0].p).toEqual([1, 2, 3])
+    expect(w().current()!.vertices[0].p).toEqual([T, 2 * T, 3 * T])
     expect(w().selection).toEqual([0])
-    w().addVertex([9, 0, 0])
+    w().addVertex([9 * T, 0, 0])
     expect(w().current()!.vertices).toHaveLength(1)
   })
 
   it('nudges the selection, may land on another vertex, and never leaves the grid', () => {
-    w().addVertex([0, 0, 0]); w().addVertex([1, 0, 0])
+    w().addVertex([0, 0, 0]); w().addVertex([T, 0, 0])
     w().selectVertex(0)
-    w().moveSelected(1, 1)
-    expect(w().current()!.vertices[0].p).toEqual([0, 1, 0])
-    w().moveSelected(1, -1); w().moveSelected(0, 1)
-    expect(w().current()!.vertices[0].p).toEqual([1, 0, 0])
+    w().moveSelected(1, T)
+    expect(w().current()!.vertices[0].p).toEqual([0, T, 0])
+    w().moveSelected(1, -T); w().moveSelected(0, T)
+    expect(w().current()!.vertices[0].p).toEqual([T, 0, 0])
     w().selectVertex(1)
-    for (let i = 0; i < 20; i++) w().moveSelected(0, 1)
-    expect(w().current()!.vertices[1].p[0]).toBe(8)
+    for (let i = 0; i < 20; i++) w().moveSelected(0, T)
+    expect(w().current()!.vertices[1].p[0]).toBe(8 * T)
   })
 
   it('stamps a shape, and the first faces switch LINES to SOLID once', () => {
@@ -69,14 +70,14 @@ describe('workshop', () => {
   it('moves, colors and deletes every vertex on the selected point together', () => {
     w().placeStamp([0, 0, 0])
     w().setColor([1, 0, 0])
-    w().placeStamp([1, 0, 0])
+    w().placeStamp([T, 0, 0])
     const s = w().current()!
-    const shared = s.vertices.map((v, i) => (v.p.join() === '1,0,0' ? i : -1)).filter((i) => i >= 0)
+    const shared = s.vertices.map((v, i) => (v.p.join() === `${T},0,0` ? i : -1)).filter((i) => i >= 0)
     expect(shared).toHaveLength(2)
     w().selectVertex(shared[0])
     // Off to a free point: landing on the blocks' top corners would join those too.
-    w().moveSelected(2, -1)
-    for (const i of shared) expect(w().current()!.vertices[i].p).toEqual([1, 0, -1])
+    w().moveSelected(2, -T)
+    for (const i of shared) expect(w().current()!.vertices[i].p).toEqual([T, 0, -T])
     w().colorSelected([0, 1, 0])
     for (const i of shared) expect(w().current()!.vertices[i].c).toEqual([0, 1, 0])
     const facesBefore = w().current()!.faces.length
@@ -90,58 +91,58 @@ describe('workshop', () => {
 
   it('selects many points: tap toggles, a box replaces, whole points always', () => {
     w().placeStamp([0, 0, 0])          // a block: 8 corners
-    w().addVertex([5, 0, 5])
+    w().addVertex([5 * T, 0, 5 * T])
     const s = w().current()!
     const corner = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
     w().selectVertex(null)
     w().toggleVertex(corner); w().toggleVertex(s.vertices.length - 1)
-    expect(new Set(w().selection.map((i) => s.vertices[i].p.join()))).toEqual(new Set(['0,0,0', '5,0,5']))
+    expect(new Set(w().selection.map((i) => s.vertices[i].p.join()))).toEqual(new Set(['0,0,0', `${5 * T},0,${5 * T}`]))
     w().toggleVertex(corner)
-    expect(w().selection.map((i) => s.vertices[i].p.join())).toEqual(['5,0,5'])
+    expect(w().selection.map((i) => s.vertices[i].p.join())).toEqual([`${5 * T},0,${5 * T}`])
     w().setSelection([corner])
     expect(w().selection).toEqual([corner])
   })
 
   it('nudges, colors and deletes a whole selection at once, refusing a move that would leave the grid', () => {
-    w().addVertex([0, 0, 0]); w().addVertex([8, 0, 0]); w().addVertex([3, 0, 3])
+    w().addVertex([0, 0, 0]); w().addVertex([8 * T, 0, 0]); w().addVertex([3 * T, 0, 3 * T])
     w().setSelection([0, 1, 2])
-    w().moveSelected(0, 1)               // 8 -> 9 is off the grid: nothing moves
-    expect(w().current()!.vertices.map((v) => v.p[0])).toEqual([0, 8, 3])
-    w().moveSelected(2, 1)
-    expect(w().current()!.vertices.map((v) => v.p[2])).toEqual([1, 1, 4])
+    w().moveSelected(0, T)               // 8 -> 9 is off the grid: nothing moves
+    expect(w().current()!.vertices.map((v) => v.p[0])).toEqual([0, 8 * T, 3 * T])
+    w().moveSelected(2, T)
+    expect(w().current()!.vertices.map((v) => v.p[2])).toEqual([T, T, 4 * T])
     w().colorSelected([1, 0, 0])
     expect(w().current()!.vertices.every((v) => v.c.join() === '1,0,0')).toBe(true)
     w().setSelection([0, 2]); w().deleteSelected()
-    expect(w().current()!.vertices.map((v) => v.p.join())).toEqual(['8,0,1'])
+    expect(w().current()!.vertices.map((v) => v.p.join())).toEqual([`${8 * T},0,${T}`])
     expect(w().selection).toEqual([])
   })
 
   it('CONNECTED grows the selection along faces and shared points, and no further', () => {
     w().placeStamp([0, 0, 0])            // one block, 8 corners joined by faces
-    w().placeStamp([5, 0, 5])            // another, apart
-    w().addVertex([-4, 0, -4])           // a lone point
+    w().placeStamp([5 * T, 0, 5 * T])    // another, apart
+    w().addVertex([-4 * T, 0, -4 * T])   // a lone point
     const s = w().current()!
     const a = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
     w().setSelection([a]); w().selectConnected()
     const points = new Set(w().selection.map((i) => s.vertices[i].p.join()))
     expect(points.size).toBe(8)
-    expect(points.has('5,0,5')).toBe(false)
-    expect(points.has('-4,0,-4')).toBe(false)
+    expect(points.has(`${5 * T},0,${5 * T}`)).toBe(false)
+    expect(points.has(`${-4 * T},0,${-4 * T}`)).toBe(false)
     w().setSelection([s.vertices.length - 1]); w().selectConnected()
     expect(w().selection).toEqual([s.vertices.length - 1])
   })
 
   it('keeps a grid scale per shard, never below what its points need, and carries it in the payload', () => {
-    w().addVertex([5, 0, 0])
+    w().addVertex([5 * T, 0, 0])
     expect(w().current()!.extent).toBe(8)
     w().setExtent(3)
     expect(w().current()!.extent).toBe(5)        // the point at x=5 holds it
     w().setExtent(999)
     expect(w().current()!.extent).toBe(64)
-    w().setLevel(50); expect(w().level).toBe(50)
+    w().setLevel(50 * T); expect(w().level).toBe(50 * T)
     w().setExtent(6)
-    expect(w().level).toBe(6)                    // the level follows the grid down
-    expect(w().addVertex([7, 0, 0]), 'outside the grid').toBeUndefined()
+    expect(w().level).toBe(6 * T)                // the level follows the grid down
+    expect(w().addVertex([7 * T, 0, 0]), 'outside the grid').toBeUndefined()
     expect(w().current()!.vertices).toHaveLength(1)
     const text = w().exportCurrent()!
     expect(JSON.parse(text).extent).toBe(6)
@@ -153,7 +154,7 @@ describe('workshop', () => {
 
   it('FILL on a selection: a flat set becomes one polygon, a solid set its hull, repeats are skipped', () => {
     w().setTool('add')
-    for (const p of [[0, 0, 0], [2, 0, 0], [2, 0, 2], [0, 0, 2]] as Array<[number, number, number]>) w().addVertex(p)
+    for (const p of [[0, 0, 0], [2 * T, 0, 0], [2 * T, 0, 2 * T], [0, 0, 2 * T]] as Array<[number, number, number]>) w().addVertex(p)
     w().setSelection([0, 1, 2, 3])
     w().fillSelection()
     expect(w().current()!.faces).toHaveLength(2)
@@ -174,6 +175,22 @@ describe('workshop', () => {
     expect(w().notice).toMatch(/12 faces around 8 points/)
     w().setSelection([0, 1]); w().fillSelection()
     expect(w().notice).toMatch(/three or more/)
+  })
+
+  it('snaps by division: a third of a unit is 40 ticks, and changing the division moves nothing already placed', () => {
+    w().setDivision(3)
+    expect(w().step()).toBe(40)
+    w().addVertex([40, 0, 80])
+    w().setDivision(4)
+    expect(w().step()).toBe(30)
+    w().addVertex([30, 0, 0])
+    w().setSelection([0]); w().moveSelected(0, w().step())
+    expect(w().current()!.vertices.map((v) => v.p)).toEqual([[70, 0, 80], [30, 0, 0]])
+    w().setDivision(1)
+    expect(w().current()!.vertices.map((v) => v.p)).toEqual([[70, 0, 80], [30, 0, 0]])
+    const wire = JSON.parse(w().exportCurrent()!)
+    expect(wire.vertices).toEqual([[0, 0, 0], [0, 0, 0]])
+    expect(wire.ticks).toEqual([[70, 0, 80], [30, 0, 0]])
   })
 
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {

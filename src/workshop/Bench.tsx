@@ -20,7 +20,7 @@ import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
-import { GRID_HALF, centroid, pointKey, rgbToHex } from '../lib/shards'
+import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex } from '../lib/shards'
 import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
@@ -32,9 +32,14 @@ const TAP_SLOP = 8
 type P3 = [number, number, number]
 
 /** The grid point a pointer over the plane means, at the level the store says. */
-function snap(p: Vector3, level: number): P3 {
-  return [Math.round(p.x), level, Math.round(p.z)]
+/** The bench point (units) to the nearest snap step, in ticks, on the current level. */
+function snap(p: Vector3, level: number, step: number): P3 {
+  const q = (v: number): number => Math.round((v * TICKS_PER_UNIT) / step) * step
+  return [q(p.x), level, q(p.z)]
 }
+/** Ticks to bench units. */
+const U = (t: number): number => t / TICKS_PER_UNIT
+const UP = (p: P3): [number, number, number] => [U(p[0]), U(p[1]), U(p[2])]
 
 /**
  * You, to scale, at the grid's centre. An avatar is one gibson wide, and a
@@ -56,6 +61,7 @@ function ScaleAvatar(): JSX.Element {
 
 function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
+  const division = useWorkshop((s) => s.division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
@@ -67,14 +73,14 @@ function Grid(): JSX.Element {
     // changed a moment ago must apply to this tap even if the bench has not
     // re-rendered yet.
     const w = useWorkshop.getState()
-    const at = snap(e.point, w.level)
+    const at = snap(e.point, w.level, w.step())
     if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
   const onMove = (e: ThreeEvent<PointerEvent>): void => {
     const w = useWorkshop.getState()
-    w.setAim(snap(e.point, w.level))
+    w.setAim(snap(e.point, w.level, w.step()))
   }
 
   // A finger lifts and the ghost goes with it; a mouse keeps hovering.
@@ -83,9 +89,11 @@ function Grid(): JSX.Element {
   }
 
   return (
-    <group position={[0, level, 0]}>
+    <group position={[0, U(level), 0]}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
       <gridHelper key={extent} args={[extent * 2, extent * 2, ACCENT, '#1d3547']} />
+      {/* The snap grid between the unit lines, dimmer, when a unit is divided. */}
+      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, '#1b3a4d', '#1b3a4d']} position={[0, -0.002, 0]} />}
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
@@ -118,7 +126,7 @@ function Ghost(): JSX.Element | null {
   if (!aim) return null
   if (tool === 'add') {
     return (
-      <mesh position={aim}>
+      <mesh position={UP(aim)}>
         <sphereGeometry args={[0.2, 12, 12]} />
         <meshBasicMaterial color={rgbToHex(color)} transparent opacity={0.5} toneMapped={false} depthWrite={false} />
       </mesh>
@@ -126,7 +134,7 @@ function Ghost(): JSX.Element | null {
   }
   if (!model) return null
   return (
-    <group position={landing(kind, size, facing, aim, extent)}>
+    <group position={UP(landing(kind, size, facing, aim, extent))}>
       <ShardMesh shard={model} ghost />
     </group>
   )
@@ -167,7 +175,7 @@ function Handles(): JSX.Element | null {
         const isSel = g.some((i) => chosen.has(i))
         const picked = facePick.some((i) => g.includes(i))
         return (
-          <group key={first} position={v.p}>
+          <group key={first} position={UP(v.p)}>
             {/* A generous invisible hit target; the visible handle is small. */}
             <mesh onClick={onClick(first, isSel)}>
               <sphereGeometry args={[0.42, 10, 10]} />
@@ -196,7 +204,7 @@ function PickLoop(): JSX.Element | null {
   const facePick = useWorkshop((s) => s.facePick)
   const line = useMemo(() => {
     if (!shard || facePick.length < 2) return null
-    const pts = facePick.map((i) => shard.vertices[i]?.p).filter((p): p is P3 => !!p)
+    const pts = facePick.map((i) => shard.vertices[i]?.p).filter((p): p is P3 => !!p).map(UP)
     if (pts.length >= 3) pts.push(pts[0])
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute(pts.flat(), 3))
@@ -215,7 +223,7 @@ function FaceHighlight(): JSX.Element | null {
   const lit = useMemo(() => {
     const f = face === null ? undefined : shard?.faces[face]
     if (!shard || !f) return null
-    const pts = f.map((i) => shard.vertices[i].p)
+    const pts = f.map((i) => UP(shard.vertices[i].p))
     // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
@@ -251,7 +259,7 @@ function Aim(): null {
   }, [camera, scene])
   const target = useMemo(() => {
     const shard = useWorkshop.getState().current()
-    return shard ? centroid(shard) : [0, 0, 0]
+    return shard ? UP(centroid(shard)) : [0, 0, 0]
   }, [id])
   useEffect(() => {
     if (!controls) return
@@ -298,7 +306,7 @@ function Marquee(): null {
       const r = canvas.getBoundingClientRect()
       const out: number[] = []
       shard.vertices.forEach((vert, i) => {
-        v.set(vert.p[0], vert.p[1], vert.p[2]).project(camera)
+        v.set(U(vert.p[0]), U(vert.p[1]), U(vert.p[2])).project(camera)
         if (v.z > 1) return
         const px = ((v.x + 1) / 2) * r.width
         const py = ((1 - v.y) / 2) * r.height
@@ -369,7 +377,7 @@ function Keys(): null {
         ArrowUp: 'up', ArrowDown: 'down', KeyW: 'up', KeyS: 'down',
         KeyR: 'away', KeyF: 'toward',
       }
-      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta); return }
+      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
@@ -379,8 +387,8 @@ function Keys(): null {
       if (e.code === 'Digit3') w.setTool('select')
       if (e.code === 'Digit4') w.setTool('face')
       if (e.code === 'KeyQ') w.turnStamp()
-      if (e.code === 'BracketRight') w.setLevel(w.level + 1)
-      if (e.code === 'BracketLeft') w.setLevel(w.level - 1)
+      if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
+      if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

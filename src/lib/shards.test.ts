@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel } from './shards'
+import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel, TICKS_PER_UNIT, packTicks, unpackTicks, unitsLabel } from './shards'
 
 const tri: ShardModel = {
   ...newShard('tri'),
@@ -12,8 +12,8 @@ const tri: ShardModel = {
   unit: 3,
   vertices: [
     { p: [0, 0, 0], c: [1, 0, 0] },
-    { p: [2, 0, 0], c: [0, 1, 0] },
-    { p: [0, 2, 0], c: [0, 0, 1] },
+    { p: [2 * TICKS_PER_UNIT, 0, 0], c: [0, 1, 0] },
+    { p: [0, 2 * TICKS_PER_UNIT, 0], c: [0, 0, 1] },
   ],
   faces: [[0, 1, 2]],
 }
@@ -59,11 +59,36 @@ describe('geometry', () => {
   })
 
   it('validates points and faces', () => {
-    expect(validPoint([1, -8, 8])).toBe(true)
-    expect(validPoint([9, 0, 0])).toBe(false)
+    expect(validPoint([TICKS_PER_UNIT, -8 * TICKS_PER_UNIT, 8 * TICKS_PER_UNIT])).toBe(true)
+    expect(validPoint([9 * TICKS_PER_UNIT, 0, 0])).toBe(false)
+    expect(validPoint([40, 30, -24])).toBe(true)     // a third, a quarter, a fifth
     expect(validPoint([0.5, 0, 0])).toBe(false)
     expect(validFace([0, 1, 2], 3)).toBe(true)
     expect(validFace([0, 1, 1], 3)).toBe(false)
     expect(validFace([0, 1, 3], 3)).toBe(false)
+  })
+})
+
+describe('ticks', () => {
+  it('carries thirds, quarters and fifths exactly, with the run shorthand, and reads an old payload as whole units', () => {
+    const v = (p: [number, number, number]) => ({ p, c: [1, 0, 0] as [number, number, number] })
+    const s = { ...newShard('t'), vertices: [v([0, 0, 0]), v([TICKS_PER_UNIT, 0, 0]), v([40, -30, 24 + 2 * TICKS_PER_UNIT]), v([0, 0, 0])] }
+    const wire = toPayload(s)
+    expect(wire.vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, -1, 2], [0, 0, 0]])
+    expect(wire.ticks).toEqual([-2, [40, 90, 24], -1])
+    const back = fromPayload(wire, 'x')!
+    expect(back.vertices.map((x) => x.p)).toEqual(s.vertices.map((x) => x.p))
+    const old = { ...wire, ticks: undefined }
+    expect(fromPayload(old, 'y')!.vertices.map((x) => x.p)).toEqual([[0, 0, 0], [TICKS_PER_UNIT, 0, 0], [0, -TICKS_PER_UNIT, 2 * TICKS_PER_UNIT], [0, 0, 0]])
+    expect(unpackTicks([-3], 4)).toBeNull()
+    expect(unpackTicks([[120, 0, 0]], 1)).toBeNull()
+    expect(packTicks([])).toEqual([])
+  })
+  it('prints ticks as units', () => {
+    expect(unitsLabel(0)).toBe('0')
+    expect(unitsLabel(240)).toBe('2')
+    expect(unitsLabel(40)).toBe('1/3')
+    expect(unitsLabel(-30)).toBe('-1/4')
+    expect(unitsLabel(2 * 120 + 90)).toBe('2 3/4')
   })
 })

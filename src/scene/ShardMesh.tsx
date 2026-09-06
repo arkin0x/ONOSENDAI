@@ -16,6 +16,8 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AddEquation,
   AdditiveBlending,
+  BackSide,
+  FrontSide,
   CustomBlending,
   OneFactor,
   ZeroFactor,
@@ -27,6 +29,7 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, type ShardModel } from '../lib/shards'
+import { orientFaces } from '../lib/orient'
 
 interface Props {
   shard: ShardModel
@@ -34,6 +37,13 @@ interface Props {
   scale?: number
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
+  /**
+   * Lit, as on the bench: faces shaded flat by the scene's lights, wound
+   * consistently outward (lib/orient.ts) and their backs painted dark, so an
+   * open shape shows its inside and a missing face is plain to see. The
+   * world draws unlit under its bloom instead.
+   */
+  lit?: boolean
   /**
    * Drawn in the world, under its bloom. The bloom adds a blurred copy of
    * everything lit back onto the frame, and across a filled face that is
@@ -58,8 +68,11 @@ const STATIC = [0, 0.9, 1] as const
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false }: Props): JSX.Element | null {
-  const { positions, colors, index } = useMemo(() => flatten(shard), [shard.vertices, shard.faces])
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false }: Props): JSX.Element | null {
+  const { positions, colors, index } = useMemo(() => {
+    const f = flatten(shard)
+    return lit ? { ...f, index: orientFaces(shard.vertices.map((v) => v.p), shard.faces).flat() } : f
+  }, [shard.vertices, shard.faces, lit])
 
   // Live copies: the decode writes into these, the targets stay untouched.
   const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])
@@ -141,9 +154,19 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
   return (
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
-        <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
-          <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />
-        </mesh>
+        <group>
+          <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
+            {lit
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
+              : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+          </mesh>
+          {lit && (
+            <mesh geometry={indexed} frustumCulled={false}>
+              {/* The inside of a face: the vertex colour at a quarter. */}
+              <meshBasicMaterial vertexColors color="#404040" side={BackSide} transparent opacity={opacity} />
+            </mesh>
+          )}
+        </group>
       )}
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
       {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (

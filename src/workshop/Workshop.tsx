@@ -384,6 +384,12 @@ export function Workshop(): JSX.Element | null {
 
       {/* Bottom right: the pad while points are selected, face actions while a face is in hand, the color bar under either. */}
       <div className="ws__corner">
+        {selectedPoints >= 3 && (
+          <div className="benchops" role="group" aria-label="Fill the selection">
+            <span className="workshop__value workshop__value--wide">{selectedPoints} points</span>
+            <button className="workshop__btn" onClick={() => w().fillSelection()} title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)">FILL</button>
+          </div>
+        )}
         {selection.length > 0 && <ControlsPad points={selectedPoints} />}
         {facing && selectedFace !== null && (
           <div className="benchops" role="group" aria-label="Selected face">

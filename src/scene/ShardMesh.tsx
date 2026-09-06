@@ -16,7 +16,6 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AddEquation,
   AdditiveBlending,
-  BackSide,
   FrontSide,
   CustomBlending,
   OneFactor,
@@ -94,6 +93,22 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     return g
   }, [posAttr, colAttr, index])
 
+  // The inside of every face as a front face of its own: the same triangles
+  // wound the other way. Flat shading takes a face's normal from the screen,
+  // and a back face's points away from the viewer, so drawn as back faces the
+  // insides could only ever be ambient; drawn as front faces they take the
+  // lights like the outsides do.
+  const inside = useMemo(() => {
+    if (!lit) return null
+    const g = new BufferGeometry()
+    g.setAttribute('position', posAttr)
+    g.setAttribute('color', colAttr)
+    const flipped: number[] = []
+    for (let i = 0; i + 2 < index.length; i += 3) flipped.push(index[i], index[i + 2], index[i + 1])
+    g.setIndex(flipped)
+    return g
+  }, [posAttr, colAttr, index, lit])
+
   const line = useMemo(() => {
     const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 }))
     l.frustumCulled = false
@@ -104,6 +119,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
   // is a primitive, which R3F never disposes, so its material is ours too.
   useEffect(() => () => { plain.dispose() }, [plain])
   useEffect(() => () => { indexed.dispose() }, [indexed])
+  useEffect(() => () => { inside?.dispose() }, [inside])
   useEffect(() => () => { line.material.dispose() }, [line])
 
   // The scrambled start: each vertex thrown somewhere in the model's extent.
@@ -160,10 +176,10 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
               : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
-          {lit && (
-            <mesh geometry={indexed} frustumCulled={false}>
-              {/* The inside of a face: the vertex colour at a quarter. */}
-              <meshBasicMaterial vertexColors color="#404040" side={BackSide} transparent opacity={opacity} />
+          {lit && inside && (
+            <mesh geometry={inside} frustumCulled={false}>
+              {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside. */}
+              <meshLambertMaterial vertexColors flatShading color="#6a6a6a" side={FrontSide} transparent opacity={opacity} />
             </mesh>
           )}
         </group>

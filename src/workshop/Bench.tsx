@@ -28,6 +28,8 @@ import { useWorkshop } from '../store/useWorkshop'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
+/** The division lines' colour: violet, apart from the unit grid's blue and the accent centre lines. */
+const DIVISION_LINE = '#35295c'
 
 type P3 = [number, number, number]
 
@@ -92,8 +94,9 @@ function Grid(): JSX.Element {
     <group position={[0, U(level), 0]}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
       <gridHelper key={extent} args={[extent * 2, extent * 2, ACCENT, '#1d3547']} />
-      {/* The snap grid between the unit lines, dimmer, when a unit is divided. */}
-      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, '#1b3a4d', '#1b3a4d']} position={[0, -0.002, 0]} />}
+      {/* The snap grid between the unit lines when a unit is divided: its own quiet
+          violet, so the unit lines stay the unit lines whatever the division. */}
+      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, DIVISION_LINE, DIVISION_LINE]} position={[0, -0.002, 0]} />}
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised

@@ -457,11 +457,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     colorSelected: (c) => {
-      const { selection } = get()
+      const { selection, selectedFace } = get()
       set({ color: clampColor(c) })
-      if (selection.length === 0) return
+      // With no points selected, a selected face takes the color for its corners.
+      const face = selection.length === 0 && selectedFace !== null ? get().current()?.faces[selectedFace] : undefined
+      if (selection.length === 0 && !face) return
       edit((s) => {
-        const chosen = new Set(selection.filter((i) => s.vertices[i]))
+        const chosen = new Set((face ?? selection).filter((i) => s.vertices[i]))
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }

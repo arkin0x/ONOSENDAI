@@ -193,6 +193,17 @@ describe('workshop', () => {
     expect(wire.ticks).toEqual([[70, 0, 80], [30, 0, 0]])
   })
 
+  it('colors a selected face\'s corners when no point is selected', () => {
+    w().placeStamp([0, 0, 0])
+    const s = w().current()!
+    w().selectVertex(null)
+    w().selectFace(0)
+    w().colorSelected([1, 0, 0])
+    const corners = new Set(s.faces[0])
+    s.vertices.forEach((_, i) => expect(w().current()!.vertices[i].c.join(), `vertex ${i}`).toBe(corners.has(i) ? '1,0,0' : s.vertices[i].c.join()))
+    expect(w().selectedFace).toBe(0)
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

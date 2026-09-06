@@ -11,8 +11,9 @@
  * the CONTROLS pad, present only while points are selected: the main pad's
  * shape, nudging the selection in screen directions, with CONNECT and DELETE
  * in its corners; and below it the COLOR bar, gone while FACE is the tool
- * since a face has no color of its own. On a phone the color bar spans the
- * bottom and the pad stacks above it.
+ * with no face in hand, back once a face is selected so a color can be put
+ * on its corners. On a phone the color bar spans the bottom and the pad
+ * stacks above it.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -421,7 +422,7 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().clearFacePick()} title="Drop the picks (Esc)">CANCEL</button>
           </div>
         )}
-        {tool !== 'face' && (
+        {(tool !== 'face' || selectedFace !== null) && (
           <div className="ws__color" role="group" aria-label="Color">
             <span className="workshop__label">COLOR</span>
             <span className="workshop__picker" title="Pick any color; it joins the palette">

@@ -295,7 +295,7 @@ export function Workshop(): JSX.Element | null {
               delete it. Stamps keep their own corners even where they touch, so a red block against a
               blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
               DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
-              the width of a sector, and SCALE is how far the grid reaches from the origin. DEPLOY shows
+              the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
               the shard at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc clears then closes.
@@ -371,7 +371,7 @@ export function Workshop(): JSX.Element | null {
             <span className="workshop__unit-size" title="Where taps, the box, nudges and the level land. Positions already placed keep their exact spots.">the snap for placing and nudging</span>
           </div>
           <div className="workshop__row">
-            <span className="workshop__label">SCALE</span>
+            <span className="workshop__label">GRID SIZE</span>
             <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) - 1))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
             <span className="workshop__value">{extent}</span>
             <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) + 1))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>

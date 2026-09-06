@@ -28,8 +28,14 @@ import { useWorkshop } from '../store/useWorkshop'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
-/** The division lines' colour: violet, apart from the unit grid's blue and the accent centre lines. */
-const DIVISION_LINE = '#35295c'
+/** The unit grid's line colour when a unit is not divided. */
+const UNIT_LINE = '#1d3547'
+/**
+ * When a unit is divided the unit lines step up toward the axis lines'
+ * light blue, and the division lines take the unit lines' old colour, so
+ * the unit grid stays the unit grid however fine the snap.
+ */
+const UNIT_LINE_DIVIDED = '#166c86'
 
 type P3 = [number, number, number]
 
@@ -93,10 +99,9 @@ function Grid(): JSX.Element {
   return (
     <group position={[0, U(level), 0]}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
-      <gridHelper key={extent} args={[extent * 2, extent * 2, ACCENT, '#1d3547']} />
-      {/* The snap grid between the unit lines when a unit is divided: its own quiet
-          violet, so the unit lines stay the unit lines whatever the division. */}
-      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, DIVISION_LINE, DIVISION_LINE]} position={[0, -0.002, 0]} />}
+      <gridHelper key={`u${extent}-${division > 1 ? 1 : 0}`} args={[extent * 2, extent * 2, ACCENT, division > 1 ? UNIT_LINE_DIVIDED : UNIT_LINE]} />
+      {/* The snap grid between the unit lines when a unit is divided, in the unit lines' plain colour. */}
+      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, UNIT_LINE, UNIT_LINE]} position={[0, -0.002, 0]} />}
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised

@@ -75,10 +75,10 @@ function hopResult(from: Position, to: Position, plane: 0 | 1, prev: string): Re
 
 function sidestepResult(from: Position, to: Position, plane: 0 | 1, prev: string): Record<string, unknown> {
   const p = computeSidestepProof(from.x, from.y, from.z, to.x, to.y, to.z, plane, prev)
-  const hex = (b: Uint8Array[]): string[] => b.map(bytesToHex)
+  const hex = (paths: Uint8Array[][]): string[][] => paths.map((q) => q.map(bytesToHex))
   return {
     proof_hash: p.proofHash, merkle_x: bytesToHex(p.merkleX), merkle_y: bytesToHex(p.merkleY), merkle_z: bytesToHex(p.merkleZ),
-    inclusion_proofs: { x: hex(p.inclusionProofs.x), y: hex(p.inclusionProofs.y), z: hex(p.inclusionProofs.z) },
+    openings: { x: hex(p.openings.x), y: hex(p.openings.y), z: hex(p.openings.z) },
     lca_heights: p.lcaHeights, previous_event_id: prev, terrain_k: p.terrainK, region_m_hex: p.regionM.toString(16), compute_msats: 300,
   }
 }
@@ -418,7 +418,7 @@ describe('cloud routes', () => {
     expect(ev.tags.find((t) => t[0] === 'A')?.[1]).toBe('sidestep')
     expect(ev.tags.find((t) => t[0] === 'proof')?.[1]).toBe(p.proofHash)
     expect(ev.tags.find((t) => t[0] === 'mr')?.[1]).toBe([p.merkleX, p.merkleY, p.merkleZ].map(bytesToHex).join(':'))
-    expect(ev.tags.find((t) => t[0] === 'mp')?.[1]).toBe([p.inclusionProofs.x.map(bytesToHex).join(''), '', ''].join(':'))
+    expect(ev.tags.find((t) => t[0] === 'mp')?.[1]).toBe([p.openings.x.map((q) => q.map(bytesToHex).join('')).join(''), '', ''].join(':'))
     expect(ev.tags.find((t) => t[0] === 'hx')?.[1]).toBe('13')
     await vi.waitFor(() => { expect(S().plan).toBeNull() })
 

@@ -17,7 +17,7 @@
  * measurement that would have wedged this thread, not after.
  */
 
-import { AXIS_CENTER, computeAxisMerkleRoot, computeSubtreeCantor } from 'cyberspace-core'
+import { AXIS_CENTER, computeAxisMerkleRoot, computeSubtreeCantor, seedPrefix } from 'cyberspace-core'
 
 export interface CalibrateRequest {
   id: number
@@ -97,7 +97,8 @@ self.onmessage = async (event: MessageEvent<CalibrateRequest>) => {
     // 2^17 - 1 internal nodes.
     const SIDESTEP_HASHES = 2 ** 18 - 1
     const t0 = performance.now()
-    computeAxisMerkleRoot(AXIS_CENTER, AXIS_CENTER + (1n << 16n))
+    // Any seed will do for the rate; the openings add nine two-leaf rebuilds at this height.
+    computeAxisMerkleRoot(seedPrefix(new Uint8Array(32), 0), 0, AXIS_CENTER, AXIS_CENTER + (1n << 16n))
     const sidestepMs = Math.max(performance.now() - t0, 0.5)
     const sha256PerSec = SIDESTEP_HASHES / (sidestepMs / 1000)
 

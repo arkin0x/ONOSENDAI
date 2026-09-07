@@ -237,7 +237,7 @@ describe('cloudProofResponse', () => {
     const p = computeSidestepProof(0n, 0n, 0n, 4096n, 0n, 0n, 0, 'ab'.repeat(32))
     const result = {
       proof_hash: p.proofHash, merkle_x: bytesToHex(p.merkleX), merkle_y: bytesToHex(p.merkleY), merkle_z: bytesToHex(p.merkleZ),
-      inclusion_proofs: { x: p.inclusionProofs.x.map(bytesToHex), y: [], z: [] }, lca_heights: p.lcaHeights,
+      openings: { x: p.openings.x.map((q) => q.map(bytesToHex)), y: [], z: [] }, lca_heights: p.lcaHeights,
       previous_event_id: 'ab'.repeat(32), terrain_k: p.terrainK, region_m_hex: p.regionM.toString(16), compute_msats: 300,
     }
     const record: PendingCloudJob = { ...base, action: 'sidestep', to: wirePosition({ x: 4096n, y: 0n, z: 0n }), stage: 'computing', deposit: null }
@@ -249,7 +249,7 @@ describe('cloudProofResponse', () => {
     expect(msg.lca).toEqual({ x: 13, y: 0, z: 0 })
     expect(msg.sidestep).toEqual({
       merkleRoots: [bytesToHex(p.merkleX), bytesToHex(p.merkleY), bytesToHex(p.merkleZ)],
-      inclusionProofs: [p.inclusionProofs.x.map(bytesToHex).join(''), '', ''],
+      openings: [p.openings.x.map((q) => q.map(bytesToHex).join('')).join(''), '', ''],
       lcaHeights: [13, 0, 0],
     })
     expect(msg.source).toBe('cloud')

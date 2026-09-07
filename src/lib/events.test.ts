@@ -142,7 +142,7 @@ describe('sidestep (§8.5)', () => {
     createdAt: 1, genesisId: ZERO, previousId: ZERO, prevCoordHex: ZERO,
     to: { x: 8n, y: 0n, z: 0n }, plane: 0, proofHash: ZERO,
     merkleRoots: ['11'.repeat(32), '22'.repeat(32), '33'.repeat(32)],
-    inclusionProofs: ['aa'.repeat(32) + 'bb'.repeat(32), '', ''],
+    openings: ['aa'.repeat(32) + 'bb'.repeat(32), '', ''],
     lcaHeights: [2, 0, 0],
   })
 

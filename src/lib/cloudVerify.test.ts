@@ -14,7 +14,6 @@ import { describe, expect, it } from 'vitest'
 import {
   bytesToHex,
   cantorPair,
-  computeAxisMerkleRoot,
   computeHopProof,
   computeSidestepProof,
   deriveRegionKeys,
@@ -129,13 +128,13 @@ describe('verifyCloudHop', () => {
 
 function sidestepResult(move: CloudMove): CloudSidestepResult {
   const p = computeSidestepProof(move.from.x, move.from.y, move.from.z, move.to.x, move.to.y, move.to.z, move.plane, move.prevEventId)
-  const hex = (b: Uint8Array[]): string[] => b.map(bytesToHex)
+  const hex = (paths: Uint8Array[][]): string[][] => paths.map((q) => q.map(bytesToHex))
   return {
     proof_hash: p.proofHash,
     merkle_x: bytesToHex(p.merkleX),
     merkle_y: bytesToHex(p.merkleY),
     merkle_z: bytesToHex(p.merkleZ),
-    inclusion_proofs: { x: hex(p.inclusionProofs.x), y: hex(p.inclusionProofs.y), z: hex(p.inclusionProofs.z) },
+    openings: { x: hex(p.openings.x), y: hex(p.openings.y), z: hex(p.openings.z) },
     lca_heights: p.lcaHeights,
     previous_event_id: move.prevEventId,
     terrain_k: p.terrainK,
@@ -159,29 +158,33 @@ describe('verifyCloudSidestep', () => {
   it('lands where the spec says and passes an honest result', () => {
     expect(SIDESTEP.to).toEqual({ x: 4096n, y: 256n, z: 0n })
     expect(good.lca_heights).toEqual([13, 9, 0])
-    expect(good.inclusion_proofs.x).toHaveLength(13)
-    expect(good.inclusion_proofs.z).toHaveLength(0)
+    // Nine openings of thirteen siblings on x (6.10), none on the still axis.
+    expect(good.openings.x).toHaveLength(9)
+    expect(good.openings.x[0]).toHaveLength(13)
+    expect(good.openings.z).toHaveLength(0)
     expect(verifyCloudSidestep(good, SIDESTEP)).toEqual([])
   })
 
   it('rejects one flipped sibling on one axis, and nothing else', () => {
-    const path = [...good.inclusion_proofs.x]
-    path[4] = path[4].startsWith('0') ? '1' + path[4].slice(1) : '0' + path[4].slice(1)
-    expect(verifyCloudSidestep({ ...good, inclusion_proofs: { ...good.inclusion_proofs, x: path } }, SIDESTEP)).toEqual(['inclusion:x'])
+    const paths = good.openings.x.map((q) => [...q])
+    paths[3][4] = paths[3][4].startsWith('0') ? '1' + paths[3][4].slice(1) : '0' + paths[3][4].slice(1)
+    expect(verifyCloudSidestep({ ...good, openings: { ...good.openings, x: paths } }, SIDESTEP)).toEqual(['openings:x'])
   })
 
-  it('rejects the leaf-0 path HOSAKA used to return instead of the destination path', () => {
-    // From 4096 toward 0 the destination IS leaf 0 of the same subtree, so its
-    // path is the old server's output for a 0 -> 4096 crossing.
-    const leafZero = computeAxisMerkleRoot(4096n, 0n)
-    expect(bytesToHex(leafZero.root)).toBe(good.merkle_x)
-    const failed = verifyCloudSidestep({ ...good, inclusion_proofs: { ...good.inclusion_proofs, x: leafZero.siblings.map(bytesToHex) } }, SIDESTEP)
-    expect(failed).toEqual(['inclusion:x'])
+  it('rejects a v1 result, one path per axis, and a tree built under another seed', () => {
+    // A v1 server returned the destination path alone; 6.15 says reject it.
+    expect(verifyCloudSidestep({ ...good, openings: { ...good.openings, x: [good.openings.x[0]] } }, SIDESTEP)).toEqual(['openings:x'])
+    // A tree seeded by someone else's chain position: its roots and openings
+    // are consistent with each other, and wrong for us on every moving axis.
+    const theirs = sidestepResult({ ...SIDESTEP, prevEventId: 'cd'.repeat(32) })
+    const failed = verifyCloudSidestep({ ...theirs, previous_event_id: PREV }, SIDESTEP)
+    expect(failed).toContain('openings:x')
+    expect(failed).toContain('openings:y')
   })
 
   it('rejects a changed root through the path, the region and the proof hash', () => {
     const failed = verifyCloudSidestep({ ...good, merkle_y: 'ee'.repeat(32) }, SIDESTEP)
-    expect(failed).toContain('inclusion:y')
+    expect(failed).toContain('openings:y')
     expect(failed).toContain('region_m')
     expect(failed).toContain('proof_hash')
   })
@@ -205,7 +208,7 @@ describe('verifyCloudSidestep', () => {
 
   it('rejects malformed roots and paths without throwing', () => {
     expect(verifyCloudSidestep({ ...good, merkle_x: 'zz' }, SIDESTEP)).toContain('merkle_x')
-    expect(verifyCloudSidestep({ ...good, inclusion_proofs: { ...good.inclusion_proofs, y: ['nope'] } }, SIDESTEP)).toEqual(['inclusion:y'])
+    expect(verifyCloudSidestep({ ...good, openings: { ...good.openings, y: [['nope']] } }, SIDESTEP)).toEqual(['openings:y'])
     expect(verifyCloudSidestep(undefined as unknown as CloudSidestepResult, SIDESTEP)).toEqual(['result'])
   })
 })

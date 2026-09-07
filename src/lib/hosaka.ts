@@ -152,7 +152,8 @@ export interface CloudSidestepResult {
   merkle_y: string
   merkle_z: string
   /** Per axis, the destination leaf's sibling hashes leaf-first; empty where the axis did not move. */
-  inclusion_proofs: { x: string[]; y: string[]; z: string[] }
+  /** Per-axis openings (spec 6.10): the destination leaf's path, then eight sampled paths, each a list of sibling hashes leaf first; empty for a still axis. */
+  openings: { x: string[][]; y: string[][]; z: string[][] }
   lca_heights: [number, number, number]
   /** JSON numbers above 2^53: never read, only recomputed. */
   bases?: unknown

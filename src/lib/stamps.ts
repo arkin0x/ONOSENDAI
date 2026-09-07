@@ -81,6 +81,12 @@ function box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: num
 }
 
 /** Where a shape of side s sits so the tap is at or near its middle: [−⌊s/2⌋, s − ⌊s/2⌋]. */
+/**
+ * A shape's footprint across the tap, on whole units: an even size sits
+ * centred on the tap, an odd size hangs one more unit to the positive side.
+ * Corners land on gibsons, as hand-placed vertices do; a finer DIVISION is
+ * the way between them.
+ */
 function span(s: number): [number, number] {
   const lo = -Math.floor(s / 2)
   return [lo, lo + s]

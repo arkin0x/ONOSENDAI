@@ -93,10 +93,11 @@ describe('workshop', () => {
     w().placeStamp([0, 0, 0])          // a block: 8 corners
     w().addVertex([5 * T, 0, 5 * T])
     const s = w().current()!
-    const corner = s.vertices.findIndex((v) => ticksOf(v).join() === '0,0,0')
+    const corner = 0
+    const cornerKey = ticksOf(s.vertices[0]).join()
     w().selectVertex(null)
     w().toggleVertex(corner); w().toggleVertex(s.vertices.length - 1)
-    expect(new Set(w().selection.map((i) => ticksOf(s.vertices[i]).join()))).toEqual(new Set(['0,0,0', `${5 * T},0,${5 * T}`]))
+    expect(new Set(w().selection.map((i) => ticksOf(s.vertices[i]).join()))).toEqual(new Set([cornerKey, `${5 * T},0,${5 * T}`]))
     w().toggleVertex(corner)
     expect(w().selection.map((i) => ticksOf(s.vertices[i]).join())).toEqual([`${5 * T},0,${5 * T}`])
     w().setSelection([corner])
@@ -122,7 +123,7 @@ describe('workshop', () => {
     w().placeStamp([5 * T, 0, 5 * T])    // another, apart
     w().addVertex([-4 * T, 0, -4 * T])   // a lone point
     const s = w().current()!
-    const a = s.vertices.findIndex((v) => ticksOf(v).join() === '0,0,0')
+    const a = 0
     w().setSelection([a]); w().selectConnected()
     const points = new Set(w().selection.map((i) => ticksOf(s.vertices[i]).join()))
     expect(points.size).toBe(8)

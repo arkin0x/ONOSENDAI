@@ -28,7 +28,7 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
-import { orientFaces } from '../lib/orient'
+import { orientShard } from '../lib/orient'
 
 interface Props {
   shard: ShardModel
@@ -70,7 +70,11 @@ const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendS
 export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => {
     const f = flatten(shard)
-    return lit ? { ...f, index: orientFaces(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces).flat() } : f
+    if (!lit) return f
+    // Wound outward, and without the faces buried inside a join, which would
+    // only fight the face they sit against (orient.ts).
+    const o = orientShard(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces)
+    return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() }
   }, [shard.vertices, shard.faces, lit])
 
   // Live copies: the decode writes into these, the targets stay untouched.

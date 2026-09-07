@@ -25,17 +25,18 @@ describe('moveDirection', () => {
 })
 
 describe('facingQuaternion', () => {
-  it('leaves a move along +X as it is, and turns the nose about for -X with the top still up', () => {
-    expect(turned(new Vector3(1, 0, 0), new Vector3(1, 0, 0))).toEqual([1, 0, 0])
-    expect(turned(new Vector3(-1, 0, 0), new Vector3(1, 0, 0))).toEqual([-1, 0, 0])
-    expect(turned(new Vector3(-1, 0, 0), new Vector3(0, 1, 0))).toEqual([0, 1, 0])
+  const NOSE = new Vector3(0, 0, -1) // model +Z, as the scene draws it
+  it('leaves a move along the nose as it is, and turns about for the opposite with the top still up', () => {
+    expect(turned(new Vector3(0, 0, -1), NOSE)).toEqual([0, 0, -1])
+    expect(turned(new Vector3(0, 0, 1), NOSE)).toEqual([0, 0, 1])
+    expect(turned(new Vector3(0, 0, 1), new Vector3(0, 1, 0))).toEqual([0, 1, 0])
   })
   it('points the nose along any direction, top up when it can be', () => {
-    for (const dir of [new Vector3(0, 0, 1), new Vector3(0, 0, -1), new Vector3(1, 0, 1).normalize(), new Vector3(0, 1, 0)]) {
-      const nose = turned(dir, new Vector3(1, 0, 0))
+    for (const dir of [new Vector3(1, 0, 0), new Vector3(-1, 0, 0), new Vector3(1, 0, 1).normalize(), new Vector3(0, 1, 0)]) {
+      const nose = turned(dir, NOSE)
       expect(nose.map((n, i) => Math.abs(n - +dir.toArray()[i].toFixed(3)) < 0.002).every(Boolean)).toBe(true)
     }
-    // Sideways along +Z: the top stays up.
-    expect(turned(new Vector3(0, 0, 1), new Vector3(0, 1, 0))).toEqual([0, 1, 0])
+    // Sideways along +X: the top stays up.
+    expect(turned(new Vector3(1, 0, 0), new Vector3(0, 1, 0))).toEqual([0, 1, 0])
   })
 })

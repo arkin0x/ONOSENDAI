@@ -2,9 +2,9 @@
  * facing.ts - which way an avatar points.
  *
  * After a hop or a sidestep the avatar turns to face the way it went, so a
- * shape with a front reads as going somewhere. A shard's front is +X, the
- * way a stamp faces on the bench at FACING 0, and it turns about its own
- * centre with its top kept up wherever the move allows.
+ * shape with a front reads as going somewhere. A shard's front is its +Z,
+ * which the scene draws as render -Z (shards.ts toRender), and it turns
+ * about its own centre with its top kept up wherever the move allows.
  */
 
 import { Matrix4, Quaternion, Vector3 } from 'three'
@@ -27,11 +27,14 @@ export function moveDirection(from: Position, to: Position, axes: ViewAxes): Vec
 const UP = new Vector3(0, 1, 0)
 const OUT = new Vector3(0, 0, 1)
 
-/** The rotation that turns the nose, +X, along `dir`, with the top kept up where the move is not vertical. */
+/**
+ * The rotation that turns the nose, model +Z and so render -Z, along `dir`,
+ * with the top kept up where the move is not vertical.
+ */
 export function facingQuaternion(dir: Vector3): Quaternion {
-  const x = dir.clone().normalize()
-  const hint = Math.abs(x.y) > 0.99 ? OUT : UP
-  const z = new Vector3().crossVectors(x, hint).normalize()
+  const z = dir.clone().normalize().negate()
+  const hint = Math.abs(z.y) > 0.99 ? OUT : UP
+  const x = new Vector3().crossVectors(hint, z).normalize()
   const y = new Vector3().crossVectors(z, x).normalize()
   return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, z))
 }

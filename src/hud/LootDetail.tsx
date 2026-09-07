@@ -10,6 +10,7 @@
  * VIEW button that flies the scene to each.
  */
 
+import { cashuLabel, decodeCashuToken, findCashuToken } from '../lib/cashu'
 import { nip19 } from 'nostr-tools'
 import type { Plane } from 'cyberspace-core'
 import { useState } from 'react'
@@ -37,6 +38,13 @@ interface OpenedItem {
   unit: number
   shard?: ShardModel
   text?: string
+}
+
+/** A message's preview, or what its Cashu token holds when it carries one. */
+function cashuOrPreview(text: string | undefined): string {
+  const raw = findCashuToken(text)
+  const token = raw ? decodeCashuToken(raw) : null
+  return token ? `₿ ${cashuLabel(token)} hidden here` : messagePreview(text ?? '', 48)
 }
 
 function safeNpub(pubkey: string): string {
@@ -67,7 +75,7 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(h.eventId, {
       eventId: h.eventId,
       type: h.type,
-      label: h.type === 'message' ? messagePreview(h.text ?? '', 48) : h.shard?.name ?? 'shard',
+      label: h.type === 'message' ? cashuOrPreview(h.text) : h.shard?.name ?? 'shard',
       at: h.at,
       plane: h.plane,
       unit: h.type === 'shard' ? h.shard?.unit ?? 0 : 0,
@@ -80,7 +88,7 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(d.eventId, {
       eventId: d.eventId,
       type: d.type,
-      label: d.type === 'message' ? messagePreview(d.text ?? '', 48) : d.shard?.name ?? 'shard',
+      label: d.type === 'message' ? cashuOrPreview(d.text) : d.shard?.name ?? 'shard',
       at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) },
       plane: d.plane,
       unit: d.type === 'shard' ? d.shard?.unit ?? 0 : 0,
@@ -164,7 +172,7 @@ export function LootDetail(): JSX.Element | null {
           <ul className="lootd__items">
             {opened.map((o) => (
               <li key={o.eventId} className="lootd__item">
-                <span className={`secret__badge secret__badge--${o.type}`}>{o.type === 'message' ? '✎' : '◇'}</span>
+                <span className={`secret__badge secret__badge--${o.type}`}>{o.type === 'message' ? (o.label.startsWith('₿') ? '₿' : '✎') : '◇'}</span>
                 <span className="lootd__item-label" title={o.label}>{o.label}</span>
                 <span className="lootd__acts">
                   <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>

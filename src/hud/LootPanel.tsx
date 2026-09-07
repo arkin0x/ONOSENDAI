@@ -11,6 +11,7 @@
  * that scrolls, so the menu column stays short.
  */
 
+import { findCashuToken } from '../lib/cashu'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLoot } from '../hooks/useLoot'
@@ -37,7 +38,7 @@ export function LootPanel(): JSX.Element {
     const by = new Map<string, { at: number; glyph: string }[]>()
     for (const h of Object.values(discovered)) {
       const list = by.get(h.bagId) ?? []
-      list.push({ at: h.createdAt, glyph: h.type === 'message' ? '✎' : '◇' })
+      list.push({ at: h.createdAt, glyph: h.type === 'message' ? (findCashuToken(h.text) ? '₿' : '✎') : '◇' })
       by.set(h.bagId, list)
     }
     const out = new Map<string, string>()

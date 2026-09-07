@@ -23,6 +23,7 @@
 import { create } from 'zustand'
 import {
   GRID_HALF,
+  centroid,
   MAX_EXTENT,
   MIN_EXTENT,
   neededExtent,
@@ -41,7 +42,9 @@ import {
   type ShardVertex,
 } from '../lib/shards'
 import { MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind } from '../lib/stamps'
-import { triangulate } from '../lib/triangulate'
+import { newell, triangulate } from '../lib/triangulate'
+import { Vector3 } from 'three'
+import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 
 export type Tool = 'stamp' | 'add' | 'select' | 'face'
 
@@ -133,6 +136,8 @@ export interface WorkshopState {
   clearFacePick: () => void
   /** Make faces from the picked corners, in order. */
   fill: () => void
+  /** Faces for the selected points at once: a flat set becomes one polygon, a solid set its convex hull. */
+  fillSelection: () => void
   removeFace: (index: number) => void
   clearShard: () => void
   undo: () => void
@@ -184,6 +189,55 @@ function group(s: ShardModel, index: number): number[] {
 }
 
 const faceKey = (f: [number, number, number]): string => [...f].sort((a, b) => a - b).join(',')
+
+type Tri = [number, number, number]
+type Tris = Tri[] & { hull?: boolean }
+
+/**
+ * Faces for a set of points with no order given. Flat (all on one plane): the
+ * points are walked around their centre and the polygon triangulated. Not
+ * flat: their convex hull, every triangle outward. Null when they lie on a
+ * line. Indices are into `pts`.
+ */
+function facesFor(pts: P3[]): Tris | null {
+  const c: P3 = [0, 0, 0]
+  for (const p of pts) for (let a = 0; a < 3; a++) c[a] += p[a] / pts.length
+  const n = newell(pts)
+  const len = Math.hypot(n[0], n[1], n[2])
+  // Distance of every point from the best plane through them.
+  const flat = len > 1e-9 && pts.every((p) => Math.abs(((p[0] - c[0]) * n[0] + (p[1] - c[1]) * n[1] + (p[2] - c[2]) * n[2]) / len) < 1e-6)
+  if (flat) {
+    const u: P3 = Math.abs(n[0]) < 0.9 * len ? [0, n[2], -n[1]] : [n[2], 0, -n[0]]
+    const ul = Math.hypot(u[0], u[1], u[2]); u[0] /= ul; u[1] /= ul; u[2] /= ul
+    const v: P3 = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]]
+    const vl = Math.hypot(v[0], v[1], v[2]); v[0] /= vl; v[1] /= vl; v[2] /= vl
+    const angle = (p: P3): number => Math.atan2((p[0] - c[0]) * v[0] + (p[1] - c[1]) * v[1] + (p[2] - c[2]) * v[2], (p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1] + (p[2] - c[2]) * u[2])
+    const order = pts.map((p, i) => ({ i, a: angle(p) })).sort((x, y) => x.a - y.a).map((x) => x.i)
+    const tris = triangulate(order.map((i) => pts[i]))
+    if (!tris) return null
+    return tris.map((t) => [order[t[0]], order[t[1]], order[t[2]]] as Tri)
+  }
+  const hull = new ConvexHull().setFromPoints(pts.map((p) => new Vector3(p[0], p[1], p[2])))
+  const at = new Map(pts.map((p, i) => [pointKey(p), i]))
+  const out: Tris = []
+  for (const face of hull.faces) {
+    const corners: number[] = []
+    let e = face.edge
+    do { corners.push(at.get(pointKey([e.head().point.x, e.head().point.y, e.head().point.z] as P3)) as number); e = e.next } while (e !== face.edge)
+    if (corners.length === 3 && corners.every((i) => i !== undefined)) out.push([corners[0], corners[1], corners[2]])
+  }
+  if (out.length === 0) return null
+  out.hull = true
+  return out
+}
+
+/** The face wound so its normal points away from `centre`. */
+function awayFrom(s: ShardModel, f: Tri, centre: P3): Tri {
+  const [a, b, c] = f.map((i) => s.vertices[i].p)
+  const n = newell([a, b, c])
+  const m: P3 = [(a[0] + b[0] + c[0]) / 3 - centre[0], (a[1] + b[1] + c[1]) / 3 - centre[1], (a[2] + b[2] + c[2]) / 3 - centre[2]]
+  return n[0] * m[0] + n[1] * m[1] + n[2] * m[2] < 0 ? [f[0], f[2], f[1]] : f
+}
 
 export const useWorkshop = create<WorkshopState>((set, get) => {
   /** Apply an edit to the current shard, remember what it was, stamp it, persist. */
@@ -457,6 +511,35 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return { ...next, mode: solidIfFirstFaces(cur, next).mode }
       }, solidIfFirstFaces(s, { ...s, faces: [[0, 0, 0]] }).notice)
       set({ facePick: [] })
+    },
+
+    fillSelection: () => {
+      const s = get().current()
+      const { selection } = get()
+      if (!s) return
+      // One vertex per point, so a shared point counts once.
+      const firstAt = new Map<string, number>()
+      for (const i of selection) { const v = s.vertices[i]; if (v && !firstAt.has(pointKey(v.p))) firstAt.set(pointKey(v.p), i) }
+      const idx = [...firstAt.values()]
+      if (idx.length < 3) { set({ notice: 'Select three or more points to fill.' }); return }
+      const pts = idx.map((i) => s.vertices[i].p)
+      const faces = facesFor(pts)
+      if (!faces) { set({ notice: 'Those points do not make a face: they lie on one line.' }); return }
+      const centre = centroid(s)
+      const before = s.faces.length
+      edit((cur) => {
+        const have = new Set(cur.faces.map(faceKey))
+        const fresh = faces
+          .map((t) => [idx[t[0]], idx[t[1]], idx[t[2]]] as [number, number, number])
+          .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(f)))
+          // A flat fill faces away from the shard's middle; the hull already does.
+          .map((f) => faces.hull ? f : awayFrom(cur, f, centre))
+        if (!fresh.length) return null
+        const next = { ...cur, faces: [...cur.faces, ...fresh] }
+        return { ...next, mode: solidIfFirstFaces(cur, next).mode }
+      })
+      const added = (get().current()?.faces.length ?? before) - before
+      set({ notice: added ? `${added} face${added === 1 ? '' : 's'} ${faces.hull ? 'around' : 'across'} ${idx.length} points.` : 'Those faces are already there.' })
     },
 
     removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),

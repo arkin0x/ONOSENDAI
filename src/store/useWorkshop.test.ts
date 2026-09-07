@@ -151,6 +151,31 @@ describe('workshop', () => {
     expect(w().current()!.extent).toBe(8)        // an older payload lands on the default
   })
 
+  it('FILL on a selection: a flat set becomes one polygon, a solid set its hull, repeats are skipped', () => {
+    w().setTool('add')
+    for (const p of [[0, 0, 0], [2, 0, 0], [2, 0, 2], [0, 0, 2]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1, 2, 3])
+    w().fillSelection()
+    expect(w().current()!.faces).toHaveLength(2)
+    expect(w().notice).toMatch(/2 faces across 4 points/)
+    w().fillSelection()
+    expect(w().current()!.faces).toHaveLength(2)
+    expect(w().notice).toMatch(/already there/)
+    w().clearShard()
+    w().placeStamp([0, 0, 0])
+    const block = w().current()!
+    // The corners only, as points, on a fresh shard: their hull is the block back.
+    w().clearShard()
+    for (const v of block.vertices) w().addVertex(v.p)
+    expect(w().current()!.faces).toHaveLength(0)
+    w().setSelection(w().current()!.vertices.map((_, i) => i))
+    w().fillSelection()
+    expect(w().current()!.faces).toHaveLength(12)
+    expect(w().notice).toMatch(/12 faces around 8 points/)
+    w().setSelection([0, 1]); w().fillSelection()
+    expect(w().notice).toMatch(/three or more/)
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

@@ -22,7 +22,7 @@ export type P3 = [number, number, number]
 type P2 = [number, number]
 
 /** Newell's method: the normal of a (possibly non-planar) loop, unnormalised. */
-function newell(points: P3[]): P3 {
+export function newell(points: P3[]): P3 {
   const n: P3 = [0, 0, 0]
   for (let i = 0; i < points.length; i++) {
     const a = points[i], b = points[(i + 1) % points.length]

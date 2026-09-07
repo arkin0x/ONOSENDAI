@@ -18,7 +18,7 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, Line, LineBasicMaterial, Vector3 } from 'three'
+import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, centroid, pointKey, rgbToHex } from '../lib/shards'
 import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
@@ -34,6 +34,24 @@ type P3 = [number, number, number]
 /** The grid point a pointer over the plane means, at the level the store says. */
 function snap(p: Vector3, level: number): P3 {
   return [Math.round(p.x), level, Math.round(p.z)]
+}
+
+/**
+ * You, to scale, at the grid's centre. An avatar is one gibson wide, and a
+ * grid unit is 2^multiplier gibsons, so this is the body the shard is being
+ * built around: a whole unit at multiplier 0, a speck at 2^10, gone by 2^20,
+ * which is the point. White, as another identity is drawn in the world.
+ */
+function ScaleAvatar(): JSX.Element {
+  const unit = useWorkshop((s) => s.current()?.unit ?? 0)
+  const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  const k = Math.pow(2, -unit)
+  return (
+    <lineSegments geometry={geometry} scale={k} frustumCulled={false}>
+      <lineBasicMaterial color="#ffffff" transparent opacity={0.85} toneMapped={false} />
+    </lineSegments>
+  )
 }
 
 function Grid(): JSX.Element {
@@ -226,10 +244,11 @@ function Aim(): null {
   const id = useWorkshop((s) => s.currentId)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
   const camera = useThree((s) => s.camera)
+  const scene = useThree((s) => s.scene)
   useEffect(() => {
-    // The browser harness projects handle positions through this to click them.
-    if (import.meta.env.DEV) (window as unknown as { __benchCamera?: unknown }).__benchCamera = camera
-  }, [camera])
+    // The browser harness projects handle positions through the camera to click them, and reaches the lights through the scene.
+    if (import.meta.env.DEV) Object.assign(window as unknown as Record<string, unknown>, { __benchCamera: camera, __benchScene: scene })
+  }, [camera, scene])
   const target = useMemo(() => {
     const shard = useWorkshop.getState().current()
     return shard ? centroid(shard) : [0, 0, 0]
@@ -352,7 +371,7 @@ function Keys(): null {
       }
       if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
-      if (e.code === 'Enter') { if (w.facePick.length >= 3) { e.preventDefault(); w.fill() } return }
+      if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
       if (e.code === 'KeyC') { w.selectConnected(); return }
       if (e.code === 'Digit1') w.setTool('stamp')
@@ -410,7 +429,11 @@ export function Bench(): JSX.Element {
         if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
       }}
     >
-      <ambientLight intensity={1} />
+      {/* A key light high and to one side, a dim fill from behind: faces read by
+          their tilt, and the dark backs (ShardMesh lit) show through any hole. */}
+      <ambientLight intensity={0.4} />
+      <directionalLight position={[8, 12, 6]} intensity={0.9} />
+      <directionalLight position={[-9, 2, -3]} intensity={0.6} />
       {/* One finger or left drag orbits, except in SELECT where that drag is the
           marquee's. Two fingers, or the right button, pan the view in the screen
           plane; pinch or the wheel dollies. These are the controls' own bindings. */}
@@ -422,7 +445,8 @@ export function Bench(): JSX.Element {
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <axesHelper key={extent} args={[extent + 1]} />
       <Grid />
-      {shard && <ShardMesh shard={shard} onFaceClick={tool === 'face' ? onFace : undefined} />}
+      <ScaleAvatar />
+      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} />}
       <Ghost />
       <PickLoop />
       <FaceHighlight />

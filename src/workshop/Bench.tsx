@@ -85,8 +85,9 @@ function BenchAxes({ reach }: { reach: number }): JSX.Element {
     return g
   }, [reach])
   useEffect(() => () => geometry.dispose(), [geometry])
+  // A hair above the grid plane, or the grid's centre lines draw over the red and blue.
   return (
-    <lineSegments geometry={geometry} frustumCulled={false}>
+    <lineSegments geometry={geometry} position={[0, 0.004, 0]} frustumCulled={false}>
       <lineBasicMaterial vertexColors toneMapped={false} />
     </lineSegments>
   )

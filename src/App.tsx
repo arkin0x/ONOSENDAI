@@ -107,7 +107,8 @@ export default function App(): JSX.Element {
   // VIEW from the position panel or a target: on a phone the panels cover the
   // scene, so the view they asked for closes them; RETURN is on the bar.
   const driving = useCyberspace((s) => s.focus?.drive === true)
-  useEffect(() => { if (driving && isMobile) setPanelsOpen(false) }, [driving, isMobile])
+  const stationView = useHyperspace((s) => s.viewOwned)
+  useEffect(() => { if ((driving || stationView) && isMobile) setPanelsOpen(false) }, [driving, stationView, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.

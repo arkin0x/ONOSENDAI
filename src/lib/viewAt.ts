@@ -32,8 +32,13 @@ function short(n: string): string {
   return n.length > 12 ? `${n.slice(0, 5)}…${n.slice(-5)}` : n
 }
 
+/** An axis value, shortened the same way. */
+export function shortAxis(n: bigint): string {
+  return short(n.toString())
+}
+
 /** A remembered place: what was typed, canonically, and how it is shown. */
-export interface RecentView { input: string; label: string }
+export interface RecentView { input: string; label: string; plane: Plane }
 
 /** The same place typed two ways is one entry: decimals become "x, y, z", a coordinate its lowercase hex. */
 export function canonicalViewAt(text: string): string {
@@ -44,5 +49,5 @@ export function canonicalViewAt(text: string): string {
 
 /** The list with `entry` at the front, its earlier copy gone, three at most. */
 export function rememberView(list: RecentView[], entry: RecentView): RecentView[] {
-  return [entry, ...list.filter((r) => r.input !== entry.input)].slice(0, 3)
+  return [entry, ...list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)].slice(0, 3)
 }

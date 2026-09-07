@@ -11,12 +11,19 @@
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */
 
+import { shortAxis } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
 import { useShards } from '../store/useShards'
 
 export function FocusBar(): JSX.Element | null {
-  const focusLabel = useCyberspace((s) => s.focus?.label ?? null)
+  const focus = useCyberspace((s) => s.focus)
+  const anchor = useCyberspace((s) => s.anchor)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
+  // A free view reads where it is now, and in which plane, since the pad moves it.
+  const focusLabel = focus === null ? null : focus.drive
+    ? `${[anchor.x, anchor.y, anchor.z].map(shortAxis).join(', ')} · ${anchorPlane === 0 ? 'DATASPACE' : 'IDEASPACE'}`
+    : focus.label
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   const inspecting = useShards((s) => s.inspecting !== null)

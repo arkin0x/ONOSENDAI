@@ -932,6 +932,7 @@ body {
   cursor: pointer;
 }
 .viewat__item:hover { border-color: var(--accent, #00e5ff); }
+.viewat__plane { display: inline-block; margin-right: 8px; padding: 1px 5px; font-size: 8px; }
 
 .legend__label {
   display: block;

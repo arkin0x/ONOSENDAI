@@ -315,6 +315,13 @@ export function Cursor({ axes }: Props): JSX.Element | null {
           </lineSegments>
         </>
       )}
+      {/* The free view's own marker: the yellow cube on the cell you are
+          looking at, which the pad moves with the view. */}
+      {!home && atHead && !active && (
+        <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
+          <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.85} depthTest={false} />
+        </lineSegments>
+      )}
     </group>
   )
 }

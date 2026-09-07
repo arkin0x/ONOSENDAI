@@ -16,7 +16,24 @@ describe('the free view', () => {
     expect(S().anchor).toEqual(there)
     S().moveCursor({ axis: 'x', dir: 1 })
     expect(S().cursor.x).toBeGreaterThan(there.x)
+    // The pad moves the view itself: the anchor and the focus go with the cursor.
+    expect(S().anchor).toEqual(S().cursor)
+    expect(S().focus?.position).toEqual(S().cursor)
     expect(S().position).toEqual(home)
+  })
+
+  it('shows and flips the plane it looks at, keeping the cursor', () => {
+    S().focusOn({ x: 5n, y: 5n, z: 5n }, 1, 'there', undefined, true)
+    expect(S().anchorPlane).toBe(1)
+    const mine = S().plane
+    S().togglePlane()
+    expect(S().anchorPlane).toBe(0)
+    expect(S().focus?.plane).toBe(0)
+    expect(S().cursor).toEqual({ x: 5n, y: 5n, z: 5n })
+    // The flip is the view's alone; home is still in your own plane.
+    expect(S().plane).toBe(mine)
+    S().clearFocus()
+    expect(S().anchorPlane).toBe(mine)
   })
 
   it('leaves the cursor where it was for a plain focus, which cannot be driven', () => {

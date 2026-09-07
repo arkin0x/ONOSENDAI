@@ -24,7 +24,7 @@ describe('parseViewAt', () => {
 })
 
 describe('rememberView', () => {
-  const at = (input: string): { input: string; label: string } => ({ input: canonicalViewAt(input), label: input.slice(0, 8) })
+  const at = (input: string, plane: 0 | 1 = 0): { input: string; label: string; plane: 0 | 1 } => ({ input: canonicalViewAt(input), label: input.slice(0, 8), plane })
   it('keeps three, newest first, and collapses a place typed again', () => {
     let list = rememberView([], at('1, 2, 3'))
     list = rememberView(list, at('4 5 6'))
@@ -40,5 +40,7 @@ describe('rememberView', () => {
     const hex = 'AB'.repeat(32)
     expect(canonicalViewAt(hex)).toBe('ab'.repeat(32))
     expect(rememberView([at(hex)], at(hex.toLowerCase()))).toHaveLength(1)
+    // The same place in the other plane is another place.
+    expect(rememberView([at('1, 2, 3', 0)], at('1, 2, 3', 1))).toHaveLength(2)
   })
 })

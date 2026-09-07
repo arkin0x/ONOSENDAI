@@ -109,7 +109,7 @@ const RECENT_KEY = 'onosendai:view-recent'
 function loadRecent(): RecentView[] {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string').slice(0, 3) : []
+    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1)).slice(0, 3) : []
   } catch { return [] }
 }
 function saveRecent(list: RecentView[]): void {
@@ -119,6 +119,8 @@ function saveRecent(list: RecentView[]): void {
 function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
+  // Decimals go to the plane on show: yours at your head, the view's in a view.
+  const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
@@ -128,7 +130,7 @@ function PositionPanel(): JSX.Element {
   const [recentOpen, setRecentOpen] = useState(false)
   const look = (typed: string, target: ViewTarget): void => {
     useCyberspace.getState().focusOn(target.position, target.plane, target.label, undefined, true)
-    const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label })
+    const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
   }
@@ -173,7 +175,7 @@ function PositionPanel(): JSX.Element {
           className="avatars__find"
           onSubmit={(e) => {
             e.preventDefault()
-            const target = parseViewAt(viewText, plane)
+            const target = parseViewAt(viewText, lookedPlane)
             if (!target) { setViewBad(true); return }
             setViewBad(false)
             look(viewText, target)
@@ -198,7 +200,7 @@ function PositionPanel(): JSX.Element {
               <ul className="viewat__list">
                 {recent.map((r) => (
                   <li key={r.input}>
-                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, plane); if (target) { setViewText(r.input); look(r.input, target) } }} title={r.input}>{r.label}</button>
+                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, target) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}</button>
                   </li>
                 ))}
               </ul>

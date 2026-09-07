@@ -1368,11 +1368,18 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     // Clamped against the axis wall: nowhere to go.
     if (next[dir.axis] === cursor[dir.axis]) return
+    // In a free view the cursor is the view: the pad moves the anchor with it.
+    const focus = get().focus
+    if (!get().atHead() && focus?.drive) { set({ cursor: next, anchor: { ...next }, focus: { ...focus, position: { ...next } } }); return }
     set({ cursor: next })
   },
 
   setCursorAtCell: (row, col) => {
-    const { position, scaleExp, view } = get()
+    const { scaleExp, view } = get()
+    const focus = get().focus
+    const viewing = !get().atHead() && focus?.drive === true
+    // Cells are counted from the field's origin: your head, or the view's anchor.
+    const position = viewing ? get().anchor : get().position
     const axes = viewAxes(view)
     const origin = alignedOrigin(position, scaleExp)
     const step = stepFor(scaleExp)
@@ -1388,6 +1395,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     )
     // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
 
+    if (viewing && focus) { set({ cursor: next, anchor: { ...next }, focus: { ...focus, position: { ...next } } }); return }
     set({ cursor: next })
   },
 
@@ -1593,18 +1601,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (get().proof.status === 'computing') return
     // Someone else's plane is theirs; the terrain follows their chain.
     if (get().spectate) return
-    if (get().plane === plane) return
+    if (get().plane === plane && get().anchorPlane === plane) return
     // The view follows the lined-up plane the way it follows the cursor: at
     // your own head, or in a focus view such as EARTH, the scene switches
     // planes now, so the planet, the landfalls, other avatars and everything
     // else of the other plane disappear at once. Only history keeps its own
     // plane, because each action there records the plane it was in.
+    // In a free view the flip is the view's alone: the plane you have lined
+    // up at your head is untouched, and RETURN puts the scene back in it.
+    const focus = get().focus
+    if (focus?.drive && get().exploreIndex === null) { set({ anchorPlane: plane, focus: { ...focus, plane } }); return }
     const next: Partial<CyberspaceState> = { plane, proof: IDLE_PROOF }
     if (get().exploreIndex === null) next.anchorPlane = plane
     set(next)
   },
 
-  togglePlane: () => { get().setPlane(get().plane === 0 ? 1 : 0) },
+  // The plane on show flips: yours at your head, the view's in a view.
+  togglePlane: () => { const shown = get().atHead() ? get().plane : get().anchorPlane; get().setPlane(shown === 0 ? 1 : 0) },
 
   applyProofMessage: async (msg) => {
     // Stale responses from a cancelled commit must not overwrite fresh state.

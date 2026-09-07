@@ -23,7 +23,8 @@ interface Props {
 }
 
 export function ViewMenu({ onClose }: Props): JSX.Element {
-  const plane = useCyberspace((s) => s.plane)
+  // The plane on show: yours at your head, the view's in a view (D-SPACE flips that one).
+  const plane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const canGoBack = useCyberspace((s) => s.viewHistory.length > 0)
 
   const press = (fn: () => void) => (e: React.PointerEvent) => {

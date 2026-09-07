@@ -27,7 +27,7 @@ import {
   LineBasicMaterial,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { flatten, toRender, type ShardModel } from '../lib/shards'
+import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
 import { orientFaces } from '../lib/orient'
 
 interface Props {
@@ -70,7 +70,7 @@ const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendS
 export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false }: Props): JSX.Element | null {
   const { positions, colors, index } = useMemo(() => {
     const f = flatten(shard)
-    return lit ? { ...f, index: orientFaces(shard.vertices.map((v) => toRender(v.p)), shard.faces).flat() } : f
+    return lit ? { ...f, index: orientFaces(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces).flat() } : f
   }, [shard.vertices, shard.faces, lit])
 
   // Live copies: the decode writes into these, the targets stay untouched.

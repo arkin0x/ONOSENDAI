@@ -20,7 +20,7 @@ import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
-import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, toRender } from '../lib/shards'
+import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
 import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
@@ -186,7 +186,7 @@ function Handles(): JSX.Element | null {
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
-    shard?.vertices.forEach((v, i) => { const k = pointKey(v.p); m.set(k, [...(m.get(k) ?? []), i]) })
+    shard?.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); m.set(k, [...(m.get(k) ?? []), i]) })
     return [...m.values()]
   }, [shard?.vertices])
   if (!shard) return null
@@ -209,7 +209,7 @@ function Handles(): JSX.Element | null {
         const isSel = g.some((i) => chosen.has(i))
         const picked = facePick.some((i) => g.includes(i))
         return (
-          <group key={first} position={UP(v.p)}>
+          <group key={first} position={UP(ticksOf(v))}>
             {/* A generous invisible hit target; the visible handle is small. */}
             <mesh onClick={onClick(first, isSel)}>
               <sphereGeometry args={[0.42, 10, 10]} />
@@ -238,7 +238,7 @@ function PickLoop(): JSX.Element | null {
   const facePick = useWorkshop((s) => s.facePick)
   const line = useMemo(() => {
     if (!shard || facePick.length < 2) return null
-    const pts = facePick.map((i) => shard.vertices[i]?.p).filter((p): p is P3 => !!p).map(UP)
+    const pts = facePick.map((i) => shard.vertices[i]).filter((v) => !!v).map((v) => UP(ticksOf(v)))
     if (pts.length >= 3) pts.push(pts[0])
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute(pts.flat(), 3))
@@ -257,7 +257,7 @@ function FaceHighlight(): JSX.Element | null {
   const lit = useMemo(() => {
     const f = face === null ? undefined : shard?.faces[face]
     if (!shard || !f) return null
-    const pts = f.map((i) => UP(shard.vertices[i].p))
+    const pts = f.map((i) => UP(ticksOf(shard.vertices[i])))
     // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
@@ -340,7 +340,7 @@ function Marquee(): null {
       const r = canvas.getBoundingClientRect()
       const out: number[] = []
       shard.vertices.forEach((vert, i) => {
-        v.set(...UP(vert.p)).project(camera)
+        v.set(...UP(ticksOf(vert))).project(camera)
         if (v.z > 1) return
         const px = ((v.x + 1) / 2) * r.width
         const py = ((1 - v.y) / 2) * r.height

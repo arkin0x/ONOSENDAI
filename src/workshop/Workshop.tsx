@@ -21,7 +21,7 @@ import { Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, Stamp, Trash2
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
-import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
+import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
@@ -174,7 +174,7 @@ export function Workshop(): JSX.Element | null {
   const say = (notice: string): void => useWorkshop.setState({ notice })
   const toggle = (p: Panel): void => setPanel((cur) => (cur === p ? null : p))
 
-  const selectedPoints = shard ? new Set(selection.map((i) => shard.vertices[i]?.p.join(','))).size : 0
+  const selectedPoints = shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
   const one = selection.length === 1 && shard ? shard.vertices[selection[0]] : null
   const extent = shard?.extent ?? MIN_EXTENT
   const minExtent = shard ? Math.max(MIN_EXTENT, neededExtent(shard)) : MIN_EXTENT
@@ -398,7 +398,7 @@ export function Workshop(): JSX.Element | null {
       <div className="ws__corner">
         {one && (
           <div className="benchops" role="status" aria-label="Selected point">
-            <span className="workshop__value workshop__value--wide">at ({one.p.map(unitsLabel).join(', ')})</span>
+            <span className="workshop__value workshop__value--wide">at ({ticksOf(one).map(unitsLabel).join(', ')})</span>
           </div>
         )}
         {selectedPoints >= 3 && (

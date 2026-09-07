@@ -19,8 +19,10 @@
 export type ShardMode = 'solid' | 'points' | 'lines'
 
 export interface ShardVertex {
-  /** Model units, integers. */
+  /** Whole units per axis: the point's floor, what the wire's `vertices` carries. */
   p: [number, number, number]
+  /** The rest of the position in ticks, 0..119 per axis; absent when the point is whole. */
+  t?: [number, number, number]
   /** 0..1 per channel. */
   c: [number, number, number]
 }
@@ -41,7 +43,7 @@ export interface ShardModel {
   unit: number
   /** Half-width of this shard's build grid, in units: the grid runs from -extent to +extent on every axis. */
   extent: number
-  /** Vertex positions are in TICKS (120 to a unit), never units: see ShardVertex. */
+  /** A vertex is whole units plus ticks, kept apart as on the wire: see ShardVertex. */
   mode: ShardMode
   vertices: ShardVertex[]
   /** Triangles as vertex indices; drawn in `solid` mode only. */
@@ -90,8 +92,22 @@ export function newShard(name = 'Untitled shard'): ShardModel {
 }
 
 /** A grid point as a map key, so "the same point" is one string compare. */
+/** A point's key, from its position in total ticks. */
 export function pointKey(p: [number, number, number]): string {
   return `${p[0]},${p[1]},${p[2]}`
+}
+
+/** A vertex's position as total ticks, the form arithmetic and keys use. */
+export function ticksOf(v: Pick<ShardVertex, 'p' | 't'>): [number, number, number] {
+  const t = v.t ?? [0, 0, 0]
+  return [v.p[0] * TICKS_PER_UNIT + t[0], v.p[1] * TICKS_PER_UNIT + t[1], v.p[2] * TICKS_PER_UNIT + t[2]]
+}
+
+/** A vertex from a position in total ticks: whole units, and the rest as ticks only when there is any. */
+export function vertexAt(total: [number, number, number], c: [number, number, number]): ShardVertex {
+  const p = total.map((x) => Math.floor(x / TICKS_PER_UNIT)) as [number, number, number]
+  const t = total.map((x, a) => x - p[a] * TICKS_PER_UNIT) as [number, number, number]
+  return t[0] === 0 && t[1] === 0 && t[2] === 0 ? { p, c } : { p, t, c }
 }
 
 export function uuid(): string {
@@ -104,10 +120,22 @@ export function validPoint(p: [number, number, number], extent: number = GRID_HA
   return p.every((v) => Number.isInteger(v) && Math.abs(v) <= extent * TICKS_PER_UNIT)
 }
 
+/**
+ * A stored model made whole again. Models have always kept `p` in units; for
+ * a short while after ticks arrived they kept total ticks there instead, and
+ * such a model shows itself by a coordinate no grid could hold (above
+ * MAX_EXTENT units). Those are split back into units and ticks.
+ */
+export function normalizeStored(s: ShardModel): ShardModel {
+  const inTicks = s.vertices.some((v) => v.t === undefined && v.p.some((c) => Math.abs(c) > MAX_EXTENT))
+  if (!inTicks) return s
+  return { ...s, vertices: s.vertices.map((v) => vertexAt(v.p, v.c)) }
+}
+
 /** The grid half-width a shard needs to hold every vertex it has. */
 export function neededExtent(s: Pick<ShardModel, 'vertices'>): number {
   let m = MIN_EXTENT
-  for (const v of s.vertices) for (const c of v.p) m = Math.max(m, Math.ceil(Math.abs(c) / TICKS_PER_UNIT))
+  for (const v of s.vertices) for (const c of ticksOf(v)) m = Math.max(m, Math.ceil(Math.abs(c) / TICKS_PER_UNIT))
   return m
 }
 
@@ -128,8 +156,8 @@ export function toPayload(s: ShardModel): ShardPayload {
     unit: s.unit,
     extent: s.extent,
     mode: s.mode,
-    vertices: s.vertices.map((v) => v.p.map((t) => Math.floor(t / TICKS_PER_UNIT)) as [number, number, number]),
-    ticks: packTicks(s.vertices.map((v) => v.p.map((t) => t - Math.floor(t / TICKS_PER_UNIT) * TICKS_PER_UNIT) as [number, number, number])),
+    vertices: s.vertices.map((v) => v.p),
+    ticks: packTicks(s.vertices.map((v) => v.t ?? [0, 0, 0])),
     colors: s.vertices.map((v) => v.c),
     faces: s.faces,
   }
@@ -186,8 +214,9 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
     if (!Array.isArray(pt) || pt.length !== 3 || !Array.isArray(c) || c.length !== 3) return null
     const whole = pt.map(Number) as [number, number, number]
     if (!whole.every(Number.isInteger)) return null
-    const point = whole.map((u, a) => u * TICKS_PER_UNIT + rest[i][a]) as [number, number, number]
-    vertices.push({ p: point, c: clampColor(c.map(Number) as [number, number, number]) })
+    const r = rest[i]
+    const colour = clampColor(c.map(Number) as [number, number, number])
+    vertices.push(r[0] === 0 && r[1] === 0 && r[2] === 0 ? { p: whole, c: colour } : { p: whole, t: r, c: colour })
   }
   const faces: Array<[number, number, number]> = []
   for (const f of p.faces) {
@@ -218,6 +247,7 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
  * world's compass does.
  */
 export function toRender(p: [number, number, number]): [number, number, number] {
+  // `p` is a position in total ticks (ticksOf).
   // 0 - z rather than -z: negating a zero gives -0, which equality tests and keys treat as different.
   return [p[0] / TICKS_PER_UNIT, p[1] / TICKS_PER_UNIT, (0 - p[2]) / TICKS_PER_UNIT]
 }
@@ -226,7 +256,7 @@ export function flatten(s: ShardModel): { positions: Float32Array; colors: Float
   const positions = new Float32Array(s.vertices.length * 3)
   const colors = new Float32Array(s.vertices.length * 3)
   s.vertices.forEach((v, i) => {
-    positions.set(toRender(v.p), i * 3)
+    positions.set(toRender(ticksOf(v)), i * 3)
     colors.set(v.c, i * 3)
   })
   return { positions, colors, index: s.faces.flat() }
@@ -236,7 +266,7 @@ export function flatten(s: ShardModel): { positions: Float32Array; colors: Float
 export function centroid(s: ShardModel): [number, number, number] {
   if (s.vertices.length === 0) return [0, 0, 0]
   const sum = [0, 0, 0]
-  for (const v of s.vertices) for (let i = 0; i < 3; i++) sum[i] += v.p[i]
+  for (const v of s.vertices) { const t = ticksOf(v); for (let i = 0; i < 3; i++) sum[i] += t[i] }
   return sum.map((x) => x / s.vertices.length) as [number, number, number]
 }
 

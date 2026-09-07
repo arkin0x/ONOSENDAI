@@ -26,6 +26,9 @@ import {
   GRID_HALF,
   TICKS_PER_UNIT,
   centroid,
+  normalizeStored,
+  ticksOf,
+  vertexAt,
   type Division,
   MAX_EXTENT,
   MIN_EXTENT,
@@ -165,7 +168,7 @@ function load(): ShardModel[] {
     if (!raw) return []
     const list = JSON.parse(raw)
     return Array.isArray(list)
-      ? list.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.vertices)).map((s) => ({ ...s, extent: Number.isInteger(s.extent) ? s.extent : Math.max(GRID_HALF, neededExtent(s)) }))
+      ? list.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.vertices)).map((s) => normalizeStored(s)).map((s) => ({ ...s, extent: Number.isInteger(s.extent) ? s.extent : Math.max(GRID_HALF, neededExtent(s)) }))
       : []
   } catch { return [] }
 }
@@ -190,9 +193,9 @@ function savePalette(palette: string[]): void {
 function group(s: ShardModel, index: number): number[] {
   const v = s.vertices[index]
   if (!v) return []
-  const key = pointKey(v.p)
+  const key = pointKey(ticksOf(v))
   const out: number[] = []
-  s.vertices.forEach((o, i) => { if (pointKey(o.p) === key) out.push(i) })
+  s.vertices.forEach((o, i) => { if (pointKey(ticksOf(o)) === key) out.push(i) })
   return out
 }
 
@@ -241,7 +244,7 @@ function facesFor(pts: P3[]): Tris | null {
 
 /** The face wound so its normal points away from `centre`. */
 function awayFrom(s: ShardModel, f: Tri, centre: P3): Tri {
-  const [a, b, c] = f.map((i) => s.vertices[i].p)
+  const [a, b, c] = f.map((i) => ticksOf(s.vertices[i]))
   const n = newell([a, b, c])
   const m: P3 = [(a[0] + b[0] + c[0]) / 3 - centre[0], (a[1] + b[1] + c[1]) / 3 - centre[1], (a[2] + b[2] + c[2]) / 3 - centre[2]]
   return n[0] * m[0] + n[1] * m[1] + n[2] * m[2] < 0 ? [f[0], f[2], f[1]] : f
@@ -370,10 +373,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       let added = -1
       edit((s) => {
         // One vertex per point by hand: adding where one already is selects it instead.
-        const existing = s.vertices.findIndex((v) => pointKey(v.p) === pointKey(p))
+        const existing = s.vertices.findIndex((v) => pointKey(ticksOf(v)) === pointKey(p))
         if (existing >= 0) { added = existing; return null }
         added = s.vertices.length
-        return { ...s, vertices: [...s.vertices, { p: [...p] as P3, c: [...get().color] as ShardVertex['c'] }] }
+        return { ...s, vertices: [...s.vertices, vertexAt(p, [...get().color] as ShardVertex['c'])] }
       })
       if (added >= 0) set({ selection: group(get().current()!, added), selectedFace: null })
     },
@@ -408,12 +411,12 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
       const join = (a: number, b: number): void => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
       const byPoint = new Map<string, number>()
-      s.vertices.forEach((v, i) => { const k = pointKey(v.p); const first = byPoint.get(k); if (first === undefined) byPoint.set(k, i); else join(first, i) })
+      s.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); const first = byPoint.get(k); if (first === undefined) byPoint.set(k, i); else join(first, i) })
       for (const f of s.faces) { join(f[0], f[1]); join(f[1], f[2]) }
       const roots = new Set(selection.map(find))
       const out = s.vertices.map((_, i) => i).filter((i) => roots.has(find(i)))
       const grew = out.length > selection.length
-      set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(s.vertices[i].p))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
+      set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
     },
 
     selectFace: (index) => set({ selectedFace: index, selection: index === null ? get().selection : [] }),
@@ -447,10 +450,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) {
-          const p = [...vertices[i].p] as P3
+          const p = ticksOf(vertices[i])
           p[axis] += delta
           if (!validPoint(p, s.extent)) return null
-          vertices[i] = { ...vertices[i], p }
+          vertices[i] = vertexAt(p, vertices[i].c)
         }
         return { ...s, vertices }
       })
@@ -498,8 +501,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { facePick } = get()
       if (!s || !s.vertices[index]) return
       // Picks are points, not vertices: any vertex on a picked point counts as that pick.
-      const key = pointKey(s.vertices[index].p)
-      const at = facePick.findIndex((i) => pointKey(s.vertices[i].p) === key)
+      const key = pointKey(ticksOf(s.vertices[index]))
+      const at = facePick.findIndex((i) => pointKey(ticksOf(s.vertices[i])) === key)
       // Tapping the first corner again closes the loop.
       if (at === 0 && facePick.length >= 3) { get().fill(); return }
       if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFace: null }); return }
@@ -512,7 +515,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       const { facePick } = get()
       if (!s || facePick.length < 3) return
-      const tris = triangulate(facePick.map((i) => s.vertices[i].p))
+      const tris = triangulate(facePick.map((i) => ticksOf(s.vertices[i])))
       if (!tris) { set({ notice: 'Those corners do not make a face. Pick them in order around its edge.' }); return }
       edit((cur) => {
         const have = new Set(cur.faces.map(faceKey))
@@ -532,10 +535,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s) return
       // One vertex per point, so a shared point counts once.
       const firstAt = new Map<string, number>()
-      for (const i of selection) { const v = s.vertices[i]; if (v && !firstAt.has(pointKey(v.p))) firstAt.set(pointKey(v.p), i) }
+      for (const i of selection) { const v = s.vertices[i]; if (v && !firstAt.has(pointKey(ticksOf(v)))) firstAt.set(pointKey(ticksOf(v)), i) }
       const idx = [...firstAt.values()]
       if (idx.length < 3) { set({ notice: 'Select three or more points to fill.' }); return }
-      const pts = idx.map((i) => s.vertices[i].p)
+      const pts = idx.map((i) => ticksOf(s.vertices[i]))
       const faces = facesFor(pts)
       if (!faces) { set({ notice: 'Those points do not make a face: they lie on one line.' }); return }
       const centre = centroid(s)

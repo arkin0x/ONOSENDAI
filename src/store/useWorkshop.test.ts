@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T } from '../lib/shards'
+import { TICKS_PER_UNIT as T, ticksOf } from '../lib/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 
 const w = () => useWorkshop.getState()
@@ -27,7 +27,7 @@ describe('workshop', () => {
     w().addVertex([T, 2 * T, 3 * T])
     w().addVertex([T, 2 * T, 3 * T])
     expect(w().current()!.vertices).toHaveLength(1)
-    expect(w().current()!.vertices[0].p).toEqual([T, 2 * T, 3 * T])
+    expect(ticksOf(w().current()!.vertices[0])).toEqual([T, 2 * T, 3 * T])
     expect(w().selection).toEqual([0])
     w().addVertex([9 * T, 0, 0])
     expect(w().current()!.vertices).toHaveLength(1)
@@ -37,12 +37,12 @@ describe('workshop', () => {
     w().addVertex([0, 0, 0]); w().addVertex([T, 0, 0])
     w().selectVertex(0)
     w().moveSelected(1, T)
-    expect(w().current()!.vertices[0].p).toEqual([0, T, 0])
+    expect(ticksOf(w().current()!.vertices[0])).toEqual([0, T, 0])
     w().moveSelected(1, -T); w().moveSelected(0, T)
-    expect(w().current()!.vertices[0].p).toEqual([T, 0, 0])
+    expect(ticksOf(w().current()!.vertices[0])).toEqual([T, 0, 0])
     w().selectVertex(1)
     for (let i = 0; i < 20; i++) w().moveSelected(0, T)
-    expect(w().current()!.vertices[1].p[0]).toBe(8 * T)
+    expect(ticksOf(w().current()!.vertices[1])[0]).toBe(8 * T)
   })
 
   it('stamps a shape, and the first faces switch LINES to SOLID once', () => {
@@ -72,12 +72,12 @@ describe('workshop', () => {
     w().setColor([1, 0, 0])
     w().placeStamp([T, 0, 0])
     const s = w().current()!
-    const shared = s.vertices.map((v, i) => (v.p.join() === `${T},0,0` ? i : -1)).filter((i) => i >= 0)
+    const shared = s.vertices.map((v, i) => (ticksOf(v).join() === `${T},0,0` ? i : -1)).filter((i) => i >= 0)
     expect(shared).toHaveLength(2)
     w().selectVertex(shared[0])
     // Off to a free point: landing on the blocks' top corners would join those too.
     w().moveSelected(2, -T)
-    for (const i of shared) expect(w().current()!.vertices[i].p).toEqual([T, 0, -T])
+    for (const i of shared) expect(ticksOf(w().current()!.vertices[i])).toEqual([T, 0, -T])
     w().colorSelected([0, 1, 0])
     for (const i of shared) expect(w().current()!.vertices[i].c).toEqual([0, 1, 0])
     const facesBefore = w().current()!.faces.length
@@ -93,12 +93,12 @@ describe('workshop', () => {
     w().placeStamp([0, 0, 0])          // a block: 8 corners
     w().addVertex([5 * T, 0, 5 * T])
     const s = w().current()!
-    const corner = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
+    const corner = s.vertices.findIndex((v) => ticksOf(v).join() === '0,0,0')
     w().selectVertex(null)
     w().toggleVertex(corner); w().toggleVertex(s.vertices.length - 1)
-    expect(new Set(w().selection.map((i) => s.vertices[i].p.join()))).toEqual(new Set(['0,0,0', `${5 * T},0,${5 * T}`]))
+    expect(new Set(w().selection.map((i) => ticksOf(s.vertices[i]).join()))).toEqual(new Set(['0,0,0', `${5 * T},0,${5 * T}`]))
     w().toggleVertex(corner)
-    expect(w().selection.map((i) => s.vertices[i].p.join())).toEqual([`${5 * T},0,${5 * T}`])
+    expect(w().selection.map((i) => ticksOf(s.vertices[i]).join())).toEqual([`${5 * T},0,${5 * T}`])
     w().setSelection([corner])
     expect(w().selection).toEqual([corner])
   })
@@ -107,13 +107,13 @@ describe('workshop', () => {
     w().addVertex([0, 0, 0]); w().addVertex([8 * T, 0, 0]); w().addVertex([3 * T, 0, 3 * T])
     w().setSelection([0, 1, 2])
     w().moveSelected(0, T)               // 8 -> 9 is off the grid: nothing moves
-    expect(w().current()!.vertices.map((v) => v.p[0])).toEqual([0, 8 * T, 3 * T])
+    expect(w().current()!.vertices.map((v) => ticksOf(v)[0])).toEqual([0, 8 * T, 3 * T])
     w().moveSelected(2, T)
-    expect(w().current()!.vertices.map((v) => v.p[2])).toEqual([T, T, 4 * T])
+    expect(w().current()!.vertices.map((v) => ticksOf(v)[2])).toEqual([T, T, 4 * T])
     w().colorSelected([1, 0, 0])
     expect(w().current()!.vertices.every((v) => v.c.join() === '1,0,0')).toBe(true)
     w().setSelection([0, 2]); w().deleteSelected()
-    expect(w().current()!.vertices.map((v) => v.p.join())).toEqual([`${8 * T},0,${T}`])
+    expect(w().current()!.vertices.map((v) => ticksOf(v).join())).toEqual([`${8 * T},0,${T}`])
     expect(w().selection).toEqual([])
   })
 
@@ -122,9 +122,9 @@ describe('workshop', () => {
     w().placeStamp([5 * T, 0, 5 * T])    // another, apart
     w().addVertex([-4 * T, 0, -4 * T])   // a lone point
     const s = w().current()!
-    const a = s.vertices.findIndex((v) => v.p.join() === '0,0,0')
+    const a = s.vertices.findIndex((v) => ticksOf(v).join() === '0,0,0')
     w().setSelection([a]); w().selectConnected()
-    const points = new Set(w().selection.map((i) => s.vertices[i].p.join()))
+    const points = new Set(w().selection.map((i) => ticksOf(s.vertices[i]).join()))
     expect(points.size).toBe(8)
     expect(points.has(`${5 * T},0,${5 * T}`)).toBe(false)
     expect(points.has(`${-4 * T},0,${-4 * T}`)).toBe(false)
@@ -185,9 +185,9 @@ describe('workshop', () => {
     expect(w().step()).toBe(30)
     w().addVertex([30, 0, 0])
     w().setSelection([0]); w().moveSelected(0, w().step())
-    expect(w().current()!.vertices.map((v) => v.p)).toEqual([[70, 0, 80], [30, 0, 0]])
+    expect(w().current()!.vertices.map((v) => ticksOf(v))).toEqual([[70, 0, 80], [30, 0, 0]])
     w().setDivision(1)
-    expect(w().current()!.vertices.map((v) => v.p)).toEqual([[70, 0, 80], [30, 0, 0]])
+    expect(w().current()!.vertices.map((v) => ticksOf(v))).toEqual([[70, 0, 80], [30, 0, 0]])
     const wire = JSON.parse(w().exportCurrent()!)
     expect(wire.vertices).toEqual([[0, 0, 0], [0, 0, 0]])
     expect(wire.ticks).toEqual([[70, 0, 80], [30, 0, 0]])

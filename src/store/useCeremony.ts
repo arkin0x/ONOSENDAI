@@ -12,7 +12,7 @@ import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { messagePreview, type Hidden } from '../lib/hidden'
 import { regionLabel } from '../lib/loot'
-import { GRID_HALF, TICKS_PER_UNIT, type ShardModel } from '../lib/shards'
+import { GRID_HALF, type ShardModel } from '../lib/shards'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
 
@@ -54,7 +54,7 @@ function previewShard(unit: number): ShardModel {
     unit,
     extent: GRID_HALF,
     mode: 'lines',
-    vertices: path.map((p, i) => ({ p: p.map((u) => u * TICKS_PER_UNIT) as [number, number, number], c: i < 16 ? [0, 0.9, 1] : [0.97, 0.58, 0.1] })),
+    vertices: path.map((p, i) => ({ p, c: i < 16 ? [0, 0.9, 1] : [0.97, 0.58, 0.1] })),
     faces: [],
     updatedAt: Math.floor(Date.now() / 1000),
   }

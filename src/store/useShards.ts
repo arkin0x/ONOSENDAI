@@ -14,6 +14,7 @@
  * up near you and could decrypt and verify.
  */
 
+import { normalizeStored } from '../lib/shards'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
@@ -119,7 +120,7 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text)) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
   } catch { return [] }
 }
 

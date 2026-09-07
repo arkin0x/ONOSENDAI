@@ -30,11 +30,17 @@ describe('avatar events (kind 33331)', () => {
     expect(avatarFromEvent({ kind: 3330, pubkey: 'x', tags: [['d', 'avatar']], content: '{}' })).toBeNull()
     expect(avatarFromEvent({ kind: AVATAR_KIND, pubkey: 'x', tags: [], content: 'not json' })).toBeNull()
   })
-  it('fills the dodecahedron cell whatever the grid size', () => {
+  it('draws at true scale: a gibson on the bench is a cell, whatever the grid size', () => {
     const shard = built()
     shard.extent = 8
-    expect(avatarScale(shard)).toBe(0.0625)
-    shard.extent = 1
-    expect(avatarScale(shard)).toBe(0.5)
+    expect(avatarScale(shard)).toBe(1)
+    // A unit of four gibsons draws four cells wide per unit.
+    shard.unit = 2
+    expect(avatarScale(shard)).toBe(4)
+  })
+  it('shrinks a shard that would reach past four cells', () => {
+    const shard = built()
+    shard.vertices.push({ p: [16, 0, 0], c: [1, 1, 1] })
+    expect(avatarScale(shard)).toBe(0.25)
   })
 })

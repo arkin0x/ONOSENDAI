@@ -419,7 +419,7 @@ export function Workshop(): JSX.Element | null {
               className="workshop__btn"
               disabled={shard.vertices.length === 0 || shard.faces.length === 0}
               onClick={() => { void useAvatars.getState().adopt(shard).then((ok) => say(ok ? `"${shard.name}" is your avatar now.` : 'No relay took the avatar. Try again when one is reachable.')) }}
-              title="Publish this shard as the shape others see for you; its whole grid fills the cell the dodecahedron fills"
+              title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell"
             >USE THIS SHARD</button>
             {myAvatar && (
               <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : 'No relay took the change.')) }} title="Back to the dodecahedron">DODECAHEDRON</button>

@@ -4,12 +4,12 @@
  * Kind 33331 (decided 2026-09-07), addressable with `d` = "avatar": one per
  * pubkey, the newest wins, and it changes without a respawn. The content is
  * a shard payload as the workshop writes it. Drawn in place of the wireframe
- * dodecahedron wherever an avatar is drawn: its grid, -extent..extent, fills
- * the cell the dodecahedron fills. An empty content puts the dodecahedron
- * back.
+ * dodecahedron wherever an avatar is drawn, at true scale: one gibson on the
+ * bench is one cell, the size the white avatar shows there. An empty content
+ * puts the dodecahedron back.
  */
 
-import { fromPayload, toPayload, type ShardModel } from './shards'
+import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from './shards'
 
 export const AVATAR_KIND = 33331
 export const AVATAR_D = 'avatar'
@@ -38,7 +38,25 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   }
 }
 
-/** Render units per model unit: the whole grid fills the dodecahedron's cell, radius one half. */
+/**
+ * Widest an avatar may reach from its centre, in cells: a shard built beyond
+ * this is shrunk to it, so nobody's avatar blots out the field.
+ */
+export const MAX_AVATAR_RADIUS = 4
+
+/**
+ * Render units per model unit: true scale. A model unit is 2^unit gibsons,
+ * and the dodecahedron's cell is one gibson at 2^0, so a shard built to the
+ * white avatar on the bench comes out exactly that size. The avatar keeps
+ * that size at every zoom, as the dodecahedron does.
+ */
 export function avatarScale(shard: ShardModel): number {
-  return 0.5 / Math.max(1, shard.extent)
+  const perUnit = 2 ** shard.unit
+  let reach = 0
+  for (const v of shard.vertices) {
+    const t = ticksOf(v)
+    reach = Math.max(reach, Math.abs(t[0]), Math.abs(t[1]), Math.abs(t[2]))
+  }
+  const radius = (reach / TICKS_PER_UNIT) * perUnit
+  return radius > MAX_AVATAR_RADIUS ? perUnit * (MAX_AVATAR_RADIUS / radius) : perUnit
 }

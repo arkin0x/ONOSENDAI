@@ -52,10 +52,15 @@ export interface Nudge {
   delta: 1 | -1
 }
 
-/** The world move a screen direction means under these axes. */
+/**
+ * The model move a screen direction means under these axes. The axes are in
+ * render terms; model +Z is render -Z (shards.ts toRender), so a move along
+ * render Z comes out with its sign turned.
+ */
 export function nudgeFor(axes: BenchAxes, name: NudgeName): Nudge {
-  const flip = (a: BenchAxis): Nudge => ({ axis: a.axis, delta: a.dir === 1 ? -1 : 1 })
-  const keep = (a: BenchAxis): Nudge => ({ axis: a.axis, delta: a.dir })
+  const model = (n: Nudge): Nudge => (n.axis === 2 ? { axis: 2, delta: n.delta === 1 ? -1 : 1 } : n)
+  const flip = (a: BenchAxis): Nudge => model({ axis: a.axis, delta: a.dir === 1 ? -1 : 1 })
+  const keep = (a: BenchAxis): Nudge => model({ axis: a.axis, delta: a.dir })
   switch (name) {
     case 'right': return keep(axes.right)
     case 'left': return flip(axes.right)

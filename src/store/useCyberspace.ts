@@ -134,6 +134,9 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
+/** How long the pad rests before a free view re-anchors on its cursor. */
+const FOLLOW_MS = 220
+let followTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
  * Another avatar, followed. Their chain is the focus chain while this is set:
@@ -1333,6 +1336,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     void get().resumeCloudJob()
   }
 
+  /**
+   * A free view follows its cursor, but not per press: re-anchoring is a
+   * change of frame that a dozen scene parts redraw for, and doing it on
+   * every step made the pad feel half a second slow. The cursor moves at
+   * once; the anchor catches it up when the presses have settled.
+   */
+  const followView = (): void => {
+    if (followTimer !== null) clearTimeout(followTimer)
+    followTimer = setTimeout(() => {
+      followTimer = null
+      const focus = get().focus
+      if (!focus?.drive || get().atHead()) return
+      const at = { ...get().cursor }
+      set({ anchor: at, focus: { ...focus, position: { ...at } } })
+    }, FOLLOW_MS)
+  }
+
   return {
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
@@ -1368,10 +1388,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     // Clamped against the axis wall: nowhere to go.
     if (next[dir.axis] === cursor[dir.axis]) return
-    // In a free view the cursor is the view: the pad moves the anchor with it.
-    const focus = get().focus
-    if (!get().atHead() && focus?.drive) { set({ cursor: next, anchor: { ...next }, focus: { ...focus, position: { ...next } } }); return }
+    // In a free view the cursor is the view: the cursor moves now and the
+    // anchor catches it up once the presses settle (followView).
     set({ cursor: next })
+    if (!get().atHead() && get().focus?.drive) followView()
   },
 
   setCursorAtCell: (row, col) => {
@@ -1395,8 +1415,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     )
     // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
 
-    if (viewing && focus) { set({ cursor: next, anchor: { ...next }, focus: { ...focus, position: { ...next } } }); return }
     set({ cursor: next })
+    if (viewing) followView()
   },
 
   commit: async () => {
@@ -1886,6 +1906,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus } = get()
+    if (followTimer !== null) { clearTimeout(followTimer); followTimer = null }
     set({
       focus: null,
       anchor: position,

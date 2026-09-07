@@ -3237,26 +3237,26 @@ kbd {
   grid-template-rows: repeat(3, 38px);
   gap: 4px;
   grid-template-areas:
-    "away    up   toward cube"
-    "left    hub  right  ."
-    "zoomout down zoomin .";
+    "cube away    up   toward"
+    ".    left    hub  right"
+    ".    zoomout down zoomin";
 }
 /* Off your own head only scale is left to drive, so the pad folds to one
  * row: coarser, the readout, finer, and the cube. The direction cells leave
  * the grid rather than standing empty in it. */
 .touchpad--scale {
   grid-template-rows: 38px;
-  grid-template-areas: "zoomout hub zoomin cube";
+  grid-template-areas: "cube zoomout hub zoomin";
 }
 .touchpad--scale .is-standdown { display: none; }
 /* The purple cube: all of cyberspace at once. */
 .touchpad__key--cube {
   grid-area: cube;
-  color: #e6d2ff;
-  background: rgba(150, 80, 255, 0.28);
-  border-color: rgba(192, 125, 255, 0.75);
+  color: #dcc2ff;
+  background: rgba(124, 58, 237, 0.62);
+  border-color: rgba(200, 150, 255, 0.9);
 }
-.touchpad__key--cube:active { background: rgba(192, 125, 255, 0.5); border-color: #e6d2ff; }
+.touchpad__key--cube:active { background: rgba(160, 100, 255, 0.85); border-color: #f0e6ff; }
 
 .touchpad__key {
   display: flex;

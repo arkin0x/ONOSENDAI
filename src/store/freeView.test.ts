@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCyberspace } from './useCyberspace'
 
 const S = () => useCyberspace.getState()
@@ -14,12 +14,30 @@ describe('the free view', () => {
     expect(S().canDrive()).toBe(true)
     expect(S().cursor).toEqual(there)
     expect(S().anchor).toEqual(there)
-    S().moveCursor({ axis: 'x', dir: 1 })
-    expect(S().cursor.x).toBeGreaterThan(there.x)
-    // The pad moves the view itself: the anchor and the focus go with the cursor.
-    expect(S().anchor).toEqual(S().cursor)
-    expect(S().focus?.position).toEqual(S().cursor)
-    expect(S().position).toEqual(home)
+    vi.useFakeTimers()
+    try {
+      S().moveCursor({ axis: 'x', dir: 1 })
+      S().moveCursor({ axis: 'x', dir: 1 })
+      expect(S().cursor.x).toBeGreaterThan(there.x)
+      // The cursor moves at once; the view catches up once the presses settle.
+      expect(S().anchor).toEqual(there)
+      vi.advanceTimersByTime(300)
+      expect(S().anchor).toEqual(S().cursor)
+      expect(S().focus?.position).toEqual(S().cursor)
+      expect(S().position).toEqual(home)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not catch up after RETURN', () => {
+    vi.useFakeTimers()
+    try {
+      S().focusOn({ x: 20n, y: 20n, z: 20n }, 0, 'there', undefined, true)
+      S().moveCursor({ axis: 'y', dir: 1 })
+      S().clearFocus()
+      vi.advanceTimersByTime(300)
+      expect(S().anchor).toEqual(S().position)
+      expect(S().focus).toBeNull()
+    } finally { vi.useRealTimers() }
   })
 
   it('shows and flips the plane it looks at, keeping the cursor', () => {

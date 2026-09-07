@@ -11,8 +11,9 @@
  * the CONTROLS pad, present only while points are selected: the main pad's
  * shape, nudging the selection in screen directions, with CONNECT and DELETE
  * in its corners; and below it the COLOR bar, gone while FACE is the tool
- * since a face has no color of its own. On a phone the color bar spans the
- * bottom and the pad stacks above it.
+ * with no face in hand, back once a face is selected so a color can be put
+ * on its corners. On a phone the color bar spans the bottom and the pad
+ * stacks above it.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -20,7 +21,7 @@ import { Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, Stamp, Trash2
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
-import { MAX_EXTENT, MIN_EXTENT, MODES, hexToRgb, neededExtent, rgbToHex, toPayload, type ShardMode } from '../lib/shards'
+import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
@@ -109,7 +110,7 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   const axes = useBenchView((s) => s.axes)
   const bind = useRepeatable()
   const w = useWorkshop.getState
-  const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta) }
+  const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().step()) }
   const sub = (name: NudgeName): string => nudgeLabel(nudgeFor(axes, name))
   const arrows: Array<{ cell: string; glyph: string; name: NudgeName; key: string }> = [
     { cell: 'away', glyph: '⊗', name: 'away', key: 'R' },
@@ -152,6 +153,7 @@ export function Workshop(): JSX.Element | null {
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
   const level = useWorkshop((s) => s.level)
+  const division = useWorkshop((s) => s.division)
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -173,6 +175,7 @@ export function Workshop(): JSX.Element | null {
   const toggle = (p: Panel): void => setPanel((cur) => (cur === p ? null : p))
 
   const selectedPoints = shard ? new Set(selection.map((i) => shard.vertices[i]?.p.join(','))).size : 0
+  const one = selection.length === 1 && shard ? shard.vertices[selection[0]] : null
   const extent = shard?.extent ?? MIN_EXTENT
   const minExtent = shard ? Math.max(MIN_EXTENT, neededExtent(shard)) : MIN_EXTENT
 
@@ -293,7 +296,7 @@ export function Workshop(): JSX.Element | null {
               delete it. Stamps keep their own corners even where they touch, so a red block against a
               blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
               DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
-              the width of a sector, and SCALE is how far the grid reaches from the origin. DEPLOY shows
+              the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
               the shard at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc clears then closes.
@@ -346,9 +349,9 @@ export function Workshop(): JSX.Element | null {
         <div className="ws__panel" role="region" aria-label="Grid">
           <div className="workshop__row">
             <span className="workshop__label">LEVEL Y</span>
-            <button className="workshop__btn" {...bind(() => w().setLevel(w().level - 1))} disabled={level <= -extent} aria-label="Level down">−</button>
-            <span className="workshop__value">{level}</span>
-            <button className="workshop__btn" {...bind(() => w().setLevel(w().level + 1))} disabled={level >= extent} aria-label="Level up">+</button>
+            <button className="workshop__btn" {...bind(() => w().setLevel(w().level - w().step()))} disabled={level <= -extent * TICKS_PER_UNIT} aria-label="Level down">−</button>
+            <span className="workshop__value">{unitsLabel(level)}</span>
+            <button className="workshop__btn" {...bind(() => w().setLevel(w().level + w().step()))} disabled={level >= extent * TICKS_PER_UNIT} aria-label="Level up">+</button>
             <span className="workshop__unit-size">the height the placing tools work at</span>
           </div>
           <div className="workshop__row">
@@ -359,8 +362,17 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= 84} aria-label="Larger unit">+</button>
             <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the shard at this size.">one unit = {formatCellSize(shard.unit)}</span>
           </div>
+          <div className="workshop__row" role="group" aria-label="Grid division">
+            <span className="workshop__label">DIVISION</span>
+            <div className="workshop__modes">
+              {DIVISIONS.map((d) => (
+                <button key={d} className={`workshop__mode ${division === d ? 'is-on' : ''}`} aria-pressed={division === d} onClick={() => w().setDivision(d)} title={d === 1 ? 'Snap to whole units' : `Snap to 1/${d} of a unit`}>{d === 1 ? '1' : `1/${d}`}</button>
+              ))}
+            </div>
+            <span className="workshop__unit-size" title="Where taps, the box, nudges and the level land. Positions already placed keep their exact spots.">the snap for placing and nudging</span>
+          </div>
           <div className="workshop__row">
-            <span className="workshop__label">SCALE</span>
+            <span className="workshop__label">GRID SIZE</span>
             <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) - 1))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
             <span className="workshop__value">{extent}</span>
             <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) + 1))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>
@@ -384,6 +396,11 @@ export function Workshop(): JSX.Element | null {
 
       {/* Bottom right: the pad while points are selected, face actions while a face is in hand, the color bar under either. */}
       <div className="ws__corner">
+        {one && (
+          <div className="benchops" role="status" aria-label="Selected point">
+            <span className="workshop__value workshop__value--wide">at ({one.p.map(unitsLabel).join(', ')})</span>
+          </div>
+        )}
         {selectedPoints >= 3 && (
           <div className="benchops" role="group" aria-label="Fill the selection">
             <span className="workshop__value workshop__value--wide">{selectedPoints} points</span>
@@ -405,7 +422,7 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().clearFacePick()} title="Drop the picks (Esc)">CANCEL</button>
           </div>
         )}
-        {tool !== 'face' && (
+        {(tool !== 'face' || selectedFace !== null) && (
           <div className="ws__color" role="group" aria-label="Color">
             <span className="workshop__label">COLOR</span>
             <span className="workshop__picker" title="Pick any color; it joins the palette">

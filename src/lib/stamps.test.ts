@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { GRID_HALF, MAX_VERTICES, newShard, validFace, validPoint, type ShardModel } from './shards'
+import { GRID_HALF, MAX_VERTICES, TICKS_PER_UNIT as T, newShard, validFace, validPoint, type ShardModel } from './shards'
 import { STAMPS, FACED, compile, landing, preview, stamp, type Facing, type StampKind } from './stamps'
 
 const red: [number, number, number] = [1, 0, 0]
@@ -40,26 +40,26 @@ describe('stamps', () => {
   })
 
   it('stands on the level and centres on the tap', () => {
-    const { points } = compile('block', 2, 0, [3, -2, 1])
-    expect(Math.min(...points.map((p) => p[1]))).toBe(-2)
+    const { points } = compile('block', 2, 0, [3 * T, -2 * T, 1 * T])
+    expect(Math.min(...points.map((p) => p[1]))).toBe(-2 * T)
     expect(Math.max(...points.map((p) => p[1]))).toBe(0)
-    expect(Math.min(...points.map((p) => p[0]))).toBe(2)
-    expect(Math.max(...points.map((p) => p[0]))).toBe(4)
+    expect(Math.min(...points.map((p) => p[0]))).toBe(2 * T)
+    expect(Math.max(...points.map((p) => p[0]))).toBe(4 * T)
   })
 
   it('is pushed back inside the grid when tapped at the edge', () => {
     for (const kind of STAMPS) {
-      const { points } = compile(kind, 4, 0, [GRID_HALF, GRID_HALF, GRID_HALF])
+      const { points } = compile(kind, 4, 0, [GRID_HALF * T, GRID_HALF * T, GRID_HALF * T])
       for (const p of points) expect(validPoint(p), `${kind} ${p}`).toBe(true)
     }
   })
 
   it('turns the faced shapes a quarter turn about Y and leaves the rest alone', () => {
     const tip = (f: Facing) => { const { points } = compile('arrow', 1, f, [0, 0, 0]); return points.reduce((a, b) => (Math.hypot(b[0], b[2]) > Math.hypot(a[0], a[2]) ? b : a)) }
-    expect(tip(0)).toEqual([3, 0, 0])
-    expect(tip(1)).toEqual([0, 0, 3])
-    expect(tip(2)).toEqual([-3, 0, 0])
-    expect(tip(3)).toEqual([0, 0, -3])
+    expect(tip(0)).toEqual([3 * T, 0, 0])
+    expect(tip(1)).toEqual([0, 0, 3 * T])
+    expect(tip(2)).toEqual([-3 * T, 0, 0])
+    expect(tip(3)).toEqual([0, 0, -3 * T])
     for (const kind of STAMPS) if (!FACED[kind]) expect(compile(kind, 2, 3, [0, 0, 0])).toEqual(compile(kind, 2, 0, [0, 0, 0]))
   })
 
@@ -74,22 +74,22 @@ describe('stamps', () => {
 
   it('drops the wall between two blocks that touch, on both sides', () => {
     const a = stamp(empty(), 'block', 1, 0, [0, 0, 0], red)!
-    const b = stamp(a.shard, 'block', 1, 0, [1, 0, 0], [0, 0, 1])!
+    const b = stamp(a.shard, 'block', 1, 0, [T, 0, 0], [0, 0, 1])!
     expect(b.shard.vertices).toHaveLength(16)
     expect(b.culled).toBe(4)
     expect(b.shard.faces).toHaveLength(24 - 4)
     // Stacked, the same: the top of one and the bottom of the other.
-    const c = stamp(a.shard, 'block', 1, 0, [0, 1, 0], red)!
+    const c = stamp(a.shard, 'block', 1, 0, [0, T, 0], red)!
     expect(c.culled).toBe(4)
     // Diagonal neighbours share an edge, not a wall: nothing to drop.
-    const d = stamp(a.shard, 'block', 1, 0, [1, 1, 0], red)!
+    const d = stamp(a.shard, 'block', 1, 0, [T, T, 0], red)!
     expect(d.culled).toBe(0)
   })
 
   it('never merges vertices, so a seam between colors stays crisp', () => {
     const a = stamp(empty(), 'block', 1, 0, [0, 0, 0], red)!
-    const b = stamp(a.shard, 'block', 1, 0, [1, 0, 0], [0, 0, 1])!
-    const at = b.shard.vertices.filter((v) => v.p.join() === '1,0,0')
+    const b = stamp(a.shard, 'block', 1, 0, [T, 0, 0], [0, 0, 1])!
+    const at = b.shard.vertices.filter((v) => v.p.join() === `${T},0,0`)
     expect(at).toHaveLength(2)
     expect(at.map((v) => v.c.join()).sort()).toEqual(['0,0,1', '1,0,0'])
   })
@@ -110,7 +110,7 @@ describe('ghost placement', () => {
   const red: [number, number, number] = [1, 0, 0]
   it('the preview moved to its landing is exactly the stamp, edge pushes included', () => {
     for (const kind of STAMPS) {
-      for (const origin of [[0, 0, 0], [GRID_HALF, 0, GRID_HALF], [-GRID_HALF, 3, 2]] as Array<[number, number, number]>) {
+      for (const origin of [[0, 0, 0], [GRID_HALF * T, 0, GRID_HALF * T], [-GRID_HALF * T, 3 * T, 2 * T]] as Array<[number, number, number]>) {
         const at = landing(kind, 4, 1, origin)
         const ghost = preview(kind, 4, 1, red).vertices.map((v) => [v.p[0] + at[0], v.p[1] + at[1], v.p[2] + at[2]])
         expect(ghost).toEqual(compile(kind, 4, 1, origin).points)
@@ -118,7 +118,7 @@ describe('ghost placement', () => {
     }
   })
   it('lands on the aim unless the grid edge pushes it back', () => {
-    expect(landing('block', 2, 0, [1, 0, 1])).toEqual([1, 0, 1])
-    expect(landing('block', 4, 0, [GRID_HALF, 0, GRID_HALF])[0]).toBeLessThan(GRID_HALF)
+    expect(landing('block', 2, 0, [T, 0, T])).toEqual([T, 0, T])
+    expect(landing('block', 4, 0, [GRID_HALF * T, 0, GRID_HALF * T])[0]).toBeLessThan(GRID_HALF * T)
   })
 })

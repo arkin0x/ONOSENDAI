@@ -25,6 +25,15 @@ export interface ShardVertex {
   c: [number, number, number]
 }
 
+/**
+ * Ticks to a grid unit. A position is stored as whole ticks, so a third, a
+ * quarter or a fifth of a unit is exact and they mix freely in one shard:
+ * 120 is divisible by every division the workshop offers and by eighths.
+ */
+export const TICKS_PER_UNIT = 120
+export const DIVISIONS = [1, 2, 3, 4, 5] as const
+export type Division = typeof DIVISIONS[number]
+
 export interface ShardModel {
   id: string
   name: string
@@ -32,6 +41,7 @@ export interface ShardModel {
   unit: number
   /** Half-width of this shard's build grid, in units: the grid runs from -extent to +extent on every axis. */
   extent: number
+  /** Vertex positions are in TICKS (120 to a unit), never units: see ShardVertex. */
   mode: ShardMode
   vertices: ShardVertex[]
   /** Triangles as vertex indices; drawn in `solid` mode only. */
@@ -48,7 +58,14 @@ export interface ShardPayload {
   /** Grid half-width the shard was built on; absent in older payloads (8). */
   extent?: number
   mode: ShardMode
+  /** Whole units per vertex, the floor of the position: what a reader from before ticks sees. */
   vertices: Array<[number, number, number]>
+  /**
+   * The rest of each position in ticks, 0..119 per axis, one entry per vertex
+   * in order; a negative number -N stands for N vertices of [0, 0, 0] in a
+   * row. Absent in older payloads: every position is whole.
+   */
+  ticks?: Array<[number, number, number] | number>
   colors: Array<[number, number, number]>
   faces: Array<[number, number, number]>
 }
@@ -84,13 +101,13 @@ export function uuid(): string {
 
 /** Integers inside the grid; anything else is not a vertex. */
 export function validPoint(p: [number, number, number], extent: number = GRID_HALF): boolean {
-  return p.every((v) => Number.isInteger(v) && Math.abs(v) <= extent)
+  return p.every((v) => Number.isInteger(v) && Math.abs(v) <= extent * TICKS_PER_UNIT)
 }
 
 /** The grid half-width a shard needs to hold every vertex it has. */
 export function neededExtent(s: Pick<ShardModel, 'vertices'>): number {
   let m = MIN_EXTENT
-  for (const v of s.vertices) for (const c of v.p) m = Math.max(m, Math.abs(c))
+  for (const v of s.vertices) for (const c of v.p) m = Math.max(m, Math.ceil(Math.abs(c) / TICKS_PER_UNIT))
   return m
 }
 
@@ -111,7 +128,8 @@ export function toPayload(s: ShardModel): ShardPayload {
     unit: s.unit,
     extent: s.extent,
     mode: s.mode,
-    vertices: s.vertices.map((v) => v.p),
+    vertices: s.vertices.map((v) => v.p.map((t) => Math.floor(t / TICKS_PER_UNIT)) as [number, number, number]),
+    ticks: packTicks(s.vertices.map((v) => v.p.map((t) => t - Math.floor(t / TICKS_PER_UNIT) * TICKS_PER_UNIT) as [number, number, number])),
     colors: s.vertices.map((v) => v.c),
     faces: s.faces,
   }
@@ -122,6 +140,36 @@ export function toPayload(s: ShardModel): ShardPayload {
  * back, and a shard with a face pointing at a vertex it does not have would
  * throw inside three.js at draw time, far from anything that could explain it.
  */
+/** The ticks column for the wire: runs of whole positions become one negative count. */
+export function packTicks(rest: Array<[number, number, number]>): Array<[number, number, number] | number> {
+  const out: Array<[number, number, number] | number> = []
+  let zeros = 0
+  for (const t of rest) {
+    if (t[0] === 0 && t[1] === 0 && t[2] === 0) { zeros++; continue }
+    if (zeros) { out.push(-zeros); zeros = 0 }
+    out.push(t)
+  }
+  if (zeros) out.push(-zeros)
+  return out
+}
+
+/** The ticks column read back, one triple per vertex, or null when it does not fit `count` vertices. */
+export function unpackTicks(packed: unknown, count: number): Array<[number, number, number]> | null {
+  if (packed === undefined) return Array.from({ length: count }, () => [0, 0, 0])
+  if (!Array.isArray(packed)) return null
+  const out: Array<[number, number, number]> = []
+  for (const e of packed) {
+    if (typeof e === 'number') {
+      if (!Number.isInteger(e) || e >= 0) return null
+      for (let i = 0; i < -e; i++) out.push([0, 0, 0])
+    } else if (Array.isArray(e) && e.length === 3 && e.every((t) => Number.isInteger(t) && t >= 0 && t < TICKS_PER_UNIT)) {
+      out.push([e[0], e[1], e[2]])
+    } else return null
+    if (out.length > count) return null
+  }
+  return out.length === count ? out : null
+}
+
 export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (!raw || typeof raw !== 'object') return null
   const p = raw as Partial<ShardPayload>
@@ -130,12 +178,15 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (p.vertices.length !== p.colors.length || p.vertices.length > MAX_VERTICES || p.faces.length > MAX_FACES) return null
   if (!MODES.includes(p.mode as ShardMode)) return null
   if (!Number.isInteger(p.unit) || (p.unit as number) < 0 || (p.unit as number) > 84) return null
+  const rest = unpackTicks(p.ticks, p.vertices.length)
+  if (!rest) return null
   const vertices: ShardVertex[] = []
   for (let i = 0; i < p.vertices.length; i++) {
     const pt = p.vertices[i], c = p.colors[i]
     if (!Array.isArray(pt) || pt.length !== 3 || !Array.isArray(c) || c.length !== 3) return null
-    const point = pt.map(Number) as [number, number, number]
-    if (!point.every(Number.isFinite)) return null
+    const whole = pt.map(Number) as [number, number, number]
+    if (!whole.every(Number.isInteger)) return null
+    const point = whole.map((u, a) => u * TICKS_PER_UNIT + rest[i][a]) as [number, number, number]
     vertices.push({ p: point, c: clampColor(c.map(Number) as [number, number, number]) })
   }
   const faces: Array<[number, number, number]> = []
@@ -163,7 +214,7 @@ export function flatten(s: ShardModel): { positions: Float32Array; colors: Float
   const positions = new Float32Array(s.vertices.length * 3)
   const colors = new Float32Array(s.vertices.length * 3)
   s.vertices.forEach((v, i) => {
-    positions.set(v.p, i * 3)
+    positions.set([v.p[0] / TICKS_PER_UNIT, v.p[1] / TICKS_PER_UNIT, v.p[2] / TICKS_PER_UNIT], i * 3)
     colors.set(v.c, i * 3)
   })
   return { positions, colors, index: s.faces.flat() }
@@ -185,4 +236,17 @@ export function hexToRgb(hex: string): [number, number, number] {
 
 export function rgbToHex(c: [number, number, number]): string {
   return '#' + c.map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join('')
+}
+
+/** A tick count as units for reading: "2", "1/3", "-2 3/4". */
+export function unitsLabel(ticks: number): string {
+  const sign = ticks < 0 ? '-' : ''
+  const a = Math.abs(ticks)
+  const whole = Math.floor(a / TICKS_PER_UNIT)
+  let num = a - whole * TICKS_PER_UNIT
+  if (num === 0) return `${sign}${whole}`
+  let den = TICKS_PER_UNIT
+  const gcd = (x: number, y: number): number => (y ? gcd(y, x % y) : x)
+  const g = gcd(num, den); num /= g; den /= g
+  return whole ? `${sign}${whole} ${num}/${den}` : `${sign}${num}/${den}`
 }

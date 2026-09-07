@@ -22,8 +22,11 @@
 
 import { create } from 'zustand'
 import {
+  DIVISIONS,
   GRID_HALF,
+  TICKS_PER_UNIT,
   centroid,
+  type Division,
   MAX_EXTENT,
   MIN_EXTENT,
   neededExtent,
@@ -79,8 +82,10 @@ export interface WorkshopState {
   selectedFace: number | null
   /** Swatches to hand: newest first, every color the picker ever settled on, then the defaults. */
   palette: string[]
-  /** The Y the add and stamp tools place on: the grid plane moves up and down. */
+  /** The Y the add and stamp tools place on, in ticks: the grid plane moves up and down. */
   level: number
+  /** Snap: the grid the placing tools, the marquee and the nudges use is a unit over this. A tool setting, not the shard's. */
+  division: Division
   /** The color new vertices get, and the color input shows. */
   color: [number, number, number]
   stampKind: StampKind
@@ -108,6 +113,9 @@ export interface WorkshopState {
   setExtent: (extent: number) => void
   setTool: (tool: Tool) => void
   setLevel: (level: number) => void
+  setDivision: (division: Division) => void
+  /** One snap step, in ticks. */
+  step: () => number
   setColor: (c: [number, number, number]) => void
   setStampKind: (kind: StampKind) => void
   setStampSize: (size: number) => void
@@ -270,6 +278,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selectedFace: null,
     palette: loadPalette(),
     level: 0,
+    division: 1,
     color: [0, 0.9, 1],
     stampKind: 'block',
     stampSize: 2,
@@ -326,12 +335,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const e = Math.max(Math.max(MIN_EXTENT, neededExtent(s)), Math.min(MAX_EXTENT, Math.round(extent)))
       if (e === s.extent) return
       edit((cur) => ({ ...cur, extent: e }))
-      set({ level: Math.max(-e, Math.min(e, get().level)) })
+      set({ level: Math.max(-e * TICKS_PER_UNIT, Math.min(e * TICKS_PER_UNIT, get().level)) })
     },
     setLevel: (level) => {
-      const e = get().current()?.extent ?? GRID_HALF
+      const e = (get().current()?.extent ?? GRID_HALF) * TICKS_PER_UNIT
       set({ level: Math.max(-e, Math.min(e, Math.round(level))) })
     },
+    setDivision: (division) => { if (DIVISIONS.includes(division)) set({ division }) },
+    step: () => TICKS_PER_UNIT / get().division,
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind }),
     setStampSize: (size) => set({ stampSize: Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size))) }),
@@ -446,11 +457,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     colorSelected: (c) => {
-      const { selection } = get()
+      const { selection, selectedFace } = get()
       set({ color: clampColor(c) })
-      if (selection.length === 0) return
+      // With no points selected, a selected face takes the color for its corners.
+      const face = selection.length === 0 && selectedFace !== null ? get().current()?.faces[selectedFace] : undefined
+      if (selection.length === 0 && !face) return
       edit((s) => {
-        const chosen = new Set(selection.filter((i) => s.vertices[i]))
+        const chosen = new Set((face ?? selection).filter((i) => s.vertices[i]))
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }

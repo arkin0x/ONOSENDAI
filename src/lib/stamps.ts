@@ -20,7 +20,7 @@
  * Pure: a stamp is a function of (kind, size, facing) and where you put it.
  */
 
-import { GRID_HALF, MAX_FACES, MAX_VERTICES, pointKey, type ShardModel, type ShardVertex } from './shards'
+import { GRID_HALF, MAX_FACES, MAX_VERTICES, TICKS_PER_UNIT, pointKey, type ShardModel, type ShardVertex } from './shards'
 import { triangulate, type P3 } from './triangulate'
 
 export type StampKind = 'block' | 'wedge' | 'pyramid' | 'column' | 'ring' | 'star' | 'arrow'
@@ -147,7 +147,8 @@ function turned(kind: StampKind, size: number, facing: Facing): Shape {
   const s = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size)))
   const base = local(kind, s)
   const k = FACED[kind] ? facing : 0
-  return { points: base.points.map((p) => turn(p, k)), faces: base.faces }
+  // Shapes are authored in units; positions are ticks.
+  return { points: base.points.map((p) => { const t = turn(p, k); return [t[0] * TICKS_PER_UNIT, t[1] * TICKS_PER_UNIT, t[2] * TICKS_PER_UNIT] as P3 }), faces: base.faces }
 }
 
 const moved = (points: P3[], by: P3): P3[] => points.map((p) => [p[0] + by[0], p[1] + by[1], p[2] + by[2]] as P3)
@@ -158,8 +159,9 @@ function fit(points: P3[], extent: number = GRID_HALF): P3 {
   for (let a = 0; a < 3; a++) {
     let lo = Infinity, hi = -Infinity
     for (const p of points) { lo = Math.min(lo, p[a]); hi = Math.max(hi, p[a]) }
-    if (lo < -extent) shift[a] = -extent - lo
-    else if (hi > extent) shift[a] = extent - hi
+    const bound = extent * TICKS_PER_UNIT
+    if (lo < -bound) shift[a] = -bound - lo
+    else if (hi > bound) shift[a] = bound - hi
   }
   return shift
 }

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel, TICKS_PER_UNIT, packTicks, unpackTicks, unitsLabel, toRender } from './shards'
+import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel, TICKS_PER_UNIT, packTicks, unpackTicks, unitsLabel, toRender, ticksOf, vertexAt, normalizeStored } from './shards'
 
 const tri: ShardModel = {
   ...newShard('tri'),
@@ -12,8 +12,8 @@ const tri: ShardModel = {
   unit: 3,
   vertices: [
     { p: [0, 0, 0], c: [1, 0, 0] },
-    { p: [2 * TICKS_PER_UNIT, 0, 0], c: [0, 1, 0] },
-    { p: [0, 2 * TICKS_PER_UNIT, 0], c: [0, 0, 1] },
+    { p: [2, 0, 0], c: [0, 1, 0] },
+    { p: [0, 2, 0], c: [0, 0, 1] },
   ],
   faces: [[0, 1, 2]],
 }
@@ -71,23 +71,31 @@ describe('geometry', () => {
 
 describe('ticks', () => {
   it('carries thirds, quarters and fifths exactly, with the run shorthand, and reads an old payload as whole units', () => {
-    const v = (p: [number, number, number]) => ({ p, c: [1, 0, 0] as [number, number, number] })
+    const v = (total: [number, number, number]) => vertexAt(total, [1, 0, 0])
     const s = { ...newShard('t'), vertices: [v([0, 0, 0]), v([TICKS_PER_UNIT, 0, 0]), v([40, -30, 24 + 2 * TICKS_PER_UNIT]), v([0, 0, 0])] }
+    expect(s.vertices[2]).toEqual({ p: [0, -1, 2], t: [40, 90, 24], c: [1, 0, 0] })
+    expect(s.vertices[1]).toEqual({ p: [1, 0, 0], c: [1, 0, 0] })
     const wire = toPayload(s)
     expect(wire.vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, -1, 2], [0, 0, 0]])
     expect(wire.ticks).toEqual([-2, [40, 90, 24], -1])
     const back = fromPayload(wire, 'x')!
-    expect(back.vertices.map((x) => x.p)).toEqual(s.vertices.map((x) => x.p))
+    expect(back.vertices).toEqual(s.vertices)
     const old = { ...wire, ticks: undefined }
-    expect(fromPayload(old, 'y')!.vertices.map((x) => x.p)).toEqual([[0, 0, 0], [TICKS_PER_UNIT, 0, 0], [0, -TICKS_PER_UNIT, 2 * TICKS_PER_UNIT], [0, 0, 0]])
+    expect(fromPayload(old, 'y')!.vertices.map((x) => ticksOf(x))).toEqual([[0, 0, 0], [TICKS_PER_UNIT, 0, 0], [0, -TICKS_PER_UNIT, 2 * TICKS_PER_UNIT], [0, 0, 0]])
     expect(unpackTicks([-3], 4)).toBeNull()
     expect(unpackTicks([[120, 0, 0]], 1)).toBeNull()
     expect(packTicks([])).toEqual([])
   })
   it('draws model +Z along render -Z, as the world draws cyberspace', () => {
     expect(toRender([TICKS_PER_UNIT, 2 * TICKS_PER_UNIT, 3 * TICKS_PER_UNIT])).toEqual([1, 2, -3])
-    const one = { ...newShard('z'), vertices: [{ p: [0, 0, TICKS_PER_UNIT] as [number, number, number], c: [1, 1, 1] as [number, number, number] }] }
+    const one = { ...newShard('z'), vertices: [{ p: [0, 0, 1] as [number, number, number], c: [1, 1, 1] as [number, number, number] }] }
     expect(Array.from(flatten(one).positions)).toEqual([0, 0, -1])
+  })
+  it('normalizes a model saved while positions were kept in ticks, and leaves a unit model alone', () => {
+    const units = { ...newShard('u'), vertices: [{ p: [3, 0, -2] as [number, number, number], c: [1, 1, 1] as [number, number, number] }] }
+    expect(normalizeStored(units)).toBe(units)
+    const interim = { ...newShard('i'), vertices: [{ p: [360, 40, -240] as [number, number, number], c: [1, 1, 1] as [number, number, number] }] }
+    expect(normalizeStored(interim).vertices[0]).toEqual({ p: [3, 0, -2], t: [0, 40, 0], c: [1, 1, 1] })
   })
   it('prints ticks as units', () => {
     expect(unitsLabel(0)).toBe('0')

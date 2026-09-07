@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { GRID_HALF, MAX_VERTICES, TICKS_PER_UNIT as T, newShard, validFace, validPoint, type ShardModel } from './shards'
+import { GRID_HALF, MAX_VERTICES, TICKS_PER_UNIT as T, newShard, ticksOf, validFace, validPoint, type ShardModel } from './shards'
 import { STAMPS, FACED, compile, landing, preview, stamp, type Facing, type StampKind } from './stamps'
 
 const red: [number, number, number] = [1, 0, 0]
@@ -89,7 +89,7 @@ describe('stamps', () => {
   it('never merges vertices, so a seam between colors stays crisp', () => {
     const a = stamp(empty(), 'block', 1, 0, [0, 0, 0], red)!
     const b = stamp(a.shard, 'block', 1, 0, [T, 0, 0], [0, 0, 1])!
-    const at = b.shard.vertices.filter((v) => v.p.join() === `${T},0,0`)
+    const at = b.shard.vertices.filter((v) => ticksOf(v).join() === `${T},0,0`)
     expect(at).toHaveLength(2)
     expect(at.map((v) => v.c.join()).sort()).toEqual(['0,0,1', '1,0,0'])
   })
@@ -112,7 +112,7 @@ describe('ghost placement', () => {
     for (const kind of STAMPS) {
       for (const origin of [[0, 0, 0], [GRID_HALF * T, 0, GRID_HALF * T], [-GRID_HALF * T, 3 * T, 2 * T]] as Array<[number, number, number]>) {
         const at = landing(kind, 4, 1, origin)
-        const ghost = preview(kind, 4, 1, red).vertices.map((v) => [v.p[0] + at[0], v.p[1] + at[1], v.p[2] + at[2]])
+        const ghost = preview(kind, 4, 1, red).vertices.map((v) => { const t = ticksOf(v); return [t[0] + at[0], t[1] + at[1], t[2] + at[2]] })
         expect(ghost).toEqual(compile(kind, 4, 1, origin).points)
       }
     }

@@ -20,7 +20,7 @@
  * Pure: a stamp is a function of (kind, size, facing) and where you put it.
  */
 
-import { GRID_HALF, MAX_FACES, MAX_VERTICES, TICKS_PER_UNIT, pointKey, type ShardModel, type ShardVertex } from './shards'
+import { GRID_HALF, MAX_FACES, MAX_VERTICES, TICKS_PER_UNIT, pointKey, ticksOf, vertexAt, type ShardModel, type ShardVertex } from './shards'
 import { triangulate, type P3 } from './triangulate'
 
 export type StampKind = 'block' | 'wedge' | 'pyramid' | 'column' | 'ring' | 'star' | 'arrow'
@@ -205,11 +205,11 @@ export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: 
   const base = shard.vertices.length
   const vertices: ShardVertex[] = [
     ...shard.vertices,
-    ...shape.points.map((p) => ({ p: [...p] as P3, c: [...color] as [number, number, number] })),
+    ...shape.points.map((p) => vertexAt(p, [...color] as [number, number, number])),
   ]
   const existing = new Map<string, number[]>()
   shard.faces.forEach((f, i) => {
-    const k = triKey(shard.vertices[f[0]].p, shard.vertices[f[1]].p, shard.vertices[f[2]].p)
+    const k = triKey(ticksOf(shard.vertices[f[0]]), ticksOf(shard.vertices[f[1]]), ticksOf(shard.vertices[f[2]]))
     existing.set(k, [...(existing.get(k) ?? []), i])
   })
   const drop = new Set<number>()
@@ -239,7 +239,7 @@ export function preview(kind: StampKind, size: number, facing: Facing, color: [n
     unit: 0,
     extent: GRID_HALF,
     mode: shape.faces.length ? 'solid' : 'lines',
-    vertices: shape.points.map((p) => ({ p, c: [...color] as [number, number, number] })),
+    vertices: shape.points.map((p) => vertexAt(p, [...color] as [number, number, number])),
     faces: shape.faces,
     updatedAt: 0,
   }

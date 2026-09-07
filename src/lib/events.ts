@@ -137,9 +137,10 @@ export function hopTemplate(i: HopInput): EventTemplate {
 export interface SidestepInput extends HopInput {
   /** Per-axis Merkle roots, 64 hex chars each. */
   merkleRoots: [string, string, string]
-  /** Per-axis inclusion proofs, sibling hashes concatenated leaf-first; an
-   * axis that did not move contributes an empty string. */
-  inclusionProofs: [string, string, string]
+  /** Per-axis openings (spec 6.10, 8.5): the destination path then the eight
+   * sampled paths, every sibling leaf first, one hex string per axis; an axis
+   * that did not move contributes an empty string. */
+  openings: [string, string, string]
   lcaHeights: [number, number, number]
 }
 
@@ -153,7 +154,7 @@ export function sidestepTemplate(i: SidestepInput): EventTemplate {
       ['A', 'sidestep'],
       ...hop.tags.slice(1, 6),
       ['mr', i.merkleRoots.join(':')],
-      ['mp', i.inclusionProofs.join(':')],
+      ['mp', i.openings.join(':')],
       ['hx', String(hx)],
       ['hy', String(hy)],
       ['hz', String(hz)],

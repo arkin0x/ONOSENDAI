@@ -10,6 +10,7 @@
 import {
   computeHopProof,
   computeSidestepProof,
+  encodeOpenings,
   estimateHopCost,
   estimateSidestepCost,
   type Plane,
@@ -36,7 +37,8 @@ export interface ProofRequest {
  */
 export interface SidestepTags {
   merkleRoots: [string, string, string]
-  inclusionProofs: [string, string, string]
+  /** Per-axis mp segments (spec 8.5): every opening's siblings, leaf first, as hex. */
+  openings: [string, string, string]
   lcaHeights: [number, number, number]
 }
 
@@ -97,9 +99,6 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         prevEventId,
         onProgress,
       )
-      // §8.5: siblings concatenated leaf-first per axis, empty where the axis
-      // did not move.
-      const path = (siblings: Uint8Array[]): string => siblings.map(bytesToHex).join('')
       const response: ProofResponse = {
         type: 'done',
         id,
@@ -111,11 +110,8 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         totalOps: estimate.totalHashes,
         sidestep: {
           merkleRoots: [bytesToHex(proof.merkleX), bytesToHex(proof.merkleY), bytesToHex(proof.merkleZ)],
-          inclusionProofs: [
-            path(proof.inclusionProofs.x),
-            path(proof.inclusionProofs.y),
-            path(proof.inclusionProofs.z),
-          ],
+          // §8.5: every opening's siblings leaf first per axis, empty where the axis did not move.
+          openings: [encodeOpenings(proof.openings.x), encodeOpenings(proof.openings.y), encodeOpenings(proof.openings.z)],
           lcaHeights: proof.lcaHeights,
         },
       }

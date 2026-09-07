@@ -24,6 +24,7 @@
 
 import {
   AXIS_BITS,
+  AXIS_BYTE,
   TEMPORAL_MAX_COMPUTE_HEIGHT,
   alignedBase,
   cantorPair,
@@ -32,12 +33,13 @@ import {
   findLcaHeight,
   hexToBytes,
   intToBytesBE,
+  seedPrefix,
   sha256,
   sha256Hex,
   sidestepLanding,
   terrainK,
-  verifyMerkleInclusion,
   type Plane,
+  verifyAxisOpenings,
 } from 'cyberspace-core'
 import type { CloudHopResult, CloudSidestepResult, HopEnvelope, HosakaAction } from './hosaka'
 import type { Position } from './space'
@@ -154,15 +156,17 @@ export function verifyCloudSidestep(result: CloudSidestepResult, move: CloudMove
     // 6.3: a crossing lands exactly 1 gibson past the boundary.
     if (h > 0 && sidestepLanding(from[axis], to[axis]) !== to[axis]) failed.push(`geometry:${axis}`)
 
-    const path = result.inclusion_proofs?.[axis]
-    if (!Array.isArray(path) || !path.every((s) => typeof s === 'string' && HEX64.test(s))) {
-      failed.push(`inclusion:${axis}`)
+    // 6.10 and 6.11: the destination's path and the eight sampled paths,
+    // each sampled leaf recomputed from our own seed (the previous event id
+    // and the axis) and carried to the root. The base is recomputed from our
+    // own coordinate, never read from the result.
+    const paths = result.openings?.[axis]
+    if (!Array.isArray(paths) || !paths.every((p) => Array.isArray(p) && p.every((s) => typeof s === 'string' && HEX64.test(s)))) {
+      failed.push(`openings:${axis}`)
       return
     }
-    // The base is recomputed from our own coordinate (6.4), never read from
-    // the result, where it is a JSON number too wide for a double.
-    const ok = verifyMerkleInclusion(to[axis], path.map(hexToBytes), hexToBytes(rootHex), h, alignedBase(from[axis], h))
-    if (!ok) failed.push(`inclusion:${axis}`)
+    const prefix = seedPrefix(hexToBytes(prevEventId), AXIS_BYTE[axis])
+    if (!verifyAxisOpenings(prefix, AXIS_BYTE[axis], from[axis], to[axis], hexToBytes(rootHex), paths.map((p) => p.map(hexToBytes)))) failed.push(`openings:${axis}`)
   })
 
   const K = terrainK(to.x, to.y, to.z, plane)

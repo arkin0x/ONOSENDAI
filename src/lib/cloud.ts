@@ -475,8 +475,8 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     totalOps: 0,
     sidestep: {
       merkleRoots: [r.merkle_x, r.merkle_y, r.merkle_z],
-      // 8.5: siblings concatenated leaf-first per axis, empty where the axis did not move.
-      inclusionProofs: [r.inclusion_proofs.x.join(''), r.inclusion_proofs.y.join(''), r.inclusion_proofs.z.join('')],
+      // 8.5: every opening's siblings leaf first per axis, empty where the axis did not move.
+      openings: [r.openings.x.map((p) => p.join('')).join(''), r.openings.y.map((p) => p.join('')).join(''), r.openings.z.map((p) => p.join('')).join('')],
       lcaHeights: r.lca_heights,
     },
     source: 'cloud',

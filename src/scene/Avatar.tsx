@@ -17,9 +17,11 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { IcosahedronGeometry, EdgesGeometry, Group } from 'three'
+import { Group } from 'three'
+import { facingQuaternion, moveDirection } from '../lib/facing'
 import { travelOffset } from '../lib/travel'
 import { useCyberspace } from '../store/useCyberspace'
+import { AvatarShape } from './AvatarShape'
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -27,14 +29,33 @@ export function Avatar(): JSX.Element | null {
   // marker there would say you are standing on it. Spectating keeps the marker,
   // where it stands in for the avatar being watched.
   const focus = useCyberspace((s) => s.focus)
+  // Whose shape: yours, or the spectated avatar's, whose marker this is then.
+  const pubkey = useCyberspace((s) => s.focusPubkey())
+  // The last move on the chain drawn, as a key so a re-render costs nothing
+  // until the chain grows; the avatar turns to face the way it went.
+  const view = useCyberspace((s) => s.view)
+  const moveKey = useCyberspace((s) => {
+    const chain = s.focusChain()
+    const n = chain.length
+    if (n < 2) return null
+    const a = chain[n - 2].position, b = chain[n - 1].position
+    return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
+  })
+  const facing = useMemo(() => {
+    if (!moveKey) return null
+    const s = useCyberspace.getState()
+    const chain = s.focusChain()
+    const dir = moveDirection(chain[chain.length - 2].position, chain[chain.length - 1].position, s.axes())
+    return dir ? facingQuaternion(dir) : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveKey, view])
 
-  const avatarGeometry = useMemo(() => {
-    const geo = new IcosahedronGeometry(0.5, 1)
-    return new EdgesGeometry(geo)
-  }, [])
-
-  useFrame(() => {
-    if (group.current) group.current.position.copy(travelOffset)
+  useFrame((_, dt) => {
+    const g = group.current
+    if (!g) return
+    g.position.copy(travelOffset)
+    // Eases into the new heading over the same beat the travel animation takes.
+    if (facing) g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
   if (focus) return null
@@ -46,9 +67,7 @@ export function Avatar(): JSX.Element | null {
           cell, the icosahedron inscribes it exactly, and standing on your
           own destination erased you; now the red edges composite on top of
           whatever shares your gibson. */}
-      <lineSegments geometry={avatarGeometry} frustumCulled={false} renderOrder={10}>
-        <lineBasicMaterial color="#ff2323" toneMapped={false} depthTest={false} />
-      </lineSegments>
+      <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} />
     </group>
   )
 }

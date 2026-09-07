@@ -29,6 +29,8 @@ import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, nee
 import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
+import { useAvatars } from '../store/useAvatars'
+import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
@@ -246,6 +248,8 @@ export function Workshop(): JSX.Element | null {
   const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
   const showAvatar = useWorkshop((s) => s.showAvatar)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const myAvatar = useAvatars((s) => s.shards[me] ?? null)
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -405,6 +409,21 @@ export function Workshop(): JSX.Element | null {
               <button className={`workshop__mode ${showAvatar ? 'is-on' : ''}`} aria-pressed={showAvatar} onClick={() => w().setShowAvatar(true)} title="Show the to-scale avatar at the grid's centre">SHOW</button>
               <button className={`workshop__mode ${!showAvatar ? 'is-on' : ''}`} aria-pressed={!showAvatar} onClick={() => w().setShowAvatar(false)} title="Hide it">HIDE</button>
             </div>
+          </div>
+          {/* The shape others see for you: this shard, published as kind 33331,
+              drawn in the dodecahedron's cell wherever you are drawn. */}
+          <div className="workshop__row" role="group" aria-label="My avatar">
+            <span className="workshop__label">MY AVATAR</span>
+            <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+            <button
+              className="workshop__btn"
+              disabled={shard.vertices.length === 0 || shard.faces.length === 0}
+              onClick={() => { void useAvatars.getState().adopt(shard).then((ok) => say(ok ? `"${shard.name}" is your avatar now.` : 'No relay took the avatar. Try again when one is reachable.')) }}
+              title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell"
+            >USE THIS SHARD</button>
+            {myAvatar && (
+              <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : 'No relay took the change.')) }} title="Back to the dodecahedron">DODECAHEDRON</button>
+            )}
           </div>
           <div className="ws__panel-title">SHARDS ({shards.length})</div>
           <div className="workshop__list-row">

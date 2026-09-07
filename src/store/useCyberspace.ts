@@ -46,8 +46,10 @@ import {
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
-import { OCCUPANCY_SCALE_MAX,
+import {
+  GRID_RADIUS,
   MAX_SCALE_EXP,
+  OCCUPANCY_SCALE_MAX,
   alignTo,
   canonicalQuaternion,
   cellDelta,
@@ -84,8 +86,7 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker,
-} from '../lib/hosaka'
+  type Waker, type HosakaProvider } from '../lib/hosaka'
 import {
   clearCloudJob,
   cloudProofResponse,
@@ -273,6 +274,8 @@ export interface CloudState {
   message: string | null
   /** GET /limits, fetched once per API URL; null until it answers, which means no cloud route. */
   limits: HosakaLimits | null
+  /** GET /provider, fetched with the limits; null on a provider that does not serve it, when the built-in HOSAKA presentation stands in. */
+  provider: HosakaProvider | null
   /** Date.now() when this flow began, for the elapsed line. */
   startedAt: number | null
   /** The last cloud proof that landed, for the panel. */
@@ -300,6 +303,7 @@ const IDLE_CLOUD: CloudState = {
   progress: null,
   message: null,
   limits: null,
+  provider: null,
   startedAt: null,
   last: null,
   checking: false,
@@ -404,7 +408,7 @@ export interface CyberspaceState {
    * is somewhere you are not. Exclusive with spectating in practice, because
    * the panel it is reached from is hidden while spectating.
    */
-  focus: { position: Position; plane: Plane; label: string } | null
+  focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
   /** The zoom before the standing focus began, restored by clearFocus. */
   focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
@@ -457,7 +461,8 @@ export interface CyberspaceState {
   /** Back to your own head. */
   endSpectate: () => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
+  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
   /** Stop looking; the scene returns to your avatar. */
   clearFocus: () => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
@@ -550,6 +555,8 @@ export interface CyberspaceState {
   actions: () => ActionEvent[]
   /** True when the scene is anchored on YOUR live head, where the controls apply. */
   atHead: () => boolean
+  /** The cursor can be driven: at your head, or in a free view that brought it along. Never while spectating or exploring history. */
+  canDrive: () => boolean
   /** The chain the scene is anchored on: the spectated avatar's, else yours. */
   focusChain: () => ActionEvent[]
   /** Whose chain that is. */
@@ -937,6 +944,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       .then((limits) => {
         // The URL may have changed while this was out; a stale answer is dropped.
         if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, limits } })
+        // The provider's own presentation rides along, and is never required.
+        void cloudClient(url).provider?.()
+          .then((provider) => { if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, provider } }) })
+          .catch(() => { if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, provider: null } }) })
         return limits
       })
       .catch(() => null)
@@ -1324,6 +1335,21 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     void get().resumeCloudJob()
   }
 
+  /**
+   * A free view keeps its anchor where VIEW put it and lets the cursor roam
+   * the field, exactly as at your head: the camera follows the cursor, and
+   * nothing re-anchors per press. Only when the cursor leaves the field's
+   * reach does the view jump to it, the way a commit re-anchors on the avatar,
+   * so a long walk costs one re-anchor every field width rather than one
+   * per step.
+   */
+  const rideView = (next: Position): void => {
+    const { anchor, scaleExp, focus } = get()
+    if (!focus?.drive || get().atHead()) return
+    const far = (['x', 'y', 'z'] as const).some((axis) => Math.abs(cellDelta(next[axis], anchor[axis], scaleExp)) > GRID_RADIUS)
+    if (far) set({ anchor: { ...next }, focus: { ...focus, position: { ...next } } })
+  }
+
   return {
   identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
   ...initial,
@@ -1351,7 +1377,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
-    if (!get().atHead()) return
+    if (!get().canDrive()) return
     const step = stepFor(scaleExp) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
@@ -1360,10 +1386,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Clamped against the axis wall: nowhere to go.
     if (next[dir.axis] === cursor[dir.axis]) return
     set({ cursor: next })
+    rideView(next)
   },
 
   setCursorAtCell: (row, col) => {
-    const { position, scaleExp, view } = get()
+    const { scaleExp, view } = get()
+    const focus = get().focus
+    const viewing = !get().atHead() && focus?.drive === true
+    // Cells are counted from the field's origin: your head, or the view's anchor.
+    const position = viewing ? get().anchor : get().position
     const axes = viewAxes(view)
     const origin = alignedOrigin(position, scaleExp)
     const step = stepFor(scaleExp)
@@ -1380,6 +1411,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
 
     set({ cursor: next })
+    if (viewing) rideView(next)
   },
 
   commit: async () => {
@@ -1584,18 +1616,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (get().proof.status === 'computing') return
     // Someone else's plane is theirs; the terrain follows their chain.
     if (get().spectate) return
-    if (get().plane === plane) return
+    if (get().plane === plane && get().anchorPlane === plane) return
     // The view follows the lined-up plane the way it follows the cursor: at
     // your own head, or in a focus view such as EARTH, the scene switches
     // planes now, so the planet, the landfalls, other avatars and everything
     // else of the other plane disappear at once. Only history keeps its own
     // plane, because each action there records the plane it was in.
+    // In a free view the flip is the view's alone: the plane you have lined
+    // up at your head is untouched, and RETURN puts the scene back in it.
+    const focus = get().focus
+    if (focus?.drive && get().exploreIndex === null) { set({ anchorPlane: plane, focus: { ...focus, plane } }); return }
     const next: Partial<CyberspaceState> = { plane, proof: IDLE_PROOF }
     if (get().exploreIndex === null) next.anchorPlane = plane
     set(next)
   },
 
-  togglePlane: () => { get().setPlane(get().plane === 0 ? 1 : 0) },
+  // The plane on show flips: yours at your head, the view's in a view.
+  togglePlane: () => { const shown = get().atHead() ? get().plane : get().anchorPlane; get().setPlane(shown === 0 ? 1 : 0) },
 
   applyProofMessage: async (msg) => {
     // Stale responses from a cancelled commit must not overwrite fresh state.
@@ -1843,9 +1880,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane })
   },
 
-  focusOn: (position, plane, label, scaleExp) => {
+  focusOn: (position, plane, label, scaleExp, drive = false) => {
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label },
+      focus: { position: { ...position }, plane, label, drive },
+      // A free view brings the cursor along, so the pad moves it there and a
+      // message or a shard placed from the view lands there, not at your head.
+      ...(drive ? { cursor: { ...position } } : {}),
       // Remember the zoom once, at the first focus; later focus changes keep it.
       focusReturnScale: get().focus === null ? get().scaleExp : get().focusReturnScale,
       spectate: null,
@@ -1860,11 +1900,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   clearFocus: () => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
-    const { position, plane, focusReturnScale, scaleExp } = get()
+    const { position, plane, focusReturnScale, scaleExp, focus } = get()
     set({
       focus: null,
       anchor: position,
       anchorPlane: plane,
+      // A cursor that went out with the view comes home with it.
+      ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
       scaleExp: focusReturnScale ?? scaleExp,
       focusReturnScale: null,
@@ -2259,7 +2301,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     saveCloudPrefs(next)
     const urlChanged = next.apiUrl !== prev.apiUrl
     if (urlChanged) limitsInFlight = null
-    set({ cloudPrefs: next, ...(urlChanged ? { cloud: { ...get().cloud, limits: null } } : {}) })
+    set({ cloudPrefs: next, ...(urlChanged ? { cloud: { ...get().cloud, limits: null, provider: null } } : {}) })
     if (next.mode !== 'off' && get().cloud.limits === null) void ensureCloudLimits()
   },
 
@@ -2302,6 +2344,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   actions: () => parsedChain(get().events),
 
+  canDrive: () => get().atHead() || (get().focus?.drive === true && get().spectate === null && get().exploreIndex === null),
   atHead: () =>
     get().exploreIndex === null &&
     get().spectate === null &&
@@ -2349,7 +2392,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // its cell, put the viewed block up-and-right of screen centre by the
     // sub-cell fraction (always positive, so always the same corner). Frame
     // the point itself, with the same continuous math it is drawn with.
-    if (focus !== null) {
+    // A driven focus (the free view) frames its cursor like your head does,
+    // so the camera follows the pad; a plain focus frames the viewed point.
+    if (focus !== null && !focus.drive) {
       // Same policy as markerCentre: at occupancy zooms the marker snaps to
       // its cell, whose cube centre is the aligned origin itself.
       if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
@@ -2358,8 +2403,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
-    // Off your own head there is no cursor to frame; the camera sits on the anchor.
-    if (!get().atHead()) return [0, 0, 0]
+    // With no cursor to drive (spectating, history, a plain focus) the camera sits on the anchor.
+    if (!get().canDrive()) return [0, 0, 0]
     const axes = viewAxes(view)
     const origin = alignedOrigin(anchor, scaleExp)
     // Cell CENTRES, the same convention the cursor cube, the avatar and the path

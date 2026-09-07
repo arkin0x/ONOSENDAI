@@ -150,7 +150,8 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const pendingTarget = useCyberspace((s) => s.pendingTarget)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const anchor = useCyberspace((s) => s.anchor)
-  const atHead = useCyberspace((s) => s.atHead())
+  const atHead = useCyberspace((s) => s.canDrive())
+  const home = useCyberspace((s) => s.atHead())
   // Looking at a focus the cursor cannot be used, so its size label would
   // just hang in the middle of the view.
   const focused = useCyberspace((s) => s.focus !== null)
@@ -158,7 +159,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
   const target = atHead ? (pendingTarget ?? cursor) : anchor
-  const active = atHead && !samePosition(position, target)
+  // A plan, and its legs, only from your own head: in a free view the avatar
+  // is astronomically far from the anchor and a leg to it would be nonsense.
+  const active = home && !samePosition(position, target)
 
   // The one action the next commit takes, exactly as the button names it
   // (useOffer): where it lands is where the ghost stands and where the tether
@@ -260,7 +263,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const ghost = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
-    const live = s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor
+    const live = s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor
     const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
@@ -278,7 +281,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         the SCALE panel already answers "how big is a gibson here" at rest.
         Off your own head it stays up, since nothing else there names the size.
       */}
-      {!focused && (!atHead || active) && <WorldLabel
+      {!focused && (!home || active) && <WorldLabel
         text={formatCellSize(scaleExp)}
         color={active ? targetColor : ACCENT}
         offset={[1.5, 0.7, 0]}
@@ -286,7 +289,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         follow={() => {
           const s = useCyberspace.getState()
           return cellCentre(
-            s.atHead() ? (s.pendingTarget ?? s.cursor) : s.anchor,
+            s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor,
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}
@@ -311,6 +314,13 @@ export function Cursor({ axes }: Props): JSX.Element | null {
             <lineBasicMaterial color={targetColor} toneMapped={false} transparent opacity={0.85} depthTest={false} />
           </lineSegments>
         </>
+      )}
+      {/* The free view's own marker: the yellow cube on the cell you are
+          looking at, which the pad moves with the view. */}
+      {!home && atHead && !active && (
+        <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
+          <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.85} depthTest={false} />
+        </lineSegments>
       )}
     </group>
   )

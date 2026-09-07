@@ -15,7 +15,9 @@
  * way WASD does and the two can never disagree about which way is up.
  */
 
+import { Box } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
+import { viewCyberspace } from './HyperspacePanel'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
@@ -40,7 +42,9 @@ export function TouchControls(): JSX.Element {
   // of the line the field draws and which regime owns the frame, so the pad
   // stays, at its own size and in its own place, with those cells emptied.
   // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
-  const atHead = useCyberspace((s) => s.atHead())
+  const atHead = useCyberspace((s) => s.canDrive())
+  // The commit row is for a move of your own: only at your head.
+  const home = useCyberspace((s) => s.atHead())
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -94,7 +98,12 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div className="touchpad" role="group" aria-label="Move cursor and change scale">
+      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}`} role="group" aria-label="Move cursor and change scale">
+        {/* The purple cube: all of cyberspace at once, 2^84, the camera on
+            the whole of it. On every pad, at your head or off it. */}
+        <button className="touchpad__key touchpad__key--cube" title="All of cyberspace at 2^84" aria-label="See all of cyberspace at 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewCyberspace(MAX_SCALE_EXP) }}>
+          <Box size={16} strokeWidth={2.25} aria-hidden />
+        </button>
         {pad.map((b) => (
           <button
             key={b.cell}
@@ -130,7 +139,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {atHead && <div className="touchops">
+      {home && <div className="touchops">
         <button
           className="touchops__cancel"
           title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}

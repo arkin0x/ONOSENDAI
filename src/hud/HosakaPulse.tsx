@@ -11,11 +11,12 @@ import { useCyberspace } from '../store/useCyberspace'
 
 export function HosakaPulse(): JSX.Element | null {
   const status = useCyberspace((s) => s.cloud.status)
+  const provider = useCyberspace((s) => s.cloud.provider)
   if (!jobInProgress(status)) return null
   return (
     <img
       className="hosaka-pulse"
-      src="/hosaka-mark.png"
+      src={provider?.logo ?? '/hosaka-mark.png'}
       alt="HOSAKA job in progress"
       role="status"
       width={308}

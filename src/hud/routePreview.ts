@@ -43,6 +43,9 @@ function summaryOf(steps: PlanStep[]): PlanSummary {
 
 /** The route from the avatar to the cursor, with this machine's ceilings and HOSAKA's caps as they stand. */
 export function useRoutePreview(): RoutePreview | null {
+  // Only at your head: in a free view the cursor is a thousand hops from the
+  // avatar, and planning that route on every press is what made the pad crawl.
+  const home = useCyberspace((s) => s.atHead())
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
@@ -53,7 +56,7 @@ export function useRoutePreview(): RoutePreview | null {
   const cloudHop = limits?.max_hop_height ?? 0
   const cloudSidestep = limits?.max_sidestep_height ?? 0
   return useMemo(() => {
-    if (samePosition(position, cursor)) return null
+    if (!home || samePosition(position, cursor)) return null
     const hop = estimateHopCost(position.x, position.y, position.z, cursor.x, cursor.y, cursor.z, plane, ceiling)
     if (!hop.exceedsLimit) return { hop, route: null, steps: null, needsCloud: false }
     // HOSAKA's caps whatever the cloud mode: what a move needs does not
@@ -63,7 +66,7 @@ export function useRoutePreview(): RoutePreview | null {
     try { steps = buildMovePlan(position, cursor, ceilings, PREVIEW_STEPS_MAX) } catch { steps = null }
     const route = steps ? summaryOf(steps) : planSummary(position, cursor, ceilings, PREVIEW_STEPS_MAX)
     return { hop, route, steps, needsCloud: route.cloudSteps > 0 }
-  }, [position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep])
+  }, [home, position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep])
 }
 
 export interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }

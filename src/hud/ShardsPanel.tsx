@@ -12,6 +12,8 @@
 
 import { useState } from 'react'
 import { formatCellSize } from '../lib/scale'
+import { cashuLabel } from '../lib/cashu'
+import { cashuStateLabel, useCashu } from './useCashu'
 import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
@@ -25,6 +27,31 @@ function positionOf(d: MyDeployment): { x: bigint; y: bigint; z: bigint } {
 
 function depName(d: MyDeployment): string {
   return d.type === 'message' ? messagePreview(d.text ?? '', 24) : d.shard?.name ?? 'shard'
+}
+
+/**
+ * One hidden thing in the STASH. A message carrying a Cashu token shows the
+ * coin instead of the pen, what it holds, and whether anyone has taken it:
+ * the mint says which proofs are spent (useCashu), so REDEEMED means found.
+ */
+function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
+  const cashu = useCashu(d.type === 'message' ? d.text : null)
+  const coin = cashu.token !== null
+  return (
+    <li className={`shards__row shards__row--deployed ${viewing ? 'is-viewing' : ''}`}>
+      <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
+        <span className="avatars__who">
+          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{coin ? '₿' : d.type === 'message' ? '✎' : '◇'}</span>
+          {coin && cashu.token ? cashuLabel(cashu.token) : depName(d)}
+        </span>
+        <span className="shards__meta">
+          {d.height === 0 ? 'exact gibson' : formatCellSize(d.height)} · {d.published ? 'LIVE' : 'LOCAL'}{d.plane === 1 ? ' · ideaspace' : ''}
+          {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
+        </span>
+      </button>
+      <span className="shards__goto-hint" aria-hidden="true">▸</span>
+    </li>
+  )
 }
 
 export function ShardsPanel(): JSX.Element {
@@ -111,18 +138,7 @@ export function ShardsPanel(): JSX.Element {
           <span className="legend__label">Deployed — hidden in cyberspace</span>
           <ul className="avatars__list">
             {mine.map((d) => (
-              <li key={d.eventId} className={`shards__row shards__row--deployed ${inspecting === d.eventId ? 'is-viewing' : ''}`}>
-                <button className="shards__goto" onClick={() => goTo(d)} title="Fly to it and see its wire record">
-                  <span className="avatars__who">
-                    <span className={`shards__type shards__type--${d.type}`}>{d.type === 'message' ? '✎' : '◇'}</span>
-                    {depName(d)}
-                  </span>
-                  <span className="shards__meta">
-                    {d.height === 0 ? 'exact gibson' : formatCellSize(d.height)} · {d.published ? 'LIVE' : 'LOCAL'}{d.plane === 1 ? ' · ideaspace' : ''}
-                  </span>
-                </button>
-                <span className="shards__goto-hint" aria-hidden="true">▸</span>
-              </li>
+              <DeployedRow key={d.eventId} d={d} viewing={inspecting === d.eventId} onGo={() => goTo(d)} />
             ))}
           </ul>
         </div>

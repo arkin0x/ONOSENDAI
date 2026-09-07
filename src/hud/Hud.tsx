@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from '../lib/scale'
+import { canonicalViewAt, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -104,12 +105,35 @@ function IdentityPanel(): JSX.Element {
   )
 }
 
+const RECENT_KEY = 'onosendai:view-recent'
+function loadRecent(): RecentView[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
+    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1)).slice(0, 3) : []
+  } catch { return [] }
+}
+function saveRecent(list: RecentView[]): void {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
+}
+
 function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
+  // Decimals go to the plane on show: yours at your head, the view's in a view.
+  const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
+  const [viewText, setViewText] = useState('')
+  const [viewBad, setViewBad] = useState(false)
+  const [recent, setRecent] = useState<RecentView[]>(() => loadRecent())
+  const [recentOpen, setRecentOpen] = useState(false)
+  const look = (typed: string, target: ViewTarget): void => {
+    useCyberspace.getState().focusOn(target.position, target.plane, target.label, undefined, true)
+    const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
+    setRecent(next)
+    saveRecent(next)
+  }
 
   // Every figure copies on a tap, raw: the grouping commas are for reading,
   // not for pasting into a filter or a script.
@@ -140,6 +164,50 @@ function PositionPanel(): JSX.Element {
         <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
         <code>{coordHex}</code>
       </button>
+
+      {/* The free view: look at any place without walking there. Three axis
+          values, or a coordinate as the tags carry it; the cursor comes along,
+          so the pad drives from there and RETURN on the bar brings the view
+          home. The last three places typed wait under RECENT. */}
+      <div className="viewat">
+        <span className="legend__label">View a coordinate</span>
+        <form
+          className="avatars__find"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const target = parseViewAt(viewText, lookedPlane)
+            if (!target) { setViewBad(true); return }
+            setViewBad(false)
+            look(viewText, target)
+          }}
+        >
+          <input
+            className={`avatars__input ${viewBad ? 'is-bad' : ''}`}
+            value={viewText}
+            onChange={(e) => { setViewText(e.target.value); setViewBad(false) }}
+            placeholder="x, y, z or a coordinate"
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="A place to view"
+            aria-invalid={viewBad}
+          />
+          <button className="avatars__go" type="submit" disabled={!viewText.trim()} title="Look at this place without moving">VIEW</button>
+        </form>
+        {recent.length > 0 && (
+          <div className="viewat__recent">
+            <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>RECENT {recentOpen ? '▴' : '▾'}</button>
+            {recentOpen && (
+              <ul className="viewat__list">
+                {recent.map((r) => (
+                  <li key={r.input}>
+                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, target) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   )
 }

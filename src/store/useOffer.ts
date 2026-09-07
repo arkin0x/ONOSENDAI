@@ -53,6 +53,8 @@ const cursorKeyOf = (c: { x: bigint; y: bigint; z: bigint }, plane: number): str
 /** What the lined-up move needs, or null when this machine can do it. Not a hook: for the keyboard. */
 export function offerNeed(): OfferView | null {
   const s = useCyberspace.getState()
+  // Only a move from your head is anyone's to make; a free view plans nothing.
+  if (!s.atHead()) return null
   const cal = useCalibration.getState()
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, cal.hopHeight)
   const verdict = offerVerdict(s.position, s.cursor, s.plane, {
@@ -66,6 +68,7 @@ export function offerNeed(): OfferView | null {
 
 /** The same, for a component: recomputed as the cursor, the caps or the ceilings change. */
 export function useOfferNeed(): OfferView | null {
+  const home = useCyberspace((s) => s.atHead())
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
@@ -73,7 +76,7 @@ export function useOfferNeed(): OfferView | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const verdict = offerVerdict(position, cursor, plane, {
+  const verdict = !home ? null : offerVerdict(position, cursor, plane, {
     hop: machineCeiling,
     sidestep: sidestepCeil,
     cloudHop: limits?.max_hop_height ?? 0,
@@ -132,19 +135,22 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
 /** The next action, read from the stores. Not a hook: for the keyboard. */
 export function nextAction(): NextActionView | null {
   const s = useCyberspace.getState()
+  if (!s.atHead()) return null
   const cal = useCalibration.getState()
   return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits)
 }
 
 /** The same, for a component. */
 export function useNextAction(): NextActionView | null {
+  // A move is yours to make only from your head; a free view plans nothing.
+  const home = useCyberspace((s) => s.atHead())
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace((s) => s.plane)
   const limits = useCyberspace((s) => s.cloud.limits)
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
-  return nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits)
+  return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits) : null
 }
 
 /** What the COMMIT button says for each next action. */

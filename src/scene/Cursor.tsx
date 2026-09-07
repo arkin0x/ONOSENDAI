@@ -273,15 +273,12 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   return (
     <group position={[0, 0, 0.04]}>
       {/*
-        The scale reading is always up, even with the cursor parked on the
-        avatar. What one cell measures is a fact about the current zoom rather
-        than about any pending action, and it is the only thing on screen that
-        ties the abstract ladder to a physical size, so having it appear only
-        once you started moving meant the answer to "how big is a gibson here"
-        vanished exactly when you stopped to think about it. It rides the cursor,
-        which sits on the avatar while idle, so it has a home either way.
+        The scale reading rides the cursor, and shows once the cursor has left
+        the avatar's cell: parked on the avatar it read as a label on you, and
+        the SCALE panel already answers "how big is a gibson here" at rest.
+        Off your own head it stays up, since nothing else there names the size.
       */}
-      {!focused && <WorldLabel
+      {!focused && (!atHead || active) && <WorldLabel
         text={formatCellSize(scaleExp)}
         color={active ? targetColor : ACCENT}
         offset={[1.5, 0.7, 0]}

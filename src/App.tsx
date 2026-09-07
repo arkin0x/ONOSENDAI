@@ -99,6 +99,11 @@ export default function App(): JSX.Element {
   // folds instead of layering underneath it.
   const secretOpen = useShards((s) => s.selectedSecret !== null)
   useEffect(() => { if (secretOpen) setPanelsOpen(false) }, [secretOpen])
+  // Deploying is the same kind of thing: the bar sits at the top, the panels
+  // close at once so the scene is clear to choose a place, and the
+  // instruments and compass stay out of the way until it is placed or dropped.
+  const deploying = useShards((s) => s.pending !== null)
+  useEffect(() => { if (deploying) setPanelsOpen(false) }, [deploying])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
@@ -143,7 +148,7 @@ export default function App(): JSX.Element {
     <div className="app">
       <Scene />
       {!crowded && !offerUp && <Targets targets={targets} />}
-      {!crowded && !secretOpen && !offerUp && (
+      {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
@@ -159,8 +164,8 @@ export default function App(): JSX.Element {
       )}
       {showPanels && !offerUp && <Hud menuOpen={crowded} />}
       <SpectateBar />
-      {!crowded && !offerUp && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
-      {!crowded && !offerUp && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
+      {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}
       {/* Off-head too: tapping a block hides the pad like any scene tap, and

@@ -43,6 +43,8 @@ export function TouchControls(): JSX.Element {
   // stays, at its own size and in its own place, with those cells emptied.
   // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
   const atHead = useCyberspace((s) => s.canDrive())
+  // The commit row is for a move of your own: only at your head.
+  const home = useCyberspace((s) => s.atHead())
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -137,7 +139,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {atHead && <div className="touchops">
+      {home && <div className="touchops">
         <button
           className="touchops__cancel"
           title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}

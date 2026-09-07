@@ -46,8 +46,10 @@ import {
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
-import { OCCUPANCY_SCALE_MAX,
+import {
+  GRID_RADIUS,
   MAX_SCALE_EXP,
+  OCCUPANCY_SCALE_MAX,
   alignTo,
   canonicalQuaternion,
   cellDelta,
@@ -134,9 +136,6 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
-/** How long the pad rests before a free view re-anchors on its cursor. */
-const FOLLOW_MS = 220
-let followTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
  * Another avatar, followed. Their chain is the focus chain while this is set:
@@ -1337,20 +1336,18 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   }
 
   /**
-   * A free view follows its cursor, but not per press: re-anchoring is a
-   * change of frame that a dozen scene parts redraw for, and doing it on
-   * every step made the pad feel half a second slow. The cursor moves at
-   * once; the anchor catches it up when the presses have settled.
+   * A free view keeps its anchor where VIEW put it and lets the cursor roam
+   * the field, exactly as at your head: the camera follows the cursor, and
+   * nothing re-anchors per press. Only when the cursor leaves the field's
+   * reach does the view jump to it, the way a commit re-anchors on the avatar,
+   * so a long walk costs one re-anchor every field width rather than one
+   * per step.
    */
-  const followView = (): void => {
-    if (followTimer !== null) clearTimeout(followTimer)
-    followTimer = setTimeout(() => {
-      followTimer = null
-      const focus = get().focus
-      if (!focus?.drive || get().atHead()) return
-      const at = { ...get().cursor }
-      set({ anchor: at, focus: { ...focus, position: { ...at } } })
-    }, FOLLOW_MS)
+  const rideView = (next: Position): void => {
+    const { anchor, scaleExp, focus } = get()
+    if (!focus?.drive || get().atHead()) return
+    const far = (['x', 'y', 'z'] as const).some((axis) => Math.abs(cellDelta(next[axis], anchor[axis], scaleExp)) > GRID_RADIUS)
+    if (far) set({ anchor: { ...next }, focus: { ...focus, position: { ...next } } })
   }
 
   return {
@@ -1388,10 +1385,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     // Clamped against the axis wall: nowhere to go.
     if (next[dir.axis] === cursor[dir.axis]) return
-    // In a free view the cursor is the view: the cursor moves now and the
-    // anchor catches it up once the presses settle (followView).
     set({ cursor: next })
-    if (!get().atHead() && get().focus?.drive) followView()
+    rideView(next)
   },
 
   setCursorAtCell: (row, col) => {
@@ -1416,7 +1411,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
 
     set({ cursor: next })
-    if (viewing) followView()
+    if (viewing) rideView(next)
   },
 
   commit: async () => {
@@ -1906,7 +1901,6 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus } = get()
-    if (followTimer !== null) { clearTimeout(followTimer); followTimer = null }
     set({
       focus: null,
       anchor: position,
@@ -2398,7 +2392,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // its cell, put the viewed block up-and-right of screen centre by the
     // sub-cell fraction (always positive, so always the same corner). Frame
     // the point itself, with the same continuous math it is drawn with.
-    if (focus !== null) {
+    // A driven focus (the free view) frames its cursor like your head does,
+    // so the camera follows the pad; a plain focus frames the viewed point.
+    if (focus !== null && !focus.drive) {
       // Same policy as markerCentre: at occupancy zooms the marker snaps to
       // its cell, whose cube centre is the aligned origin itself.
       if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
@@ -2407,8 +2403,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
-    // Off your own head there is no cursor to frame; the camera sits on the anchor.
-    if (!get().atHead()) return [0, 0, 0]
+    // With no cursor to drive (spectating, history, a plain focus) the camera sits on the anchor.
+    if (!get().canDrive()) return [0, 0, 0]
     const axes = viewAxes(view)
     const origin = alignedOrigin(anchor, scaleExp)
     // Cell CENTRES, the same convention the cursor cube, the avatar and the path

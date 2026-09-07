@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { useCyberspace } from './useCyberspace'
 
 const S = () => useCyberspace.getState()
@@ -14,44 +14,22 @@ describe('the free view', () => {
     expect(S().canDrive()).toBe(true)
     expect(S().cursor).toEqual(there)
     expect(S().anchor).toEqual(there)
-    vi.useFakeTimers()
-    try {
-      S().moveCursor({ axis: 'x', dir: 1 })
-      S().moveCursor({ axis: 'x', dir: 1 })
-      expect(S().cursor.x).toBeGreaterThan(there.x)
-      // The cursor moves at once; the view catches up once the presses settle.
-      expect(S().anchor).toEqual(there)
-      vi.advanceTimersByTime(300)
-      expect(S().anchor).toEqual(S().cursor)
-      expect(S().focus?.position).toEqual(S().cursor)
-      expect(S().position).toEqual(home)
-    } finally { vi.useRealTimers() }
+    S().moveCursor({ axis: 'x', dir: 1 })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(S().cursor.x).toBe(there.x + 2n)
+    // Within the field the anchor stays: the camera follows the cursor, nothing re-anchors.
+    expect(S().anchor).toEqual(there)
+    expect(S().position).toEqual(home)
   })
 
-  it('does not catch up after RETURN', () => {
-    vi.useFakeTimers()
-    try {
-      S().focusOn({ x: 20n, y: 20n, z: 20n }, 0, 'there', undefined, true)
-      S().moveCursor({ axis: 'y', dir: 1 })
-      S().clearFocus()
-      vi.advanceTimersByTime(300)
-      expect(S().anchor).toEqual(S().position)
-      expect(S().focus).toBeNull()
-    } finally { vi.useRealTimers() }
-  })
-
-  it('shows and flips the plane it looks at, keeping the cursor', () => {
-    S().focusOn({ x: 5n, y: 5n, z: 5n }, 1, 'there', undefined, true)
-    expect(S().anchorPlane).toBe(1)
-    const mine = S().plane
-    S().togglePlane()
-    expect(S().anchorPlane).toBe(0)
-    expect(S().focus?.plane).toBe(0)
-    expect(S().cursor).toEqual({ x: 5n, y: 5n, z: 5n })
-    // The flip is the view's alone; home is still in your own plane.
-    expect(S().plane).toBe(mine)
-    S().clearFocus()
-    expect(S().anchorPlane).toBe(mine)
+  it('jumps the view to the cursor once it leaves the field', () => {
+    const there = { x: 1000n, y: 1000n, z: 1000n }
+    S().focusOn(there, S().plane, 'there', undefined, true)
+    for (let i = 0; i < 24; i++) S().moveCursor({ axis: 'z', dir: 1 })
+    expect(S().anchor).toEqual(there)
+    S().moveCursor({ axis: 'z', dir: 1 })
+    expect(S().anchor).toEqual(S().cursor)
+    expect(S().focus?.position).toEqual(S().cursor)
   })
 
   it('leaves the cursor where it was for a plain focus, which cannot be driven', () => {

@@ -106,9 +106,12 @@ export default function App(): JSX.Element {
   useEffect(() => { if (deploying) setPanelsOpen(false) }, [deploying])
   // VIEW from the position panel or a target: on a phone the panels cover the
   // scene, so the view they asked for closes them; RETURN is on the bar.
-  const driving = useCyberspace((s) => s.focus?.drive === true)
+  // Every VIEW counts, not only the first: a recent place tapped while already
+  // viewing must reach the screen too.
+  const viewSeq = useCyberspace((s) => s.viewSeq)
   const stationView = useHyperspace((s) => s.viewOwned)
-  useEffect(() => { if ((driving || stationView) && isMobile) setPanelsOpen(false) }, [driving, stationView, isMobile])
+  useEffect(() => { if (viewSeq > 0 && isMobile) setPanelsOpen(false) }, [viewSeq, isMobile])
+  useEffect(() => { if (stationView && isMobile) setPanelsOpen(false) }, [stationView, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.

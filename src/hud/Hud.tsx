@@ -109,7 +109,8 @@ const RECENT_KEY = 'onosendai:view-recent'
 function loadRecent(): RecentView[] {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1)).slice(0, 3) : []
+    // Places kept before they carried a plane are dataspace.
+    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string').map((r) => ({ ...r, plane: (r.plane === 1 ? 1 : 0) as 0 | 1 })).slice(0, 3) : []
   } catch { return [] }
 }
 function saveRecent(list: RecentView[]): void {

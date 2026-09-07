@@ -409,6 +409,8 @@ export interface CyberspaceState {
    * the panel it is reached from is hidden while spectating.
    */
   focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
+  /** Counts every VIEW, so a view asked for while already viewing still reaches the screen (the phone's panels close on it). */
+  viewSeq: number
   /** The zoom before the standing focus began, restored by clearFocus. */
   focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
@@ -1356,6 +1358,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   spectate: null,
   focus: null,
   focusReturnScale: null,
+  viewSeq: 0,
   transit: null,
   targets: loadTargets(),
   cursor: initial.position,
@@ -1883,6 +1886,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   focusOn: (position, plane, label, scaleExp, drive = false) => {
     const next: Partial<CyberspaceState> = {
       focus: { position: { ...position }, plane, label, drive },
+      ...(drive ? { viewSeq: get().viewSeq + 1 } : {}),
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),

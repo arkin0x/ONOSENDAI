@@ -1803,7 +1803,7 @@ kbd {
 .deploybar {
   position: fixed;
   left: 14px;
-  bottom: 14px;
+  top: 14px;
   z-index: 101;
   width: min(360px, calc(100vw - 28px));
   display: flex;
@@ -1933,14 +1933,6 @@ kbd {
 @media (min-width: 1101px) {
   .deploybar {
     left: 332px;
-    bottom: 14px;
-  }
-}
-
-/* Above the movement pad on a phone. */
-@media (max-width: 1100px) {
-  .deploybar {
-    bottom: 150px;
   }
 }
 

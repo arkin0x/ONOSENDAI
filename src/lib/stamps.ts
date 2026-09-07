@@ -82,12 +82,14 @@ function box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: num
 
 /** Where a shape of side s sits so the tap is at or near its middle: [−⌊s/2⌋, s − ⌊s/2⌋]. */
 /**
- * A shape's footprint across the tap: from -s/2 to s/2, so every size is
- * centred on the tap and an avatar at the tap stands in the middle. An odd
- * size puts its corners on half units, which ticks carry exactly (60 of 120).
+ * A shape's footprint across the tap, on whole units: an even size sits
+ * centred on the tap, an odd size hangs one more unit to the positive side.
+ * Corners land on gibsons, as hand-placed vertices do; a finer DIVISION is
+ * the way between them.
  */
 function span(s: number): [number, number] {
-  return [-s / 2, s / 2]
+  const lo = -Math.floor(s / 2)
+  return [lo, lo + s]
 }
 
 /** Points on a circle of radius r at n even steps, snapped to the grid, runs of repeats collapsed. */
@@ -113,7 +115,7 @@ function flat(points: P3[]): Shape {
 function local(kind: StampKind, s: number): Shape {
   switch (kind) {
     case 'block': { const [x0, x1] = span(s); const [z0, z1] = span(s); return box(x0, x1, 0, s, z0, z1) }
-    case 'column': return box(-0.5, 0.5, 0, 2 * s, -0.5, 0.5)
+    case 'column': return box(0, 1, 0, 2 * s, 0, 1)
     case 'pyramid': return {
       points: [[-s, 0, -s], [s, 0, -s], [s, 0, s], [-s, 0, s], [0, 2 * s, 0]],
       faces: [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4], ...quad(0, 1, 2, 3)],

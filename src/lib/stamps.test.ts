@@ -47,20 +47,6 @@ describe('stamps', () => {
     expect(Math.max(...points.map((p) => p[0]))).toBe(4 * T)
   })
 
-  it('centres every size on the tap, odd sizes on half units', () => {
-    const one = compile('block', 1, 0, [3 * T, 0, 0]).points
-    expect(Math.min(...one.map((p) => p[0]))).toBe(3 * T - T / 2)
-    expect(Math.max(...one.map((p) => p[0]))).toBe(3 * T + T / 2)
-    expect(Math.min(...one.map((p) => p[2]))).toBe(-T / 2)
-    const three = compile('block', 3, 0, [0, 0, 0]).points
-    expect(Math.min(...three.map((p) => p[0]))).toBe(-1.5 * T)
-    expect(Math.max(...three.map((p) => p[0]))).toBe(1.5 * T)
-    const post = compile('column', 2, 0, [0, 0, 0]).points
-    expect(Math.min(...post.map((p) => p[0]))).toBe(-T / 2)
-    expect(Math.max(...post.map((p) => p[2]))).toBe(T / 2)
-    for (const p of [...one, ...three, ...post]) for (const c of p) expect(Number.isInteger(c)).toBe(true)
-  })
-
   it('is pushed back inside the grid when tapped at the edge', () => {
     for (const kind of STAMPS) {
       const { points } = compile(kind, 4, 0, [GRID_HALF * T, GRID_HALF * T, GRID_HALF * T])
@@ -103,8 +89,7 @@ describe('stamps', () => {
   it('never merges vertices, so a seam between colors stays crisp', () => {
     const a = stamp(empty(), 'block', 1, 0, [0, 0, 0], red)!
     const b = stamp(a.shard, 'block', 1, 0, [T, 0, 0], [0, 0, 1])!
-    // Blocks centre on the tap: the two meet on the plane x = T/2.
-    const at = b.shard.vertices.filter((v) => ticksOf(v).join() === `${T / 2},0,${-T / 2}`)
+    const at = b.shard.vertices.filter((v) => ticksOf(v).join() === `${T},0,0`)
     expect(at).toHaveLength(2)
     expect(at.map((v) => v.c.join()).sort()).toEqual(['0,0,1', '1,0,0'])
   })

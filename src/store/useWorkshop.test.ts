@@ -72,12 +72,12 @@ describe('workshop', () => {
     w().setColor([1, 0, 0])
     w().placeStamp([T, 0, 0])
     const s = w().current()!
-    const shared = s.vertices.map((v, i) => (ticksOf(v).join() === `${T / 2},0,${-T / 2}` ? i : -1)).filter((i) => i >= 0)
+    const shared = s.vertices.map((v, i) => (ticksOf(v).join() === `${T},0,0` ? i : -1)).filter((i) => i >= 0)
     expect(shared).toHaveLength(2)
     w().selectVertex(shared[0])
     // Off to a free point: landing on the blocks' top corners would join those too.
     w().moveSelected(2, -T)
-    for (const i of shared) expect(ticksOf(w().current()!.vertices[i])).toEqual([T / 2, 0, -T / 2 - T])
+    for (const i of shared) expect(ticksOf(w().current()!.vertices[i])).toEqual([T, 0, -T])
     w().colorSelected([0, 1, 0])
     for (const i of shared) expect(w().current()!.vertices[i].c).toEqual([0, 1, 0])
     const facesBefore = w().current()!.faces.length

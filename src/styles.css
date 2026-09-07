@@ -2629,6 +2629,27 @@ kbd {
   background: rgba(6, 14, 22, 0.88);
   border: 1px solid rgba(0, 229, 255, 0.3);
 }
+/* Bottom left: TOOLS, its panel above the chip. */
+.ws__tools {
+  position: absolute;
+  left: 12px;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ws__panel--up {
+  max-height: calc(100vh - 140px);
+}
+/* COLOR folded: a swatch of the current colour, the picker's dashed edge. */
+.ws__colorchip {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px dashed rgba(255, 255, 255, 0.7);
+}
 .ws__corner {
   position: absolute;
   right: 14px;
@@ -2679,17 +2700,18 @@ kbd {
 }
 .ws__color .workshop__label { min-width: 0; }
 @media (max-width: 640px) {
-  .ws__corner {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 0 10px 10px;
-  }
+  /* The open bar takes the width above the two corner chips; folded, the
+     corner stays a corner. */
   .ws__color {
-    width: 100%;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 60px;
     max-width: none;
     box-sizing: border-box;
-    border-radius: 10px;
+  }
+  .ws__panel--up {
+    max-height: calc(100vh - 220px);
   }
   .ws__panel {
     max-height: calc(100vh - 260px);

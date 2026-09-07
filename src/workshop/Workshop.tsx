@@ -4,16 +4,18 @@
  * the world.
  *
  * Top left, a row of chips: MENU (the shard itself: name, mode, the list,
- * clear, explain), TOOLS (STAMP, ADD, SELECT, FACE and each tool's options)
- * and GRID (the level the placing tools work on, the deploy scale multiplier,
- * and the grid's own scale), each opening one panel below the row; UNDO and
- * REDO float beside them. Top right, DEPLOY and the way out. Bottom right,
+ * clear, explain) and GRID (the level the placing tools work on, the deploy
+ * scale multiplier, and the grid's own size), each opening one panel below
+ * the row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
+ * SELECT, FACE and each tool's options). Top right, DEPLOY and the way out. Bottom right,
  * the CONTROLS pad, present only while points are selected: the main pad's
  * shape, nudging the selection in screen directions, with CONNECT and DELETE
- * in its corners; and below it the COLOR bar, gone while FACE is the tool
- * with no face in hand, back once a face is selected so a color can be put
- * on its corners. On a phone the color bar spans the bottom and the pad
- * stacks above it.
+ * in its corners; and below it COLOR, folded to a swatch of the current
+ * color until tapped, shut again by a tap anywhere else, and held open while
+ * SELECT is the tool; gone while FACE is the tool with no face in hand, back
+ * once a face is selected so a color can be put on its corners. TOOLS sits
+ * bottom left, its panel opening upward. On a phone the open color bar spans
+ * the bottom above the two corners.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -162,12 +164,35 @@ export function Workshop(): JSX.Element | null {
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
+  const [colorOpen, setColorOpen] = useState(false)
+  // On a phone the open colour bar and the TOOLS panel share the bottom, so
+  // they take turns; on a wide screen they have corners of their own.
+  const [narrow, setNarrow] = useState<boolean>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)')
+    const on = (): void => setNarrow(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [deleteColor, setDeleteColor] = useState<string | null>(null)
   const settle = useRef<number>()
   const picked = useRef(false)
   useEffect(() => () => window.clearTimeout(settle.current), [])
+  // A tap anywhere outside the colour bar shuts it, except while SELECT is
+  // the tool, when colouring the selection is the work and the bar stays.
+  useEffect(() => {
+    if (!colorOpen) return
+    const shut = (e: PointerEvent): void => {
+      if (useWorkshop.getState().tool === 'select') return
+      const el = e.target as HTMLElement | null
+      if (el?.closest('.ws__color, .ws__colorchip')) return
+      setColorOpen(false)
+    }
+    document.addEventListener('pointerdown', shut, true)
+    return () => document.removeEventListener('pointerdown', shut, true)
+  }, [colorOpen])
   const bind = useRepeatable()
 
   if (!open) return null
@@ -215,6 +240,7 @@ export function Workshop(): JSX.Element | null {
   }
 
   const facing = tool === 'face' && selection.length === 0 && (selectedFace !== null || facePick.length > 0)
+  const colorBar = (colorOpen || tool === 'select') && !(narrow && panel === 'tools')
 
   return (
     <div className="workshop" role="dialog" aria-label="Shard workshop">
@@ -230,9 +256,6 @@ export function Workshop(): JSX.Element | null {
       <div className="ws__chips">
         <button className={`chip ws__chip ${panel === 'menu' ? 'is-on' : ''}`} aria-pressed={panel === 'menu'} onClick={() => toggle('menu')}>
           <Menu size={12} strokeWidth={2.25} aria-hidden />MENU
-        </button>
-        <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
-          <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · {tool.toUpperCase()}
         </button>
         <button className={`chip ws__chip ${panel === 'grid' ? 'is-on' : ''}`} aria-pressed={panel === 'grid'} onClick={() => toggle('grid')}>
           <Grid3x3 size={12} strokeWidth={2.25} aria-hidden />GRID
@@ -313,46 +336,6 @@ export function Workshop(): JSX.Element | null {
         </div>
       )}
 
-      {panel === 'tools' && (
-        <div className="ws__panel" role="region" aria-label="Tools">
-          <div className="workshop__row" role="group" aria-label="Tool">
-            {TOOLS.map((t, i) => {
-              const Icon = TOOL_ICON[t]
-              return (
-                <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${t} (${i + 1})`}>
-                  <Icon size={12} strokeWidth={2.25} aria-hidden />{t.toUpperCase()}
-                </button>
-              )
-            })}
-          </div>
-          {TOOL_HELP[tool] && <div className="workshop__help">{TOOL_HELP[tool]}</div>}
-          {tool === 'stamp' && (
-            <>
-              <div className="workshop__row" role="group" aria-label="Shape">
-                <span className="workshop__label">SHAPE</span>
-                <div className="workshop__shapes">
-                  {STAMPS.map((k: StampKind) => (
-                    <button key={k} className={`workshop__tool ${stampKind === k ? 'is-on' : ''}`} aria-pressed={stampKind === k} onClick={() => w().setStampKind(k)} title={STAMP_HELP[k]}>{k.toUpperCase()}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="workshop__row">
-                <span className="workshop__label">SIZE</span>
-                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize - 1))} disabled={stampSize <= MIN_SIZE} aria-label="Smaller">−</button>
-                <span className="workshop__value">{stampSize}</span>
-                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize + 1))} disabled={stampSize >= MAX_SIZE} aria-label="Larger">+</button>
-                {FACED[stampKind] && (
-                  <>
-                    <span className="workshop__label workshop__label--gap">FACING</span>
-                    <button className="workshop__btn" onClick={() => w().turnStamp()} title="Turn a quarter (Q)">{FACING_LABEL[stampFacing]} ↻</button>
-                  </>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {panel === 'grid' && shard && (
         <div className="ws__panel" role="region" aria-label="Grid">
           <div className="workshop__row">
@@ -402,6 +385,53 @@ export function Workshop(): JSX.Element | null {
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
 
+      {/* Bottom left: TOOLS, its panel opening upward over the chip. */}
+      <div className="ws__tools">
+      {panel === 'tools' && (
+        <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
+          <div className="workshop__row" role="group" aria-label="Tool">
+            {TOOLS.map((t, i) => {
+              const Icon = TOOL_ICON[t]
+              return (
+                <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${t} (${i + 1})`}>
+                  <Icon size={12} strokeWidth={2.25} aria-hidden />{t.toUpperCase()}
+                </button>
+              )
+            })}
+          </div>
+          {TOOL_HELP[tool] && <div className="workshop__help">{TOOL_HELP[tool]}</div>}
+          {tool === 'stamp' && (
+            <>
+              <div className="workshop__row" role="group" aria-label="Shape">
+                <span className="workshop__label">SHAPE</span>
+                <div className="workshop__shapes">
+                  {STAMPS.map((k: StampKind) => (
+                    <button key={k} className={`workshop__tool ${stampKind === k ? 'is-on' : ''}`} aria-pressed={stampKind === k} onClick={() => w().setStampKind(k)} title={STAMP_HELP[k]}>{k.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="workshop__row">
+                <span className="workshop__label">SIZE</span>
+                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize - 1))} disabled={stampSize <= MIN_SIZE} aria-label="Smaller">−</button>
+                <span className="workshop__value">{stampSize}</span>
+                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize + 1))} disabled={stampSize >= MAX_SIZE} aria-label="Larger">+</button>
+                {FACED[stampKind] && (
+                  <>
+                    <span className="workshop__label workshop__label--gap">FACING</span>
+                    <button className="workshop__btn" onClick={() => w().turnStamp()} title="Turn a quarter (Q)">{FACING_LABEL[stampFacing]} ↻</button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+        <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
+          <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · {tool.toUpperCase()}
+        </button>
+      </div>
+
       {/* Bottom right: the pad while points are selected, face actions while a face is in hand, the color bar under either. */}
       <div className="ws__corner">
         {one && (
@@ -430,8 +460,8 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().clearFacePick()} title="Drop the picks (Esc)">CANCEL</button>
           </div>
         )}
-        {(tool !== 'face' || selectedFace !== null) && (
-          <div className="ws__color" role="group" aria-label="Color">
+        {(tool !== 'face' || selectedFace !== null) && (colorBar ? (
+          <div className={`ws__color ${tool === 'select' ? '' : 'is-open'}`} role="group" aria-label="Color">
             <span className="workshop__label">COLOR</span>
             <span className="workshop__picker" title="Pick any color; it joins the palette">
               <input type="color" className="workshop__color" value={hex} list="workshop-palette" onChange={(e) => pick(e.target.value)} onBlur={(e) => settled(e.target.value)} aria-label="Pick a color" {...noCallout} />
@@ -445,7 +475,9 @@ export function Workshop(): JSX.Element | null {
             </div>
             <button className="workshop__btn" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="Apply the color to every vertex">ALL</button>
           </div>
-        )}
+        ) : (
+          <button className="chip ws__colorchip" style={{ background: hex }} onClick={() => { setColorOpen(true); if (narrow && panel === 'tools') setPanel(null) }} title={`Color ${hex}. Tap for the palette.`} aria-label={`Color ${hex}, tap for the palette`} />
+        ))}
       </div>
 
       {deleteColor !== null && (

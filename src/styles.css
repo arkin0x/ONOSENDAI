@@ -2471,8 +2471,9 @@ kbd {
 /* The first-visit card: three steps, then never again. */
 .workshop__intro {
   position: absolute;
-  top: 56px;
-  right: 12px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 2;
   width: min(300px, calc(100vw - 24px));
   padding: 12px 14px 10px;
@@ -2686,30 +2687,27 @@ kbd {
   border: 1px solid var(--border);
   backdrop-filter: blur(8px);
 }
+/* COLOR open: a column rising from the corner, two swatches wide, so it never
+ * runs along the bottom into TOOLS. */
 .ws__color {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: min(440px, calc(100vw - 28px));
-  padding: 8px 10px;
+  gap: 8px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: 8px 6px;
   border-radius: 10px;
   background: rgba(6, 14, 22, 0.85);
   border: 1px solid var(--border);
   backdrop-filter: blur(8px);
 }
 .ws__color .workshop__label { min-width: 0; }
+.ws__color .workshop__swatches {
+  display: grid;
+  grid-template-columns: repeat(2, 22px);
+}
 @media (max-width: 640px) {
-  /* The open bar takes the width above the two corner chips; folded, the
-     corner stays a corner. */
-  .ws__color {
-    position: fixed;
-    left: 10px;
-    right: 10px;
-    bottom: 60px;
-    max-width: none;
-    box-sizing: border-box;
-  }
   .ws__panel--up {
     max-height: calc(100vh - 220px);
   }
@@ -2746,7 +2744,7 @@ kbd {
   /* The tray's contextual row only shows the current tool's controls, so the
    * bench keeps most of the screen; the explanation opens over a full row. */
   .workshop__tools { gap: 5px; padding: 6px 8px 8px; }
-  .workshop__intro { top: 8px; right: 8px; left: 8px; width: auto; }
+  .workshop__intro { width: calc(100vw - 16px); }
 }
 
 /* ---------- Relays panel ---------- */

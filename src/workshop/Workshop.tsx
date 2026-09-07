@@ -193,6 +193,9 @@ export function Workshop(): JSX.Element | null {
     document.addEventListener('pointerdown', shut, true)
     return () => document.removeEventListener('pointerdown', shut, true)
   }, [colorOpen])
+  // ADD, SELECT and FACE have nothing under them, so choosing one by key puts
+  // the TOOLS panel away; STAMP keeps it for the shape, size and facing.
+  useEffect(() => { if (tool !== 'stamp') setPanel((p) => (p === 'tools' ? null : p)) }, [tool])
   const bind = useRepeatable()
 
   if (!open) return null
@@ -385,15 +388,24 @@ export function Workshop(): JSX.Element | null {
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
 
-      {/* Bottom left: TOOLS, its panel opening upward over the chip. */}
+      {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
+          its panel, which opens upward over the chip. */}
       <div className="ws__tools">
+        {selection.length > 0 && (
+          <div className="benchops" role="group" aria-label="Turn the selection">
+            <span className="workshop__label">TURN</span>
+            <button className="workshop__btn" onClick={() => w().rotateSelected(-1)} title="A quarter turn this way about the vertical (Q)">↺</button>
+            <button className="workshop__btn" onClick={() => w().rotateSelected(1)} title="A quarter turn the other way (E)">↻</button>
+          </div>
+        )}
+        {selection.length > 0 && <ControlsPad points={selectedPoints} />}
       {panel === 'tools' && (
         <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
           <div className="workshop__row" role="group" aria-label="Tool">
             {TOOLS.map((t, i) => {
               const Icon = TOOL_ICON[t]
               return (
-                <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => w().setTool(t)} title={`${t} (${i + 1})`}>
+                <button key={t} className={`workshop__tool ${tool === t ? 'is-on' : ''}`} aria-pressed={tool === t} onClick={() => { w().setTool(t); if (t !== 'stamp') setPanel(null) }} title={`${t} (${i + 1})`}>
                   <Icon size={12} strokeWidth={2.25} aria-hidden />{t.toUpperCase()}
                 </button>
               )
@@ -432,7 +444,8 @@ export function Workshop(): JSX.Element | null {
         </button>
       </div>
 
-      {/* Bottom right: the pad while points are selected, face actions while a face is in hand, the color bar under either. */}
+      {/* Bottom right: FILL for a set of points, face actions while a face is in
+          hand, the color column under either. */}
       <div className="ws__corner">
         {one && (
           <div className="benchops" role="status" aria-label="Selected point">
@@ -445,14 +458,6 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().fillSelection()} title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)">FILL</button>
           </div>
         )}
-        {selection.length > 0 && (
-          <div className="benchops" role="group" aria-label="Turn the selection">
-            <span className="workshop__label">TURN</span>
-            <button className="workshop__btn" onClick={() => w().rotateSelected(-1)} title="A quarter turn this way about the vertical (Q)">↺</button>
-            <button className="workshop__btn" onClick={() => w().rotateSelected(1)} title="A quarter turn the other way (E)">↻</button>
-          </div>
-        )}
-        {selection.length > 0 && <ControlsPad points={selectedPoints} />}
         {facing && selectedFace !== null && (
           <div className="benchops" role="group" aria-label="Selected face">
             <span className="workshop__value workshop__value--wide">face {selectedFace + 1} of {shard?.faces.length ?? 0}</span>

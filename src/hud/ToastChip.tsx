@@ -5,10 +5,12 @@
  * is still announced when the scene comes back. Tap to dismiss.
  */
 
+import { useCyberspace } from '../store/useCyberspace'
 import { useEffect } from 'react'
 import { TOAST_MS, useToast } from '../store/useToast'
 
 export function ToastChip(): JSX.Element | null {
+  const provider = useCyberspace((s) => s.cloud.provider)
   const toast = useToast((s) => s.toast)
 
   useEffect(() => {
@@ -20,7 +22,7 @@ export function ToastChip(): JSX.Element | null {
   if (!toast) return null
   return (
     <div className="hyperbar hyperbar--found hyperbar--toast" role="status" onClick={() => useToast.getState().dismiss()}>
-      <img className="hyperbar__mark" src="/hosaka-mark.png" alt="HOSAKA" width={308} height={334} decoding="async" />
+      <img className="hyperbar__mark" src={provider?.logo ?? '/hosaka-mark.png'} alt={provider?.name ?? 'HOSAKA'} width={308} height={334} decoding="async" />
       <span className="hyperbar__text">
         <span className="hyperbar__label">{toast.label}</span>
         <span className="hyperbar__meta">{toast.meta}</span>

@@ -84,8 +84,7 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker,
-} from '../lib/hosaka'
+  type Waker, type HosakaProvider } from '../lib/hosaka'
 import {
   clearCloudJob,
   cloudProofResponse,
@@ -273,6 +272,8 @@ export interface CloudState {
   message: string | null
   /** GET /limits, fetched once per API URL; null until it answers, which means no cloud route. */
   limits: HosakaLimits | null
+  /** GET /provider, fetched with the limits; null on a provider that does not serve it, when the built-in HOSAKA presentation stands in. */
+  provider: HosakaProvider | null
   /** Date.now() when this flow began, for the elapsed line. */
   startedAt: number | null
   /** The last cloud proof that landed, for the panel. */
@@ -300,6 +301,7 @@ const IDLE_CLOUD: CloudState = {
   progress: null,
   message: null,
   limits: null,
+  provider: null,
   startedAt: null,
   last: null,
   checking: false,
@@ -937,6 +939,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       .then((limits) => {
         // The URL may have changed while this was out; a stale answer is dropped.
         if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, limits } })
+        // The provider's own presentation rides along, and is never required.
+        void cloudClient(url).provider?.()
+          .then((provider) => { if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, provider } }) })
+          .catch(() => { if (get().cloudPrefs.apiUrl === url) set({ cloud: { ...get().cloud, provider: null } }) })
         return limits
       })
       .catch(() => null)
@@ -2259,7 +2265,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     saveCloudPrefs(next)
     const urlChanged = next.apiUrl !== prev.apiUrl
     if (urlChanged) limitsInFlight = null
-    set({ cloudPrefs: next, ...(urlChanged ? { cloud: { ...get().cloud, limits: null } } : {}) })
+    set({ cloudPrefs: next, ...(urlChanged ? { cloud: { ...get().cloud, limits: null, provider: null } } : {}) })
     if (next.mode !== 'off' && get().cloud.limits === null) void ensureCloudLimits()
   },
 

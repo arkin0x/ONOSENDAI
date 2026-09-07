@@ -48,6 +48,7 @@ const BALANCE_STALE_MS = 10 * 60 * 1000
 export function CloudPanel(): JSX.Element {
   const prefs = useCyberspace((s) => s.cloudPrefs)
   const cloud = useCyberspace((s) => s.cloud)
+  const provider = cloud.provider
   const [editingUrl, setEditingUrl] = useState(false)
   const [urlDraft, setUrlDraft] = useState(prefs.apiUrl)
   const store = useCyberspace.getState
@@ -88,7 +89,7 @@ export function CloudPanel(): JSX.Element {
       {/* The provider's mark, first thing under the title: this is the panel
           whose work happens on someone else's machine. HOSAKA's for now; the
           plan is for the connected provider to serve its own (hosaka-api #6). */}
-      <img className="cloud__mark" src="/hosaka-mark.png" alt="HOSAKA" width={308} height={334} decoding="async" />
+      <img className="cloud__mark" src={provider?.logo ?? '/hosaka-mark.png'} alt={provider?.name ?? 'HOSAKA'} width={308} height={334} decoding="async" />
 
       <div className="cloud__modes" role="radiogroup" aria-label="Cloud mode">
         {MODES.map(([mode, label]) => (

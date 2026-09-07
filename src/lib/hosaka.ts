@@ -64,6 +64,25 @@ export interface HosakaCoord {
   plane: Plane
 }
 
+/**
+ * GET /api/v1/provider (hosaka-api#6): how the provider presents itself.
+ * Read once per URL next to /limits; absent on providers that predate it,
+ * when the built-in HOSAKA presentation stands in.
+ */
+export interface HosakaProvider {
+  version: number
+  name: string
+  tagline?: string
+  homepage?: string
+  /** A URL or data URI for the mark shown at the head of the cloud panel, in toasts and as the pulse. */
+  logo?: string
+  services?: Array<{ type: string; max_height: number; min_msats?: number }>
+  pricing?: { reference?: boolean; hop?: Array<{ max_height: number; sats: number; est_time: string }>; sidestep?: Array<{ max_height: number; sats: number; est_time: string }> }
+  payments?: { methods?: string[]; deposit_min_msats?: number; deposit_max_msats?: number; invoice_ttl_seconds?: number }
+  contact?: string
+  terms?: string
+}
+
 /** GET /api/v1/limits. Clients never hardcode a cap. */
 export interface HosakaLimits {
   max_hop_height: number
@@ -313,6 +332,8 @@ export interface HosakaClientOptions {
 export interface HosakaClient {
   readonly apiUrl: string
   limits: (signal?: AbortSignal) => Promise<HosakaLimits>
+  /** Absent on a client built before providers presented themselves. */
+  provider?: (signal?: AbortSignal) => Promise<HosakaProvider>
   quote: (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, signal?: AbortSignal) => Promise<HosakaQuote>
   submitHop: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
   submitSidestep: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
@@ -438,6 +459,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
   const client: HosakaClient = {
     apiUrl,
     limits: (signal) => request<HosakaLimits>('/api/v1/limits', { method: 'GET', signal }),
+    provider: (signal) => request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal }),
     quote: (action, v1, v2, signal) =>
       request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2 }, signal }),
     submitHop: (v1, v2, previousEventId, signal) => submit('hop', v1, v2, previousEventId, signal),

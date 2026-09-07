@@ -67,6 +67,25 @@ const HEX = /^#[0-9a-f]{6}$/
 
 type P3 = [number, number, number]
 
+/**
+ * Where a quarter turn pivots. The middle of the points' extent serves when a
+ * turn about it keeps every point on the snap grid: that is when the middle's
+ * x and z are both on a grid line or both halfway between lines, which is
+ * every square footprint, odd or even. Otherwise (a two by three, say) the
+ * middle snapped to the grid, and the caller keeps that point for the next
+ * turn so the shape cycles home in four instead of walking a step each time.
+ */
+function turnPivotFor(pts: P3[], step: number): [number, number] {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+  for (const [x, , z] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z) }
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
+  const rem = (v: number): number => ((v % step) + step) % step
+  const half = step / 2
+  if ((rem(cx) === 0 && rem(cz) === 0) || (rem(cx) === half && rem(cz) === half)) return [cx, cz]
+  const snap = (v: number): number => Math.round(v / step) * step
+  return [snap(cx), snap(cz)]
+}
+
 export interface WorkshopState {
   shards: ShardModel[]
   currentId: string | null
@@ -105,6 +124,8 @@ export interface WorkshopState {
   future: ShardModel[]
   /** One line about the last action, shown on the bench until the next edit. */
   notice: string | null
+  /** Where the last turn pivoted, kept while the same selection turns again. */
+  turnPivot: { key: string; at: [number, number] } | null
 
   openWorkshop: (id?: string) => void
   closeWorkshop: () => void
@@ -274,7 +295,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (!next) return false
     const list = shards.slice()
     list[i] = { ...next, updatedAt: Date.now() }
-    set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice })
+    set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null })
     save(list)
     return true
   }
@@ -296,6 +317,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     palette: loadPalette(),
     level: 0,
     division: 1,
+    turnPivot: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
     stampKind: 'block',
@@ -476,30 +498,32 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     rotateSelected: (turns) => {
-      const { selection } = get()
-      if (selection.length === 0) return
+      const { selection, turnPivot } = get()
+      const s = get().current()
+      if (!s || selection.length === 0) return
       const step = get().step()
+      const chosen = [...new Set(selection.filter((i) => s.vertices[i]))]
+      if (chosen.length === 0) return
+      const pts = chosen.map((i) => ticksOf(s.vertices[i]))
+      // The same selection turned again turns about the same point; any other
+      // edit forgets it (edit() clears it), and so does a change of DIVISION.
+      const key = `${step}:${[...chosen].sort((a, b) => a - b).join(',')}`
+      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(pts, step)
+      const [cx, cz] = at
       let refused = false
-      edit((s) => {
-        const chosen = [...new Set(selection.filter((i) => s.vertices[i]))]
-        if (chosen.length === 0) return null
-        const pts = chosen.map((i) => ticksOf(s.vertices[i]))
-        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
-        for (const [x, , z] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z) }
-        // The pivot: the middle of the selection's extent, on the snap grid.
-        const snap = (v: number): number => Math.round(v / step) * step
-        const cx = snap((minX + maxX) / 2), cz = snap((minZ + maxZ) / 2)
-        const vertices = s.vertices.slice()
+      edit((m) => {
+        const vertices = m.vertices.slice()
         chosen.forEach((i, k) => {
           const [x, y, z] = pts[k]
           const dx = x - cx, dz = z - cz
           const p: P3 = turns === 1 ? [cx + dz, y, cz - dx] : [cx - dz, y, cz + dx]
-          if (!validPoint(p, s.extent)) refused = true
+          if (!validPoint(p, m.extent)) refused = true
           vertices[i] = vertexAt(p, vertices[i].c)
         })
-        return refused ? null : { ...s, vertices }
+        return refused ? null : { ...m, vertices }
       })
       if (refused) set({ notice: 'That turn would carry a point off the grid.' })
+      else set({ turnPivot: { key, at } })
     },
 
     colorSelected: (c) => {

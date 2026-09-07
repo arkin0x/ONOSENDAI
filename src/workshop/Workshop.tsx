@@ -18,7 +18,7 @@
  * the bottom above the two corners.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
 import { Eye, Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
@@ -30,6 +30,11 @@ import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useAvatars } from '../store/useAvatars'
+import { avatarReach, avatarWork } from 'cyberspace-core'
+import { avatarTemplate } from '../lib/avatar'
+import { clock, describeDuration, expectedTries, serializeEvent, triesPerSec } from '../lib/avatarMine'
+import { minerCount } from '../lib/avatarWorker'
+import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
@@ -250,6 +255,18 @@ export function Workshop(): JSX.Element | null {
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const me = useCyberspace((s) => s.identity.pubkey)
   const myAvatar = useAvatars((s) => s.shards[me] ?? null)
+  const mining = useAvatars((s) => s.mining)
+  const sha256PerSec = useCalibration((s) => s.sha256PerSec)
+  // The avatar's price (spec 8.10), memoised on the geometry; a hook, so it sits with the others.
+  const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
+  const work = useMemo(() => {
+    if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
+    const payload = toPayload(shard)
+    // The bytes hashed per try: the serialized event with a nonce tag of typical width.
+    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
+    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -415,14 +432,34 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__row" role="group" aria-label="My avatar">
             <span className="workshop__label">MY AVATAR</span>
             <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
-            <button
-              className="workshop__btn"
-              disabled={shard.vertices.length === 0 || shard.faces.length === 0}
-              onClick={() => { void useAvatars.getState().adopt(shard).then((ok) => say(ok ? `"${shard.name}" is your avatar now.` : 'No relay took the avatar. Try again when one is reachable.')) }}
-              title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell"
-            >USE THIS SHARD</button>
-            {myAvatar && (
-              <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : 'No relay took the change.')) }} title="Back to the dodecahedron">DODECAHEDRON</button>
+            {mining ? (
+              <button className="workshop__btn workshop__btn--danger" onClick={() => useAvatars.getState().cancelAdopt()} title="Stop mining; your avatar stays as it is">CANCEL</button>
+            ) : (
+              <button
+                className="workshop__btn"
+                disabled={!buildable}
+                onClick={() => {
+                  const started = Date.now()
+                  void useAvatars.getState().adopt(shard).then((ok) => {
+                    const err = useAvatars.getState().adoptError
+                    say(ok ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${describeDuration((Date.now() - started) / 1000).replace('about ', '')}.` : err ?? 'Mining cancelled. Your avatar is as it was.')
+                  })
+                }}
+                title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
+              >USE THIS SHARD</button>
+            )}
+            {myAvatar && !mining && (
+              <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the dodecahedron; it owes no work">DODECAHEDRON</button>
+            )}
+            {/* The price (spec 8.10): 16 bits for any avatar, 6 more per doubling of
+                its reach in gibsons, 3 per doubling of vertices plus faces beyond 32;
+                the whole event is hashed per try, so bytes cost as well. */}
+            {buildable && (
+              <span className="workshop__work" aria-live="polite">
+                {mining
+                  ? `MINING ${mining.required} BITS · ${clock(mining.elapsedMs)} ELAPSED · ${mining.elapsedMs > 1000 ? describeDuration(expectedTries(mining.required) / (mining.tries / (mining.elapsedMs / 1000))).toUpperCase() + ' EXPECTED · ' : ''}${mining.elapsedMs > 1000 ? Math.round(mining.tries / (mining.elapsedMs / 1000) / 1000) + 'K TRIES/S' : 'MEASURING'}`
+                  : `WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
+              </span>
             )}
           </div>
           <div className="ws__panel-title">SHARDS ({shards.length})</div>

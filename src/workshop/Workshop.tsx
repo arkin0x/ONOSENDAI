@@ -445,6 +445,13 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().fillSelection()} title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)">FILL</button>
           </div>
         )}
+        {selection.length > 0 && (
+          <div className="benchops" role="group" aria-label="Turn the selection">
+            <span className="workshop__label">TURN</span>
+            <button className="workshop__btn" onClick={() => w().rotateSelected(-1)} title="A quarter turn this way about the vertical (Q)">↺</button>
+            <button className="workshop__btn" onClick={() => w().rotateSelected(1)} title="A quarter turn the other way (E)">↻</button>
+          </div>
+        )}
         {selection.length > 0 && <ControlsPad points={selectedPoints} />}
         {facing && selectedFace !== null && (
           <div className="benchops" role="group" aria-label="Selected face">

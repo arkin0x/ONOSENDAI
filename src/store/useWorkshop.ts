@@ -144,6 +144,12 @@ export interface WorkshopState {
   rememberColor: (hex: string) => void
   forgetColor: (hex: string) => void
   moveSelected: (axis: 0 | 1 | 2, delta: number) => void
+  /**
+   * Turn the selected points a quarter turn about the vertical, +1 one way
+   * and -1 the other, around the middle of their extent snapped to the
+   * current DIVISION's grid, so every point stays on that grid.
+   */
+  rotateSelected: (turns: 1 | -1) => void
   colorSelected: (c: [number, number, number]) => void
   colorAll: (c: [number, number, number]) => void
   deleteSelected: () => void
@@ -467,6 +473,33 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         }
         return { ...s, vertices }
       })
+    },
+
+    rotateSelected: (turns) => {
+      const { selection } = get()
+      if (selection.length === 0) return
+      const step = get().step()
+      let refused = false
+      edit((s) => {
+        const chosen = [...new Set(selection.filter((i) => s.vertices[i]))]
+        if (chosen.length === 0) return null
+        const pts = chosen.map((i) => ticksOf(s.vertices[i]))
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+        for (const [x, , z] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z) }
+        // The pivot: the middle of the selection's extent, on the snap grid.
+        const snap = (v: number): number => Math.round(v / step) * step
+        const cx = snap((minX + maxX) / 2), cz = snap((minZ + maxZ) / 2)
+        const vertices = s.vertices.slice()
+        chosen.forEach((i, k) => {
+          const [x, y, z] = pts[k]
+          const dx = x - cx, dz = z - cz
+          const p: P3 = turns === 1 ? [cx + dz, y, cz - dx] : [cx - dz, y, cz + dx]
+          if (!validPoint(p, s.extent)) refused = true
+          vertices[i] = vertexAt(p, vertices[i].c)
+        })
+        return refused ? null : { ...s, vertices }
+      })
+      if (refused) set({ notice: 'That turn would carry a point off the grid.' })
     },
 
     colorSelected: (c) => {

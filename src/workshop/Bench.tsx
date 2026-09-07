@@ -20,7 +20,7 @@ import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
-import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex } from '../lib/shards'
+import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, toRender } from '../lib/shards'
 import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
@@ -40,14 +40,19 @@ const UNIT_LINE_DIVIDED = '#166c86'
 type P3 = [number, number, number]
 
 /** The grid point a pointer over the plane means, at the level the store says. */
-/** The bench point (units) to the nearest snap step, in ticks, on the current level. */
+/**
+ * The bench point (render units) to the nearest snap step, in model ticks, on
+ * the current level. Model +Z is render -Z (shards.ts toRender), so the tap's
+ * render z comes back negated.
+ */
 function snap(p: Vector3, level: number, step: number): P3 {
   const q = (v: number): number => Math.round((v * TICKS_PER_UNIT) / step) * step
-  return [q(p.x), level, q(p.z)]
+  return [q(p.x), level, -q(p.z)]
 }
-/** Ticks to bench units. */
+/** Ticks to render units, one axis (for Y, which is not mirrored). */
 const U = (t: number): number => t / TICKS_PER_UNIT
-const UP = (p: P3): [number, number, number] => [U(p[0]), U(p[1]), U(p[2])]
+/** A model position as the bench draws it. */
+const UP = toRender
 
 /**
  * You, to scale, at the grid's centre. An avatar is one gibson wide, and a
@@ -63,6 +68,27 @@ function ScaleAvatar(): JSX.Element {
   return (
     <lineSegments geometry={geometry} scale={k} frustumCulled={false}>
       <lineBasicMaterial color="#ffffff" transparent opacity={0.85} toneMapped={false} />
+    </lineSegments>
+  )
+}
+
+/**
+ * The axes, in the compass's colors: X red, Y green, Z blue. Not three's own
+ * helper, whose blue points along render +Z: cyberspace +Z is drawn along
+ * render -Z here as in the world, so the blue arrow goes that way.
+ */
+function BenchAxes({ reach }: { reach: number }): JSX.Element {
+  const geometry = useMemo(() => {
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute([0, 0, 0, reach, 0, 0, 0, 0, 0, 0, reach, 0, 0, 0, 0, 0, 0, -reach], 3))
+    g.setAttribute('color', new Float32BufferAttribute([1, 0.2, 0.2, 1, 0.2, 0.2, 0.2, 1, 0.2, 0.2, 1, 0.2, 0.2, 0.4, 1, 0.2, 0.4, 1], 3))
+    return g
+  }, [reach])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  // A hair above the grid plane, or the grid's centre lines draw over the red and blue.
+  return (
+    <lineSegments geometry={geometry} position={[0, 0.004, 0]} frustumCulled={false}>
+      <lineBasicMaterial vertexColors toneMapped={false} />
     </lineSegments>
   )
 }
@@ -314,7 +340,7 @@ function Marquee(): null {
       const r = canvas.getBoundingClientRect()
       const out: number[] = []
       shard.vertices.forEach((vert, i) => {
-        v.set(U(vert.p[0]), U(vert.p[1]), U(vert.p[2])).project(camera)
+        v.set(...UP(vert.p)).project(camera)
         if (v.z > 1) return
         const px = ((v.x + 1) / 2) * r.width
         const py = ((1 - v.y) / 2) * r.height
@@ -459,7 +485,7 @@ export function Bench(): JSX.Element {
       <Keys />
       <AxesReporter />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
-      <axesHelper key={extent} args={[extent + 1]} />
+      <BenchAxes reach={extent + 1} />
       <Grid />
       <ScaleAvatar />
       {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} />}

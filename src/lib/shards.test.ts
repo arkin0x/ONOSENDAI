@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel, TICKS_PER_UNIT, packTicks, unpackTicks, unitsLabel } from './shards'
+import { flatten, fromPayload, newShard, toPayload, validFace, validPoint, type ShardModel, TICKS_PER_UNIT, packTicks, unpackTicks, unitsLabel, toRender } from './shards'
 
 const tri: ShardModel = {
   ...newShard('tri'),
@@ -83,6 +83,11 @@ describe('ticks', () => {
     expect(unpackTicks([-3], 4)).toBeNull()
     expect(unpackTicks([[120, 0, 0]], 1)).toBeNull()
     expect(packTicks([])).toEqual([])
+  })
+  it('draws model +Z along render -Z, as the world draws cyberspace', () => {
+    expect(toRender([TICKS_PER_UNIT, 2 * TICKS_PER_UNIT, 3 * TICKS_PER_UNIT])).toEqual([1, 2, -3])
+    const one = { ...newShard('z'), vertices: [{ p: [0, 0, TICKS_PER_UNIT] as [number, number, number], c: [1, 1, 1] as [number, number, number] }] }
+    expect(Array.from(flatten(one).positions)).toEqual([0, 0, -1])
   })
   it('prints ticks as units', () => {
     expect(unitsLabel(0)).toBe('0')

@@ -210,11 +210,23 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
 }
 
 /** The flat arrays three.js wants, in one place so every drawer agrees. */
+/**
+ * A model position as the scene draws it. Model axes are cyberspace axes,
+ * and the world draws cyberspace with Z negated (lib/space.ts
+ * flipHandedness), so model +Z is render -Z here too: the bench and the
+ * world show the same object, and the bench's blue arrow points where the
+ * world's compass does.
+ */
+export function toRender(p: [number, number, number]): [number, number, number] {
+  // 0 - z rather than -z: negating a zero gives -0, which equality tests and keys treat as different.
+  return [p[0] / TICKS_PER_UNIT, p[1] / TICKS_PER_UNIT, (0 - p[2]) / TICKS_PER_UNIT]
+}
+
 export function flatten(s: ShardModel): { positions: Float32Array; colors: Float32Array; index: number[] } {
   const positions = new Float32Array(s.vertices.length * 3)
   const colors = new Float32Array(s.vertices.length * 3)
   s.vertices.forEach((v, i) => {
-    positions.set([v.p[0] / TICKS_PER_UNIT, v.p[1] / TICKS_PER_UNIT, v.p[2] / TICKS_PER_UNIT], i * 3)
+    positions.set(toRender(v.p), i * 3)
     colors.set(v.c, i * 3)
   })
   return { positions, colors, index: s.faces.flat() }

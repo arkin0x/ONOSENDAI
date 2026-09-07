@@ -444,6 +444,7 @@ export function Bench(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const extent = shard?.extent ?? GRID_HALF
+  const showAvatar = useWorkshop((s) => s.showAvatar)
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
@@ -487,7 +488,7 @@ export function Bench(): JSX.Element {
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />
-      <ScaleAvatar />
+      {showAvatar && <ScaleAvatar />}
       {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} />}
       <Ghost />
       <PickLoop />

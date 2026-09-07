@@ -56,6 +56,7 @@ export type Tool = 'stamp' | 'add' | 'select' | 'face'
 
 const STORAGE = 'onosendai:shards'
 const PALETTE_STORAGE = 'onosendai:palette'
+const AVATAR_KEY = 'onosendai:workshop-avatar'
 /** Undo depth per shard. */
 const HISTORY = 64
 /** The swatches every workshop starts with. */
@@ -89,6 +90,8 @@ export interface WorkshopState {
   level: number
   /** Snap: the grid the placing tools, the marquee and the nudges use is a unit over this. A tool setting, not the shard's. */
   division: Division
+  /** The to-scale avatar at the grid's centre, on or off. Kept between visits. */
+  showAvatar: boolean
   /** The color new vertices get, and the color input shows. */
   color: [number, number, number]
   stampKind: StampKind
@@ -117,6 +120,7 @@ export interface WorkshopState {
   setTool: (tool: Tool) => void
   setLevel: (level: number) => void
   setDivision: (division: Division) => void
+  setShowAvatar: (on: boolean) => void
   /** One snap step, in ticks. */
   step: () => number
   setColor: (c: [number, number, number]) => void
@@ -183,6 +187,10 @@ function loadPalette(): string[] {
     const list: unknown = raw ? JSON.parse(raw) : null
     return Array.isArray(list) && list.every((h) => typeof h === 'string' && HEX.test(h)) ? list : DEFAULT_PALETTE
   } catch { return DEFAULT_PALETTE }
+}
+
+function loadShowAvatar(): boolean {
+  try { return localStorage.getItem(AVATAR_KEY) !== '0' } catch { return true }
 }
 
 function savePalette(palette: string[]): void {
@@ -282,6 +290,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     palette: loadPalette(),
     level: 0,
     division: 1,
+    showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
     stampKind: 'block',
     stampSize: 2,
@@ -345,6 +354,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       set({ level: Math.max(-e, Math.min(e, Math.round(level))) })
     },
     setDivision: (division) => { if (DIVISIONS.includes(division)) set({ division }) },
+    setShowAvatar: (on) => { set({ showAvatar: on }); try { localStorage.setItem(AVATAR_KEY, on ? '1' : '0') } catch { /* private mode */ } },
     step: () => TICKS_PER_UNIT / get().division,
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind }),

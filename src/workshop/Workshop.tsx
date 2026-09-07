@@ -154,6 +154,7 @@ export function Workshop(): JSX.Element | null {
   const palette = useWorkshop((s) => s.palette)
   const level = useWorkshop((s) => s.level)
   const division = useWorkshop((s) => s.division)
+  const showAvatar = useWorkshop((s) => s.showAvatar)
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -254,6 +255,13 @@ export function Workshop(): JSX.Element | null {
               {MODES.map((m: ShardMode) => (
                 <button key={m} className={`workshop__mode ${shard.mode === m ? 'is-on' : ''}`} aria-pressed={shard.mode === m} onClick={() => w().setMode(m)}>{m.toUpperCase()}</button>
               ))}
+            </div>
+          </div>
+          <div className="workshop__row" role="group" aria-label="Scale avatar">
+            <span className="workshop__label">AVATAR</span>
+            <div className="workshop__modes">
+              <button className={`workshop__mode ${showAvatar ? 'is-on' : ''}`} aria-pressed={showAvatar} onClick={() => w().setShowAvatar(true)} title="Show the to-scale avatar at the grid's centre">SHOW</button>
+              <button className={`workshop__mode ${!showAvatar ? 'is-on' : ''}`} aria-pressed={!showAvatar} onClick={() => w().setShowAvatar(false)} title="Hide it">HIDE</button>
             </div>
           </div>
           <div className="ws__panel-title">SHARDS ({shards.length})</div>

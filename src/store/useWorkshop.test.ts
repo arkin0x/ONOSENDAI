@@ -231,6 +231,35 @@ describe('workshop', () => {
     expect(w().current()!.vertices.map((v) => ticksOf(v).join())).toEqual([`${8 * T},0,0`, `${8 * T},0,${3 * T}`])
   })
 
+  it('turns an odd shape in place, and a mixed one about one remembered point', () => {
+    // Three wide: the middle is half a unit off the grid on both axes, and a
+    // turn about exactly that keeps every corner on the grid.
+    w().clearShard()
+    for (const p of [[0, 0, 0], [3 * T, 0, 0], [3 * T, 0, 3 * T], [0, 0, 3 * T], [T, 0, 0]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1, 2, 3, 4])
+    const pts = (): Set<string> => new Set(w().current()!.vertices.map((v) => ticksOf(v).join()))
+    w().rotateSelected(1)
+    expect(pts()).toEqual(new Set(['0,0,0', `${3 * T},0,0`, `${3 * T},0,${3 * T}`, `0,0,${3 * T}`, `0,0,${2 * T}`]))
+    expect(w().turnPivot?.at).toEqual([1.5 * T, 1.5 * T])
+    // Two by three: no turn keeps it still, so the same point serves every
+    // turn and four of them bring it home.
+    w().clearShard()
+    for (const p of [[0, 0, 0], [2 * T, 0, 0], [2 * T, 0, 3 * T], [0, 0, 3 * T]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1, 2, 3])
+    const home = pts()
+    const pivots = new Set<string>()
+    for (let i = 0; i < 4; i++) {
+      w().rotateSelected(1)
+      pivots.add(w().turnPivot!.at.join())
+      for (const v of w().current()!.vertices) for (const c of ticksOf(v)) expect(Math.abs(c % T)).toBe(0)
+    }
+    expect(pivots.size).toBe(1)
+    expect(pts()).toEqual(home)
+    // A move in between forgets the point.
+    w().moveSelected(0, T)
+    expect(w().turnPivot).toBeNull()
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

@@ -2328,28 +2328,23 @@ kbd {
 
 /* The picker: a dashed swatch with a pipette on it, so it reads as "any
  * color" beside the fixed ones. */
-.workshop__picker {
-  position: relative;
-  display: inline-flex;
-}
-
+/* The mixer's handle: a dashed pipette, solid while the mixer is up. */
 .workshop__color {
   width: 38px;
   height: 30px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
   border: 1px dashed rgba(255, 255, 255, 0.6);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
 }
-
-.workshop__picker-icon {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  pointer-events: none;
-  color: #fff;
-  filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);
+.workshop__color.is-on {
+  border-style: solid;
+  background: rgba(0, 229, 255, 0.15);
 }
 
 .workshop__swatches {
@@ -2657,8 +2652,8 @@ kbd {
  * corners the scale keys have out there. */
 .benchpad {
   display: grid;
-  grid-template-columns: repeat(3, 38px);
-  grid-template-rows: repeat(3, 38px);
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
   gap: 4px;
   grid-template-areas:
     "away    up   toward"
@@ -2668,7 +2663,22 @@ kbd {
 .benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
 .benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
 .benchpad .touchpad__key--connect .touchpad__sub,
-.benchpad .touchpad__key--delete .touchpad__sub { font-size: 6px; }
+.benchpad .touchpad__key--delete .touchpad__sub { font-size: 7px; }
+/* Glyph over word in every cell: the cells are big enough here for both. */
+.benchpad .touchpad__key,
+.benchturn .touchpad__key {
+  flex-direction: column;
+  gap: 2px;
+  font-size: 17px;
+}
+.benchpad .touchpad__sub,
+.benchturn .touchpad__sub { font-size: 8px; }
+.benchturn {
+  display: grid;
+  grid-template-columns: repeat(2, 48px);
+  grid-template-rows: 48px;
+  gap: 4px;
+}
 .benchops {
   display: flex;
   align-items: center;
@@ -2698,6 +2708,67 @@ kbd {
 .ws__color .workshop__swatches {
   display: grid;
   grid-template-columns: repeat(2, 22px);
+}
+/* The mixer rises above the corner stack, clear of the pad on the left. */
+.ws__mixer {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 220px;
+  padding: 10px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.ws__mixer-head { display: flex; align-items: center; gap: 8px; }
+.ws__mixer-head .workshop__swatch--sample { width: 30px; height: 30px; margin: 0; }
+.ws__mixer-hex {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ws__mixer-row { display: flex; flex-direction: column; gap: 4px; }
+.ws__mixer-row .workshop__label { min-width: 0; }
+.ws__mixer input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.ws__mixer input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #000;
+  box-shadow: 0 0 0 1px #fff;
+}
+.ws__mixer input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #000;
+  box-shadow: 0 0 0 1px #fff;
 }
 @media (max-width: 640px) {
   .ws__panel--up {

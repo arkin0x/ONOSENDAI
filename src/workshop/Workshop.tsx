@@ -19,11 +19,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
+import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
@@ -145,6 +146,60 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   )
 }
 
+/**
+ * The mixer: HUE, SATURATION and BRIGHTNESS, each a slider on a track painted
+ * with what that slider would give, the colour they make at the top and a hex
+ * field for a colour from elsewhere. It opens on the colour in hand; when that
+ * has no saturation or no brightness (white, grey, black) those two open at
+ * the middle, so the first touch of HUE gives a colour rather than another grey.
+ */
+const MID = 50
+function opening(hex: string): Hsv {
+  const [h, s, v] = rgbToHsv(hexToRgb(hex))
+  return [Math.round(h), s === 0 ? MID : Math.round(s), v === 0 ? MID : Math.round(v)]
+}
+function Mixer({ hex, onChange, onSettle }: { hex: string; onChange: (hex: string) => void; onSettle: (hex: string) => void }): JSX.Element {
+  const [hsv, setHsv] = useState<Hsv>(() => opening(hex))
+  const [text, setText] = useState(hex)
+  const made = rgbToHex(hsvToRgb(hsv))
+  // A swatch tapped while the mixer is up moves the sliders to it.
+  useEffect(() => { if (hex !== made) { setHsv(opening(hex)); setText(hex) } }, [hex]) // eslint-disable-line react-hooks/exhaustive-deps
+  const slide = (i: 0 | 1 | 2) => (e: { target: { value: string } }): void => {
+    const next = [...hsv] as Hsv
+    next[i] = Number(e.target.value)
+    const out = rgbToHex(hsvToRgb(next))
+    setHsv(next); setText(out); onChange(out)
+  }
+  const typed = (value: string): void => {
+    setText(value)
+    const m = /^#?([0-9a-f]{6})$/i.exec(value.trim())
+    if (!m) return
+    const out = '#' + m[1].toLowerCase()
+    setHsv(opening(out)); onChange(out)
+  }
+  const at = (h: number, sat: number, v: number): string => rgbToHex(hsvToRgb([h, sat, v]))
+  const tracks = [
+    'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
+    `linear-gradient(to right, ${at(hsv[0], 0, hsv[2])}, ${at(hsv[0], 100, hsv[2])})`,
+    `linear-gradient(to right, #000, ${at(hsv[0], hsv[1], 100)})`,
+  ]
+  const rows: Array<[string, number, number]> = [['HUE', 360, hsv[0]], ['SATURATION', 100, hsv[1]], ['BRIGHTNESS', 100, hsv[2]]]
+  return (
+    <div className="ws__mixer" role="group" aria-label="Mix a color">
+      <div className="ws__mixer-head">
+        <span className="workshop__swatch workshop__swatch--sample" style={{ background: made }} aria-hidden />
+        <input className="ws__mixer-hex" value={text} onChange={(e) => typed(e.target.value)} onBlur={() => onSettle(made)} spellCheck={false} aria-label="Hex color" />
+      </div>
+      {rows.map(([label, max, value], i) => (
+        <label key={label} className="ws__mixer-row">
+          <span className="workshop__label">{label}</span>
+          <input type="range" min={0} max={max} step={1} value={value} style={{ background: tracks[i] }} onChange={slide(i as 0 | 1 | 2)} onPointerUp={() => onSettle(made)} onKeyUp={() => onSettle(made)} aria-label={label} />
+        </label>
+      ))}
+    </div>
+  )
+}
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
@@ -165,6 +220,7 @@ export function Workshop(): JSX.Element | null {
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [colorOpen, setColorOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   // On a phone the open colour bar and the TOOLS panel share the bottom, so
   // they take turns; on a wide screen they have corners of their own.
   const [narrow, setNarrow] = useState<boolean>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches)
@@ -174,6 +230,7 @@ export function Workshop(): JSX.Element | null {
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
   }, [])
+  const colorBar = (colorOpen || tool === 'select') && !(narrow && panel === 'tools')
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [deleteColor, setDeleteColor] = useState<string | null>(null)
@@ -196,6 +253,18 @@ export function Workshop(): JSX.Element | null {
   // ADD, SELECT and FACE have nothing under them, so choosing one by key puts
   // the TOOLS panel away; STAMP keeps it for the shape, size and facing.
   useEffect(() => { if (tool !== 'stamp') setPanel((p) => (p === 'tools' ? null : p)) }, [tool])
+  // The mixer shuts with the column, and on a tap anywhere else.
+  useEffect(() => { if (!colorBar) setPickerOpen(false) }, [colorBar])
+  useEffect(() => {
+    if (!pickerOpen) return
+    const shut = (e: PointerEvent): void => {
+      const el = e.target as HTMLElement | null
+      if (el?.closest('.ws__mixer, .workshop__color')) return
+      setPickerOpen(false)
+    }
+    document.addEventListener('pointerdown', shut, true)
+    return () => document.removeEventListener('pointerdown', shut, true)
+  }, [pickerOpen])
   const bind = useRepeatable()
 
   if (!open) return null
@@ -243,7 +312,7 @@ export function Workshop(): JSX.Element | null {
   }
 
   const facing = tool === 'face' && selection.length === 0 && (selectedFace !== null || facePick.length > 0)
-  const colorBar = (colorOpen || tool === 'select') && !(narrow && panel === 'tools')
+  const ToolIcon = TOOL_ICON[tool]
 
   return (
     <div className="workshop" role="dialog" aria-label="Shard workshop">
@@ -392,10 +461,15 @@ export function Workshop(): JSX.Element | null {
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
         {selection.length > 0 && (
-          <div className="benchops" role="group" aria-label="Turn the selection">
-            <span className="workshop__label">TURN</span>
-            <button className="workshop__btn" onClick={() => w().rotateSelected(-1)} title="A quarter turn this way about the vertical (Q)">↺</button>
-            <button className="workshop__btn" onClick={() => w().rotateSelected(1)} title="A quarter turn the other way (E)">↻</button>
+          <div className="benchturn" role="group" aria-label="Turn the selection">
+            <button className="touchpad__key" title="A quarter turn left about the vertical (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
+              <RotateCcw size={18} strokeWidth={2.25} aria-hidden />
+              <span className="touchpad__sub">LEFT</span>
+            </button>
+            <button className="touchpad__key" title="A quarter turn right (E)" aria-label="Turn right" {...noCallout} onClick={() => w().rotateSelected(1)}>
+              <RotateCw size={18} strokeWidth={2.25} aria-hidden />
+              <span className="touchpad__sub">RIGHT</span>
+            </button>
           </div>
         )}
         {selection.length > 0 && <ControlsPad points={selectedPoints} />}
@@ -440,7 +514,7 @@ export function Workshop(): JSX.Element | null {
       )}
 
         <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
-          <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · {tool.toUpperCase()}
+          <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
         </button>
       </div>
 
@@ -475,11 +549,9 @@ export function Workshop(): JSX.Element | null {
         {(tool !== 'face' || selectedFace !== null) && (colorBar ? (
           <div className={`ws__color ${tool === 'select' ? '' : 'is-open'}`} role="group" aria-label="Color">
             <span className="workshop__label">COLOR</span>
-            <span className="workshop__picker" title="Pick any color; it joins the palette">
-              <input type="color" className="workshop__color" value={hex} list="workshop-palette" onChange={(e) => pick(e.target.value)} onBlur={(e) => settled(e.target.value)} aria-label="Pick a color" {...noCallout} />
-              <Pipette className="workshop__picker-icon" size={13} strokeWidth={2.25} aria-hidden />
-              <datalist id="workshop-palette">{palette.map((h) => <option key={h} value={h} />)}</datalist>
-            </span>
+            <button className={`workshop__color ${pickerOpen ? 'is-on' : ''}`} onClick={() => setPickerOpen((o) => !o)} aria-pressed={pickerOpen} title="Mix a color: hue, saturation, brightness" aria-label="Mix a color" {...noCallout}>
+              <Pipette size={13} strokeWidth={2.25} aria-hidden />
+            </button>
             <div className="workshop__swatches">
               {palette.map((h) => (
                 <Swatch key={h} hex={h} on={h === hex} onUse={() => w().colorSelected(hexToRgb(h))} onHold={() => setDeleteColor(h)} />
@@ -490,6 +562,7 @@ export function Workshop(): JSX.Element | null {
         ) : (
           <button className="chip ws__colorchip" style={{ background: hex }} onClick={() => { setColorOpen(true); if (narrow && panel === 'tools') setPanel(null) }} title={`Color ${hex}. Tap for the palette.`} aria-label={`Color ${hex}, tap for the palette`} />
         ))}
+        {colorBar && pickerOpen && (tool !== 'face' || selectedFace !== null) && <Mixer hex={hex} onChange={pick} onSettle={settled} />}
       </div>
 
       {deleteColor !== null && (

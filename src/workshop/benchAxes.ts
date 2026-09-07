@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand'
-import { Vector3, type Camera } from 'three'
+import { Quaternion, Vector3, type Camera } from 'three'
 
 export type NudgeName = 'up' | 'down' | 'left' | 'right' | 'away' | 'toward'
 
@@ -84,4 +84,18 @@ export const sameAxes = (a: BenchAxes, b: BenchAxes): boolean =>
 /** The bench's default view: X right, Y up, Z toward the viewer. */
 export const DEFAULT_AXES: BenchAxes = { right: { axis: 0, dir: 1 }, up: { axis: 1, dir: 1 }, out: { axis: 2, dir: 1 } }
 
-export const useBenchView = create<{ axes: BenchAxes }>(() => ({ axes: DEFAULT_AXES }))
+/** The bench camera's orientation, for the compass in its own canvas. Mutable, per frame, never store state. */
+export const benchPose = new Quaternion()
+
+export type ViewDir = 'up' | 'down' | 'left' | 'right'
+/** What the view pad and keys ask of the camera. */
+export type ViewAsk = { kind: 'rotate'; dir: ViewDir } | { kind: 'top' } | { kind: 'back' }
+export type ViewRequest = ViewAsk & { id: number }
+
+export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null; canGoBack: boolean }>(() => ({ axes: DEFAULT_AXES, request: null, canGoBack: false }))
+
+let asked = 0
+/** Ask the bench camera for a quarter turn, the top view, or the view before. */
+export function requestView(ask: ViewAsk): void {
+  useBenchView.setState({ request: { ...ask, id: ++asked } })
+}

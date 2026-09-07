@@ -18,10 +18,10 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
+import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Spherical, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
-import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
+import { benchAxes, benchPose, nudgeFor, requestView, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
@@ -403,6 +403,14 @@ function Keys(): null {
         return
       }
       if (e.altKey) return
+      // Shift+WASD turns the view a quarter and Tab brings the view before
+      // back, as out in the world.
+      if (e.shiftKey && (e.code === 'KeyW' || e.code === 'KeyA' || e.code === 'KeyS' || e.code === 'KeyD')) {
+        e.preventDefault()
+        requestView({ kind: 'rotate', dir: ({ KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' } as const)[e.code] })
+        return
+      }
+      if (e.code === 'Tab') { e.preventDefault(); requestView({ kind: 'back' }); return }
       // Screen directions, as the cursor's keys are in the world: W up, S down,
       // A left, D right, R into the screen, F out of it, whatever way the bench
       // camera has been turned.
@@ -416,10 +424,11 @@ function Keys(): null {
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
       if (e.code === 'KeyC') { w.selectConnected(); return }
-      if (e.code === 'Digit1') w.setTool('stamp')
-      if (e.code === 'Digit2') w.setTool('add')
-      if (e.code === 'Digit3') w.setTool('select')
-      if (e.code === 'Digit4') w.setTool('face')
+      if (e.code === 'Digit1') w.setTool('view')
+      if (e.code === 'Digit2') w.setTool('stamp')
+      if (e.code === 'Digit3') w.setTool('add')
+      if (e.code === 'Digit4') w.setTool('select')
+      if (e.code === 'Digit5') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(-1); else w.turnStamp() }
       if (e.code === 'KeyE') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(1) }
@@ -433,6 +442,52 @@ function Keys(): null {
 }
 
 /** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
+/**
+ * Turns the camera on request, a quarter at a time about the target, from
+ * whatever view it is in: the current view is snapped to the nearest square
+ * one first, so a turn from an oblique angle lands square. Arrows steer the
+ * scene the way the world's view pad does: RIGHT brings the model's right side
+ * round to face you. TOP looks straight down. BACK returns to the view before.
+ * Also shares the camera's orientation with the compass every frame.
+ */
+function ViewDriver(): null {
+  const camera = useThree((s) => s.camera)
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
+  const request = useBenchView((s) => s.request)
+  const history = useRef<Array<{ position: Vector3; target: Vector3 }>>([])
+  useFrame(() => { benchPose.copy(camera.quaternion) })
+  useEffect(() => {
+    if (!request || !controls) return
+    if (request.kind === 'back') {
+      const last = history.current.pop()
+      if (last) { camera.position.copy(last.position); controls.target.copy(last.target); controls.update() }
+      useBenchView.setState({ canGoBack: history.current.length > 0 })
+      return
+    }
+    const s = new Spherical().setFromVector3(camera.position.clone().sub(controls.target))
+    const Q = Math.PI / 2
+    let theta = Math.round(s.theta / Q) * Q
+    let phi = Math.round(s.phi / Q) * Q
+    if (request.kind === 'top') phi = 0
+    else if (request.dir === 'right') theta += Q
+    else if (request.dir === 'left') theta -= Q
+    else if (request.dir === 'up') phi -= Q
+    else phi += Q
+    // A hair off the poles, as the controls keep it, so up stays defined.
+    s.theta = theta
+    s.phi = Math.min(Math.max(phi, 1e-3), Math.PI - 1e-3)
+    const next = controls.target.clone().add(new Vector3().setFromSpherical(s))
+    // Already there (TOP from the top, say): nothing to remember, nothing to do.
+    if (next.distanceTo(camera.position) < 1e-4) return
+    history.current.push({ position: camera.position.clone(), target: controls.target.clone() })
+    if (history.current.length > 32) history.current.shift()
+    useBenchView.setState({ canGoBack: true })
+    camera.position.copy(next)
+    controls.update()
+  }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -487,6 +542,7 @@ export function Bench(): JSX.Element {
       <Aim />
       <Keys />
       <AxesReporter />
+      <ViewDriver />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />

@@ -2631,6 +2631,35 @@ kbd {
 .ws__panel--up {
   max-height: calc(100vh - 140px);
 }
+/* TOOLS with a tool in hand: the chip and, joined to its right, the X that
+ * puts the tool down. */
+.ws__toolchips { display: inline-flex; }
+.ws__toolchips .ws__chip:first-child:not(:only-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.ws__chip--x {
+  padding: 0 9px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 0;
+}
+/* The compass and the view pad live in the corner on the bench, not at the
+ * screen's fixed spots. */
+.compass-3d.compass-3d--bench {
+  position: static;
+  transform: none;
+  width: 104px;
+  height: 104px;
+}
+/* Two classes, to outrank the fixed placements the world gives the menu
+ * further down, at every width. */
+.viewmenu.viewmenu--bench {
+  position: static;
+  top: auto;
+  right: auto;
+  bottom: auto;
+}
 /* COLOR folded: a swatch of the current colour, the picker's dashed edge. */
 .ws__colorchip {
   width: 34px;

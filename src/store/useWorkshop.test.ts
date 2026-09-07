@@ -260,6 +260,13 @@ describe('workshop', () => {
     expect(w().turnPivot).toBeNull()
   })
 
+  it('opens holding VIEW, the tool that builds nothing', () => {
+    w().setTool('stamp')
+    w().closeWorkshop()
+    w().openWorkshop()
+    expect(w().tool).toBe('view')
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

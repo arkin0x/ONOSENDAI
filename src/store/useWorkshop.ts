@@ -52,7 +52,8 @@ import { newell, triangulate } from '../lib/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 
-export type Tool = 'stamp' | 'add' | 'select' | 'face'
+/** VIEW builds nothing: it is the tool you hold to look around. */
+export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
 
 const STORAGE = 'onosendai:shards'
 const PALETTE_STORAGE = 'onosendai:palette'
@@ -310,7 +311,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     shards: load(),
     currentId: null,
     open: false,
-    tool: 'stamp',
+    tool: 'view',
     selection: [],
     facePick: [],
     selectedFace: null,
@@ -331,7 +332,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? shards[0]?.id ?? get().create()
-      set({ open: true, currentId, selection: [], selectedFace: null, facePick: [], tool: 'stamp', aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, selection: [], selectedFace: null, facePick: [], tool: 'view', aim: null, past: [], future: [], notice: null })
     },
 
     closeWorkshop: () => set({ open: false, selection: [], selectedFace: null, facePick: [], aim: null }),

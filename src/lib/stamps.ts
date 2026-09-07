@@ -159,6 +159,21 @@ function turned(kind: StampKind, size: number, facing: Facing): Shape {
 
 const moved = (points: P3[], by: P3): P3[] => points.map((p) => [p[0] + by[0], p[1] + by[1], p[2] + by[2]] as P3)
 
+/**
+ * The working grid's normal axis: 1 is the floor (the XZ plane, up is +Y),
+ * 0 stands the grid on its side facing +X (the YZ plane), 2 stands it up
+ * facing +Z (the XY plane). Shapes are authored with up along +Y; on another
+ * plane they turn so up follows the normal, by a proper rotation (no mirror):
+ * a quarter about Z for plane 0, a quarter about X for plane 2.
+ */
+export type WorkPlane = 0 | 1 | 2
+export const FLOOR: WorkPlane = 1
+export function onPlane(points: P3[], plane: WorkPlane): P3[] {
+  if (plane === 1) return points
+  // `0 - v` rather than `-v`: negating a zero would leave a -0 in the model.
+  return points.map(([x, y, z]) => (plane === 0 ? [y, 0 - x, z] : [x, 0 - z, y]) as P3)
+}
+
 /** The push that brings a shape back inside the grid: zero on an axis it already fits. */
 function fit(points: P3[], extent: number = GRID_HALF): P3 {
   const shift: P3 = [0, 0, 0]
@@ -177,15 +192,15 @@ function fit(points: P3[], extent: number = GRID_HALF): P3 {
  * inside the grid if any of it would poke out. Nothing here is wider than
  * the grid, so the push always succeeds.
  */
-export function compile(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF): Shape {
+export function compile(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF, plane: WorkPlane = FLOOR): Shape {
   const t = turned(kind, size, facing)
-  const points = moved(t.points, origin)
+  const points = moved(onPlane(t.points, plane), origin)
   return { points: moved(points, fit(points, extent)), faces: t.faces }
 }
 
 /** Where a stamp aimed at `origin` lands: `origin` itself unless the grid's edge pushed it back. */
-export function landing(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF): P3 {
-  const shift = fit(moved(turned(kind, size, facing).points, origin), extent)
+export function landing(kind: StampKind, size: number, facing: Facing, origin: P3, extent: number = GRID_HALF, plane: WorkPlane = FLOOR): P3 {
+  const shift = fit(moved(onPlane(turned(kind, size, facing).points, plane), origin), extent)
   return [origin[0] + shift[0], origin[1] + shift[1], origin[2] + shift[2]]
 }
 
@@ -206,8 +221,8 @@ export interface Stamped {
  * triangles are re-indexed, and any triangle that exactly matches an existing
  * one corner for corner is dropped along with the one it matched.
  */
-export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: Facing, origin: P3, color: [number, number, number]): Stamped | null {
-  const shape = compile(kind, size, facing, origin, shard.extent)
+export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: Facing, origin: P3, color: [number, number, number], plane: WorkPlane = FLOOR): Stamped | null {
+  const shape = compile(kind, size, facing, origin, shard.extent, plane)
   const base = shard.vertices.length
   const vertices: ShardVertex[] = [
     ...shard.vertices,
@@ -237,8 +252,9 @@ export function stamp(shard: ShardModel, kind: StampKind, size: number, facing: 
  * ghost's geometry is built once per shape and merely moved as the pointer
  * crosses cells; building it afresh per cell was the ghost's whole cost.
  */
-export function preview(kind: StampKind, size: number, facing: Facing, color: [number, number, number]): ShardModel {
-  const shape = turned(kind, size, facing)
+export function preview(kind: StampKind, size: number, facing: Facing, color: [number, number, number], plane: WorkPlane = FLOOR): ShardModel {
+  const shape = { ...turned(kind, size, facing) }
+  shape.points = onPlane(shape.points, plane)
   return {
     id: 'ghost',
     name: kind,

@@ -28,11 +28,11 @@ import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
 import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
-import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
+import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
-import { benchPose, nudgeFor, nudgeLabel, requestView, useBenchView, type NudgeName } from './benchAxes'
+import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -207,26 +207,27 @@ function Mixer({ hex, onChange, onSettle }: { hex: string; onChange: (hex: strin
 const BENCH_DIRS = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, -1) }
 
 /**
- * The view controls from out in the world, for the bench: the pad turns the
- * model a quarter, BACK returns to the view before, TOP looks straight down.
- * EARTH, CYBERSPACE, SUN and the plane have no meaning on a bench.
+ * The view pad, for the bench: the arrows turn the working grid a quarter
+ * while the geometry stays put, so the next points go down on another plane.
+ * Up and down tip it about the screen's horizontal, left and right roll it
+ * about the line of sight (benchAxes planeAfter). SUN is the black sun's seat
+ * here: the grid back on the floor and the camera back where the bench opens.
  */
 function BenchViewMenu(): JSX.Element {
-  const canGoBack = useBenchView((s) => s.canGoBack)
+  const w = useWorkshop.getState
   const press = (fn: () => void) => (e: React.PointerEvent): void => { e.preventDefault(); e.stopPropagation(); fn() }
-  const turn = (dir: 'up' | 'down' | 'left' | 'right') => (): void => requestView({ kind: 'rotate', dir })
+  const turn = (about: 'tip' | 'roll') => (): void => w().setPlane(planeAfter(w().plane, useBenchView.getState().axes, about))
   return (
-    <div className="viewmenu viewmenu--bench" role="group" aria-label="View controls">
+    <div className="viewmenu viewmenu--bench" role="group" aria-label="Grid controls">
       <div className="viewmenu__pad">
-        <button className="viewmenu__key viewmenu__key--up" {...noCallout} onPointerDown={press(turn('up'))} aria-label="Rotate up">▲</button>
-        <button className="viewmenu__key viewmenu__key--left" {...noCallout} onPointerDown={press(turn('left'))} aria-label="Rotate left">◀</button>
-        <span className="viewmenu__hub" aria-hidden="true">ROT</span>
-        <button className="viewmenu__key viewmenu__key--right" {...noCallout} onPointerDown={press(turn('right'))} aria-label="Rotate right">▶</button>
-        <button className="viewmenu__key viewmenu__key--down" {...noCallout} onPointerDown={press(turn('down'))} aria-label="Rotate down">▼</button>
+        <button className="viewmenu__key viewmenu__key--up" {...noCallout} onPointerDown={press(turn('tip'))} aria-label="Tip the grid up">▲</button>
+        <button className="viewmenu__key viewmenu__key--left" {...noCallout} onPointerDown={press(turn('roll'))} aria-label="Roll the grid left">◀</button>
+        <span className="viewmenu__hub" aria-hidden="true">GRID</span>
+        <button className="viewmenu__key viewmenu__key--right" {...noCallout} onPointerDown={press(turn('roll'))} aria-label="Roll the grid right">▶</button>
+        <button className="viewmenu__key viewmenu__key--down" {...noCallout} onPointerDown={press(turn('tip'))} aria-label="Tip the grid down">▼</button>
       </div>
       <div className="viewmenu__row">
-        <button className="viewmenu__op" disabled={!canGoBack} {...noCallout} onPointerDown={press(() => requestView({ kind: 'back' }))}>BACK</button>
-        <button className="viewmenu__op" {...noCallout} onPointerDown={press(() => requestView({ kind: 'top' }))}>TOP</button>
+        <button className="viewmenu__op" {...noCallout} onPointerDown={press(() => { w().setPlane(FLOOR); requestView({ kind: 'home' }) })} title="The grid back on the floor, the view back where the bench opens">SUN</button>
       </div>
     </div>
   )
@@ -242,6 +243,7 @@ export function Workshop(): JSX.Element | null {
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
   const level = useWorkshop((s) => s.level)
+  const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const color = useWorkshop((s) => s.color)
@@ -378,8 +380,8 @@ export function Workshop(): JSX.Element | null {
           <Grid3x3 size={12} strokeWidth={2.25} aria-hidden />GRID
         </button>
         <span className="ws__history">
-          <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} strokeWidth={2.25} aria-hidden /></button>
-          <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} strokeWidth={2.25} aria-hidden /></button>
+          <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
+          <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
         </span>
       </div>
       {panel === 'menu' && shard && (
@@ -456,7 +458,7 @@ export function Workshop(): JSX.Element | null {
       {panel === 'grid' && shard && (
         <div className="ws__panel" role="region" aria-label="Grid">
           <div className="workshop__row">
-            <span className="workshop__label">LEVEL Y</span>
+            <span className="workshop__label">LEVEL {'XYZ'[plane]}</span>
             <button className="workshop__btn" {...bind(() => w().setLevel(w().level - w().step()))} disabled={level <= -extent * TICKS_PER_UNIT} aria-label="Level down">−</button>
             <span className="workshop__value">{unitsLabel(level)}</span>
             <button className="workshop__btn" {...bind(() => w().setLevel(w().level + w().step()))} disabled={level >= extent * TICKS_PER_UNIT} aria-label="Level up">+</button>
@@ -501,6 +503,15 @@ export function Workshop(): JSX.Element | null {
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
+
+      {/* Top right, under DEPLOY and the way out: the compass while VIEW is in
+          hand, the grid pad under it when tapped. */}
+      {tool === 'view' && (
+        <div className="ws__view">
+          <Compass3D bench pose={benchPose} dirs={BENCH_DIRS} onTap={() => setViewOpen((o) => !o)} />
+          {viewOpen && <BenchViewMenu />}
+        </div>
+      )}
 
       {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
           its panel, which opens upward over the chip. */}
@@ -575,8 +586,6 @@ export function Workshop(): JSX.Element | null {
       {/* Bottom right: FILL for a set of points, face actions while a face is in
           hand, the color column under either. */}
       <div className="ws__corner">
-        {tool === 'view' && viewOpen && <BenchViewMenu />}
-        {tool === 'view' && <Compass3D bench pose={benchPose} dirs={BENCH_DIRS} onTap={() => setViewOpen((o) => !o)} />}
         {one && (
           <div className="benchops" role="status" aria-label="Selected point">
             <span className="workshop__value workshop__value--wide">at ({ticksOf(one).map(unitsLabel).join(', ')})</span>

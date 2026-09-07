@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { GRID_HALF, MAX_VERTICES, TICKS_PER_UNIT as T, newShard, ticksOf, validFace, validPoint, type ShardModel } from './shards'
-import { STAMPS, FACED, compile, landing, preview, stamp, type Facing, type StampKind } from './stamps'
+import { FACED, STAMPS, compile, landing, onPlane, preview, stamp, type Facing, type StampKind } from './stamps'
 
 const red: [number, number, number] = [1, 0, 0]
 const empty = (): ShardModel => ({ ...newShard('t'), mode: 'solid' })
@@ -120,5 +120,18 @@ describe('ghost placement', () => {
   it('lands on the aim unless the grid edge pushes it back', () => {
     expect(landing('block', 2, 0, [T, 0, T])).toEqual([T, 0, T])
     expect(landing('block', 4, 0, [GRID_HALF * T, 0, GRID_HALF * T])[0]).toBeLessThan(GRID_HALF * T)
+  })
+})
+
+describe('onPlane', () => {
+  it('turns up along the plane normal by a proper rotation, and leaves the floor alone', () => {
+    const up: [number, number, number] = [0, 120, 0]
+    expect(onPlane([up], 1)).toEqual([up])
+    expect(onPlane([up], 0)).toEqual([[120, 0, 0]])
+    expect(onPlane([up], 2)).toEqual([[0, 0, 120]])
+    // Right-handed: x cross y stays z after the turn.
+    const [x, y, z] = onPlane([[1, 0, 0], [0, 1, 0], [0, 0, 1]], 2)
+    const cross = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]]
+    expect(cross).toEqual(z)
   })
 })

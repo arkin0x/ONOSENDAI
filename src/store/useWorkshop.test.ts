@@ -267,6 +267,17 @@ describe('workshop', () => {
     expect(w().tool).toBe('view')
   })
 
+  it('stamps on the working plane: a block on the +X grid is one unit thick along X', () => {
+    w().clearShard()
+    w().setTool('stamp'); w().setStampKind('block'); w().setStampSize(1)
+    w().setPlane(0)
+    w().placeStamp([0, 0, 0])
+    const xs = new Set(w().current()!.vertices.map((v) => ticksOf(v)[0]))
+    expect(xs).toEqual(new Set([0, T]))
+    w().setPlane(1)
+    expect(w().plane).toBe(1)
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

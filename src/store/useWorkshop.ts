@@ -47,7 +47,7 @@ import {
   type ShardModel,
   type ShardVertex,
 } from '../lib/shards'
-import { MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind } from '../lib/stamps'
+import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from '../lib/stamps'
 import { newell, triangulate } from '../lib/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
@@ -108,6 +108,8 @@ export interface WorkshopState {
   palette: string[]
   /** The Y the add and stamp tools place on, in ticks: the grid plane moves up and down. */
   level: number
+  /** The working grid's normal axis: 1 the floor, 0 facing +X, 2 facing +Z (stamps.ts WorkPlane). */
+  plane: WorkPlane
   /** Snap: the grid the placing tools, the marquee and the nudges use is a unit over this. A tool setting, not the shard's. */
   division: Division
   /** The to-scale avatar at the grid's centre, on or off. Kept between visits. */
@@ -141,6 +143,7 @@ export interface WorkshopState {
   setExtent: (extent: number) => void
   setTool: (tool: Tool) => void
   setLevel: (level: number) => void
+  setPlane: (plane: WorkPlane) => void
   setDivision: (division: Division) => void
   setShowAvatar: (on: boolean) => void
   /** One snap step, in ticks. */
@@ -317,6 +320,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selectedFace: null,
     palette: loadPalette(),
     level: 0,
+    plane: FLOOR,
     division: 1,
     turnPivot: null,
     showAvatar: loadShowAvatar(),
@@ -332,7 +336,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? shards[0]?.id ?? get().create()
-      set({ open: true, currentId, selection: [], selectedFace: null, facePick: [], tool: 'view', aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, selection: [], selectedFace: null, facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
     },
 
     closeWorkshop: () => set({ open: false, selection: [], selectedFace: null, facePick: [], aim: null }),
@@ -378,6 +382,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       edit((cur) => ({ ...cur, extent: e }))
       set({ level: Math.max(-e * TICKS_PER_UNIT, Math.min(e * TICKS_PER_UNIT, get().level)) })
     },
+    setPlane: (plane) => set({ plane, aim: null }),
     setLevel: (level) => {
       const e = (get().current()?.extent ?? GRID_HALF) * TICKS_PER_UNIT
       set({ level: Math.max(-e, Math.min(e, Math.round(level))) })
@@ -397,10 +402,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     placeStamp: (at) => {
-      const { stampKind, stampSize, stampFacing, color } = get()
+      const { stampKind, stampSize, stampFacing, color, plane } = get()
       const s = get().current()
       if (!s || !validPoint(at, s.extent)) return
-      const res = stamp(s, stampKind, stampSize, stampFacing, at, color)
+      const res = stamp(s, stampKind, stampSize, stampFacing, at, color, plane)
       if (!res) { set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
       edit(() => ({ ...res.shard, mode }), notice)

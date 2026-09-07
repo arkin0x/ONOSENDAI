@@ -204,6 +204,32 @@ describe('workshop', () => {
     expect(w().selectedFace).toBe(0)
   })
 
+  it('turns the selection a quarter turn about the middle of its extent, on the grid, and refuses a turn off it', () => {
+    // An L: three along x, one up z. Its extent's middle snaps to (T, T).
+    for (const p of [[0, 0, 0], [T, 0, 0], [2 * T, 0, 0], [0, 0, T]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1, 2, 3])
+    w().rotateSelected(1)
+    const after = w().current()!.vertices.map((v) => ticksOf(v).join())
+    expect(new Set(after)).toEqual(new Set([`0,0,${2 * T}`, `0,0,${T}`, '0,0,0', `${T},0,${2 * T}`]))
+    for (const v of w().current()!.vertices) for (const c of ticksOf(v)) expect(c % T).toBe(0)
+    w().rotateSelected(-1)
+    expect(new Set(w().current()!.vertices.map((v) => ticksOf(v).join()))).toEqual(new Set(['0,0,0', `${T},0,0`, `${2 * T},0,0`, `0,0,${T}`]))
+    // A square turns in place.
+    w().clearShard()
+    for (const p of [[0, 0, 0], [2 * T, 0, 0], [2 * T, 0, 2 * T], [0, 0, 2 * T]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1, 2, 3])
+    const before = new Set(w().current()!.vertices.map((v) => ticksOf(v).join()))
+    w().rotateSelected(1)
+    expect(new Set(w().current()!.vertices.map((v) => ticksOf(v).join()))).toEqual(before)
+    // At the grid's edge a turn that would leave it is refused whole.
+    w().clearShard()
+    for (const p of [[8 * T, 0, 0], [8 * T, 0, 3 * T]] as Array<[number, number, number]>) w().addVertex(p)
+    w().setSelection([0, 1])
+    w().rotateSelected(1)
+    expect(w().notice).toMatch(/off the grid/)
+    expect(w().current()!.vertices.map((v) => ticksOf(v).join())).toEqual([`${8 * T},0,0`, `${8 * T},0,${3 * T}`])
+  })
+
   it('fills a loop of picked corners, closing on the first pick or by FILL', () => {
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([2, 0, 0]); w().addVertex([2, 0, 2]); w().addVertex([0, 0, 2])

@@ -420,7 +420,9 @@ function Keys(): null {
       if (e.code === 'Digit2') w.setTool('add')
       if (e.code === 'Digit3') w.setTool('select')
       if (e.code === 'Digit4') w.setTool('face')
-      if (e.code === 'KeyQ') w.turnStamp()
+      // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
+      if (e.code === 'KeyQ') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(-1); else w.turnStamp() }
+      if (e.code === 'KeyE') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(1) }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }

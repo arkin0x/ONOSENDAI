@@ -160,6 +160,8 @@ interface CalibrationSnapshot {
   hopHeight: number
   /** Recommended sidestep ceiling: measured, else the default. */
   sidestepHeight: number
+  /** Measured SHA-256 leaf hashes per second; absent until measured or read from the cache. */
+  sha256PerSec?: number
 }
 
 /**
@@ -226,6 +228,7 @@ export function startCalibration(): void {
       status: 'cached',
       hopHeight: hopCeiling(cached.cantorMsByHeight),
       sidestepHeight: sidestepCeiling(cached.sha256PerSec),
+      sha256PerSec: cached.sha256PerSec,
     })
     return
   }
@@ -258,6 +261,7 @@ function runBenchmark(): void {
       status: 'measured',
       hopHeight: hopCeiling(msg.cantorMsByHeight),
       sidestepHeight: sidestepCeiling(msg.sha256PerSec),
+      sha256PerSec: msg.sha256PerSec,
     })
   }
   worker.onerror = () => worker.terminate()

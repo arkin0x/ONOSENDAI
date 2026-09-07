@@ -19,21 +19,23 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Vector3 } from 'three'
+import { Compass3D } from '../scene/Compass3D'
+import { Eye, Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
 import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
-import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
+import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
-import { nudgeFor, nudgeLabel, useBenchView, type NudgeName } from './benchAxes'
+import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 
-const TOOLS: Tool[] = ['stamp', 'add', 'select', 'face']
-const TOOL_ICON: Record<Tool, LucideIcon> = { stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
+const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
+const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
 
 const LONG_PRESS_MS = 550
 const SETTLE_MS = 500
@@ -41,6 +43,7 @@ const TOAST_MS = 4000
 
 /** One line under the tool row. SELECT needs none: the pad appears when something is selected. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
+  view: 'Look around: one finger orbits, two pan, pinch zooms. The compass turns the view a quarter at a time. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it.',
@@ -200,6 +203,36 @@ function Mixer({ hex, onChange, onSettle }: { hex: string; onChange: (hex: strin
   )
 }
 
+/** The bench's axes as the compass draws them: model +Z is render -Z (shards.ts toRender). */
+const BENCH_DIRS = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, -1) }
+
+/**
+ * The view pad, for the bench: the arrows turn the working grid a quarter
+ * while the geometry stays put, so the next points go down on another plane.
+ * Up and down tip it about the screen's horizontal, left and right roll it
+ * about the line of sight (benchAxes planeAfter). SUN is the black sun's seat
+ * here: the grid back on the floor and the camera back where the bench opens.
+ */
+function BenchViewMenu(): JSX.Element {
+  const w = useWorkshop.getState
+  const press = (fn: () => void) => (e: React.PointerEvent): void => { e.preventDefault(); e.stopPropagation(); fn() }
+  const turn = (about: 'tip' | 'roll') => (): void => w().setPlane(planeAfter(w().plane, useBenchView.getState().axes, about))
+  return (
+    <div className="viewmenu viewmenu--bench" role="group" aria-label="Grid controls">
+      <div className="viewmenu__pad">
+        <button className="viewmenu__key viewmenu__key--up" {...noCallout} onPointerDown={press(turn('tip'))} aria-label="Tip the grid up">▲</button>
+        <button className="viewmenu__key viewmenu__key--left" {...noCallout} onPointerDown={press(turn('roll'))} aria-label="Roll the grid left">◀</button>
+        <span className="viewmenu__hub" aria-hidden="true">GRID</span>
+        <button className="viewmenu__key viewmenu__key--right" {...noCallout} onPointerDown={press(turn('roll'))} aria-label="Roll the grid right">▶</button>
+        <button className="viewmenu__key viewmenu__key--down" {...noCallout} onPointerDown={press(turn('tip'))} aria-label="Tip the grid down">▼</button>
+      </div>
+      <div className="viewmenu__row">
+        <button className="viewmenu__op" {...noCallout} onPointerDown={press(() => { w().setPlane(FLOOR); requestView({ kind: 'home' }) })} title="The grid back on the floor, the view back where the bench opens">SUN</button>
+      </div>
+    </div>
+  )
+}
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
@@ -210,6 +243,7 @@ export function Workshop(): JSX.Element | null {
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
   const level = useWorkshop((s) => s.level)
+  const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const color = useWorkshop((s) => s.color)
@@ -221,6 +255,7 @@ export function Workshop(): JSX.Element | null {
   const [panel, setPanel] = useState<Panel | null>(null)
   const [colorOpen, setColorOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [viewOpen, setViewOpen] = useState(false)
   // On a phone the open colour bar and the TOOLS panel share the bottom, so
   // they take turns; on a wide screen they have corners of their own.
   const [narrow, setNarrow] = useState<boolean>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches)
@@ -244,7 +279,7 @@ export function Workshop(): JSX.Element | null {
     const shut = (e: PointerEvent): void => {
       if (useWorkshop.getState().tool === 'select') return
       const el = e.target as HTMLElement | null
-      if (el?.closest('.ws__color, .ws__colorchip')) return
+      if (el?.closest('.ws__color, .ws__colorchip, .ws__mixer')) return
       setColorOpen(false)
     }
     document.addEventListener('pointerdown', shut, true)
@@ -253,6 +288,18 @@ export function Workshop(): JSX.Element | null {
   // ADD, SELECT and FACE have nothing under them, so choosing one by key puts
   // the TOOLS panel away; STAMP keeps it for the shape, size and facing.
   useEffect(() => { if (tool !== 'stamp') setPanel((p) => (p === 'tools' ? null : p)) }, [tool])
+  // The view pad goes with the VIEW tool, and shuts on a tap anywhere else.
+  useEffect(() => { if (tool !== 'view') setViewOpen(false) }, [tool])
+  useEffect(() => {
+    if (!viewOpen) return
+    const shut = (e: PointerEvent): void => {
+      const el = e.target as HTMLElement | null
+      if (el?.closest('.viewmenu, .compass-3d')) return
+      setViewOpen(false)
+    }
+    document.addEventListener('pointerdown', shut, true)
+    return () => document.removeEventListener('pointerdown', shut, true)
+  }, [viewOpen])
   // The mixer shuts with the column, and on a tap anywhere else.
   useEffect(() => { if (!colorBar) setPickerOpen(false) }, [colorBar])
   useEffect(() => {
@@ -333,8 +380,8 @@ export function Workshop(): JSX.Element | null {
           <Grid3x3 size={12} strokeWidth={2.25} aria-hidden />GRID
         </button>
         <span className="ws__history">
-          <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} strokeWidth={2.25} aria-hidden /></button>
-          <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} strokeWidth={2.25} aria-hidden /></button>
+          <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
+          <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
         </span>
       </div>
       {panel === 'menu' && shard && (
@@ -411,7 +458,7 @@ export function Workshop(): JSX.Element | null {
       {panel === 'grid' && shard && (
         <div className="ws__panel" role="region" aria-label="Grid">
           <div className="workshop__row">
-            <span className="workshop__label">LEVEL Y</span>
+            <span className="workshop__label">LEVEL {'XYZ'[plane]}</span>
             <button className="workshop__btn" {...bind(() => w().setLevel(w().level - w().step()))} disabled={level <= -extent * TICKS_PER_UNIT} aria-label="Level down">−</button>
             <span className="workshop__value">{unitsLabel(level)}</span>
             <button className="workshop__btn" {...bind(() => w().setLevel(w().level + w().step()))} disabled={level >= extent * TICKS_PER_UNIT} aria-label="Level up">+</button>
@@ -456,6 +503,15 @@ export function Workshop(): JSX.Element | null {
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
+
+      {/* Top right, under DEPLOY and the way out: the compass while VIEW is in
+          hand, the grid pad under it when tapped. */}
+      {tool === 'view' && (
+        <div className="ws__view">
+          <Compass3D bench pose={benchPose} dirs={BENCH_DIRS} onTap={() => setViewOpen((o) => !o)} />
+          {viewOpen && <BenchViewMenu />}
+        </div>
+      )}
 
       {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
           its panel, which opens upward over the chip. */}
@@ -513,9 +569,18 @@ export function Workshop(): JSX.Element | null {
         </div>
       )}
 
-        <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
-          <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
-        </button>
+        {/* The tool in hand, and an X joined to the chip that puts it down: VIEW,
+            the tool that builds nothing. */}
+        <div className="ws__toolchips">
+          <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
+            <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
+          </button>
+          {tool !== 'view' && (
+            <button className="chip ws__chip ws__chip--x" onClick={() => w().setTool('view')} title="Put the tool down (1)" aria-label="Put the tool down">
+              <X size={13} strokeWidth={2.25} aria-hidden />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Bottom right: FILL for a set of points, face actions while a face is in

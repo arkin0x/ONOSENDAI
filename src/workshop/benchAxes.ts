@@ -10,7 +10,8 @@
  */
 
 import { create } from 'zustand'
-import { Vector3, type Camera } from 'three'
+import { Quaternion, Vector3, type Camera } from 'three'
+import type { WorkPlane } from '../lib/stamps'
 
 export type NudgeName = 'up' | 'down' | 'left' | 'right' | 'away' | 'toward'
 
@@ -84,4 +85,32 @@ export const sameAxes = (a: BenchAxes, b: BenchAxes): boolean =>
 /** The bench's default view: X right, Y up, Z toward the viewer. */
 export const DEFAULT_AXES: BenchAxes = { right: { axis: 0, dir: 1 }, up: { axis: 1, dir: 1 }, out: { axis: 2, dir: 1 } }
 
-export const useBenchView = create<{ axes: BenchAxes }>(() => ({ axes: DEFAULT_AXES }))
+/** The bench camera's orientation, for the compass in its own canvas. Mutable, per frame, never store state. */
+export const benchPose = new Quaternion()
+
+/** What the view pad asks of the camera: only the way home, now that the arrows turn the grid. */
+export type ViewAsk = { kind: 'home' }
+export type ViewRequest = ViewAsk & { id: number }
+
+/**
+ * The working grid after a quarter turn about a screen axis. 'tip' turns it
+ * about the screen's horizontal (the top comes toward you), 'roll' about the
+ * line of sight. A plane is its normal axis, so a turn about the normal itself
+ * changes nothing; then the turn is taken about the screen's vertical instead,
+ * so every arrow does something from every view. Either way round lands on
+ * the same plane, which is why the pad's opposite arrows agree.
+ */
+export function planeAfter(plane: WorkPlane, axes: BenchAxes, about: 'tip' | 'roll'): WorkPlane {
+  let a: number = about === 'tip' ? axes.right.axis : axes.out.axis
+  if (a === plane) a = axes.up.axis
+  if (a === plane) return plane
+  return (3 - plane - a) as WorkPlane
+}
+
+export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null }>(() => ({ axes: DEFAULT_AXES, request: null }))
+
+let asked = 0
+/** Ask the bench camera for the default view. */
+export function requestView(ask: ViewAsk): void {
+  useBenchView.setState({ request: { ...ask, id: ++asked } })
+}

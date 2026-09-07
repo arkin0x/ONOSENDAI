@@ -21,8 +21,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
-import { benchAxes, nudgeFor, sameAxes, useBenchView, type NudgeName } from './benchAxes'
-import { landing, preview } from '../lib/stamps'
+import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
+import { landing, preview, type WorkPlane } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
 import { useWorkshop } from '../store/useWorkshop'
 
@@ -45,10 +45,15 @@ type P3 = [number, number, number]
  * the current level. Model +Z is render -Z (shards.ts toRender), so the tap's
  * render z comes back negated.
  */
-function snap(p: Vector3, level: number, step: number): P3 {
+function snap(p: Vector3, level: number, step: number, plane: WorkPlane): P3 {
   const q = (v: number): number => Math.round((v * TICKS_PER_UNIT) / step) * step
+  // The two coordinates in the plane snap; the one along its normal is the level.
+  if (plane === 0) return [level, q(p.y), -q(p.z)]
+  if (plane === 2) return [q(p.x), q(p.y), level]
   return [q(p.x), level, -q(p.z)]
 }
+/** Where the camera sits from its target when sent home: the bench's opening view. */
+const HOME: P3 = [10, 9, 12]
 /** Ticks to render units, one axis (for Y, which is not mirrored). */
 const U = (t: number): number => t / TICKS_PER_UNIT
 /** A model position as the bench draws it. */
@@ -95,6 +100,7 @@ function BenchAxes({ reach }: { reach: number }): JSX.Element {
 
 function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
+  const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
@@ -107,14 +113,14 @@ function Grid(): JSX.Element {
     // changed a moment ago must apply to this tap even if the bench has not
     // re-rendered yet.
     const w = useWorkshop.getState()
-    const at = snap(e.point, w.level, w.step())
+    const at = snap(e.point, w.level, w.step(), w.plane)
     if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
   const onMove = (e: ThreeEvent<PointerEvent>): void => {
     const w = useWorkshop.getState()
-    w.setAim(snap(e.point, w.level, w.step()))
+    w.setAim(snap(e.point, w.level, w.step(), w.plane))
   }
 
   // A finger lifts and the ghost goes with it; a mouse keeps hovering.
@@ -122,8 +128,13 @@ function Grid(): JSX.Element {
     if (e.pointerType !== 'mouse') useWorkshop.getState().setAim(null)
   }
 
+  // The grid is drawn on the floor and turned to its plane: a quarter about Z
+  // to face +X, a quarter about X to face +Z (render -Z is model +Z, so the
+  // level along model Z sits at render -level).
+  const position: P3 = plane === 0 ? [U(level), 0, 0] : plane === 2 ? [0, 0, -U(level)] : [0, U(level), 0]
+  const rotation: P3 = plane === 0 ? [0, 0, -Math.PI / 2] : plane === 2 ? [Math.PI / 2, 0, 0] : [0, 0, 0]
   return (
-    <group position={[0, U(level), 0]}>
+    <group position={position} rotation={rotation}>
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
       <gridHelper key={`u${extent}-${division > 1 ? 1 : 0}`} args={[extent * 2, extent * 2, ACCENT, division > 1 ? UNIT_LINE_DIVIDED : UNIT_LINE]} />
       {/* The snap grid between the unit lines when a unit is divided, in the unit lines' plain colour. */}
@@ -153,9 +164,10 @@ function Ghost(): JSX.Element | null {
   const size = useWorkshop((s) => s.stampSize)
   const facing = useWorkshop((s) => s.stampFacing)
   const color = useWorkshop((s) => s.color)
-  // Built once per shape and color; the aim only moves it. Built per cell, the
+  const plane = useWorkshop((s) => s.plane)
+  // Built once per shape, color and plane; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
-  const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color) : null), [tool, kind, size, facing, color])
+  const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color, plane) : null), [tool, kind, size, facing, color, plane])
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   if (!aim) return null
   if (tool === 'add') {
@@ -168,7 +180,7 @@ function Ghost(): JSX.Element | null {
   }
   if (!model) return null
   return (
-    <group position={UP(landing(kind, size, facing, aim, extent))}>
+    <group position={UP(landing(kind, size, facing, aim, extent, plane))}>
       <ShardMesh shard={model} ghost />
     </group>
   )
@@ -403,6 +415,13 @@ function Keys(): null {
         return
       }
       if (e.altKey) return
+      // Shift+W/S tips the working grid a quarter about the screen's horizontal,
+      // Shift+A/D rolls it about the line of sight; the geometry stays put.
+      if (e.shiftKey && (e.code === 'KeyW' || e.code === 'KeyA' || e.code === 'KeyS' || e.code === 'KeyD')) {
+        e.preventDefault()
+        w.setPlane(planeAfter(w.plane, useBenchView.getState().axes, e.code === 'KeyW' || e.code === 'KeyS' ? 'tip' : 'roll'))
+        return
+      }
       // Screen directions, as the cursor's keys are in the world: W up, S down,
       // A left, D right, R into the screen, F out of it, whatever way the bench
       // camera has been turned.
@@ -416,10 +435,11 @@ function Keys(): null {
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
       if (e.code === 'KeyC') { w.selectConnected(); return }
-      if (e.code === 'Digit1') w.setTool('stamp')
-      if (e.code === 'Digit2') w.setTool('add')
-      if (e.code === 'Digit3') w.setTool('select')
-      if (e.code === 'Digit4') w.setTool('face')
+      if (e.code === 'Digit1') w.setTool('view')
+      if (e.code === 'Digit2') w.setTool('stamp')
+      if (e.code === 'Digit3') w.setTool('add')
+      if (e.code === 'Digit4') w.setTool('select')
+      if (e.code === 'Digit5') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
       if (e.code === 'KeyQ') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(-1); else w.turnStamp() }
       if (e.code === 'KeyE') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(1) }
@@ -433,6 +453,23 @@ function Keys(): null {
 }
 
 /** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
+/**
+ * Sends the camera home on request (the default oblique view, the target kept),
+ * and shares its orientation with the compass every frame.
+ */
+function ViewDriver(): null {
+  const camera = useThree((s) => s.camera)
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
+  const request = useBenchView((s) => s.request)
+  useFrame(() => { benchPose.copy(camera.quaternion) })
+  useEffect(() => {
+    if (!request || !controls) return
+    camera.position.copy(controls.target).add(new Vector3(HOME[0], HOME[1], HOME[2]))
+    controls.update()
+  }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -487,6 +524,7 @@ export function Bench(): JSX.Element {
       <Aim />
       <Keys />
       <AxesReporter />
+      <ViewDriver />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />

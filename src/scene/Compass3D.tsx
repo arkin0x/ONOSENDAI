@@ -63,20 +63,22 @@ function Arrow({ dir, color }: { dir: Vector3; color: string }): JSX.Element {
   )
 }
 
-function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPosition[]) => void }): JSX.Element {
+type Dirs = Record<'x' | 'y' | 'z', Vector3>
+
+function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels: LabelPosition[]) => void; pose: Quaternion; given?: Dirs }): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
   const { camera, size } = useThree()
 
-  const dirs = useMemo(() => ({
+  const dirs = useMemo<Dirs>(() => given ?? {
     x: localDir(axes, 'x'),
     y: localDir(axes, 'y'),
     z: localDir(axes, 'z'),
-  }), [axes])
+  }, [axes, given])
 
   useFrame(() => {
-    camera.quaternion.copy(cameraPose)
-    camera.position.copy(new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(cameraPose))
+    camera.quaternion.copy(pose)
+    camera.position.copy(new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(pose))
 
     const labels: LabelPosition[] = (['x', 'y', 'z'] as const).map((axis) => {
       const world = dirs[axis].clone().multiplyScalar(ARROW_LENGTH + LABEL_OFFSET)
@@ -105,7 +107,12 @@ function CompassScene({ onLabelsUpdate }: { onLabelsUpdate: (labels: LabelPositi
   )
 }
 
-export function Compass3D({ onTap }: { onTap?: () => void } = {}): JSX.Element {
+/**
+ * By default the main camera's pose and the cyberspace axes. The workshop
+ * passes the bench camera's pose and its own axis directions, and `bench`
+ * takes the compass out of its fixed spot so the corner can hold it.
+ */
+export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean } = {}): JSX.Element {
   const [labels, setLabels] = useState<LabelPosition[]>([])
 
   const handleLabelsUpdate = (newLabels: LabelPosition[]) => {
@@ -125,7 +132,7 @@ export function Compass3D({ onTap }: { onTap?: () => void } = {}): JSX.Element {
 
   return (
     <div
-      className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}`}
+      className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}${bench ? ' compass-3d--bench' : ''}`}
       onPointerDown={onTap ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
       role={onTap ? 'button' : undefined}
       aria-label={onTap ? 'View controls' : undefined}
@@ -137,7 +144,7 @@ export function Compass3D({ onTap }: { onTap?: () => void } = {}): JSX.Element {
       >
         <ambientLight intensity={0.6} />
         <pointLight position={[5, 5, 5]} intensity={0.8} />
-        <CompassScene onLabelsUpdate={handleLabelsUpdate} />
+        <CompassScene onLabelsUpdate={handleLabelsUpdate} pose={pose} given={dirs} />
       </Canvas>
       {labels.map(({ axis, screen }) => (
         <span

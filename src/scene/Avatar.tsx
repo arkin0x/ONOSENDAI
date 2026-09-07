@@ -15,11 +15,12 @@
  * the coordinate.
  */
 
-import { useMemo, useRef } from 'react'
+import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { IcosahedronGeometry, EdgesGeometry, Group } from 'three'
+import { Group } from 'three'
 import { travelOffset } from '../lib/travel'
 import { useCyberspace } from '../store/useCyberspace'
+import { AvatarShape } from './AvatarShape'
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -27,11 +28,8 @@ export function Avatar(): JSX.Element | null {
   // marker there would say you are standing on it. Spectating keeps the marker,
   // where it stands in for the avatar being watched.
   const focus = useCyberspace((s) => s.focus)
-
-  const avatarGeometry = useMemo(() => {
-    const geo = new IcosahedronGeometry(0.5, 1)
-    return new EdgesGeometry(geo)
-  }, [])
+  // Whose shape: yours, or the spectated avatar's, whose marker this is then.
+  const pubkey = useCyberspace((s) => s.focusPubkey())
 
   useFrame(() => {
     if (group.current) group.current.position.copy(travelOffset)
@@ -46,9 +44,7 @@ export function Avatar(): JSX.Element | null {
           cell, the icosahedron inscribes it exactly, and standing on your
           own destination erased you; now the red edges composite on top of
           whatever shares your gibson. */}
-      <lineSegments geometry={avatarGeometry} frustumCulled={false} renderOrder={10}>
-        <lineBasicMaterial color="#ff2323" toneMapped={false} depthTest={false} />
-      </lineSegments>
+      <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} />
     </group>
   )
 }

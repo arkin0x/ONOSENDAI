@@ -35,6 +35,7 @@ import { startSelfSync } from './lib/selfSync'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
+import { useAvatars } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
 
 /** How long after the panels open the anchor sync goes full tilt. */
@@ -51,7 +52,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine() }, [])
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])

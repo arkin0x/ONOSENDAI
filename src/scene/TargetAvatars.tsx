@@ -9,9 +9,9 @@
  */
 
 import { useMemo } from 'react'
-import { EdgesGeometry, IcosahedronGeometry } from 'three'
 import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { AvatarShape } from './AvatarShape'
 import { WorldLabel } from './WorldLabel'
 
 /** Same cull as Earth and the spawn marker. */
@@ -35,7 +35,6 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const focus = useCyberspace((s) => s.focusPubkey())
-  const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
 
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
@@ -56,9 +55,7 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     <>
       {near.map((t) => (
         <group key={t.id} position={t.centre}>
-          <lineSegments geometry={geometry} frustumCulled={false}>
-            <lineBasicMaterial color={t.color} toneMapped={false} />
-          </lineSegments>
+          <AvatarShape pubkey={t.id} color={t.color} />
           <WorldLabel text={t.label} color={t.color} at={[0, 0.9, 0]} align="center" px={11} opacity={0.9} />
         </group>
       ))}

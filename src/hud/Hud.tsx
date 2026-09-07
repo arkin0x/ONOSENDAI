@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from '../lib/scale'
+import { parseViewAt } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -110,6 +111,8 @@ function PositionPanel(): JSX.Element {
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
+  const [viewText, setViewText] = useState('')
+  const [viewBad, setViewBad] = useState(false)
 
   // Every figure copies on a tap, raw: the grouping commas are for reading,
   // not for pasting into a filter or a script.
@@ -140,6 +143,32 @@ function PositionPanel(): JSX.Element {
         <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
         <code>{coordHex}</code>
       </button>
+
+      {/* The free view: look at any place without walking there. Three axis
+          values, or a coordinate as the tags carry it; RETURN on the bar brings
+          the view home. */}
+      <form
+        className="avatars__add"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const target = parseViewAt(viewText, plane)
+          if (!target) { setViewBad(true); return }
+          setViewBad(false)
+          useCyberspace.getState().focusOn(target.position, target.plane, target.label)
+        }}
+      >
+        <input
+          className={`avatars__input ${viewBad ? 'is-bad' : ''}`}
+          value={viewText}
+          onChange={(e) => { setViewText(e.target.value); setViewBad(false) }}
+          placeholder="x, y, z or a coordinate"
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="A place to view"
+          aria-invalid={viewBad}
+        />
+        <button className="avatars__go" type="submit" disabled={!viewText.trim()} title="Look at this place without moving">VIEW</button>
+      </form>
     </section>
   )
 }

@@ -3233,14 +3233,30 @@ kbd {
 .touchpad {
   bottom: 92px;
   display: grid;
-  grid-template-columns: repeat(3, 38px);
+  grid-template-columns: repeat(4, 38px);
   grid-template-rows: repeat(3, 38px);
   gap: 4px;
   grid-template-areas:
-    "away  up    toward"
-    "left  hub   right"
-    "zoomout down zoomin";
+    "away    up   toward cube"
+    "left    hub  right  ."
+    "zoomout down zoomin .";
 }
+/* Off your own head only scale is left to drive, so the pad folds to one
+ * row: coarser, the readout, finer, and the cube. The direction cells leave
+ * the grid rather than standing empty in it. */
+.touchpad--scale {
+  grid-template-rows: 38px;
+  grid-template-areas: "zoomout hub zoomin cube";
+}
+.touchpad--scale .is-standdown { display: none; }
+/* The purple cube: all of cyberspace at once. */
+.touchpad__key--cube {
+  grid-area: cube;
+  color: #e6d2ff;
+  background: rgba(150, 80, 255, 0.28);
+  border-color: rgba(192, 125, 255, 0.75);
+}
+.touchpad__key--cube:active { background: rgba(192, 125, 255, 0.5); border-color: #e6d2ff; }
 
 .touchpad__key {
   display: flex;

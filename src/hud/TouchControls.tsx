@@ -15,7 +15,9 @@
  * way WASD does and the two can never disagree about which way is up.
  */
 
+import { Box } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
+import { viewCyberspace } from './HyperspacePanel'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
@@ -94,7 +96,12 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div className="touchpad" role="group" aria-label="Move cursor and change scale">
+      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}`} role="group" aria-label="Move cursor and change scale">
+        {/* The purple cube: all of cyberspace at once, 2^84, the camera on
+            the whole of it. On every pad, at your head or off it. */}
+        <button className="touchpad__key touchpad__key--cube" title="All of cyberspace at 2^84" aria-label="See all of cyberspace at 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewCyberspace(MAX_SCALE_EXP) }}>
+          <Box size={16} strokeWidth={2.25} aria-hidden />
+        </button>
         {pad.map((b) => (
           <button
             key={b.cell}

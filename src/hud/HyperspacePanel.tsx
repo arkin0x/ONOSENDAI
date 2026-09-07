@@ -447,9 +447,9 @@ export function viewEarth(): void {
  * lattices are drawn: the view a hyperjump gives, held still. Stays in the
  * current plane; the lattices take that plane's colors.
  */
-export function viewCyberspace(): void {
+export function viewCyberspace(scaleExp = 82): void {
   ownHyperspaceView()
   markViewedStop(null)
   const plane = useCyberspace.getState().plane
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, plane, 'CYBERSPACE', 82)
+  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, plane, 'CYBERSPACE', scaleExp)
 }

@@ -31,3 +31,18 @@ export function parseViewAt(text: string, plane: Plane): ViewTarget | null {
 function short(n: string): string {
   return n.length > 12 ? `${n.slice(0, 5)}…${n.slice(-5)}` : n
 }
+
+/** A remembered place: what was typed, canonically, and how it is shown. */
+export interface RecentView { input: string; label: string }
+
+/** The same place typed two ways is one entry: decimals become "x, y, z", a coordinate its lowercase hex. */
+export function canonicalViewAt(text: string): string {
+  const t = text.trim()
+  if (/^[0-9a-f]{64}$/i.test(t)) return t.toLowerCase()
+  return t.split(/[\s,]+/).filter(Boolean).join(', ')
+}
+
+/** The list with `entry` at the front, its earlier copy gone, three at most. */
+export function rememberView(list: RecentView[], entry: RecentView): RecentView[] {
+  return [entry, ...list.filter((r) => r.input !== entry.input)].slice(0, 3)
+}

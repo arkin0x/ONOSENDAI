@@ -104,6 +104,10 @@ export default function App(): JSX.Element {
   // instruments and compass stay out of the way until it is placed or dropped.
   const deploying = useShards((s) => s.pending !== null)
   useEffect(() => { if (deploying) setPanelsOpen(false) }, [deploying])
+  // VIEW from the position panel or a target: on a phone the panels cover the
+  // scene, so the view they asked for closes them; RETURN is on the bar.
+  const driving = useCyberspace((s) => s.focus?.drive === true)
+  useEffect(() => { if (driving && isMobile) setPanelsOpen(false) }, [driving, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.

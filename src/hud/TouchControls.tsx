@@ -40,7 +40,7 @@ export function TouchControls(): JSX.Element {
   // of the line the field draws and which regime owns the frame, so the pad
   // stays, at its own size and in its own place, with those cells emptied.
   // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
-  const atHead = useCyberspace((s) => s.atHead())
+  const atHead = useCyberspace((s) => s.canDrive())
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)

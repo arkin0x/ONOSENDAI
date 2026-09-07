@@ -142,7 +142,7 @@ export function TargetsPanel(): JSX.Element {
                   : t.status === 'spawn' ? 'AT SPAWN'
                     : 'RELAY?'}
             </span>
-            <button className="avatars__spectate" onClick={() => useCyberspace.getState().focusOn(t.position, t.plane, t.name ?? `${t.npub.slice(0, 12)}…`)} title="Look at where they are, without walking there">VIEW</button>
+            <button className="avatars__spectate" onClick={() => useCyberspace.getState().focusOn(t.position, t.plane, t.name ?? `${t.npub.slice(0, 12)}…`, undefined, true)} title="Look at where they are, without walking there">VIEW</button>
             <button className="avatars__spectate" onClick={() => void spectate(t.pubkey)} title="Spectate">SPECTATE</button>
             <button className="targets__remove" onClick={() => useCyberspace.getState().removeTarget(t.pubkey)} aria-label="Remove target" title="Remove target">✕</button>
           </li>

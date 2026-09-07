@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { xyzToCoord } from 'cyberspace-core'
-import { parseViewAt } from './viewAt'
+import { canonicalViewAt, parseViewAt, rememberView } from './viewAt'
 
 describe('parseViewAt', () => {
   it('reads three decimal axis values', () => {
@@ -20,5 +20,25 @@ describe('parseViewAt', () => {
     expect(parseViewAt('1, 2', 0)).toBeNull()
     expect(parseViewAt('a, b, c', 0)).toBeNull()
     expect(parseViewAt(`${(1n << 85n).toString()}, 0, 0`, 0)).toBeNull()
+  })
+})
+
+describe('rememberView', () => {
+  const at = (input: string): { input: string; label: string } => ({ input: canonicalViewAt(input), label: input.slice(0, 8) })
+  it('keeps three, newest first, and collapses a place typed again', () => {
+    let list = rememberView([], at('1, 2, 3'))
+    list = rememberView(list, at('4 5 6'))
+    list = rememberView(list, at('7,8,9'))
+    expect(list.map((r) => r.input)).toEqual(['7, 8, 9', '4, 5, 6', '1, 2, 3'])
+    list = rememberView(list, at('1,2,3'))
+    expect(list.map((r) => r.input)).toEqual(['1, 2, 3', '7, 8, 9', '4, 5, 6'])
+    list = rememberView(list, at('10, 11, 12'))
+    expect(list).toHaveLength(3)
+    expect(list.map((r) => r.input)).toEqual(['10, 11, 12', '1, 2, 3', '7, 8, 9'])
+  })
+  it('treats a coordinate the same whatever its case', () => {
+    const hex = 'AB'.repeat(32)
+    expect(canonicalViewAt(hex)).toBe('ab'.repeat(32))
+    expect(rememberView([at(hex)], at(hex.toLowerCase()))).toHaveLength(1)
   })
 })

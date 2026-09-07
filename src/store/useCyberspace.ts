@@ -406,7 +406,7 @@ export interface CyberspaceState {
    * is somewhere you are not. Exclusive with spectating in practice, because
    * the panel it is reached from is hidden while spectating.
    */
-  focus: { position: Position; plane: Plane; label: string } | null
+  focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
   /** The zoom before the standing focus began, restored by clearFocus. */
   focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
@@ -459,7 +459,8 @@ export interface CyberspaceState {
   /** Back to your own head. */
   endSpectate: () => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
+  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
   /** Stop looking; the scene returns to your avatar. */
   clearFocus: () => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
@@ -552,6 +553,8 @@ export interface CyberspaceState {
   actions: () => ActionEvent[]
   /** True when the scene is anchored on YOUR live head, where the controls apply. */
   atHead: () => boolean
+  /** The cursor can be driven: at your head, or in a free view that brought it along. Never while spectating or exploring history. */
+  canDrive: () => boolean
   /** The chain the scene is anchored on: the spectated avatar's, else yours. */
   focusChain: () => ActionEvent[]
   /** Whose chain that is. */
@@ -1357,7 +1360,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()
-    if (!get().atHead()) return
+    if (!get().canDrive()) return
     const step = stepFor(scaleExp) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
@@ -1849,9 +1852,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane })
   },
 
-  focusOn: (position, plane, label, scaleExp) => {
+  focusOn: (position, plane, label, scaleExp, drive = false) => {
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label },
+      focus: { position: { ...position }, plane, label, drive },
+      // A free view brings the cursor along, so the pad moves it there and a
+      // message or a shard placed from the view lands there, not at your head.
+      ...(drive ? { cursor: { ...position } } : {}),
       // Remember the zoom once, at the first focus; later focus changes keep it.
       focusReturnScale: get().focus === null ? get().scaleExp : get().focusReturnScale,
       spectate: null,
@@ -1866,11 +1872,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   clearFocus: () => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
-    const { position, plane, focusReturnScale, scaleExp } = get()
+    const { position, plane, focusReturnScale, scaleExp, focus } = get()
     set({
       focus: null,
       anchor: position,
       anchorPlane: plane,
+      // A cursor that went out with the view comes home with it.
+      ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
       scaleExp: focusReturnScale ?? scaleExp,
       focusReturnScale: null,
@@ -2308,6 +2316,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   actions: () => parsedChain(get().events),
 
+  canDrive: () => get().atHead() || (get().focus?.drive === true && get().spectate === null && get().exploreIndex === null),
   atHead: () =>
     get().exploreIndex === null &&
     get().spectate === null &&

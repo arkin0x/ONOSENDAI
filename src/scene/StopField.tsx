@@ -105,7 +105,10 @@ const REBUILD_GROWTH_FRACTION = 0.15
 // Landfalls read as embers of bitcoin orange on the globe; the old EARTH
 // blue made scrubbed stops look selected when nothing was.
 const LANDFALL_COLOR = new Color('#b06f14')
-const PORT_COLOR = new Color(SIDESTEP)
+// Half the sidestep purple: ports are pixel-sized and unlit under a bloom that
+// treats anything bright as a light, and a field of thousands at full purple
+// blew the whole ideaspace view out.
+const PORT_COLOR = new Color(SIDESTEP).multiplyScalar(0.45)
 
 interface Props {
   axes: ViewAxes
@@ -480,7 +483,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         */}
         <pointsMaterial
           vertexColors
-          size={portView ? 6 : 0.24}
+          size={portView ? 3 : 0.24}
           sizeAttenuation={!portView}
           transparent
           opacity={0.95}

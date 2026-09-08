@@ -15,7 +15,6 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AddEquation,
-  AdditiveBlending,
   FrontSide,
   CustomBlending,
   OneFactor,
@@ -28,8 +27,8 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
-import { glowTexture } from '../lib/glow'
 import { orientShard } from '../lib/orient'
+import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
 
 interface Props {
   shard: ShardModel
@@ -86,7 +85,8 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     const g = new BufferGeometry()
     g.setAttribute('position', posAttr)
     g.setAttribute('color', colAttr)
-    return g
+    // The same colours under the name the disc shader reads (scene/pointDisc).
+    return withDiscColors(g, colAttr)
   }, [posAttr, colAttr])
 
   const indexed = useMemo(() => {
@@ -113,6 +113,14 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     g.setIndex(flipped)
     return g
   }, [posAttr, colAttr, index, lit])
+
+  // The points, drawn as the terrain field draws its gibsons: a feathered disc
+  // with a bright core for the bloom, sized in pixels between a floor and a cap.
+  const pointMaterial = useMemo(() => {
+    const seen = ghost ? 0.45 : 1
+    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? seen : seen * 0.55)
+  }, [shard.mode, ghost])
+  useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
 
   const line = useMemo(() => {
     const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 }))
@@ -151,7 +159,9 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
   const done = useRef(false)
   const frame = useRef(0)
 
-  useFrame(() => {
+  useFrame((state) => {
+    // The disc is sized in pixels, so it needs the canvas it is drawn on.
+    sizeDisc(pointMaterial, state.gl.getPixelRatio(), state.size.height)
     if (birth === undefined || noise === null || done.current) return
     const t = Math.min(1, (performance.now() - birth) / SHARD_DECODE_MS)
     const e = easeOutCubic(t)
@@ -171,7 +181,6 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
 
   if (shard.vertices.length === 0) return null
   const opacity = ghost ? 0.45 : 1
-  const glow = glowTexture()
 
   return (
     <group scale={scale}>
@@ -192,21 +201,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
       )}
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
       {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
-        <points geometry={plain} frustumCulled={false}>
-          {/* Small and glowing: a soft round sprite tinted by the vertex colour, added
-              to what is behind it, so a point reads as a light rather than a tile. */}
-          <pointsMaterial
-            vertexColors
-            size={shard.mode === 'points' ? 0.22 : 0.1}
-            sizeAttenuation
-            transparent
-            opacity={shard.mode === 'points' ? opacity : opacity * 0.9}
-            blending={AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-            {...(glow ? { map: glow, alphaTest: 0.02 } : {})}
-          />
-        </points>
+        <points geometry={plain} material={pointMaterial} frustumCulled={false} />
       )}
     </group>
   )

@@ -37,6 +37,8 @@ function depName(d: MyDeployment): string {
 function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
   const cashu = useCashu(d.type === 'message' ? d.text : null)
   const coin = cashu.token !== null
+  const live = useCyberspace((s) => s.live)
+  const broadcasting = useShards((s) => s.broadcasting) === d.lookupId
   return (
     <li className={`shards__row shards__row--deployed ${viewing ? 'is-viewing' : ''}`}>
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
@@ -49,6 +51,15 @@ function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; 
           {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
         </span>
       </button>
+      {/* Deployed while LOCAL: signed and kept, never sent. This sends it. */}
+      {!d.published && live && (
+        <button
+          className="shards__broadcast"
+          disabled={broadcasting}
+          onClick={() => { void useShards.getState().broadcast(d.lookupId) }}
+          title="Send this region's bag to the relays now"
+        >{broadcasting ? 'SENDING' : 'BROADCAST'}</button>
+      )}
       <span className="shards__goto-hint" aria-hidden="true">▸</span>
     </li>
   )
@@ -66,6 +77,9 @@ export function ShardsPanel(): JSX.Element {
   const target = models.find((m) => m.id === deleteModel)
   const deployedCount = (id: string): number => mine.filter((d) => d.type === 'shard' && d.shard?.id === id).length
   const hiddenCount = mine.length
+  const live = useCyberspace((s) => s.live)
+  const broadcastError = useShards((s) => s.broadcastError)
+  const localCount = mine.filter((d) => !d.published).length
 
   const goTo = (d: MyDeployment): void => {
     useShards.getState().inspect(d.eventId)
@@ -136,6 +150,15 @@ export function ShardsPanel(): JSX.Element {
       {mine.length > 0 && (
         <div className="shards__section">
           <span className="legend__label">Deployed — hidden in cyberspace</span>
+          {/* Anything deployed while LOCAL was signed and kept but never sent.
+              It stays that way until it is broadcast, which needs LIVE. */}
+          {localCount > 0 && (
+            <span className="shards__note">
+              {localCount === 1 ? 'One thing is' : `${localCount} things are`} on this device only.{' '}
+              {live ? 'BROADCAST sends the region it is hidden in.' : 'Switch to LIVE to send them.'}
+            </span>
+          )}
+          {broadcastError && <span className="shards__note shards__note--warn">{broadcastError}</span>}
           <ul className="avatars__list">
             {mine.map((d) => (
               <DeployedRow key={d.eventId} d={d} viewing={inspecting === d.eventId} onGo={() => goTo(d)} />

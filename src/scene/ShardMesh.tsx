@@ -177,7 +177,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
-          <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
+          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
               : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}

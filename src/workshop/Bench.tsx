@@ -25,7 +25,7 @@ import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRen
 import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
-import { useWorkshop } from '../store/useWorkshop'
+import { useWorkshop, type Tool } from '../store/useWorkshop'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
@@ -191,10 +191,15 @@ function Ghost(): JSX.Element | null {
 const HANDLE = 0.07
 const HANDLE_ON = 0.11
 const HALO = 0.5
-/** Hit sphere radii: wide enough for a finger, and in ADD narrow enough that two
- * points a fifth of a gibson apart can both be placed and picked. */
+/** Hit sphere radii: wide enough for a finger at a whole-gibson grid, and never
+ * more than a share of the current step, so points a fifth of a gibson apart
+ * each keep their own target; ADD and FACE take the narrow one, since there a
+ * tap beside a point means the plane or the face. */
 const HIT = 0.3
-const HIT_ADD = 0.16
+const HIT_NARROW = 0.16
+function hitRadiusFor(tool: Tool, stepUnits: number): number {
+  return Math.min(tool === 'add' || tool === 'face' ? HIT_NARROW : HIT, stepUnits * 0.45)
+}
 
 /**
  * One handle per point. Several vertices can share a point once stamps have
@@ -205,6 +210,7 @@ function Handles(): JSX.Element | null {
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const step = useWorkshop((s) => s.step())
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
@@ -213,13 +219,21 @@ function Handles(): JSX.Element | null {
   }, [shard?.vertices])
   if (!shard) return null
   const glow = glowTexture()
-  const hitRadius = tool === 'add' ? HIT_ADD : HIT
+  const hitRadius = hitRadiusFor(tool, step / TICKS_PER_UNIT)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP) return
     e.stopPropagation()
     const w = useWorkshop.getState()
-    if (tool === 'face') w.pickForFace(first)
+    if (tool === 'face') {
+      // The sphere stands proud of the faces, so it meets the ray first even when
+      // the tap was on a face beside the corner. If a face is under the tap and
+      // the ray passes farther from the corner than its drawn dot, the face wins.
+      const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
+      const face = e.intersections.find((i) => i.object.name === 'shard-faces')
+      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > HANDLE_ON) { w.selectFace(face.faceIndex); return }
+      w.pickForFace(first)
+    }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
@@ -537,8 +551,9 @@ export function Bench(): JSX.Element {
       <directionalLight position={[-9, 2, -3]} intensity={0.6} />
       {/* One finger or left drag orbits, except in SELECT where that drag is the
           marquee's. Two fingers, or the right button, pan the view in the screen
-          plane; pinch or the wheel dollies. These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+          plane; pinch or the wheel dollies, in to 0.6 of a gibson so a fifth-gibson
+          step fills a good share of a phone's screen. These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
       <Marquee />
       <Aim />
       <Keys />

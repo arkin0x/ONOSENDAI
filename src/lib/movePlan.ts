@@ -51,7 +51,29 @@ export interface Ceilings {
   sidestep: number
   cloudHop: number
   cloudSidestep: number
+  /**
+   * The lowest wall height HOSAKA takes over at, when it can hop it. Infinity
+   * (or absent) means it never does unless this machine cannot cross at all,
+   * which is BYPASS; lib/crossover.ts measures where UNLOCK takes over.
+   */
+  offloadFrom?: number
 }
+
+/**
+ * How to get past a wall this machine cannot hop.
+ *
+ * `bypass` goes around it. A sidestep crosses one gibson of the boundary and
+ * costs nothing, and the walk to the wall and on from it is however many hops
+ * that takes. You arrive without the Cantor root of the regions you crossed,
+ * so nothing hidden in them will open for you.
+ *
+ * `unlock` buys the hop. One event instead of the walk, and you arrive holding
+ * the region's root, which is the key to whatever is hidden there. It is taken
+ * only from the height where it is also the quicker way across, measured
+ * rather than assumed (lib/crossover.ts): below that this machine is faster as
+ * well as free. A hop this machine can make is never paid for under either.
+ */
+export type RouteProfile = 'unlock' | 'bypass'
 
 export function localOnly(hop: number, sidestep: number = hop): Ceilings {
   return { hop, sidestep, cloudHop: 0, cloudSidestep: 0 }
@@ -59,6 +81,23 @@ export function localOnly(hop: number, sidestep: number = hop): Ceilings {
 
 function asCeilings(c: number | Ceilings): Ceilings {
   return typeof c === 'number' ? localOnly(c, Number.MAX_SAFE_INTEGER) : c
+}
+
+/**
+ * Whether the paid hop wins from here, under `fastest`.
+ *
+ * The question is about the crossing, not the step in hand. This machine's
+ * own first step toward a distant wall is an ordinary hop, and taking it
+ * because it is local would walk the whole way to the wall before the choice
+ * came up at all. So the tallest boundary between here and the target decides:
+ * if this machine would have to sidestep across it somewhere on the way, and
+ * HOSAKA can hop it outright, HOSAKA hops it now and the walk never happens.
+ */
+function cloudIsFaster(from: Position, to: Position, c: Ceilings): boolean {
+  const from_ = c.offloadFrom ?? Infinity
+  if (!Number.isFinite(from_)) return false
+  const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
+  return h >= from_ && h > c.hop && h <= c.cloudHop
 }
 
 function sourceOf(kind: PlanStepKind, h: number, c: Ceilings): StepSource {
@@ -89,7 +128,11 @@ export function routeFeasible(from: Position, to: Position, ceilings: number | C
 export function routeNeedsCloud(from: Position, to: Position, ceilings: number | Ceilings): boolean {
   const c = asCeilings(ceilings)
   const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
-  return h > c.hop && h > c.sidestep
+  if (h <= c.hop) return false
+  // Under `fastest` a boundary HOSAKA can hop is HOSAKA's, even though this
+  // machine could have sidestepped its way across.
+  if (h >= (c.offloadFrom ?? Infinity) && h <= c.cloudHop) return true
+  return h > c.sidestep
 }
 
 export type AxisMove =
@@ -158,7 +201,8 @@ export function nextStep(cur: Position, to: Position, ceilings: number | Ceiling
   // none, so a walk this machine can make is never a paid hop.
   if (c.cloudHop > 0 || c.cloudSidestep > 0) {
     const mine = nextStep(cur, to, localOnly(c.hop, c.sidestep))
-    if (mine === null || mine.source === 'local') return mine
+    if (mine === null) return null
+    if (mine.source === 'local' && !cloudIsFaster(cur, to, c)) return mine
   }
   const walk = Math.max(c.hop, c.cloudHop)
   if (walk < 1) throw new Error('ceiling must be at least 1')

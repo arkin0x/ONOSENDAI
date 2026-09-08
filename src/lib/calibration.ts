@@ -162,6 +162,8 @@ interface CalibrationSnapshot {
   sidestepHeight: number
   /** Measured SHA-256 leaf hashes per second; absent until measured or read from the cache. */
   sha256PerSec?: number
+  /** Measured milliseconds per Cantor axis at each height; absent until measured. */
+  cantorMsByHeight?: Record<number, number>
 }
 
 /**
@@ -229,6 +231,7 @@ export function startCalibration(): void {
       hopHeight: hopCeiling(cached.cantorMsByHeight),
       sidestepHeight: sidestepCeiling(cached.sha256PerSec),
       sha256PerSec: cached.sha256PerSec,
+      cantorMsByHeight: cached.cantorMsByHeight,
     })
     return
   }
@@ -262,6 +265,7 @@ function runBenchmark(): void {
       hopHeight: hopCeiling(msg.cantorMsByHeight),
       sidestepHeight: sidestepCeiling(msg.sha256PerSec),
       sha256PerSec: msg.sha256PerSec,
+      cantorMsByHeight: msg.cantorMsByHeight,
     })
   }
   worker.onerror = () => worker.terminate()

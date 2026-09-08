@@ -16,9 +16,13 @@ import { HOSAKA_DEFAULT_URL } from '../lib/hosaka'
 import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
+import type { RouteProfile } from '../lib/movePlan'
+import { offloadFrom } from '../lib/crossover'
+import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
+const PROFILES: Array<[RouteProfile, string]> = [['unlock', 'UNLOCK'], ['bypass', 'BYPASS']]
 
 const STAGE_LABEL: Record<string, string> = {
   awaiting_payment: 'AWAITING PAYMENT',
@@ -70,6 +74,23 @@ export function CloudPanel(): JSX.Element {
     const known = st.cloud.balance
     if (signerKind === 'local' && st.cloud.limits !== null && st.cloudPrefs.mode !== 'off' && (known === null || Date.now() - known.at > BALANCE_STALE_MS)) void st.refreshBalance()
   }, [pubkey, signerKind, cloud.limits !== null])
+  const hopCeil = useCalibration((st) => st.hopHeight)
+  const sidestepCeil = useCalibration((st) => st.sidestepHeight)
+  const cantorMsByHeight = useCalibration((st) => st.cantorMsByHeight)
+  const sha256PerSec = useCalibration((st) => st.sha256PerSec)
+
+  // Where the paid hop starts winning, measured (lib/crossover): the setting
+  // explains itself with the number rather than a promise.
+  const crossover = offloadFrom('unlock', {
+    hopCeiling: hopCeil,
+    sidestepCeiling: sidestepCeil,
+    cloudHop: cloud.limits?.max_hop_height ?? 0,
+    provider: cloud.provider ?? null,
+    signerKind,
+    cantorMsByHeight,
+    sha256PerSec,
+  })
+
   const tag = prefs.mode === 'off' ? 'OFF' : active || cloud.status === 'error' ? STATUS_LABEL[cloud.status] : prefs.mode.toUpperCase()
 
   const setUrl = (): void => {
@@ -103,6 +124,33 @@ export function CloudPanel(): JSX.Element {
           >{label}</button>
         ))}
       </div>
+
+      {/* How to get past a wall this machine cannot hop. Not a spending limit:
+          AUTO and ASK still decide what actually gets paid. */}
+      {prefs.mode !== 'off' && (
+        <div className="cloud__profile">
+          <span className="login__label">Crossing a wall</span>
+          <div className="cloud__modes" role="radiogroup" aria-label="Crossing a wall">
+            {PROFILES.map(([profile, label]) => (
+              <button
+                key={profile}
+                type="button"
+                role="radio"
+                aria-checked={prefs.profile === profile}
+                className={`secret__act cloud__mode ${prefs.profile === profile ? 'is-on' : ''}`}
+                onClick={() => store().setCloudPrefs({ profile })}
+              >{label}</button>
+            ))}
+          </div>
+          <span className="cloud__profile-note">
+            {prefs.profile === 'bypass'
+              ? 'Sidestep around every wall this machine can, however many steps that walk takes, and pay nothing. You arrive without the region’s Cantor root, so anything hidden along the way stays shut. HOSAKA is used only where this machine cannot cross at all.'
+              : Number.isFinite(crossover)
+                ? `Buy the hop from 2^${crossover} up, where the walk also costs more time than the hop does, and arrive holding the region’s Cantor root. Below that this machine is quicker as well as free, so nothing is bought.`
+                : 'Measured against HOSAKA’s own published times, this machine crosses faster than HOSAKA everywhere it can reach, so nothing is bought here. HOSAKA still takes the walls this machine cannot cross at all, and those arrive with the region’s root.'}
+          </span>
+        </div>
+      )}
 
       {prefs.mode === 'auto' && (
         <label className="cloud__budget">

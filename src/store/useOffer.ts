@@ -13,6 +13,7 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
+import { offloadFrom } from '../lib/crossover'
 import { localOnly, nextStep, routeFeasible, routeNeedsCloud, type Ceilings, type PlanStep } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
@@ -109,7 +110,7 @@ export interface NextActionView {
   cursorKey: string
 }
 
-export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null): NextActionView | null {
+export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null, offloadFromHeight: number = Infinity): NextActionView | null {
   if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   const cursorKey = cursorKeyOf(cursor, plane)
@@ -118,7 +119,7 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
   // cross, which is when it is actually needed; a route with such a boundary
   // anywhere on it reads OFFLOAD from the start. A cursor no one reaches is
   // TOO FAR as soon as HOSAKA's caps are known; until they are, OFFLOAD asks.
-  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
+  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0, offloadFrom: offloadFromHeight }
   if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
   const step = nextStep(position, cursor, ceilings)
   if (!step) return null
@@ -137,7 +138,12 @@ export function nextAction(): NextActionView | null {
   const s = useCyberspace.getState()
   if (!s.atHead()) return null
   const cal = useCalibration.getState()
-  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits)
+  const from = offloadFrom(s.cloudPrefs.profile, {
+    hopCeiling: cal.hopHeight, sidestepCeiling: cal.sidestepHeight,
+    cloudHop: s.cloud.limits?.max_hop_height ?? 0, provider: s.cloud.provider ?? null,
+    signerKind: s.signerKind, cantorMsByHeight: cal.cantorMsByHeight, sha256PerSec: cal.sha256PerSec,
+  })
+  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits, from)
 }
 
 /** The same, for a component. */
@@ -150,7 +156,13 @@ export function useNextAction(): NextActionView | null {
   const limits = useCyberspace((s) => s.cloud.limits)
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
-  return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits) : null
+  const profile = useCyberspace((s) => s.cloudPrefs.profile)
+  const provider = useCyberspace((s) => s.cloud.provider)
+  const signerKind = useCyberspace((s) => s.signerKind)
+  const cantorMsByHeight = useCalibration((s) => s.cantorMsByHeight)
+  const sha256PerSec = useCalibration((s) => s.sha256PerSec)
+  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
+  return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits, from) : null
 }
 
 /** What the COMMIT button says for each next action. */

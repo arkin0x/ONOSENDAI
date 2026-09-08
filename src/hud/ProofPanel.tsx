@@ -14,7 +14,12 @@ import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan } from '../store/useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
+
+const MOVE_MODES: Array<[MoveMode, string, string]> = [
+  ['single', 'SINGLE ACTION', 'One action per press'],
+  ['auto', 'AUTOMATIC', 'The whole route, in order'],
+]
 
 function StatusLabel({ status }: { status: string }): JSX.Element {
   const label: Record<string, string> = {
@@ -46,6 +51,7 @@ export function ProofPanel(): JSX.Element {
   // defaults until the quiet benchmark lands, then the line updates in place.
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+  const moveMode = useCyberspace((s) => s.moveMode)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
   // lowered to what calibration measured (the preview hook uses the same).
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
@@ -218,6 +224,29 @@ export function ProofPanel(): JSX.Element {
           {proof.message && <p className="notice">{proof.message}</p>}
         </>
       )}
+
+      {/* What COMMIT does with a route: its first step, or all of them. */}
+      <div className="proof__mode" role="radiogroup" aria-label="What commit runs">
+        <span className="login__label">Commit runs</span>
+        <div className="cloud__modes">
+          {MOVE_MODES.map(([mode, label, title]) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={moveMode === mode}
+              title={title}
+              className={`secret__act cloud__mode ${moveMode === mode ? 'is-on' : ''}`}
+              onClick={() => useCyberspace.getState().setMoveMode(mode)}
+            >{label}</button>
+          ))}
+        </div>
+        <span className="cloud__profile-note">
+          {moveMode === 'auto'
+            ? 'Every step of the route in order, stopping only if a signature is declined or a step fails.'
+            : 'One step per press: the one the button names. The cursor stays where it is, so the next press takes the next step.'}
+        </span>
+      </div>
 
       <p className="legend__note">
         THIS MACHINE BENCHMARK

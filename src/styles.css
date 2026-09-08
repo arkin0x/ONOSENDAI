@@ -5180,3 +5180,10 @@ kbd {
   line-height: 1.55;
   color: var(--dim);
 }
+
+/* The stash's hidden list scrolls with the panel, not inside its own box: a
+   scroller within a scroller ate the drag that was meant for the panel. */
+.shards__section .avatars__list {
+  max-height: none;
+  overflow-y: visible;
+}

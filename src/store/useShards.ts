@@ -92,6 +92,10 @@ interface ShardsState {
   deleted: Record<string, true>
   inspecting: string | null
   scanning: boolean
+  /** The region whose bag is being sent to the relays right now, by lookup id. */
+  broadcasting: string | null
+  /** Why the last broadcast failed, for the row that asked for it. */
+  broadcastError: string | null
   /** A world item clicked open, by its inner event id. */
   selectedSecret: string | null
 
@@ -101,6 +105,8 @@ interface ShardsState {
   cancelDeploy: () => void
   deploy: () => Promise<void>
   deleteInstance: (eventId: string) => Promise<void>
+  /** Send a region's bag to the relays now: what LOCAL deferred. */
+  broadcast: (lookupId: string) => Promise<boolean>
   inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
   addDiscovered: (items: Hidden[]) => void
@@ -203,6 +209,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deleted: loadDeleted(),
     inspecting: null,
     scanning: false,
+    broadcasting: null,
+    broadcastError: null,
     selectedSecret: null,
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
@@ -268,6 +276,46 @@ export const useShards = create<ShardsState>((set, get) => {
         saveMine(mine)
       } catch (err) {
         set({ deployStatus: 'error', deployError: err instanceof Error ? err.message : String(err) })
+      }
+    },
+
+    /**
+     * Send a region's bag to the relays, with everything this device has for it.
+     *
+     * A deploy made while LOCAL is signed and kept but never sent, and going
+     * LIVE afterwards did nothing for it: the bag sat on the device with no way
+     * out. This is that way out. It rebuilds the region's bag exactly as a
+     * deploy does, from the relay's copy merged with every local item, so a
+     * region half published from another device comes back whole rather than
+     * being overwritten by this device's half.
+     */
+    broadcast: async (lookupId) => {
+      const cs = cyber()
+      if (!cs.live) {
+        set({ broadcastError: 'Nothing is published while you are LOCAL. Switch to LIVE and try again.' })
+        return false
+      }
+      if (get().broadcasting) return false
+      const items = get().mine.filter((d) => d.lookupId === lookupId)
+      if (items.length === 0) return false
+      set({ broadcasting: lookupId, broadcastError: null })
+      try {
+        const key = hexToBytes(items[0].keyHex)
+        const existing = await gatherInners(lookupId, key, true)
+        const allInners = mergeInners(existing, items.map((d) => d.inner))
+        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true)
+        if (!published) {
+          set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.' })
+          return false
+        }
+        const relays = relaySet()
+        const mine = get().mine.map((d) => (d.lookupId === lookupId ? { ...d, bagId: event.id, published: true, relays } : d))
+        set({ mine, broadcasting: null })
+        saveMine(mine)
+        return true
+      } catch (err) {
+        set({ broadcasting: null, broadcastError: err instanceof Error ? err.message : String(err) })
+        return false
       }
     },
 

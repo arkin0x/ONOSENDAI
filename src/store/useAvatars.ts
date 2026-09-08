@@ -9,7 +9,9 @@
  * is on screen before the relay answers, and adopting a shard prices it,
  * mines the nonce off the main thread with progress and cancel, signs (with
  * a long patience, since a person is reading the prompt), publishes the
- * event and keeps the copy. `phase` says which of those is happening, so the
+ * event unless you are LOCAL, and keeps the copy. An avatar adopted while
+ * LOCAL is kept whole, work and all, and `broadcastMine` sends that same
+ * event once you are LIVE. `phase` says which of those is happening, so the
  * workshop can keep the button down and say where things are.
  */
 
@@ -19,6 +21,7 @@ import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
 import { AVATAR_D, AVATAR_KIND, avatarFromEvent, avatarTemplate } from '../lib/avatar'
 import { nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, mineInWorker, type AvatarMiner } from '../lib/avatarWorker'
+import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { fromPayload, toPayload, type ShardModel } from '../lib/shards'
 import { useCyberspace } from './useCyberspace'
@@ -52,6 +55,10 @@ interface AvatarsState {
   asked: Record<string, number>
   /** The job in progress, for the workshop's row. */
   mining: Mining | null
+  /** Your own avatar event, signed and kept, whether or not a relay has it. */
+  mineEvent: NostrEvent | null
+  /** Whether a relay took your avatar. False for one adopted while LOCAL. */
+  minePublished: boolean
   /** What adopt is doing now, null when idle; the button stays down through all of it. */
   phase: AdoptPhase | null
   /** How long the last mine took, kept through signing and publishing for the row. */
@@ -64,6 +71,8 @@ interface AvatarsState {
   adopt: (shard: ShardModel | null) => Promise<boolean>
   /** Stop the mining in progress; adopt resolves false. */
   cancelAdopt: () => void
+  /** Send the avatar you adopted while LOCAL to the relays now. */
+  broadcastMine: () => Promise<boolean>
   /** Your own from localStorage, before the relay answers. */
   loadMine: () => void
 }
@@ -72,6 +81,8 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
   shards: {},
   asked: {},
   mining: null,
+  mineEvent: null,
+  minePublished: false,
   phase: null,
   minedMs: null,
   adoptError: null,
@@ -92,7 +103,11 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
         }
         const shard = paidShard(newest)
         set({ shards: { ...get().shards, [pubkey]: shard } })
-        if (pubkey === useCyberspace.getState().identity.pubkey) remember(shard)
+        if (pubkey === useCyberspace.getState().identity.pubkey) {
+          // The relay has it, so it is published, whatever this device thought.
+          set({ minePublished: true })
+          remember(shard, get().mineEvent, true)
+        }
       })
       .catch(() => { if (!(pubkey in get().shards)) set({ shards: { ...get().shards, [pubkey]: null } }) })
   },
@@ -139,14 +154,44 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       set({ phase: null, adoptError: 'The signer changed the event, so the work no longer covers it. Try again.' })
       return false
     }
+    // LOCAL means LOCAL. The avatar is signed, kept and drawn for you, and it
+    // goes out the moment you broadcast it or adopt again while LIVE; publishing
+    // it anyway would have been the one action that ignored the setting.
+    if (!cs.live) {
+      set({ phase: null, shards: { ...get().shards, [me]: shard }, asked: { ...get().asked, [me]: Date.now() }, mineEvent: event, minePublished: false })
+      remember(shard, event, false)
+      return true
+    }
     set({ phase: 'publishing' })
+    const result = await publish(event)
+    if (!result.ok) {
+      set({ phase: null, mineEvent: event, minePublished: false, adoptError: 'No relay took the avatar. Try again when one is reachable.' })
+      remember(shard, event, false)
+      return false
+    }
+    set({ phase: null, shards: { ...get().shards, [me]: shard }, asked: { ...get().asked, [me]: Date.now() }, mineEvent: event, minePublished: true })
+    remember(shard, event, true)
+    return true
+  },
+
+  broadcastMine: async () => {
+    const cs = useCyberspace.getState()
+    const event = get().mineEvent
+    if (!event) return false
+    if (!cs.live) {
+      set({ adoptError: 'Nothing is published while you are LOCAL. Switch to LIVE and try again.' })
+      return false
+    }
+    if (get().phase) return false
+    set({ phase: 'publishing', adoptError: null })
     const result = await publish(event)
     if (!result.ok) {
       set({ phase: null, adoptError: 'No relay took the avatar. Try again when one is reachable.' })
       return false
     }
-    set({ phase: null, shards: { ...get().shards, [me]: shard }, asked: { ...get().asked, [me]: Date.now() } })
-    remember(shard)
+    const shard = get().shards[cs.identity.pubkey] ?? null
+    set({ phase: null, minePublished: true, asked: { ...get().asked, [cs.identity.pubkey]: Date.now() } })
+    remember(shard, event, true)
     return true
   },
 
@@ -157,10 +202,15 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     try {
       const raw = localStorage.getItem(MINE_KEY)
       if (!raw) return
-      const kept = JSON.parse(raw) as { pubkey?: string; payload?: unknown }
+      const kept = JSON.parse(raw) as { pubkey?: string; payload?: unknown; event?: NostrEvent; published?: boolean }
       if (kept.pubkey !== me) return
       const shard = kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
-      set({ shards: { ...get().shards, [me]: shard } })
+      set({
+        shards: { ...get().shards, [me]: shard },
+        mineEvent: kept.event ?? null,
+        // Anything kept before this field existed was published as it was adopted.
+        minePublished: kept.published ?? true,
+      })
     } catch { /* nothing kept */ }
   },
 }))
@@ -175,9 +225,16 @@ export function paidShard(ev: { kind: number; pubkey: string; content: string; t
   return avatarFromEvent(ev)
 }
 
-function remember(shard: ShardModel | null): void {
+function remember(shard: ShardModel | null, event: NostrEvent | null, published: boolean): void {
   try {
-    localStorage.setItem(MINE_KEY, JSON.stringify({ pubkey: useCyberspace.getState().identity.pubkey, payload: shard ? toPayload(shard) : null }))
+    localStorage.setItem(MINE_KEY, JSON.stringify({
+      pubkey: useCyberspace.getState().identity.pubkey,
+      payload: shard ? toPayload(shard) : null,
+      // Kept whole so an avatar adopted while LOCAL can be broadcast later
+      // without mining it again: the work is on this event.
+      event,
+      published,
+    }))
   } catch { /* private mode */ }
 }
 

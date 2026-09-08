@@ -51,7 +51,7 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
   it('adopting a shard signs a kind 33331 event with d=avatar, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
@@ -144,6 +144,36 @@ describe('useAvatars', () => {
     useAvatars.getState().ensure(other)
     await vi.waitFor(() => { expect(other in useAvatars.getState().shards).toBe(true) })
     expect(useAvatars.getState().shards[other]).toBeNull()
+  })
+
+  it('LOCAL keeps the avatar on this device, and BROADCAST sends that same event later', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const wasLive = useCyberspace.getState().live
+    useCyberspace.setState({ live: false })
+    try {
+      expect(await useAvatars.getState().adopt(built())).toBe(true)
+      // Drawn for you, kept whole, and no relay heard about it.
+      expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
+      expect(useAvatars.getState().minePublished).toBe(false)
+      expect(vi.mocked(publish)).not.toHaveBeenCalled()
+      const kept = useAvatars.getState().mineEvent
+      expect(kept).not.toBeNull()
+      expect(verifyAvatarWork(kept!)).toMatchObject({ ok: true })
+
+      // Broadcasting while still LOCAL refuses rather than publishing.
+      expect(await useAvatars.getState().broadcastMine()).toBe(false)
+      expect(vi.mocked(publish)).not.toHaveBeenCalled()
+      expect(useAvatars.getState().adoptError).toMatch(/LOCAL/)
+
+      // Live: the very event that was mined goes out, no second mine.
+      useCyberspace.setState({ live: true })
+      expect(await useAvatars.getState().broadcastMine()).toBe(true)
+      expect(vi.mocked(publish)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(publish).mock.calls[0][0].id).toBe(kept!.id)
+      expect(useAvatars.getState().minePublished).toBe(true)
+    } finally {
+      useCyberspace.setState({ live: wasLive })
+    }
   })
 
   it('an avatar that has not paid is the dodecahedron to everyone', async () => {

@@ -5101,3 +5101,36 @@ kbd {
   color: var(--warn, #ffb347);
   border-color: color-mix(in srgb, var(--warn, #ffb347) 50%, transparent);
 }
+
+/* Something deployed while LOCAL, and the button that sends it. */
+.shards__note {
+  display: block;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+  padding: 2px 0 4px;
+}
+
+.shards__note--warn { color: var(--warn); }
+
+.shards__broadcast {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 6px;
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--warn);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 3px;
+}
+
+.shards__broadcast:disabled { opacity: 0.5; }
+
+/* An avatar adopted while LOCAL, waiting to be sent. */
+.workshop__btn.workshop__btn--warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}

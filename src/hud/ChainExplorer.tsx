@@ -12,8 +12,9 @@
  * space, not a fact you look up. Its heading is the chip that folds it away.
  *
  * Off the head the controls are withdrawn, because nothing in history is a
- * place you can move from; LIVE brings them back. Held buttons rapid-fire, and
- * [ ] Home End do the same from the keyboard.
+ * place you can move from; LATEST brings them back. It says LATEST, not LIVE,
+ * because LIVE is the publishing setting: this is the newest action on the
+ * chain, whether or not any of it has been sent to a relay.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -120,10 +121,10 @@ export function ChainExplorer(): JSX.Element {
             <span className={`explorer__type explorer__type--${action.type}`}>{action.type.toUpperCase()}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
             {atHead ? (
-              <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LIVE'}</span>
+              <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LATEST'}</span>
             ) : (
               <button className="explorer__return" {...noCallout}
-                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LIVE'}</button>
+                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LATEST'}</button>
             )}
           </div>
 

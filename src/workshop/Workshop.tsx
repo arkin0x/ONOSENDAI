@@ -259,6 +259,8 @@ export function Workshop(): JSX.Element | null {
   const phase = useAvatars((s) => s.phase)
   const minedMs = useAvatars((s) => s.minedMs)
   const adoptError = useAvatars((s) => s.adoptError)
+  const minePublished = useAvatars((s) => s.minePublished)
+  const live = useCyberspace((s) => s.live)
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -449,6 +451,12 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__row" role="group" aria-label="My avatar">
             <span className="workshop__label">MY AVATAR</span>
             <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+            {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it. */}
+            {myAvatar && !minePublished && !phase && (
+              live
+                ? <button className="workshop__btn workshop__btn--warn" onClick={() => { void useAvatars.getState().broadcastMine().then((ok) => say(ok ? 'Your avatar is published.' : useAvatars.getState().adoptError ?? 'No relay took the avatar.')) }} title="Send the avatar you adopted while LOCAL to the relays">BROADCAST</button>
+                : <span className="workshop__value">LOCAL</span>
+            )}
             {phase === 'mining' ? (
               <button className="workshop__btn workshop__btn--danger" onClick={() => useAvatars.getState().cancelAdopt()} title="Stop mining; your avatar stays as it is">CANCEL</button>
             ) : phase ? (
@@ -460,8 +468,12 @@ export function Workshop(): JSX.Element | null {
                 onClick={() => {
                   const started = Date.now()
                   void useAvatars.getState().adopt(shard).then((ok) => {
-                    const err = useAvatars.getState().adoptError
-                    say(ok ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${describeDuration((Date.now() - started) / 1000).replace('about ', '')}.` : err ?? 'Mining cancelled. Your avatar is as it was.')
+                    const st = useAvatars.getState()
+                    const took = describeDuration((Date.now() - started) / 1000).replace('about ', '')
+                    if (!ok) { say(st.adoptError ?? 'Mining cancelled. Your avatar is as it was.'); return }
+                    say(st.minePublished
+                      ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${took}.`
+                      : `"${shard.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
                   })
                 }}
                 title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."

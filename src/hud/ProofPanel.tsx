@@ -8,8 +8,11 @@
  * the real computation.
  */
 
-import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
+import { useState } from 'react'
+import { CloudUpload, Footprints, KeyRound, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
+import { SecretsModal } from './SecretsModal'
+import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
@@ -52,6 +55,8 @@ export function ProofPanel(): JSX.Element {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
+  const heldCount = useSecrets((s) => Object.keys(s.keys).length)
+  const [secrets, setSecrets] = useState(false)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
   // lowered to what calibration measured (the preview hook uses the same).
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
@@ -224,6 +229,14 @@ export function ProofPanel(): JSX.Element {
           {proof.message && <p className="notice">{proof.message}</p>}
         </>
       )}
+
+      {/* Every region you can open, and what it cost to get there. */}
+      <div className="proof__secrets">
+        <button className="avatars__go" onClick={() => setSecrets(true)}>
+          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> SECRETS{heldCount > 0 ? ` (${heldCount})` : ''}
+        </button>
+      </div>
+      {secrets && <SecretsModal onClose={() => setSecrets(false)} />}
 
       {/* What COMMIT does with a route: its first step, or all of them. */}
       <div className="proof__mode" role="radiogroup" aria-label="What commit runs">

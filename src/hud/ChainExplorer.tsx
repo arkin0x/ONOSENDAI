@@ -18,6 +18,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { KeyRound } from 'lucide-react'
+import { findLcaHeight } from 'cyberspace-core'
+import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
@@ -35,6 +38,11 @@ export function ChainExplorer(): JSX.Element {
   const index = exploreIndex ?? last
   const action = actions[index]
   const atHead = exploreIndex === null
+  const secretKeys = useSecrets((s) => s.keys)
+  const key = useMemo(
+    () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
+    [action, actions, index, secretKeys],
+  )
 
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
@@ -120,6 +128,18 @@ export function ChainExplorer(): JSX.Element {
           <div className="explorer__meta">
             <span className={`explorer__type explorer__type--${action.type}`}>{action.type.toUpperCase()}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
+            {/* A hop computes the region's Cantor root, which is the key to what
+                is hidden there; a sidestep computes no root at all. */}
+            {key.state !== 'none' && (
+              <span
+                className={`explorer__root ${key.state === 'gone' ? 'is-gone' : ''}`}
+                title={key.state === 'held'
+                  ? `This hop yielded the key to its 2^${key.height} region, and you still hold it.`
+                  : `This hop yielded the key to its 2^${key.height} region. It is not in your Secrets list.`}
+              >
+                <KeyRound size={11} strokeWidth={2.25} aria-hidden />2^{key.height}
+              </span>
+            )}
             {atHead ? (
               <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LATEST'}</span>
             ) : (

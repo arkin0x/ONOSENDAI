@@ -54,6 +54,7 @@ import { PathTrail } from './PathTrail'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
+import { SecretRegions } from './SecretRegions'
 import { SpawnMarker } from './SpawnMarker'
 import { TargetAvatars } from './TargetAvatars'
 import { WorldShards } from './WorldShards'
@@ -128,6 +129,7 @@ function World(): JSX.Element {
       <WorldMessages axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <SecretRegions axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
     </group>

@@ -107,6 +107,8 @@ interface ShardsState {
   deleteInstance: (eventId: string) => Promise<void>
   /** Send a region's bag to the relays now: what LOCAL deferred. */
   broadcast: (lookupId: string) => Promise<boolean>
+  /** Ask the relay what is hidden in one region you hold the key to, and open it. */
+  rescan: (lookupId: string, keyHex: string) => Promise<number>
   inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
   addDiscovered: (items: Hidden[]) => void
@@ -316,6 +318,26 @@ export const useShards = create<ShardsState>((set, get) => {
       } catch (err) {
         set({ broadcasting: null, broadcastError: err instanceof Error ? err.message : String(err) })
         return false
+      }
+    },
+
+    /**
+     * One region, asked for by name. The discovery scan sweeps the cubes you
+     * stand in; this asks about a region you hold the key to but are nowhere
+     * near, which is what the Secrets list is for.
+     */
+    rescan: async (lookupId, keyHex) => {
+      set({ scanning: true })
+      try {
+        const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
+        const found: Hidden[] = []
+        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex)))
+        if (found.length > 0) get().addDiscovered(found)
+        return found.length
+      } catch {
+        return 0
+      } finally {
+        set({ scanning: false })
       }
     },
 

@@ -19,6 +19,7 @@ import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
+import { useSecrets } from '../store/useSecrets'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 
 /** The aligned base of a value at a height: what decides "same region". */
@@ -35,13 +36,24 @@ function regionSignature(x: bigint, y: bigint, z: bigint): string {
 
 export function useDiscovery(): void {
   const anchor = useCyberspace((s) => s.anchor)
+  const plane = useCyberspace((s) => s.anchorPlane)
   const worker = useRef<Worker | null>(null)
   const lastSig = useRef<string | null>(null)
   const reqId = useRef(0)
 
   useEffect(() => {
     worker.current = new Worker(new URL('../workers/region.worker.ts', import.meta.url), { type: 'module' })
-    return () => { worker.current?.terminate(); worker.current = null }
+    return () => {
+      worker.current?.terminate()
+      worker.current = null
+      // The scan below skips a region it has already asked about. A terminated
+      // worker never answered, so the memory of having asked has to go with it,
+      // or the next worker is never asked anything. In development React mounts
+      // effects twice, which is exactly this: the first worker was killed
+      // mid-scan and the second sat idle, so nothing was ever found.
+      lastSig.current = null
+      useShards.getState().setScanning(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -63,11 +75,30 @@ export function useDiscovery(): void {
       if (msg.id !== id) return
       if (msg.type === 'key') {
         keys.set(msg.key.lookupId, msg.key.keyHex)
+        // The key is the region: hold it, so the Secrets list is what you can
+        // open rather than what happened to be open when you walked past.
+        useSecrets.getState().hold([{
+          lookupId: msg.key.lookupId,
+          keyHex: msg.key.keyHex,
+          height: msg.key.height,
+          base: { x: String(base(anchor.x, msg.key.height)), y: String(base(anchor.y, msg.key.height)), z: String(base(anchor.z, msg.key.height)) },
+          plane,
+          source: 'scan',
+          at: Math.floor(Date.now() / 1000),
+        }])
+        return
+      }
+      if (msg.type === 'error') {
+        // A scan that dies took SCANNING with it; leaving the tag lit forever
+        // said the machine was still looking when it had stopped.
+        w.removeEventListener('message', onMessage)
+        useShards.getState().setScanning(false)
+        console.warn('[discovery] region worker failed:', msg.message)
         return
       }
       if (msg.type !== 'done') return
       w.removeEventListener('message', onMessage)
-      if (keys.size === 0) return
+      if (keys.size === 0) { useShards.getState().setScanning(false); return }
 
       // A superseded scan must not write stale finds.
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })

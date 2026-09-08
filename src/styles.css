@@ -5180,3 +5180,129 @@ kbd {
   line-height: 1.55;
   color: var(--dim);
 }
+
+/* Secrets: the regions you hold the key to. Green throughout, the same green
+   the deploy box uses for "found here". */
+.secrets__box {
+  width: min(560px, calc(100vw - 24px));
+  padding: 16px;
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.secrets__box .panel__head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.secrets__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.secrets__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.secrets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.secrets__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.secrets__row:first-child { border-top: none; }
+
+.secrets__go {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.secrets__where {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #52e39f;
+}
+
+.secrets__meta,
+.secrets__id {
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.secrets__id {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.secrets__found { color: #52e39f; }
+
+.secrets__scan {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #52e39f;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, #52e39f 45%, transparent);
+  border-radius: 3px;
+}
+
+.proof__secrets { display: flex; }
+.proof__secrets .avatars__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The region root a hop left on the chain, and whether it is still held.
+   Not .explorer__key, which is already the name of a field's label. */
+.explorer__root {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: #52e39f;
+}
+
+.explorer__root.is-gone {
+  color: var(--dim);
+  opacity: 0.7;
+}

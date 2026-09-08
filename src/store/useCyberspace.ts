@@ -485,7 +485,8 @@ export interface CyberspaceState {
   targetList: () => CyberTarget[]
   /** Sign a template with this identity's active signer. Async because an
    * extension or a bunker is genuinely remote. The only door to it outside this module. */
-  signEvent: (template: EventTemplate) => Promise<NostrEvent>
+  /** Sign as the current identity. `patienceMs` is how long to wait for a remote signer before asking again over fresh sockets; a human-in-the-loop signature (an avatar) deserves more than a hop's. */
+  signEvent: (template: EventTemplate, patienceMs?: number) => Promise<NostrEvent>
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
@@ -741,11 +742,15 @@ function pickInitialSigner(): Signer {
  * and it is rebuilt once and asked again. A payment poll used to await this
  * forever, which left a paid invoice unrecognised until a reload.
  */
-async function signEvent(template: EventTemplate): Promise<NostrEvent> {
+/** Remote signatures in flight: while one waits, a wake must not drop the sockets its answer arrives on. */
+let pendingSigns = 0
+
+async function signEvent(template: EventTemplate, patienceMs?: number): Promise<NostrEvent> {
   const signer = currentSigner
   if (signer.kind === 'local') return signer.signEvent(template)
+  pendingSigns++
   try {
-    return await signWithin(signer, template)
+    return await signWithin(signer, template, patienceMs)
   } catch (err) {
     // A timeout, or a publish that gave up ("All promises were rejected"):
     // either way the signer's sockets are presumed dead. Drop them and ask
@@ -753,7 +758,9 @@ async function signEvent(template: EventTemplate): Promise<NostrEvent> {
     if (!signer.reconnect) throw err
     const fresh = await signer.reconnect()
     if (currentSigner === signer) currentSigner = fresh
-    return await signWithin(fresh, template)
+    return await signWithin(fresh, template, patienceMs)
+  } finally {
+    pendingSigns--
   }
 }
 
@@ -764,6 +771,11 @@ async function signEvent(template: EventTemplate): Promise<NostrEvent> {
  */
 function wakeSigner(): void {
   if (currentSigner.kind === 'local') return
+  // Back from the signer's own app with a signature still pending: the answer
+  // is on its way over these sockets. Dropping them now would lose it and ask
+  // again, which is the second prompt for the same event. If they really are
+  // dead, the pending request's timeout reconnects and asks again itself.
+  if (pendingSigns > 0) return
   void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
 }
 

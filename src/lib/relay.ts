@@ -106,9 +106,22 @@ export function relaySet(): string[] {
 
 export type PublishResult = { ok: true } | { ok: false; reason: string }
 
-/** Send to a set of relays; ok if any accepts, the last refusal otherwise. */
-export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
-  if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
+/** A relay's own refusal (NIP-01 OK false prefixes): asking again would get the same answer. */
+const REFUSED = /^(blocked|invalid|duplicate|pow|rate-limited|restricted|error)\b/i
+
+/**
+ * Drop the sockets to these relays so the next operation opens fresh ones.
+ * A phone that was in another app (a wallet, a signer) comes back with its
+ * sockets half-open: nothing arrives on them and a publish waits its whole
+ * maxWait for an OK that never comes. Also forgets their auth, since a new
+ * connection brings a new challenge.
+ */
+export function dropRelays(relays: string[]): void {
+  try { getPool().close(relays) } catch { /* nothing open */ }
+  for (const url of relays) authedFor.delete(url)
+}
+
+async function publishOnce(relays: string[], event: NostrEvent): Promise<PublishResult> {
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
   // already be authed before publishing.
@@ -117,6 +130,20 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
   if (results.some((r) => r.status === 'fulfilled')) return { ok: true }
   const reason = results.map((r) => (r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : '')).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }
+}
+
+/**
+ * Send to a set of relays; ok if any accepts, the last refusal otherwise. When
+ * every relay failed for a reason that is not a refusal (a timeout, a closed
+ * socket), the sockets are presumed dead: they are dropped and the event is
+ * sent once more over fresh ones.
+ */
+export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
+  if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
+  const first = await publishOnce(relays, event)
+  if (first.ok || REFUSED.test(first.reason)) return first
+  dropRelays(relays)
+  return publishOnce(relays, event)
 }
 
 /** Send one event to every configured relay. */

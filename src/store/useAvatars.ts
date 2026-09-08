@@ -7,8 +7,10 @@
  * 8.10, cyberspace-core's verifyAvatarWork); one that has not is the
  * dodecahedron to everyone. Your own is kept in localStorage as well, so it
  * is on screen before the relay answers, and adopting a shard prices it,
- * mines the nonce off the main thread with progress and cancel, signs and
- * publishes the event and keeps the copy.
+ * mines the nonce off the main thread with progress and cancel, signs (with
+ * a long patience, since a person is reading the prompt), publishes the
+ * event and keeps the copy. `phase` says which of those is happening, so the
+ * workshop can keep the button down and say where things are.
  */
 
 import { useEffect } from 'react'
@@ -37,6 +39,12 @@ export interface Mining {
   elapsedMs: number
 }
 
+/** Where an adopt is: the work, then the signer, then the relays. */
+export type AdoptPhase = 'mining' | 'signing' | 'publishing'
+
+/** How long to wait for a remote signer here: a person is reading the prompt, not a hop. */
+export const AVATAR_SIGN_PATIENCE_MS = 120_000
+
 interface AvatarsState {
   /** By pubkey: the shard, null for the dodecahedron; absent until asked. */
   shards: Record<string, ShardModel | null>
@@ -44,6 +52,10 @@ interface AvatarsState {
   asked: Record<string, number>
   /** The job in progress, for the workshop's row. */
   mining: Mining | null
+  /** What adopt is doing now, null when idle; the button stays down through all of it. */
+  phase: AdoptPhase | null
+  /** How long the last mine took, kept through signing and publishing for the row. */
+  minedMs: number | null
   /** Why the last adopt failed, for the notice; null when it succeeded or was cancelled. */
   adoptError: string | null
   /** Look a pubkey's avatar up, once per refresh window. */
@@ -60,6 +72,8 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
   shards: {},
   asked: {},
   mining: null,
+  phase: null,
+  minedMs: null,
   adoptError: null,
 
   ensure: (pubkey) => {
@@ -70,7 +84,13 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     query({ kinds: [AVATAR_KIND], authors: [pubkey], '#d': [AVATAR_D] })
       .then((events) => {
         const newest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
-        const shard = newest ? paidShard(newest) : null
+        // An empty answer says nothing: a relay that is down, or has not seen
+        // the event yet, must not turn a known avatar back into the dodecahedron.
+        if (!newest) {
+          if (!(pubkey in get().shards)) set({ shards: { ...get().shards, [pubkey]: null } })
+          return
+        }
+        const shard = paidShard(newest)
         set({ shards: { ...get().shards, [pubkey]: shard } })
         if (pubkey === useCyberspace.getState().identity.pubkey) remember(shard)
       })
@@ -78,11 +98,13 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
   },
 
   adopt: async (shard) => {
-    if (get().mining) return false
+    // One adopt at a time, through mining, signing and publishing: a second
+    // press while the signer's prompt is open would mine and ask again.
+    if (get().phase) return false
     const cs = useCyberspace.getState()
     const me = cs.identity.pubkey
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))
-    set({ adoptError: null })
+    set({ adoptError: null, minedMs: null })
     if (shard) {
       const required = avatarWork(toPayload(shard))
       const job = miner({ ...template, pubkey: me }, required, (p) => {
@@ -90,37 +112,40 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
         if (m) set({ mining: { ...m, tries: p.tries, elapsedMs: p.elapsedMs } })
       })
       current = job
-      set({ mining: { required, tries: 0, elapsedMs: 0 } })
+      set({ phase: 'mining', mining: { required, tries: 0, elapsedMs: 0 } })
       try {
         const found = await job.done
         template = nonceTagged(template, found.nonce, required)
+        set({ minedMs: found.elapsedMs })
       } catch (e) {
-        set({ mining: null, adoptError: e instanceof MineCancelled ? null : 'The mining failed on this device.' })
+        set({ phase: null, mining: null, adoptError: e instanceof MineCancelled ? null : 'The mining failed on this device.' })
         return false
       } finally {
         current = null
       }
       set({ mining: null })
     }
+    set({ phase: 'signing' })
     let event
     try {
-      event = await cs.signEvent(template)
+      event = await cs.signEvent(template, AVATAR_SIGN_PATIENCE_MS)
     } catch {
-      set({ adoptError: 'The signer did not sign the avatar.' })
+      set({ phase: null, adoptError: 'The signer did not sign the avatar.' })
       return false
     }
     // The signer must return the event as mined: a changed created_at or tag
     // list is a different id, and the work is gone with it.
     if (shard && !verifyAvatarWork(event).ok) {
-      set({ adoptError: 'The signer changed the event, so the work no longer covers it. Try again.' })
+      set({ phase: null, adoptError: 'The signer changed the event, so the work no longer covers it. Try again.' })
       return false
     }
+    set({ phase: 'publishing' })
     const result = await publish(event)
     if (!result.ok) {
-      set({ adoptError: 'No relay took the avatar. Try again when one is reachable.' })
+      set({ phase: null, adoptError: 'No relay took the avatar. Try again when one is reachable.' })
       return false
     }
-    set({ shards: { ...get().shards, [me]: shard }, asked: { ...get().asked, [me]: Date.now() } })
+    set({ phase: null, shards: { ...get().shards, [me]: shard }, asked: { ...get().asked, [me]: Date.now() } })
     remember(shard)
     return true
   },

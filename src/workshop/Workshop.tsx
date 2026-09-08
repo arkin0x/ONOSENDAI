@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Eye, Grid3x3, Link, Menu, MousePointer2, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, Undo2, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Eye, Grid3x3, Link, Menu, MousePointer2, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
@@ -32,7 +32,7 @@ import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, typ
 import { useAvatars } from '../store/useAvatars'
 import { avatarReach, avatarWork } from 'cyberspace-core'
 import { avatarTemplate } from '../lib/avatar'
-import { clock, describeDuration, expectedTries, serializeEvent, triesPerSec } from '../lib/avatarMine'
+import { clock, describeDuration, expectedTries, minedIn, serializeEvent, triesPerSec } from '../lib/avatarMine'
 import { minerCount } from '../lib/avatarWorker'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
@@ -256,6 +256,17 @@ export function Workshop(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const myAvatar = useAvatars((s) => s.shards[me] ?? null)
   const mining = useAvatars((s) => s.mining)
+  const phase = useAvatars((s) => s.phase)
+  const minedMs = useAvatars((s) => s.minedMs)
+  const adoptError = useAvatars((s) => s.adoptError)
+  // The moment the work is done: say so, because the signer's prompt may take a
+  // while to appear and nothing else marks the end of the mining.
+  const lastPhase = useRef<typeof phase>(null)
+  useEffect(() => {
+    if (lastPhase.current === 'mining' && phase === 'signing') useWorkshop.setState({ notice: `Mined in ${minedIn(minedMs ?? 0)}. Sign the avatar event when your signer asks.` })
+    lastPhase.current = phase
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
   // The avatar's price (spec 8.10), memoised on the geometry; a hook, so it sits with the others.
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
@@ -400,6 +411,12 @@ export function Workshop(): JSX.Element | null {
         <button className={`chip ws__chip ${panel === 'grid' ? 'is-on' : ''}`} aria-pressed={panel === 'grid'} onClick={() => toggle('grid')}>
           <Grid3x3 size={12} strokeWidth={2.25} aria-hidden />GRID
         </button>
+        {phase && (
+          <button className="chip ws__chip ws__chip--work" onClick={() => { if (panel !== 'menu') toggle('menu') }} title="Your avatar: see MENU" aria-live="polite">
+            <Pickaxe size={12} strokeWidth={2.25} aria-hidden />
+            {phase === 'mining' ? `MINING ${mining ? clock(mining.elapsedMs) : ''}` : phase === 'signing' ? 'SIGN IT' : 'PUBLISHING'}
+          </button>
+        )}
         <span className="ws__history">
           <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
           <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
@@ -432,8 +449,10 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__row" role="group" aria-label="My avatar">
             <span className="workshop__label">MY AVATAR</span>
             <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
-            {mining ? (
+            {phase === 'mining' ? (
               <button className="workshop__btn workshop__btn--danger" onClick={() => useAvatars.getState().cancelAdopt()} title="Stop mining; your avatar stays as it is">CANCEL</button>
+            ) : phase ? (
+              <button className="workshop__btn" disabled title={phase === 'signing' ? 'Waiting for your signer' : 'Publishing to the relays'}>{phase === 'signing' ? 'SIGNING' : 'PUBLISHING'}</button>
             ) : (
               <button
                 className="workshop__btn"
@@ -448,7 +467,7 @@ export function Workshop(): JSX.Element | null {
                 title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
               >USE THIS SHARD</button>
             )}
-            {myAvatar && !mining && (
+            {myAvatar && !phase && (
               <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the dodecahedron; it owes no work">DODECAHEDRON</button>
             )}
             {/* The price (spec 8.10): 16 bits for any avatar, 6 more per doubling of
@@ -458,7 +477,11 @@ export function Workshop(): JSX.Element | null {
               <span className="workshop__work" aria-live="polite">
                 {mining
                   ? `MINING ${mining.required} BITS · ${clock(mining.elapsedMs)} ELAPSED · ${mining.elapsedMs > 1000 ? describeDuration(expectedTries(mining.required) / (mining.tries / (mining.elapsedMs / 1000))).toUpperCase() + ' EXPECTED · ' : ''}${mining.elapsedMs > 1000 ? Math.round(mining.tries / (mining.elapsedMs / 1000) / 1000) + 'K TRIES/S' : 'MEASURING'}`
-                  : `WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
+                  : phase === 'signing'
+                    ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · WAITING FOR YOUR SIGNER`
+                    : phase === 'publishing'
+                      ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · SIGNED · PUBLISHING`
+                      : `${adoptError ? `LAST ATTEMPT: ${adoptError.toUpperCase()} · ` : ''}WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
               </span>
             )}
           </div>

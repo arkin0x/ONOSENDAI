@@ -17,7 +17,6 @@
 
 import { Box } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { viewCyberspace } from './HyperspacePanel'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
@@ -99,9 +98,13 @@ export function TouchControls(): JSX.Element {
   return (
     <>
       <div className={`touchpad${atHead ? '' : ' touchpad--scale'}`} role="group" aria-label="Move cursor and change scale">
-        {/* The purple cube: all of cyberspace at once, 2^84, the camera on
-            the whole of it. On every pad, at your head or off it. */}
-        <button className="touchpad__key touchpad__key--cube" title="All of cyberspace at 2^84" aria-label="See all of cyberspace at 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewCyberspace(MAX_SCALE_EXP) }}>
+        {/* The purple cube: the scale key taken to its end, 2^84, in one press.
+            It changes the scale and nothing else, so whatever you are looking
+            at stays what you are looking at, only seen from the top of the
+            ladder. Viewing cyberspace itself is the CYBERSPACE button in the
+            view menu, which is a different thing and stays where it is.
+            On every pad, at your head or off it. */}
+        <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
           <Box size={16} strokeWidth={2.25} aria-hidden />
         </button>
         {pad.map((b) => (

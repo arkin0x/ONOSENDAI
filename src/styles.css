@@ -3237,9 +3237,9 @@ kbd {
   grid-template-rows: repeat(3, 38px);
   gap: 4px;
   grid-template-areas:
-    "cube away    up   toward"
+    ".    away    up   toward"
     ".    left    hub  right"
-    ".    zoomout down zoomin";
+    "cube zoomout down zoomin";
 }
 /* Off your own head only scale is left to drive, so the pad folds to one
  * row: coarser, the readout, finer, and the cube. The direction cells leave
@@ -3249,7 +3249,8 @@ kbd {
   grid-template-areas: "cube zoomout hub zoomin";
 }
 .touchpad--scale .is-standdown { display: none; }
-/* The purple cube: all of cyberspace at once. */
+/* The purple cube: the scale keys' own end of the ladder, so it sits with them,
+   directly left of the coarser key rather than up in the direction cells. */
 .touchpad__key--cube {
   grid-area: cube;
   color: #dcc2ff;

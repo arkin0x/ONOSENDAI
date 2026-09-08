@@ -5136,8 +5136,16 @@ kbd {
 }
 
 /* The workshop's panels hover over the compass and its pad, which share the
-   top-right corner: the panel is what you are reading, so it wins. */
-.ws__top { z-index: 5; }
+   top-right corner: the panel is what you are reading, so it wins. The compass
+   drops a layer rather than the panels rising one, because DEPLOY and the way
+   out share the top edge with the chips and must stay pressable above all of it.
+   The chip row also reserves 124px on its right for those two buttons, and that
+   strip must let a press through rather than swallow it. */
+.ws__view { z-index: 2; }
+
+.ws__chips { pointer-events: none; }
+
+.ws__chips > * { pointer-events: auto; }
 
 /* A rule between the controls in MENU and GRID, so a row reads as one control. */
 .ws__panel .workshop__row {

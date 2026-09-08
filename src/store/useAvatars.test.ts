@@ -128,6 +128,24 @@ describe('useAvatars', () => {
     expect(await pending).toBe(true)
   })
 
+  it('an empty answer from the relay keeps a known avatar', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    await useAvatars.getState().adopt(built())
+    expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
+    useAvatars.setState({ asked: {} })
+    vi.mocked(query).mockResolvedValueOnce([])
+    useAvatars.getState().ensure(me)
+    await vi.waitFor(() => { expect(vi.mocked(query)).toHaveBeenCalledTimes(1) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(useAvatars.getState().shards[me]?.name).toBe('Arches')
+    // Never asked before and nothing there: the dodecahedron, as before.
+    const other = '12'.repeat(32)
+    vi.mocked(query).mockResolvedValueOnce([])
+    useAvatars.getState().ensure(other)
+    await vi.waitFor(() => { expect(other in useAvatars.getState().shards).toBe(true) })
+    expect(useAvatars.getState().shards[other]).toBeNull()
+  })
+
   it('an avatar that has not paid is the dodecahedron to everyone', async () => {
     const pk = 'ef'.repeat(32)
     const shard = built()

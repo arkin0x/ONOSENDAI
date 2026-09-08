@@ -84,7 +84,13 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     query({ kinds: [AVATAR_KIND], authors: [pubkey], '#d': [AVATAR_D] })
       .then((events) => {
         const newest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
-        const shard = newest ? paidShard(newest) : null
+        // An empty answer says nothing: a relay that is down, or has not seen
+        // the event yet, must not turn a known avatar back into the dodecahedron.
+        if (!newest) {
+          if (!(pubkey in get().shards)) set({ shards: { ...get().shards, [pubkey]: null } })
+          return
+        }
+        const shard = paidShard(newest)
         set({ shards: { ...get().shards, [pubkey]: shard } })
         if (pubkey === useCyberspace.getState().identity.pubkey) remember(shard)
       })

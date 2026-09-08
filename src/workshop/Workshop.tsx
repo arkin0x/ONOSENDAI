@@ -258,6 +258,7 @@ export function Workshop(): JSX.Element | null {
   const mining = useAvatars((s) => s.mining)
   const phase = useAvatars((s) => s.phase)
   const minedMs = useAvatars((s) => s.minedMs)
+  const adoptError = useAvatars((s) => s.adoptError)
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -480,7 +481,7 @@ export function Workshop(): JSX.Element | null {
                     ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · WAITING FOR YOUR SIGNER`
                     : phase === 'publishing'
                       ? `MINED IN ${minedIn(minedMs ?? 0).toUpperCase()} · SIGNED · PUBLISHING`
-                      : `WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
+                      : `${adoptError ? `LAST ATTEMPT: ${adoptError.toUpperCase()} · ` : ''}WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
               </span>
             )}
           </div>

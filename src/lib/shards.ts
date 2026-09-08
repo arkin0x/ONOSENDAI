@@ -33,7 +33,16 @@ export interface ShardVertex {
  * 120 is divisible by every division the workshop offers and by eighths.
  */
 export const TICKS_PER_UNIT = 120
-export const DIVISIONS = [1, 2, 3, 4, 5] as const
+/**
+ * The grid divisions offered, all of them exact.
+ *
+ * A vertex is stored in 120ths of a unit (TICKS_PER_UNIT), so a division is
+ * only offered when it divides 120 without a remainder: sevenths and ninths
+ * would land vertices between ticks and could not be written to the wire.
+ * That leaves 6, 8 and 10 as the next steps after 5; 12, 15, 20, 24, 30, 40
+ * and 60 are exact too if finer work ever wants them.
+ */
+export const DIVISIONS = [1, 2, 3, 4, 5, 6, 8, 10] as const
 export type Division = typeof DIVISIONS[number]
 
 export interface ShardModel {

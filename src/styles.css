@@ -5134,3 +5134,25 @@ kbd {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
+
+/* The workshop's panels hover over the compass and its pad, which share the
+   top-right corner: the panel is what you are reading, so it wins. */
+.ws__top { z-index: 5; }
+
+/* A rule between the controls in MENU and GRID, so a row reads as one control. */
+.ws__panel .workshop__row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding-top: 8px;
+}
+
+.ws__panel .workshop__row:first-child { border-top: none; padding-top: 0; }
+
+/* With undo and redo out of the way, the open panel sits right under its chip. */
+.ws__top--open { gap: 5px; }
+
+/* The delete X, big enough to hit and to read. */
+.workshop__mini--x {
+  font-size: 20px;
+  line-height: 1;
+  padding-bottom: 2px;
+}

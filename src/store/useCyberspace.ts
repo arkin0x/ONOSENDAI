@@ -923,7 +923,7 @@ let hosaka: { url: string; client: HosakaClient } | null = null
 let limitsInFlight: { url: string; promise: Promise<HosakaLimits | null> } | null = null
 
 /** One client per API URL. It signs through `signEvent`, so it follows identity switches. */
-function cloudClient(apiUrl: string): HosakaClient {
+export function cloudClient(apiUrl: string): HosakaClient {
   if (!hosaka || hosaka.url !== apiUrl) hosaka = { url: apiUrl, client: createHosaka({ apiUrl, sign: signEvent }) }
   return hosaka.client
 }

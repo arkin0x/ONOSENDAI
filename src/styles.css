@@ -5306,3 +5306,47 @@ kbd {
   color: var(--dim);
   opacity: 0.7;
 }
+
+/* Buying a key: the heights this machine cannot sweep for itself. */
+.secrets__buy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.secrets__buy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__buy-size {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: #52e39f;
+  font-variant-numeric: tabular-nums;
+}
+
+.secrets__step {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.secrets__step:disabled { opacity: 0.35; }
+
+.secrets__error {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--warn);
+}

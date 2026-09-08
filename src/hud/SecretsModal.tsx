@@ -19,7 +19,7 @@ import { formatCellSize } from '../lib/scale'
 import { formatAgo } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets, bytesOf, heldList, type HeldKey } from '../store/useSecrets'
-import { useShards } from '../store/useShards'
+import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
 
@@ -29,6 +29,26 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const discovered = useShards((s) => s.discovered)
   const showSecrets = useCyberspace((s) => s.showSecrets)
   const [forgetAll, setForgetAll] = useState(false)
+
+  const anchor = useCyberspace((s) => s.anchor)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
+  const limits = useCyberspace((s) => s.cloud.limits)
+  const provider = useCyberspace((s) => s.cloud.provider)
+  const cloudOff = useCyberspace((s) => s.cloudPrefs.mode === 'off')
+  const buying = useSecrets((s) => s.buying)
+  const buyError = useSecrets((s) => s.buyError)
+
+  // Above what this machine sweeps for itself, up to what HOSAKA computes.
+  const lowest = SCAN_MAX_HEIGHT + 1
+  const highest = limits?.max_hop_height ?? lowest
+  const canBuy = !cloudOff && highest >= lowest
+  const [buyHeight, setBuyHeight] = useState(Math.min(highest, lowest + 4))
+  const price = useMemo(() => {
+    const ladder = provider?.pricing?.hop
+    if (!ladder) return null
+    const band = [...ladder].sort((a, b) => a.max_height - b.max_height).find((x) => buyHeight <= x.max_height)
+    return band?.sats ?? null
+  }, [provider, buyHeight])
 
   const list = useMemo(() => heldList(keys), [keys])
   const bytes = useMemo(() => list.reduce((n, k) => n + bytesOf(k), 0), [list])
@@ -70,6 +90,30 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             Draw them in the scene
           </label>
         </div>
+
+        {/* The heights this machine cannot reach for itself. A cube of side
+            2^12 it computes as you walk; 2^20 is a million pairings an axis. */}
+        {canBuy && (
+          <div className="secrets__buy">
+            <span className="login__label">Buy a key where you stand</span>
+            <div className="secrets__buy-row">
+              <button className="secrets__step" disabled={!!buying || buyHeight <= lowest} onClick={() => setBuyHeight((h) => Math.max(lowest, h - 1))} aria-label="Smaller region">−</button>
+              <span className="secrets__buy-size">2^{buyHeight} · {formatCellSize(buyHeight)}</span>
+              <button className="secrets__step" disabled={!!buying || buyHeight >= highest} onClick={() => setBuyHeight((h) => Math.min(highest, h + 1))} aria-label="Larger region">+</button>
+              <button
+                className="avatars__go secrets__buy-go"
+                disabled={!!buying}
+                onClick={() => { void useSecrets.getState().buy(anchor, anchorPlane, buyHeight) }}
+              >{buying ? (buying.status === 'submitting' ? 'ASKING' : 'COMPUTING') : `BUY${price !== null ? ` · ${price} SATS` : ''}`}</button>
+            </div>
+            <span className="cloud__profile-note">
+              {buying
+                ? `HOSAKA is computing the 2^${buying.height} cube around you. It lands in this list when it is done.`
+                : `Three axis trees at 2^${buyHeight}, which is a hop's work at that height and is priced as one. Paid from your HOSAKA balance.`}
+            </span>
+            {buyError && <span className="secrets__error">{buyError}</span>}
+          </div>
+        )}
 
         <ul className="secrets__list">
           {list.map((k) => {

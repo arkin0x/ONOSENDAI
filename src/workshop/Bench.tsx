@@ -18,7 +18,7 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
@@ -187,18 +187,44 @@ function Ghost(): JSX.Element | null {
   )
 }
 
-/** Handle radii in bench units (a gibson at level 0): the dot, the selected dot, its halo's width. */
-const HANDLE = 0.07
-const HANDLE_ON = 0.11
-const HALO = 0.5
-/** Hit sphere radii: wide enough for a finger at a whole-gibson grid, and never
- * more than a share of the current step, so points a fifth of a gibson apart
- * each keep their own target; ADD and FACE take the narrow one, since there a
- * tap beside a point means the plane or the face. */
-const HIT = 0.3
-const HIT_NARROW = 0.16
-function hitRadiusFor(tool: Tool, stepUnits: number): number {
-  return Math.min(tool === 'add' || tool === 'face' ? HIT_NARROW : HIT, stepUnits * 0.45)
+/**
+ * Handle sizes in CSS pixels, not bench units.
+ *
+ * Each handle sits in a group scaled by its own distance from the camera
+ * (`ScreenScale`), so a radius of 1 draws one pixel across whatever the zoom.
+ * That is the whole point: a ball sized in the world is a good target when you
+ * are looking at the whole shard and a screenful when you lean in to place two
+ * points inside one gibson. Constant on screen, it is the same target at every
+ * zoom, and zooming in spreads the points apart underneath it, which is what
+ * makes close work possible.
+ */
+const DOT_R = 4.25
+const DOT_ON_R = 6
+const HALO_PX = 26
+const RING_R = 11
+const RING_OUT = 13
+/** The finger target: bigger than the dot, and smaller in ADD and FACE, where a
+ * tap beside a point means the plane or the face rather than the point. */
+const HIT_R = 10
+const HIT_NARROW_R = 5.5
+function hitRadiusFor(tool: Tool): number {
+  return tool === 'add' || tool === 'face' ? HIT_NARROW_R : HIT_R
+}
+
+/**
+ * A group that holds its size on screen: scaled by its distance from the camera
+ * and the view's pixels per world unit, so its children's units are CSS pixels.
+ */
+function ScreenScale({ position, children }: { position: [number, number, number]; children: React.ReactNode }): JSX.Element {
+  const ref = useRef<Group>(null)
+  useFrame((state) => {
+    const g = ref.current
+    if (!g) return
+    const cam = state.camera as PerspectiveCamera
+    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
+    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel))
+  })
+  return <group ref={ref} position={position}>{children}</group>
 }
 
 /**
@@ -210,7 +236,6 @@ function Handles(): JSX.Element | null {
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
-  const step = useWorkshop((s) => s.step())
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
@@ -219,7 +244,7 @@ function Handles(): JSX.Element | null {
   }, [shard?.vertices])
   if (!shard) return null
   const glow = glowTexture()
-  const hitRadius = hitRadiusFor(tool, step / TICKS_PER_UNIT)
+  const hitRadius = hitRadiusFor(tool)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP) return
@@ -231,7 +256,9 @@ function Handles(): JSX.Element | null {
       // the ray passes farther from the corner than its drawn dot, the face wins.
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
       const face = e.intersections.find((i) => i.object.name === 'shard-faces')
-      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > HANDLE_ON) { w.selectFace(face.faceIndex); return }
+      // The dot's drawn radius in world units: its pixels times the group's own scale.
+      const drawn = DOT_ON_R * (e.object.parent?.scale.x ?? 1)
+      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face.faceIndex); return }
       w.pickForFace(first)
     }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
@@ -247,7 +274,7 @@ function Handles(): JSX.Element | null {
         const isSel = g.some((i) => chosen.has(i))
         const picked = facePick.some((i) => g.includes(i))
         return (
-          <group key={first} position={UP(ticksOf(v))}>
+          <ScreenScale key={first} position={UP(ticksOf(v))}>
             {/* An invisible hit target wider than the handle, narrower in ADD so a tap
                 beside a point lands on the plane and places another one near it. */}
             <mesh onClick={onClick(first, isSel)}>
@@ -255,22 +282,22 @@ function Handles(): JSX.Element | null {
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
             <mesh>
-              <sphereGeometry args={[isSel || picked ? HANDLE_ON : HANDLE, 12, 12]} />
+              <sphereGeometry args={[isSel || picked ? DOT_ON_R : DOT_R, 12, 12]} />
               <meshBasicMaterial color={isSel ? WARN : picked ? ACCENT : rgbToHex(v.c)} toneMapped={false} />
             </mesh>
             {/* A halo, so a small selected handle still stands out. */}
             {(isSel || picked) && glow && (
-              <sprite scale={[HALO, HALO, 1]}>
+              <sprite scale={[HALO_PX, HALO_PX, 1]}>
                 <spriteMaterial map={glow} color={isSel ? WARN : ACCENT} transparent opacity={0.85} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
               </sprite>
             )}
             {picked && (
               <mesh>
-                <ringGeometry args={[0.2, 0.24, 24]} />
+                <ringGeometry args={[RING_R, RING_OUT, 24]} />
                 <meshBasicMaterial color={ACCENT} toneMapped={false} side={2} />
               </mesh>
             )}
-          </group>
+          </ScreenScale>
         )
       })}
     </>
@@ -333,9 +360,11 @@ function Aim(): null {
   const camera = useThree((s) => s.camera)
   const scene = useThree((s) => s.scene)
   useEffect(() => {
-    // The browser harness projects handle positions through the camera to click them, and reaches the lights through the scene.
-    if (import.meta.env.DEV) Object.assign(window as unknown as Record<string, unknown>, { __benchCamera: camera, __benchScene: scene })
-  }, [camera, scene])
+    // The browser harness projects handle positions through the camera to click them,
+    // reaches the lights through the scene, and dollies the view through the controls
+    // (setting the camera alone is undone on their next update).
+    if (import.meta.env.DEV) Object.assign(window as unknown as Record<string, unknown>, { __benchCamera: camera, __benchScene: scene, __benchControls: controls })
+  }, [camera, scene, controls])
   const target = useMemo(() => {
     const shard = useWorkshop.getState().current()
     return shard ? UP(centroid(shard)) : [0, 0, 0]

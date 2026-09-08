@@ -18,8 +18,9 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
+import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
 import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from '../lib/stamps'
@@ -173,7 +174,7 @@ function Ghost(): JSX.Element | null {
   if (tool === 'add') {
     return (
       <mesh position={UP(aim)}>
-        <sphereGeometry args={[0.2, 12, 12]} />
+        <sphereGeometry args={[0.1, 12, 12]} />
         <meshBasicMaterial color={rgbToHex(color)} transparent opacity={0.5} toneMapped={false} depthWrite={false} />
       </mesh>
     )
@@ -185,6 +186,15 @@ function Ghost(): JSX.Element | null {
     </group>
   )
 }
+
+/** Handle radii in bench units (a gibson at level 0): the dot, the selected dot, its halo's width. */
+const HANDLE = 0.07
+const HANDLE_ON = 0.11
+const HALO = 0.5
+/** Hit sphere radii: wide enough for a finger, and in ADD narrow enough that two
+ * points a fifth of a gibson apart can both be placed and picked. */
+const HIT = 0.3
+const HIT_ADD = 0.16
 
 /**
  * One handle per point. Several vertices can share a point once stamps have
@@ -202,6 +212,8 @@ function Handles(): JSX.Element | null {
     return [...m.values()]
   }, [shard?.vertices])
   if (!shard) return null
+  const glow = glowTexture()
+  const hitRadius = tool === 'add' ? HIT_ADD : HIT
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP) return
@@ -222,18 +234,25 @@ function Handles(): JSX.Element | null {
         const picked = facePick.some((i) => g.includes(i))
         return (
           <group key={first} position={UP(ticksOf(v))}>
-            {/* A generous invisible hit target; the visible handle is small. */}
+            {/* An invisible hit target wider than the handle, narrower in ADD so a tap
+                beside a point lands on the plane and places another one near it. */}
             <mesh onClick={onClick(first, isSel)}>
-              <sphereGeometry args={[0.42, 10, 10]} />
+              <sphereGeometry args={[hitRadius, 10, 10]} />
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
             <mesh>
-              <sphereGeometry args={[isSel || picked ? 0.2 : 0.12, 12, 12]} />
+              <sphereGeometry args={[isSel || picked ? HANDLE_ON : HANDLE, 12, 12]} />
               <meshBasicMaterial color={isSel ? WARN : picked ? ACCENT : rgbToHex(v.c)} toneMapped={false} />
             </mesh>
+            {/* A halo, so a small selected handle still stands out. */}
+            {(isSel || picked) && glow && (
+              <sprite scale={[HALO, HALO, 1]}>
+                <spriteMaterial map={glow} color={isSel ? WARN : ACCENT} transparent opacity={0.85} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
+              </sprite>
+            )}
             {picked && (
               <mesh>
-                <ringGeometry args={[0.3, 0.36, 24]} />
+                <ringGeometry args={[0.2, 0.24, 24]} />
                 <meshBasicMaterial color={ACCENT} toneMapped={false} side={2} />
               </mesh>
             )}

@@ -12,6 +12,7 @@
 import { useMemo } from 'react'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
+import { offloadFrom } from '../lib/crossover'
 import { buildMovePlan, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from '../store/useCyberspace'
 
@@ -53,21 +54,26 @@ export function useRoutePreview(): RoutePreview | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const profile = useCyberspace((st) => st.cloudPrefs.profile)
   const cloudHop = limits?.max_hop_height ?? 0
   const cloudSidestep = limits?.max_sidestep_height ?? 0
+  const profile = useCyberspace((st) => st.cloudPrefs.profile)
+  const provider = useCyberspace((st) => st.cloud.provider)
+  const signerKind = useCyberspace((st) => st.signerKind)
+  const cantorMsByHeight = useCalibration((st) => st.cantorMsByHeight)
+  const sha256PerSec = useCalibration((st) => st.sha256PerSec)
+  const from = offloadFrom(profile, { hopCeiling: ceiling, sidestepCeiling: sidestepCeil, cloudHop, provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
   return useMemo(() => {
     if (!home || samePosition(position, cursor)) return null
     const hop = estimateHopCost(position.x, position.y, position.z, cursor.x, cursor.y, cursor.z, plane, ceiling)
     if (!hop.exceedsLimit) return { hop, route: null, steps: null, needsCloud: false }
     // HOSAKA's caps whatever the cloud mode: what a move needs does not
     // depend on a setting, and the button (useOffer) reads it the same way.
-    const ceilings: Ceilings = { hop: ceiling, sidestep: sidestepCeil, cloudHop, cloudSidestep, profile }
+    const ceilings: Ceilings = { hop: ceiling, sidestep: sidestepCeil, cloudHop, cloudSidestep, offloadFrom: from }
     let steps: PlanStep[] | null = null
     try { steps = buildMovePlan(position, cursor, ceilings, PREVIEW_STEPS_MAX) } catch { steps = null }
     const route = steps ? summaryOf(steps) : planSummary(position, cursor, ceilings, PREVIEW_STEPS_MAX)
     return { hop, route, steps, needsCloud: route.cloudSteps > 0 }
-  }, [home, position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep, profile])
+  }, [home, position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep, from])
 }
 
 export interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }

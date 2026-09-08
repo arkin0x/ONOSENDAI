@@ -3,8 +3,9 @@ import { buildMovePlan, nextStep, planSummary, routeNeedsCloud, type Ceilings } 
 
 /** This machine hops to 2^18 and sidesteps to 2^23; HOSAKA hops to 2^27. */
 const base = { hop: 18, sidestep: 23, cloudHop: 27, cloudSidestep: 29 }
-const cheapest: Ceilings = { ...base, profile: 'cheapest' }
-const fastest: Ceilings = { ...base, profile: 'fastest' }
+const cheapest: Ceilings = { ...base, offloadFrom: Infinity }
+// Measured for this machine and this provider (lib/crossover): from h21 up.
+const fastest: Ceilings = { ...base, offloadFrom: 21 }
 
 const at = (x: bigint): { x: bigint; y: bigint; z: bigint } => ({ x, y: 1n << 84n, z: 1n << 84n })
 
@@ -54,7 +55,7 @@ describe('the route profile', () => {
   })
 
   it('with no cloud, the profile changes nothing', () => {
-    const alone: Ceilings = { hop: 18, sidestep: 23, cloudHop: 0, cloudSidestep: 0, profile: 'fastest' }
+    const alone: Ceilings = { hop: 18, sidestep: 23, cloudHop: 0, cloudSidestep: 0, offloadFrom: 21 }
     const step = nextStep(from, to, alone)
     expect(step?.source).toBe('local')
     expect(routeNeedsCloud(from, to, alone)).toBe(false)

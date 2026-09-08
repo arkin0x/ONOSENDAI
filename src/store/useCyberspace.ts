@@ -77,7 +77,8 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
-import { recommendedHopHeight, recommendedSidestepHeight } from '../lib/calibration'
+import { offloadFrom } from '../lib/crossover'
+import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
 import {
   createHosaka,
   createWaker,
@@ -996,7 +997,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       sidestep: recommendedSidestepHeight(),
       cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
       cloudSidestep: on && cloud.limits ? cloud.limits.max_sidestep_height : 0,
-      profile: cloudPrefs.profile,
+      offloadFrom: offloadFrom(cloudPrefs.profile, {
+        hopCeiling: Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()),
+        sidestepCeiling: recommendedSidestepHeight(),
+        cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
+        provider: cloud.provider ?? null,
+        signerKind: get().signerKind,
+        cantorMsByHeight: useCalibration.getState().cantorMsByHeight,
+        sha256PerSec: useCalibration.getState().sha256PerSec,
+      }),
     }
   }
 

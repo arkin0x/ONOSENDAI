@@ -51,8 +51,12 @@ export interface Ceilings {
   sidestep: number
   cloudHop: number
   cloudSidestep: number
-  /** Which step to prefer where both this machine and HOSAKA have one. */
-  profile?: RouteProfile
+  /**
+   * The lowest wall height HOSAKA takes over at, when it can hop it. Infinity
+   * (or absent) means it never does unless this machine cannot cross at all,
+   * which is the cheapest profile; lib/crossover.ts measures the rest.
+   */
+  offloadFrom?: number
 }
 
 /**
@@ -63,10 +67,11 @@ export interface Ceilings {
  * and on from it is however many hops that takes. Nothing is paid for until
  * a boundary neither ceiling reaches.
  *
- * `fastest` pays to skip that walk. Wherever this machine would have to
- * sidestep and HOSAKA could hop the whole boundary instead, the paid hop is
- * taken: one event, one wait, in place of a walk to the wall, a sidestep, and
- * a walk on. A hop this machine can make is still never paid for.
+ * `fastest` pays to skip that walk, but only from the height where the walk
+ * actually costs more than the hop. That height is measured, not assumed
+ * (lib/crossover.ts): below it this machine is quicker as well as free, since
+ * one sidestep is one hash chain and a paid hop is a queue and a payment.
+ * A hop this machine can make is never paid for under either.
  */
 export type RouteProfile = 'fastest' | 'cheapest'
 
@@ -89,9 +94,10 @@ function asCeilings(c: number | Ceilings): Ceilings {
  * HOSAKA can hop it outright, HOSAKA hops it now and the walk never happens.
  */
 function cloudIsFaster(from: Position, to: Position, c: Ceilings): boolean {
-  if (c.profile !== 'fastest') return false
+  const from_ = c.offloadFrom ?? Infinity
+  if (!Number.isFinite(from_)) return false
   const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
-  return h > c.hop && h <= c.cloudHop
+  return h >= from_ && h > c.hop && h <= c.cloudHop
 }
 
 function sourceOf(kind: PlanStepKind, h: number, c: Ceilings): StepSource {
@@ -125,7 +131,7 @@ export function routeNeedsCloud(from: Position, to: Position, ceilings: number |
   if (h <= c.hop) return false
   // Under `fastest` a boundary HOSAKA can hop is HOSAKA's, even though this
   // machine could have sidestepped its way across.
-  if (c.profile === 'fastest' && h <= c.cloudHop) return true
+  if (h >= (c.offloadFrom ?? Infinity) && h <= c.cloudHop) return true
   return h > c.sidestep
 }
 

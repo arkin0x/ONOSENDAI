@@ -28,6 +28,7 @@ import {
   LineSegments,
   BoxGeometry,
 } from 'three'
+import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
@@ -172,9 +173,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const limits = useCyberspace((s) => s.cloud.limits)
   const profile = useCyberspace((s) => s.cloudPrefs.profile)
+  const provider = useCyberspace((s) => s.cloud.provider)
+  const signerKind = useCyberspace((s) => s.signerKind)
+  const cantorMsByHeight = useCalibration((s) => s.cantorMsByHeight)
+  const sha256PerSec = useCalibration((s) => s.sha256PerSec)
+  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
   const next = useMemo(
-    () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits, profile) : null),
-    [active, position, target, plane, hopCeil, sidestepCeil, limits, profile],
+    () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits, from) : null),
+    [active, position, target, plane, hopCeil, sidestepCeil, limits, from],
   )
 
   // Screen-space endpoints, at cell CENTRES.

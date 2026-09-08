@@ -17,6 +17,8 @@ import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import type { RouteProfile } from '../lib/movePlan'
+import { offloadFrom } from '../lib/crossover'
+import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
@@ -72,6 +74,23 @@ export function CloudPanel(): JSX.Element {
     const known = st.cloud.balance
     if (signerKind === 'local' && st.cloud.limits !== null && st.cloudPrefs.mode !== 'off' && (known === null || Date.now() - known.at > BALANCE_STALE_MS)) void st.refreshBalance()
   }, [pubkey, signerKind, cloud.limits !== null])
+  const hopCeil = useCalibration((st) => st.hopHeight)
+  const sidestepCeil = useCalibration((st) => st.sidestepHeight)
+  const cantorMsByHeight = useCalibration((st) => st.cantorMsByHeight)
+  const sha256PerSec = useCalibration((st) => st.sha256PerSec)
+
+  // Where the paid hop starts winning, measured (lib/crossover): the setting
+  // explains itself with the number rather than a promise.
+  const crossover = offloadFrom('fastest', {
+    hopCeiling: hopCeil,
+    sidestepCeiling: sidestepCeil,
+    cloudHop: cloud.limits?.max_hop_height ?? 0,
+    provider: cloud.provider ?? null,
+    signerKind,
+    cantorMsByHeight,
+    sha256PerSec,
+  })
+
   const tag = prefs.mode === 'off' ? 'OFF' : active || cloud.status === 'error' ? STATUS_LABEL[cloud.status] : prefs.mode.toUpperCase()
 
   const setUrl = (): void => {
@@ -124,9 +143,11 @@ export function CloudPanel(): JSX.Element {
             ))}
           </div>
           <span className="cloud__profile-note">
-            {prefs.profile === 'fastest'
-              ? 'HOSAKA hops the boundaries this machine could only sidestep across: one paid step in place of a walk to the wall, a sidestep, and a walk on.'
-              : 'This machine takes every boundary it can, sidestepping across the ones above its hop ceiling, however many steps that walk takes. HOSAKA is used only where this machine cannot go at all.'}
+            {prefs.profile === 'cheapest'
+              ? 'This machine takes every boundary it can, sidestepping across the ones above its hop ceiling, however many steps that walk takes. HOSAKA is used only where this machine cannot go at all.'
+              : Number.isFinite(crossover)
+                ? `HOSAKA takes the crossings from 2^${crossover} up, where the walk across costs this machine more time than the paid hop does. Below that this machine is quicker as well as free, so nothing is bought.`
+                : 'Measured against HOSAKA’s own published times, this machine is quicker at every crossing it can make, so nothing is bought. HOSAKA still takes the boundaries this machine cannot cross at all.'}
           </span>
         </div>
       )}

@@ -49,14 +49,15 @@ export interface CloudPrefs {
   mode: CloudMode
   autoMaxSats: number
   apiUrl: string
-  /** Which step to prefer where both this machine and HOSAKA have one. */
+  /** How to get past a wall this machine cannot hop: unlock it, or bypass it. */
   profile: RouteProfile
 }
 
 export function defaultCloudPrefs(): CloudPrefs {
-  // Fastest by default: the walk this machine can make across a high boundary
-  // is dozens of signed events, and one paid hop replaces all of them.
-  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl(), profile: 'fastest' }
+  // Unlock by default: the walk across a high boundary is dozens of signed
+  // events and arrives blind, and one paid hop replaces all of them with the
+  // region's key in hand.
+  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl(), profile: 'unlock' }
 }
 
 const PREFS_KEY = 'onosendai:cloud'
@@ -68,14 +69,18 @@ export function loadCloudPrefs(): CloudPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY)
     if (!raw) return d
-    const p = JSON.parse(raw) as Partial<CloudPrefs>
+    const p = JSON.parse(raw) as Omit<Partial<CloudPrefs>, 'profile'> & { profile?: string }
     return {
       mode: p.mode === 'auto' || p.mode === 'ask' || p.mode === 'off' ? p.mode : d.mode,
       autoMaxSats: typeof p.autoMaxSats === 'number' && Number.isFinite(p.autoMaxSats) && p.autoMaxSats >= 0
         ? Math.floor(p.autoMaxSats)
         : d.autoMaxSats,
       apiUrl: typeof p.apiUrl === 'string' && /^https?:\/\/\S+$/.test(p.apiUrl) ? p.apiUrl.replace(/\/+$/, '') : d.apiUrl,
-      profile: p.profile === 'cheapest' || p.profile === 'fastest' ? p.profile : d.profile,
+      // The pair was briefly called fastest and cheapest; anything kept under
+      // those names still reads.
+      profile: p.profile === 'bypass' || p.profile === 'cheapest' ? 'bypass'
+        : p.profile === 'unlock' || p.profile === 'fastest' ? 'unlock'
+        : d.profile,
     }
   } catch {
     return d

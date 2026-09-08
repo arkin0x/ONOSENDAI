@@ -22,7 +22,7 @@ import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
-const PROFILES: Array<[RouteProfile, string]> = [['fastest', 'FASTEST'], ['cheapest', 'CHEAPEST']]
+const PROFILES: Array<[RouteProfile, string]> = [['unlock', 'UNLOCK'], ['bypass', 'BYPASS']]
 
 const STAGE_LABEL: Record<string, string> = {
   awaiting_payment: 'AWAITING PAYMENT',
@@ -81,7 +81,7 @@ export function CloudPanel(): JSX.Element {
 
   // Where the paid hop starts winning, measured (lib/crossover): the setting
   // explains itself with the number rather than a promise.
-  const crossover = offloadFrom('fastest', {
+  const crossover = offloadFrom('unlock', {
     hopCeiling: hopCeil,
     sidestepCeiling: sidestepCeil,
     cloudHop: cloud.limits?.max_hop_height ?? 0,
@@ -125,12 +125,12 @@ export function CloudPanel(): JSX.Element {
         ))}
       </div>
 
-      {/* Which step to prefer where both this machine and HOSAKA have one.
-          Not a spending limit: AUTO and ASK still decide what gets paid. */}
+      {/* How to get past a wall this machine cannot hop. Not a spending limit:
+          AUTO and ASK still decide what actually gets paid. */}
       {prefs.mode !== 'off' && (
         <div className="cloud__profile">
-          <span className="login__label">Route profile</span>
-          <div className="cloud__modes" role="radiogroup" aria-label="Route profile">
+          <span className="login__label">Crossing a wall</span>
+          <div className="cloud__modes" role="radiogroup" aria-label="Crossing a wall">
             {PROFILES.map(([profile, label]) => (
               <button
                 key={profile}
@@ -143,11 +143,11 @@ export function CloudPanel(): JSX.Element {
             ))}
           </div>
           <span className="cloud__profile-note">
-            {prefs.profile === 'cheapest'
-              ? 'This machine takes every boundary it can, sidestepping across the ones above its hop ceiling, however many steps that walk takes. HOSAKA is used only where this machine cannot go at all.'
+            {prefs.profile === 'bypass'
+              ? 'Sidestep around every wall this machine can, however many steps that walk takes, and pay nothing. You arrive without the region’s Cantor root, so anything hidden along the way stays shut. HOSAKA is used only where this machine cannot cross at all.'
               : Number.isFinite(crossover)
-                ? `HOSAKA takes the crossings from 2^${crossover} up, where the walk across costs this machine more time than the paid hop does. Below that this machine is quicker as well as free, so nothing is bought.`
-                : 'Measured against HOSAKA’s own published times, this machine is quicker at every crossing it can make, so nothing is bought. HOSAKA still takes the boundaries this machine cannot cross at all.'}
+                ? `Buy the hop from 2^${crossover} up, where the walk also costs more time than the hop does, and arrive holding the region’s Cantor root. Below that this machine is quicker as well as free, so nothing is bought.`
+                : 'Measured against HOSAKA’s own published times, this machine crosses faster than HOSAKA everywhere it can reach, so nothing is bought here. HOSAKA still takes the walls this machine cannot cross at all, and those arrive with the region’s root.'}
           </span>
         </div>
       )}

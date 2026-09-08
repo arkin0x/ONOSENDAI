@@ -107,9 +107,9 @@ describe('persistence', () => {
 
   it('defaults prefs, round-trips them, and refuses junk', () => {
     expect(loadCloudPrefs()).toEqual(defaultCloudPrefs())
-    saveCloudPrefs({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765/', profile: 'cheapest' })
+    saveCloudPrefs({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765/', profile: 'bypass' })
     // A trailing slash is dropped on the way back in, so paths never double it.
-    expect(loadCloudPrefs()).toEqual({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765', profile: 'cheapest' })
+    expect(loadCloudPrefs()).toEqual({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765', profile: 'bypass' })
     localStorage.setItem('onosendai:cloud', JSON.stringify({ mode: 'yes', autoMaxSats: -4, apiUrl: 'ftp://x' }))
     expect(loadCloudPrefs()).toEqual(defaultCloudPrefs())
     localStorage.setItem('onosendai:cloud', '{not json')

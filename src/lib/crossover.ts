@@ -1,8 +1,8 @@
 /**
  * crossover.ts - the wall height where buying the hop beats walking it.
  *
- * The route profile used to be structural: under `fastest` any boundary above
- * this machine's hop ceiling went to HOSAKA. Measured, that is wrong at the
+ * The choice used to be structural: under UNLOCK any boundary above this
+ * machine's hop ceiling went to HOSAKA. Measured, that is wrong at the
  * bottom of the range. A single sidestep is one hash chain and this machine
  * beats HOSAKA at every height it can reach at all: a 2^20 crossing is four
  * seconds here against about two and a half minutes there.
@@ -20,7 +20,7 @@
  * one number.
  */
 
-import { buildMovePlan, localOnly } from './movePlan'
+import { buildMovePlan, localOnly, type RouteProfile } from './movePlan'
 import { projectCantorMs } from './calibration'
 import type { SignerKind } from './signers'
 
@@ -134,8 +134,8 @@ export function crossoverHeight(inputs: CrossoverInputs): number {
 let cached: { key: string; value: number } | null = null
 
 /** The same, memoised: the inputs change rarely and the answer is asked per cursor move. */
-export function crossoverFor(profile: 'fastest' | 'cheapest', inputs: CrossoverInputs): number {
-  if (profile !== 'fastest') return Infinity
+export function crossoverFor(profile: RouteProfile, inputs: CrossoverInputs): number {
+  if (profile !== 'unlock') return Infinity
   const key = [
     inputs.hopCeiling, inputs.sidestepCeiling, inputs.cloudHop, inputs.signerKind,
     Math.round(inputs.sha256PerSec ?? 0),
@@ -154,7 +154,7 @@ export function crossoverFor(profile: 'fastest' | 'cheapest', inputs: CrossoverI
  * cannot disagree about where HOSAKA takes over.
  */
 export function offloadFrom(
-  profile: 'fastest' | 'cheapest',
+  profile: RouteProfile,
   opts: {
     hopCeiling: number
     sidestepCeiling: number

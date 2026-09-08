@@ -54,26 +54,26 @@ export interface Ceilings {
   /**
    * The lowest wall height HOSAKA takes over at, when it can hop it. Infinity
    * (or absent) means it never does unless this machine cannot cross at all,
-   * which is the cheapest profile; lib/crossover.ts measures the rest.
+   * which is BYPASS; lib/crossover.ts measures where UNLOCK takes over.
    */
   offloadFrom?: number
 }
 
 /**
- * Which step to prefer where both this machine and HOSAKA can move you.
+ * How to get past a wall this machine cannot hop.
  *
- * `cheapest` spends nothing it does not have to: a boundary above the hop
- * ceiling is crossed by this machine's own sidestep, and the walk to the wall
- * and on from it is however many hops that takes. Nothing is paid for until
- * a boundary neither ceiling reaches.
+ * `bypass` goes around it. A sidestep crosses one gibson of the boundary and
+ * costs nothing, and the walk to the wall and on from it is however many hops
+ * that takes. You arrive without the Cantor root of the regions you crossed,
+ * so nothing hidden in them will open for you.
  *
- * `fastest` pays to skip that walk, but only from the height where the walk
- * actually costs more than the hop. That height is measured, not assumed
- * (lib/crossover.ts): below it this machine is quicker as well as free, since
- * one sidestep is one hash chain and a paid hop is a queue and a payment.
- * A hop this machine can make is never paid for under either.
+ * `unlock` buys the hop. One event instead of the walk, and you arrive holding
+ * the region's root, which is the key to whatever is hidden there. It is taken
+ * only from the height where it is also the quicker way across, measured
+ * rather than assumed (lib/crossover.ts): below that this machine is faster as
+ * well as free. A hop this machine can make is never paid for under either.
  */
-export type RouteProfile = 'fastest' | 'cheapest'
+export type RouteProfile = 'unlock' | 'bypass'
 
 export function localOnly(hop: number, sidestep: number = hop): Ceilings {
   return { hop, sidestep, cloudHop: 0, cloudSidestep: 0 }

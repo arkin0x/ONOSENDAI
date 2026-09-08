@@ -5095,3 +5095,9 @@ kbd {
   font-variant-numeric: tabular-nums;
   line-height: 1.5;
 }
+
+/* The avatar adopt in progress, visible from the top row while MENU is closed. */
+.ws__chip.ws__chip--work {
+  color: var(--warn, #ffb347);
+  border-color: color-mix(in srgb, var(--warn, #ffb347) 50%, transparent);
+}

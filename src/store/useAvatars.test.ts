@@ -23,7 +23,7 @@ import { eventId, mineChunk, nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, type AvatarMiner } from '../lib/avatarWorker'
 import { newShard } from '../lib/shards'
 import { useCyberspace } from './useCyberspace'
-import { setAvatarMiner, useAvatars } from './useAvatars'
+import { AVATAR_SIGN_PATIENCE_MS, setAvatarMiner, useAvatars } from './useAvatars'
 
 // The work, inline: the same loop the worker runs, with a hook to cancel.
 const inline: AvatarMiner = (template, target, onProgress) => {
@@ -51,7 +51,7 @@ const built = () => {
 }
 
 describe('useAvatars', () => {
-  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, adoptError: null }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
+  beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
   it('adopting a shard signs a kind 33331 event with d=avatar, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
@@ -92,6 +92,34 @@ describe('useAvatars', () => {
     expect(useAvatars.getState().adoptError).toBeNull()
     expect(vi.mocked(publish)).not.toHaveBeenCalled()
     expect(me in useAvatars.getState().shards).toBe(false)
+  })
+
+  it('walks mining, signing and publishing, refusing a second adopt the whole way', async () => {
+    const original = useCyberspace.getState().signEvent
+    let release: (() => void) | null = null
+    const patience: number[] = []
+    useCyberspace.setState({
+      signEvent: (template, patienceMs) => new Promise((resolve) => {
+        patience.push(patienceMs ?? -1)
+        release = () => { void original(template).then(resolve) }
+      }),
+    })
+    try {
+      const pending = useAvatars.getState().adopt(built())
+      expect(useAvatars.getState().phase).toBe('mining')
+      await vi.waitFor(() => { expect(useAvatars.getState().phase).toBe('signing') })
+      expect(useAvatars.getState().mining).toBeNull()
+      expect(useAvatars.getState().minedMs).not.toBeNull()
+      // The signer's prompt is open: a second press must not mine and ask again.
+      expect(await useAvatars.getState().adopt(built())).toBe(false)
+      expect(patience).toEqual([AVATAR_SIGN_PATIENCE_MS])
+      release!()
+      expect(await pending).toBe(true)
+      expect(useAvatars.getState().phase).toBeNull()
+      expect(vi.mocked(publish)).toHaveBeenCalledTimes(1)
+    } finally {
+      useCyberspace.setState({ signEvent: original })
+    }
   })
 
   it('a second adopt while one is mining is refused', async () => {

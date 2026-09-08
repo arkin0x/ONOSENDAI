@@ -121,6 +121,11 @@ export function describeDuration(seconds: number): string {
   return `about ${Math.round(seconds / (365.25 * 86400))} years`
 }
 
+/** How long a mine took, for a sentence: "under a second" or m:ss. */
+export function minedIn(ms: number): string {
+  return ms < 1000 ? 'under a second' : clock(ms)
+}
+
 /** m:ss for an elapsed span. */
 export function clock(ms: number): string {
   const s = Math.floor(ms / 1000)

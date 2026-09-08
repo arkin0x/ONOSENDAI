@@ -5134,3 +5134,33 @@ kbd {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
+
+/* The workshop's panels hover over the compass and its pad, which share the
+   top-right corner: the panel is what you are reading, so it wins. The compass
+   drops a layer rather than the panels rising one, because DEPLOY and the way
+   out share the top edge with the chips and must stay pressable above all of it.
+   The chip row also reserves 124px on its right for those two buttons, and that
+   strip must let a press through rather than swallow it. */
+.ws__view { z-index: 2; }
+
+.ws__chips { pointer-events: none; }
+
+.ws__chips > * { pointer-events: auto; }
+
+/* A rule between the controls in MENU and GRID, so a row reads as one control. */
+.ws__panel .workshop__row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding-top: 8px;
+}
+
+.ws__panel .workshop__row:first-child { border-top: none; padding-top: 0; }
+
+/* With undo and redo out of the way, the open panel sits right under its chip. */
+.ws__top--open { gap: 5px; }
+
+/* The delete X, big enough to hit and to read. */
+.workshop__mini--x {
+  font-size: 20px;
+  line-height: 1;
+  padding-bottom: 2px;
+}

@@ -3,6 +3,9 @@
  *
  * SOLID draws the indexed triangles, LINES the vertex order as one line, and
  * every mode draws the vertices as points so a shard is visible at any size.
+ * LINES draws every edge of every face once, so a shape reads as a wireframe;
+ * with no faces there are no edges, and it falls back to one line through the
+ * points in the order they were made.
  * The two geometries share one pair of attribute buffers.
  *
  * With a `birth`, the shard is one this client has just found, and it does not
@@ -28,6 +31,7 @@ import {
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
 import { orientShard } from '../lib/orient'
+import { faceEdges } from '../lib/outline'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
 
 interface Props {
@@ -122,6 +126,26 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
   }, [shard.mode, ghost])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
 
+  /**
+   * LINES mode: every edge of every face, each drawn once.
+   *
+   * Built from the shard's own faces rather than the triangulated index, so a
+   * polygon shows its outline and not the diagonals its triangles were cut
+   * along, and an edge two faces share is drawn once rather than twice.
+   */
+  const outline = useMemo(() => {
+    if (shard.faces.length === 0) return null
+    const idx = faceEdges(shard.faces)
+    if (idx.length === 0) return null
+    const g = new BufferGeometry()
+    g.setAttribute('position', posAttr)
+    g.setAttribute('color', colAttr)
+    g.setIndex(idx)
+    return g
+  }, [posAttr, colAttr, shard.faces])
+
+  useEffect(() => () => { outline?.dispose() }, [outline])
+
   const line = useMemo(() => {
     const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 }))
     l.frustumCulled = false
@@ -199,7 +223,14 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
           )}
         </group>
       )}
-      {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
+      {/* Faces as outlines. A shard with no faces has no edges to draw, so it
+          keeps the old single line through its points, which is all there is. */}
+      {shard.mode === 'lines' && outline && (
+        <lineSegments geometry={outline} frustumCulled={false}>
+          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} />
+        </lineSegments>
+      )}
+      {shard.mode === 'lines' && !outline && shard.vertices.length > 1 && <primitive object={line} />}
       {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} />
       )}

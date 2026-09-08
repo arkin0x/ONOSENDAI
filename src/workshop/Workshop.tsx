@@ -234,7 +234,7 @@ function BenchViewMenu(): JSX.Element {
         <button className="viewmenu__key viewmenu__key--down" {...noCallout} onPointerDown={press(turn('tip'))} aria-label="Tip the grid down">▼</button>
       </div>
       <div className="viewmenu__row">
-        <button className="viewmenu__op" {...noCallout} onPointerDown={press(() => { w().setPlane(FLOOR); requestView({ kind: 'home' }) })} title="The grid back on the floor, the view back where the bench opens">SUN</button>
+        <button className="viewmenu__op" {...noCallout} onPointerDown={press(() => { w().setPlane(FLOOR); requestView({ kind: 'home' }) })} title="The grid back on the floor, the view back where the bench opens">RESET</button>
       </div>
     </div>
   )
@@ -405,7 +405,7 @@ export function Workshop(): JSX.Element | null {
 
       {/* Top left: the three chips and the history in one row, wrapping on a phone,
           and the open panel under whatever the row wrapped to. */}
-      <div className="ws__top">
+      <div className={`ws__top ${panel ? 'ws__top--open' : ''}`}>
       <div className="ws__chips">
         <button className={`chip ws__chip ${panel === 'menu' ? 'is-on' : ''}`} aria-pressed={panel === 'menu'} onClick={() => toggle('menu')}>
           <Menu size={12} strokeWidth={2.25} aria-hidden />MENU
@@ -419,10 +419,14 @@ export function Workshop(): JSX.Element | null {
             {phase === 'mining' ? `MINING ${mining ? clock(mining.elapsedMs) : ''}` : phase === 'signing' ? 'SIGN IT' : 'PUBLISHING'}
           </button>
         )}
-        <span className="ws__history">
-          <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
-          <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
-        </span>
+        {/* Out of the way while a panel is open: on a phone they wrapped the chip
+            row onto a second line and pushed the panel down with it. */}
+        {!panel && (
+          <span className="ws__history">
+            <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
+            <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
+          </span>
+        )}
       </div>
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
@@ -439,8 +443,8 @@ export function Workshop(): JSX.Element | null {
               ))}
             </div>
           </div>
-          <div className="workshop__row" role="group" aria-label="Scale avatar">
-            <span className="workshop__label">AVATAR</span>
+          <div className="workshop__row" role="group" aria-label="Default avatar ghost">
+            <span className="workshop__label">DEFAULT AVATAR GHOST</span>
             <div className="workshop__modes">
               <button className={`workshop__mode ${showAvatar ? 'is-on' : ''}`} aria-pressed={showAvatar} onClick={() => w().setShowAvatar(true)} title="Show the to-scale avatar at the grid's centre">SHOW</button>
               <button className={`workshop__mode ${!showAvatar ? 'is-on' : ''}`} aria-pressed={!showAvatar} onClick={() => w().setShowAvatar(false)} title="Hide it">HIDE</button>
@@ -520,12 +524,12 @@ export function Workshop(): JSX.Element | null {
                 </button>
                 <button className="workshop__mini" title="Duplicate" onClick={() => w().duplicate(s.id)}>⧉</button>
                 <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copy(s.id)}>COPY</button>
-                <button className="workshop__mini workshop__mini--danger" title="Delete" onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
+                <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
               </li>
             ))}
           </ul>
           <div className="workshop__row">
-            <button className="workshop__btn workshop__btn--danger" disabled={shard.vertices.length === 0} onClick={() => { if (window.confirm('Clear every vertex and face of this shard?')) w().clearShard() }} title="Empty this shard (undoable)">CLEAR SHARD</button>
+            <button className="workshop__btn workshop__btn--danger" disabled={shard.vertices.length === 0} onClick={() => { if (window.confirm('Delete all vertices and faces in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />
             <Explanation>
               A shard is colored points on a grid of whole units, drawn SOLID (faces, colors blending

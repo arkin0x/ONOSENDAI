@@ -425,6 +425,9 @@ export interface CyberspaceState {
   moveCursor: (dir: AxisDirection) => void
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
+  /** Whether COMMIT runs one step of the route or all of them in order. */
+  moveMode: MoveMode
+  setMoveMode: (mode: MoveMode) => void
   cancel: () => void
   /** Continue a paused route: ask for the pending signature again, or restart the step. */
   resumePlan: () => void
@@ -592,6 +595,22 @@ function chainKeyFor(pubkey: string): string {
   return `${CHAIN_KEY}:${pubkey}`
 }
 const LIVE_KEY = 'onosendai:live'
+const MOVE_MODE_KEY = 'onosendai:moveMode'
+
+/** One action per commit, or the whole route in order. */
+export type MoveMode = 'single' | 'auto'
+
+function loadMoveMode(): MoveMode {
+  try {
+    return localStorage.getItem(MOVE_MODE_KEY) === 'auto' ? 'auto' : 'single'
+  } catch {
+    return 'single'
+  }
+}
+
+function saveMoveMode(mode: MoveMode): void {
+  try { localStorage.setItem(MOVE_MODE_KEY, mode) } catch { /* private mode */ }
+}
 const TARGETS_KEY = 'onosendai:targets'
 
 /**
@@ -977,6 +996,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       sidestep: recommendedSidestepHeight(),
       cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
       cloudSidestep: on && cloud.limits ? cloud.limits.max_sidestep_height : 0,
+      profile: cloudPrefs.profile,
     }
   }
 
@@ -1521,14 +1541,16 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       })
       return
     }
-    // One action per commit. The cursor may sit any distance away; this
-    // commit executes only the first step of the way there, the one the
+    // SINGLE: one action per commit. The cursor may sit any distance away;
+    // the commit executes only the first step of the way there, the one the
     // button named (a hop to the cursor, a hop to the boundary, a sidestep
     // through it, or HOSAKA's version of either), and lands where that step
-    // lands. The cursor stays, so the next commit names the next step. The
-    // whole path is shown, never run: a route that signs step after step in
-    // the background was harder to follow than to walk.
-    const target = { ...step.to }
+    // lands. The cursor stays, so the next commit names the next step.
+    //
+    // AUTOMATIC: the whole route, its steps run in order, pausing only for a
+    // declined signature or a step that fails. A long walk is dozens of
+    // identical presses otherwise, which is what this is for.
+    const target = get().moveMode === 'auto' ? { ...cursor } : { ...step.to }
     const one = planSummary(position, target, ceilings)
     const funded = one.cloudSteps === 0
     set({
@@ -1546,6 +1568,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
     if (funded) startPlanStep()
     else await quoteRoute(++requestId)
+  },
+
+  setMoveMode: (mode) => {
+    if (mode === get().moveMode) return
+    saveMoveMode(mode)
+    set({ moveMode: mode })
   },
 
   resumePlan: () => {
@@ -2155,6 +2183,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   cloud: IDLE_CLOUD,
   cloudPrefs: loadCloudPrefs(),
+  moveMode: loadMoveMode(),
 
   approveCloud: () => {
     const { cloud } = get()

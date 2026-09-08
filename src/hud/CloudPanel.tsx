@@ -16,9 +16,11 @@ import { HOSAKA_DEFAULT_URL } from '../lib/hosaka'
 import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
+import type { RouteProfile } from '../lib/movePlan'
 import { Explanation } from './Explanation'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
+const PROFILES: Array<[RouteProfile, string]> = [['fastest', 'FASTEST'], ['cheapest', 'CHEAPEST']]
 
 const STAGE_LABEL: Record<string, string> = {
   awaiting_payment: 'AWAITING PAYMENT',
@@ -103,6 +105,31 @@ export function CloudPanel(): JSX.Element {
           >{label}</button>
         ))}
       </div>
+
+      {/* Which step to prefer where both this machine and HOSAKA have one.
+          Not a spending limit: AUTO and ASK still decide what gets paid. */}
+      {prefs.mode !== 'off' && (
+        <div className="cloud__profile">
+          <span className="login__label">Route profile</span>
+          <div className="cloud__modes" role="radiogroup" aria-label="Route profile">
+            {PROFILES.map(([profile, label]) => (
+              <button
+                key={profile}
+                type="button"
+                role="radio"
+                aria-checked={prefs.profile === profile}
+                className={`secret__act cloud__mode ${prefs.profile === profile ? 'is-on' : ''}`}
+                onClick={() => store().setCloudPrefs({ profile })}
+              >{label}</button>
+            ))}
+          </div>
+          <span className="cloud__profile-note">
+            {prefs.profile === 'fastest'
+              ? 'HOSAKA hops the boundaries this machine could only sidestep across: one paid step in place of a walk to the wall, a sidestep, and a walk on.'
+              : 'This machine takes every boundary it can, sidestepping across the ones above its hop ceiling, however many steps that walk takes. HOSAKA is used only where this machine cannot go at all.'}
+          </span>
+        </div>
+      )}
 
       {prefs.mode === 'auto' && (
         <label className="cloud__budget">

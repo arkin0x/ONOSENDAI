@@ -51,7 +51,24 @@ export interface Ceilings {
   sidestep: number
   cloudHop: number
   cloudSidestep: number
+  /** Which step to prefer where both this machine and HOSAKA have one. */
+  profile?: RouteProfile
 }
+
+/**
+ * Which step to prefer where both this machine and HOSAKA can move you.
+ *
+ * `cheapest` spends nothing it does not have to: a boundary above the hop
+ * ceiling is crossed by this machine's own sidestep, and the walk to the wall
+ * and on from it is however many hops that takes. Nothing is paid for until
+ * a boundary neither ceiling reaches.
+ *
+ * `fastest` pays to skip that walk. Wherever this machine would have to
+ * sidestep and HOSAKA could hop the whole boundary instead, the paid hop is
+ * taken: one event, one wait, in place of a walk to the wall, a sidestep, and
+ * a walk on. A hop this machine can make is still never paid for.
+ */
+export type RouteProfile = 'fastest' | 'cheapest'
 
 export function localOnly(hop: number, sidestep: number = hop): Ceilings {
   return { hop, sidestep, cloudHop: 0, cloudSidestep: 0 }
@@ -59,6 +76,22 @@ export function localOnly(hop: number, sidestep: number = hop): Ceilings {
 
 function asCeilings(c: number | Ceilings): Ceilings {
   return typeof c === 'number' ? localOnly(c, Number.MAX_SAFE_INTEGER) : c
+}
+
+/**
+ * Whether the paid hop wins from here, under `fastest`.
+ *
+ * The question is about the crossing, not the step in hand. This machine's
+ * own first step toward a distant wall is an ordinary hop, and taking it
+ * because it is local would walk the whole way to the wall before the choice
+ * came up at all. So the tallest boundary between here and the target decides:
+ * if this machine would have to sidestep across it somewhere on the way, and
+ * HOSAKA can hop it outright, HOSAKA hops it now and the walk never happens.
+ */
+function cloudIsFaster(from: Position, to: Position, c: Ceilings): boolean {
+  if (c.profile !== 'fastest') return false
+  const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
+  return h > c.hop && h <= c.cloudHop
 }
 
 function sourceOf(kind: PlanStepKind, h: number, c: Ceilings): StepSource {
@@ -89,7 +122,11 @@ export function routeFeasible(from: Position, to: Position, ceilings: number | C
 export function routeNeedsCloud(from: Position, to: Position, ceilings: number | Ceilings): boolean {
   const c = asCeilings(ceilings)
   const h = Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z))
-  return h > c.hop && h > c.sidestep
+  if (h <= c.hop) return false
+  // Under `fastest` a boundary HOSAKA can hop is HOSAKA's, even though this
+  // machine could have sidestepped its way across.
+  if (c.profile === 'fastest' && h <= c.cloudHop) return true
+  return h > c.sidestep
 }
 
 export type AxisMove =
@@ -158,7 +195,8 @@ export function nextStep(cur: Position, to: Position, ceilings: number | Ceiling
   // none, so a walk this machine can make is never a paid hop.
   if (c.cloudHop > 0 || c.cloudSidestep > 0) {
     const mine = nextStep(cur, to, localOnly(c.hop, c.sidestep))
-    if (mine === null || mine.source === 'local') return mine
+    if (mine === null) return null
+    if (mine.source === 'local' && !cloudIsFaster(cur, to, c)) return mine
   }
   const walk = Math.max(c.hop, c.cloudHop)
   if (walk < 1) throw new Error('ceiling must be at least 1')

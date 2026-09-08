@@ -43,14 +43,20 @@ export type CloudMode = 'auto' | 'ask' | 'off'
  * Auto never means auto-pay: the client has no wallet, so it means the
  * invoice is shown at once.
  */
+import type { RouteProfile } from './movePlan'
+
 export interface CloudPrefs {
   mode: CloudMode
   autoMaxSats: number
   apiUrl: string
+  /** Which step to prefer where both this machine and HOSAKA have one. */
+  profile: RouteProfile
 }
 
 export function defaultCloudPrefs(): CloudPrefs {
-  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl() }
+  // Fastest by default: the walk this machine can make across a high boundary
+  // is dozens of signed events, and one paid hop replaces all of them.
+  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl(), profile: 'fastest' }
 }
 
 const PREFS_KEY = 'onosendai:cloud'
@@ -69,6 +75,7 @@ export function loadCloudPrefs(): CloudPrefs {
         ? Math.floor(p.autoMaxSats)
         : d.autoMaxSats,
       apiUrl: typeof p.apiUrl === 'string' && /^https?:\/\/\S+$/.test(p.apiUrl) ? p.apiUrl.replace(/\/+$/, '') : d.apiUrl,
+      profile: p.profile === 'cheapest' || p.profile === 'fastest' ? p.profile : d.profile,
     }
   } catch {
     return d

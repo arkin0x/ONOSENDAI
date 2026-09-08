@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
-import { localOnly, nextStep, routeFeasible, routeNeedsCloud, type Ceilings, type PlanStep } from '../lib/movePlan'
+import { localOnly, nextStep, routeFeasible, routeNeedsCloud, type Ceilings, type PlanStep, type RouteProfile } from '../lib/movePlan'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -109,7 +109,7 @@ export interface NextActionView {
   cursorKey: string
 }
 
-export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null): NextActionView | null {
+export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null, profile: RouteProfile = 'cheapest'): NextActionView | null {
   if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   const cursorKey = cursorKeyOf(cursor, plane)
@@ -118,7 +118,7 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
   // cross, which is when it is actually needed; a route with such a boundary
   // anywhere on it reads OFFLOAD from the start. A cursor no one reaches is
   // TOO FAR as soon as HOSAKA's caps are known; until they are, OFFLOAD asks.
-  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0 }
+  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0, profile }
   if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
   const step = nextStep(position, cursor, ceilings)
   if (!step) return null
@@ -137,7 +137,7 @@ export function nextAction(): NextActionView | null {
   const s = useCyberspace.getState()
   if (!s.atHead()) return null
   const cal = useCalibration.getState()
-  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits)
+  return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits, s.cloudPrefs.profile)
 }
 
 /** The same, for a component. */
@@ -150,7 +150,8 @@ export function useNextAction(): NextActionView | null {
   const limits = useCyberspace((s) => s.cloud.limits)
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
-  return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits) : null
+  const profile = useCyberspace((s) => s.cloudPrefs.profile)
+  return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits, profile) : null
 }
 
 /** What the COMMIT button says for each next action. */

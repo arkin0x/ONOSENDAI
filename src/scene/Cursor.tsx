@@ -171,9 +171,10 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const limits = useCyberspace((s) => s.cloud.limits)
+  const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const next = useMemo(
-    () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits) : null),
-    [active, position, target, plane, hopCeil, sidestepCeil, limits],
+    () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits, profile) : null),
+    [active, position, target, plane, hopCeil, sidestepCeil, limits, profile],
   )
 
   // Screen-space endpoints, at cell CENTRES.

@@ -53,6 +53,7 @@ export function useRoutePreview(): RoutePreview | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
+  const profile = useCyberspace((st) => st.cloudPrefs.profile)
   const cloudHop = limits?.max_hop_height ?? 0
   const cloudSidestep = limits?.max_sidestep_height ?? 0
   return useMemo(() => {
@@ -61,12 +62,12 @@ export function useRoutePreview(): RoutePreview | null {
     if (!hop.exceedsLimit) return { hop, route: null, steps: null, needsCloud: false }
     // HOSAKA's caps whatever the cloud mode: what a move needs does not
     // depend on a setting, and the button (useOffer) reads it the same way.
-    const ceilings: Ceilings = { hop: ceiling, sidestep: sidestepCeil, cloudHop, cloudSidestep }
+    const ceilings: Ceilings = { hop: ceiling, sidestep: sidestepCeil, cloudHop, cloudSidestep, profile }
     let steps: PlanStep[] | null = null
     try { steps = buildMovePlan(position, cursor, ceilings, PREVIEW_STEPS_MAX) } catch { steps = null }
     const route = steps ? summaryOf(steps) : planSummary(position, cursor, ceilings, PREVIEW_STEPS_MAX)
     return { hop, route, steps, needsCloud: route.cloudSteps > 0 }
-  }, [home, position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep])
+  }, [home, position, cursor, plane, ceiling, sidestepCeil, cloudHop, cloudSidestep, profile])
 }
 
 export interface PreviewRow { index: number; kind: string; height: string; state: string; label: string }

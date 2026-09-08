@@ -28,6 +28,7 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
+import { glowTexture } from '../lib/glow'
 import { orientShard } from '../lib/orient'
 
 interface Props {
@@ -170,12 +171,13 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
 
   if (shard.vertices.length === 0) return null
   const opacity = ghost ? 0.45 : 1
+  const glow = glowTexture()
 
   return (
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
-          <mesh geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
+          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
               : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
@@ -191,15 +193,18 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
       {shard.mode === 'lines' && shard.vertices.length > 1 && <primitive object={line} />}
       {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} frustumCulled={false}>
+          {/* Small and glowing: a soft round sprite tinted by the vertex colour, added
+              to what is behind it, so a point reads as a light rather than a tile. */}
           <pointsMaterial
             vertexColors
-            size={shard.mode === 'points' ? 0.6 : 0.16}
+            size={shard.mode === 'points' ? 0.22 : 0.1}
             sizeAttenuation
             transparent
             opacity={shard.mode === 'points' ? opacity : opacity * 0.9}
             blending={AdditiveBlending}
             depthWrite={false}
             toneMapped={false}
+            {...(glow ? { map: glow, alphaTest: 0.02 } : {})}
           />
         </points>
       )}

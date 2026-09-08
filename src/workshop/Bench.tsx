@@ -18,13 +18,14 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, IcosahedronGeometry, Line, LineBasicMaterial, Vector3 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
+import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
 import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from '../lib/stamps'
 import { ShardMesh } from '../scene/ShardMesh'
-import { useWorkshop } from '../store/useWorkshop'
+import { useWorkshop, type Tool } from '../store/useWorkshop'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
@@ -173,7 +174,7 @@ function Ghost(): JSX.Element | null {
   if (tool === 'add') {
     return (
       <mesh position={UP(aim)}>
-        <sphereGeometry args={[0.2, 12, 12]} />
+        <sphereGeometry args={[0.1, 12, 12]} />
         <meshBasicMaterial color={rgbToHex(color)} transparent opacity={0.5} toneMapped={false} depthWrite={false} />
       </mesh>
     )
@@ -186,6 +187,20 @@ function Ghost(): JSX.Element | null {
   )
 }
 
+/** Handle radii in bench units (a gibson at level 0): the dot, the selected dot, its halo's width. */
+const HANDLE = 0.07
+const HANDLE_ON = 0.11
+const HALO = 0.5
+/** Hit sphere radii: wide enough for a finger at a whole-gibson grid, and never
+ * more than a share of the current step, so points a fifth of a gibson apart
+ * each keep their own target; ADD and FACE take the narrow one, since there a
+ * tap beside a point means the plane or the face. */
+const HIT = 0.3
+const HIT_NARROW = 0.16
+function hitRadiusFor(tool: Tool, stepUnits: number): number {
+  return Math.min(tool === 'add' || tool === 'face' ? HIT_NARROW : HIT, stepUnits * 0.45)
+}
+
 /**
  * One handle per point. Several vertices can share a point once stamps have
  * landed on each other; they read and act as one, so they draw as one.
@@ -195,6 +210,7 @@ function Handles(): JSX.Element | null {
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const step = useWorkshop((s) => s.step())
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
@@ -202,12 +218,22 @@ function Handles(): JSX.Element | null {
     return [...m.values()]
   }, [shard?.vertices])
   if (!shard) return null
+  const glow = glowTexture()
+  const hitRadius = hitRadiusFor(tool, step / TICKS_PER_UNIT)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP) return
     e.stopPropagation()
     const w = useWorkshop.getState()
-    if (tool === 'face') w.pickForFace(first)
+    if (tool === 'face') {
+      // The sphere stands proud of the faces, so it meets the ray first even when
+      // the tap was on a face beside the corner. If a face is under the tap and
+      // the ray passes farther from the corner than its drawn dot, the face wins.
+      const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
+      const face = e.intersections.find((i) => i.object.name === 'shard-faces')
+      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > HANDLE_ON) { w.selectFace(face.faceIndex); return }
+      w.pickForFace(first)
+    }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
@@ -222,18 +248,25 @@ function Handles(): JSX.Element | null {
         const picked = facePick.some((i) => g.includes(i))
         return (
           <group key={first} position={UP(ticksOf(v))}>
-            {/* A generous invisible hit target; the visible handle is small. */}
+            {/* An invisible hit target wider than the handle, narrower in ADD so a tap
+                beside a point lands on the plane and places another one near it. */}
             <mesh onClick={onClick(first, isSel)}>
-              <sphereGeometry args={[0.42, 10, 10]} />
+              <sphereGeometry args={[hitRadius, 10, 10]} />
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
             <mesh>
-              <sphereGeometry args={[isSel || picked ? 0.2 : 0.12, 12, 12]} />
+              <sphereGeometry args={[isSel || picked ? HANDLE_ON : HANDLE, 12, 12]} />
               <meshBasicMaterial color={isSel ? WARN : picked ? ACCENT : rgbToHex(v.c)} toneMapped={false} />
             </mesh>
+            {/* A halo, so a small selected handle still stands out. */}
+            {(isSel || picked) && glow && (
+              <sprite scale={[HALO, HALO, 1]}>
+                <spriteMaterial map={glow} color={isSel ? WARN : ACCENT} transparent opacity={0.85} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
+              </sprite>
+            )}
             {picked && (
               <mesh>
-                <ringGeometry args={[0.3, 0.36, 24]} />
+                <ringGeometry args={[0.2, 0.24, 24]} />
                 <meshBasicMaterial color={ACCENT} toneMapped={false} side={2} />
               </mesh>
             )}
@@ -518,8 +551,9 @@ export function Bench(): JSX.Element {
       <directionalLight position={[-9, 2, -3]} intensity={0.6} />
       {/* One finger or left drag orbits, except in SELECT where that drag is the
           marquee's. Two fingers, or the right button, pan the view in the screen
-          plane; pinch or the wheel dollies. These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={3} maxDistance={60} dampingFactor={0.12} />
+          plane; pinch or the wheel dollies, in to 0.6 of a gibson so a fifth-gibson
+          step fills a good share of a phone's screen. These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
       <Marquee />
       <Aim />
       <Keys />

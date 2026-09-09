@@ -29,6 +29,8 @@ import { V2_ACTIONS } from '../lib/chains'
 import { query, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
+import { useChat } from './useChat'
+import { chime } from '../lib/chime'
 
 export interface Person {
   pubkey: string
@@ -75,6 +77,10 @@ interface PresenceState {
   sector: string | null
   /** True while the neighborhood's backfill is in flight. */
   loading: boolean
+  /** People first seen after the backfill finished: arrivals, not history. */
+  arrivals: number
+  /** When the last arrival was noticed, ms since the epoch, or null. */
+  lastArrivalAt: number | null
   /** Take an action event in: the newest per author wins. */
   ingest: (ev: NostrEvent, now?: number) => void
   /** Drop someone; the sweep does this when their newest action is elsewhere. */
@@ -87,6 +93,8 @@ export const usePresence = create<PresenceState>((set, get) => ({
   people: {},
   sector: null,
   loading: false,
+  arrivals: 0,
+  lastArrivalAt: null,
 
   ingest: (ev, now = Math.floor(Date.now() / 1000)) => {
     const action = parseAction(ev)
@@ -95,10 +103,19 @@ export const usePresence = create<PresenceState>((set, get) => ({
     if (action.pubkey === me) return
     const have = get().people[action.pubkey]
     if (have && have.lastActive >= action.createdAt) return
-    set({ people: { ...get().people, [action.pubkey]: {
-      pubkey: action.pubkey, position: action.position, plane: action.plane,
-      lastActive: action.createdAt, type: action.type, checkedAt: now,
-    } } })
+    // Someone new, after the backfill: an arrival. During the backfill every
+    // person is new and none of them just arrived. Your targets are not
+    // arrivals either; you already know where they are.
+    const arrived = !have && !get().loading && !useCyberspace.getState().targets[action.pubkey]
+    set({
+      people: { ...get().people, [action.pubkey]: {
+        pubkey: action.pubkey, position: action.position, plane: action.plane,
+        lastActive: action.createdAt, type: action.type, checkedAt: now,
+      } },
+      ...(arrived ? { arrivals: get().arrivals + 1, lastArrivalAt: Date.now() } : {}),
+    })
+    // The chat's mute is the one switch for sounds about other people.
+    if (arrived && !useChat.getState().muted) chime()
   },
 
   forget: (pubkey) => {
@@ -184,7 +201,7 @@ export function stopPresence(): void {
   stopLive = null
   if (sweepHandle) { clearInterval(sweepHandle); sweepHandle = null }
   started = false
-  usePresence.setState({ people: {}, sector: null, loading: false })
+  usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null })
 }
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

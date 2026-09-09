@@ -76,6 +76,13 @@ interface SecretsState {
    */
   current: Record<string, CurrentKey>
   setCurrent: (current: Record<string, CurrentKey>) => void
+  /**
+   * The keys of the 26 cubes of side 2^SCAN_MAX_HEIGHT around the one you are
+   * in, so a line said one cube over is heard across the wall. Replaced whole
+   * when you cross into a new cube of that size. Not held, not persisted.
+   */
+  neighbors: Record<string, CurrentKey>
+  setNeighbors: (neighbors: Record<string, CurrentKey>) => void
   /** The purchase in flight, or null. */
   buying: Buying | null
   /** The region the list last sent you to look at: drawn bright, the rest dimmed. */
@@ -140,6 +147,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   buyError: null,
   focused: null,
   current: {},
+  neighbors: {},
   open: false,
   sort: 'recent',
 
@@ -174,6 +182,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   focus: (lookupId) => set({ focused: lookupId }),
 
   setCurrent: (current) => set({ current }),
+
+  setNeighbors: (neighbors) => set({ neighbors }),
 
   setOpen: (open) => set({ open }),
 

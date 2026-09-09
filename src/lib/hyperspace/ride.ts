@@ -89,22 +89,32 @@ export function computeRideLeaf(previousEventIdHex: string, height: number, bloc
 
 /** The heights a ride from `from` to `to` passes: (lo, hi], ascending. */
 /**
- * What the chain's rides add up to: how many hyperjumps, and how many blocks
- * they passed between them (§5.3: the ride passes every block from the
- * lower height exclusive to the higher inclusive, so a ride's length is the
- * difference). Exact from the events themselves, which is why it is derived
- * from the chain rather than tallied as proofs finish: an adopted chain has
- * the same numbers as one ridden here.
+ * Where the chain head puts you on the line, or null when it does not.
+ *
+ * DECK-0001 v3 §4.3: a rider who has entered stays entered until a hop or a
+ * sidestep leaves; every further hyperjump chains from the previous one,
+ * with `from_height` equal to its `B`, and a hyperjump whose previous event
+ * is neither an enter-hyperspace nor a hyperjump is invalid. So the head
+ * alone says whether the next ride needs a boarding: an enter-hyperspace
+ * head is boarded and the station decides where the ride starts
+ * (`fromHeight` null); a hyperjump head is standing at its stop and the next
+ * ride starts there. Anything else is off the line.
  */
-export function rideStatsOf(actions: ActionEvent[]): { hyperjumps: number; blocksRidden: number } {
-  let hyperjumps = 0
-  let blocksRidden = 0
-  for (const a of actions) {
-    if (a.type !== 'hyperjump' || a.fromHeight === undefined || a.toHeight === undefined) continue
-    hyperjumps += 1
-    blocksRidden += Math.abs(a.toHeight - a.fromHeight)
-  }
-  return { hyperjumps, blocksRidden }
+export interface LineState {
+  /** The head's id: the next ride's `previous`, and what seeds its leaves (§5.3). */
+  previousId: string
+  /** The head's coordinate: the next ride's `c` (§5.2). */
+  coordHex: string
+  /** The stop you stand at after a ride, or null when boarding decides it. */
+  fromHeight: number | null
+}
+
+export function lineStateOf(actions: ActionEvent[]): LineState | null {
+  const head = actions[actions.length - 1]
+  if (!head) return null
+  if (head.type === 'enter-hyperspace') return { previousId: head.id, coordHex: head.coordHex, fromHeight: null }
+  if (head.type === 'hyperjump' && head.toHeight !== undefined) return { previousId: head.id, coordHex: head.coordHex, fromHeight: head.toHeight }
+  return null
 }
 
 export function rideBlocks(fromHeight: number, toHeight: number): number[] {
@@ -342,4 +352,23 @@ export function timeCalibrationSample(): { elapsedMs: number; pairs: number } {
     computeRideLeaf(previousEventIdHex, 1_000 + i, hashes[i])
   }
   return { elapsedMs: performance.now() - started, pairs: exactRidePairs(hashes) }
+}
+
+/**
+ * What the chain's rides add up to: how many hyperjumps, and how many blocks
+ * they passed between them (§5.3: the ride passes every block from the
+ * lower height exclusive to the higher inclusive, so a ride's length is the
+ * difference). Exact from the events themselves, which is why it is derived
+ * from the chain rather than tallied as proofs finish: an adopted chain has
+ * the same numbers as one ridden here.
+ */
+export function rideStatsOf(actions: ActionEvent[]): { hyperjumps: number; blocksRidden: number } {
+  let hyperjumps = 0
+  let blocksRidden = 0
+  for (const a of actions) {
+    if (a.type !== 'hyperjump' || a.fromHeight === undefined || a.toHeight === undefined) continue
+    hyperjumps += 1
+    blocksRidden += Math.abs(a.toHeight - a.fromHeight)
+  }
+  return { hyperjumps, blocksRidden }
 }

@@ -9,7 +9,8 @@
 
 import { useMemo } from 'react'
 import { EARTH } from '../lib/palette'
-import type { CyberTarget } from '../lib/targets'
+import { targetColor, type CyberTarget } from '../lib/targets'
+import { usePresence } from '../store/usePresence'
 import { useCyberspace } from '../store/useCyberspace'
 
 /** The avatar's own red, so the marker for you is the color you are drawn in. */
@@ -27,6 +28,8 @@ export function useTargets(): CyberTarget[] {
   const headPlane = useCyberspace((s) => s.headPlane)
   const tracked = useCyberspace((s) => s.targets)
   const focus = useCyberspace((s) => s.focusPubkey())
+  const people = usePresence((s) => s.people)
+  const me = useCyberspace((s) => s.identity.pubkey)
 
   return useMemo(() => {
     const out: CyberTarget[] = []
@@ -39,6 +42,14 @@ export function useTargets(): CyberTarget[] {
       const tr = tracked[t.id]
       if (tr && tr.plane !== plane) continue
       out.push(t)
+    }
+    // Everyone else in the sector, at any distance: the same marker a target
+    // gets, dimmer, so a person shows at the screen's edge before they are in
+    // the field, and passing one without knowing stops being the normal case.
+    // Same plane rule as a target; your targets and you are already covered.
+    for (const p of Object.values(people)) {
+      if (p.pubkey === me || p.pubkey === focus || tracked[p.pubkey] || p.plane !== plane) continue
+      out.push({ id: p.pubkey, label: `${p.pubkey.slice(0, 8)}…`.toUpperCase(), color: targetColor(p.pubkey), at: p.position, presence: true })
     }
     // While the camera is anywhere you are not (someone else's eyes, a
     // hyperspace stop, EARTH, a shard), the way home is a thing worth
@@ -58,5 +69,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, headPlane, spectating, focused, position, tracked, focus])
+  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me])
 }

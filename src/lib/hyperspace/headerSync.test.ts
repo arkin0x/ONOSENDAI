@@ -6,7 +6,7 @@
  * gate that makes those invariants safe to assume everywhere downstream.
  */
 import { describe, expect, it } from 'vitest'
-import { HEADERS_MANIFEST_URL, blobUrl, manifestUrl, parseManifest } from './headerSync'
+import { HEADERS_MANIFEST_URL, blobUrl, manifestUrl, overlapsCovered, parseManifest, shouldSkipBlob } from './headerSync'
 
 const good = () => ({
   formatVersion: 1,
@@ -81,5 +81,34 @@ describe('URL plumbing', () => {
       .toBe('https://example.com/x/headers-000.bin')
     expect(blobUrl('https://example.com/x/manifest.json', 'https://cdn.example.com/h.bin'))
       .toBe('https://cdn.example.com/h.bin')
+  })
+})
+
+describe('skipping blobs the cache already holds', () => {
+  const blob = (startHeight: number, count: number) => ({ ordinal: 0, startHeight, count, sha256: 'a'.repeat(64), file: 'x.bin' })
+
+  it('overlapsCovered sees touching ranges and misses disjoint ones', () => {
+    const covered: Array<[number, number]> = [[0, 999], [5000, 5999]]
+    expect(overlapsCovered(covered, [1000, 1999])).toBe(false)
+    expect(overlapsCovered(covered, [999, 1999])).toBe(true)
+    expect(overlapsCovered(covered, [4000, 5000])).toBe(true)
+    expect(overlapsCovered(covered, [6000, 7000])).toBe(false)
+    expect(overlapsCovered([], [0, 10])).toBe(false)
+  })
+
+  it('a blob fully inside the cache is skipped', () => {
+    expect(shouldSkipBlob(blob(0, 1000), [[0, 9999]])).toBe(true)
+  })
+
+  it('a blob the cache has no height of is verified', () => {
+    expect(shouldSkipBlob(blob(10000, 1000), [[0, 9999]])).toBe(false)
+  })
+
+  it('a blob the cache holds only part of is skipped whole, for the relay to finish', () => {
+    expect(shouldSkipBlob(blob(9500, 1000), [[0, 9999]])).toBe(true)
+  })
+
+  it('a cold cache skips nothing', () => {
+    expect(shouldSkipBlob(blob(0, 1000), [])).toBe(false)
   })
 })

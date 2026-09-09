@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../events'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, rideStatsOf } from './ride'
+import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from './ride'
 
 const PREV = 'ab'.repeat(32)
 
@@ -215,6 +215,33 @@ describe('calibration sample', () => {
     const { elapsedMs, pairs } = timeCalibrationSample()
     expect(elapsedMs).toBeGreaterThan(0)
     expect(pairs).toBe(exactRidePairs(calibrationHashes()))
+  })
+})
+
+describe('lineStateOf: what the chain head says about the line', () => {
+  const action = (over: Partial<ActionEvent>): ActionEvent => ({
+    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', coordHex: 'c'.repeat(64),
+    position: { x: 0n, y: 0n, z: 0n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0',
+    ...over,
+  })
+
+  it('is nothing with no chain, and nothing after a hop', () => {
+    expect(lineStateOf([])).toBeNull()
+    expect(lineStateOf([action({ type: 'spawn' }), action({ type: 'hop', id: 'h'.repeat(64) })])).toBeNull()
+  })
+
+  it('an enter-hyperspace head is boarded, with the station still to decide the start', () => {
+    const s = lineStateOf([action({ type: 'spawn' }), action({ type: 'enter-hyperspace', id: 'a'.repeat(64), coordHex: 'b'.repeat(64) })])
+    expect(s).toEqual({ previousId: 'a'.repeat(64), coordHex: 'b'.repeat(64), fromHeight: null })
+  })
+
+  it('a hyperjump head stands at its stop: the next ride starts from B and chains from it', () => {
+    const s = lineStateOf([action({ type: 'enter-hyperspace' }), action({ type: 'hyperjump', id: 'j'.repeat(64), coordHex: 'd'.repeat(64), fromHeight: 100, toHeight: 398 })])
+    expect(s).toEqual({ previousId: 'j'.repeat(64), coordHex: 'd'.repeat(64), fromHeight: 398 })
+  })
+
+  it('a hop after a hyperjump leaves the line', () => {
+    expect(lineStateOf([action({ type: 'hyperjump', toHeight: 398 }), action({ type: 'hop' })])).toBeNull()
   })
 })
 

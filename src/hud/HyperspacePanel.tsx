@@ -19,7 +19,7 @@ import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
-import { expectedRidePairs, rideBlocks } from '../lib/hyperspace/ride'
+import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
@@ -91,36 +91,53 @@ export async function startRide(): Promise<void> {
   if (riding) return
   const destination = useHyperspace.getState().destination
   const transit = useCyberspace.getState().transit
-  if (destination === null || transit === null) return
+  // A boarding this session, or the chain head already on the line: after a
+  // ride you stand at a stop and the next ride chains from it (§4.3), with
+  // no second boarding; after a reload an enter-hyperspace head is still a
+  // boarding. Either gives the ride its `previous` and its seed.
+  const line = lineStateOf(useCyberspace.getState().actions())
+  if (destination === null || (transit === null && line === null)) return
+  const previousId = transit?.enterEventId ?? line!.previousId
   const destStop = getStopByHeight(destination)
   if (destStop === undefined) {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
     return
   }
-  // §4.2: the station is evaluated over stops with height <= the destination
-  // height, so it only becomes a fact of the trip once the destination is
-  // fixed. Recompute it here, with the same function the panel's estimate
-  // uses, rather than trusting anything cached from before the choice.
   const { position, plane } = useCyberspace.getState()
-  const here = xyzToCoord(position.x, position.y, position.z, plane)
-  // DECK-0001 v3 §4.2 (as amended): the station set is bounded by a declared
-  // as_of height, not the destination. Declare the tip we synced, so the
-  // station is the genuine nearest stop; the bound rides in the event.
-  const asOf = useHyperspace.getState().tipHeight
-  if (asOf === null || asOf < destination) {
-    useRideRun.setState({ error: 'The line is not synced past the destination yet.', progress: null })
-    return
-  }
-  const station = findStation(getStopIndex(), here, asOf)
-  if (station === null) {
-    useRideRun.setState({ error: 'No station: no stop at or below the destination height' })
-    return
+  // Chained from a stop: the ride starts where the last one ended, and the
+  // station set bound is not declared, because no station is computed (§5.2).
+  let fromHeight: number
+  let asOf: number | undefined
+  if (line !== null && line.fromHeight !== null) {
+    fromHeight = line.fromHeight
+    asOf = undefined
+  } else {
+    // §4.2: the station is evaluated over stops with height <= the destination
+    // height, so it only becomes a fact of the trip once the destination is
+    // fixed. Recompute it here, with the same function the panel's estimate
+    // uses, rather than trusting anything cached from before the choice.
+    const here = xyzToCoord(position.x, position.y, position.z, plane)
+    // DECK-0001 v3 §4.2 (as amended): the station set is bounded by a declared
+    // as_of height, not the destination. Declare the tip we synced, so the
+    // station is the genuine nearest stop; the bound rides in the event.
+    const tip = useHyperspace.getState().tipHeight
+    if (tip === null || tip < destination) {
+      useRideRun.setState({ error: 'The line is not synced past the destination yet.', progress: null })
+      return
+    }
+    const station = findStation(getStopIndex(), here, tip)
+    if (station === null) {
+      useRideRun.setState({ error: 'No station: no stop at or below the destination height' })
+      return
+    }
+    fromHeight = station.stop.height
+    asOf = tip
   }
   // Every passed block's hash seeds its leaf work (§5.3); a gap means the
   // sync has not covered that stretch of the line yet. A zero-length ride
   // (station is the destination) passes nothing and is valid (§5.6).
   const blocks: Array<{ height: number; blockHash: string }> = []
-  for (const height of rideBlocks(station.stop.height, destination)) {
+  for (const height of rideBlocks(fromHeight, destination)) {
     const blockHash = getStopByHeight(height)?.blockHash
     if (!blockHash) {
       useRideRun.setState({ error: `Block ${height} has no hash in the index yet; let the sync finish` })
@@ -134,7 +151,7 @@ export async function startRide(): Promise<void> {
   useRideRun.setState({
     error: null,
     progress: { done: 0, total: blocks.length, etaMs: null },
-    path: { fromHeight: station.stop.height, toHeight: destination },
+    path: { fromHeight, toHeight: destination },
   })
   // The ride is a spectacle: pull back to the whole cube so the path can be
   // watched threading through it (RidePath). RETURN undoes the seat; the
@@ -149,14 +166,14 @@ export async function startRide(): Promise<void> {
   )
   try {
     const { rootHex, mp } = await computeRideProof(
-      { previousEventIdHex: transit.enterEventId, blocks },
+      { previousEventIdHex: previousId, blocks },
       (p) => useRideRun.setState({ progress: p }),
       controller.signal,
     )
     await useCyberspace.getState().completeRide({
       asOf,
       toCoordHex: coordToHex(stopCoordExact(destStop)),
-      fromHeight: station.stop.height,
+      fromHeight,
       toHeight: destination,
       rootHex,
       mp,
@@ -181,9 +198,16 @@ export function HyperspacePanel(): JSX.Element {
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const destination = useHyperspace((s) => s.destination)
   const transit = useCyberspace((s) => s.transit)
+  const events = useCyberspace((s) => s.events)
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
   const atHead = useCyberspace((s) => s.atHead())
+  // Where the chain head already puts you: boarded (an enter-hyperspace head)
+  // or at a stop (a hyperjump head). Neither needs a BOARD.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const line = useMemo(() => lineStateOf(useCyberspace.getState().actions()), [events])
+  const atStop = line !== null && line.fromHeight !== null
+  const onLine = transit !== null || line !== null
   const progress = useRideRun((s) => s.progress)
   const rideError = useRideRun((s) => s.error)
   const ready = sync.status === 'ready'
@@ -216,12 +240,16 @@ export function HyperspacePanel(): JSX.Element {
   // you get (§4.2 binds the station to the destination height).
   const estimate = useMemo(() => {
     if (destination === null) return null
+    // From a stop, the ride starts at the stop; no station is involved.
+    if (line !== null && line.fromHeight !== null) {
+      return { from: line.fromHeight, fromLabel: 'At block', length: rideBlocks(line.fromHeight, destination).length }
+    }
     const here = xyzToCoord(position.x, position.y, position.z, plane)
     const asOf = useHyperspace.getState().tipHeight
     const station = findStation(getStopIndex(), here, Math.max(asOf ?? destination, destination))
     if (station === null) return null
-    return { station, length: rideBlocks(station.stop.height, destination).length }
-  }, [destination, position, plane, indexVersion])
+    return { from: station.stop.height, fromLabel: 'Station', length: rideBlocks(station.stop.height, destination).length }
+  }, [destination, position, plane, indexVersion, line])
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
   const tag = ready ? `READY ${stopCount()} BLOCKS`
@@ -301,8 +329,8 @@ export function HyperspacePanel(): JSX.Element {
               {estimate && (
                 <>
                   <div>
-                    <dt>Station</dt>
-                    <dd>{estimate.station.stop.height}</dd>
+                    <dt>{estimate.fromLabel}</dt>
+                    <dd>{estimate.from}</dd>
                   </div>
                   <div>
                     <dt>Ride length</dt>
@@ -345,15 +373,21 @@ export function HyperspacePanel(): JSX.Element {
       )}
 
       <div className="hyper__actions">
-        <button
-          className="hyper__btn"
-          disabled={!atHead || !ready || destination === null}
-          onClick={() => void useCyberspace.getState().boardHyperspace()}
-        >BOARD</button>
+        {/* BOARD only when the chain head is off the line. After a ride you
+            stand at a stop and the next ride chains from it (§4.3); a second
+            enter-hyperspace there is a needless event, and the panel used to
+            demand one. */}
+        {!onLine && (
+          <button
+            className="hyper__btn"
+            disabled={!atHead || !ready || destination === null}
+            onClick={() => void useCyberspace.getState().boardHyperspace()}
+          >BOARD</button>
+        )}
         {progress === null ? (
           <button
             className="hyper__btn hyper__btn--ride"
-            disabled={transit === null || destination === null || !ready}
+            disabled={!onLine || destination === null || !ready || (transit === null && !atHead)}
             onClick={() => void startRide()}
           >RIDE</button>
         ) : (
@@ -363,12 +397,15 @@ export function HyperspacePanel(): JSX.Element {
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
-      {transit === null && progress === null && (
+      {!onLine && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
         ) : destination === null ? null : !atHead ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR AVATAR: RETURN TO IT FIRST</p>
         ) : null
+      )}
+      {atStop && progress === null && (
+        <p className="hyper__why">ON THE LINE AT BLOCK {line!.fromHeight}: PICK A BLOCK AND RIDE, OR HOP TO LEAVE</p>
       )}
       <button
         className="hyper__btn hyper__btn--earth"

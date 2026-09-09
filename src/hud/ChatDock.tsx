@@ -12,7 +12,7 @@
  * talking is heard.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { MessageSquare, SendHorizontal, Trash2, Volume2, VolumeX, ChevronDown } from 'lucide-react'
 import { useChat, sendKey, type ChatLine } from '../store/useChat'
 import { useCyberspace } from '../store/useCyberspace'
@@ -33,11 +33,11 @@ function whenLabel(at: number, now: number): string {
   return `${Math.floor(s / 86400)}d`
 }
 
-function Line({ line, now }: { line: ChatLine; now: number }): JSX.Element {
+function Line({ line, now, here }: { line: ChatLine; now: number; here: boolean }): JSX.Element {
   const profile = useProfile(line.from)
   const name = line.mine ? 'you' : (profile?.name ?? line.from.slice(0, 8))
   return (
-    <li className={`chat__line ${line.mine ? 'is-mine' : ''}`}>
+    <li className={`chat__line ${line.mine ? 'is-mine' : ''} ${here ? '' : 'is-elsewhere'}`}>
       <ProfilePic pubkey={line.from} size={22} />
       <div className="chat__body">
         <span className="chat__meta">
@@ -125,7 +125,16 @@ export function ChatDock(): JSX.Element {
             Nothing said here yet. A line reaches everyone standing in the same {key ? `2^${key.height}` : ''} cube, and the relay keeps none of it.
           </li>
         )}
-        {shown.map((l) => <Line key={l.id} line={l} now={now} />)}
+        {shown.map((l, i) => (
+          <Fragment key={l.id}>
+            {/* The room changed: a rule with the new room's size, so a log
+                that spans your walk still says which room each line was in. */}
+            {(i === 0 || shown[i - 1].region !== l.region) && shown.length > 0 && (i > 0 || (key && l.region !== key.lookupId)) && (
+              <li className="chat__divider" aria-hidden="true"><span>{l.region === key?.lookupId ? 'HERE' : `ANOTHER 2^${l.height}`}</span></li>
+            )}
+            <Line line={l} now={now} here={!key || l.region === key.lookupId} />
+          </Fragment>
+        ))}
       </ul>
 
       <form

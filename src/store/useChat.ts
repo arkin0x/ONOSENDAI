@@ -141,7 +141,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const now = Math.floor(Date.now() / 1000)
     try {
       set({ sendStatus: 'signing', sendError: null })
-      const inner = await cyber.signEvent(chatInnerTemplate(text, cyber.position, cyber.plane, now))
+      const inner = await cyber.signEvent(chatInnerTemplate(text, cyber.position, cyber.plane, now, key.lookupId))
       set({ sendStatus: 'sending' })
       const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
       const result = await publishMany(relaySet(), outer)
@@ -163,7 +163,9 @@ export const useChat = create<ChatState>((set, get) => ({
   receive: async (outer) => {
     const region = outer.tags.find((t) => t[0] === 'd')?.[1]
     if (!region) return
-    const key = useSecrets.getState().current[region]
+    // Your own cube, or one of the 26 around it: a line said across the wall.
+    const secrets = useSecrets.getState()
+    const key = secrets.current[region] ?? secrets.neighbors[region]
     if (!key) return
     const inners = await chatInners(outer, hexToBytes(key.keyHex))
     if (inners.length === 0) return

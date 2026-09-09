@@ -23,17 +23,26 @@ import {
   type BlobColumns,
   type ChainState,
 } from '../lib/hyperspace/headers'
-import type { HeadersManifest } from '../lib/hyperspace/headerSync'
+import { shouldSkipBlob, type HeadersManifest } from '../lib/hyperspace/headerSync'
 
 export interface HeadersRequest {
   type: 'sync'
   manifest: HeadersManifest
   manifestUrl: string
+  /**
+   * Inclusive height ranges the page already holds (its cache). A blob that
+   * touches one is not downloaded or verified; the chain state is dropped
+   * across it and the next blob re-seeds from its checkpoint, exactly as
+   * after a discarded blob. This is what turns a warm boot from two million
+   * hashes into none.
+   */
+  skip?: Array<[number, number]>
 }
 
 export type HeadersResponse =
   | { type: 'progress'; startHeight: number; verified: number; count: number }
   | { type: 'blob'; columns: BlobColumns }
+  | { type: 'blob-skipped'; startHeight: number; count: number }
   | { type: 'blob-failed'; startHeight: number; count: number; reason: string }
   | { type: 'done' }
 
@@ -101,7 +110,7 @@ function post(msg: HeadersResponse, transfer?: Transferable[]): void {
 }
 
 self.onmessage = async (event: MessageEvent<HeadersRequest>) => {
-  const { manifest, manifestUrl } = event.data
+  const { manifest, manifestUrl, skip = [] } = event.data
   const embedded = new Map(EMBEDDED_CHECKPOINTS.map((c) => [c.height, c.blockHash]))
   const manifestCp = new Map(manifest.checkpoints.map((c) => [c.height, c.blockHash]))
 
@@ -113,6 +122,13 @@ self.onmessage = async (event: MessageEvent<HeadersRequest>) => {
     const fail = (reason: string): void => {
       post({ type: 'blob-failed', startHeight: blob.startHeight, count: blob.count, reason })
       state = null
+    }
+    if (shouldSkipBlob(blob, skip)) {
+      // Already held: nothing to download or verify. Its final hash cannot
+      // seed the next blob's linkage, so that one re-seeds from a checkpoint.
+      post({ type: 'blob-skipped', startHeight: blob.startHeight, count: blob.count })
+      state = null
+      continue
     }
     const finalHeight = blob.startHeight + blob.count - 1
     const finalHashHex = manifestCp.get(finalHeight)

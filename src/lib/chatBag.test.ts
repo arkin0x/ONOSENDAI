@@ -6,7 +6,7 @@ const key = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
 const at = { x: 1n << 40n, y: 5n, z: 9n }
 
 async function said(text: string, sk = generateSecretKey()) {
-  const inner = finalizeEvent(chatInnerTemplate(text, at, 0, 1_700_000_000), sk)
+  const inner = finalizeEvent(chatInnerTemplate(text, at, 0, 1_700_000_000, 'aa'.repeat(32)), sk)
   const outer = finalizeEvent(await bagTemplate([inner], key, 'aa'.repeat(32), 12, 1_700_000_000, CHAT_BAG_KIND), sk)
   return { inner, outer, sk }
 }
@@ -39,7 +39,7 @@ describe('the ephemeral envelope', () => {
   it('refuses a line wrapped by someone who did not sign it', async () => {
     const speaker = generateSecretKey()
     const wrapper = generateSecretKey()
-    const inner = finalizeEvent(chatInnerTemplate('not mine to carry', at, 0, 1), speaker)
+    const inner = finalizeEvent(chatInnerTemplate('not mine to carry', at, 0, 1, 'bb'.repeat(32)), speaker)
     const outer = finalizeEvent(await bagTemplate([inner], key, 'bb'.repeat(32), 12, 1, CHAT_BAG_KIND), wrapper)
     expect(getPublicKey(speaker)).not.toBe(outer.pubkey)
     expect(await chatInners(outer, key)).toHaveLength(0)
@@ -54,8 +54,18 @@ describe('the ephemeral envelope', () => {
     expect(await chatInners(stored, key)).toHaveLength(0)
   })
 
+  it('names its room on the inner event, the way other clients file a room', async () => {
+    const { inner } = await said('where am i')
+    expect(inner.tags.find((t) => t[0] === 'd')?.[1]).toBe('aa'.repeat(32))
+  })
+
+  it('a line said one cube over opens with that cube\'s key', async () => {
+    const { outer } = await said('across the wall')
+    expect(await chatInners(outer, key)).toHaveLength(1)
+  })
+
   it('caps a line at the chat length', () => {
-    const t = chatInnerTemplate('x'.repeat(2000), at, 0, 1)
+    const t = chatInnerTemplate('x'.repeat(2000), at, 0, 1, 'aa'.repeat(32))
     expect(t.content).toHaveLength(500)
   })
 })

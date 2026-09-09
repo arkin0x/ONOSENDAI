@@ -56,7 +56,7 @@ describe('receiving', () => {
 
   it('opens an envelope from someone else, unfolds the dock and keeps the line', async () => {
     const sk = generateSecretKey()
-    const inner = finalizeEvent(chatInnerTemplate('anyone around?', { x: 1n, y: 2n, z: 3n }, 0, 1_700_000_100), sk)
+    const inner = finalizeEvent(chatInnerTemplate('anyone around?', { x: 1n, y: 2n, z: 3n }, 0, 1_700_000_100, region), sk)
     const outer = finalizeEvent(await bagTemplate([inner], regionKey, region, 12, 1_700_000_100, CHAT_BAG_KIND), sk)
     await useChat.getState().receive(outer)
     const s = useChat.getState()
@@ -66,9 +66,20 @@ describe('receiving', () => {
     expect(JSON.parse(localStorage.getItem('onosendai:chat') ?? '[]')).toHaveLength(1)
   })
 
+  it('opens an envelope from a neighboring cube with that cube\'s key', async () => {
+    const other = 'ff'.repeat(32)
+    useSecrets.setState({ neighbors: { [other]: { keyHex: bytesToHex(regionKey), height: 12 } } })
+    const sk = generateSecretKey()
+    const inner = finalizeEvent(chatInnerTemplate('over the wall', { x: 1n, y: 2n, z: 3n }, 0, 5, other), sk)
+    const outer = finalizeEvent(await bagTemplate([inner], regionKey, other, 12, 5, CHAT_BAG_KIND), sk)
+    await useChat.getState().receive(outer)
+    expect(useChat.getState().lines.map((l) => l.text)).toEqual(['over the wall'])
+    useSecrets.setState({ neighbors: {} })
+  })
+
   it('ignores an envelope for a region it has no key for', async () => {
     const sk = generateSecretKey()
-    const inner = finalizeEvent(chatInnerTemplate('elsewhere', { x: 1n, y: 2n, z: 3n }, 0, 1), sk)
+    const inner = finalizeEvent(chatInnerTemplate('elsewhere', { x: 1n, y: 2n, z: 3n }, 0, 1, 'ee'.repeat(32)), sk)
     const outer = finalizeEvent(await bagTemplate([inner], regionKey, 'ee'.repeat(32), 12, 1, CHAT_BAG_KIND), sk)
     await useChat.getState().receive(outer)
     expect(useChat.getState().lines).toHaveLength(0)
@@ -78,7 +89,7 @@ describe('receiving', () => {
   it('does not unfold for your own echo', async () => {
     const sk = generateSecretKey()
     useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: getPublicKey(sk) } })
-    const inner = finalizeEvent(chatInnerTemplate('me', { x: 1n, y: 2n, z: 3n }, 0, 2), sk)
+    const inner = finalizeEvent(chatInnerTemplate('me', { x: 1n, y: 2n, z: 3n }, 0, 2, region), sk)
     const outer = finalizeEvent(await bagTemplate([inner], regionKey, region, 12, 2, CHAT_BAG_KIND), sk)
     await useChat.getState().receive(outer)
     expect(useChat.getState().lines[0]?.mine).toBe(true)
@@ -87,7 +98,7 @@ describe('receiving', () => {
 
   it('the same envelope twice is one line', async () => {
     const sk = generateSecretKey()
-    const inner = finalizeEvent(chatInnerTemplate('once', { x: 1n, y: 2n, z: 3n }, 0, 3), sk)
+    const inner = finalizeEvent(chatInnerTemplate('once', { x: 1n, y: 2n, z: 3n }, 0, 3, region), sk)
     const outer = finalizeEvent(await bagTemplate([inner], regionKey, region, 12, 3, CHAT_BAG_KIND), sk)
     await useChat.getState().receive(outer)
     await useChat.getState().receive(outer)

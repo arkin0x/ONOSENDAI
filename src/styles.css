@@ -5717,3 +5717,16 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .presence.is-arrival { animation: none; border-color: var(--accent, #00e5ff); }
 }
+
+/* A line said in another room is still yours to read, dimmer; a rule marks
+ * where the room changed as you walked. */
+.chat__line.is-elsewhere { opacity: 0.55; }
+.chat__divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+.chat__divider::before, .chat__divider::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }

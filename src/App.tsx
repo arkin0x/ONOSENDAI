@@ -23,6 +23,8 @@ import { TouchControls } from './hud/TouchControls'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
+import { PresenceChip } from './hud/PresenceChip'
+import { startPresence } from './store/usePresence'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { useKeyboard } from './hooks/useKeyboard'
@@ -53,7 +55,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
@@ -167,6 +169,7 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
+          <PresenceChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />

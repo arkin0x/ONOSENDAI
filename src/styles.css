@@ -5417,3 +5417,33 @@ kbd {
 }
 
 .secrets__sort .login__label { margin-right: 2px; }
+
+/* ---------- Presence: who is in this sector ---------- */
+.presence { pointer-events: auto; flex-direction: column; align-items: stretch; gap: 0; }
+.presence__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.presence__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.presence__row { display: flex; align-items: center; gap: 8px; }
+.presence__who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.presence__name { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presence__meta { font-size: 9px; color: var(--dim); letter-spacing: 0.08em; }
+.presence__target { padding: 2px 8px; font-size: 8px; }

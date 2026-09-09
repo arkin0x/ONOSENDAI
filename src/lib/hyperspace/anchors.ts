@@ -298,6 +298,11 @@ let db: IDBDatabase | null = null
 let covered: Array<[number, number]> = []
 /** Verified header-blob ranges, this session only (see the header comment). */
 let blobCovered: Array<[number, number]> = []
+/** What the adopted snapshot holds; its rows are in the index, not in IDB. */
+let snapshotCovered: Array<[number, number]> = []
+
+/** How the last boot's header phase went, for the HUD and for tests. */
+export const syncStats = { blobsVerified: 0, blobsSkipped: 0, skippedHeights: 0, cacheCovered: [] as Array<[number, number]> }
 /** Rows delivered by verified blobs, for the source label. */
 let blobRows = 0
 /** Index size and wall clock at the last snapshot write (or adoption), the
@@ -415,6 +420,10 @@ function persistTip(tip: number): void {
 function effectiveCovered(): Array<[number, number]> {
   let out = covered
   for (const range of blobCovered) out = mergeCovered(out, range)
+  // The snapshot's rows were pruned from IDB (they came from blobs), so
+  // `covered` alone under-reports what the index holds; without this a warm
+  // boot would ask the relay for every height the snapshot already has.
+  for (const range of snapshotCovered) out = mergeCovered(out, range)
   return out
 }
 
@@ -482,6 +491,7 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
     if (validSnapshotMeta(snapMeta) && adoptSnapshot(anchorIndex, snapMeta.snapshot)) {
       adopted = anchorIndex.size - before
       coveredAtSnapshot = snapMeta.coveredAtSnapshot
+      snapshotCovered = coveredAtSnapshot
       snapshotSize = anchorIndex.size
       snapshotAt = Date.now()
       cb.onLoaded(anchorIndex.size)
@@ -633,11 +643,17 @@ async function pruneBlobCovered(): Promise<void> {
 }
 
 /**
- * The whole pipeline: verified header blobs first (when the manifest is
- * reachable), then the IndexedDB replay of relay-cached rows, then the
- * batched relay backfill of whatever is left with a 30 s retry, then the
- * live tail. Runs once per page; the store's startSync is the idempotence
- * gate, this flag is just belt and braces.
+ * The whole pipeline: the cache first (the persisted snapshot, then the
+ * IndexedDB replay of relay-cached rows), then verified header blobs for
+ * only the heights the cache does not hold (when the manifest is reachable),
+ * then the batched relay backfill of whatever is left with a 30 s retry,
+ * then the live tail. Runs once per page; the store's startSync is the
+ * idempotence gate, this flag is just belt and braces.
+ *
+ * Blobs used to run before the cache, so every boot re-verified two million
+ * headers and the panel showed a full resync on each launch. The cache is a
+ * cheaper, already-verified copy of the same rows: it goes first, and the
+ * blob phase is told what it holds.
  */
 export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
   if (running) return
@@ -666,19 +682,30 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
     } catch { /* cache read is best effort */ }
   }
 
+  try {
+    await loadCache(cb)
+  } catch {
+    // A corrupt cache is not fatal: whatever validated is in the index, and
+    // the network stage re-fetches anything the cache failed to deliver.
+  }
+  // Everything the cache delivered, snapshot and rows: the blob phase skips
+  // any blob touching it, and the relay phase treats it as done.
+  syncStats.cacheCovered = effectiveCovered()
+
   // Header-blob phase. fetchManifest never throws; null means the relay owns
   // everything this session.
   const mf = await fetchManifest()
   if (mf) {
     cb.onSource('blobs')
     setStatus(cb, 'syncing')
-    knownTip = mf.manifest.generatedAtHeight
+    knownTip = Math.max(mf.manifest.generatedAtHeight, knownTip ?? 0)
     cb.onTip(knownTip)
     persistTip(knownTip)
     const result = await runHeaderSync(mf.manifest, mf.url, {
       onProgress: (_startHeight, verified) => cb.onLoaded(anchorIndex.size + verified),
       onColumns: (cols) => {
         blobRows += appendColumns(anchorIndex, cols)
+        syncStats.blobsVerified += 1
         cb.onLoaded(anchorIndex.size)
         scheduleBump(cb)
         pumpMerge(cb)
@@ -688,18 +715,19 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
           `[hyperspace] header blob ${startHeight}..${startHeight + count - 1} discarded: ${reason}; falling back to relay sync for that range`,
         )
       },
-    })
+    }, syncStats.cacheCovered)
     blobCovered = result.covered
+    syncStats.blobsSkipped = result.skipped
+    syncStats.skippedHeights = result.skippedHeights
+    // Skipped blobs are blob-sourced rows the cache carried over; the source
+    // label should not call a warm boot "relay" for holding them.
+    blobRows += result.skippedHeights
+    if (result.skipped > 0) {
+      console.info(`[hyperspace] header phase: ${result.skipped} blobs (${result.skippedHeights} heights) already in the cache, ${result.covered.length} verified`)
+    }
     announceSource(cb)
   } else {
     cb.onSource('relay')
-  }
-
-  try {
-    await loadCache(cb)
-  } catch {
-    // A corrupt cache is not fatal: whatever validated is in the index, and
-    // the network stage re-fetches anything the cache failed to deliver.
   }
 
   for (;;) {
@@ -739,4 +767,12 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
 
   startTail(cb)
   void pruneBlobCovered()
+}
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __anchors: { stats: typeof syncStats; size: () => number; status: () => string } }).__anchors = {
+    stats: syncStats,
+    size: () => anchorIndex.size,
+    status: () => currentStatus,
+  }
 }

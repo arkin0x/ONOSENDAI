@@ -151,6 +151,31 @@ export interface HeaderSyncHandlers {
 export interface HeaderSyncResult {
   /** Verified inclusive height ranges, ascending, one per delivered blob. */
   covered: Array<[number, number]>
+  /** Blobs the caller asked to skip because it already held their heights. */
+  skipped: number
+  /** Heights those skipped blobs would have delivered. */
+  skippedHeights: number
+}
+
+/** Whether an inclusive range touches any of a sorted, merged covered list. */
+export function overlapsCovered(covered: Array<[number, number]>, range: [number, number]): boolean {
+  for (const [start, end] of covered) {
+    if (end < range[0]) continue
+    if (start > range[1]) return false
+    return true
+  }
+  return false
+}
+
+/**
+ * Whether a blob is not worth verifying: any of its heights is already held.
+ * A blob that only partly overlaps is skipped whole rather than verified and
+ * then dropped, because the index refuses a column set with a duplicate
+ * height; the few heights beyond the overlap are the relay backfill's, which
+ * is exactly where a partial blob's remainder went before blobs existed.
+ */
+export function shouldSkipBlob(blob: ManifestBlob, skip: Array<[number, number]>): boolean {
+  return overlapsCovered(skip, [blob.startHeight, blob.startHeight + blob.count - 1])
 }
 
 /**
@@ -162,15 +187,19 @@ export function runHeaderSync(
   manifest: HeadersManifest,
   url: string,
   handlers: HeaderSyncHandlers,
+  /** Heights already held: blobs touching these are not verified again. */
+  skip: Array<[number, number]> = [],
 ): Promise<HeaderSyncResult> {
   return new Promise((resolve) => {
     const worker = new Worker(new URL('../../workers/headers.worker.ts', import.meta.url), {
       type: 'module',
     })
     const covered: Array<[number, number]> = []
+    let skipped = 0
+    let skippedHeights = 0
     const finish = (): void => {
       worker.terminate()
-      resolve({ covered })
+      resolve({ covered, skipped, skippedHeights })
     }
     worker.onmessage = (event: MessageEvent<HeadersResponse>) => {
       const msg = event.data
@@ -179,6 +208,9 @@ export function runHeaderSync(
       } else if (msg.type === 'blob') {
         covered.push([msg.columns.startHeight, msg.columns.startHeight + msg.columns.count - 1])
         handlers.onColumns(msg.columns)
+      } else if (msg.type === 'blob-skipped') {
+        skipped += 1
+        skippedHeights += msg.count
       } else if (msg.type === 'blob-failed') {
         handlers.onBlobFailed(msg.startHeight, msg.count, msg.reason)
       } else {
@@ -191,7 +223,7 @@ export function runHeaderSync(
       console.warn('[hyperspace] headers worker failed:', event.message)
       finish()
     }
-    const request: HeadersRequest = { type: 'sync', manifest, manifestUrl: url }
+    const request: HeadersRequest = { type: 'sync', manifest, manifestUrl: url, skip }
     worker.postMessage(request)
   })
 }

@@ -16,7 +16,7 @@
  */
 
 import { create } from 'zustand'
-import { lineStateOf } from '../lib/hyperspace/ride'
+import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -235,9 +235,43 @@ export interface ChainStats {
   totalHashes: number
   /** Cumulative proof compute time. */
   totalMs: number
+  /** Completed hyperjumps (DECK-0001 rides), from the chain's own events. */
+  hyperjumps: number
+  /** Blocks those rides passed, summed; the ride proof's unit of work. */
+  blocksRidden: number
 }
 
-const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 }
+const EMPTY_STATS: ChainStats = { hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0, hyperjumps: 0, blocksRidden: 0 }
+
+/**
+ * Respawns are a fact about the identity, not the chain: each one starts a
+ * new chain and the old events leave the store, so the count lives beside
+ * the identity in storage rather than in the chain's stats.
+ */
+const RESPAWNS_KEY = 'onosendai:respawns'
+
+function respawnTable(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(RESPAWNS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function loadRespawns(pubkey: string): number {
+  const v = respawnTable()[pubkey]
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+export function addRespawn(pubkey: string): number {
+  const table = respawnTable()
+  const next = loadRespawns(pubkey) + 1
+  table[pubkey] = next
+  try { localStorage.setItem(RESPAWNS_KEY, JSON.stringify(table)) } catch { /* storage unavailable: the number is still in memory */ }
+  return next
+}
 
 /**
  * The cloud flow's stations. `quoting` covers every exchange before there is
@@ -367,6 +401,8 @@ export interface CyberspaceState {
   plan: MovePlan | null
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
   spentMsats: number
+  /** How many times this identity has respawned; each one began a new chain. */
+  respawns: number
   /**
    * The plane the next commit lands in. Part of the lined-up action, like the
    * cursor: toggling it costs nothing until committed, and a commit with the
@@ -903,7 +939,9 @@ function derive(saved: PersistedChain): {
     genesisId: actions[0].id,
     prevEventId: head.id,
     published,
-    chain: saved.stats,
+    // Rides are counted from the events, so an adopted chain reads the same
+    // as one ridden here; the local measurements stay what was saved.
+    chain: { ...saved.stats, ...rideStatsOf(actions) },
     position: head.position,
     positionHistory: actions.map((a) => a.position),
     plane: head.plane,
@@ -1391,6 +1429,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       pendingTarget: null,
       plan: null,
       spentMsats: loadSpent(base.genesisId),
+      respawns: loadRespawns(signer.pubkey),
       proof: IDLE_PROOF,
       publishError: null,
       spectate: null,
@@ -1430,6 +1469,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   pendingTarget: null,
   plan: null,
   spentMsats: loadSpent(initial.genesisId),
+  respawns: loadRespawns(pubkeyHex),
   scaleExp: 0,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
@@ -1806,6 +1846,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     const now = get()
     const stats: ChainStats = {
+      // Rides are counted from the events (rideStatsOf), untouched here.
+      ...now.chain,
       hops: now.chain.hops + (msg.mode === 'hop' ? 1 : 0),
       sidesteps: now.chain.sidesteps + (msg.mode === 'sidestep' ? 1 : 0),
       totalOps: now.chain.totalOps + (msg.mode === 'hop' ? msg.totalOps : 0),
@@ -1905,6 +1947,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       proof: IDLE_PROOF,
       publishError: null,
       spentMsats: loadSpent(fresh.genesisId),
+      respawns: addRespawn(get().identity.pubkey),
       cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
     })
     saveChain(fresh.events, fresh.published, fresh.chain)
@@ -2082,10 +2125,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     const newPosition: Position = { x: dest.x, y: dest.y, z: dest.z }
     const published: Record<string, PublishStatus> = { ...get().published, [event.id]: 'queued' }
     const nextEvents = [...get().events, event]
+    const chain: ChainStats = { ...get().chain, ...rideStatsOf(buildChain(nextEvents)) }
     set({
       events: nextEvents,
       prevEventId: event.id,
       published,
+      chain,
       position: newPosition,
       cursor: { ...newPosition },
       plane: dest.plane,

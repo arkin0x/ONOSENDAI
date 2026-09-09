@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../events'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf } from './ride'
+import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from './ride'
 
 const PREV = 'ab'.repeat(32)
 
@@ -242,5 +242,32 @@ describe('lineStateOf: what the chain head says about the line', () => {
 
   it('a hop after a hyperjump leaves the line', () => {
     expect(lineStateOf([action({ type: 'hyperjump', toHeight: 398 }), action({ type: 'hop' })])).toBeNull()
+  })
+})
+
+describe('rideStatsOf: what the chain has ridden', () => {
+  const act = (over: Partial<ActionEvent>): ActionEvent => ({
+    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', coordHex: 'c'.repeat(64),
+    position: { x: 0n, y: 0n, z: 0n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0',
+    ...over,
+  })
+
+  it('is zero with no rides', () => {
+    expect(rideStatsOf([act({ type: 'spawn' }), act({ type: 'hop' })])).toEqual({ hyperjumps: 0, blocksRidden: 0 })
+  })
+
+  it('counts each hyperjump and the blocks it passed, whichever way it went', () => {
+    const chain = [
+      act({ type: 'spawn' }),
+      act({ type: 'enter-hyperspace' }),
+      act({ type: 'hyperjump', fromHeight: 100, toHeight: 398 }),
+      act({ type: 'hyperjump', fromHeight: 398, toHeight: 250 }),
+      act({ type: 'hop' }),
+    ]
+    expect(rideStatsOf(chain)).toEqual({ hyperjumps: 2, blocksRidden: 298 + 148 })
+  })
+
+  it('a zero-length ride counts as a ride that passed nothing', () => {
+    expect(rideStatsOf([act({ type: 'hyperjump', fromHeight: 50, toHeight: 50 })])).toEqual({ hyperjumps: 1, blocksRidden: 0 })
   })
 })

@@ -19,11 +19,18 @@ describe('respawn', () => {
     useCyberspace.setState({
       position: { ...SPAWN, x: SPAWN.x + 5n },
       cursor: { ...SPAWN, x: SPAWN.x + 9n },
-      chain: { hops: 3, sidesteps: 1, totalOps: 99, totalHashes: 7, totalMs: 12 },
+      chain: { hops: 3, sidesteps: 1, totalOps: 99, totalHashes: 7, totalMs: 12, hyperjumps: 2, blocksRidden: 400 },
     })
+    const respawnsBefore = before.respawns
 
     await useCyberspace.getState().respawn()
     const s = useCyberspace.getState()
+
+    // Each respawn is one more on the identity's count, and the new chain
+    // starts with no rides.
+    expect(s.respawns).toBe(respawnsBefore + 1)
+    expect(s.chain.hyperjumps).toBe(0)
+    expect(s.chain.blocksRidden).toBe(0)
 
     expect(s.events).toHaveLength(1)
     const spawn = parseAction(s.events[0])
@@ -37,7 +44,7 @@ describe('respawn', () => {
     expect(s.positionHistory).toEqual([SPAWN])
     expect(s.plane).toBe(spawn?.plane)
     expect(s.headPlane).toBe(spawn?.plane)
-    expect(s.chain).toEqual({ hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0 })
+    expect(s.chain).toEqual({ hops: 0, sidesteps: 0, totalOps: 0, totalHashes: 0, totalMs: 0, hyperjumps: 0, blocksRidden: 0 })
     expect(Object.keys(s.published)).toEqual([s.events[0].id])
     expect(s.published[s.events[0].id]).toBe('queued')
     expect(s.pendingTarget).toBeNull()

@@ -353,3 +353,22 @@ export function timeCalibrationSample(): { elapsedMs: number; pairs: number } {
   }
   return { elapsedMs: performance.now() - started, pairs: exactRidePairs(hashes) }
 }
+
+/**
+ * What the chain's rides add up to: how many hyperjumps, and how many blocks
+ * they passed between them (§5.3: the ride passes every block from the
+ * lower height exclusive to the higher inclusive, so a ride's length is the
+ * difference). Exact from the events themselves, which is why it is derived
+ * from the chain rather than tallied as proofs finish: an adopted chain has
+ * the same numbers as one ridden here.
+ */
+export function rideStatsOf(actions: ActionEvent[]): { hyperjumps: number; blocksRidden: number } {
+  let hyperjumps = 0
+  let blocksRidden = 0
+  for (const a of actions) {
+    if (a.type !== 'hyperjump' || a.fromHeight === undefined || a.toHeight === undefined) continue
+    hyperjumps += 1
+    blocksRidden += Math.abs(a.toHeight - a.fromHeight)
+  }
+  return { hyperjumps, blocksRidden }
+}

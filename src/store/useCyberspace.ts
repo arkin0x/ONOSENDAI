@@ -16,6 +16,7 @@
  */
 
 import { create } from 'zustand'
+import { lineStateOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -2049,12 +2050,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   completeRide: async (ride) => {
     const { events, genesisId, prevEventId, transit } = get()
-    if (!transit || !genesisId || !prevEventId) return
+    if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
     if (!head) return
-    // One ride per boarding for now; the spec allows chaining rides (§4.3) and
-    // the builder supports it, but the client boards fresh each time.
-    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit.enterCoordHex
+    // From a boarding, or chained from the stop the last ride reached (§4.3):
+    // either way the head is on the line, and `c` is its coordinate.
+    const line = lineStateOf(buildChain(events))
+    if (!transit && !line) return
+    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit?.enterCoordHex ?? line?.coordHex
+    if (!prevCoordHex) return
     const template = hyperjumpTemplate({
       createdAt: nextCreatedAt(head),
       genesisId,

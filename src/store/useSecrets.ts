@@ -67,6 +67,9 @@ interface SecretsState {
   keys: Record<string, HeldKey>
   /** The purchase in flight, or null. */
   buying: Buying | null
+  /** The region the list last sent you to look at: drawn bright, the rest dimmed. */
+  focused: string | null
+  focus: (lookupId: string | null) => void
   /** Why the last purchase did not happen. */
   buyError: string | null
   /** Note a key you now hold; keeps the one already held rather than replacing it. */
@@ -102,6 +105,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
   buying: null,
   buyError: null,
+  focused: null,
 
   hold: (incoming) => {
     if (incoming.length === 0) return
@@ -130,6 +134,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     set({ keys: {} })
     save({})
   },
+
+  focus: (lookupId) => set({ focused: lookupId }),
 
   buy: async (at, plane, height) => {
     if (get().buying) return false

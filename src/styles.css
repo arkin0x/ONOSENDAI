@@ -5353,3 +5353,50 @@ kbd {
   line-height: 1.5;
   color: var(--warn);
 }
+
+/* The Secrets button stands apart from the rows above and below it. */
+.proof__secrets {
+  display: flex;
+  padding: 10px 0;
+  margin: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A rule before the benchmark, which is a different subject from the controls. */
+.proof__rule {
+  height: 0;
+  margin: 10px 0 6px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* The Secrets modal's head: title, count, and the way out on the right. */
+.secrets__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__close { margin-left: auto; }
+
+.secrets__gap { flex: 1 1 auto; }
+
+.secrets__forget-all {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 3px;
+}
+
+.secrets__dims {
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.secrets__scan:disabled { opacity: 0.6; }

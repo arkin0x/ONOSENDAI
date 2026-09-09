@@ -240,7 +240,7 @@ export function ProofPanel(): JSX.Element {
 
       {/* What COMMIT does with a route: its first step, or all of them. */}
       <div className="proof__mode" role="radiogroup" aria-label="What commit runs">
-        <span className="login__label">Commit runs</span>
+        <span className="login__label">COMMIT BUTTON ACTION:</span>
         <div className="cloud__modes">
           {MOVE_MODES.map(([mode, label, title]) => (
             <button
@@ -260,6 +260,8 @@ export function ProofPanel(): JSX.Element {
             : 'One step per press: the one the button names. The cursor stays where it is, so the next press takes the next step.'}
         </span>
       </div>
+
+      <hr className="proof__rule" />
 
       <p className="legend__note">
         THIS MACHINE BENCHMARK

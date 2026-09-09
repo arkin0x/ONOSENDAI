@@ -19,6 +19,7 @@ import { formatCellSize } from '../lib/scale'
 import { formatAgo } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets, bytesOf, heldList, type HeldKey } from '../store/useSecrets'
+import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
@@ -29,6 +30,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const discovered = useShards((s) => s.discovered)
   const showSecrets = useCyberspace((s) => s.showSecrets)
   const [forgetAll, setForgetAll] = useState(false)
+  const [scanning, setScanning] = useState<string | null>(null)
+  const [scanned, setScanned] = useState<Record<string, number>>({})
 
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -65,22 +68,32 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   }, [discovered])
 
   const go = (k: HeldKey): void => {
-    // The region's own corner, in its own plane, at a scale where it fits.
-    const at = { x: BigInt(k.base.x), y: BigInt(k.base.y), z: BigInt(k.base.z) }
+    // The middle of the region, not its corner: looking at a corner puts the
+    // thing you asked about at the edge of the screen and everything else in
+    // the middle. Half a side along each axis, per axis, because a movement's
+    // region is a box.
+    const mid = (axis: 'x' | 'y' | 'z'): bigint => {
+      const h = BigInt(k.heights ? k.heights[axis] : k.height)
+      return BigInt(k.base[axis]) + (1n << h) / 2n
+    }
     onClose()
-    useCyberspace.getState().focusOn(at, k.plane, `REGION 2^${k.height}`, Math.max(0, k.height - 4))
+    useSecrets.getState().focus(k.lookupId)
+    useCyberspace.getState().focusOn({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3))
   }
 
   return createPortal(
     <div className="modal" role="dialog" aria-label="Secrets" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
-        <header className="panel__head">
+        <header className="panel__head secrets__head">
           <h2><KeyRound size={14} strokeWidth={2.25} aria-hidden /> Secrets</h2>
           <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
+          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
         </header>
 
         <div className="secrets__summary">
           <span>{formatBytes(bytes)} on this device</span>
+          {list.length > 0 && <button className="secrets__forget-all" onClick={() => setForgetAll(true)}>FORGET ALL</button>}
+          <span className="secrets__gap" />
           <label className="secrets__toggle">
             <input
               type="checkbox"
@@ -123,10 +136,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                   <span className="secrets__where">
                     <KeyRound size={11} strokeWidth={2.25} aria-hidden />
-                    {k.heights && !(k.heights.x === k.heights.y && k.heights.y === k.heights.z)
-                      ? `2^${k.heights.x} × 2^${k.heights.y} × 2^${k.heights.z}`
-                      : `2^${k.height} · ${formatCellSize(k.height)}`}
+                    {sizeLabel(k)}
                   </span>
+                  {/* Every side, in real units: a region is a volume and one
+                      number could only ever be one of its edges. */}
+                  <span className="secrets__dims">{physicalSize(k)}</span>
                   <span className="secrets__meta">
                     {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : 'opened'} · {formatAgo(k.at, now)}
                     {found > 0 && <span className="secrets__found"> · {found} found</span>}
@@ -135,9 +149,17 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 </button>
                 <button
                   className="secrets__scan"
-                  onClick={() => { void useShards.getState().rescan(k.lookupId, k.keyHex) }}
+                  disabled={scanning === k.lookupId}
+                  onClick={() => {
+                    setScanning(k.lookupId)
+                    void useShards.getState().rescan(k.lookupId, k.keyHex).then((n) => {
+                      setScanning(null)
+                      setScanned((prev) => ({ ...prev, [k.lookupId]: n }))
+                      window.setTimeout(() => setScanned((prev) => { const next = { ...prev }; delete next[k.lookupId]; return next }), 6000)
+                    })
+                  }}
                   title="Ask the relay what is hidden in this region now"
-                >SCAN</button>
+                >{scanning === k.lookupId ? '…' : scanned[k.lookupId] !== undefined ? (scanned[k.lookupId] > 0 ? `+${scanned[k.lookupId]}` : 'NONE') : 'SCAN'}</button>
                 <button
                   className="targets__remove"
                   onClick={() => useSecrets.getState().forget(k.lookupId)}
@@ -166,10 +188,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           and one of side 2^27 is a hundred and thirty million.
         </Explanation>
 
-        <div className="modal__actions">
-          {list.length > 0 && <button className="avatars__go" onClick={() => setForgetAll(true)}>FORGET ALL</button>}
-          <button className="avatars__go" onClick={onClose}>CLOSE</button>
-        </div>
+
       </div>
 
       {forgetAll && (
@@ -184,6 +203,14 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     </div>,
     document.body,
   )
+}
+
+/** Every side of the region in real units, so "how big" has a whole answer. */
+function physicalSize(k: HeldKey): string {
+  if (!k.heights || (k.heights.x === k.heights.y && k.heights.y === k.heights.z)) {
+    return `${formatCellSize(k.height)} on every side`
+  }
+  return `${formatCellSize(k.heights.x)} × ${formatCellSize(k.heights.y)} × ${formatCellSize(k.heights.z)}`
 }
 
 function formatBytes(n: number): string {

@@ -39,6 +39,22 @@ interface Props {
  * along X alone unlocks 2^7 × 2^0 × 2^0, a bar seven doublings long and one
  * gibson through, which is a different thing from a cube of side 2^7.
  */
+/** Whether `outer` covers every gibson of `inner`, on all three axes. */
+export function contains(outer: HeldKey, inner: HeldKey): boolean {
+  if (outer.lookupId === inner.lookupId || outer.plane !== inner.plane) return false
+  for (const axis of ['x', 'y', 'z'] as const) {
+    const ho = BigInt(outer.heights ? outer.heights[axis] : outer.height)
+    const hi = BigInt(inner.heights ? inner.heights[axis] : inner.height)
+    if (hi > ho) return false
+    const lo = BigInt(outer.base[axis])
+    const v = BigInt(inner.base[axis])
+    // Aligned blocks nest or miss: the inner one is inside when its base
+    // falls in the outer one and it does not run past the outer's end.
+    if (v < lo || v + (1n << hi) > lo + (1n << ho)) return false
+  }
+  return true
+}
+
 export function sizeLabel(key: HeldKey): string {
   const h = key.heights
   if (!h || (h.x === h.y && h.y === h.z)) return `2^${key.height}`
@@ -59,6 +75,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const show = useCyberspace((s) => s.showSecrets)
+  const focused = useSecrets((s) => s.focused)
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
@@ -94,10 +111,22 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
       if (far > GRID_RADIUS * 4) continue
       out.push({ key, centre, corner, sides })
     }
+    /*
+     * Only the outermost regions.
+     *
+     * Each hop's region contains both ends of that hop, so a walk away from
+     * where you started leaves a set of nested blocks, each swallowing the one
+     * before. Drawing them all put three or four shells around every step and
+     * said nothing the largest did not already say. A region contained in
+     * another held region is dropped, and the one that contains it is drawn.
+     */
+    // The one you asked to look at is always drawn, whatever contains it.
+    const outermost = out.filter((cage) => cage.key.lookupId === focused
+      || !out.some((other) => other !== cage && contains(other.key, cage.key)))
     // Nearest first, so the ones you are standing in are the ones you see.
-    out.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
-    return out.slice(0, DRAWN_MAX)
-  }, [show, keys, anchor, anchorPlane, scaleExp, axes])
+    outermost.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
+    return outermost.slice(0, DRAWN_MAX)
+  }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused])
 
   if (cages.length === 0) return null
 
@@ -106,12 +135,13 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
       {cages.map((cage) => (
         <group key={cage.key.lookupId}>
           <lineSegments geometry={geometry} position={cage.centre} scale={cage.sides} frustumCulled={false} renderOrder={8}>
-            <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={0.4} depthTest={false} />
+            {/* The one you went to look at stands out; the rest step back. */}
+            <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={focused === null ? 0.4 : focused === cage.key.lookupId ? 0.95 : 0.12} depthTest={false} />
           </lineSegments>
           {/* The key and the region's size as one piece, hanging just under the
               corner: a cage says nothing about how big it is until it says so,
               and 2^7 × 2^0 × 2^0 is the difference between a room and a corridor. */}
-          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={14} opacity={0.9} align="left" />
+          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={18} opacity={focused === null || focused === cage.key.lookupId ? 0.9 : 0.3} align="left" />
         </group>
       ))}
     </>

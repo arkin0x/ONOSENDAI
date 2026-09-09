@@ -29,6 +29,8 @@ export interface CyberTarget {
   at: Position
   /** Drawn as a ring of this many gibsons, when it has a real extent. */
   radius?: bigint
+  /** Someone in the sector you have not targeted: the same marker, dimmer. */
+  presence?: boolean
 }
 
 export interface TargetScreen {

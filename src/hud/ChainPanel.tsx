@@ -11,6 +11,7 @@
  */
 
 import { formatMs, formatOps } from '../lib/space'
+import { expectedRidePairs } from '../lib/hyperspace/ride'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
@@ -25,6 +26,7 @@ export function ChainPanel(): JSX.Element {
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  const respawns = useCyberspace((s) => s.respawns)
 
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
@@ -61,6 +63,10 @@ export function ChainPanel(): JSX.Element {
           <dt>Sidesteps</dt>
           <dd>{chain.sidesteps}</dd>
         </div>
+        <div title="DECK-0001 rides on the block line, and the blocks they passed between them">
+          <dt>Hyperjumps</dt>
+          <dd>{chain.hyperjumps}{chain.blocksRidden > 0 ? ` · ${chain.blocksRidden.toLocaleString()} BLOCKS` : ''}</dd>
+        </div>
         <div>
           <dt>Cantor ops</dt>
           <dd>{formatOps(chain.totalOps)}</dd>
@@ -69,6 +75,12 @@ export function ChainPanel(): JSX.Element {
           <dt>SHA-256 hashes</dt>
           <dd>{formatOps(chain.totalHashes)}</dd>
         </div>
+        {chain.blocksRidden > 0 && (
+          <div title="The rides' work: about 42,000 Cantor pairs per block passed (DECK-0001 v3 §5.7), which is expected, not measured">
+            <dt>Ride pairs</dt>
+            <dd>≈ {formatOps(expectedRidePairs(chain.blocksRidden))}</dd>
+          </div>
+        )}
         <div>
           <dt>Compute time</dt>
           <dd>{formatMs(chain.totalMs)}</dd>
@@ -83,6 +95,12 @@ export function ChainPanel(): JSX.Element {
             {sent} / {events.length}{' '}
             <span className={`relay relay--${relayState.toLowerCase()}`}>{relayState}</span>
           </dd>
+        </div>
+        {/* Last and apart: each respawn began a new chain, so this is a fact
+            about the identity, not about the chain above it. */}
+        <div title="Times this identity has respawned. Each one started a new chain; counted on this device.">
+          <dt>Respawns</dt>
+          <dd>{respawns}</dd>
         </div>
       </dl>
 

@@ -30,8 +30,11 @@ const NOTE = '#ffd27d'
 const BITCOIN = '#f7931a'
 /** The note's own blue, for the cube a message hangs on. */
 const NOTE_BLUE = '#4aa3ff'
-/** How wide the mark behind an item stands, in CSS pixels. */
-const MARK_PX = 34
+/** How wide the mark behind an item stands, in CSS pixels. The coin is larger
+ * than the note: it is a whole object in itself, where the cube is a backing. */
+const MARK_PX = { coin: 51, note: 34 } as const
+/** The coin's own mark, in CSS pixels. */
+const COIN_PX = 39
 
 interface Props {
   axes: ViewAxes
@@ -123,10 +126,10 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
             <WorldMark kind={coin ? 'coin' : 'note'} at={w.centre} />
             {coin
               ? <>
-                  <WorldLabel text="₿" color={BITCOIN} at={w.centre} align="center" px={26} />
+                  <WorldLabel text="₿" color={BITCOIN} at={w.centre} align="center" px={COIN_PX} />
                   {/* Words left around the token are the message; the base64 is not. */}
                   {textWithoutToken(w.text) && (
-                    <WorldLabel text={messageBillboard(textWithoutToken(w.text))} color={NOTE} at={[w.centre[0], w.centre[1] - 0.55, w.centre[2]]} align="center" px={12} />
+                    <WorldLabel text={messageBillboard(textWithoutToken(w.text))} color={NOTE} at={[w.centre[0], w.centre[1] - 0.75, w.centre[2]]} align="center" px={12} />
                   )}
                 </>
               : births[w.key] !== undefined
@@ -186,7 +189,7 @@ function WorldMark({ kind, at }: { kind: 'coin' | 'note'; at: [number, number, n
     if (!g) return
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX))
+    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX[kind]))
     // The coin turns; a note stays where it was left.
     if (kind === 'coin') g.rotation.y = state.clock.elapsedTime * 0.6
   })

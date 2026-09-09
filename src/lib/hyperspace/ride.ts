@@ -7,6 +7,7 @@
  * Everything here is consensus-critical and pure; the worker pool wraps it.
  */
 import { alignedBase, bytesToHex, computeSubtreeCantor, hexToBytes, intToBytesBE, sha256 } from 'cyberspace-core'
+import type { ActionEvent } from '../events'
 
 export const K_LINE = 6
 export const RIDE_MAX_HEIGHT = 16 + K_LINE
@@ -87,6 +88,35 @@ export function computeRideLeaf(previousEventIdHex: string, height: number, bloc
 }
 
 /** The heights a ride from `from` to `to` passes: (lo, hi], ascending. */
+/**
+ * Where the chain head puts you on the line, or null when it does not.
+ *
+ * DECK-0001 v3 §4.3: a rider who has entered stays entered until a hop or a
+ * sidestep leaves; every further hyperjump chains from the previous one,
+ * with `from_height` equal to its `B`, and a hyperjump whose previous event
+ * is neither an enter-hyperspace nor a hyperjump is invalid. So the head
+ * alone says whether the next ride needs a boarding: an enter-hyperspace
+ * head is boarded and the station decides where the ride starts
+ * (`fromHeight` null); a hyperjump head is standing at its stop and the next
+ * ride starts there. Anything else is off the line.
+ */
+export interface LineState {
+  /** The head's id: the next ride's `previous`, and what seeds its leaves (§5.3). */
+  previousId: string
+  /** The head's coordinate: the next ride's `c` (§5.2). */
+  coordHex: string
+  /** The stop you stand at after a ride, or null when boarding decides it. */
+  fromHeight: number | null
+}
+
+export function lineStateOf(actions: ActionEvent[]): LineState | null {
+  const head = actions[actions.length - 1]
+  if (!head) return null
+  if (head.type === 'enter-hyperspace') return { previousId: head.id, coordHex: head.coordHex, fromHeight: null }
+  if (head.type === 'hyperjump' && head.toHeight !== undefined) return { previousId: head.id, coordHex: head.coordHex, fromHeight: head.toHeight }
+  return null
+}
+
 export function rideBlocks(fromHeight: number, toHeight: number): number[] {
   const lo = Math.min(fromHeight, toHeight)
   const hi = Math.max(fromHeight, toHeight)

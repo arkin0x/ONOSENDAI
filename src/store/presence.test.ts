@@ -81,3 +81,34 @@ describe('taking people in', () => {
     expect(Object.keys(usePresence.getState().people)).toHaveLength(0)
   })
 })
+
+describe('arrivals', () => {
+  beforeEach(() => { usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null }) })
+
+  it('someone first seen after the backfill is an arrival', () => {
+    usePresence.getState().ingest(spawnAt(here, 100))
+    expect(usePresence.getState().arrivals).toBe(1)
+    expect(usePresence.getState().lastArrivalAt).not.toBeNull()
+  })
+
+  it('someone seen during the backfill is not', () => {
+    usePresence.setState({ loading: true })
+    usePresence.getState().ingest(spawnAt(here, 100))
+    expect(usePresence.getState().arrivals).toBe(0)
+  })
+
+  it('a later move by someone already here is not an arrival', () => {
+    const sk = generateSecretKey()
+    usePresence.getState().ingest(spawnAt(here, 100, sk))
+    usePresence.getState().ingest(spawnAt({ ...here, x: here.x + 1n }, 200, sk))
+    expect(usePresence.getState().arrivals).toBe(1)
+  })
+
+  it('a target arriving is not announced: you already know where they are', () => {
+    const sk = generateSecretKey()
+    useCyberspace.setState({ targets: { [getPublicKey(sk)]: { pubkey: getPublicKey(sk), npub: 'npub1x', name: null, position: here, plane: 0, lastActive: null, status: 'live' } } })
+    usePresence.getState().ingest(spawnAt(here, 100, sk))
+    expect(usePresence.getState().arrivals).toBe(0)
+    useCyberspace.setState({ targets: {} })
+  })
+})

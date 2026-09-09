@@ -103,12 +103,14 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
  * keyed to the region it was said in, so a relay sees ciphertext and the
  * people standing in that region see the words.
  */
-export function chatInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number): EventTemplate {
+export function chatInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number, lookupId: string): EventTemplate {
   return {
     kind: CHAT_KIND,
     created_at: createdAt,
     content: text.slice(0, MAX_CHAT_LENGTH),
-    tags: [['C', positionHex(at, plane)]],
+    // `d` names the room the way other ephemeral-chat clients do, and the room
+    // is the region: its lookup id. `C` is where the speaker stood.
+    tags: [['d', lookupId], ['C', positionHex(at, plane)]],
   }
 }
 

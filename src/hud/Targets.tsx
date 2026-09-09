@@ -118,7 +118,7 @@ function TargetMarker({ target }: { target: CyberTarget }): JSX.Element {
   const profile = useProfile(person ? target.id : null)
   const name = (person && profile?.name) || target.label
   return (
-    <div className="target" data-target={target.id} style={{ color: target.color }}>
+    <div className={`target${target.presence ? ' target--presence' : ''}`} data-target={target.id} style={{ color: target.color }}>
       <span className="target__ring" />
       {/* Points along +x unrotated, so a rotation by the screen bearing aims it
           at the target. The previous glyph pointed up and left, which put every

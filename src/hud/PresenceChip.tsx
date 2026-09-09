@@ -8,10 +8,11 @@
  * scene following them.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { usePresence, type Person } from '../store/usePresence'
+import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 import { formatDistance } from '../lib/scale'
@@ -42,18 +43,33 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   )
 }
 
+/** How long the chip stays lit after someone arrives. */
+const ARRIVAL_MS = 4000
+
 export function PresenceChip(): JSX.Element | null {
   const people = usePresence((s) => s.people)
   const loading = usePresence((s) => s.loading)
+  const lastArrivalAt = usePresence((s) => s.lastArrivalAt)
   const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity.pubkey)
+  const muted = useChat((s) => s.muted)
   const [open, setOpen] = useState(false)
+  // Lit for a few seconds after an arrival, then back to plain.
+  const [lit, setLit] = useState(false)
+  useEffect(() => {
+    if (lastArrivalAt === null) return
+    setLit(true)
+    const t = window.setTimeout(() => setLit(false), ARRIVAL_MS)
+    return () => window.clearTimeout(t)
+  }, [lastArrivalAt])
   const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey]).sort((a, b) => b.lastActive - a.lastActive)
   if (others.length === 0 && !loading) return null
   const now = Math.floor(Date.now() / 1000)
+  const title = "People whose newest move landed in this sector or one beside it. A sector is 2^30 gibsons on a side. An arrival lights this chip"
+    + (muted ? "; the sound is off, which is the chat's mute." : " and chimes; the chat's mute silences it.")
   return (
-    <div className={`hyperbar presence ${open ? 'is-open' : ''}`} role="status">
-      <button className="presence__head" onClick={() => setOpen((o) => !o)} aria-expanded={open} title="People whose newest move landed in this sector or one beside it. A sector is 2^30 gibsons on a side.">
+    <div className={`hyperbar presence ${open ? 'is-open' : ''} ${lit ? 'is-arrival' : ''}`} role="status">
+      <button className="presence__head" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={title}>
         <Users size={12} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__label">{loading && others.length === 0 ? 'LOOKING' : `${others.length} IN THIS SECTOR`}</span>
       </button>

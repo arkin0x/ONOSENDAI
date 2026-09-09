@@ -219,6 +219,28 @@ function save(keys: Record<string, HeldKey>): void {
   try { localStorage.setItem(KEY, JSON.stringify(keys)) } catch { /* private mode */ }
 }
 
+/**
+ * Leaving a region goes back to the list.
+ *
+ * A view can end several ways: RETURN on the bar, a hyperspace exit, walking
+ * the chain, a respawn. Rather than teach each of them about the Secrets list,
+ * this watches the focus itself: when a view that came from the list ends, the
+ * list comes back and nothing is left highlighted in the scene.
+ *
+ * Started from the app rather than at import: these two stores import each
+ * other, and subscribing at module scope reached for the other one before it
+ * existed.
+ */
+export function watchFocus(): () => void {
+  return useCyberspace.subscribe((state, previous) => {
+    if (previous.focus === null || state.focus !== null) return
+    const { focused, focus, setOpen } = useSecrets.getState()
+    if (focused === null) return
+    focus(null)
+    setOpen(true)
+  })
+}
+
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __secrets?: unknown }).__secrets = useSecrets
 }

@@ -125,7 +125,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
      * asked to look at: those are not detail, they are the point.
      */
     const innermost = out.filter((cage) => cage.key.lookupId === focused
-      || cage.key.source === 'scan'
+      // A region you opened or bought stays on screen once it is there: it is
+      // a door, and a door does not stop existing because you stepped past it.
+      // Only the regions your movements granted give way to finer ones.
+      || cage.key.source !== 'hop'
       || !out.some((other) => other !== cage && contains(cage.key, other.key)))
     // Nearest first, so the ones you are standing in are the ones you see.
     innermost.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))

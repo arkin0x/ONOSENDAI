@@ -5592,6 +5592,32 @@ kbd {
 
 .chat__compose {
   display: flex;
+
+/* Buying compute credit before anything needs it. */
+.cloud__balance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud__topup {
+  padding: 3px 8px;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.cloud__topup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.cloud__topup-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -5638,4 +5664,8 @@ kbd {
     width: auto;
     max-height: 38vh;
   }
+
+.cloud__topup-input {
+  width: 90px;
+  flex: 0 0 auto;
 }

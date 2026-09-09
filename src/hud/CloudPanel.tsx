@@ -22,6 +22,9 @@ import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
+/** The amounts most people want, so the common case is one tap. */
+const TOP_UPS = [1_000, 5_000, 25_000]
+
 const PROFILES: Array<[RouteProfile, string]> = [['unlock', 'UNLOCK'], ['bypass', 'BYPASS']]
 
 const STAGE_LABEL: Record<string, string> = {
@@ -54,6 +57,8 @@ export function CloudPanel(): JSX.Element {
   const cloud = useCyberspace((s) => s.cloud)
   const provider = cloud.provider
   const [editingUrl, setEditingUrl] = useState(false)
+  const [topUpOpen, setTopUpOpen] = useState(false)
+  const [topUpSats, setTopUpSats] = useState('1000')
   const [urlDraft, setUrlDraft] = useState(prefs.apiUrl)
   const store = useCyberspace.getState
 
@@ -186,19 +191,69 @@ export function CloudPanel(): JSX.Element {
         </div>
         <div>
           <dt>Prepaid balance</dt>
-          <dd>
-            {balance ? balanceLabel(balance.msats) : '—'}{' '}
-            <button
-              className="cloud__link"
-              onClick={() => { void useCyberspace.getState().refreshBalance() }}
-              disabled={cloud.balanceChecking}
-              title={signerKind === 'local' ? 'Ask HOSAKA for the balance' : 'Ask HOSAKA for the balance (your signer will be asked to sign the request)'}
-            >
-              {cloud.balanceChecking ? 'CHECKING…' : balance ? `REFRESH · ${sinceLabel(balance.at, now || Date.now())}` : 'CHECK'}
-            </button>
+          <dd className="cloud__balance">
+            <span>
+              {balance ? balanceLabel(balance.msats) : '—'}{' '}
+              <button
+                className="cloud__link"
+                onClick={() => { void useCyberspace.getState().refreshBalance() }}
+                disabled={cloud.balanceChecking}
+                title={signerKind === 'local' ? 'Ask HOSAKA for the balance' : 'Ask HOSAKA for the balance (your signer will be asked to sign the request)'}
+              >
+                {cloud.balanceChecking ? 'CHECKING…' : balance ? `REFRESH · ${sinceLabel(balance.at, now || Date.now())}` : 'CHECK'}
+              </button>
+            </span>
+            {/* Credit bought before anything needs it: the route's own funding
+                only ever tops up what one move is short by. */}
+            {prefs.mode !== 'off' && (
+              <button
+                className="avatars__go cloud__topup"
+                onClick={() => setTopUpOpen((v) => !v)}
+                aria-expanded={topUpOpen}
+              >{topUpOpen ? 'CANCEL' : 'INCREASE COMPUTE BALANCE'}</button>
+            )}
           </dd>
         </div>
       </dl>
+      {topUpOpen && (
+        <form
+          className="cloud__topup-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const sats = Math.floor(Number(topUpSats))
+            if (!Number.isFinite(sats) || sats <= 0) return
+            setTopUpOpen(false)
+            void useCyberspace.getState().topUp(sats)
+          }}
+        >
+          <span className="login__label">How many sats</span>
+          <div className="cloud__topup-row">
+            {TOP_UPS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`secret__act cloud__mode ${Number(topUpSats) === n ? 'is-on' : ''}`}
+                onClick={() => setTopUpSats(String(n))}
+              >{n.toLocaleString()}</button>
+            ))}
+            <input
+              className="avatars__input login__input cloud__topup-input"
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={topUpSats}
+              onChange={(e) => setTopUpSats(e.target.value)}
+              aria-label="Top-up amount in sats"
+            />
+            <button className="avatars__go" type="submit">GET INVOICE ▸</button>
+          </div>
+          <span className="cloud__profile-note">
+            HOSAKA sends a lightning invoice. The balance updates the moment the node reports it paid, and nothing is spent until a move needs it.
+          </span>
+        </form>
+      )}
+
       {cloud.balanceError && <p className="legend__note">{cloud.balanceError}</p>}
 
       {editingUrl && (

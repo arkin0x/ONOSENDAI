@@ -15,7 +15,6 @@ import { formatCellSize } from '../lib/scale'
 import { cashuLabel } from '../lib/cashu'
 import { cashuStateLabel, useCashu } from './useCashu'
 import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
-import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards, type MyDeployment } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
@@ -66,16 +65,12 @@ function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; 
 }
 
 export function ShardsPanel(): JSX.Element {
-  const models = useWorkshop((s) => s.shards)
   const mine = useShards((s) => s.mine)
   const inspecting = useShards((s) => s.inspecting)
   const scanning = useShards((s) => s.scanning)
-  const [deleteModel, setDeleteModel] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')
 
-  const target = models.find((m) => m.id === deleteModel)
-  const deployedCount = (id: string): number => mine.filter((d) => d.type === 'shard' && d.shard?.id === id).length
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)
   const broadcastError = useShards((s) => s.broadcastError)
@@ -102,23 +97,11 @@ export function ShardsPanel(): JSX.Element {
         <span className={`tag ${scanning ? 'tag--scan' : ''}`}>{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING HIDDEN' : `${hiddenCount} HIDDEN`}</span>
       </header>
 
+      {/* The models themselves live in the workshop, which is where they are
+          made, named and deleted. Listing them here grew a second scrolling
+          box inside a scrolling panel, and the panel could not be scrolled
+          past it. What the stash is for is what is hidden. */}
       <div className="shards__section">
-        <span className="legend__label">Models — shard designs on this device</span>
-        <ul className="avatars__list shards__list">
-          {models.map((m) => {
-            const n = deployedCount(m.id)
-            return (
-              <li key={m.id} className="shards__row">
-                <button className="shards__open" onClick={() => useWorkshop.getState().openWorkshop(m.id)} title="Open in the workshop">
-                  <span className="avatars__who">{m.name}</span>
-                  <span className="shards__meta">{m.vertices.length} v · {m.faces.length} f · {m.mode.toUpperCase()} · 2^{m.unit}{n > 0 ? ` · ${n} deployed` : ''}</span>
-                </button>
-                <button className="targets__remove" onClick={() => setDeleteModel(m.id)} aria-label="Delete model" title="Delete this model">✕</button>
-              </li>
-            )
-          })}
-          {models.length === 0 && <li className="avatars__empty">Nothing built yet.</li>}
-        </ul>
         <div className="shards__actions">
           <button className="avatars__go" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
           <button className="avatars__go" onClick={() => { useWorkshop.getState().create(); useWorkshop.getState().openWorkshop() }}>NEW MODEL</button>
@@ -171,16 +154,6 @@ export function ShardsPanel(): JSX.Element {
         Build 3D objects (shards), messages, and encrypt them at a location in
         cyberspace for others to find.
       </Explanation>
-
-      {target && (
-        <ConfirmModal
-          title={`Delete the model "${target.name}"?`}
-          body={`This removes the model and its ${target.vertices.length} vertices from this device for good — it is not the same as removing a deployed copy. ${deployedCount(target.id) > 0 ? `Its ${deployedCount(target.id)} deployed instance${deployedCount(target.id) === 1 ? ' stays' : 's stay'} in cyberspace; delete those from the Deployed list.` : 'It has no deployed instances.'}`}
-          confirmLabel="DELETE MODEL"
-          onConfirm={() => { useWorkshop.getState().remove(target.id); setDeleteModel(null) }}
-          onCancel={() => setDeleteModel(null)}
-        />
-      )}
     </section>
   )
 }

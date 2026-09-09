@@ -5704,6 +5704,20 @@ kbd {
 .presence__meta { font-size: 9px; color: var(--dim); letter-spacing: 0.08em; }
 .presence__target { padding: 2px 8px; font-size: 8px; }
 
+/* Someone in the sector you have not targeted: the target marker, dimmer. */
+.target--presence { opacity: 0.55; }
+.target--presence .target__ring { border-style: dashed; }
+
+/* An arrival lights the sector chip for a few seconds. */
+@keyframes presence-arrival {
+  0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(0, 229, 255, 0); }
+}
+.presence.is-arrival { animation: presence-arrival 1s ease-out 3; }
+@media (prefers-reduced-motion: reduce) {
+  .presence.is-arrival { animation: none; border-color: var(--accent, #00e5ff); }
+}
+
 /* A line said in another room is still yours to read, dimmer; a rule marks
  * where the room changed as you walked. */
 .chat__line.is-elsewhere { opacity: 0.55; }

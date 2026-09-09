@@ -25,6 +25,9 @@ import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { PresenceChip } from './hud/PresenceChip'
 import { startPresence } from './store/usePresence'
+import { ChatDock } from './hud/ChatDock'
+import { useChatFeed } from './hooks/useChatFeed'
+import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { useKeyboard } from './hooks/useKeyboard'
@@ -56,6 +59,10 @@ export default function App(): JSX.Element {
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
   useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
+  // The feeds that watch other people, the loot and the anchors are reissued
+  // when the tab returns from a real absence or the network comes back; a
+  // socket that died while the tab was away looks open and delivers nothing.
+  useEffect(() => watchConnectivity(), [])
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
@@ -76,6 +83,7 @@ export default function App(): JSX.Element {
   }, [])
 
   const isMobile = useIsMobile()
+  useChatFeed()
   const targets = useTargets()
   // Spectating locks the panels: they describe you, and the scene is not about
   // you right now. The bar carries what matters and the way out.
@@ -178,6 +186,7 @@ export default function App(): JSX.Element {
       {showPanels && !offerUp && <Hud menuOpen={crowded} />}
       <SpectateBar />
       {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {!crowded && !offerUp && !deploying && !secretOpen && <ChatDock />}
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}

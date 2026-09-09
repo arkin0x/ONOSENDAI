@@ -535,6 +535,8 @@ export interface CyberspaceState {
   ensureBalance: () => void
   /** Ask HOSAKA for the balance (a signed request) and remember the answer. */
   refreshBalance: () => Promise<void>
+  /** Buy compute credit with no movement waiting on it; sats, not millisats. */
+  topUp: (sats: number) => Promise<void>
   /**
    * Pick up the persisted job (on load, after an identity switch, or from the
    * panel) when its chain head is still ours; drop it when the head moved or
@@ -2259,6 +2261,76 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (cloud.balance !== null) return
     const known = loadBalance(identity.pubkey)
     if (known) set({ cloud: { ...cloud, balance: known } })
+  },
+
+  /**
+   * Put sats on the HOSAKA balance, with no movement waiting on them.
+   *
+   * The route's own funding tops up as much as one route needs and no more,
+   * which is the right shape when a hop is waiting but leaves no way to fill
+   * the balance in advance. This is that way: a deposit for the amount asked,
+   * the invoice on screen through the same modal a route uses, and the balance
+   * refreshed the moment the node reports it settled. Nothing else waits on
+   * it, so cancelling costs nothing but the invoice.
+   */
+  topUp: async (sats) => {
+    const { cloud, cloudPrefs, plan } = get()
+    // A route in flight owns the cloud flow and its invoice; two invoices at
+    // once would fight over the same modal and the same saved deposit.
+    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+      set({ cloud: { ...cloud, balanceError: 'Finish or cancel the move in progress first.' } })
+      return
+    }
+    const msats = Math.max(0, Math.round(sats)) * 1000
+    const min = cloud.limits?.deposit_min_msats ?? 1000
+    const max = cloud.limits?.deposit_max_msats ?? Number.MAX_SAFE_INTEGER
+    if (msats < min || msats > max) {
+      set({ cloud: { ...cloud, balanceError: `HOSAKA takes between ${satsOf(min)} and ${satsOf(max)} sats at a time.` } })
+      return
+    }
+
+    const client = cloudClient(cloudPrefs.apiUrl)
+    stopCloud()
+    const id = ++requestId
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    try {
+      set({ cloud: { ...get().cloud, status: 'funding', balanceError: null, message: currentSigner.kind === 'local' ? 'Asking HOSAKA for an invoice.' : 'Waiting for your signer to approve the request.' } })
+      const dep = await client.deposit(msats, abort.signal)
+      if (id !== requestId) return
+      const invoice = invoiceOf(dep)
+      // On disk before the invoice is on screen: a reload after paying claims it.
+      saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: msats, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+      set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
+
+      const settled = await client.waitForDeposit(dep.deposit_id, {
+        signal: abort.signal,
+        expiresAt: invoice.expiresAt,
+        intervalMs: claimIntervalFor(currentSigner.kind),
+        waker,
+        onPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
+        onPollError: () => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false } }) },
+      })
+      if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
+      if (id !== requestId) return
+      clearCloudDeposit()
+      if (settled.status !== 'settled') {
+        set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: 'The invoice expired unpaid. Nothing was charged.' } })
+        return
+      }
+      set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, credited: { msats, at: Date.now() } } })
+      // The node's own figure is authoritative, but ask anyway: it settles
+      // what the panel shows without waiting for the next reason to look.
+      void get().refreshBalance()
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return
+      clearCloudDeposit()
+      set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: describeCloudError(err) } })
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
   },
 
   refreshBalance: async () => {

@@ -38,8 +38,14 @@ function inUnit(meters: number): { figure: number; unit: (typeof UNITS)[number] 
  */
 export function formatDistance(gibsons: bigint): string {
   if (gibsons === 0n) return '0'
-  // 2^33 gibsons per meter, so this is exact rather than a rounding.
-  const meters = Number((gibsons * 1_000_000n) >> 33n) / 1_000_000
+  // 2^33 gibsons per meter. Below 2^53 gibsons a double holds the count
+  // exactly and the division keeps every picometer; the old integer-microns
+  // shortcut floored anything under a micrometer to zero, so a person three
+  // gibsons away read as "0 pm". Past 2^53 the shift is exact and the
+  // microns are all anyone reads.
+  const meters = gibsons < (1n << 53n)
+    ? Number(gibsons) / 2 ** 33
+    : Number((gibsons * 1_000_000n) >> 33n) / 1_000_000
   for (let i = 0; i < UNITS.length; i++) {
     const u = UNITS[i]
     if (meters < u.threshold || i === UNITS.length - 1) {

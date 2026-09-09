@@ -23,6 +23,8 @@ import { TouchControls } from './hud/TouchControls'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
+import { PresenceChip } from './hud/PresenceChip'
+import { startPresence } from './store/usePresence'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
 import { watchConnectivity } from './lib/relay'
@@ -56,7 +58,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
@@ -175,6 +177,7 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
+          <PresenceChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />

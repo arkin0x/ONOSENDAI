@@ -1,3 +1,4 @@
+import { formatDistance } from './scale'
 /**
  * scale.test.ts - a cell's size reads in the unit it is best read in, short
  * for the ladder and spelled out for the readout; the step reads in gibsons.
@@ -23,5 +24,16 @@ describe('step', () => {
     expect(formatStep(0)).toBe('1 gibson')
     expect(formatStep(10)).toBe('1,024 gibsons')
     expect(formatStep(40)).toBe('2^40 gibsons')
+  })
+})
+
+describe('formatDistance under a micrometer', () => {
+  it('does not floor a few gibsons to zero', () => {
+    expect(formatDistance(3n)).not.toBe('0 pm')
+    expect(formatDistance(3n)).toMatch(/^349 pm$/)
+  })
+
+  it('still reads a large distance the same way', () => {
+    expect(formatDistance(1n << 40n)).toBe('128 m')
   })
 })

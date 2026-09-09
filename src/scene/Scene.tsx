@@ -57,6 +57,7 @@ import { ShaderPointField } from './ShaderPointField'
 import { SecretRegions } from './SecretRegions'
 import { SpawnMarker } from './SpawnMarker'
 import { TargetAvatars } from './TargetAvatars'
+import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
 import { ShardGhost } from './ShardGhost'
@@ -125,6 +126,7 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
+      <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
       <ShardGhost axes={axes} />

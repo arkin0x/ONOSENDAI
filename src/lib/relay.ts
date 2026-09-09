@@ -17,6 +17,8 @@ import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
 import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
+import { LiveRegistry, type Transport } from './liveSub'
+import { normalizeURL } from 'nostr-tools/utils'
 import { useCyberspace } from '../store/useCyberspace'
 
 /** The default relay, always present; kept here so panels can name it. */
@@ -53,6 +55,17 @@ export function getPool(): AbstractSimplePool {
       // SimplePool's own default (3e3), restated because the abstract
       // constructor requires the field.
       maxWaitForConnection: 3000,
+      // A ping every 29 seconds, and a socket that misses its pong for 20 is
+      // declared dead. Without it a socket a NAT or a suspended phone has
+      // forgotten stays "open" forever, delivering nothing: the "already in
+      // CLOSING or CLOSED state" lines in the console were writes to exactly
+      // that. A declared death closes the subscriptions on it, and the live
+      // registry below reopens them.
+      enablePing: true,
+      // Not the pool's own reconnect: it refires REQs the instant the socket
+      // opens, before the relay's fresh NIP-42 challenge is answered, and the
+      // relay auth-gates reads. The registry authenticates first, then asks.
+      enableReconnect: false,
     })
     // Not in SimplePool's constructor options, but the abstract pool honours it:
     // when a relay proactively sends an AUTH challenge, authenticate with it.
@@ -212,26 +225,141 @@ export async function queryAny(relays: string[], filter: Filter, maxWait?: numbe
 }
 
 /** A live subscription across the configured relays; the returned function closes it. */
+/**
+ * The transport under the live registry: authenticate, then ask, and report
+ * the relay ending the subscription so the registry can ask again.
+ */
+const liveTransport: Transport = {
+  open: async (filter, handlers, onClose) => {
+    const relays = relaySet()
+    // Authenticate first; a live subscription opened on an unauthed socket is
+    // closed by the relay before it delivers anything.
+    await authAll(relays)
+    const sub = getPool().subscribe(relays, filter, {
+      onevent: handlers.onEvent,
+      oneose: handlers.onEose,
+      onauth: authSign,
+      // Fires once every relay in the set has ended it: for the one relay we
+      // run on, once, and that is the socket dying under us.
+      onclose: (reasons) => onClose(reasons.map((r) => r.reason).join('; ')),
+    })
+    return () => sub.close()
+  },
+}
+
+const live = new LiveRegistry(liveTransport)
+
+/**
+ * A live subscription that stays open for the life of its closer: reissued
+ * after any close the relay makes, and on demand when the tab comes back.
+ */
 export function subscribe(
   filter: Filter,
   onEvent: (ev: NostrEvent) => void,
   onEose?: () => void,
 ): () => void {
-  const relays = relaySet()
-  let closed = false
-  let sub: { close: () => void } | null = null
-  // Authenticate first; a live subscription opened on an unauthed socket is
-  // closed by the relay before it delivers anything.
-  void authAll(relays).then(() => {
-    if (closed) return
-    sub = getPool().subscribe(relays, filter, { onevent: onEvent, oneose: onEose, onauth: authSign })
-  })
-  return () => { closed = true; sub?.close() }
+  return live.subscribe(filter, { onEvent, onEose })
 }
 
-/** Whether any configured relay is currently connected. */
+/**
+ * Back from the background: every socket may be half-open, which looks
+ * connected and delivers nothing. Drop them and reissue every live
+ * subscription over fresh ones. Cheap, and only worth it after a real absence:
+ * an alt-tab on a desktop is not an absence, so the caller says how long.
+ */
+export function resumeLive(): void {
+  live.resumeAll(() => dropRelays(relaySet()))
+}
+
+/** How long the tab must have been hidden before its return reissues the feeds. */
+export const RESUME_AFTER_HIDDEN_MS = 15_000
+/** How often the connection is asked whether it is really there. */
+export const PROBE_EVERY_MS = 20_000
+/** How long a probe waits for the relay's answer before calling the socket dead. */
+export const PROBE_TIMEOUT_MS = 8_000
+/** An id no event has: the probe wants only the relay's EOSE, never an event. */
+const NO_SUCH_ID = '0'.repeat(64)
+
+let hiddenAt: number | null = null
+let probing = false
+
+/**
+ * Ask the relay for nothing and see whether it says so.
+ *
+ * A half-open socket is the case nothing else catches: the pool believes it
+ * is connected, the browser's WebSocket reports open, and every write goes
+ * into the void. The pool's own ping notices that and calls close(), but a
+ * close on a half-open socket waits for a close handshake that never comes,
+ * so the pool never learns the socket is dead and never ends the
+ * subscriptions on it. This does not wait for the socket to admit anything:
+ * a probe the relay does not answer in time is a dead connection, and the
+ * feeds are reissued over fresh sockets. Only run while the pool thinks it
+ * is connected; a connection the pool already knows is down is the registry's
+ * own backoff path, and probing it would only reset that backoff.
+ */
+export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
+  if (probing || live.list().length === 0 || !connected()) return 'skipped'
+  probing = true
+  try {
+    const relays = relaySet()
+    const answered = await new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (ok: boolean): void => { if (!settled) { settled = true; resolve(ok) } }
+      const timer = setTimeout(() => done(false), PROBE_TIMEOUT_MS)
+      const sub = getPool().subscribe(relays, { ids: [NO_SUCH_ID] }, {
+        onevent: () => {},
+        oneose: () => { clearTimeout(timer); done(true); sub.close() },
+        onclose: () => { clearTimeout(timer); done(false) },
+        onauth: authSign,
+        maxWait: PROBE_TIMEOUT_MS,
+      })
+    })
+    if (answered) return 'alive'
+    resumeLive()
+    return 'dead'
+  } finally {
+    probing = false
+  }
+}
+
+/**
+ * Watch the tab's visibility and the network, and keep asking the connection
+ * whether it is there; resume the feeds when any of them says it is not.
+ */
+export function watchConnectivity(): () => void {
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return }
+    if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_HIDDEN_MS) resumeLive()
+    hiddenAt = null
+  }
+  const onOnline = (): void => resumeLive()
+  // Not while hidden: a background tab's timers are throttled anyway, and the
+  // return is handled above.
+  const tick = (): void => { if (document.visibilityState === 'visible') void probeLiveness() }
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('online', onOnline)
+  const interval = setInterval(tick, PROBE_EVERY_MS)
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('online', onOnline)
+    clearInterval(interval)
+  }
+}
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __live: LiveRegistry; __pool: () => AbstractSimplePool; __resumeLive: () => void }).__live = live
+  ;(window as unknown as { __pool: () => AbstractSimplePool }).__pool = getPool
+  ;(window as unknown as { __resumeLive: () => void }).__resumeLive = resumeLive
+  ;(window as unknown as { __probeLiveness: () => Promise<string> }).__probeLiveness = probeLiveness
+}
+
+/**
+ * Whether any configured relay is currently connected, as far as the pool
+ * knows. The pool files relays under normalized URLs (a trailing slash on a
+ * bare host), so the lookup normalizes too; compared raw, this was never true.
+ */
 export function connected(): boolean {
   const status = pool?.listConnectionStatus()
   if (!status) return false
-  return relaySet().some((r) => status.get(r))
+  return relaySet().some((r) => status.get(normalizeURL(r)))
 }

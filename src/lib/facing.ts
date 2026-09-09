@@ -38,3 +38,21 @@ export function facingQuaternion(dir: Vector3): Quaternion {
   const y = new Vector3().crossVectors(z, x).normalize()
   return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, z))
 }
+
+/**
+ * The two positions whose direction the avatar faces, at a point on the chain.
+ *
+ * Time decides the angle: the avatar faces the way the move that brought it
+ * to this link went. At the head that is the last two links, as before.
+ * While scrubbing the chain to link `index`, it is the link before and this
+ * one, so the avatar turns as the history is walked rather than keeping the
+ * heading it has now. At the spawn there is no move in yet, so it faces the
+ * first move out. A chain of one link faces nothing.
+ */
+export function facingPair<T>(chain: T[], index: number | null): [T, T] | null {
+  const n = chain.length
+  if (n < 2) return null
+  const i = index === null ? n - 1 : Math.max(0, Math.min(n - 1, index))
+  if (i === 0) return [chain[0], chain[1]]
+  return [chain[i - 1], chain[i]]
+}

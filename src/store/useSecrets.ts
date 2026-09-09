@@ -63,8 +63,19 @@ export interface Buying {
   startedAt: number
 }
 
+/** A region key the machine has for where you are, this moment. */
+export interface CurrentKey { keyHex: string; height: number }
+
 interface SecretsState {
   keys: Record<string, HeldKey>
+  /**
+   * The keys of every region the anchor is standing in, all scan heights,
+   * replaced whole on each passive scan. Not held and not persisted: they are
+   * the thirteen cubes around you, recomputed the moment you cross into new
+   * ones, and they are what opens an ephemeral envelope said in one of them.
+   */
+  current: Record<string, CurrentKey>
+  setCurrent: (current: Record<string, CurrentKey>) => void
   /** The purchase in flight, or null. */
   buying: Buying | null
   /** The region the list last sent you to look at: drawn bright, the rest dimmed. */
@@ -128,6 +139,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   buying: null,
   buyError: null,
   focused: null,
+  current: {},
   open: false,
   sort: 'recent',
 
@@ -160,6 +172,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   },
 
   focus: (lookupId) => set({ focused: lookupId }),
+
+  setCurrent: (current) => set({ current }),
 
   setOpen: (open) => set({ open }),
 

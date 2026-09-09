@@ -62,6 +62,7 @@ import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
 
@@ -131,6 +132,7 @@ function World(): JSX.Element {
       <WorldMessages axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />
       <Cursor axes={axes} />
       <Avatar />

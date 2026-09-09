@@ -186,7 +186,10 @@ export default function App(): JSX.Element {
       {showPanels && !offerUp && <Hud menuOpen={crowded} />}
       <SpectateBar />
       {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
-      {!crowded && !offerUp && !deploying && !secretOpen && <ChatDock />}
+      {/* Not while spectating: the spectate bar owns the bottom of the screen,
+          and on a foldable's wide screen the folded CHAT chip sat on top of
+          it. You cannot speak from someone else's head anyway. */}
+      {!crowded && !offerUp && !deploying && !secretOpen && !spectating && <ChatDock />}
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}

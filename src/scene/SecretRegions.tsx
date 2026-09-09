@@ -112,20 +112,24 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
       out.push({ key, centre, corner, sides })
     }
     /*
-     * Only the outermost regions.
+     * Only the innermost regions.
      *
      * Each hop's region contains both ends of that hop, so a walk away from
-     * where you started leaves a set of nested blocks, each swallowing the one
-     * before. Drawing them all put three or four shells around every step and
-     * said nothing the largest did not already say. A region contained in
-     * another held region is dropped, and the one that contains it is drawn.
+     * where you started leaves nested blocks, each swallowing the one before.
+     * Drawing them all put three or four shells around every step. Drawing the
+     * outermost instead threw the detail away: the widest block is the least
+     * specific thing you hold. So a region that contains another steps aside
+     * for the one inside it, and what is drawn is the finest grain you have.
+     *
+     * A region something was found in is always drawn, and so is the one you
+     * asked to look at: those are not detail, they are the point.
      */
-    // The one you asked to look at is always drawn, whatever contains it.
-    const outermost = out.filter((cage) => cage.key.lookupId === focused
-      || !out.some((other) => other !== cage && contains(other.key, cage.key)))
+    const innermost = out.filter((cage) => cage.key.lookupId === focused
+      || cage.key.source === 'scan'
+      || !out.some((other) => other !== cage && contains(cage.key, other.key)))
     // Nearest first, so the ones you are standing in are the ones you see.
-    outermost.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
-    return outermost.slice(0, DRAWN_MAX)
+    innermost.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
+    return innermost.slice(0, DRAWN_MAX)
   }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused])
 
   if (cages.length === 0) return null

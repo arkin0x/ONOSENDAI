@@ -76,7 +76,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
       const h = BigInt(k.heights ? k.heights[axis] : k.height)
       return BigInt(k.base[axis]) + (1n << h) / 2n
     }
-    onClose()
+    useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(k.lookupId)
     useCyberspace.getState().focusOn({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3))
   }

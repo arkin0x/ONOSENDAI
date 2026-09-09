@@ -8,7 +8,6 @@
  * the real computation.
  */
 
-import { useState } from 'react'
 import { CloudUpload, Footprints, KeyRound, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
 import { SecretsModal } from './SecretsModal'
@@ -56,7 +55,8 @@ export function ProofPanel(): JSX.Element {
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
   const heldCount = useSecrets((s) => Object.keys(s.keys).length)
-  const [secrets, setSecrets] = useState(false)
+  // In the store, so RETURN from a region can bring the list back.
+  const secrets = useSecrets((s) => s.open)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
   // lowered to what calibration measured (the preview hook uses the same).
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
@@ -232,11 +232,11 @@ export function ProofPanel(): JSX.Element {
 
       {/* Every region you can open, and what it cost to get there. */}
       <div className="proof__secrets">
-        <button className="avatars__go" onClick={() => setSecrets(true)}>
+        <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
           <KeyRound size={12} strokeWidth={2.25} aria-hidden /> SECRETS{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
-      {secrets && <SecretsModal onClose={() => setSecrets(false)} />}
+      {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}
 
       {/* What COMMIT does with a route: its first step, or all of them. */}
       <div className="proof__mode" role="radiogroup" aria-label="What commit runs">

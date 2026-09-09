@@ -1993,6 +1993,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   clearFocus: () => {
+    // A view that came from the Secrets list goes back to it: RETURN is how
+    // you leave the region, and the list is where you were when you asked.
+    const secrets = useSecrets.getState()
+    if (secrets.focused !== null) {
+      secrets.focus(null)
+      secrets.setOpen(true)
+    }
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus } = get()

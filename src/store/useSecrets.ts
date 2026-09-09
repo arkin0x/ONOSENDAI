@@ -70,6 +70,9 @@ interface SecretsState {
   /** The region the list last sent you to look at: drawn bright, the rest dimmed. */
   focused: string | null
   focus: (lookupId: string | null) => void
+  /** Whether the list is on screen. In the store, so RETURN can bring it back. */
+  open: boolean
+  setOpen: (open: boolean) => void
   /** Why the last purchase did not happen. */
   buyError: string | null
   /** Note a key you now hold; keeps the one already held rather than replacing it. */
@@ -106,6 +109,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   buying: null,
   buyError: null,
   focused: null,
+  open: false,
 
   hold: (incoming) => {
     if (incoming.length === 0) return
@@ -136,6 +140,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   },
 
   focus: (lookupId) => set({ focused: lookupId }),
+
+  setOpen: (open) => set({ open }),
 
   buy: async (at, plane, height) => {
     if (get().buying) return false

@@ -110,7 +110,10 @@ export default function App(): JSX.Element {
   // scene, so the view they asked for closes them; RETURN is on the bar.
   const driving = useCyberspace((s) => s.focus?.drive === true)
   const stationView = useHyperspace((s) => s.viewOwned)
-  useEffect(() => { if ((driving || stationView) && isMobile) setPanelsOpen(false) }, [driving, stationView, isMobile])
+  // A region tapped in the Secrets list is the same kind of asking: the panels
+  // are what you were reading, and the region is what you asked to see.
+  const viewingSecret = useSecrets((s) => s.focused !== null)
+  useEffect(() => { if ((driving || stationView || viewingSecret) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.

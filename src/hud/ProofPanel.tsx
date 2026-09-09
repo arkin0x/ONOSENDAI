@@ -230,10 +230,10 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
-      {/* Every region you can open, and what it cost to get there. */}
+      {/* Every region you hold the key to, and what it cost to get there. */}
       <div className="proof__secrets">
         <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
-          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> SECRETS{heldCount > 0 ? ` (${heldCount})` : ''}
+          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
       {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}

@@ -1,5 +1,5 @@
 /**
- * SecretsModal.tsx — every region you can open.
+ * SecretsModal.tsx — REGION KEYS: every region you can open.
  *
  * A key is a number you computed, not a password you were given: the Cantor
  * root of one aligned region, hashed for the key and again for the lookup id
@@ -85,10 +85,10 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   }
 
   return createPortal(
-    <div className="modal" role="dialog" aria-label="Secrets" aria-modal="true" onPointerDown={onClose}>
+    <div className="modal" role="dialog" aria-label="Region keys" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
-          <h2><KeyRound size={14} strokeWidth={2.25} aria-hidden /> Secrets</h2>
+          <h2><KeyRound size={14} strokeWidth={2.25} aria-hidden /> Region keys</h2>
           <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
           <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
         </header>
@@ -196,15 +196,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
         </ul>
 
         <Explanation>
-          A region key is the Cantor root of one aligned cube, hashed once for the
-          key and twice for the address the relay files it under. Holding it lets
-          you ask what is hidden there and read the answer, and it opens that cube
-          alone: a key to a large region says nothing about the blocks inside it,
-          because each has its own root. Your machine computes the small cubes
-          around you as you move, so those are not kept; a key earns its place
-          here by opening something, or by being bought. The large ones are what
-          HOSAKA sells, since a cube of side 2^20 is a million pairings per axis
-          and one of side 2^27 is a hundred and thirty million.
+          A region key is the Cantor root of one aligned volume containing your
+          hop origin and destination. The key is used for your movement proof,
+          but it can also decrypt location-encrypted content anchored to that
+          same region. Your action chain already holds the proofs independently
+          of these keys, so they can be deleted and recalculated later.
         </Explanation>
 
 

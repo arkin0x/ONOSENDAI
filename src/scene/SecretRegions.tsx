@@ -9,9 +9,10 @@
  * a key at its +X +Z corner, the same green the deploy box uses for "found
  * here", so the colour means one thing throughout.
  *
- * Only what is worth drawing is drawn. A cube smaller than a few pixels or
- * wider than the field says nothing, and the nearest few are enough: past that
- * the cages overlap into a haze and the frame pays for it.
+ * Only what is worth drawing is drawn. A region smaller than one cell at the
+ * current zoom says nothing and cannot be aimed at, and one wider than the
+ * field is a wall of lines; the nearest few are enough, since past that the
+ * cages overlap into a haze and the frame pays for it.
  */
 
 import { useMemo } from 'react'
@@ -99,7 +100,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     for (const key of Object.values(keys)) {
       if (key.plane !== anchorPlane) continue
       const widest = sideOf(key.height)
-      if (widest > GRID_RADIUS * 6 || widest < 0.05) continue
+      // Smaller than the cell you are looking at: there is nothing to see and
+      // nothing to aim at, so it waits until you zoom back in. Measured on the
+      // longest side, so a bar stays while it still reaches across a cell.
+      if (widest > GRID_RADIUS * 6 || widest < 1) continue
       const centre: [number, number, number] = [0, 0, 0]
       const corner: [number, number, number] = [0, 0, 0]
       const sides: [number, number, number] = [1, 1, 1]

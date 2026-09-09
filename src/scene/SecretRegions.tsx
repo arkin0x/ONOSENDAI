@@ -31,6 +31,20 @@ interface Props {
   axes: ViewAxes
 }
 
+/**
+ * How wide the region is, in the units the protocol uses.
+ *
+ * A hiding place is a cube and reads as one number. A movement's region is a
+ * box, each axis as wide as that axis's own crossing, and reads as three: a hop
+ * along X alone unlocks 2^7 × 2^0 × 2^0, a bar seven doublings long and one
+ * gibson through, which is a different thing from a cube of side 2^7.
+ */
+export function sizeLabel(key: HeldKey): string {
+  const h = key.heights
+  if (!h || (h.x === h.y && h.y === h.z)) return `2^${key.height}`
+  return `2^${h.x}×2^${h.y}×2^${h.z}`
+}
+
 interface Cage {
   key: HeldKey
   centre: [number, number, number]
@@ -94,8 +108,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
           <lineSegments geometry={geometry} position={cage.centre} scale={cage.sides} frustumCulled={false} renderOrder={8}>
             <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={0.4} depthTest={false} />
           </lineSegments>
-          {/* The key at the region's low corner: a held region is an open one. */}
-          <WorldLabel text="⚿" color={HELD} at={cage.corner} px={16} opacity={0.85} align="center" />
+          {/* The key and the region's size as one piece, hanging just under the
+              corner: a cage says nothing about how big it is until it says so,
+              and 2^7 × 2^0 × 2^0 is the difference between a room and a corridor. */}
+          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={14} opacity={0.9} align="left" />
         </group>
       ))}
     </>

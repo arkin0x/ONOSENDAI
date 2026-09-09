@@ -8,6 +8,8 @@
  */
 
 import {
+  deriveRegionKeys,
+  alignedBase,
   computeHopProof,
   computeSidestepProof,
   encodeOpenings,
@@ -62,6 +64,18 @@ export type ProofResponse =
       jobId?: string
       costMsats?: number
       lookupId?: string
+      /**
+       * A hop's own region (spec §4.7 and §7.2): the box the movement crossed,
+       * its three axes at their own heights, with the key that opens whatever
+       * is hidden there. The computation makes it either way; dropping it threw
+       * away the one thing a hop grants beyond the movement itself.
+       */
+      region?: {
+        keyHex: string
+        lookupId: string
+        heights: [number, number, number]
+        base: [string, string, string]
+      }
     }
   | { type: 'error'; id: number; message: string; elapsedMs: number }
 
@@ -161,6 +175,18 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
       terrainK: proof.terrainK,
       lca: { x: estimate.lcaX, y: estimate.lcaY, z: estimate.lcaZ },
       totalOps: estimate.totalOps,
+      // The region this hop crossed, and its key (§7.2). Free: the proof
+      // already built region_n on its way to the movement proof.
+      region: {
+        keyHex: bytesToHex(deriveRegionKeys(proof.regionN).locationDecryptionKey),
+        lookupId: deriveRegionKeys(proof.regionN).lookupIdHex,
+        heights: [estimate.lcaX, estimate.lcaY, estimate.lcaZ],
+        base: [
+          alignedBase(from.x, estimate.lcaX).toString(),
+          alignedBase(from.y, estimate.lcaY).toString(),
+          alignedBase(from.z, estimate.lcaZ).toString(),
+        ],
+      },
     }
     self.postMessage(response)
   } catch (err) {

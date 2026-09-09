@@ -1238,7 +1238,10 @@ kbd {
 
 .targets__row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto auto;
+  /* Dot, who, status, VIEW, SPECTATE, remove: six cells, and six columns. The
+     row was declared with five, so VIEW (added with the free view) pushed the
+     remove button onto a second line of its own. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 8px;
   padding: 5px 0;
@@ -5187,3 +5190,230 @@ kbd {
   max-height: none;
   overflow-y: visible;
 }
+
+/* Secrets: the regions you hold the key to. Green throughout, the same green
+   the deploy box uses for "found here". */
+.secrets__box {
+  width: min(560px, calc(100vw - 24px));
+  padding: 16px;
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.secrets__box .panel__head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.secrets__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.secrets__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.secrets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.secrets__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.secrets__row:first-child { border-top: none; }
+
+.secrets__go {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.secrets__where {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #52e39f;
+}
+
+.secrets__meta,
+.secrets__id {
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.secrets__id {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.secrets__found { color: #52e39f; }
+
+.secrets__scan {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #52e39f;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, #52e39f 45%, transparent);
+  border-radius: 3px;
+}
+
+.proof__secrets { display: flex; }
+.proof__secrets .avatars__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The region root a hop left on the chain, and whether it is still held.
+   Not .explorer__key, which is already the name of a field's label. */
+.explorer__root {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: #52e39f;
+}
+
+.explorer__root.is-gone {
+  color: var(--dim);
+  opacity: 0.7;
+}
+
+/* Buying a key: the heights this machine cannot sweep for itself. */
+.secrets__buy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.secrets__buy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__buy-size {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: #52e39f;
+  font-variant-numeric: tabular-nums;
+}
+
+.secrets__step {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.secrets__step:disabled { opacity: 0.35; }
+
+.secrets__error {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--warn);
+}
+
+/* The Secrets button stands apart from the rows above and below it. */
+.proof__secrets {
+  display: flex;
+  padding: 10px 0;
+  margin: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A rule before the benchmark, which is a different subject from the controls. */
+.proof__rule {
+  height: 0;
+  margin: 10px 0 6px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* The Secrets modal's head: title, count, and the way out on the right. */
+.secrets__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__close { margin-left: auto; }
+
+.secrets__gap { flex: 1 1 auto; }
+
+.secrets__forget-all {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 3px;
+}
+
+.secrets__dims {
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.secrets__scan:disabled { opacity: 0.6; }
+
+/* How the Secrets list is ordered. */
+.secrets__sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.secrets__sort .login__label { margin-right: 2px; }

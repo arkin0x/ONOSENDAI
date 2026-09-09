@@ -32,10 +32,20 @@ interface Props {
   opacity?: number
   /** Left for labels that hang off a point, centre for labels that cap a face. */
   align?: 'left' | 'center'
+  /**
+   * A second string set beside the first at a smaller size, as one piece: a
+   * glyph and its reading, where the glyph carries and the reading explains.
+   * The pair straddles the anchor, so neither has to be measured to place the
+   * other, and both scale together because they share the group.
+   */
+  small?: string
+  /** How big the second string is, as a fraction of the first. */
+  smallScale?: number
 }
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], px = 14, opacity = 1, align = 'left',
+  small, smallScale = 0.68,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const scratch = useMemo(() => new Vector3(), [])
@@ -62,16 +72,32 @@ export function WorldLabel({
         <Text
           font={WORLD_FONT}
           fontSize={1}
-          anchorX={align}
+          anchorX={small === undefined ? align : 'right'}
           anchorY="middle"
           color={color}
           textAlign={align}
           fillOpacity={opacity}
           outlineWidth={0.06}
           outlineColor="#05070d"
+          position={small === undefined ? undefined : [-0.14, 0, 0]}
         >
           {text}
         </Text>
+        {small !== undefined && (
+          <Text
+            font={WORLD_FONT}
+            fontSize={smallScale}
+            anchorX="left"
+            anchorY="middle"
+            color={color}
+            fillOpacity={opacity}
+            outlineWidth={0.06}
+            outlineColor="#05070d"
+            position={[0.14, 0, 0]}
+          >
+            {small}
+          </Text>
+        )}
       </Billboard>
     </group>
   )

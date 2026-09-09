@@ -144,7 +144,7 @@ function fakeClient(over: Partial<HosakaClient>): HosakaClient {
   const reject = (): never => { throw new Error('unexpected call') }
   return {
     apiUrl: 'http://fake',
-    limits: reject, quote: reject, submitHop: reject, submitSidestep: reject, getJob: reject, balance: reject, deposit: reject,
+    limits: reject, quote: reject, submitHop: reject, submitSidestep: reject, submitRegionKey: reject, getJob: reject, balance: reject, deposit: reject,
     startJob: reject, claimDeposit: reject, waitForDeposit: reject, waitForJob: reject,
     ...over,
   }

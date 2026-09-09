@@ -123,6 +123,7 @@ import {
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
+import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 
 /**
@@ -429,6 +430,9 @@ export interface CyberspaceState {
   /** Whether COMMIT runs one step of the route or all of them in order. */
   moveMode: MoveMode
   setMoveMode: (mode: MoveMode) => void
+  /** Whether the regions you hold keys to are drawn in the scene. */
+  showSecrets: boolean
+  setShowSecrets: (show: boolean) => void
   cancel: () => void
   /** Continue a paused route: ask for the pending signature again, or restart the step. */
   resumePlan: () => void
@@ -597,6 +601,11 @@ function chainKeyFor(pubkey: string): string {
 }
 const LIVE_KEY = 'onosendai:live'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
+const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
+
+function loadShowSecrets(): boolean {
+  try { return localStorage.getItem(SHOW_SECRETS_KEY) !== '0' } catch { return true }
+}
 
 /** One action per commit, or the whole route in order. */
 export type MoveMode = 'single' | 'auto'
@@ -914,7 +923,7 @@ let hosaka: { url: string; client: HosakaClient } | null = null
 let limitsInFlight: { url: string; promise: Promise<HosakaLimits | null> } | null = null
 
 /** One client per API URL. It signs through `signEvent`, so it follows identity switches. */
-function cloudClient(apiUrl: string): HosakaClient {
+export function cloudClient(apiUrl: string): HosakaClient {
   if (!hosaka || hosaka.url !== apiUrl) hosaka = { url: apiUrl, client: createHosaka({ apiUrl, sign: signEvent }) }
   return hosaka.client
 }
@@ -1305,6 +1314,21 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         jobId: final.jobId,
         at: Math.floor(Date.now() / 1000),
       })
+      // And into the Secrets list, where every region you can open is listed
+      // together, whoever computed it.
+      useSecrets.getState().hold([{
+        lookupId: msg.lookupId,
+        keyHex: r.region_n.secret_key,
+        height: r.max_height,
+        base: {
+          x: String((move.to.x >> BigInt(r.max_height)) << BigInt(r.max_height)),
+          y: String((move.to.y >> BigInt(r.max_height)) << BigInt(r.max_height)),
+          z: String((move.to.z >> BigInt(r.max_height)) << BigInt(r.max_height)),
+        },
+        plane: move.plane,
+        source: 'cloud',
+        at: Math.floor(Date.now() / 1000),
+      }])
     }
     const before = get().events.length
     await get().finishProof(msg)
@@ -1579,6 +1603,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     else await quoteRoute(++requestId)
   },
 
+  setShowSecrets: (show) => {
+    if (show === get().showSecrets) return
+    try { localStorage.setItem(SHOW_SECRETS_KEY, show ? '1' : '0') } catch { /* private mode */ }
+    set({ showSecrets: show })
+  },
+
   setMoveMode: (mode) => {
     if (mode === get().moveMode) return
     saveMoveMode(mode)
@@ -1811,6 +1841,22 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
 
     saveChain(nextEvents, nextPublished, stats)
+
+    // What the hop unlocked: the region it crossed, held with the action that
+    // bought it, so the chain can say which hops left a key behind.
+    if (msg.type === 'done' && msg.mode === 'hop' && msg.region) {
+      useSecrets.getState().hold([{
+        lookupId: msg.region.lookupId,
+        keyHex: msg.region.keyHex,
+        height: Math.max(...msg.region.heights),
+        heights: { x: msg.region.heights[0], y: msg.region.heights[1], z: msg.region.heights[2] },
+        base: { x: msg.region.base[0], y: msg.region.base[1], z: msg.region.base[2] },
+        plane,
+        source: 'hop',
+        eventId: event.id,
+        at: Math.floor(Date.now() / 1000),
+      }])
+    }
 
     // A route continues from where this step landed, or ends here.
     const { plan } = get()
@@ -2193,6 +2239,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   cloud: IDLE_CLOUD,
   cloudPrefs: loadCloudPrefs(),
   moveMode: loadMoveMode(),
+  showSecrets: loadShowSecrets(),
 
   approveCloud: () => {
     const { cloud } = get()

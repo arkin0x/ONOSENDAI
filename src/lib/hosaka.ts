@@ -185,6 +185,14 @@ export interface CloudSidestepResult {
 }
 
 /** A job as the API returns it: the row, plus the payment fields a submit or a start adds. */
+/** What a completed region_key job carries: §7.2's key and the id it is filed under. */
+export interface HosakaRegionKeyResult {
+  secret_key: string
+  lookup_id: string
+  height: number
+  base: { x: number | string; y: number | string; z: number | string }
+}
+
 export interface HosakaJob {
   id: string
   status: HosakaJobStatus
@@ -338,6 +346,14 @@ export interface HosakaClient {
   quote: (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, signal?: AbortSignal) => Promise<HosakaQuote>
   submitHop: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
   submitSidestep: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
+  /**
+   * The key to the aligned cube of side 2^height around a coordinate.
+   *
+   * Not a movement: a hop's region is the three axes at their own crossing
+   * heights, which is a box, and everything is hidden in a cube. This computes
+   * the cube, which is what actually opens anything.
+   */
+  submitRegionKey: (at: { x: bigint; y: bigint; z: bigint }, height: number, signal?: AbortSignal) => Promise<HosakaJob>
   /** Reads with the poll token; no signature, so a bunker is never prompted per poll. */
   getJob: (jobId: string, pollToken: string, signal?: AbortSignal) => Promise<HosakaJob>
   startJob: (jobId: string, signal?: AbortSignal) => Promise<HosakaJob>
@@ -465,6 +481,13 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
       request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2 }, signal }),
     submitHop: (v1, v2, previousEventId, signal) => submit('hop', v1, v2, previousEventId, signal),
     submitSidestep: (v1, v2, previousEventId, signal) => submit('sidestep', v1, v2, previousEventId, signal),
+    submitRegionKey: (at, height, signal) =>
+      request<HosakaJob>('/api/v1/region_key', {
+        method: 'POST',
+        auth: true,
+        body: { x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), height },
+        signal,
+      }),
     getJob,
     startJob: (jobId, signal) => request<HosakaJob>(`/api/v1/jobs/${jobId}/start`, { method: 'POST', auth: true, signal }),
     claimDeposit,

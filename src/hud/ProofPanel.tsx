@@ -8,8 +8,10 @@
  * the real computation.
  */
 
-import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
+import { CloudUpload, Footprints, KeyRound, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
+import { SecretsModal } from './SecretsModal'
+import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
@@ -52,6 +54,9 @@ export function ProofPanel(): JSX.Element {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
+  const heldCount = useSecrets((s) => Object.keys(s.keys).length)
+  // In the store, so RETURN from a region can bring the list back.
+  const secrets = useSecrets((s) => s.open)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
   // lowered to what calibration measured (the preview hook uses the same).
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
@@ -225,9 +230,17 @@ export function ProofPanel(): JSX.Element {
         </>
       )}
 
+      {/* Every region you hold the key to, and what it cost to get there. */}
+      <div className="proof__secrets">
+        <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
+          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
+        </button>
+      </div>
+      {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}
+
       {/* What COMMIT does with a route: its first step, or all of them. */}
       <div className="proof__mode" role="radiogroup" aria-label="What commit runs">
-        <span className="login__label">Commit runs</span>
+        <span className="login__label">COMMIT BUTTON ACTION:</span>
         <div className="cloud__modes">
           {MOVE_MODES.map(([mode, label, title]) => (
             <button
@@ -247,6 +260,8 @@ export function ProofPanel(): JSX.Element {
             : 'One step per press: the one the button names. The cursor stays where it is, so the next press takes the next step.'}
         </span>
       </div>
+
+      <hr className="proof__rule" />
 
       <p className="legend__note">
         THIS MACHINE BENCHMARK

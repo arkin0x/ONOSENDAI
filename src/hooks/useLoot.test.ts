@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+if (typeof localStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
 const events: Array<Record<string, unknown>> = []
 let queryCalls = 0
 let subscribeCalls = 0
@@ -59,5 +69,23 @@ describe('the loot list outlives the panel', () => {
     ensureLoot(['wss://one'])
     expect(useLootStore.getState().status).toBe('loading')
     await vi.waitFor(() => { expect(useLootStore.getState().status).toBe('ready') })
+  })
+})
+
+describe('the list survives a reload', () => {
+  it('writes what it learns, so the next visit opens with rows', async () => {
+    events.push({ id: 'a' }, { id: 'b' })
+    useLootStore.setState({ items: [], status: 'loading', source: '' })
+    ensureLoot(['wss://one'])
+    await vi.waitFor(() => { expect(useLootStore.getState().status).toBe('ready') })
+
+    const kept = JSON.parse(localStorage.getItem('onosendai:loot') ?? '[]')
+    expect(kept).toHaveLength(2)
+  })
+
+  it('a list already on screen is not a loading state', () => {
+    // What the store looks like when it was built from a cache.
+    useLootStore.setState({ items: [{ key: 'a' } as never], status: 'ready', source: '' })
+    expect(useLootStore.getState().status).toBe('ready')
   })
 })

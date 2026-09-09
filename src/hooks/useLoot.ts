@@ -34,7 +34,42 @@ interface LootState extends Loot {
   source: string
 }
 
-export const useLootStore = create<LootState>(() => ({ items: [], status: 'loading', source: '' }))
+const CACHE_KEY = 'onosendai:loot'
+/** How many rows are kept for the next visit. The panel shows a handful. */
+const CACHE_MAX = 120
+
+/**
+ * The last list, kept for the next visit.
+ *
+ * Holding it outside React stopped the panel blinking when the menu closed,
+ * but a reload still opened on LOADING and an empty list and then dropped two
+ * dozen rows in at once, moving everything under them. The rows are small and
+ * they do not spoil: a bag that has been rewritten comes back in the same
+ * backfill and replaces itself.
+ */
+function readCache(): LootItem[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return []
+    const list = JSON.parse(raw) as unknown
+    return Array.isArray(list) ? (list as LootItem[]).filter((i) => i && typeof i.key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeCache(items: LootItem[]): void {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(items.slice(0, CACHE_MAX))) } catch { /* private mode */ }
+}
+
+const cached = readCache()
+
+export const useLootStore = create<LootState>(() => ({
+  items: cached,
+  // Rows already on screen are not a loading state, whatever the relay is doing.
+  status: cached.length > 0 ? 'ready' : 'loading',
+  source: '',
+}))
 
 let close: (() => void) | null = null
 
@@ -53,7 +88,11 @@ export function ensureLoot(relays: string[]): void {
   close = subscribe({ kinds: [HIDDEN_KIND], since }, (ev) => {
     const item = summarizeBag(ev)
     if (item && useLootStore.getState().source === source) {
-      useLootStore.setState((s) => ({ items: mergeLoot(s.items, [item]) }))
+      useLootStore.setState((s) => {
+        const items = mergeLoot(s.items, [item])
+        writeCache(items)
+        return { items }
+      })
     }
   })
 
@@ -61,7 +100,11 @@ export function ensureLoot(relays: string[]): void {
     (events) => {
       if (useLootStore.getState().source !== source) return
       const found = events.map(summarizeBag).filter((x): x is LootItem => x !== null)
-      useLootStore.setState((s) => ({ items: mergeLoot(s.items, found), status: 'ready' }))
+      useLootStore.setState((s) => {
+        const items = mergeLoot(s.items, found)
+        writeCache(items)
+        return { items, status: 'ready' }
+      })
     },
     () => {
       if (useLootStore.getState().source !== source) return

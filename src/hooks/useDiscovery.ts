@@ -19,7 +19,7 @@ import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
-import { useSecrets } from '../store/useSecrets'
+import { useSecrets, type CurrentKey } from '../store/useSecrets'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 
 /** The aligned base of a value at a height: what decides "same region". */
@@ -90,6 +90,12 @@ export function useDiscovery(): void {
       if (msg.type !== 'done') return
       w.removeEventListener('message', onMessage)
       if (keys.size === 0) { useShards.getState().setScanning(false); return }
+
+      // The chat needs these before the relay answers, and whether it answers:
+      // an envelope said in one of these cubes opens with one of these keys.
+      const current: Record<string, CurrentKey> = {}
+      for (const [lookupId, keyHex] of keys) current[lookupId] = { keyHex, height: heights.get(lookupId) ?? 0 }
+      useSecrets.getState().setCurrent(current)
 
       // A superseded scan must not write stale finds.
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })

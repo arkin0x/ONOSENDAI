@@ -23,6 +23,8 @@ import { TouchControls } from './hud/TouchControls'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
+import { ChatDock } from './hud/ChatDock'
+import { useChatFeed } from './hooks/useChatFeed'
 import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
@@ -79,6 +81,7 @@ export default function App(): JSX.Element {
   }, [])
 
   const isMobile = useIsMobile()
+  useChatFeed()
   const targets = useTargets()
   // Spectating locks the panels: they describe you, and the scene is not about
   // you right now. The bar carries what matters and the way out.
@@ -180,6 +183,7 @@ export default function App(): JSX.Element {
       {showPanels && !offerUp && <Hud menuOpen={crowded} />}
       <SpectateBar />
       {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {!crowded && !offerUp && !deploying && !secretOpen && <ChatDock />}
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}

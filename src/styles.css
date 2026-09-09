@@ -3151,7 +3151,9 @@ kbd {
   display: block;
   width: 100%;
   height: 2px;
-  background: var(--fg);
+  /* The same blue as the CONTROLS and CHAT chips' text: the three bottom
+     controls read as one set. */
+  background: var(--accent, #00e5ff);
   border-radius: 1px;
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
@@ -3236,24 +3238,30 @@ kbd {
 .touchpad {
   bottom: 92px;
   display: grid;
-  grid-template-columns: repeat(4, 38px);
-  grid-template-rows: repeat(3, 38px);
+  grid-template-columns: repeat(3, 38px);
+  grid-template-rows: repeat(4, 38px);
   gap: 4px;
   grid-template-areas:
-    ".    away    up   toward"
-    ".    left    hub  right"
-    "cube zoomout down zoomin";
+    ".       .    cube"
+    "away    up   toward"
+    "left    hub  right"
+    "zoomout down zoomin";
 }
-/* Off your own head only scale is left to drive, so the pad folds to one
- * row: coarser, the readout, finer, and the cube. The direction cells leave
- * the grid rather than standing empty in it. */
+/* Off your own head only scale is left to drive, so the pad folds to the
+ * scale row with the cube above it. The direction cells leave the grid
+ * rather than standing empty in it. */
 .touchpad--scale {
-  grid-template-rows: 38px;
-  grid-template-areas: "cube zoomout hub zoomin";
+  grid-template-rows: repeat(2, 38px);
+  grid-template-areas:
+    ".       .   cube"
+    "zoomout hub zoomin";
 }
 .touchpad--scale .is-standdown { display: none; }
-/* The purple cube: the scale keys' own end of the ladder, so it sits with them,
-   directly left of the coarser key rather than up in the direction cells. */
+/* The purple cube: the whole ladder in one press, and a thing you want to
+   press on purpose. It sat at the bottom left of the pad, beside the coarser
+   key, where a thumb reaching for the pad's edge kept landing on it. It sits
+   above NEAR now, in its own row at the top right corner: out of the path to
+   every other key, and clear of the chat that lives to the pad's left. */
 .touchpad__key--cube {
   grid-area: cube;
   color: #dcc2ff;
@@ -3521,19 +3529,22 @@ kbd {
   }
 }
 
-/* The compass sat bottom-centre, directly under the action row, so the controls
- * buried it. On a phone it moves out of the thumb zone entirely. */
+/* The compass sat bottom-centre, which is where the chat lives now. It stands
+ * at the top right on every width: out of the thumb zone on a phone, and out
+ * of the way of talk on a desktop. The view menu it summons already opens
+ * under that corner. */
+.compass-3d {
+  bottom: auto;
+  top: 12px;
+  left: auto;
+  right: 12px;
+  transform: none;
+}
 @media (max-width: 1100px) {
   .compass-3d {
-    bottom: auto;
-    top: 12px;
-    left: auto;
-    right: 12px;
-    transform: none;
     width: 84px;
     height: 84px;
   }
-
 }
 
 /* ---------- Summoned controls: view menu, hint chip ---------- */
@@ -3706,14 +3717,30 @@ kbd {
     height: 46px;
   }
 
-  /* The view menu hangs off the compass, which is bottom-centre on a desktop
-   * rather than top-right, so the menu follows it down. It has to clear the
-   * movement pad, whose top edge is 184px up: the pad is 122px tall and sits
-   * 62px from the bottom. At 150 the menu covered the pad's top row. */
-  .viewmenu {
-    top: auto;
-    bottom: 226px;
+  /* The compass is top-right on every width now (the chat took the bottom
+   * centre). Flush right on a desktop is underneath the 300px panel column,
+   * so it moves to the scene's right edge, 332px in, like the pad; and the
+   * view menu hangs off it, directly beneath. */
+  .compass-3d {
     right: 332px;
+  }
+
+  .viewmenu {
+    top: 140px;
+    right: 332px;
+  }
+
+  /* The chat sits between the hamburger (352px in, 46px wide) and the pad
+   * column (332px in from the right, 122px wide), never under either. The
+   * chip centres on the scene, which is 10px right of the viewport's centre
+   * with 320px of panels on the left and 300px on the right. */
+  .chatdock {
+    left: 424px;
+    right: 470px;
+  }
+
+  .chatdock__chip {
+    left: calc(50% + 10px);
   }
 }
 
@@ -5417,3 +5444,198 @@ kbd {
 }
 
 .secrets__sort .login__label { margin-right: 2px; }
+
+/* ---------- Chat: the room you are standing in ----------
+ * Bottom centre, between the menu button (left, 56px + margins) and the
+ * controls (right, 122px wide pad column + margins), so it never covers
+ * either. The list runs newest at the bottom; what climbs above a third of
+ * the screen fades to nothing rather than stopping at an edge. */
+.chatdock__chip {
+  position: fixed;
+  /* Level with the CONTROLS chip, which sits at the same 14px. */
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 101;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* The same height as CONTROLS beside it: 9px text at line-height 1 in 9px
+     of padding is 29px; an 11px glyph in 8px of padding is the same. */
+  padding: 8px 12px;
+}
+
+.chatdock__badge {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  color: #06121a;
+  background: var(--accent, #00e5ff);
+}
+
+.chatdock {
+  position: fixed;
+  bottom: 14px;
+  left: 84px;
+  right: 152px;
+  margin: 0 auto;
+  width: min(480px, 100%);
+  max-height: 33vh;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(6, 14, 22, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.chatdock__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.chatdock__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.chatdock__room {
+  margin-left: 4px;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  text-transform: none;
+}
+
+.chatdock__acts { display: inline-flex; gap: 4px; }
+
+.chatdock__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chatdock__act:hover, .chatdock__act[aria-pressed="true"] { color: var(--fg); border-color: var(--border); }
+
+/* Newest at the bottom, oldest fading out at the top. The mask is what makes
+ * the fade: lines that scroll up into the last quarter thin to nothing. The
+ * scrollbar is there and is not drawn. */
+.chat__list {
+  list-style: none;
+  margin: 0;
+  padding: 10px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  min-height: 48px;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 1) 28%);
+  mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 1) 28%);
+  overscroll-behavior: contain;
+}
+.chat__list::-webkit-scrollbar { display: none; }
+
+.chat__line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.chat__line.is-mine .chat__who { color: var(--accent, #00e5ff); }
+
+.chat__body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.chat__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.chat__who { color: var(--fg); text-transform: none; letter-spacing: 0; font-size: 10px; }
+.chat__when { font-variant-numeric: tabular-nums; }
+
+.chat__text {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat__empty {
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.4;
+}
+
+.chat__compose {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.chat__input:focus { outline: none; border-color: var(--accent, #00e5ff); }
+.chat__input:disabled { opacity: 0.55; }
+
+.chat__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 32px;
+  color: #06121a;
+  background: var(--accent, #00e5ff);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.chat__send:disabled { opacity: 0.35; cursor: default; }
+
+.chat__error { margin: 0; font-size: 9px; color: var(--danger); }
+.chat__status { margin: 0; font-size: 8px; letter-spacing: 0.14em; color: var(--dim); }
+
+/* Under 1100px the pad column is the same width, but the menu button and the
+ * dock fight for the bottom on a narrow phone: the dock takes the width and
+ * sits above the button row. */
+@media (max-width: 640px) {
+  .chatdock {
+    left: 10px;
+    right: 10px;
+    bottom: 80px;
+    width: auto;
+    max-height: 38vh;
+  }
+}

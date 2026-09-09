@@ -29,6 +29,16 @@ import type { Position } from './space'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
+/**
+ * The same envelope in the ephemeral range: a relay hands it to whoever is
+ * subscribed at that moment and keeps nothing. Chat lives here. A 23330 is a
+ * 33330 in every respect but the kind: same `d`, same `encrypted`, same `h`.
+ */
+export const CHAT_BAG_KIND = 23330
+/** A chat line, inside the ephemeral envelope; the kind other clients use for ephemeral chat. */
+export const CHAT_KIND = 23333
+/** Longest chat line. Short on purpose: it is a room, not a wall. */
+export const MAX_CHAT_LENGTH = 500
 /** A shard, inside the envelope (v1's shard kind). */
 export const SHARD_KIND = 3330
 /** A plain note, inside the envelope. */
@@ -87,6 +97,22 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
 }
 
 /**
+ * The inner chat event template (kind 23333), signed by the author.
+ *
+ * Never published bare: it only ever travels inside a CHAT_BAG_KIND envelope
+ * keyed to the region it was said in, so a relay sees ciphertext and the
+ * people standing in that region see the words.
+ */
+export function chatInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  return {
+    kind: CHAT_KIND,
+    created_at: createdAt,
+    content: text.slice(0, MAX_CHAT_LENGTH),
+    tags: [['C', positionHex(at, plane)]],
+  }
+}
+
+/**
  * Wrap a BAG of signed inner events into one region envelope template.
  *
  * Spec §8.6: the envelope is keyed by `d = lookup_id`, so there is one per
@@ -100,10 +126,10 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number): Promise<EventTemplate> {
+export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND): Promise<EventTemplate> {
   const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inners))
   return {
-    kind: HIDDEN_KIND,
+    kind,
     created_at: createdAt,
     content: '',
     tags: [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2'], ['h', String(height)]],
@@ -116,7 +142,7 @@ function tag(ev: NostrEvent, name: string): string | undefined {
 
 /** The ciphertext out of an envelope, or null if it is not one. */
 export function ciphertextOf(ev: NostrEvent): string | null {
-  if (ev.kind !== HIDDEN_KIND) return null
+  if (ev.kind !== HIDDEN_KIND && ev.kind !== CHAT_BAG_KIND) return null
   const enc = ev.tags.find((t) => t[0] === 'encrypted')
   if (!enc || enc[1] !== ALGO || !enc[2]) return null
   return enc[2]
@@ -184,6 +210,17 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array): Promise<H
     if (h) out.push(h)
   }
   return out
+}
+
+/**
+ * The chat lines in an ephemeral envelope: every inner that is a CHAT_KIND,
+ * verifies, and was signed by the same key that wrapped it. Anything else in
+ * the bag is not chat and is left where it is.
+ */
+export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Promise<NostrEvent[]> {
+  if (outer.kind !== CHAT_BAG_KIND) return []
+  const inners = await bagInners(outer, regionKey)
+  return inners.filter((e) => e.kind === CHAT_KIND && typeof e.content === 'string' && e.content.length > 0)
 }
 
 /** The signed inner events currently in an envelope's bag (unverified passthrough). */

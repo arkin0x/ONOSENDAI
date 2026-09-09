@@ -67,6 +67,15 @@ interface Cage {
   corner: [number, number, number]
   /** Per view axis, because a movement's region is a box and not a cube. */
   sides: [number, number, number]
+  /** Whether this region holds another one you also hold. */
+  outer?: boolean
+}
+
+/** How strongly a cage is drawn: a door, the finest grain, or the context. */
+function weightOf(cage: Cage, focused: string | null): number {
+  if (focused !== null) return focused === cage.key.lookupId ? 0.95 : 0.1
+  if (cage.key.source !== 'hop') return 0.7
+  return cage.outer ? 0.18 : 0.45
 }
 
 export function SecretRegions({ axes }: Props): JSX.Element | null {
@@ -112,27 +121,23 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
       out.push({ key, centre, corner, sides })
     }
     /*
-     * Only the innermost regions.
+     * Every region is drawn; depth is carried by weight, not by hiding.
      *
-     * Each hop's region contains both ends of that hop, so a walk away from
-     * where you started leaves nested blocks, each swallowing the one before.
-     * Drawing them all put three or four shells around every step. Drawing the
-     * outermost instead threw the detail away: the widest block is the least
-     * specific thing you hold. So a region that contains another steps aside
-     * for the one inside it, and what is drawn is the finest grain you have.
-     *
-     * A region something was found in is always drawn, and so is the one you
-     * asked to look at: those are not detail, they are the point.
+     * Hiding the inner ones threw away the detail, and hiding the outer ones
+     * threw away the context: a small step inside a block you already held
+     * made that block vanish, and a wide hop that swallowed an earlier one
+     * never appeared. Both are true and both are yours, so both are drawn,
+     * and how strongly says which is which: a region with another inside it
+     * steps back, the finest grain stands forward, and a door you opened or
+     * bought is brighter than either, because it is the one that goes
+     * somewhere.
      */
-    const innermost = out.filter((cage) => cage.key.lookupId === focused
-      // A region you opened or bought stays on screen once it is there: it is
-      // a door, and a door does not stop existing because you stepped past it.
-      // Only the regions your movements granted give way to finer ones.
-      || cage.key.source !== 'hop'
-      || !out.some((other) => other !== cage && contains(cage.key, other.key)))
+    for (const cage of out) {
+      cage.outer = out.some((other) => other !== cage && contains(cage.key, other.key))
+    }
     // Nearest first, so the ones you are standing in are the ones you see.
-    innermost.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
-    return innermost.slice(0, DRAWN_MAX)
+    out.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
+    return out.slice(0, DRAWN_MAX)
   }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused])
 
   if (cages.length === 0) return null
@@ -143,12 +148,12 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         <group key={cage.key.lookupId}>
           <lineSegments geometry={geometry} position={cage.centre} scale={cage.sides} frustumCulled={false} renderOrder={8}>
             {/* The one you went to look at stands out; the rest step back. */}
-            <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={focused === null ? 0.4 : focused === cage.key.lookupId ? 0.95 : 0.12} depthTest={false} />
+            <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={weightOf(cage, focused)} depthTest={false} />
           </lineSegments>
           {/* The key and the region's size as one piece, hanging just under the
               corner: a cage says nothing about how big it is until it says so,
               and 2^7 × 2^0 × 2^0 is the difference between a room and a corridor. */}
-          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={18} opacity={focused === null || focused === cage.key.lookupId ? 0.9 : 0.3} align="left" />
+          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={18} opacity={Math.min(0.95, weightOf(cage, focused) + 0.3)} align="left" />
         </group>
       ))}
     </>

@@ -3,9 +3,11 @@
  *
  * A held region key (store/useSecrets) is a cube of side 2^height, aligned on
  * every axis, and holding it means you can ask the relay what is hidden there
- * and read the answer. This draws each one you are near as a light green cage
- * with a key at its low corner, the same green the deploy box uses for "found
- * here", so the colour means one thing throughout: this region is open to you.
+ * and read the answer. A key is held when it opened something or when it was
+ * bought, so a cage here is not "somewhere you walked": it is somewhere with
+ * something in it. This draws each one you are near as a light green cage with
+ * a key at its +X +Z corner, the same green the deploy box uses for "found
+ * here", so the colour means one thing throughout.
  *
  * Only what is worth drawing is drawn. A cube smaller than a few pixels or
  * wider than the field says nothing, and the nearest few are enough: past that
@@ -61,7 +63,11 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         const axis: AxisName = a.axis
         const lo = cellDelta(BigInt(key.base[axis]), origin[axis], scaleExp)
         centre[i] = (lo + (side - 1) / 2) * a.dir
-        corner[i] = lo * a.dir
+        // Always the same corner of the cube: the one at +X and +Z, at the
+        // region's floor. A key hanging at a fixed corner says which cage it
+        // belongs to, where one at the nearest corner just floats.
+        const far_ = axis === 'y' ? -0.5 : side - 0.5
+        corner[i] = (lo + far_) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
       if (far > GRID_RADIUS * 4) continue

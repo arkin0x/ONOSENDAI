@@ -19,7 +19,7 @@ import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
-import { findCashuToken } from '../lib/cashu'
+import { findCashuToken, textWithoutToken } from '../lib/cashu'
 
 const TAP_SLOP = 8
 
@@ -122,7 +122,13 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
           <group key={w.key}>
             <WorldMark kind={coin ? 'coin' : 'note'} at={w.centre} />
             {coin
-              ? <WorldLabel text="₿" color={BITCOIN} at={w.centre} align="center" px={26} />
+              ? <>
+                  <WorldLabel text="₿" color={BITCOIN} at={w.centre} align="center" px={26} />
+                  {/* Words left around the token are the message; the base64 is not. */}
+                  {textWithoutToken(w.text) && (
+                    <WorldLabel text={messageBillboard(textWithoutToken(w.text))} color={NOTE} at={[w.centre[0], w.centre[1] - 0.55, w.centre[2]]} align="center" px={12} />
+                  )}
+                </>
               : births[w.key] !== undefined
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
                 : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} />}

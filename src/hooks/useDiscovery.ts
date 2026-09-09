@@ -68,6 +68,7 @@ export function useDiscovery(): void {
 
     // Collect this scan's keys, then query the relay once for all of them.
     const keys = new Map<string, string>() // lookupId -> keyHex
+    const heights = new Map<string, number>() // lookupId -> the cube's height
 
     const onMessage = (e: MessageEvent<RegionResponse>): void => { void handle(e) }
     const handle = async (e: MessageEvent<RegionResponse>): Promise<void> => {
@@ -75,17 +76,7 @@ export function useDiscovery(): void {
       if (msg.id !== id) return
       if (msg.type === 'key') {
         keys.set(msg.key.lookupId, msg.key.keyHex)
-        // The key is the region: hold it, so the Secrets list is what you can
-        // open rather than what happened to be open when you walked past.
-        useSecrets.getState().hold([{
-          lookupId: msg.key.lookupId,
-          keyHex: msg.key.keyHex,
-          height: msg.key.height,
-          base: { x: String(base(anchor.x, msg.key.height)), y: String(base(anchor.y, msg.key.height)), z: String(base(anchor.z, msg.key.height)) },
-          plane,
-          source: 'scan',
-          at: Math.floor(Date.now() / 1000),
-        }])
+        heights.set(msg.key.lookupId, msg.key.height)
         return
       }
       if (msg.type === 'error') {
@@ -105,12 +96,46 @@ export function useDiscovery(): void {
       if (id !== reqId.current) return
 
       const found = []
+      const opened: string[] = []
       for (const ev of events) {
         const region = ev.tags.find((t) => t[0] === 'd')?.[1]
         const keyHex = region ? keys.get(region) : undefined
-        if (!keyHex) continue
+        if (!keyHex || !region) continue
         // One envelope holds a bag; unbag flattens it to items.
-        found.push(...await unbag(ev, hexToBytes(keyHex)))
+        const items = await unbag(ev, hexToBytes(keyHex))
+        if (items.length > 0) opened.push(region)
+        found.push(...items)
+      }
+
+      /*
+       * Which keys are worth keeping.
+       *
+       * Every position is inside thirteen cubes, and this machine computes all
+       * thirteen every time you cross into a new one, so holding them all made
+       * the Secrets list a record of where the camera had been. Worse, the scan
+       * runs at the anchor, and the anchor follows exploring, spectating and
+       * the free view: regions were being marked as yours because you had
+       * looked at them.
+       *
+       * A key is kept when it opened something. That is the one that means
+       * anything: it says there is something here and you can read it. The
+       * rest cost milliseconds to compute again the moment you stand there.
+       */
+      if (opened.length > 0 && useCyberspace.getState().atHead()) {
+        const now = Math.floor(Date.now() / 1000)
+        useSecrets.getState().hold(opened.map((region) => ({
+          lookupId: region,
+          keyHex: keys.get(region)!,
+          height: heights.get(region) ?? 0,
+          base: {
+            x: String(base(anchor.x, heights.get(region) ?? 0)),
+            y: String(base(anchor.y, heights.get(region) ?? 0)),
+            z: String(base(anchor.z, heights.get(region) ?? 0)),
+          },
+          plane,
+          source: 'scan' as const,
+          at: now,
+        })))
       }
       if (id === reqId.current) {
         const known = useShards.getState().discovered

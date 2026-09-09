@@ -147,7 +147,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           })}
           {list.length === 0 && (
             <li className="avatars__empty">
-              No keys yet. Moving through cyberspace computes the regions you pass, and each one you compute is a region you can open.
+              Nothing opened yet. A key is kept when it opens something where you stand, or when you buy one; the regions you merely pass through cost milliseconds to compute again and are not listed.
             </li>
           )}
         </ul>
@@ -157,10 +157,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           key and twice for the address the relay files it under. Holding it lets
           you ask what is hidden there and read the answer, and it opens that cube
           alone: a key to a large region says nothing about the blocks inside it,
-          because each has its own root. Your machine computes the small ones as
-          you move; the large ones are what HOSAKA sells, since a cube of side
-          2^20 is a million pairings per axis and one of side 2^27 is a hundred
-          and thirty million.
+          because each has its own root. Your machine computes the small cubes
+          around you as you move, so those are not kept; a key earns its place
+          here by opening something, or by being bought. The large ones are what
+          HOSAKA sells, since a cube of side 2^20 is a million pairings per axis
+          and one of side 2^27 is a hundred and thirty million.
         </Explanation>
 
         <div className="modal__actions">

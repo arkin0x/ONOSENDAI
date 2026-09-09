@@ -26,7 +26,19 @@ export type CashuState = 'unclaimed' | 'redeemed' | 'pending' | 'unknown'
 
 const TOKEN = /cashu[AB][A-Za-z0-9_\-+/=]{16,}/
 
-/** The first Cashu token in a text, or null. */
+/**
+ * What a message says once its token is taken out.
+ *
+ * A token can sit anywhere in the text, and usually has words around it: "for
+ * the drinks" and then two thousand characters of base64. Those words are the
+ * message and the base64 is the money, so they are drawn as different things.
+ */
+export function textWithoutToken(text: string | null | undefined): string {
+  if (!text) return ''
+  return text.replace(new RegExp(TOKEN.source, 'g'), '').replace(/\s+/g, ' ').trim()
+}
+
+/** The first Cashu token in a text, or null. Found anywhere in it. */
 export function findCashuToken(text: string | null | undefined): string | null {
   if (!text) return null
   const m = TOKEN.exec(text)

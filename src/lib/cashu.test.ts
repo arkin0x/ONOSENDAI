@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bytesToHex, hexToBytes } from 'cyberspace-core'
-import { cashuLabel, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve } from './cashu'
+import { cashuLabel, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve, textWithoutToken } from './cashu'
 
 const b64url = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
@@ -83,5 +83,30 @@ describe('checkCashuState (NUT-07)', () => {
   })
   it('is unknown when the mint is down', async () => {
     expect(await checkCashuState(token, (async () => { throw new Error('down') }) as unknown as typeof fetch)).toBe('unknown')
+  })
+})
+
+describe('a token among words', () => {
+  const token = 'cashuBo2FteCJodHRwczovL21pbnQubWluaWJpdHMuY2FzaCIsInVuaXQiOiJzYXQiLCJwcm9vZnMi' + 'A'.repeat(200)
+
+  it('is found wherever it sits in the message', () => {
+    expect(findCashuToken(`for the drinks ${token}`)).toBeTruthy()
+    expect(findCashuToken(`${token} enjoy`)).toBeTruthy()
+    expect(findCashuToken(`before ${token} after`)).toBeTruthy()
+  })
+
+  it('leaves the words behind when it is taken out', () => {
+    expect(textWithoutToken(`for the drinks ${token}`)).toBe('for the drinks')
+    expect(textWithoutToken(`${token} enjoy`)).toBe('enjoy')
+    expect(textWithoutToken(`before ${token} after`)).toBe('before after')
+  })
+
+  it('is nothing but a token when there are no words', () => {
+    expect(textWithoutToken(token)).toBe('')
+  })
+
+  it('leaves an ordinary message alone', () => {
+    expect(findCashuToken('just a note')).toBeNull()
+    expect(textWithoutToken('just a note')).toBe('just a note')
   })
 })

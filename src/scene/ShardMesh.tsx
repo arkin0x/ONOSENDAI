@@ -30,6 +30,7 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
+import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from '../lib/orient'
 import { faceEdges } from '../lib/outline'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
@@ -61,6 +62,13 @@ interface Props {
   birth?: number
   /** A tap on a SOLID face (its index is `e.faceIndex`); the workshop's FACE tool. */
   onFaceClick?: (e: ThreeEvent<MouseEvent>) => void
+  /**
+   * The region the shard is sealed to, in this frame (lib/clip.ts regionBox).
+   * What lies outside it is not drawn: faces are cut at the walls and points
+   * beyond them dropped. Absent on the bench and for avatars, which are not
+   * region-encrypted.
+   */
+  clip?: Box
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -71,15 +79,27 @@ const STATIC = [0, 0.9, 1] as const
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false }: Props): JSX.Element | null {
-  const { positions, colors, index } = useMemo(() => {
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip }: Props): JSX.Element | null {
+  const { positions, colors, index, faces } = useMemo(() => {
     const f = flatten(shard)
-    if (!lit) return f
-    // Wound outward, and without the faces buried inside a join, which would
-    // only fight the face they sit against (orient.ts).
-    const o = orientShard(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces)
-    return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() }
-  }, [shard.vertices, shard.faces, lit])
+    const oriented = lit
+      // Wound outward, and without the faces buried inside a join, which would
+      // only fight the face they sit against (orient.ts).
+      ? (() => { const o = orientShard(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces); return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() } })()
+      : f
+    if (!clip || boxContains(clip, oriented.positions)) return { ...oriented, faces: shard.faces as number[][] }
+    // Cropped to its region: the faces cut at the walls, and the points that
+    // are left are the vertices of the cut faces, or, for a shard with no
+    // faces, its own points inside the walls.
+    if (shard.faces.length === 0) {
+      const pts = clipPoints(oriented.positions, oriented.colors, clip)
+      return { positions: pts.positions, colors: pts.colors, index: [] as number[], faces: [] as number[][] }
+    }
+    const cut = clipMesh(oriented, clip)
+    const faces: number[][] = []
+    for (let t = 0; t + 2 < cut.index.length; t += 3) faces.push([cut.index[t], cut.index[t + 1], cut.index[t + 2]])
+    return { ...cut, faces }
+  }, [shard.vertices, shard.faces, lit, clip])
 
   // Live copies: the decode writes into these, the targets stay untouched.
   const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])
@@ -134,15 +154,15 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
    * along, and an edge two faces share is drawn once rather than twice.
    */
   const outline = useMemo(() => {
-    if (shard.faces.length === 0) return null
-    const idx = faceEdges(shard.faces)
+    if (faces.length === 0) return null
+    const idx = faceEdges(faces)
     if (idx.length === 0) return null
     const g = new BufferGeometry()
     g.setAttribute('position', posAttr)
     g.setAttribute('color', colAttr)
     g.setIndex(idx)
     return g
-  }, [posAttr, colAttr, shard.faces])
+  }, [posAttr, colAttr, faces])
 
   useEffect(() => () => { outline?.dispose() }, [outline])
 

@@ -14,6 +14,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
+import { regionBox } from '../lib/clip'
 import { WorldLabel } from './WorldLabel'
 
 interface Props {
@@ -31,6 +32,11 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     const exp = shard.unit - scaleExp
     return exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
   }, [shard, scaleExp])
+  // The region it will be sealed to, at the cursor: the preview is cropped
+  // the way the placed shard will be, so what you see is what lands.
+  const cursor = useCyberspace((s) => s.cursor)
+  const deployHeight = useShards((s) => s.deployHeight)
+  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, shard.unit, scaleExp, axes) : undefined), [shard, cursor, deployHeight, scaleExp, axes])
 
   // Ride the live cursor, like the cursor cube does, rather than a React commit.
   useFrame(() => {
@@ -64,7 +70,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
 
   return (
     <group ref={group}>
-      <ShardMesh shard={shard} scale={scale} ghost />
+      <ShardMesh shard={shard} scale={scale} ghost clip={clip} />
     </group>
   )
 }

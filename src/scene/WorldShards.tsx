@@ -16,6 +16,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
+import { regionBox } from '../lib/clip'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
@@ -46,7 +47,9 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         // the ratio survives past a double at large separations of the two.
         const exp = shard.unit - scaleExp
         const scale = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
-        return { key: w.key, shard, centre, scale }
+        // Sealed to one cube of side 2^height: nothing of it is drawn outside.
+        const clip = regionBox(w.at, w.height, shard.unit, scaleExp, axes)
+        return { key: w.key, shard, centre, scale, clip }
       })
       .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldShards reads.
@@ -67,7 +70,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         }
         return (
           <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world />
+            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world clip={w.clip} />
             {/* An invisible, generous tap target: shards can be a few pixels. */}
             <mesh onClick={open}>
               <sphereGeometry args={[hit, 8, 8]} />

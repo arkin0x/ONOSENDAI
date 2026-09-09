@@ -45,7 +45,7 @@ interface Props {
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], px = 14, opacity = 1, align = 'left',
-  small, smallScale = 0.72,
+  small, smallScale = 0.68,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const scratch = useMemo(() => new Vector3(), [])

@@ -28,6 +28,11 @@ const HELD = '#52e39f'
 /** How many cages are drawn at once, nearest first. */
 const DRAWN_MAX = 16
 
+/** The key glyph's height in CSS pixels; the size beside it is smaller again
+ * (WorldLabel's `small`). Small on purpose: a dozen regions in view means a
+ * dozen of these, and they are a caption on the cage, not a headline. */
+const KEY_PX = 13
+
 interface Props {
   axes: ViewAxes
 }
@@ -157,7 +162,15 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
           {/* The key and the region's size as one piece, hanging just under the
               corner: a cage says nothing about how big it is until it says so,
               and 2^7 × 2^0 × 2^0 is the difference between a room and a corridor. */}
-          <WorldLabel text={`⚿ ${sizeLabel(cage.key)}`} color={HELD} at={cage.corner} offset={[0, -0.5, 0]} px={18} opacity={Math.min(0.95, weightOf(cage, focused) + 0.3)} align="left" />
+          <WorldLabel
+            text="⚿"
+            small={sizeLabel(cage.key)}
+            color={HELD}
+            at={cage.corner}
+            offset={[0, -0.5, 0]}
+            px={KEY_PX}
+            opacity={Math.min(0.95, weightOf(cage, focused) + 0.3)}
+          />
         </group>
       ))}
     </>

@@ -12,6 +12,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
+import { useChat } from '../store/useChat'
 import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
@@ -72,8 +73,18 @@ export function useKeyboard(): void {
         return
       }
 
+      // The chat: / unfolds it with the caret in the line. Escape inside the
+      // line is handled by the line itself, which is an INPUT and never gets
+      // here; Escape with the dock unfolded but the caret elsewhere folds it.
+      if (event.code === 'Slash') {
+        event.preventDefault()
+        useChat.setState({ open: true, unread: 0, focusOnOpen: true })
+        return
+      }
+
       if (event.code === 'Escape') {
         event.preventDefault()
+        if (useChat.getState().open) { useChat.getState().setOpen(false); return }
         // Deploying: back out of it rather than resetting the view.
         if (useShards.getState().pending) { useShards.getState().cancelDeploy(); return }
         // Viewing a stop or EARTH: come home before anything else.

@@ -83,3 +83,7 @@ export const useRelays = create<RelaysState>((set, get) => ({
 export function currentRelays(): string[] {
   return useRelays.getState().relays
 }
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __relays: typeof useRelays }).__relays = useRelays
+}

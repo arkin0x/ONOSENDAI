@@ -18,7 +18,7 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group } from 'three'
-import { facingQuaternion, moveDirection } from '../lib/facing'
+import { facingPair, facingQuaternion, moveDirection } from '../lib/facing'
 import { travelOffset } from '../lib/travel'
 import { useCyberspace } from '../store/useCyberspace'
 import { AvatarShape } from './AvatarShape'
@@ -34,18 +34,21 @@ export function Avatar(): JSX.Element | null {
   // The last move on the chain drawn, as a key so a re-render costs nothing
   // until the chain grows; the avatar turns to face the way it went.
   const view = useCyberspace((s) => s.view)
+  // Time decides the angle: the move that brought the avatar to the link on
+  // show, which while scrubbing the chain is the link before the explored one
+  // and this one, not the head's last move (lib/facing.ts facingPair).
   const moveKey = useCyberspace((s) => {
-    const chain = s.focusChain()
-    const n = chain.length
-    if (n < 2) return null
-    const a = chain[n - 2].position, b = chain[n - 1].position
+    const pair = facingPair(s.focusChain(), s.exploreIndex)
+    if (!pair) return null
+    const a = pair[0].position, b = pair[1].position
     return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
   })
   const facing = useMemo(() => {
     if (!moveKey) return null
     const s = useCyberspace.getState()
-    const chain = s.focusChain()
-    const dir = moveDirection(chain[chain.length - 2].position, chain[chain.length - 1].position, s.axes())
+    const pair = facingPair(s.focusChain(), s.exploreIndex)
+    if (!pair) return null
+    const dir = moveDirection(pair[0].position, pair[1].position, s.axes())
     return dir ? facingQuaternion(dir) : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey, view])

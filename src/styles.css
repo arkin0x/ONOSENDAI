@@ -1238,7 +1238,10 @@ kbd {
 
 .targets__row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto auto;
+  /* Dot, who, status, VIEW, SPECTATE, remove: six cells, and six columns. The
+     row was declared with five, so VIEW (added with the free view) pushed the
+     remove button onto a second line of its own. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 8px;
   padding: 5px 0;

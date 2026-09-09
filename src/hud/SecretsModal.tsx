@@ -123,10 +123,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                   <span className="secrets__where">
                     <KeyRound size={11} strokeWidth={2.25} aria-hidden />
-                    2^{k.height} · {formatCellSize(k.height)}
+                    {k.heights && !(k.heights.x === k.heights.y && k.heights.y === k.heights.z)
+                      ? `2^${k.heights.x} × 2^${k.heights.y} × 2^${k.heights.z}`
+                      : `2^${k.height} · ${formatCellSize(k.height)}`}
                   </span>
                   <span className="secrets__meta">
-                    {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'HOSAKA' : 'scanned'} · {formatAgo(k.at, now)}
+                    {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : 'opened'} · {formatAgo(k.at, now)}
                     {found > 0 && <span className="secrets__found"> · {found} found</span>}
                   </span>
                   <span className="secrets__id">{k.lookupId.slice(0, 16)}…</span>

@@ -35,7 +35,8 @@ interface Cage {
   key: HeldKey
   centre: [number, number, number]
   corner: [number, number, number]
-  side: number
+  /** Per view axis, because a movement's region is a box and not a cube. */
+  sides: [number, number, number]
 }
 
 export function SecretRegions({ axes }: Props): JSX.Element | null {
@@ -51,27 +52,33 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     if (!show) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const out: Cage[] = []
+    const sideOf = (height: number): number => {
+      const exp = height - scaleExp
+      return exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
+    }
     for (const key of Object.values(keys)) {
       if (key.plane !== anchorPlane) continue
-      const exp = key.height - scaleExp
-      const side = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
-      if (side > GRID_RADIUS * 6 || side < 0.05) continue
+      const widest = sideOf(key.height)
+      if (widest > GRID_RADIUS * 6 || widest < 0.05) continue
       const centre: [number, number, number] = [0, 0, 0]
       const corner: [number, number, number] = [0, 0, 0]
+      const sides: [number, number, number] = [1, 1, 1]
       let far = 0
       ;[axes.right, axes.up, axes.out].forEach((a, i) => {
         const axis: AxisName = a.axis
+        // A hop's region is a box: each axis is as wide as its own crossing.
+        const side = sideOf(key.heights ? key.heights[axis] : key.height)
+        sides[i] = side
         const lo = cellDelta(BigInt(key.base[axis]), origin[axis], scaleExp)
         centre[i] = (lo + (side - 1) / 2) * a.dir
-        // Always the same corner of the cube: the one at +X and +Z, at the
-        // region's floor. A key hanging at a fixed corner says which cage it
-        // belongs to, where one at the nearest corner just floats.
-        const far_ = axis === 'y' ? -0.5 : side - 0.5
-        corner[i] = (lo + far_) * a.dir
+        // Always the same corner: +X and +Z, at the region's floor. A key
+        // hanging at a fixed corner says which cage it belongs to, where one
+        // at the nearest corner just floats.
+        corner[i] = (lo + (axis === 'y' ? -0.5 : side - 0.5)) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
       if (far > GRID_RADIUS * 4) continue
-      out.push({ key, centre, corner, side })
+      out.push({ key, centre, corner, sides })
     }
     // Nearest first, so the ones you are standing in are the ones you see.
     out.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
@@ -84,7 +91,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     <>
       {cages.map((cage) => (
         <group key={cage.key.lookupId}>
-          <lineSegments geometry={geometry} position={cage.centre} scale={cage.side} frustumCulled={false} renderOrder={8}>
+          <lineSegments geometry={geometry} position={cage.centre} scale={cage.sides} frustumCulled={false} renderOrder={8}>
             <lineBasicMaterial color={HELD} toneMapped={false} transparent opacity={0.4} depthTest={false} />
           </lineSegments>
           {/* The key at the region's low corner: a held region is an open one. */}

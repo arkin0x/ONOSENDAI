@@ -32,13 +32,21 @@ export interface HeldKey {
   lookupId: string
   /** The key itself, 32 bytes as hex. */
   keyHex: string
-  /** A cube of side 2^height, aligned on every axis. */
+  /**
+   * How wide the region is. A hiding place is a cube, so one height covers it;
+   * a movement's region is a box, its three axes at their own crossing
+   * heights, and `heights` carries those. `height` is the largest either way.
+   */
   height: number
+  heights?: { x: number; y: number; z: number }
   /** The region's aligned corner, as decimal strings. */
   base: { x: string; y: string; z: string }
   plane: Plane
-  /** How it was come by: your own scanning, or a hop HOSAKA computed for you. */
-  source: 'scan' | 'cloud'
+  /**
+   * How it was come by: a hop of your own, which grants the region it crossed;
+   * a scan that opened something where you stood; or a purchase from HOSAKA.
+   */
+  source: 'hop' | 'scan' | 'cloud'
   /** The action that bought it, for the chain overlay's key marker. */
   eventId?: string
   /** First held, in seconds since the epoch. */

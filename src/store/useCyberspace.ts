@@ -1842,6 +1842,22 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     saveChain(nextEvents, nextPublished, stats)
 
+    // What the hop unlocked: the region it crossed, held with the action that
+    // bought it, so the chain can say which hops left a key behind.
+    if (msg.type === 'done' && msg.mode === 'hop' && msg.region) {
+      useSecrets.getState().hold([{
+        lookupId: msg.region.lookupId,
+        keyHex: msg.region.keyHex,
+        height: Math.max(...msg.region.heights),
+        heights: { x: msg.region.heights[0], y: msg.region.heights[1], z: msg.region.heights[2] },
+        base: { x: msg.region.base[0], y: msg.region.base[1], z: msg.region.base[2] },
+        plane,
+        source: 'hop',
+        eventId: event.id,
+        at: Math.floor(Date.now() / 1000),
+      }])
+    }
+
     // A route continues from where this step landed, or ends here.
     const { plan } = get()
     if (plan && plan.status === 'running') {

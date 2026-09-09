@@ -11,7 +11,7 @@ if (typeof localStorage === 'undefined') {
 }
 
 import { findLcaHeight } from 'cyberspace-core'
-import { SECRETS_MAX, bytesOf, heldList, keyStateForAction, useSecrets, type HeldKey } from './useSecrets'
+import { SECRETS_MAX, bytesOf, heldList, keyStateForAction, useSecrets, type HeldKey, volumeExponent } from './useSecrets'
 
 const key = (over: Partial<HeldKey> = {}): HeldKey => ({
   lookupId: 'aa'.repeat(32),
@@ -110,5 +110,38 @@ describe('what an action left behind', () => {
       },
     })
     expect(keyStateForAction(hop, prev, { [held.lookupId]: held }, findLcaHeight).state).toBe('gone')
+  })
+})
+
+describe('the order of the list', () => {
+  const at = (id: string, when: number, heights: { x: number; y: number; z: number }): HeldKey =>
+    key({ lookupId: id.repeat(32), at: when, height: Math.max(heights.x, heights.y, heights.z), heights })
+
+  const keys = {
+    ['aa'.repeat(32)]: at('aa', 300, { x: 4, y: 4, z: 4 }),   // volume 2^12, newest
+    ['bb'.repeat(32)]: at('bb', 200, { x: 20, y: 0, z: 0 }),  // volume 2^20, a long bar
+    ['cc'.repeat(32)]: at('cc', 100, { x: 8, y: 8, z: 8 }),   // volume 2^24, oldest and biggest
+  }
+
+  it('by most recent puts the newest first', () => {
+    expect(heldList(keys, 'recent').map((k) => k.at)).toEqual([300, 200, 100])
+  })
+
+  it('by volume puts the largest first, whatever its shape', () => {
+    expect(heldList(keys, 'volume').map((k) => volumeExponent(k))).toEqual([24, 20, 12])
+  })
+
+  it('measures a box by its whole volume, not its longest side', () => {
+    // A bar 2^20 long is a bigger region than a cube of side 2^6 (2^18).
+    expect(volumeExponent(at('dd', 1, { x: 20, y: 0, z: 0 }))).toBe(20)
+    expect(volumeExponent(at('ee', 1, { x: 6, y: 6, z: 6 }))).toBe(18)
+  })
+
+  it('a cube with no per-axis heights is still cubed', () => {
+    expect(volumeExponent(key({ height: 5 }))).toBe(15)
+  })
+
+  it('defaults to most recent', () => {
+    expect(heldList(keys).map((k) => k.at)).toEqual([300, 200, 100])
   })
 })

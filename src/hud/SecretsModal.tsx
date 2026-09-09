@@ -18,11 +18,13 @@ import { KeyRound } from 'lucide-react'
 import { formatCellSize } from '../lib/scale'
 import { formatAgo } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
-import { useSecrets, bytesOf, heldList, type HeldKey } from '../store/useSecrets'
+import { useSecrets, bytesOf, heldList, type HeldKey, type SecretsSort } from '../store/useSecrets'
 import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
+
+const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
 /** The green of "found here", as everywhere else keys are drawn. */
 export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element {
@@ -53,7 +55,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     return band?.sats ?? null
   }, [provider, buyHeight])
 
-  const list = useMemo(() => heldList(keys), [keys])
+  const sort = useSecrets((s) => s.sort)
+  const list = useMemo(() => heldList(keys, sort), [keys, sort])
   const bytes = useMemo(() => list.reduce((n, k) => n + bytesOf(k), 0), [list])
   const now = Math.floor(Date.now() / 1000)
 
@@ -125,6 +128,22 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 : `Three axis trees at 2^${buyHeight}, which is a hop's work at that height and is priced as one. Paid from your HOSAKA balance.`}
             </span>
             {buyError && <span className="secrets__error">{buyError}</span>}
+          </div>
+        )}
+
+        {list.length > 1 && (
+          <div className="secrets__sort" role="radiogroup" aria-label="Order">
+            <span className="login__label">Order</span>
+            {SORTS.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={sort === value}
+                className={`secret__act cloud__mode ${sort === value ? 'is-on' : ''}`}
+                onClick={() => useSecrets.getState().setSort(value)}
+              >{label}</button>
+            ))}
           </div>
         )}
 

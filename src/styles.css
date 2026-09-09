@@ -5407,3 +5407,13 @@ kbd {
 }
 
 .secrets__scan:disabled { opacity: 0.6; }
+
+/* How the Secrets list is ordered. */
+.secrets__sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.secrets__sort .login__label { margin-right: 2px; }

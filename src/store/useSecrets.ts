@@ -73,6 +73,9 @@ interface SecretsState {
   /** Whether the list is on screen. In the store, so RETURN can bring it back. */
   open: boolean
   setOpen: (open: boolean) => void
+  /** How the list is ordered; kept while the modal is closed. */
+  sort: SecretsSort
+  setSort: (sort: SecretsSort) => void
   /** Why the last purchase did not happen. */
   buyError: string | null
   /** Note a key you now hold; keeps the one already held rather than replacing it. */
@@ -99,9 +102,25 @@ export function bytesOf(k: HeldKey): number {
   return JSON.stringify(k).length
 }
 
-/** The regions held, newest first. */
-export function heldList(keys: Record<string, HeldKey>): HeldKey[] {
-  return Object.values(keys).sort((a, b) => b.at - a.at || b.height - a.height)
+/** How the list is ordered. */
+export type SecretsSort = 'recent' | 'volume'
+
+/**
+ * How much space a region covers, as the exponent of its volume in gibsons
+ * cubed: a cube of side 2^8 is 2^24, and a bar of 2^8 x 2^0 x 2^0 is 2^8.
+ * Kept as the exponent because the volumes themselves run past what a number
+ * can hold, and the order is all that is being asked for.
+ */
+export function volumeExponent(k: HeldKey): number {
+  return k.heights ? k.heights.x + k.heights.y + k.heights.z : k.height * 3
+}
+
+/** The regions held, newest first or largest first. */
+export function heldList(keys: Record<string, HeldKey>, sort: SecretsSort = 'recent'): HeldKey[] {
+  const list = Object.values(keys)
+  return sort === 'volume'
+    ? list.sort((a, b) => volumeExponent(b) - volumeExponent(a) || b.at - a.at)
+    : list.sort((a, b) => b.at - a.at || volumeExponent(b) - volumeExponent(a))
 }
 
 export const useSecrets = create<SecretsState>((set, get) => ({
@@ -110,6 +129,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   buyError: null,
   focused: null,
   open: false,
+  sort: 'recent',
 
   hold: (incoming) => {
     if (incoming.length === 0) return
@@ -142,6 +162,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   focus: (lookupId) => set({ focused: lookupId }),
 
   setOpen: (open) => set({ open }),
+
+  setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height) => {
     if (get().buying) return false
@@ -208,7 +230,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 }))
 
 function trim(keys: Record<string, HeldKey>): Record<string, HeldKey> {
-  const list = heldList(keys)
+  const list = heldList(keys, 'recent')
   if (list.length <= SECRETS_MAX) return keys
   const out: Record<string, HeldKey> = {}
   for (const k of list.slice(0, SECRETS_MAX)) out[k.lookupId] = k

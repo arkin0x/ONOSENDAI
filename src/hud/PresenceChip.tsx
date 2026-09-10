@@ -78,16 +78,7 @@ export function PresenceChip(): JSX.Element | null {
         {open && <span className="presence__close" aria-hidden="true">✕</span>}
       </button>
       {open && (
-        <p className="presence__explain">
-          SCANNING asks the relay for everyone whose newest move landed in this
-          sector or one of the 26 around it. Every move carries its sector on
-          its tags, so one subscription covers the whole neighborhood, and it
-          is reissued the moment you cross into a new sector. Whoever it finds
-          is drawn where they stand, marked at the edge of the screen when they
-          are out of view, and listed here; TARGET follows them. A sector is
-          2^30 gibsons on a side, so in this sector means the part of
-          cyberspace you are in, not the space beside you.
-        </p>
+        <p className="presence__explain">Searching cyberspace for nearby avatars.</p>
       )}
       {open && others.length > 0 && (
         <ul className="presence__list">

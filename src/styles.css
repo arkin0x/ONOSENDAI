@@ -5730,3 +5730,8 @@ kbd {
   color: var(--dim);
 }
 .chat__divider::before, .chat__divider::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+/* The deploy bar's estimate and its ask: the key's cost, and the yes. */
+.deploybar__est { font-size: 10px; color: var(--dim); }
+.deploybar__ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--fg); }
+.deploybar__yes { color: #06121a; background: var(--accent, #00e5ff); border-color: var(--accent, #00e5ff); }

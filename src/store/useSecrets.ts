@@ -112,7 +112,8 @@ interface SecretsState {
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.
    */
-  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<boolean>
+  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. */
+  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<HeldKey | null>
 }
 
 /** Roughly what one entry costs in local storage. */
@@ -190,7 +191,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height) => {
-    if (get().buying) return false
+    if (get().buying) return null
     const cs = useCyberspace.getState()
     const client = cloudClient(cs.cloudPrefs.apiUrl)
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
@@ -198,24 +199,24 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       const job = await client.submitRegionKey(at, height)
       if (job.payment_required) {
         set({ buying: null, buyError: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats for a 2^${height} key and your balance is short. Top up in the Cloud panel.` })
-        return false
+        return null
       }
       if (!job.poll_token) {
         set({ buying: null, buyError: 'HOSAKA took the job but gave no way to follow it.' })
-        return false
+        return null
       }
       set({ buying: { height, status: 'computing', costMsats: job.cost_msats, estSeconds: null, startedAt: Date.now() } })
       const done = await client.waitForJob(job.id, job.poll_token)
       if (done.status !== 'completed' || !done.result) {
         set({ buying: null, buyError: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' })
-        return false
+        return null
       }
       const r = done.result as HosakaRegionKeyResult
       if (!r.secret_key || !r.lookup_id) {
         set({ buying: null, buyError: 'HOSAKA returned no key.' })
-        return false
+        return null
       }
-      get().hold([{
+      const held: HeldKey = {
         lookupId: r.lookup_id,
         keyHex: r.secret_key,
         height: r.height ?? height,
@@ -227,14 +228,15 @@ export const useSecrets = create<SecretsState>((set, get) => ({
         plane,
         source: 'cloud',
         at: Math.floor(Date.now() / 1000),
-      }])
+      }
+      get().hold([held])
       set({ buying: null })
       // What was bought is worth looking in at once.
       void useShards.getState().rescan(r.lookup_id, r.secret_key)
-      return true
+      return held
     } catch (err) {
       set({ buying: null, buyError: err instanceof Error ? err.message : String(err) })
-      return false
+      return null
     }
   },
 

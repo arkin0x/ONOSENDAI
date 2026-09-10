@@ -177,10 +177,11 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
-          <PresenceChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />
+          {/* Last in the stack, under XOR BITS, spaced as the rest are. */}
+          <PresenceChip />
         </div>
       )}
       {showPanels && !offerUp && <Hud menuOpen={crowded} />}

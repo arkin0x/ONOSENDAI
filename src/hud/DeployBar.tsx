@@ -32,9 +32,11 @@ export function DeployBar(): JSX.Element | null {
   const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
   const ladder = useCyberspace((s) => s.cloud.provider?.pricing?.hop)
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
+  // This machine's limit: the calibrated hop ceiling the movement panel shows.
+  const hopLimit = useCalibration((s) => s.hopHeight)
   const bind = useRepeatable()
 
-  const inputs = { localMax: MAX_COMPUTE_HEIGHT, cloudMode, cloudCap }
+  const inputs = { localMax: Math.min(MAX_COMPUTE_HEIGHT, hopLimit), cloudMode, cloudCap }
   const ceiling = deployCeiling(inputs)
   const route = deployRoute(height, inputs)
   const localSeconds = localKeySeconds(height, cantorMs)
@@ -91,24 +93,27 @@ export function DeployBar(): JSX.Element | null {
             : `Computed by HOSAKA; its price for 2^${height} is not known yet.`}
       </div>
 
-      {ask && (
-        <div className="deploybar__row deploybar__ask">
-          <span>HOSAKA will charge {ask.sats !== null ? `${ask.sats} sats` : 'its price'} and take {ask.seconds !== null ? waitLabel(ask.seconds) : 'a while'} for the 2^{height} key.</span>
-          <button className="deploybar__btn deploybar__yes" onClick={() => useShards.getState().confirmDeploy()}>YES, HIDE</button>
-          <button className="deploybar__btn" onClick={() => useShards.getState().declineDeploy()}>NOT NOW</button>
-        </div>
-      )}
-
       {error && <div className="deploybar__row notice">{error}</div>}
 
-      <button
-        className="deploybar__deploy"
-        disabled={empty || working}
-        onClick={() => void useShards.getState().deploy()}
-        {...noCallout}
-      >
-        {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
-      </button>
+      {/* The ask takes the button's place: the same green, now the yes, with
+          the price and the wait on it, and a way to stand down beside it. */}
+      {ask ? (
+        <div className="deploybar__ask">
+          <button className="deploybar__deploy" onClick={() => useShards.getState().confirmDeploy()} {...noCallout}>
+            YES, HIDE VIA HOSAKA{ask.sats !== null ? ` · ${ask.sats} SATS` : ''}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
+          </button>
+          <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
+        </div>
+      ) : (
+        <button
+          className="deploybar__deploy"
+          disabled={empty || working}
+          onClick={() => void useShards.getState().deploy()}
+          {...noCallout}
+        >
+          {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+        </button>
+      )}
     </div>
   )
 }

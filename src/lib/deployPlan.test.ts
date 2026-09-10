@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from './deployPlan'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, localKeySeconds, needsAsk, waitLabel } from './deployPlan'
+import { useCalibration } from './calibration'
 
 const ladder = [{ max_height: 24, sats: 60, est_time: 'about 3 min' }, { max_height: 27, sats: 200, est_time: 'about 9 min' }]
 
@@ -44,5 +45,17 @@ describe('the estimates', () => {
     expect(waitLabel(12)).toBe('about 12 s')
     expect(waitLabel(540)).toBe('about 9 min')
     expect(waitLabel(5400)).toBe('about 1.5 h')
+  })
+})
+
+describe('this machine\'s limit', () => {
+  it('is the calibrated hop ceiling, the number the movement panel shows', () => {
+    useCalibration.setState({ hopHeight: 17 })
+    expect(localKeyCeiling()).toBe(17)
+  })
+
+  it('never passes the protocol\'s cap of 20', () => {
+    useCalibration.setState({ hopHeight: 20 })
+    expect(localKeyCeiling()).toBe(20)
   })
 })

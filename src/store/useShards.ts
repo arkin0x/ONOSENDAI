@@ -21,7 +21,7 @@ import { publishMany, query, relaySet } from '../lib/relay'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
-import { cloudKeyQuote, deployCeiling, deployRoute, needsAsk } from '../lib/deployPlan'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
   HIDDEN_KIND,
@@ -238,7 +238,7 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(get().deployCeiling(), Math.round(h))), deployAsk: null }),
     deployCeiling: () => {
       const cs = cyber()
-      return deployCeiling({ localMax: MAX_COMPUTE_HEIGHT, cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
+      return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
     },
     cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null }),
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
@@ -255,7 +255,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
       // priced as a hop at that height, and the Cloud compute panel's mode says
       // whether to ask first.
-      const inputs = { localMax: MAX_COMPUTE_HEIGHT, cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null }
+      const inputs = { localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null }
       const route = deployRoute(deployHeight, inputs)
       if (route === 'cloud') {
         if (cs.cloudPrefs.mode === 'off' || deployHeight > deployCeiling(inputs)) {

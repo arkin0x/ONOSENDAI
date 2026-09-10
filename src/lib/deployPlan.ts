@@ -12,11 +12,24 @@
  * Pure: the store hands in what it knows and gets a decision and two numbers.
  */
 
-import { projectCantorMs } from './calibration'
+import { projectCantorMs, recommendedHopHeight } from './calibration'
 import { parseEstTime } from './crossover'
 import type { CloudMode } from './cloud'
 
 export type DeployRoute = 'local' | 'cloud'
+
+/** The protocol's hard cap on what a client computes itself. */
+export const LOCAL_KEY_HARD_CAP = 20
+
+/**
+ * This machine's limit, the same number the movement panel shows as its hop
+ * limit: the calibrated ceiling, never past the protocol's cap of 20. A key
+ * is a hop's work at that height, so a machine that hops to 17 hides to 17
+ * on its own and asks HOSAKA above it; one limit, not two.
+ */
+export function localKeyCeiling(): number {
+  return Math.min(LOCAL_KEY_HARD_CAP, recommendedHopHeight())
+}
 
 export interface DeployInputs {
   /** The highest height this machine computes itself. */

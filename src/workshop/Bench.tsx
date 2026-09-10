@@ -203,12 +203,22 @@ const DOT_ON_R = 6
 const HALO_PX = 26
 const RING_R = 11
 const RING_OUT = 13
-/** The finger target: bigger than the dot, and smaller in ADD and FACE, where a
- * tap beside a point means the plane or the face rather than the point. */
-const HIT_R = 10
+/**
+ * The finger target, in CSS pixels of radius (the handle holds its size on
+ * screen). Bigger than the dot everywhere. In ADD it is small, because a tap
+ * beside a point means the plane, and places another point near it. In FACE
+ * it is the largest of all: the corner is the thing being aimed at, three or
+ * four times in a row, and at 5.5 it was the same eleven pixel circle as ADD,
+ * which made joining corners into a face a matter of luck on a phone. A tap
+ * on a drawn face away from its corners still selects the face.
+ */
+const HIT_R = 12
+const HIT_FACE_R = 16
 const HIT_NARROW_R = 5.5
 function hitRadiusFor(tool: Tool): number {
-  return tool === 'add' || tool === 'face' ? HIT_NARROW_R : HIT_R
+  if (tool === 'add') return HIT_NARROW_R
+  if (tool === 'face') return HIT_FACE_R
+  return HIT_R
 }
 
 /**

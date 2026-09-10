@@ -63,16 +63,32 @@ export function PresenceChip(): JSX.Element | null {
     return () => window.clearTimeout(t)
   }, [lastArrivalAt])
   const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey]).sort((a, b) => b.lastActive - a.lastActive)
-  if (others.length === 0 && !loading) return null
+  // Gone when there is nothing to say and nobody is reading it. Open, it
+  // stays until closed, whatever the scan does meanwhile.
+  if (others.length === 0 && !loading && !open) return null
   const now = Math.floor(Date.now() / 1000)
-  const title = "People whose newest move landed in this sector or one beside it. A sector is 2^30 gibsons on a side. An arrival lights this chip"
+  const label = others.length > 0 ? `${others.length} IN THIS SECTOR` : loading ? 'SCANNING' : 'NOBODY IN THIS SECTOR'
+  const title = "Tap for what this is doing. An arrival lights this chip"
     + (muted ? "; the sound is off, which is the chat's mute." : " and chimes; the chat's mute silences it.")
   return (
     <div className={`hyperbar presence ${open ? 'is-open' : ''} ${lit ? 'is-arrival' : ''}`} role="status">
       <button className="presence__head" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={title}>
         <Users size={12} strokeWidth={2.25} aria-hidden />
-        <span className="hyperbar__label">{loading && others.length === 0 ? 'LOOKING' : `${others.length} IN THIS SECTOR`}</span>
+        <span className="hyperbar__label">{label}</span>
+        {open && <span className="presence__close" aria-hidden="true">✕</span>}
       </button>
+      {open && (
+        <p className="presence__explain">
+          SCANNING asks the relay for everyone whose newest move landed in this
+          sector or one of the 26 around it. Every move carries its sector on
+          its tags, so one subscription covers the whole neighborhood, and it
+          is reissued the moment you cross into a new sector. Whoever it finds
+          is drawn where they stand, marked at the edge of the screen when they
+          are out of view, and listed here; TARGET follows them. A sector is
+          2^30 gibsons on a side, so in this sector means the part of
+          cyberspace you are in, not the space beside you.
+        </p>
+      )}
       {open && others.length > 0 && (
         <ul className="presence__list">
           {others.slice(0, 12).map((p) => <Row key={p.pubkey} person={p} now={now} />)}

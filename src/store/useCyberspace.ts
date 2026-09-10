@@ -85,6 +85,7 @@ import {
   createWaker,
   type CloudHopResult,
   type HosakaAction,
+  type HosakaRegionKeyResult,
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
@@ -575,6 +576,14 @@ export interface CyberspaceState {
   /** Buy compute credit with no movement waiting on it; sats, not millisats. */
   topUp: (sats: number) => Promise<void>
   /**
+   * Buy the key to the cube of side 2^height around `at` from HOSAKA, through
+   * the same job driver a route uses: a short balance gets the job's own
+   * invoice in the invoice modal, CHECK PAYMENT and CANCEL JOB work on it,
+   * and the job starts when the invoice settles. Resolves to the key, or to
+   * the reason it did not.
+   */
+  buyRegionKey: (at: Position, plane: Plane, height: number) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
+  /**
    * Pick up the persisted job (on load, after an identity switch, or from the
    * panel) when its chain head is still ours; drop it when the head moved or
    * its invoice expired. Also fetches the caps when cloud mode is on.
@@ -978,6 +987,15 @@ function claimIntervalFor(kind: SignerKind): number {
 
 /** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
 let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+
+/**
+ * A job's action as a proof mode. A region-key purchase is a job too, but it
+ * never becomes a proof: the driver hands its key to the deploy instead, so
+ * only the two move actions reach here.
+ */
+function moveAction(action: HosakaAction): ProofMode {
+  return action === 'sidestep' ? 'sidestep' : 'hop'
+}
 
 export const useCyberspace = create<CyberspaceState>((set, get) => {
   /**
@@ -2382,6 +2400,68 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
   },
 
+  buyRegionKey: async (at, plane, height) => {
+    const { cloud, cloudPrefs, plan } = get()
+    if (cloudPrefs.mode === 'off') return { ok: false, error: 'Cloud compute is off in the Cloud compute panel.' }
+    // A route in flight owns the cloud flow and its invoice.
+    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+      return { ok: false, error: 'Finish or cancel the move in progress first.' }
+    }
+    const client = cloudClient(cloudPrefs.apiUrl)
+    stopCloud()
+    const id = ++requestId
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    const idle = { status: 'idle' as const, invoice: null, invoiceOpen: false, job: null, progress: null, message: null }
+    try {
+      set({ cloud: { ...get().cloud, status: 'quoting', invoice: null, invoiceOpen: false, job: null, progress: null, message: currentSigner.kind === 'local' ? 'Asking HOSAKA for the key.' : 'Waiting for your signer to approve the HOSAKA request.' } })
+      const job = await client.submitRegionKey(at, height, abort.signal)
+      if (id !== requestId) return { ok: false, error: 'Superseded by another cloud job.' }
+      if (typeof job.new_balance_msats === 'number') get().noteBalance(job.new_balance_msats)
+      if (!job.poll_token) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'HOSAKA took the job but gave no way to follow it.' } }
+      const paying = job.payment_required === true && job.deposit !== undefined
+      if (job.payment_required === true && !paying) {
+        set({ cloud: { ...get().cloud, ...idle } })
+        return { ok: false, error: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats more than your balance holds and issued no invoice.` }
+      }
+      // Not persisted: a reload mid-purchase loses the job, not the money, since
+      // a paid invoice lands on the balance and the next attempt is covered.
+      const record: PendingCloudJob = {
+        version: 1, jobId: job.id, pollToken: job.poll_token, action: 'region_key', pubkey: get().identity.pubkey,
+        from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',
+        costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0, createdAt: Date.now(),
+        stage: paying ? 'awaiting_payment' : 'computing', deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+      }
+      set({ cloud: { ...get().cloud, job: record, message: null } })
+      const outcome = await driveCloudJob(client, record, {
+        onRecord: (r) => { if (id === requestId) set({ cloud: { ...get().cloud, job: r } }) },
+        onDepositPoll: (d) => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } }) },
+        onDepositPollError: () => { if (id === requestId) set({ cloud: { ...get().cloud, checking: false } }) },
+        onStage: (stage, d) => {
+          if (id !== requestId) return
+          const c = get().cloud
+          set({ cloud: { ...c, status: stage, invoice: d.invoice === undefined ? c.invoice : d.invoice, invoiceOpen: stage === 'awaiting_payment' ? (d.invoice ? true : c.invoiceOpen) : false, progress: d.progress === undefined ? c.progress : d.progress, message: d.message === undefined ? c.message : d.message } })
+        },
+      }, abort.signal, waker)
+      if (id !== requestId) return { ok: false, error: 'Superseded by another cloud job.' }
+      const done = outcome.job
+      if (typeof done.new_balance_msats === 'number') get().noteBalance(done.new_balance_msats)
+      set({ cloud: { ...get().cloud, ...idle } })
+      if (done.status !== 'completed' || !done.result) return { ok: false, error: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' }
+      const r = done.result as HosakaRegionKeyResult
+      if (!r.secret_key || !r.lookup_id) return { ok: false, error: 'HOSAKA returned no key.' }
+      return { ok: true, result: r }
+    } catch (err) {
+      if (abort.signal.aborted) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'Cancelled.' } }
+      if (id === requestId) set({ cloud: { ...get().cloud, ...idle } })
+      return { ok: false, error: describeCloudError(err) }
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
+  },
+
   refreshBalance: async () => {
     const { cloud, cloudPrefs } = get()
     if (cloud.balanceChecking) return
@@ -2472,7 +2552,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     const id = ++requestId
     set({
       pendingTarget: positionFromWire(record.to),
-      proof: { ...IDLE_PROOF, status: 'computing', mode: record.action, source: 'cloud' },
+      proof: { ...IDLE_PROOF, status: 'computing', mode: moveAction(record.action), source: 'cloud' },
       cloud: {
         ...get().cloud,
         status: record.stage,

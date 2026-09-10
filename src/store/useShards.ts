@@ -286,7 +286,7 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         let rk: { key: Uint8Array; lookupId: string }
         if (route === 'cloud') {
-          set({ deployNote: `HOSAKA is computing the 2^${deployHeight} key` })
+          set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
           const held = await useSecrets.getState().buy(at, plane, deployHeight)
           if (!held) throw new Error(useSecrets.getState().buyError ?? 'HOSAKA could not compute the key.')
           rk = { key: hexToBytes(held.keyHex), lookupId: held.lookupId }

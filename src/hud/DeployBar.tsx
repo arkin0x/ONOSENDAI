@@ -100,7 +100,7 @@ export function DeployBar(): JSX.Element | null {
       {ask ? (
         <div className="deploybar__ask">
           <button className="deploybar__deploy" onClick={() => useShards.getState().confirmDeploy()} {...noCallout}>
-            YES, HIDE VIA HOSAKA{ask.sats !== null ? ` · ${ask.sats} SATS` : ''}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
+            {ask.sats !== null ? `${ask.sats} SATS` : 'HIDE VIA HOSAKA'}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
           </button>
           <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
         </div>

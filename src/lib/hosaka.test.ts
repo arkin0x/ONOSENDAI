@@ -21,8 +21,7 @@ import {
   jsonWithBigints,
   type HosakaDeposit,
   type HosakaJob,
-  SIGN_TIMEOUT_MS,
-} from './hosaka'
+  SIGN_TIMEOUT_MS, keysPending } from './hosaka'
 
 const sk = generateSecretKey()
 const pubkey = getPublicKey(sk)
@@ -73,6 +72,36 @@ describe('jsonWithBigints', () => {
     expect(jsonWithBigints({ v: { x: (1n << 84n) + 5n, plane: 0 }, id: 'ab' })).toBe(
       `{"v":{"x":${((1n << 84n) + 5n).toString()},"plane":0},"id":"ab"}`,
     )
+  })
+})
+
+describe('a staged hop', () => {
+  it('is pending cubes only while computing, never once completed', () => {
+    const job = (status: string, result: unknown): never => ({ id: 'j', status, cost_msats: 1, result, error: null } as never)
+    expect(keysPending(job('computing', { keys_pending: true }))).toBe(true)
+    expect(keysPending(job('pending', { keys_pending: true }))).toBe(true)
+    expect(keysPending(job('computing', { keys_pending: false }))).toBe(false)
+    expect(keysPending(job('computing', null))).toBe(false)
+    expect(keysPending(job('completed', { keys_pending: true }))).toBe(false)
+    expect(keysPending(job('failed', null))).toBe(false)
+  })
+
+  it('ends waitForJob at the staged answer, and without stopWhen waits for completed', async () => {
+    const staged = { id: 'job-1', status: 'computing', cost_msats: 1000, result: { keys_pending: true, destination_keys: null }, error: null }
+    const done = { id: 'job-1', status: 'completed', cost_msats: 1000, result: { keys_pending: false, destination_keys: [{ height: 13, secret_key: 'ab', lookup_id: 'cd' }] }, error: null }
+    let polls = 0
+    const { fetch } = scripted({ 'GET /api/v1/jobs/job-1': () => ({ body: ++polls === 1 ? staged : done }) })
+    const c = createHosaka({ apiUrl: API, sign, fetch })
+    const first = await c.waitForJob('job-1', 'tok', { stopWhen: keysPending })
+    expect(first.status).toBe('computing')
+    expect((first.result as { keys_pending?: boolean }).keys_pending).toBe(true)
+    expect(polls).toBe(1)
+
+    // The same client with no stopWhen returns the finished job, not the
+    // staged one: the early stop is the caller's to ask for.
+    polls = 1
+    const whole = await c.waitForJob('job-1', 'tok')
+    expect(whole.status).toBe('completed')
   })
 })
 

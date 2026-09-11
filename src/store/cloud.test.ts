@@ -54,6 +54,7 @@ import type { Position } from '../lib/space'
 import { postProof } from '../lib/workers'
 import { useCyberspace } from './useCyberspace'
 import { useToast } from './useToast'
+import { useSecrets } from './useSecrets'
 
 const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5e9, invoice_ttl_seconds: 3600 }
 
@@ -139,6 +140,53 @@ describe('cloud routes', () => {
     S().cancelPlan()
     S().cancelCloud()
     S().discardCloudJob()
+  })
+
+  it('a staged hop moves the avatar at once and takes the cubes when they land', async () => {
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    const hop = hopResult(from, to, S().plane, head)
+    const cubes = [{ height: 13, secret_key: 'ab'.repeat(32), lookup_id: 'cd'.repeat(32) }]
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    // First answer: the hop alone, the cubes still computing. Second: the cubes.
+    fake.waitForJob
+      .mockResolvedValueOnce({ id: 'job-1', status: 'computing', cost_msats: 1000, result: { ...hop, keys_pending: true, destination_keys: null }, error: null } as HosakaJob)
+      .mockResolvedValueOnce(completed({ ...hop, keys_pending: false, destination_keys: cubes }))
+
+    await S().commit()
+    await idle()
+
+    // The move landed on the staged answer, without waiting for the cubes.
+    expect(S().position).toEqual(to)
+    expect(fake.waitForJob).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => { expect(useSecrets.getState().keys['cd'.repeat(32)]).toBeTruthy() })
+    expect(useSecrets.getState().keys['cd'.repeat(32)].height).toBe(13)
+    expect(storage.getItem('onosendai:cloudKeys')).toBeNull()
+    expect(useToast.getState().toast?.label).toBe('1 REGION KEYS FROM HOSAKA')
+  })
+
+  it('a staged hop whose cubes fail keeps the move and says what came back', async () => {
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    const hop = hopResult(from, to, S().plane, head)
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob
+      .mockResolvedValueOnce({ id: 'job-1', status: 'computing', cost_msats: 1000, result: { ...hop, keys_pending: true, destination_keys: null }, error: null } as HosakaJob)
+      .mockResolvedValueOnce(completed({ ...hop, keys_pending: false, destination_keys: null, keys_error: 'the pairing container died', keys_credit_msats: 2000 }))
+
+    await S().commit()
+    await idle()
+
+    expect(S().position).toEqual(to)
+    await vi.waitFor(() => { expect(useToast.getState().toast?.label).toBe('CUBES NOT COMPUTED') })
+    expect(useToast.getState().toast?.meta).toContain('2 sats came back')
+    expect(storage.getItem('onosendai:cloudKeys')).toBeNull()
   })
 
   it('under LOOT the hop is quoted and submitted asking for the destination cubes; COST asks for nothing extra', async () => {

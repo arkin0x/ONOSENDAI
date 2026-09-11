@@ -44,8 +44,14 @@ export const SHARD_KIND = 3330
 /** A plain note, inside the envelope. */
 export const MESSAGE_KIND = 1
 
-/** Longest hidden message; the whole event still has to fit a relay's limit. */
-export const MAX_MESSAGE_LENGTH = 2000
+/**
+ * Longest hidden message. The relay is the only hard limit and it is far
+ * off: cyberspace.nostr1.com (strfry) takes 262,140 bytes of content, and
+ * the sealed envelope of a 10,000-character message is under 15 KB. Two
+ * thousand was a placeholder, and it cut a Cashu token of six proofs in
+ * half as it was pasted; ten thousand leaves room for thirty.
+ */
+export const MAX_MESSAGE_LENGTH = 10_000
 
 export type HiddenType = 'shard' | 'message'
 

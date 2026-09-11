@@ -163,6 +163,8 @@ export interface CloudHopResult {
   max_height: number
   compute_msats: number
   storage_msats_24h?: number
+  /** The cubes around the destination, one per height, when the hop asked for them. */
+  destination_keys?: Array<{ height: number; secret_key: string; lookup_id: string; base?: { x: string; y: string; z: string } }>
 }
 
 /** `result` of a completed sidestep job (spec 6.8 and 6.10). */
@@ -331,6 +333,20 @@ export interface WaitForJobOptions {
   maxWaitMs?: number
 }
 
+/**
+ * What a hop is asked to bring back besides its own key. `destinationKeys`
+ * asks HOSAKA for the keys of the cubes around where the hop lands, heights
+ * 13 up to the tallest axis or 20, one cube per height, priced into the
+ * quote. The client asks only under the LOOT profile: COST and TIME keep
+ * nothing from a hop, so they should not pay for the extra trees a short
+ * axis needs. Sent as `destination_keys: true` and left out otherwise, so a
+ * request that does not want them is byte for byte what it was; a HOSAKA
+ * that does not know the field yet ignores it.
+ */
+export interface HopWants {
+  destinationKeys?: boolean
+}
+
 export interface HosakaClientOptions {
   apiUrl: string
   /** Signs the kind 27235 auth event: the store's signer, whatever kind it is. */
@@ -344,8 +360,8 @@ export interface HosakaClient {
   limits: (signal?: AbortSignal) => Promise<HosakaLimits>
   /** Absent on a client built before providers presented themselves. */
   provider?: (signal?: AbortSignal) => Promise<HosakaProvider>
-  quote: (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, signal?: AbortSignal) => Promise<HosakaQuote>
-  submitHop: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
+  quote: (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, signal?: AbortSignal, wants?: HopWants) => Promise<HosakaQuote>
+  submitHop: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal, wants?: HopWants) => Promise<HosakaJob>
   submitSidestep: (v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal) => Promise<HosakaJob>
   /**
    * The key to the aligned cube of side 2^height around a coordinate.
@@ -460,11 +476,13 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     return data as T
   }
 
-  const submit = (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal): Promise<HosakaJob> =>
+  const wanted = (wants?: HopWants): Record<string, unknown> => (wants?.destinationKeys ? { destination_keys: true } : {})
+
+  const submit = (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal, wants?: HopWants): Promise<HosakaJob> =>
     request<HosakaJob>(`/api/v1/${action}`, {
       method: 'POST',
       auth: true,
-      body: { v1, v2, previous_event_id: previousEventId },
+      body: { v1, v2, previous_event_id: previousEventId, ...wanted(wants) },
       signal,
     })
 
@@ -478,9 +496,9 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     apiUrl,
     limits: (signal) => request<HosakaLimits>('/api/v1/limits', { method: 'GET', signal }),
     provider: (signal) => request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal }),
-    quote: (action, v1, v2, signal) =>
-      request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2 }, signal }),
-    submitHop: (v1, v2, previousEventId, signal) => submit('hop', v1, v2, previousEventId, signal),
+    quote: (action, v1, v2, signal, wants) =>
+      request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2, ...wanted(wants) }, signal }),
+    submitHop: (v1, v2, previousEventId, signal, wants) => submit('hop', v1, v2, previousEventId, signal, wants),
     submitSidestep: (v1, v2, previousEventId, signal) => submit('sidestep', v1, v2, previousEventId, signal),
     submitRegionKey: (at, height, signal) =>
       request<HosakaJob>('/api/v1/region_key', {

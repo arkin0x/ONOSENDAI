@@ -92,6 +92,22 @@ describe('createHosaka requests', () => {
     expect(calls[1].body).not.toContain(`"${V2.x.toString()}"`)
   })
 
+  it('asks for the destination cubes only when told to, on the quote and on the hop', async () => {
+    const { fetch, calls } = scripted({
+      'POST /api/v1/quote': () => ({ body: { action: 'hop', cost_msats: 1000, within_cap: true } }),
+      'POST /api/v1/hop': () => ({ status: 201, body: funded }),
+    })
+    const c = createHosaka({ apiUrl: API, sign, fetch })
+    await c.quote('hop', V1, V2)
+    await c.quote('hop', V1, V2, undefined, { destinationKeys: true })
+    await c.submitHop(V1, V2, PREV)
+    await c.submitHop(V1, V2, PREV, undefined, { destinationKeys: true })
+    expect(calls[0].body).not.toContain('destination_keys')
+    expect(calls[1].body).toContain('"destination_keys":true')
+    expect(calls[2].body).not.toContain('destination_keys')
+    expect(calls[3].body).toContain('"destination_keys":true')
+  })
+
   it('signs submits with a fresh NIP-98 event naming the exact URL, the method and a nonce', async () => {
     const { fetch, calls } = scripted({ 'POST /api/v1/hop': () => ({ status: 201, body: funded }) })
     const c = createHosaka({ apiUrl: API, sign, fetch })

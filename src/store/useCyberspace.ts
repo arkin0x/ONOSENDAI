@@ -16,6 +16,8 @@
  */
 
 import { create } from 'zustand'
+import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
+import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
@@ -90,7 +92,7 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker, type HosakaProvider } from '../lib/hosaka'
+  type Waker, type HosakaProvider, type HopWants } from '../lib/hosaka'
 import {
   clearCloudJob,
   cloudProofResponse,
@@ -1125,7 +1127,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     let secondsKnown = true
     try {
       for (const step of steps) {
-        const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane))
+        // Under LOOT a hop is quoted with the destination's cubes, since that
+        // is what LOOT pays for; the other profiles quote the bare hop.
+        const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane), undefined, hopWants(step.kind))
         if (id !== requestId) return
         if (!q.within_cap || q.cost_msats === null) {
           routeFail(q.hint ?? `HOSAKA does not sell an h${q.max_height} ${step.kind}.`)
@@ -1259,7 +1263,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       const v1 = hosakaCoord(step.from, plane)
       const v2 = hosakaCoord(step.to, plane)
       job = step.kind === 'hop'
-        ? await client.submitHop(v1, v2, prevEventId)
+        ? await client.submitHop(v1, v2, prevEventId, undefined, hopWants('hop'))
         : await client.submitSidestep(v1, v2, prevEventId)
       const after = job.new_balance_msats ?? job.current_balance_msats
       if (typeof after === 'number') get().noteBalance(after)
@@ -1407,6 +1411,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.lookupId, r.region_n.secret_key)
+      // LOOT: the cubes around where it landed. HOSAKA's own list when it sent
+      // one; this machine computes what it can either way, up to its ceiling.
+      if (get().cloudPrefs.profile === 'loot') {
+        const sent = r.destination_keys ? holdCloudDestinationKeys(r.destination_keys, move.to, move.plane) : 0
+        const top = sent > 0 ? Math.min(...r.destination_keys!.map((k) => k.height)) - 1 : localKeyCeiling()
+        void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(r.max_height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
+      }
     }
     const before = get().events.length
     await get().finishProof(msg)
@@ -1939,6 +1950,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.region.lookupId, msg.region.keyHex)
+      // LOOT: the cubes around where it landed, up to what this machine computes.
+      if (get().cloudPrefs.profile === 'loot') {
+        const n = Math.max(...msg.region.heights)
+        void holdDestinationCubes(newPosition, plane, destinationHeights(n, localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'hop', event.id)
+      }
     }
 
     // A route continues from where this step landed, or ends here.
@@ -2815,6 +2831,11 @@ export function sidestepTarget(position: Position, cursor: Position, ceiling: nu
 /**
  * The aligned origin of the cell the avatar occupies at the current scale.
  */
+/** What to ask a HOSAKA hop for: the destination's cubes under LOOT, nothing extra otherwise. Sidesteps never carry them. */
+function hopWants(kind: HosakaAction): HopWants | undefined {
+  return kind === 'hop' && useCyberspace.getState().cloudPrefs.profile === 'loot' ? { destinationKeys: true } : undefined
+}
+
 export function alignedOrigin(position: Position, scaleExp: number): Position {
   return {
     x: alignTo(position.x, scaleExp),

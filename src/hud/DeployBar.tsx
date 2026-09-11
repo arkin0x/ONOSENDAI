@@ -16,6 +16,7 @@ import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
+import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 
 export function DeployBar(): JSX.Element | null {
@@ -40,7 +41,8 @@ export function DeployBar(): JSX.Element | null {
   const ceiling = deployCeiling(inputs)
   const route = deployRoute(height, inputs)
   const localSeconds = localKeySeconds(height, cantorMs)
-  const quote = route === 'cloud' ? cloudKeyQuote(height, ladder) : null
+  const experience = useExperience((s) => ratioOf(s.samples))
+  const quote = route === 'cloud' ? cloudKeyQuote(height, ladder, experience) : null
   const willAsk = route === 'cloud' && needsAsk(cloudMode, quote?.sats ?? null, autoMaxSats)
 
   if (!pending) return null

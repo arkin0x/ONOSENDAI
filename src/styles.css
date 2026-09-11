@@ -5731,6 +5731,21 @@ kbd {
 }
 .chat__divider::before, .chat__divider::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }
 
+/* SCANNING, opened: what it is doing, in a few lines, and a mark that says
+ * tapping the head closes it. */
+.presence__explain {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  max-width: 34ch;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--fg);
+}
+.presence__close { margin-left: auto; font-size: 10px; color: var(--dim); }
+
 /* The deploy bar's estimate and its ask: the key's cost, and the yes. */
 .deploybar__est { font-size: 10px; color: var(--dim); }
 .deploybar__ask { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }

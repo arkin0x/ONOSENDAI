@@ -1,8 +1,9 @@
 /**
  * crossover.ts - the wall height where buying the hop beats walking it.
  *
- * The choice used to be structural: under UNLOCK any boundary above this
- * machine's hop ceiling went to HOSAKA. Measured, that is wrong at the
+ * LOOT is structural on purpose: any boundary above this machine's hop
+ * ceiling goes to HOSAKA, because the key is the point. TIME asks a different
+ * question, and measured, the structural answer is wrong for it at the
  * bottom of the range. A single sidestep is one hash chain and this machine
  * beats HOSAKA at every height it can reach at all: a 2^20 crossing is four
  * seconds here against about two and a half minutes there.
@@ -135,7 +136,10 @@ let cached: { key: string; value: number } | null = null
 
 /** The same, memoised: the inputs change rarely and the answer is asked per cursor move. */
 export function crossoverFor(profile: RouteProfile, inputs: CrossoverInputs): number {
-  if (profile !== 'unlock') return Infinity
+  // COST never buys a hop; LOOT buys every wall above this machine's hop
+  // ceiling; TIME is the measured question below.
+  if (profile === 'cost') return Infinity
+  if (profile === 'loot') return inputs.hopCeiling + 1
   const key = [
     inputs.hopCeiling, inputs.sidestepCeiling, inputs.cloudHop, inputs.signerKind,
     Math.round(inputs.sha256PerSec ?? 0),

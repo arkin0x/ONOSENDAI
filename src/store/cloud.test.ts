@@ -123,7 +123,7 @@ describe('cloud routes', () => {
     // This machine stops at h12 for hops AND sidesteps, so an h13 move has no local way and is
     // the cloud's (HOSAKA is used only when needed); the caps are already known.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
-    useCyberspace.setState({ cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake', profile: 'bypass' }, plan: null })
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake', profile: 'cost' }, plan: null })
     for (const fn of Object.values(fake)) if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset()
     fake.limits.mockResolvedValue(LIMITS)
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
@@ -517,7 +517,7 @@ describe('cloud routes', () => {
   it('a caps request out for another API URL is not reused: the current URL gets its own (#69)', async () => {
     const old = deferred<HosakaLimits>()
     fake.limits.mockReturnValueOnce(old.promise).mockResolvedValueOnce(LIMITS)
-    useCyberspace.setState({ cloud: { ...S().cloud, limits: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://old', profile: 'bypass' } })
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: null }, cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://old', profile: 'cost' } })
     const first = S().resumeCloudJob()
     await vi.waitFor(() => expect(fake.limits).toHaveBeenCalledTimes(1))
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, apiUrl: 'http://fake' } })

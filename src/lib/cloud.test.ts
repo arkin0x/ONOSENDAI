@@ -107,9 +107,9 @@ describe('persistence', () => {
 
   it('defaults prefs, round-trips them, and refuses junk', () => {
     expect(loadCloudPrefs()).toEqual(defaultCloudPrefs())
-    saveCloudPrefs({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765/', profile: 'bypass' })
+    saveCloudPrefs({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765/', profile: 'cost' })
     // A trailing slash is dropped on the way back in, so paths never double it.
-    expect(loadCloudPrefs()).toEqual({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765', profile: 'bypass' })
+    expect(loadCloudPrefs()).toEqual({ mode: 'ask', autoMaxSats: 21, apiUrl: 'http://127.0.0.1:8765', profile: 'cost' })
     localStorage.setItem('onosendai:cloud', JSON.stringify({ mode: 'yes', autoMaxSats: -4, apiUrl: 'ftp://x' }))
     expect(loadCloudPrefs()).toEqual(defaultCloudPrefs())
     localStorage.setItem('onosendai:cloud', '{not json')
@@ -297,5 +297,21 @@ describe('remembered balance', () => {
     expect(loadBalance('pk-a')).toEqual({ msats: 1235, at: 42 })
     expect(loadBalance('pk-b')).toBeNull()
     expect(saveBalance('pk-b', -5, 1).msats).toBe(0)
+  })
+})
+
+describe('the strategy names people saved before', () => {
+  it('reads UNLOCK as TIME, since that was the measured crossover, and BYPASS as COST', () => {
+    localStorage.setItem('onosendai:cloud', JSON.stringify({ mode: 'ask', autoMaxSats: 0, apiUrl: 'http://127.0.0.1:8765', profile: 'unlock' }))
+    expect(loadCloudPrefs().profile).toBe('time')
+    localStorage.setItem('onosendai:cloud', JSON.stringify({ mode: 'ask', autoMaxSats: 0, apiUrl: 'http://127.0.0.1:8765', profile: 'bypass' }))
+    expect(loadCloudPrefs().profile).toBe('cost')
+    localStorage.setItem('onosendai:cloud', JSON.stringify({ mode: 'ask', autoMaxSats: 0, apiUrl: 'http://127.0.0.1:8765', profile: 'loot' }))
+    expect(loadCloudPrefs().profile).toBe('loot')
+  })
+
+  it('defaults to LOOT', () => {
+    localStorage.removeItem('onosendai:cloud')
+    expect(loadCloudPrefs().profile).toBe('loot')
   })
 })

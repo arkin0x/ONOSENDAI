@@ -5776,7 +5776,6 @@ kbd {
 
 /* NEARBY: a chip that stays while anything decrypted is around you, glowing
  * like the find chip; the way to the list while the menu is locked. */
-.nearby__chip { font: inherit; color: var(--fg); gap: 8px; }
-.nearby__chip svg { color: var(--accent); flex: none; }
+.nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }

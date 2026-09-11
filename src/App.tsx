@@ -179,11 +179,11 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
-          <NearbyChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />
-          {/* Last in the stack, under XOR BITS, spaced as the rest are. */}
+          {/* Under XOR BITS, spaced as the rest are: what is open to you here, then the scan. */}
+          <NearbyChip />
           <PresenceChip />
         </div>
       )}

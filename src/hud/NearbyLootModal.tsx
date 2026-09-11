@@ -72,10 +72,10 @@ export function NearbyLootModal(): JSX.Element | null {
           <button className="targets__remove secrets__close" onClick={close} aria-label="Close" title="Close">✕</button>
         </header>
         <div className="secrets__summary">
-          <span>What your keys open in the region you stand in, the green box, nearest first.</span>
+          <span>Hop actions produce region keys that decrypt hidden things nearby.</span>
         </div>
         <ul className="secrets__list">
-          {list.length === 0 && <li className="secrets__empty">Nothing decrypted where you stand. Move, and the scan looks again.</li>}
+          {list.length === 0 && <li className="secrets__empty">Nothing decrypted in this region. A rescan is triggered after every movement action.</li>}
           {list.map((item) => <Row key={item.key} item={item} me={me} onView={view} />)}
         </ul>
       </div>

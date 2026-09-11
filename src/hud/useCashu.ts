@@ -46,7 +46,9 @@ export function useCashu(text: string | null | undefined): CashuView {
     if (!token) return
     let live = true
     const cached = cache.get(raw)
+    // A new token starts from CHECKING, not from the last token's answer.
     if (cached && cached.at > 0) setState(cached.state)
+    else setState('checking')
     void stateOf(raw, token).then((s) => { if (live) setState(s) })
     return () => { live = false }
   }, [raw])
@@ -57,4 +59,46 @@ export function useCashu(text: string | null | undefined): CashuView {
 /** UNCLAIMED, REDEEMED, PENDING, CHECKING, UNREADABLE, or nothing to say. */
 export function cashuStateLabel(state: CashuView['state']): string {
   return state === 'unclaimed' ? 'UNCLAIMED' : state === 'redeemed' ? 'REDEEMED' : state === 'pending' ? 'PENDING' : state === 'checking' ? 'CHECKING' : state === 'unreadable' ? 'UNREADABLE' : 'MINT?'
+}
+
+/** How long the compose box waits for the text to hold still before reading a token. */
+export const SETTLE_MS = 500
+
+export interface ComposeVerdict {
+  /** The message may be placed. */
+  ready: boolean
+  /** What to say under the box, or nothing. */
+  note: string | null
+  tone: 'ok' | 'warn' | 'dim'
+}
+
+function hostOf(mint: string): string {
+  try { return new URL(mint).host } catch { return mint }
+}
+
+/**
+ * Whether a composed message may be placed, and what to say under the box.
+ *
+ * Nothing is decided while the text is still moving (`settled` false): the
+ * button waits for the timer. Once still, a message without a token is
+ * ready at once. One with a token is ready only if the token decodes and
+ * its mint does not call it spent: a token that will not decode, or one
+ * already redeemed or being spent, would publish a coin nobody can claim,
+ * so the button stays off and the note says why. A mint that cannot be
+ * reached is a warning, not a stop: the token reads, and placing it is the
+ * writer's call.
+ */
+export function composeVerdict(settled: boolean, view: CashuView): ComposeVerdict {
+  if (!settled) return { ready: false, note: null, tone: 'dim' }
+  if (!view.found) return { ready: true, note: null, tone: 'dim' }
+  if (!view.token) return { ready: false, tone: 'warn', note: 'This cashu token will not decode: it is cut short or malformed. Fix it or take it out before placing.' }
+  const sats = `${view.token.amount.toLocaleString()} ${view.token.unit}`
+  const host = hostOf(view.token.mint)
+  switch (view.state) {
+    case 'checking': return { ready: false, tone: 'dim', note: `Asking ${host} about this ${sats} token…` }
+    case 'unclaimed': return { ready: true, tone: 'ok', note: `${sats}, unclaimed at ${host}.` }
+    case 'redeemed': return { ready: false, tone: 'warn', note: `This ${sats} token was already redeemed at ${host}. Nobody could claim it.` }
+    case 'pending': return { ready: false, tone: 'warn', note: `${host} says this ${sats} token is being spent right now. Wait, or use another.` }
+    default: return { ready: true, tone: 'warn', note: `A ${sats} token that reads, but ${host} could not be reached to verify it. Placing it anyway is your call.` }
+  }
 }

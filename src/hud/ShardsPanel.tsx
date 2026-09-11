@@ -13,7 +13,8 @@
 import { useState } from 'react'
 import { formatCellSize } from '../lib/scale'
 import { cashuLabel } from '../lib/cashu'
-import { cashuStateLabel, useCashu } from './useCashu'
+import { cashuStateLabel, composeVerdict, SETTLE_MS, useCashu } from './useCashu'
+import { useSettled } from './useSettled'
 import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards, type MyDeployment } from '../store/useShards'
@@ -73,6 +74,12 @@ export function ShardsPanel(): JSX.Element {
   const scanning = useShards((s) => s.scanning)
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')
+  // The token is read, and its mint asked, only once the text has held
+  // still for SETTLE_MS: not on every keystroke through a token thousands
+  // of characters long. Until then PLACE MESSAGE waits.
+  const settled = useSettled(message, SETTLE_MS) === message
+  const cashu = useCashu(settled ? message : null)
+  const verdict = composeVerdict(settled, cashu)
 
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)
@@ -123,9 +130,10 @@ export function ShardsPanel(): JSX.Element {
               rows={3}
               autoFocus
             />
+            {verdict.note && <span className={`shards__compose-note shards__compose-note--${verdict.tone}`} role="status">{verdict.note}</span>}
             <div className="shards__actions">
               <button className="avatars__go" onClick={() => { setComposing(false); setMessage('') }}>CANCEL</button>
-              <button className="avatars__go" disabled={!message.trim()} onClick={placeMessage}>PLACE MESSAGE ▸</button>
+              <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={placeMessage}>PLACE MESSAGE ▸</button>
             </div>
           </div>
         ) : (

@@ -5764,10 +5764,9 @@ kbd {
 }
 
 /* The question under the wordmark: a face, a bubble, a link to the answers.
- * The row is boxed like the wordmark (the same width, centred the same way),
- * so the face sits on the wordmark's left edge and stays there whatever the
- * bubble says. The row's height is fixed at two lines, so a phrase that
- * wraps changes the bubble and not the panel. */
+ * Left-aligned in the panel, the face on the panel's left edge, where it
+ * stays whatever the bubble says. The row's height is fixed at two lines, so
+ * a phrase that wraps changes the bubble and not the panel. */
 .ask {
   --ask-bg: #061a22;
   pointer-events: auto;
@@ -5775,8 +5774,7 @@ kbd {
   align-items: center;
   gap: 8px;
   height: 46px;
-  max-width: 290px;
-  margin: 12px auto 0;
+  margin: 12px 0 0;
   text-decoration: none;
   text-align: left;
   cursor: pointer;

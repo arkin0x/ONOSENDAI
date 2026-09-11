@@ -24,6 +24,7 @@ import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
+import { useNearbyLoot } from '../hooks/useNearbyLoot'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 4
@@ -46,6 +47,7 @@ export function LootPanel(): JSX.Element {
     return out
   }, [discovered])
   const found = useMemo(() => new Set(kinds.keys()), [kinds])
+  const nearbyCount = useNearbyLoot().length
   const foundCount = useMemo(() => items.filter((it) => found.has(it.bagId)).length, [items, found])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -75,6 +77,8 @@ export function LootPanel(): JSX.Element {
       <header className="panel__head">
         <h2>Loot</h2>
         <span className="loot__tags">
+          {/* What is decrypted where you stand, however it was found. */}
+          <button className="tag tag--live loot__nearby" onClick={() => useShards.getState().setNearbyOpen(true)} title="What has been decrypted in the region you stand in">NEARBY {nearbyCount}</button>
           {foundCount > 0 && <span className="tag tag--live">{foundCount} FOUND</span>}
           <span className="tag">{status === 'loading' ? 'LOADING' : `${items.length} HIDDEN`}</span>
         </span>

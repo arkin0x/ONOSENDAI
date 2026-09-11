@@ -5762,3 +5762,11 @@ kbd {
   border-radius: 10px;
   cursor: pointer;
 }
+
+/* Nearby loot: what is decrypted where you stand. */
+.loot__nearby { cursor: pointer; font: inherit; font-size: 8px; letter-spacing: 0.14em; }
+.nearby__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.nearby__glyph { font-size: 14px; color: var(--accent, #00e5ff); }
+.nearby__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nearby__label { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nearby__meta { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }

@@ -3,7 +3,8 @@
  *
  * Finding is a decryption, so the scene shows one: items born from a scan
  * carry a birth time here, and the shard and message renderers read it to run
- * their decode. The HUD shows a KEY FOUND chip for the newest find. A DEV
+ * their decode. The HUD shows a chip with how many were found, which stays
+ * until tapped and opens the Nearby Loot list. A DEV
  * trigger fabricates a found bag beside the avatar so the ceremony can be
  * watched without hiding anything first.
  */
@@ -18,10 +19,12 @@ import { useShards } from './useShards'
 
 export interface FoundChip {
   id: string
-  /** What was found, for the decoding line: a message preview or a shard name. */
+  /** What was found last, for the decoding line: a message preview or a shard name. */
   label: string
-  /** Region size and item count. */
+  /** Region size of the last find. */
   meta: string
+  /** Everything found since the chip was last tapped away. */
+  count: number
   at: number
 }
 
@@ -71,7 +74,10 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     for (const h of items) births[h.eventId] = now
     const first = items[0]
     const label = first.type === 'message' ? messagePreview(first.text ?? '', 40) : first.shard?.name ?? 'shard'
-    set({ births, chip: { id: `${now}`, label, meta: `${regionLabel(first.height)} · ${items.length} ${items.length === 1 ? 'item' : 'items'}`, at: now } })
+    // Finds pile onto a chip nobody has tapped yet: the count is everything
+    // since the last tap, and the chip stays until it is.
+    const count = (get().chip?.count ?? 0) + items.length
+    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now } })
   },
 
   dismiss: () => set({ chip: null }),
@@ -115,4 +121,5 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __ceremony?: () => void }).__ceremony = () => useCeremony.getState().preview()
   ;(window as unknown as { __ceremonyClear?: () => void }).__ceremonyClear = () => useCeremony.getState().clearPreview()
+  ;(window as unknown as { __ceremonyStore?: typeof useCeremony }).__ceremonyStore = useCeremony
 }

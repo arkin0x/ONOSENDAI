@@ -5762,3 +5762,44 @@ kbd {
   border-radius: 10px;
   cursor: pointer;
 }
+
+/* The question under the wordmark: a face, a bubble, a link to the answers.
+ * Left-aligned on purpose inside the centred brand block, and the one thing
+ * in it that takes the pointer. */
+.ask {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+}
+.ask__emoji { font-size: 20px; line-height: 1; flex: none; }
+.ask__bubble {
+  position: relative;
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 10px;
+  white-space: nowrap;
+}
+/* The bubble's tail, pointing at the face. */
+.ask__bubble::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateY(-50%) rotate(45deg);
+  background: #0a121a;
+  border-left: 1px solid rgba(0, 229, 255, 0.3);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.3);
+}
+.ask:hover .ask__bubble { background: rgba(0, 229, 255, 0.12); }

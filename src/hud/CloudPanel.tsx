@@ -25,7 +25,14 @@ const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['o
 /** The amounts most people want, so the common case is one tap. */
 const TOP_UPS = [1_000, 5_000, 25_000]
 
-const PROFILES: Array<[RouteProfile, string]> = [['unlock', 'UNLOCK'], ['bypass', 'BYPASS']]
+const PROFILES: Array<[RouteProfile, string]> = [['loot', 'LOOT'], ['time', 'TIME'], ['cost', 'COST']]
+
+/** What each strategy does, in plain words, under the buttons. */
+const PROFILE_NOTES: Record<RouteProfile, string> = {
+  loot: 'Buy the hop at every wall this machine cannot cross on its own, and land holding that region\u2019s key, so what is hidden there opens for you. Where HOSAKA cannot hop either, a sidestep gets you across without the key.',
+  time: 'Buy the hop wherever paying is faster than walking, measured on this machine against HOSAKA\u2019s own times. Below that, walk and sidestep for free. You keep the keys only from the hops you paid for.',
+  cost: 'Never buy a hop. Walk to each wall and sidestep through it, and pay for a sidestep only where this machine cannot manage one. You arrive without keys, so what is hidden along the way stays shut.',
+}
 
 const STAGE_LABEL: Record<string, string> = {
   awaiting_payment: 'AWAITING PAYMENT',
@@ -86,7 +93,7 @@ export function CloudPanel(): JSX.Element {
 
   // Where the paid hop starts winning, measured (lib/crossover): the setting
   // explains itself with the number rather than a promise.
-  const crossover = offloadFrom('unlock', {
+  const crossover = offloadFrom('time', {
     hopCeiling: hopCeil,
     sidestepCeiling: sidestepCeil,
     cloudHop: cloud.limits?.max_hop_height ?? 0,
@@ -130,33 +137,6 @@ export function CloudPanel(): JSX.Element {
         ))}
       </div>
 
-      {/* How to get past a wall this machine cannot hop. Not a spending limit:
-          AUTO and ASK still decide what actually gets paid. */}
-      {prefs.mode !== 'off' && (
-        <div className="cloud__profile">
-          <span className="login__label">Crossing a wall</span>
-          <div className="cloud__modes" role="radiogroup" aria-label="Crossing a wall">
-            {PROFILES.map(([profile, label]) => (
-              <button
-                key={profile}
-                type="button"
-                role="radio"
-                aria-checked={prefs.profile === profile}
-                className={`secret__act cloud__mode ${prefs.profile === profile ? 'is-on' : ''}`}
-                onClick={() => store().setCloudPrefs({ profile })}
-              >{label}</button>
-            ))}
-          </div>
-          <span className="cloud__profile-note">
-            {prefs.profile === 'bypass'
-              ? 'Sidestep around every wall this machine can, however many steps that walk takes, and pay nothing. You arrive without the region’s Cantor root, so anything hidden along the way stays shut. HOSAKA is used only where this machine cannot cross at all.'
-              : Number.isFinite(crossover)
-                ? `Buy the hop from 2^${crossover} up, where the walk also costs more time than the hop does, and arrive holding the region’s Cantor root. Below that this machine is quicker as well as free, so nothing is bought.`
-                : 'Measured against HOSAKA’s own published times, this machine crosses faster than HOSAKA everywhere it can reach, so nothing is bought here. HOSAKA still takes the walls this machine cannot cross at all, and those arrive with the region’s root.'}
-          </span>
-        </div>
-      )}
-
       {prefs.mode === 'auto' && (
         <label className="cloud__budget">
           <span className="login__label">Auto-approve up to (sats, 0 asks every time)</span>
@@ -174,6 +154,37 @@ export function CloudPanel(): JSX.Element {
             aria-label="Auto-approve budget in sats"
           />
         </label>
+      )}
+
+      <hr className="cloud__rule" />
+
+      {/* What a route optimizes for at a wall this machine cannot hop. Not a
+          spending limit: AUTO and ASK still decide what actually gets paid. */}
+      {prefs.mode !== 'off' && (
+        <div className="cloud__profile">
+          <span className="login__label">OPTIMIZE FOR:</span>
+          <div className="cloud__modes" role="radiogroup" aria-label="Optimize for">
+            {PROFILES.map(([profile, label]) => (
+              <button
+                key={profile}
+                type="button"
+                role="radio"
+                aria-checked={prefs.profile === profile}
+                className={`secret__act cloud__mode ${prefs.profile === profile ? 'is-on' : ''}`}
+                onClick={() => store().setCloudPrefs({ profile })}
+              >{label}</button>
+            ))}
+          </div>
+          <span className="cloud__profile-note">
+            {PROFILE_NOTES[prefs.profile]}
+            {prefs.profile === 'time' && (
+              Number.isFinite(crossover)
+                ? ` On this machine, paying is faster from 2^${crossover} up.`
+                : ' On this machine, walking is faster everywhere it can reach, so TIME buys only where it cannot cross at all.'
+            )}
+          </span>
+          <hr className="cloud__rule" />
+        </div>
       )}
 
       <dl className="stats">
@@ -203,18 +214,18 @@ export function CloudPanel(): JSX.Element {
                 {cloud.balanceChecking ? 'CHECKING…' : balance ? `REFRESH · ${sinceLabel(balance.at, now || Date.now())}` : 'CHECK'}
               </button>
             </span>
-            {/* Credit bought before anything needs it: the route's own funding
-                only ever tops up what one move is short by. */}
-            {prefs.mode !== 'off' && (
-              <button
-                className="avatars__go cloud__topup"
-                onClick={() => setTopUpOpen((v) => !v)}
-                aria-expanded={topUpOpen}
-              >{topUpOpen ? 'CANCEL' : 'INCREASE COMPUTE BALANCE'}</button>
-            )}
           </dd>
         </div>
       </dl>
+      {/* Credit bought before anything needs it: the route's own funding
+          only ever tops up what one move is short by. */}
+      {prefs.mode !== 'off' && (
+        <button
+          className="avatars__go cloud__topup"
+          onClick={() => setTopUpOpen((v) => !v)}
+          aria-expanded={topUpOpen}
+        >{topUpOpen ? 'CANCEL' : 'INCREASE COMPUTE BALANCE'}</button>
+      )}
       {topUpOpen && (
         <form
           className="cloud__topup-form"

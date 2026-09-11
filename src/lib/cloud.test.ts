@@ -21,6 +21,7 @@ import {
   driveCloudJob,
   formatClock,
   jobInProgress,
+  hosakaComputing,
   loadBalance,
   loadCloudJob,
   loadCloudPrefs,
@@ -275,6 +276,15 @@ describe('jobInProgress', () => {
   it('is paid, computing or verifying, and no other status', () => {
     for (const st of ['paid', 'computing', 'verifying'] as const) expect(jobInProgress(st)).toBe(true)
     for (const st of ['idle', 'quoting', 'confirm', 'funding', 'awaiting_payment', 'error'] as const) expect(jobInProgress(st)).toBe(false)
+  })
+})
+
+describe('hosakaComputing', () => {
+  it('is computing alone: a funded route between local steps is not HOSAKA working', () => {
+    expect(hosakaComputing('computing')).toBe(true)
+    for (const st of ['paid', 'verifying', 'idle', 'quoting', 'confirm', 'funding', 'awaiting_payment', 'error'] as const) {
+      expect(hosakaComputing(st), st).toBe(false)
+    }
   })
 })
 

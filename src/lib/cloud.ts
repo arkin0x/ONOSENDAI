@@ -590,6 +590,20 @@ export function jobInProgress(status: CloudStatus): boolean {
   return status === 'paid' || status === 'computing' || status === 'verifying'
 }
 
+/**
+ * HOSAKA is doing the work right now.
+ *
+ * Narrower than `jobInProgress`, which also counts `paid`: a route is marked
+ * paid the moment it is funded and stays that way between its steps, so a
+ * mixed route computing a local step on this machine reads as in progress
+ * while HOSAKA is idle. `verifying` is this machine checking the result that
+ * came back, which is also not HOSAKA working. Only `computing` is, which is
+ * what the breathing mark over the menu button says.
+ */
+export function hosakaComputing(status: CloudStatus): boolean {
+  return status === 'computing'
+}
+
 // ---------------------------------------------------------------------------
 // The prepaid balance, remembered per identity
 // ---------------------------------------------------------------------------

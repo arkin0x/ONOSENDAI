@@ -15,7 +15,8 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { formatCellSize } from '../lib/scale'
+import { formatDistance } from '../lib/scale'
+import { axisDistance } from '../lib/nearby'
 import { WorldLabel } from './WorldLabel'
 import {
   BufferGeometry,
@@ -283,13 +284,16 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   return (
     <group position={[0, 0, 0.04]}>
       {/*
-        The scale reading rides the cursor, and shows once the cursor has left
-        the avatar's cell: parked on the avatar it read as a label on you, and
-        the SCALE panel already answers "how big is a gibson here" at rest.
-        Off your own head it stays up, since nothing else there names the size.
+        How far the cursor is from your avatar, riding the cursor itself, and
+        shown once it has left the avatar's cell: parked on the avatar the
+        answer is zero. It reads as the largest of the three axis distances,
+        the same measure the presence chip and the Nearby Loot list use, so
+        "12 km away" means the same thing everywhere. In history there is no
+        cursor and the label rides the anchor, saying how far that link is
+        from your head. The SCALE panel answers how big a cell is.
       */}
       {!focused && (!home || active) && <WorldLabel
-        text={formatCellSize(scaleExp)}
+        text={formatDistance(axisDistance(target, position))}
         color={active ? targetColor : ACCENT}
         offset={[1.5, 0.7, 0]}
         opacity={active ? 1 : 0.75}

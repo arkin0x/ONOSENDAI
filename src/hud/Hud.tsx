@@ -344,10 +344,15 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // HOSAKA outranks even that: while a payment is awaited or a job is under
   // way the cloud panel takes the first panel position, under the brand.
   const cloudLeads = useCyberspace((s) => s.cloud.status === 'awaiting_payment' || jobInProgress(s.cloud.status))
+  // A move being computed outranks everything: wherever the work is happening,
+  // the proof panel is the thing you are watching, so it takes the first
+  // position and HOSAKA falls in behind it rather than above it.
+  const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
         <Brand />
+        {proofLeads && <ProofPanel />}
         {cloudLeads && <CloudPanel />}
         {rideSet && <HyperspacePanel />}
         <IdentityPanel />
@@ -360,7 +365,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       <div className="hud__col hud__col--right">
         <ScalePanel />
         <PositionPanel />
-        <ProofPanel />
+        {!proofLeads && <ProofPanel />}
         {!cloudLeads && <CloudPanel />}
         <ChainPanel />
         {!rideSet && <HyperspacePanel />}

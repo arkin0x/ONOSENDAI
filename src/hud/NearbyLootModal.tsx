@@ -13,7 +13,6 @@ import { useNearbyLoot, type NearbyItem } from '../hooks/useNearbyLoot'
 import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
 import { messagePreview } from '../lib/hidden'
-import { regionLabel } from '../lib/loot'
 import { formatDistance } from '../lib/scale'
 import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel } from '../store/useProfiles'
@@ -25,9 +24,16 @@ function safeNpub(pubkey: string): string {
   try { return nip19.npubEncode(pubkey) } catch { return pubkey }
 }
 
+/** The first line: the message itself, or the shard named in quotes with its size. */
 function labelOf(item: NearbyItem): string {
-  if (item.type === 'message') return findCashuToken(item.text) ? '₿ cashu token' : messagePreview(item.text ?? '', 60)
-  return item.shard?.name ?? 'shard'
+  if (item.type === 'message') return findCashuToken(item.text) ? '₿ cashu token' : messagePreview(item.text ?? '', 160)
+  const shard = item.shard
+  return shard ? `\u201c${shard.name}\u201d shard \u00b7 ${shard.vertices.length} vertices \u00b7 ${shard.faces.length} faces` : 'shard'
+}
+
+/** The second line: where it is, in the words the panels use. */
+function whereOf(item: NearbyItem): string {
+  return `${item.plane === 1 ? 'Ideaspace' : 'Dataspace'}, height ${item.height}`
 }
 
 function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item: NearbyItem) => void }): JSX.Element {
@@ -39,10 +45,10 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
       <span className="nearby__glyph" aria-hidden="true">{item.type === 'message' ? (findCashuToken(item.text) ? '₿' : '✎') : '◇'}</span>
       <div className="nearby__body">
         <span className="nearby__label">{labelOf(item)}</span>
+        <span className="nearby__where">{whereOf(item)}</span>
         <span className="nearby__meta">
           {author && <ProfilePic pubkey={author} size={14} />}
           <span>{name}</span>
-          <span>· {regionLabel(item.height)}</span>
           <span>· {item.distance === 0n ? 'right here' : `${formatDistance(item.distance)} away`}</span>
         </span>
       </div>

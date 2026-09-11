@@ -5779,3 +5779,7 @@ kbd {
 .nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
+
+/* The Nearby Loot row's second line: the plane and the height. */
+.nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.nearby__label { white-space: normal; overflow-wrap: anywhere; }

@@ -1799,6 +1799,15 @@ kbd {
   border-color: var(--accent);
 }
 
+/* What the compose box says about a token in the text, under the textarea. */
+.shards__compose-note {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.shards__compose-note--ok { color: #52e39f; }
+.shards__compose-note--warn { color: var(--warn); }
+
 .shards__compose-open {
   width: 100%;
 }

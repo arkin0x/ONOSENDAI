@@ -151,6 +151,10 @@ export interface PendingCloudJob {
   createdAt: number
   stage: CloudStage
   deposit: CloudInvoice | null
+  /** Seconds the provider's ladder estimated for this job's height, at submit. */
+  estSeconds?: number
+  /** Date.now() when the job began computing, the payment wait behind it. */
+  computingAt?: number
 }
 
 export function loadCloudJob(): PendingCloudJob | null {
@@ -406,6 +410,8 @@ export async function driveCloudJob(
       hooks.onRecord(record)
     }
 
+    // The clock for the experience record starts here, after any payment wait.
+    if (record.computingAt === undefined) { record = { ...record, computingAt: Date.now() }; hooks.onRecord(record) }
     hooks.onStage('computing', { invoice: null, progress: null, message: null })
     const job = await client.waitForJob(record.jobId, record.pollToken, {
       signal,

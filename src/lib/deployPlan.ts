@@ -67,12 +67,13 @@ export interface CloudQuote {
 }
 
 /** HOSAKA's price and time for the key at this height, from its ladder. */
-export function cloudKeyQuote(height: number, ladder: Array<{ max_height: number; sats: number; est_time?: string; est_seconds?: number | null }> | null | undefined): CloudQuote | null {
+export function cloudKeyQuote(height: number, ladder: Array<{ max_height: number; sats: number; est_time?: string; est_seconds?: number | null }> | null | undefined, experience = 1): CloudQuote | null {
   if (!ladder || ladder.length === 0) return null
   const band = [...ladder].sort((a, b) => a.max_height - b.max_height).find((b) => height <= b.max_height)
   if (!band) return null
   const seconds = typeof band.est_seconds === 'number' && band.est_seconds > 0 ? band.est_seconds : parseEstTime(band.est_time)
-  return { sats: band.sats, seconds }
+  // The provider's estimate, corrected by what its jobs have taken here.
+  return { sats: band.sats, seconds: seconds === null ? null : seconds * experience }
 }
 
 /** Whether the Cloud compute mode wants a confirmation before this price. */

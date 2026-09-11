@@ -16,6 +16,7 @@
  */
 
 import { create } from 'zustand'
+import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
@@ -78,7 +79,7 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
-import { offloadFrom } from '../lib/crossover'
+import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
 import {
   createHosaka,
@@ -1086,6 +1087,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         signerKind: get().signerKind,
         cantorMsByHeight: useCalibration.getState().cantorMsByHeight,
         sha256PerSec: useCalibration.getState().sha256PerSec,
+        experience: experienceRatio(),
       }),
     }
   }
@@ -1282,6 +1284,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       createdAt: Date.now(),
       stage: paying ? 'awaiting_payment' : 'computing',
       deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+      estSeconds: cloudSeconds(step.maxHeight, get().cloud.provider?.pricing?.hop ?? null) ?? undefined,
     }
     saveCloudJob(record)
     set({ cloud: { ...get().cloud, job: record, message: null } })
@@ -1351,6 +1354,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return
     }
+    // What it actually took, against what was estimated: TIME learns from it.
+    recordJobExperience(final, Math.max(findLcaHeight(BigInt(final.from.x), BigInt(final.to.x)), findLcaHeight(BigInt(final.from.y), BigInt(final.to.y)), findLcaHeight(BigInt(final.from.z), BigInt(final.to.z))))
 
     set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: null } })
     const move = { from: positionFromWire(final.from), to: positionFromWire(final.to), plane: final.plane, prevEventId: final.prevEventId }
@@ -2458,6 +2463,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',
         costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0, createdAt: Date.now(),
         stage: paying ? 'awaiting_payment' : 'computing', deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+        estSeconds: cloudSeconds(height, get().cloud.provider?.pricing?.hop ?? null) ?? undefined,
       }
       set({ cloud: { ...get().cloud, job: record, message: null } })
       const outcome = await driveCloudJob(client, record, {
@@ -2475,6 +2481,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       if (typeof done.new_balance_msats === 'number') get().noteBalance(done.new_balance_msats)
       set({ cloud: { ...get().cloud, ...idle } })
       if (done.status !== 'completed' || !done.result) return { ok: false, error: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' }
+      recordJobExperience(outcome.record, height)
       const r = done.result as HosakaRegionKeyResult
       if (!r.secret_key || !r.lookup_id) return { ok: false, error: 'HOSAKA returned no key.' }
       return { ok: true, result: r }

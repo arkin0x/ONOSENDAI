@@ -163,6 +163,8 @@ export interface CloudHopResult {
   max_height: number
   compute_msats: number
   storage_msats_24h?: number
+  /** The cubes around the destination, one per height, when the hop asked for them. */
+  destination_keys?: Array<{ height: number; secret_key: string; lookup_id: string; base?: { x: string; y: string; z: string } }>
 }
 
 /** `result` of a completed sidestep job (spec 6.8 and 6.10). */

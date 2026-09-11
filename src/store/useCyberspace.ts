@@ -16,6 +16,8 @@
  */
 
 import { create } from 'zustand'
+import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
+import { localKeyCeiling } from '../lib/deployPlan'
 import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
@@ -1400,6 +1402,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.lookupId, r.region_n.secret_key)
+      // LOOT: the cubes around where it landed. HOSAKA's own list when it sent
+      // one; this machine computes what it can either way, up to its ceiling.
+      if (get().cloudPrefs.profile === 'loot') {
+        const sent = r.destination_keys ? holdCloudDestinationKeys(r.destination_keys, move.to, move.plane) : 0
+        const top = sent > 0 ? Math.min(...r.destination_keys!.map((k) => k.height)) - 1 : localKeyCeiling()
+        void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(r.max_height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
+      }
     }
     const before = get().events.length
     await get().finishProof(msg)
@@ -1932,6 +1941,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.region.lookupId, msg.region.keyHex)
+      // LOOT: the cubes around where it landed, up to what this machine computes.
+      if (get().cloudPrefs.profile === 'loot') {
+        const n = Math.max(...msg.region.heights)
+        void holdDestinationCubes(newPosition, plane, destinationHeights(n, localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'hop', event.id)
+      }
     }
 
     // A route continues from where this step landed, or ends here.

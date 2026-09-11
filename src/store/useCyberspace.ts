@@ -997,6 +997,17 @@ function moveAction(action: HosakaAction): ProofMode {
   return action === 'sidestep' ? 'sidestep' : 'hop'
 }
 
+/**
+ * What a hop unlocked, listed. A hop leaves the key to the region it crossed,
+ * whether this machine or HOSAKA computed it, and the key is only worth
+ * something if it opens what is there: ask the relay at once, so the finds
+ * get their ceremony and the Nearby Loot list. Imported lazily: the shards
+ * store imports this one.
+ */
+function scanHeldKey(lookupId: string, keyHex: string): void {
+  void import('./useShards').then((m) => m.useShards.getState().rescan(lookupId, keyHex)).catch(() => { /* the relay was asked; a miss is a miss */ })
+}
+
 export const useCyberspace = create<CyberspaceState>((set, get) => {
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
@@ -1388,6 +1399,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         source: 'cloud',
         at: Math.floor(Date.now() / 1000),
       }])
+      scanHeldKey(msg.lookupId, r.region_n.secret_key)
     }
     const before = get().events.length
     await get().finishProof(msg)
@@ -1919,6 +1931,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         eventId: event.id,
         at: Math.floor(Date.now() / 1000),
       }])
+      scanHeldKey(msg.region.lookupId, msg.region.keyHex)
     }
 
     // A route continues from where this step landed, or ends here.

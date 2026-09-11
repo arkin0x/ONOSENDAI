@@ -47,6 +47,19 @@ export function ChainExplorer(): JSX.Element {
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
   const [open, setOpen] = useState(false)
+  // Spectating opens it: the chain is the thing you came to look at. What you
+  // had it set to is put back when spectation ends.
+  const openBefore = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (spectate) {
+      if (openBefore.current === null) { openBefore.current = open; setOpen(true) }
+    } else if (openBefore.current !== null) {
+      setOpen(openBefore.current)
+      openBefore.current = null
+    }
+    // `open` is read once, at the moment spectation starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spectate !== null])
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {

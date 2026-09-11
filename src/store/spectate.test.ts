@@ -103,3 +103,28 @@ describe('spectate', () => {
     useCyberspace.getState().endSpectate()
   })
 })
+
+describe('the view while spectating', () => {
+  it('arrives in the black sun orientation and leaves the way it came', async () => {
+    const { canonicalQuaternion, topDownQuaternion } = await import('../lib/space')
+    const before = topDownQuaternion()
+    useCyberspace.setState({ view: before.clone(), viewHistory: [], spectate: null })
+    useCyberspace.getState().beginSpectate('ab'.repeat(32))
+    const during = useCyberspace.getState().view
+    const canon = canonicalQuaternion()
+    expect(Math.abs(during.dot(canon))).toBeCloseTo(1, 5)
+    expect(useCyberspace.getState().spectate?.returnView.dot(before)).toBeCloseTo(1, 5)
+    useCyberspace.getState().endSpectate()
+    expect(Math.abs(useCyberspace.getState().view.dot(before))).toBeCloseTo(1, 5)
+    expect(useCyberspace.getState().spectate).toBeNull()
+  })
+
+  it('switching avatars keeps the first return view', async () => {
+    const { topDownQuaternion } = await import('../lib/space')
+    const before = topDownQuaternion()
+    useCyberspace.setState({ view: before.clone(), viewHistory: [], spectate: null })
+    useCyberspace.getState().beginSpectate('ab'.repeat(32))
+    useCyberspace.getState().beginSpectate('cd'.repeat(32))
+    expect(useCyberspace.getState().spectate?.returnView.dot(before)).toBeCloseTo(1, 5)
+  })
+})

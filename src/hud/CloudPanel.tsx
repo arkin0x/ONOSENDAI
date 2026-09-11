@@ -141,6 +141,27 @@ export function CloudPanel(): JSX.Element {
         ))}
       </div>
 
+      {prefs.mode === 'auto' && (
+        <label className="cloud__budget">
+          <span className="login__label">Auto-approve up to (sats, 0 asks every time)</span>
+          <input
+            className="avatars__input login__input"
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={prefs.autoMaxSats}
+            onChange={(e) => {
+              const n = Math.floor(Number(e.target.value))
+              if (Number.isFinite(n) && n >= 0) store().setCloudPrefs({ autoMaxSats: n })
+            }}
+            aria-label="Auto-approve budget in sats"
+          />
+        </label>
+      )}
+
+      <hr className="cloud__rule" />
+
       {/* What a route optimizes for at a wall this machine cannot hop. Not a
           spending limit: AUTO and ASK still decide what actually gets paid. */}
       {prefs.mode !== 'off' && (
@@ -169,26 +190,8 @@ export function CloudPanel(): JSX.Element {
               ` HOSAKA's estimates are corrected by experience: over your last ${samples.length} jobs it ran at ${experience.toFixed(2)}× what it estimated.`
             )}
           </span>
+          <hr className="cloud__rule" />
         </div>
-      )}
-
-      {prefs.mode === 'auto' && (
-        <label className="cloud__budget">
-          <span className="login__label">Auto-approve up to (sats, 0 asks every time)</span>
-          <input
-            className="avatars__input login__input"
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={prefs.autoMaxSats}
-            onChange={(e) => {
-              const n = Math.floor(Number(e.target.value))
-              if (Number.isFinite(n) && n >= 0) store().setCloudPrefs({ autoMaxSats: n })
-            }}
-            aria-label="Auto-approve budget in sats"
-          />
-        </label>
       )}
 
       <dl className="stats">
@@ -218,18 +221,18 @@ export function CloudPanel(): JSX.Element {
                 {cloud.balanceChecking ? 'CHECKING…' : balance ? `REFRESH · ${sinceLabel(balance.at, now || Date.now())}` : 'CHECK'}
               </button>
             </span>
-            {/* Credit bought before anything needs it: the route's own funding
-                only ever tops up what one move is short by. */}
-            {prefs.mode !== 'off' && (
-              <button
-                className="avatars__go cloud__topup"
-                onClick={() => setTopUpOpen((v) => !v)}
-                aria-expanded={topUpOpen}
-              >{topUpOpen ? 'CANCEL' : 'INCREASE COMPUTE BALANCE'}</button>
-            )}
           </dd>
         </div>
       </dl>
+      {/* Credit bought before anything needs it: the route's own funding
+          only ever tops up what one move is short by. */}
+      {prefs.mode !== 'off' && (
+        <button
+          className="avatars__go cloud__topup"
+          onClick={() => setTopUpOpen((v) => !v)}
+          aria-expanded={topUpOpen}
+        >{topUpOpen ? 'CANCEL' : 'INCREASE COMPUTE BALANCE'}</button>
+      )}
       {topUpOpen && (
         <form
           className="cloud__topup-form"

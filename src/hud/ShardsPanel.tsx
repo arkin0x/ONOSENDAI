@@ -32,10 +32,13 @@ function depName(d: MyDeployment): string {
  * One hidden thing in the STASH. A message carrying a Cashu token shows the
  * coin instead of the pen, what it holds, and whether anyone has taken it:
  * the mint says which proofs are spent (useCashu), so REDEEMED means found.
+ * The coin is decided by the token being there, not by its being readable:
+ * one this client cannot decode still shows the mark, reads "cashu token",
+ * and says UNREADABLE, the same rule the world and the loot list follow.
  */
 function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
   const cashu = useCashu(d.type === 'message' ? d.text : null)
-  const coin = cashu.token !== null
+  const coin = cashu.found
   const live = useCyberspace((s) => s.live)
   const broadcasting = useShards((s) => s.broadcasting) === d.lookupId
   return (
@@ -43,7 +46,7 @@ function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; 
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
         <span className="avatars__who">
           <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{coin ? '₿' : d.type === 'message' ? '✎' : '◇'}</span>
-          {coin && cashu.token ? cashuLabel(cashu.token) : depName(d)}
+          {coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : depName(d)}
         </span>
         <span className="shards__meta">
           {d.height === 0 ? 'exact gibson' : formatCellSize(d.height)} · {d.published ? 'LIVE' : 'LOCAL'}{d.plane === 1 ? ' · ideaspace' : ''}

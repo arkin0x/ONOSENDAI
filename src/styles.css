@@ -1785,6 +1785,7 @@ kbd {
 .shards__cashu--unclaimed { color: #52e39f; }
 .shards__cashu--redeemed { color: #f7931a; }
 .shards__cashu--pending, .shards__cashu--checking, .shards__cashu--unknown { opacity: 0.7; }
+.shards__cashu--unreadable { color: var(--warn); }
 
 .shards__compose {
   display: flex;

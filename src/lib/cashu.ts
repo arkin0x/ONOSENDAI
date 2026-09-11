@@ -45,6 +45,20 @@ export function findCashuToken(text: string | null | undefined): string | null {
   return m ? m[0].replace(/=+$/, '') : null
 }
 
+/**
+ * A message's token, found and read, as one answer. `raw` is the token as it
+ * sits in the text, or null when the message carries none: it decides whether
+ * the message is a coin. `token` is what the coin holds, or null when the
+ * token is there but this reader cannot read it: cut short (the compose cap
+ * or a paste that lost its tail), fused with the word after it, or a shape
+ * this decoder does not know. A coin that cannot be read is still a coin, so
+ * every surface keys the mark on `raw` and the amount on `token`.
+ */
+export function readCashuToken(text: string | null | undefined): { raw: string | null; token: CashuToken | null } {
+  const raw = findCashuToken(text)
+  return { raw, token: raw ? decodeCashuToken(raw) : null }
+}
+
 function base64ToBytes(s: string): Uint8Array {
   const std = s.replace(/-/g, '+').replace(/_/g, '/')
   const padded = std + '='.repeat((4 - (std.length % 4)) % 4)

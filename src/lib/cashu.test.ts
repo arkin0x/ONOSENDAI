@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bytesToHex, hexToBytes } from 'cyberspace-core'
-import { cashuLabel, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve, textWithoutToken } from './cashu'
+import { cashuLabel, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve, readCashuToken, textWithoutToken } from './cashu'
 
 const b64url = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
@@ -108,5 +108,29 @@ describe('a token among words', () => {
   it('leaves an ordinary message alone', () => {
     expect(findCashuToken('just a note')).toBeNull()
     expect(textWithoutToken('just a note')).toBe('just a note')
+  })
+})
+
+describe('readCashuToken: a coin is a coin whether or not it can be read', () => {
+  it('reads a whole token: found, and what it holds', () => {
+    const r = readCashuToken(`for the drinks ${V4}`)
+    expect(r.raw).toBe(V4)
+    expect(r.token?.amount).toBe(9)
+  })
+  it('a token cut short is still found, with nothing readable in it', () => {
+    // What the 2000-character compose cap does to a token longer than the room
+    // left after the words: the prefix survives, the tail does not.
+    const r = readCashuToken(`for the drinks ${V4.slice(0, V4.length - 20)}`)
+    expect(r.raw).not.toBeNull()
+    expect(r.token).toBeNull()
+  })
+  it('a token fused with the word after it is found and unreadable, not a plain message', () => {
+    const r = readCashuToken(`${V4}enjoy`)
+    expect(r.raw).not.toBeNull()
+    expect(r.token).toBeNull()
+  })
+  it('a plain message is neither', () => {
+    expect(readCashuToken('just a note')).toEqual({ raw: null, token: null })
+    expect(readCashuToken(undefined)).toEqual({ raw: null, token: null })
   })
 })

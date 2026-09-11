@@ -10,7 +10,7 @@
  * VIEW button that flies the scene to each.
  */
 
-import { cashuLabel, decodeCashuToken, findCashuToken } from '../lib/cashu'
+import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { nip19 } from 'nostr-tools'
 import type { Plane } from 'cyberspace-core'
 import { useState } from 'react'
@@ -40,11 +40,10 @@ interface OpenedItem {
   text?: string
 }
 
-/** A message's preview, or what its Cashu token holds when it carries one. */
+/** A message's preview, or what its Cashu token holds when it carries one; a coin that cannot be read is still a coin. */
 function cashuOrPreview(text: string | undefined): string {
-  const raw = findCashuToken(text)
-  const token = raw ? decodeCashuToken(raw) : null
-  return token ? `₿ ${cashuLabel(token)} hidden here` : messagePreview(text ?? '', 48)
+  const { raw, token } = readCashuToken(text)
+  return token ? `₿ ${cashuLabel(token)} hidden here` : raw ? '₿ cashu token hidden here' : messagePreview(text ?? '', 48)
 }
 
 function safeNpub(pubkey: string): string {

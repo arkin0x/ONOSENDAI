@@ -569,7 +569,7 @@ export function Workshop(): JSX.Element | null {
           </div>
           <div className="workshop__row" role="group" aria-label="Grid division">
             <span className="workshop__label">DIVISION</span>
-            <div className="workshop__modes">
+            <div className="workshop__modes workshop__modes--divisions">
               {DIVISIONS.map((d) => (
                 <button key={d} className={`workshop__mode ${division === d ? 'is-on' : ''}`} aria-pressed={division === d} onClick={() => w().setDivision(d)} title={d === 1 ? 'Snap to whole units' : `Snap to 1/${d} of a unit`}>{d === 1 ? '1' : `1/${d}`}</button>
               ))}

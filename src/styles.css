@@ -2274,7 +2274,19 @@ kbd {
 
 .workshop__modes {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
+}
+
+/* The eight divisions do not fit one line beside their label, and a flex row
+   that could not wrap ran off the panel. Five to a line, on one column
+   rhythm, so 1/6 begins the second line under 1 and the two lines read as
+   one block. */
+.workshop__modes--divisions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  flex: 1 1 200px;
+  max-width: 260px;
 }
 
 .workshop__list {

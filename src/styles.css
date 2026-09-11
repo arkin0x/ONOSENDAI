@@ -103,6 +103,18 @@ body {
   width: 300px;
   align-items: stretch;
 }
+/* The build version at the foot of the menu, with room around it so it
+   reads as a signature and not as one more panel. */
+.hud__version {
+  flex: 0 0 auto;
+  padding: 36px 0 44px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
 
 /* ---------- Panels ---------- */
 

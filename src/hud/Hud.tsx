@@ -368,6 +368,9 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         <Controls />
         <DerezzPanel />
         <RelaysPanel />
+        {/* The build, last thing in the menu: 2, the day it was merged, how
+            many PRs had merged that day, and which PR this is. */}
+        <div className="hud__version" title="2 . day merged . PRs merged that day . this PR">{__ONOSENDAI_VERSION__}</div>
       </div>
     </div>
   )

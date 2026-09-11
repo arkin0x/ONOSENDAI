@@ -163,8 +163,19 @@ export interface CloudHopResult {
   max_height: number
   compute_msats: number
   storage_msats_24h?: number
-  /** The cubes around the destination, one per height, when the hop asked for them. */
-  destination_keys?: Array<{ height: number; secret_key: string; lookup_id: string; base?: { x: string; y: string; z: string } }>
+  /**
+   * The cubes around the destination, one per height, when the hop asked for
+   * them. Null while they are still being computed: the hop above is whole
+   * and can be verified and signed at once, and the cubes follow on the same
+   * job (`keys_pending`).
+   */
+  destination_keys?: Array<{ height: number; secret_key: string; lookup_id: string; base?: { x: string; y: string; z: string } }> | null
+  /** This result is the hop alone; the cubes are still being computed. */
+  keys_pending?: boolean
+  /** The cubes failed while the hop stands. The hop is yours; the surcharge came back. */
+  keys_error?: string | null
+  /** What HOSAKA credited back when the cubes failed, in millisats. */
+  keys_credit_msats?: number
 }
 
 /** `result` of a completed sidestep job (spec 6.8 and 6.10). */
@@ -331,6 +342,23 @@ export interface WaitForJobOptions {
   /** Every poll's answer, for progress. */
   onPoll?: (job: HosakaJob) => void
   maxWaitMs?: number
+  /**
+   * Stop early on a job that is not finished but has delivered what the
+   * caller was waiting for. A staged hop is the case: its own proof is whole
+   * while the destination cubes are still being computed, so the move can be
+   * signed now and the cubes collected later on the same job.
+   */
+  stopWhen?: (job: HosakaJob) => boolean
+}
+
+/**
+ * A job whose hop is deliverable but whose cubes are not: the staged first
+ * answer. `completed` is not staged, whatever else it says, since everything
+ * that job will ever hold is already in it.
+ */
+export function keysPending(job: HosakaJob): boolean {
+  if (job.status !== 'computing' && job.status !== 'pending') return false
+  return (job.result as CloudHopResult | null)?.keys_pending === true
 }
 
 /**
@@ -555,6 +583,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
           failures = 0
           o.onPoll?.(job)
           if (job.status === 'completed' || job.status === 'failed') return job
+          if (o.stopWhen?.(job)) return job
         } catch (err) {
           if (err instanceof HosakaError && err.code === 'aborted') throw err
           // A 404 right after completion is the volume syncing (contract);

@@ -92,9 +92,12 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker, type HosakaProvider, type HopWants } from '../lib/hosaka'
+  type Waker, type HosakaProvider, type HopWants, keysPending } from '../lib/hosaka'
 import {
   clearCloudJob,
+  clearKeysTicket,
+  loadKeysTicket,
+  saveKeysTicket,
   cloudProofResponse,
   describeCloudError,
   driveCloudJob,
@@ -594,6 +597,8 @@ export interface CyberspaceState {
    * its invoice expired. Also fetches the caps when cloud mode is on.
    */
   resumeCloudJob: () => Promise<void>
+  /** Collect the destination cubes of a staged hop whose move has already landed. */
+  collectCloudKeys: () => Promise<void>
   /** Forget a kept job without finishing it. */
   discardCloudJob: () => void
   /** Ask HOSAKA about the invoice now rather than at the next poll. */
@@ -972,6 +977,8 @@ let requestId = 0
 
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
+// One collector at a time: the startup call and a just-landed hop can both ask.
+let collectingKeys = false
 let cloudWaker: Waker | null = null
 let hosaka: { url: string; client: HosakaClient } | null = null
 /** The caps request out right now, and the API URL it was sent to. */
@@ -1353,7 +1360,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     const { job } = outcome
     const final = outcome.record
-    if (job.status !== 'completed') {
+    // A staged hop is not a finished job and is not a failed one: its own
+    // proof is whole and the destination cubes are still being computed, so
+    // it is verified and signed exactly like a finished one and the cubes are
+    // collected afterwards (collectCloudKeys).
+    if (job.status !== 'completed' && !keysPending(job)) {
       clearCloudJob()
       cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return
@@ -1383,6 +1394,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
 
+    // Set by the hop below when HOSAKA is still computing its cubes.
+    let stagedCubes = false
     const msg = cloudProofResponse(id, final, job, Date.now() - (get().cloud.startedAt ?? final.createdAt))
     if (msg.type === 'done' && msg.mode === 'hop' && msg.lookupId) {
       // The region key of the region entered (spec 7.2), which this machine could not derive.
@@ -1417,6 +1430,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         const sent = r.destination_keys ? holdCloudDestinationKeys(r.destination_keys, move.to, move.plane) : 0
         const top = sent > 0 ? Math.min(...r.destination_keys!.map((k) => k.height)) - 1 : localKeyCeiling()
         void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(r.max_height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
+        // Staged delivery: this result is the hop alone and the cubes are
+        // still being computed on the same job. Noted here, taken up once the
+        // move itself has landed, since the cubes are the lesser half.
+        stagedCubes = r.keys_pending === true
       }
     }
     const before = get().events.length
@@ -1428,6 +1445,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
     useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${final.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
+    // The move is signed and the toast for it has been shown; now the cubes,
+    // which arrive on the same job minutes later. The ticket outlives this
+    // tab, so a phone put away mid job collects them when it comes back.
+    if (stagedCubes) {
+      saveKeysTicket({ version: 1, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
+      void get().collectCloudKeys()
+    }
     // The event landed, and a route may already have moved on to its next
     // step (which bumps the request id): the bookkeeping below is about the
     // step that landed, so it runs regardless.
@@ -2556,6 +2580,39 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
             : null,
       },
     })
+  },
+
+  collectCloudKeys: async () => {
+    const ticket = loadKeysTicket()
+    if (!ticket || collectingKeys) return
+    collectingKeys = true
+    try {
+      const job = await cloudClient(get().cloudPrefs.apiUrl).waitForJob(ticket.jobId, ticket.pollToken)
+      const r = job.result as CloudHopResult | null
+      if (job.status === 'completed' && r?.destination_keys && r.destination_keys.length > 0) {
+        const n = holdCloudDestinationKeys(r.destination_keys, positionFromWire(ticket.to), ticket.plane)
+        clearKeysTicket()
+        if (n > 0) useToast.getState().show({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
+      } else if (r?.keys_error) {
+        // The hop stands and is already signed: only the extra work failed,
+        // and HOSAKA credited its surcharge back.
+        clearKeysTicket()
+        const back = Math.round((r.keys_credit_msats ?? 0) / 1000)
+        useToast.getState().show({
+          label: 'CUBES NOT COMPUTED',
+          meta: back > 0 ? `Your hop stands. ${back} sats came back to your HOSAKA balance.` : 'Your hop stands. Nothing extra was charged.',
+          mark: 'hosaka',
+        })
+      } else if (job.status === 'completed' || job.status === 'failed') {
+        // Nothing is coming on this job.
+        clearKeysTicket()
+      }
+    } catch {
+      // A dropped socket or a tab put away: the ticket keeps, and the next
+      // load picks it up again.
+    } finally {
+      collectingKeys = false
+    }
   },
 
   resumeCloudJob: async () => {

@@ -69,6 +69,9 @@ export default function App(): JSX.Element {
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
+  // Cubes from a staged hop whose move landed before they finished: the
+  // ticket outlives the tab, so a phone put away mid job collects on return.
+  useEffect(() => { void useCyberspace.getState().collectCloudKeys() }, [])
   // Back from the wallet: a phone suspends the tab while another app is up,
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.

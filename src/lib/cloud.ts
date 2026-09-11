@@ -32,7 +32,7 @@ import {
   type HosakaJob,
   type HosakaLimits,
   type Waker,
-} from './hosaka'
+  keysPending } from './hosaka'
 import type { Position } from './space'
 
 export type CloudMode = 'auto' | 'ask' | 'off'
@@ -63,6 +63,7 @@ export function defaultCloudPrefs(): CloudPrefs {
 const PREFS_KEY = 'onosendai:cloud'
 const JOB_KEY = 'onosendai:cloudJob'
 const REGION_KEYS_KEY = 'onosendai:cloudRegionKeys'
+const KEYS_TICKET_KEY = 'onosendai:cloudKeys'
 
 export function loadCloudPrefs(): CloudPrefs {
   const d = defaultCloudPrefs()
@@ -195,6 +196,50 @@ export function saveCloudJob(record: PendingCloudJob): void {
 
 export function clearCloudJob(): void {
   try { localStorage.removeItem(JOB_KEY) } catch { /* private mode */ }
+}
+
+/**
+ * The ticket for cubes still being computed after their hop has landed.
+ *
+ * A hop with destination cubes is delivered in two stages: the hop's own
+ * proof first, which is what the avatar needs to move, and the cubes after.
+ * Once the move is signed the pending job record is gone, so this small
+ * ticket is what remains to collect the second stage: the job it belongs to,
+ * the token that reads it, and where the hop landed, which is what the cubes
+ * are held against. It survives a reload, so a phone put away mid job still
+ * collects its cubes when it comes back.
+ */
+export interface PendingKeys {
+  version: 1
+  jobId: string
+  pollToken: string
+  /** Where the hop landed: the cubes are around this point. */
+  to: WirePosition
+  plane: Plane
+  /** Date.now() when the hop landed and the wait for cubes began. */
+  at: number
+}
+
+export function loadKeysTicket(): PendingKeys | null {
+  try {
+    const raw = localStorage.getItem(KEYS_TICKET_KEY)
+    if (!raw) return null
+    const r = JSON.parse(raw) as Partial<PendingKeys>
+    if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
+    if (!r.to || (r.plane !== 0 && r.plane !== 1)) return null
+    positionFromWire(r.to)
+    return { version: 1, jobId: r.jobId, pollToken: r.pollToken, to: r.to, plane: r.plane, at: typeof r.at === 'number' ? r.at : Date.now() }
+  } catch {
+    return null
+  }
+}
+
+export function saveKeysTicket(t: PendingKeys): void {
+  try { localStorage.setItem(KEYS_TICKET_KEY, JSON.stringify(t)) } catch { /* private mode */ }
+}
+
+export function clearKeysTicket(): void {
+  try { localStorage.removeItem(KEYS_TICKET_KEY) } catch { /* private mode */ }
 }
 
 /**
@@ -413,9 +458,14 @@ export async function driveCloudJob(
     // The clock for the experience record starts here, after any payment wait.
     if (record.computingAt === undefined) { record = { ...record, computingAt: Date.now() }; hooks.onRecord(record) }
     hooks.onStage('computing', { invoice: null, progress: null, message: null })
+    // A staged hop ends the wait here: its own proof is whole, so the move is
+    // signed now rather than after the destination cubes finish, which is
+    // work the avatar does not need in order to move. The caller collects the
+    // cubes from the same job afterwards (loadKeysTicket).
     const job = await client.waitForJob(record.jobId, record.pollToken, {
       signal,
       onPoll: (j) => hooks.onStage('computing', { progress: progressOf(j) }),
+      stopWhen: keysPending,
     })
     return { job, record }
   }

@@ -18,8 +18,7 @@
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
-import type { HosakaRegionKeyResult } from '../lib/hosaka'
-import { cloudClient, useCyberspace } from './useCyberspace'
+import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
 
 /** How many keys are kept before the oldest are dropped. */
@@ -112,7 +111,8 @@ interface SecretsState {
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.
    */
-  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<boolean>
+  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. */
+  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<HeldKey | null>
 }
 
 /** Roughly what one entry costs in local storage. */
@@ -190,52 +190,35 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height) => {
-    if (get().buying) return false
+    if (get().buying) return null
     const cs = useCyberspace.getState()
-    const client = cloudClient(cs.cloudPrefs.apiUrl)
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
-    try {
-      const job = await client.submitRegionKey(at, height)
-      if (job.payment_required) {
-        set({ buying: null, buyError: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats for a 2^${height} key and your balance is short. Top up in the Cloud panel.` })
-        return false
-      }
-      if (!job.poll_token) {
-        set({ buying: null, buyError: 'HOSAKA took the job but gave no way to follow it.' })
-        return false
-      }
-      set({ buying: { height, status: 'computing', costMsats: job.cost_msats, estSeconds: null, startedAt: Date.now() } })
-      const done = await client.waitForJob(job.id, job.poll_token)
-      if (done.status !== 'completed' || !done.result) {
-        set({ buying: null, buyError: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' })
-        return false
-      }
-      const r = done.result as HosakaRegionKeyResult
-      if (!r.secret_key || !r.lookup_id) {
-        set({ buying: null, buyError: 'HOSAKA returned no key.' })
-        return false
-      }
-      get().hold([{
-        lookupId: r.lookup_id,
-        keyHex: r.secret_key,
-        height: r.height ?? height,
-        base: {
-          x: String(r.base?.x ?? (at.x >> BigInt(height)) << BigInt(height)),
-          y: String(r.base?.y ?? (at.y >> BigInt(height)) << BigInt(height)),
-          z: String(r.base?.z ?? (at.z >> BigInt(height)) << BigInt(height)),
-        },
-        plane,
-        source: 'cloud',
-        at: Math.floor(Date.now() / 1000),
-      }])
-      set({ buying: null })
-      // What was bought is worth looking in at once.
-      void useShards.getState().rescan(r.lookup_id, r.secret_key)
-      return true
-    } catch (err) {
-      set({ buying: null, buyError: err instanceof Error ? err.message : String(err) })
-      return false
+    // The store's job driver: a short balance gets the job's own invoice in
+    // the invoice modal, and the job starts when it settles.
+    const outcome = await cs.buyRegionKey(at, plane, height)
+    if (!outcome.ok) {
+      set({ buying: null, buyError: outcome.error })
+      return null
     }
+    const r = outcome.result
+    const held: HeldKey = {
+      lookupId: r.lookup_id,
+      keyHex: r.secret_key,
+      height: r.height ?? height,
+      base: {
+        x: String(r.base?.x ?? (at.x >> BigInt(height)) << BigInt(height)),
+        y: String(r.base?.y ?? (at.y >> BigInt(height)) << BigInt(height)),
+        z: String(r.base?.z ?? (at.z >> BigInt(height)) << BigInt(height)),
+      },
+      plane,
+      source: 'cloud',
+      at: Math.floor(Date.now() / 1000),
+    }
+    get().hold([held])
+    set({ buying: null })
+    // What was bought is worth looking in at once.
+    void useShards.getState().rescan(r.lookup_id, r.secret_key)
+    return held
   },
 
   load: () => {

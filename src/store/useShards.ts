@@ -20,6 +20,9 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
+import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } from '../lib/deployPlan'
+import { useSecrets } from './useSecrets'
 import {
   HIDDEN_KIND,
   bagInners,
@@ -86,6 +89,10 @@ interface ShardsState {
   pending: DeployPending | null
   deployHeight: number
   deployStatus: DeployStatus
+  /** What the deploy is doing right now, for the button: computing, buying, publishing. */
+  deployNote: string | null
+  /** A HOSAKA purchase waiting for a yes: the price and the wait. Null when not asking. */
+  deployAsk: { sats: number | null; seconds: number | null } | null
   deployError: string | null
   mine: MyDeployment[]
   discovered: Record<string, Hidden>
@@ -102,8 +109,14 @@ interface ShardsState {
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
   setDeployHeight: (h: number) => void
+  /** The highest height the deploy bar offers: this machine's, or HOSAKA's when cloud compute is on. */
+  deployCeiling: () => number
+  /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
+  confirmDeploy: () => void
+  declineDeploy: () => void
   cancelDeploy: () => void
-  deploy: () => Promise<void>
+  /** Hide the pending thing at the cursor. `confirmed` is the yes to a HOSAKA ask. */
+  deploy: (confirmed?: boolean) => Promise<void>
   deleteInstance: (eventId: string) => Promise<void>
   /** Send a region's bag to the relays now: what LOCAL deferred. */
   broadcast: (lookupId: string) => Promise<boolean>
@@ -205,6 +218,8 @@ export const useShards = create<ShardsState>((set, get) => {
     pending: null,
     deployHeight: 0,
     deployStatus: 'idle',
+    deployNote: null,
+    deployAsk: null,
     deployError: null,
     mine: loadMine(),
     discovered: {},
@@ -220,16 +235,39 @@ export const useShards = create<ShardsState>((set, get) => {
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
     // warns about.
-    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(MAX_COMPUTE_HEIGHT, Math.round(h))) }),
-    cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null }),
+    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(get().deployCeiling(), Math.round(h))), deployAsk: null }),
+    deployCeiling: () => {
+      const cs = cyber()
+      return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
+    },
+    cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null }),
+    confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
+    declineDeploy: () => set({ deployAsk: null }),
 
-    deploy: async () => {
+    deploy: async (confirmed = false) => {
       const { pending, deployHeight } = get()
       if (!pending) return
       const cs = cyber()
       const at: Position = { ...cs.cursor }
       const plane = cs.plane
       const createdAt = Math.floor(Date.now() / 1000)
+
+      // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
+      // priced as a hop at that height, and the Cloud compute panel's mode says
+      // whether to ask first.
+      const inputs = { localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null }
+      const route = deployRoute(deployHeight, inputs)
+      if (route === 'cloud') {
+        if (cs.cloudPrefs.mode === 'off' || deployHeight > deployCeiling(inputs)) {
+          set({ deployStatus: 'error', deployError: `Height ${deployHeight} is past what this machine computes, and cloud compute is off.` })
+          return
+        }
+        const quote = cloudKeyQuote(deployHeight, cs.cloud.provider?.pricing?.hop)
+        if (!confirmed && needsAsk(cs.cloudPrefs.mode, quote?.sats ?? null, cs.cloudPrefs.autoMaxSats)) {
+          set({ deployAsk: { sats: quote?.sats ?? null, seconds: quote?.seconds ?? null }, deployError: null })
+          return
+        }
+      }
 
       let shard: ShardModel | undefined
       let text: string | undefined
@@ -244,9 +282,19 @@ export const useShards = create<ShardsState>((set, get) => {
         innerTemplate = messageInnerTemplate(text, at, plane, createdAt)
       }
 
-      set({ deployStatus: 'working', deployError: null })
+      set({ deployStatus: 'working', deployError: null, deployAsk: null })
       try {
-        const rk = regionKeyAt(at, deployHeight, MAX_COMPUTE_HEIGHT)
+        let rk: { key: Uint8Array; lookupId: string }
+        if (route === 'cloud') {
+          set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
+          const held = await useSecrets.getState().buy(at, plane, deployHeight)
+          if (!held) throw new Error(useSecrets.getState().buyError ?? 'HOSAKA could not compute the key.')
+          rk = { key: hexToBytes(held.keyHex), lookupId: held.lookupId }
+        } else {
+          set({ deployNote: `Computing the 2^${deployHeight} key on this machine` })
+          rk = await regionKeyOffThread(at, deployHeight, MAX_COMPUTE_HEIGHT)
+        }
+        set({ deployNote: 'Sealing and publishing' })
         const inner = await cs.signEvent(innerTemplate)
         const live = cs.live
         const existing = await gatherInners(rk.lookupId, rk.key, live)
@@ -274,10 +322,10 @@ export const useShards = create<ShardsState>((set, get) => {
           ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published } : d)),
           item,
         ]
-        set({ mine, deployStatus: 'done', pending: null })
+        set({ mine, deployStatus: 'done', pending: null, deployNote: null })
         saveMine(mine)
       } catch (err) {
-        set({ deployStatus: 'error', deployError: err instanceof Error ? err.message : String(err) })
+        set({ deployStatus: 'error', deployNote: null, deployError: err instanceof Error ? err.message : String(err) })
       }
     },
 

@@ -15,6 +15,8 @@ import { formatCellSize } from '../lib/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { useCalibration } from '../lib/calibration'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -22,8 +24,24 @@ export function DeployBar(): JSX.Element | null {
   const height = useShards((s) => s.deployHeight)
   const status = useShards((s) => s.deployStatus)
   const error = useShards((s) => s.deployError)
+  const note = useShards((s) => s.deployNote)
+  const ask = useShards((s) => s.deployAsk)
   const live = useCyberspace((s) => s.live)
+  const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
+  const autoMaxSats = useCyberspace((s) => s.cloudPrefs.autoMaxSats)
+  const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
+  const ladder = useCyberspace((s) => s.cloud.provider?.pricing?.hop)
+  const cantorMs = useCalibration((s) => s.cantorMsByHeight)
+  // This machine's limit: the calibrated hop ceiling the movement panel shows.
+  const hopLimit = useCalibration((s) => s.hopHeight)
   const bind = useRepeatable()
+
+  const inputs = { localMax: Math.min(MAX_COMPUTE_HEIGHT, hopLimit), cloudMode, cloudCap }
+  const ceiling = deployCeiling(inputs)
+  const route = deployRoute(height, inputs)
+  const localSeconds = localKeySeconds(height, cantorMs)
+  const quote = route === 'cloud' ? cloudKeyQuote(height, ladder) : null
+  const willAsk = route === 'cloud' && needsAsk(cloudMode, quote?.sats ?? null, autoMaxSats)
 
   if (!pending) return null
 
@@ -46,7 +64,7 @@ export function DeployBar(): JSX.Element | null {
         <span className="deploybar__label">HIDE AT HEIGHT</span>
         <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height - 1))} disabled={height <= 0} aria-label="Lower height">−</button>
         <span className="deploybar__value">{height}</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height + 1))} disabled={height >= MAX_COMPUTE_HEIGHT} aria-label="Higher height">+</button>
+        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height + 1))} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
         </span>
@@ -65,16 +83,37 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
+      {/* What the key costs: this machine's time below its ceiling, HOSAKA's
+          time and price above it, and whether the mode will ask first. */}
+      <div className="deploybar__row deploybar__est">
+        {route === 'local'
+          ? (height === 0 ? 'No key work at height 0.' : localSeconds === null ? `Computed on this machine; the benchmark has not run yet.` : `Computed on this machine, ${waitLabel(localSeconds)}.`)
+          : quote
+            ? `Computed by HOSAKA, ${quote.seconds !== null ? waitLabel(quote.seconds) : 'time unknown'} · ${quote.sats} sats from your balance${willAsk ? ', asked first' : cloudMode === 'auto' ? ', without asking (AUTO)' : ''}.`
+            : `Computed by HOSAKA; its price for 2^${height} is not known yet.`}
+      </div>
+
       {error && <div className="deploybar__row notice">{error}</div>}
 
-      <button
-        className="deploybar__deploy"
-        disabled={empty || working}
-        onClick={() => void useShards.getState().deploy()}
-        {...noCallout}
-      >
-        {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? 'HIDING…' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
-      </button>
+      {/* The ask takes the button's place: the same green, now the yes, with
+          the price and the wait on it, and a way to stand down beside it. */}
+      {ask ? (
+        <div className="deploybar__ask">
+          <button className="deploybar__deploy" onClick={() => useShards.getState().confirmDeploy()} {...noCallout}>
+            {ask.sats !== null ? `${ask.sats} SATS` : 'HIDE VIA HOSAKA'}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
+          </button>
+          <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
+        </div>
+      ) : (
+        <button
+          className="deploybar__deploy"
+          disabled={empty || working}
+          onClick={() => void useShards.getState().deploy()}
+          {...noCallout}
+        >
+          {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+        </button>
+      )}
     </div>
   )
 }

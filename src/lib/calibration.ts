@@ -271,3 +271,7 @@ function runBenchmark(): void {
   worker.onerror = () => worker.terminate()
   worker.postMessage({ id: 1 })
 }
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __calibration: typeof useCalibration }).__calibration = useCalibration
+}

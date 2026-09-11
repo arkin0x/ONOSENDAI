@@ -54,7 +54,8 @@ const EXPIRY_GRACE_MS = 30_000
 /** A job watched longer than this keeps its record for RESUME instead of holding the tab. */
 const DEFAULT_JOB_WAIT_MS = 60 * 60 * 1000
 
-export type HosakaAction = 'hop' | 'sidestep'
+/** What a job computes: a move's proof, or a region key bought on its own. */
+export type HosakaAction = 'hop' | 'sidestep' | 'region_key'
 
 /** A coordinate as the API takes it: per-axis integers plus the plane. */
 export interface HosakaCoord {

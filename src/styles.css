@@ -5745,3 +5745,20 @@ kbd {
   color: var(--fg);
 }
 .presence__close { margin-left: auto; font-size: 10px; color: var(--dim); }
+
+/* The deploy bar's estimate and its ask: the key's cost, and the yes. */
+.deploybar__est { font-size: 10px; color: var(--dim); }
+.deploybar__ask { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
+.deploybar__ask .deploybar__deploy { min-width: 0; }
+.deploybar__decline {
+  padding: 0 16px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}

@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { bytesToHex } from './events'
 import { regionKeyAt } from './shardCrypto'
 import { newShard, type ShardModel } from './shards'
 import {
@@ -58,6 +59,11 @@ describe('unbag', () => {
     expect(msgItem.text).toBe('meet at the black sun')
     expect(msgItem.plane).toBe(1)
     expect(msgItem.at.x).toBe(at.x + 1n)
+    // Each find carries the event it was made of and the key that opened it,
+    // so a find of your own can become a deployment on this device.
+    expect(shardItem.inner).toEqual(s)
+    expect(msgItem.inner).toEqual(m)
+    expect(msgItem.keyHex).toBe(bytesToHex(rk.key))
   })
 
   it('stays shut to the wrong region', async () => {

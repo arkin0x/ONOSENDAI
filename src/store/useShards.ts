@@ -9,9 +9,10 @@
  * per-item tags. Height is the discovery radius (spec §7.3): 0 is a single
  * gibson; higher hides it across a wider aligned cube that costs more to find.
  *
- * `mine` is what this device deployed, kept with each item's signed inner event
- * so a bag can be rebuilt without the relay; `discovered` is what a scan turned
- * up near you and could decrypt and verify.
+ * `mine` is what this identity deployed, placed from this device or found by a
+ * scan after another device placed it, kept with each item's signed inner
+ * event so a bag can be rebuilt without the relay; `discovered` is what a scan
+ * turned up near you and could decrypt and verify.
  */
 
 import { normalizeStored } from '../lib/shards'
@@ -132,6 +133,7 @@ interface ShardsState {
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
+  /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   addDiscovered: (items: Hidden[]) => void
   setScanning: (scanning: boolean) => void
   testDiscovery: (eventId: string) => Promise<boolean>
@@ -174,6 +176,11 @@ function saveDeleted(deleted: Record<string, true>): void {
 
 export function positionOf(d: { at: { x: string; y: string; z: string } }): Position {
   return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
+}
+
+/** The reverse: a position as the decimal strings a deployment keeps. */
+function storedAt(p: Position): { x: string; y: string; z: string } {
+  return { x: p.x.toString(), y: p.y.toString(), z: p.z.toString() }
 }
 
 /** Union of inner events by id, order preserved. */
@@ -220,6 +227,38 @@ export const useShards = create<ShardsState>((set, get) => {
     } catch {
       return local
     }
+  }
+
+  /**
+   * A find this identity wrote is a deployment, whichever device placed it.
+   *
+   * `mine` lives in this device's localStorage and was written only at deploy
+   * time, so a bag hidden from the phone and opened by a scan on the desktop
+   * went into `discovered` and no further: the Stash's DEPLOYED list stayed
+   * empty there. The author is proven (unbag verified the inner signature
+   * against the envelope's pubkey), and the find carries the inner event and
+   * the key that opened it, which is everything a row needs to be rescanned,
+   * broadcast or deleted from here. The relays are the set the scan asked.
+   * What is already listed or deleted here stays as it is.
+   */
+  function claimOwn(items: Hidden[]): void {
+    const me = cyber().identity.pubkey
+    const { mine, deleted } = get()
+    const have = new Set(mine.map((d) => d.eventId))
+    const own: MyDeployment[] = []
+    for (const h of items) {
+      if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
+      have.add(h.eventId)
+      own.push({
+        eventId: h.eventId, inner: h.inner, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text,
+        at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
+        relays: relaySet(), createdAt: h.createdAt, published: true,
+      })
+    }
+    if (own.length === 0) return
+    const next = [...mine, ...own]
+    set({ mine: next })
+    saveMine(next)
   }
 
   return {
@@ -320,7 +359,7 @@ export const useShards = create<ShardsState>((set, get) => {
           type: pending.type,
           shard,
           text,
-          at: { x: at.x.toString(), y: at.y.toString(), z: at.z.toString() },
+          at: storedAt(at),
           plane,
           height: deployHeight,
           lookupId: rk.lookupId,
@@ -454,6 +493,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let changed = false
       for (const h of items) if (!discovered[h.eventId] && !deleted[h.eventId]) { discovered[h.eventId] = h; changed = true }
       if (changed) set({ discovered })
+      claimOwn(items)
     },
 
     setScanning: (scanning) => set({ scanning }),

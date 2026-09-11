@@ -172,10 +172,12 @@ describe('driveCloudJob', () => {
     })
     expect(calls).toEqual(['wait:d1', 'start:job-1', 'poll:job-1:tok'])
     expect(stages).toEqual(['awaiting_payment:d1', 'paid', 'computing'])
-    expect(records).toEqual(['paid', 'computing'])
+    // The second computing record is the driver stamping when computing began.
+    expect(records).toEqual(['paid', 'computing', 'computing'])
     expect(out.job.status).toBe('completed')
     expect(out.record.stage).toBe('computing')
     expect(out.record.deposit).toBeNull()
+    expect(typeof out.record.computingAt).toBe('number')
   })
 
   it('a short payment gets a second invoice, then proceeds', async () => {

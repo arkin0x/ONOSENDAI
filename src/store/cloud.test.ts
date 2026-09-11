@@ -141,6 +141,24 @@ describe('cloud routes', () => {
     S().discardCloudJob()
   })
 
+  it('under LOOT the hop is quoted and submitted asking for the destination cubes; COST asks for nothing extra', async () => {
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
+
+    await S().commit()
+    await idle()
+
+    const s = S()
+    expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, { destinationKeys: true })
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, { destinationKeys: true })
+    expect(s.position).toEqual(to)
+  })
+
   it('a funded route of one cloud hop lands at the cursor as a signed hop event, verified first', async () => {
     const before = S().events.length
     const head = S().prevEventId
@@ -154,10 +172,10 @@ describe('cloud routes', () => {
     await idle()
 
     const s = S()
-    expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane })
+    expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, undefined)
     expect(fake.balance).toHaveBeenCalled()
     expect(fake.deposit).not.toHaveBeenCalled()          // the balance covered it
-    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head)
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, undefined)
     expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
     expect(s.plan).toBeNull()
     expect(s.events).toHaveLength(before + 1)
@@ -255,7 +273,7 @@ describe('cloud routes', () => {
     settle.resolve(deposit('d1', 'settled'))
     await committed
     await idle()
-    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head)
+    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head, undefined, undefined)
     expect(fake.startJob).not.toHaveBeenCalled()         // funded from the balance: it started at once
     expect(S().events).toHaveLength(before + 1)
     expect(S().position).toEqual(to)
@@ -410,7 +428,7 @@ describe('cloud routes', () => {
     // The next commit is the sidestep through the boundary, HOSAKA's here: quoted, funded, landed.
     await S().commit()
     expect(fake.quote).toHaveBeenCalledTimes(1)
-    expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane })
+    expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, undefined, undefined)
     await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
     expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
     const ev = S().events[S().events.length - 1]

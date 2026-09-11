@@ -46,7 +46,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
           <span>· {item.distance === 0n ? 'right here' : `${formatDistance(item.distance)} away`}</span>
         </span>
       </div>
-      <button className="secrets__scan" onClick={() => onView(item)} title="Fly to it">VIEW</button>
+      <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW ▸</button>
     </li>
   )
 }

@@ -10,6 +10,7 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { NearbyChip } from './hud/NearbyChip'
 import { ToastChip } from './hud/ToastChip'
 import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
@@ -178,6 +179,7 @@ export default function App(): JSX.Element {
           <HyperspaceBar />
           <FocusBar />
           <KeyFoundChip />
+          <NearbyChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />

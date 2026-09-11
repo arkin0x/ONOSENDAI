@@ -155,6 +155,8 @@ export interface SpectateState {
   /** created_at of their newest action; null when the relay has none. */
   lastActive: number | null
   status: 'loading' | 'live' | 'empty' | 'error'
+  /** The view you had before spectating, put back when it ends. */
+  returnView: Quaternion
 }
 
 export type ProofStatus = 'idle' | 'computing' | 'done' | 'infeasible'
@@ -1996,14 +1998,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   beginSpectate: (pubkey) => {
     const spawn = spawnOf(pubkey)
+    const { view, viewHistory, spectate } = get()
+    // The view you arrive with is the black sun orientation (section 11.3),
+    // the same the C key gives, at the standard distance the rig frames from:
+    // a stranger's neighborhood seen from whatever angle you had orbited to
+    // was a view of nothing in particular. What you had is kept and put back
+    // when spectation ends; switching from one avatar to another keeps the
+    // first one's return view.
     set({
-      spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading' },
+      spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading', returnView: spectate?.returnView ?? view.clone() },
       exploreIndex: null,
       // A standing focus (a shard, EARTH, a viewed stop) would hide the
       // avatar and keep the rig on the old point: spectating replaces it.
       focus: null,
       anchor: spawn.position,
       anchorPlane: spawn.plane,
+      view: canonicalQuaternion(),
+      viewHistory: [...viewHistory, view.clone()],
     })
   },
 
@@ -2034,9 +2045,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   },
 
   endSpectate: () => {
-    // Back to your own head, in the plane you have lined up there.
-    const { position, plane } = get()
-    set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane })
+    // Back to your own head, in the plane you have lined up there, looking
+    // the way you were looking before.
+    const { position, plane, spectate } = get()
+    set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane, ...(spectate ? { view: spectate.returnView } : {}) })
   },
 
   focusOn: (position, plane, label, scaleExp, drive = false) => {

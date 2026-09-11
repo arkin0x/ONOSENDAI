@@ -17,6 +17,7 @@ import { formatDistance } from '../lib/scale'
 import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
+import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { nip19 } from 'nostr-tools'
 
@@ -65,6 +66,8 @@ export function NearbyLootModal(): JSX.Element | null {
   if (!open) return null
   const close = (): void => useShards.getState().setNearbyOpen(false)
   const view = (item: NearbyItem): void => {
+    // Where to come back to, spectation and link included, before looking away.
+    rememberNearbyReturn()
     close()
     const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
     useCyberspace.getState().focusOn(item.at, item.plane, labelOf(item).toUpperCase(), unit)

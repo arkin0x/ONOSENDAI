@@ -11,6 +11,7 @@ import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { NearbyChip } from './hud/NearbyChip'
+import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
 import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
@@ -60,7 +61,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
@@ -182,11 +183,12 @@ export default function App(): JSX.Element {
           <LineScrubber />
           <HyperspaceBar />
           <FocusBar />
-          <KeyFoundChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />
-          {/* Under XOR BITS, spaced as the rest are: what is open to you here, then the scan. */}
+          {/* Under XOR BITS, spaced as the rest are: what was just found, what
+              is open to you here, then the scan. */}
+          <KeyFoundChip />
           <NearbyChip />
           <PresenceChip />
         </div>

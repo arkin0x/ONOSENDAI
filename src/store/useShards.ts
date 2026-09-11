@@ -38,6 +38,7 @@ import { useCeremony } from './useCeremony'
 import type { ShardModel } from '../lib/shards'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
+import type { NearbyReturn } from '../lib/nearbyReturn'
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -109,6 +110,9 @@ interface ShardsState {
   /** Whether the Nearby Loot list is on screen: what is decrypted where you stand. */
   nearbyOpen: boolean
   setNearbyOpen: (open: boolean) => void
+  /** What VIEW on a Nearby Loot row will return to (lib/nearbyReturn.ts); null when nothing is pending. */
+  nearbyReturn: NearbyReturn | null
+  setNearbyReturn: (r: NearbyReturn | null) => void
 
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
@@ -234,7 +238,9 @@ export const useShards = create<ShardsState>((set, get) => {
     broadcastError: null,
     selectedSecret: null,
     nearbyOpen: false,
+    nearbyReturn: null,
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
+    setNearbyReturn: (r) => set({ nearbyReturn: r }),
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),

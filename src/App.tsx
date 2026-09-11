@@ -10,8 +10,11 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { NearbyChip } from './hud/NearbyChip'
+import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
 import { LootDetail } from './hud/LootDetail'
+import { NearbyLootModal } from './hud/NearbyLootModal'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
 import { HosakaPulse } from './hud/HosakaPulse'
@@ -58,7 +61,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
@@ -123,7 +126,11 @@ export default function App(): JSX.Element {
   // A region tapped in the Secrets list is the same kind of asking: the panels
   // are what you were reading, and the region is what you asked to see.
   const viewingSecret = useSecrets((s) => s.focused !== null)
-  useEffect(() => { if ((driving || stationView || viewingSecret) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, isMobile])
+  // Any view that begins, driven or not: VIEW on a Nearby Loot row while
+  // spectating ends the spectation, and the panels hidden behind it would
+  // come straight back over the thing just asked for.
+  const viewing = useCyberspace((s) => s.focus !== null)
+  useEffect(() => { if ((driving || stationView || viewingSecret || viewing) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
@@ -176,11 +183,13 @@ export default function App(): JSX.Element {
           <LineScrubber />
           <HyperspaceBar />
           <FocusBar />
-          <KeyFoundChip />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />
-          {/* Last in the stack, under XOR BITS, spaced as the rest are. */}
+          {/* Under XOR BITS, spaced as the rest are: what was just found, what
+              is open to you here, then the scan. */}
+          <KeyFoundChip />
+          <NearbyChip />
           <PresenceChip />
         </div>
       )}
@@ -210,6 +219,7 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <SecretModal />
       <LootDetail />
+      <NearbyLootModal />
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
       {!showPanels && <HosakaPulse />}

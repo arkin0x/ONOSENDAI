@@ -279,6 +279,9 @@ function Rig(): JSX.Element {
   // zero offset to its minimum distance straight overhead: the avatar seen
   // from two units above, looking down.
   const lastOffset = useRef(new Vector3(0, 0, START_DISTANCE))
+  // The orbit to land a cut with: the one the camera had, unless it has
+  // collapsed, in which case the standard framing distance straight on.
+  const keptOffset = (): Vector3 => (lastOffset.current.lengthSq() >= 1 ? lastOffset.current.clone() : new Vector3(0, 0, START_DISTANCE))
 
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
@@ -307,7 +310,6 @@ function Rig(): JSX.Element {
     // not rendered the new anchor yet, else the frame before the change.
     const last = lastSeen.current
     const seen = last === null ? null : !same(last) ? last : (lastChange.current !== null && same(lastChange.current.to) ? lastChange.current.from : null)
-    const keptOffset = (): Vector3 => (lastOffset.current.lengthSq() >= 1 ? lastOffset.current.clone() : new Vector3(0, 0, START_DISTANCE))
     if (stepOnly && seen !== null) {
       // The plane is not part of the frame: the axes come from the camera and
       // the origin from the anchor, so a hop that lands in the other plane
@@ -423,9 +425,28 @@ function Rig(): JSX.Element {
     //
     // It also must not be eased. Easing a frame change would slide the world
     // under a camera that is looking at something stationary.
+    const [tx, ty, tz] = s.cursorOffset()
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
-      if (shift[0] !== 0 || shift[1] !== 0 || shift[2] !== 0) {
+      if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
+        // Too far to fly: a cut, the same one the effect above makes for a
+        // chain step that far. This path is for the anchor changes that do
+        // not pass through the effect, whose dependencies are the framing
+        // and the explored link, not the anchor: a spectated chain arriving
+        // with its head a universe from the spawn the rig framed first (a
+        // traveller's hops and hyperjumps add up to 1e22 cells), or a friend
+        // watched live making a hop. Shifting the camera that far and easing
+        // it back was not a fly. At 1e22 a double cannot hold the 26-unit
+        // orbit: the offset rounded to zero, OrbitControls clamped it to its
+        // 2-unit minimum straight overhead, and the target then sailed home
+        // over five seconds with the camera stuck there. That was the
+        // close-up from above that greeted every spectation of a
+        // well-travelled avatar.
+        glideLeft.current = 0
+        smooth.current.set(tx, ty, tz)
+        c.object.position.copy(smooth.current).add(keptOffset())
+        locked.current = true
+      } else if (shift[0] !== 0 || shift[1] !== 0 || shift[2] !== 0) {
         c.object.position.x += shift[0]
         c.object.position.y += shift[1]
         c.object.position.z += shift[2]
@@ -434,8 +455,6 @@ function Rig(): JSX.Element {
         smooth.current.z += shift[2]
       }
     }
-
-    const [tx, ty, tz] = s.cursorOffset()
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.

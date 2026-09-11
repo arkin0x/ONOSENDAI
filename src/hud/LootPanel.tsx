@@ -24,6 +24,7 @@ import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
+import { useNearbyLoot } from '../hooks/useNearbyLoot'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 4
@@ -46,6 +47,7 @@ export function LootPanel(): JSX.Element {
     return out
   }, [discovered])
   const found = useMemo(() => new Set(kinds.keys()), [kinds])
+  const nearbyCount = useNearbyLoot().length
   const foundCount = useMemo(() => items.filter((it) => found.has(it.bagId)).length, [items, found])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -88,9 +90,15 @@ export function LootPanel(): JSX.Element {
           <li className="avatars__empty">Nothing hidden on the relay yet.</li>
         )}
       </ul>
-      {items.length > SHOWN && (
-        <button className="avatars__more" onClick={() => setMore(true)}>VIEW MORE ({items.length - SHOWN})</button>
-      )}
+      {/* Two doors under the list, side by side: what is decrypted where you
+          stand, and the rest of what the relay holds. A button is not a tag,
+          so neither lives in the header. */}
+      <div className={`loot__actions ${items.length > SHOWN ? '' : 'loot__actions--one'}`}>
+        <button className="avatars__more" onClick={() => useShards.getState().setNearbyOpen(true)} title="What has been decrypted in the region you stand in">NEARBY {nearbyCount}</button>
+        {items.length > SHOWN && (
+          <button className="avatars__more" onClick={() => setMore(true)}>VIEW MORE ({items.length - SHOWN})</button>
+        )}
+      </div>
 
       <Explanation>
         Identities can encrypt messages, 3D objects (shards), or other data by

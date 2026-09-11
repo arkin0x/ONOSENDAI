@@ -57,7 +57,7 @@ export function defaultCloudPrefs(): CloudPrefs {
   // Unlock by default: the walk across a high boundary is dozens of signed
   // events and arrives blind, and one paid hop replaces all of them with the
   // region's key in hand.
-  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl(), profile: 'unlock' }
+  return { mode: 'auto', autoMaxSats: 0, apiUrl: defaultHosakaUrl(), profile: 'loot' }
 }
 
 const PREFS_KEY = 'onosendai:cloud'
@@ -76,10 +76,12 @@ export function loadCloudPrefs(): CloudPrefs {
         ? Math.floor(p.autoMaxSats)
         : d.autoMaxSats,
       apiUrl: typeof p.apiUrl === 'string' && /^https?:\/\/\S+$/.test(p.apiUrl) ? p.apiUrl.replace(/\/+$/, '') : d.apiUrl,
-      // The pair was briefly called fastest and cheapest; anything kept under
-      // those names still reads.
-      profile: p.profile === 'bypass' || p.profile === 'cheapest' ? 'bypass'
-        : p.profile === 'unlock' || p.profile === 'fastest' ? 'unlock'
+      // The three were UNLOCK and BYPASS, and before that fastest and cheapest;
+      // a setting kept under any of those names still reads. UNLOCK was the
+      // measured crossover, which is TIME now, not LOOT.
+      profile: p.profile === 'loot' ? 'loot'
+        : p.profile === 'time' || p.profile === 'unlock' || p.profile === 'fastest' ? 'time'
+        : p.profile === 'cost' || p.profile === 'bypass' || p.profile === 'cheapest' ? 'cost'
         : d.profile,
     }
   } catch {

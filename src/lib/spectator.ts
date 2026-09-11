@@ -10,10 +10,11 @@
 
 import { fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import { useCyberspace } from '../store/useCyberspace'
+import type { NostrEvent } from './events'
 
 let current: { pubkey: string; close: () => void } | null = null
 
-export async function spectate(pubkey: string): Promise<void> {
+export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise<void> {
   stopSpectating()
   const store = useCyberspace.getState()
   store.beginSpectate(pubkey)
@@ -21,7 +22,10 @@ export async function spectate(pubkey: string): Promise<void> {
   // Anything published while the fetch is in flight is caught by the watch,
   // which starts from a minute ago so nothing falls between the two.
   const since = Math.floor(Date.now() / 1000) - 60
-  let events: ReturnType<typeof mergeEvents> = []
+  // A chain already in hand (a spectation being resumed) stands at once, so
+  // the explored link survives the refetch: the ids match and the store keeps it.
+  let events: ReturnType<typeof mergeEvents> = mergeEvents([], seed)
+  if (events.length > 0) store.setSpectateChain(pubkey, events)
   const close = watchAuthor(pubkey, since, (ev) => {
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(events, [ev])

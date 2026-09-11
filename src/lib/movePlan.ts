@@ -54,26 +54,31 @@ export interface Ceilings {
   /**
    * The lowest wall height HOSAKA takes over at, when it can hop it. Infinity
    * (or absent) means it never does unless this machine cannot cross at all,
-   * which is BYPASS; lib/crossover.ts measures where UNLOCK takes over.
+   * which is COST; LOOT sets it one above this machine's hop ceiling, so every
+   * wall is bought; lib/crossover.ts measures where TIME takes over.
    */
   offloadFrom?: number
 }
 
 /**
- * How to get past a wall this machine cannot hop.
+ * What a route optimizes for, at a wall this machine cannot hop.
  *
- * `bypass` goes around it. A sidestep crosses one gibson of the boundary and
- * costs nothing, and the walk to the wall and on from it is however many hops
- * that takes. You arrive without the Cantor root of the regions you crossed,
- * so nothing hidden in them will open for you.
+ * `loot` buys the hop at every such wall, so you land holding that region's
+ * key and what is hidden there opens for you. Where HOSAKA cannot hop either,
+ * a sidestep gets you across without the key.
  *
- * `unlock` buys the hop. One event instead of the walk, and you arrive holding
- * the region's root, which is the key to whatever is hidden there. It is taken
- * only from the height where it is also the quicker way across, measured
- * rather than assumed (lib/crossover.ts): below that this machine is faster as
- * well as free. A hop this machine can make is never paid for under either.
+ * `time` buys the hop only from the height where paying is also the quicker
+ * way across, measured rather than assumed (lib/crossover.ts); below that this
+ * machine walks and sidesteps, which is faster as well as free.
+ *
+ * `cost` never buys a hop. It walks to each wall and sidesteps through it,
+ * and pays for a sidestep only where this machine cannot manage one. You
+ * arrive without keys, so what is hidden along the way stays shut.
+ *
+ * Under every one of them a hop this machine can make is never paid for, and
+ * a wall above HOSAKA's hop cap is crossed by a sidestep.
  */
-export type RouteProfile = 'unlock' | 'bypass'
+export type RouteProfile = 'loot' | 'time' | 'cost'
 
 export function localOnly(hop: number, sidestep: number = hop): Ceilings {
   return { hop, sidestep, cloudHop: 0, cloudSidestep: 0 }

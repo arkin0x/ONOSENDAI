@@ -34,9 +34,11 @@ import {
   type HiddenType,
 } from '../lib/hidden'
 import { useWorkshop } from './useWorkshop'
+import { useCeremony } from './useCeremony'
 import type { ShardModel } from '../lib/shards'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
+import type { NearbyReturn } from '../lib/nearbyReturn'
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -105,6 +107,12 @@ interface ShardsState {
   broadcastError: string | null
   /** A world item clicked open, by its inner event id. */
   selectedSecret: string | null
+  /** Whether the Nearby Loot list is on screen: what is decrypted where you stand. */
+  nearbyOpen: boolean
+  setNearbyOpen: (open: boolean) => void
+  /** What VIEW on a Nearby Loot row will return to (lib/nearbyReturn.ts); null when nothing is pending. */
+  nearbyReturn: NearbyReturn | null
+  setNearbyReturn: (r: NearbyReturn | null) => void
 
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
@@ -229,6 +237,10 @@ export const useShards = create<ShardsState>((set, get) => {
     broadcasting: null,
     broadcastError: null,
     selectedSecret: null,
+    nearbyOpen: false,
+    nearbyReturn: null,
+    setNearbyOpen: (open) => set({ nearbyOpen: open }),
+    setNearbyReturn: (r) => set({ nearbyReturn: r }),
 
     startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
@@ -380,7 +392,12 @@ export const useShards = create<ShardsState>((set, get) => {
         const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
         const found: Hidden[] = []
         for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex)))
+        // What this scan opened for the first time gets the ceremony: the
+        // decode in the scene and the chip that says how many.
+        const { discovered, deleted } = get()
+        const fresh = found.filter((h) => !discovered[h.eventId] && !deleted[h.eventId])
         if (found.length > 0) get().addDiscovered(found)
+        if (fresh.length > 0) useCeremony.getState().mark(fresh)
         return found.length
       } catch {
         return 0

@@ -2100,12 +2100,16 @@ kbd {
   background: #ff5c5c;
 }
 
+/* Under 1100px the bar moves to the bottom. It hangs from the right edge and
+ * is as wide as what it says, no wider: pinned to both edges it stretched
+ * across the whole bottom with a field of nothing to the right of the button.
+ * The cap keeps it clear of the menu button's corner on the left. */
 @media (max-width: 1100px) {
   .spectate {
     top: auto;
     right: 14px;
     bottom: 14px;
-    left: 92px;
+    max-width: calc(100vw - 106px);
   }
 
   .spectate__meta {
@@ -5649,9 +5653,22 @@ kbd {
 }
 
 .cloud__topup {
+  margin-top: 12px;
   padding: 3px 8px;
   font-size: 8px;
   letter-spacing: 0.12em;
+}
+/* The panel reads in three bands, a rule between each: how HOSAKA may be
+   used (mode and budget), what a route optimizes for, then the account. */
+.cloud__rule {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+/* Inside the profile's column the flex gap already gives 5px, so the rule
+   keeps the same 12px above it as the one under the budget. */
+.cloud__profile > .cloud__rule {
+  margin-top: 7px;
 }
 
 .cloud__topup-form {
@@ -5762,6 +5779,27 @@ kbd {
   border-radius: 10px;
   cursor: pointer;
 }
+
+/* Nearby loot: what is decrypted where you stand. */
+/* NEARBY and VIEW MORE, side by side under the list; NEARBY alone takes the row. */
+.loot__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.loot__actions--one { grid-template-columns: 1fr; }
+.loot__actions .avatars__more { margin-top: 0; }
+.nearby__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.nearby__glyph { font-size: 14px; color: var(--accent, #00e5ff); }
+.nearby__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nearby__label { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nearby__meta { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+
+/* NEARBY: a chip that stays while anything decrypted is around you, glowing
+ * like the find chip; the way to the list while the menu is locked. */
+.nearby__chip .presence__head svg { color: var(--accent); }
+/* VIEW on a Nearby Loot row: a button, not a label. */
+.nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
+
+/* The Nearby Loot row's second line: the plane and the height. */
+.nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.nearby__label { white-space: normal; overflow-wrap: anywhere; }
 
 /* The question under the wordmark: a face, a bubble, a link to the answers.
  * Left-aligned in the panel, the face on the panel's left edge, where it

@@ -5800,3 +5800,52 @@ kbd {
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }
+
+/* The question under the wordmark: a face, a bubble, a link to the answers.
+ * Left-aligned in the panel, the face on the panel's left edge, where it
+ * stays whatever the bubble says. The row's height is fixed at two lines, so
+ * a phrase that wraps changes the bubble and not the panel. */
+.ask {
+  --ask-bg: #061a22;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  margin: 12px 0 0;
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+}
+.ask__emoji { font-size: 20px; line-height: 1; flex: none; }
+.ask__bubble {
+  position: relative;
+  min-width: 0;
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  /* Opaque, so the tail can be the same color and hide the outline where it joins. */
+  background: var(--ask-bg);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 10px;
+}
+/* The bubble's tail, pointing at the face: a square turned on its corner,
+   overlapping the bubble by a pixel so there is no gap, in the bubble's own
+   color so the outline it covers disappears and its two outer edges read as
+   the outline continuing. */
+.ask__bubble::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateY(-50%) rotate(45deg);
+  background: var(--ask-bg);
+  border-left: 1px solid rgba(0, 229, 255, 0.3);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.3);
+}
+.ask:hover .ask__bubble { border-color: rgba(0, 229, 255, 0.55); }

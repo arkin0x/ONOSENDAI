@@ -5764,7 +5764,10 @@ kbd {
 }
 
 /* Nearby loot: what is decrypted where you stand. */
-.loot__nearby { cursor: pointer; font: inherit; font-size: 8px; letter-spacing: 0.14em; }
+/* NEARBY and VIEW MORE, side by side under the list; NEARBY alone takes the row. */
+.loot__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.loot__actions--one { grid-template-columns: 1fr; }
+.loot__actions .avatars__more { margin-top: 0; }
 .nearby__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .nearby__glyph { font-size: 14px; color: var(--accent, #00e5ff); }
 .nearby__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

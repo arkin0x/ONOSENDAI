@@ -77,8 +77,6 @@ export function LootPanel(): JSX.Element {
       <header className="panel__head">
         <h2>Loot</h2>
         <span className="loot__tags">
-          {/* What is decrypted where you stand, however it was found. */}
-          <button className="tag tag--live loot__nearby" onClick={() => useShards.getState().setNearbyOpen(true)} title="What has been decrypted in the region you stand in">NEARBY {nearbyCount}</button>
           {foundCount > 0 && <span className="tag tag--live">{foundCount} FOUND</span>}
           <span className="tag">{status === 'loading' ? 'LOADING' : `${items.length} HIDDEN`}</span>
         </span>
@@ -92,9 +90,15 @@ export function LootPanel(): JSX.Element {
           <li className="avatars__empty">Nothing hidden on the relay yet.</li>
         )}
       </ul>
-      {items.length > SHOWN && (
-        <button className="avatars__more" onClick={() => setMore(true)}>VIEW MORE ({items.length - SHOWN})</button>
-      )}
+      {/* Two doors under the list, side by side: what is decrypted where you
+          stand, and the rest of what the relay holds. A button is not a tag,
+          so neither lives in the header. */}
+      <div className={`loot__actions ${items.length > SHOWN ? '' : 'loot__actions--one'}`}>
+        <button className="avatars__more" onClick={() => useShards.getState().setNearbyOpen(true)} title="What has been decrypted in the region you stand in">NEARBY {nearbyCount}</button>
+        {items.length > SHOWN && (
+          <button className="avatars__more" onClick={() => setMore(true)}>VIEW MORE ({items.length - SHOWN})</button>
+        )}
+      </div>
 
       <Explanation>
         Identities can encrypt messages, 3D objects (shards), or other data by

@@ -2100,12 +2100,16 @@ kbd {
   background: #ff5c5c;
 }
 
+/* Under 1100px the bar moves to the bottom. It hangs from the right edge and
+ * is as wide as what it says, no wider: pinned to both edges it stretched
+ * across the whole bottom with a field of nothing to the right of the button.
+ * The cap keeps it clear of the menu button's corner on the left. */
 @media (max-width: 1100px) {
   .spectate {
     top: auto;
     right: 14px;
     bottom: 14px;
-    left: 92px;
+    max-width: calc(100vw - 106px);
   }
 
   .spectate__meta {

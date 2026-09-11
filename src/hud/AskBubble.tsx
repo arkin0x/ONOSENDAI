@@ -16,7 +16,7 @@ import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 export const ASK_EMOJI = '🤔'
 export const CHANNEL_URL = 'https://youtube.com/channel/UC1f8lCTlq6WvQ9ucCe3Dpyw'
 /** In the words people use. */
-export const ASKS = ['what is all this?', 'what am i looking at?', "i'm confused", 'can someone explain this?', 'where am i?']
+export const ASKS = ['what is all this?', 'what am i looking at?', "i'm confused", 'can someone explain this?', 'where am i?', 'i need an adult', 'cyberspace???', 'help, what is this?', 'is this for real?', "i'm lost"]
 /** How long each phrase holds once it has decoded. */
 const HOLD_MS = 2600
 

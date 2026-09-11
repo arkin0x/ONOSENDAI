@@ -22,7 +22,7 @@
 
 import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
-import { positionHex, type EventTemplate, type NostrEvent } from './events'
+import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from './shards'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import type { Position } from './space'
@@ -65,6 +65,14 @@ export function messagePreview(text: string, max = 32): string {
 export interface Hidden {
   /** The item's stable identity: its inner event id. */
   eventId: string
+  /**
+   * The signed inner event itself, verified, and the region key that opened
+   * its bag, as hex. Together they let a find of your own become a deployment
+   * on this device: enough to rebuild, broadcast or delete the bag from here.
+   * Absent on the ceremony's preview items, which came out of no bag.
+   */
+  inner?: NostrEvent
+  keyHex?: string
   /** The envelope (bag) currently holding it; changes when the bag is rewritten. */
   bagId: string
   /** The bag's `d` tag (spec §8.6 lookup id): with the author it is the bag's address. */
@@ -162,8 +170,8 @@ export function heightHint(ev: NostrEvent): number {
   return Number.isInteger(n) && n >= 0 ? n : 0
 }
 
-/** One inner event of a bag -> a Hidden, or null if it does not verify. */
-function fromInner(inner: NostrEvent, outer: NostrEvent): Hidden | null {
+/** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
+function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden | null {
   // The inner event must be genuinely signed, and by the same key that wrapped
   // it: an envelope carrying someone else's event is not theirs to place.
   if (!inner || typeof inner.kind !== 'number' || inner.pubkey !== outer.pubkey) return null
@@ -174,6 +182,8 @@ function fromInner(inner: NostrEvent, outer: NostrEvent): Hidden | null {
   const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
   const base = {
     eventId: inner.id,
+    inner,
+    keyHex,
     bagId: outer.id,
     lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
@@ -212,9 +222,10 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array): Promise<H
   let inners: unknown
   try { inners = JSON.parse(json) } catch { return [] }
   if (!Array.isArray(inners)) return []
+  const keyHex = bytesToHex(regionKey)
   const out: Hidden[] = []
   for (const inner of inners) {
-    const h = fromInner(inner as NostrEvent, outer)
+    const h = fromInner(inner as NostrEvent, outer, keyHex)
     if (h) out.push(h)
   }
   return out

@@ -45,8 +45,7 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex,
-} from '../lib/shards'
+  type ShardVertex, cloneVertex } from '../lib/shards'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from '../lib/stamps'
 import { newell, triangulate } from '../lib/triangulate'
 import { Vector3 } from 'three'
@@ -359,7 +358,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     duplicate: (id) => {
       const src = get().shards.find((s) => s.id === id)
       if (!src) return id
-      const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map((v) => ({ p: [...v.p] as P3, c: [...v.c] as ShardVertex['c'] })), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list, currentId: copy.id, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id
@@ -674,7 +673,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     importShard: (model) => {
       const taken = new Set(get().shards.map((s) => s.name))
       const name = taken.has(model.name) ? `${model.name} copy` : model.name
-      const copy: ShardModel = { ...model, id: uuid(), name, vertices: model.vertices.map((v) => ({ p: [...v.p] as ShardVertex['p'], c: [...v.c] as ShardVertex['c'] })), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      const copy: ShardModel = { ...model, id: uuid(), name, vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list }); save(list)
       return copy.id

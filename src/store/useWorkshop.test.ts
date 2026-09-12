@@ -11,10 +11,52 @@ import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 
 const w = () => useWorkshop.getState()
 
+/**
+ * arkinox's Crucifix, exactly as the workshop exports it. The corpus arm
+ * (vertices 24 to 37) is drawn inside single cells: fourteen vertices share
+ * six whole positions between them and are told apart only by their ticks.
+ * Duplicate used to copy `p` and `c` and drop `t`, which landed those
+ * fourteen on six points and left every one of the arm's ten triangles
+ * without area, so the copy showed the cross and nothing else.
+ */
+const CRUCIFIX = "{\"v\":1,\"type\":\"shard\",\"name\":\"Crucifix\",\"unit\":0,\"extent\":15,\"mode\":\"solid\",\"vertices\":[[0,0,0],[-1,0,0],[0,7,0],[-1,7,0],[-1,7,-1],[0,7,-1],[2,7,0],[2,7,-1],[-3,7,0],[-3,7,-1],[-3,8,-1],[-1,8,-1],[0,8,-1],[2,8,-1],[2,8,0],[0,8,0],[-1,8,0],[-3,8,0],[0,0,-1],[-1,0,-1],[0,10,-1],[0,10,0],[-1,10,-1],[-1,10,0],[-3,7,-1],[-2,7,-1],[-2,7,-1],[-3,7,-1],[-3,7,-1],[-2,7,-1],[-1,7,-1],[0,7,-1],[0,6,-1],[-1,6,-1],[-2,7,-1],[-1,7,-1],[-1,7,-1],[-2,7,-1]],\"ticks\":[[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[60,0,60],[108,36,48],[24,60,48],[48,48,48],[108,72,48],[96,60,48],[12,36,48],[60,24,48],[60,24,48],[72,108,48],[48,108,48],[108,36,48],[24,36,48],[0,0,48],[48,24,48]],\"colors\":[[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[1,0.8352941176470589,0],[1,0.8352941176470589,0],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[1,0.8352941176470589,0],[1,0.8352941176470589,0],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[0.9686274509803922,0.5764705882352941,0.10196078431372549],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1],[1,1,1]],\"faces\":[[1,0,2],[2,3,1],[18,5,4],[19,4,18],[1,19,4],[3,4,1],[2,5,0],[0,18,5],[0,1,19],[0,18,19],[11,13,7],[11,7,5],[11,5,4],[11,4,9],[9,10,11],[3,6,14],[3,14,15],[3,15,16],[3,16,17],[17,8,3],[14,6,7],[7,13,14],[17,9,8],[9,17,10],[11,17,16],[17,11,10],[12,14,13],[14,12,15],[22,21,20],[21,22,23],[23,15,21],[15,23,16],[23,11,16],[11,23,22],[12,22,20],[12,11,22],[21,15,12],[12,20,21],[5,7,6],[6,2,5],[9,8,4],[3,4,8],[28,24,27],[27,25,29],[24,29,27],[25,29,26],[29,26,37],[26,34,37],[37,36,34],[34,36,35],[35,36,33],[35,30,33]]}"
+
 describe('workshop', () => {
   beforeEach(() => {
     useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
+  })
+
+  it('duplicating the crucifix keeps all 38 vertices, ticks and all, and no face loses its area', () => {
+    const id = w().importText(CRUCIFIX)
+    expect(id).not.toBeNull()
+    const src = w().shards.find((s) => s.id === id)!
+    expect(src.vertices).toHaveLength(38)
+    // Fourteen arm vertices on five whole positions: the ticks are the only
+    // thing keeping them apart, which is what made this bug invisible on the
+    // cross and total on the arm.
+    const arm = src.vertices.slice(24)
+    expect(new Set(arm.map((v) => v.p.join(','))).size).toBe(6)
+    expect(new Set(arm.map((v) => ticksOf(v).join(','))).size).toBe(14)
+
+    const copyId = w().duplicate(id!)
+    const copy = w().shards.find((s) => s.id === copyId)!
+    expect(copy.vertices).toEqual(src.vertices)
+    expect(copy.vertices).not.toBe(src.vertices)
+    expect(copy.vertices[24]).not.toBe(src.vertices[24])
+    for (const [a, b, c] of copy.faces) {
+      const at = (i: number): string => ticksOf(copy.vertices[i]).join(',')
+      expect(new Set([at(a), at(b), at(c)]).size, `face ${a},${b},${c} has corners on top of each other`).toBe(3)
+    }
+  })
+
+  it('taking a found shard into the stash keeps its sub-unit vertices too', () => {
+    const id = w().importText(CRUCIFIX)!
+    const found = w().shards.find((s) => s.id === id)!
+    const takenId = w().importShard(found)
+    const taken = w().shards.find((s) => s.id === takenId)!
+    expect(taken.vertices).toEqual(found.vertices)
+    expect(taken.id).not.toBe(found.id)
   })
 
   it('starts a new shard in LINES with the stamp tool', () => {

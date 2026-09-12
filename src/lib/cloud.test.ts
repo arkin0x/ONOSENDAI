@@ -38,7 +38,7 @@ import {
   type PendingCloudJob,
   wirePosition,
   formatWait,
-} from './cloud'
+  jobPatienceMs } from './cloud'
 import { HosakaError, type HosakaClient, type HosakaDeposit, type HosakaJob, type HosakaLimits } from './hosaka'
 
 const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5_000_000_000, invoice_ttl_seconds: 3600 }
@@ -276,6 +276,25 @@ describe('jobInProgress', () => {
   it('is paid, computing or verifying, and no other status', () => {
     for (const st of ['paid', 'computing', 'verifying'] as const) expect(jobInProgress(st)).toBe(true)
     for (const st of ['idle', 'quoting', 'confirm', 'funding', 'awaiting_payment', 'error'] as const) expect(jobInProgress(st)).toBe(false)
+  })
+})
+
+describe('jobPatienceMs', () => {
+  it('waits three times the quote plus ten minutes, between twenty minutes and six hours', () => {
+    const min = 60_000
+    // A two minute hop: the floor, since three times two minutes is under it.
+    expect(jobPatienceMs(103)).toBe(20 * min)
+    // A ten minute hop: 3 x 565 s is 28.25 min, plus 10.
+    expect(jobPatienceMs(565)).toBe(565 * 3_000 + 10 * min)
+    // An h30 hop sold at about 4.2 hours: the cap, which is still longer
+    // than the quote, so it is not abandoned while it could still land.
+    expect(jobPatienceMs(15_120)).toBe(6 * 60 * min)
+    expect(jobPatienceMs(15_120)).toBeGreaterThan(15_120 * 1000)
+    // No quote on the record, and nonsense on it, both get the floor.
+    expect(jobPatienceMs(undefined)).toBe(20 * min)
+    expect(jobPatienceMs(0)).toBe(20 * min)
+    expect(jobPatienceMs(Number.NaN)).toBe(20 * min)
+    expect(jobPatienceMs(-5)).toBe(20 * min)
   })
 })
 

@@ -28,6 +28,19 @@ export interface ShardVertex {
 }
 
 /**
+ * A vertex copied whole, ticks included.
+ *
+ * The two halves of a position, whole units in `p` and the remainder in `t`,
+ * have to travel together. A copy that takes `p` and `c` and forgets `t`
+ * silently moves every sub-unit vertex onto the corner of its cell, and
+ * vertices that shared a cell land on each other, which turns their faces
+ * into triangles with no area that draw nothing at all.
+ */
+export function cloneVertex(v: ShardVertex): ShardVertex {
+  return { p: [...v.p], ...(v.t ? { t: [...v.t] as ShardVertex['t'] } : {}), c: [...v.c] }
+}
+
+/**
  * Ticks to a grid unit. A position is stored as whole ticks, so a third, a
  * quarter or a fifth of a unit is exact and they mix freely in one shard:
  * 120 is divisible by every division the workshop offers and by eighths.

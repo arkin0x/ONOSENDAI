@@ -404,6 +404,31 @@ export interface CloudDriverHooks {
 /** Rounds of "pay, start" tolerated: a short payment can ask once more. */
 const PAYMENT_ROUNDS = 3
 
+const MINUTE = 60_000
+
+/**
+ * How long to keep polling one job before handing it back for RESUME.
+ *
+ * It used to be a flat hour for every job, which is two wrong answers at
+ * once: a two minute hop that dies in its first second held the screen for
+ * an hour, and an h30 hop sold at about 4.2 hours was abandoned long before
+ * it could possibly land. Patience is the job's own quote times three, plus
+ * ten minutes for the queue and the cold starts, floored at twenty minutes
+ * so a tiny job still gets a fair wait, and capped at six hours, past which
+ * HOSAKA's own reaper has long since marked the job failed and refunded it.
+ *
+ *   a 103 s hop     the floor, 20 minutes
+ *   a 565 s hop     3 x 565 s + 10 min, about 38 minutes
+ *   an h30 at 4.2 h the cap, 6 hours
+ *
+ * Handing it back is not losing it: the record stays on disk and RESUME
+ * picks the same job up by its id and token.
+ */
+export function jobPatienceMs(estSeconds?: number): number {
+  const est = typeof estSeconds === 'number' && Number.isFinite(estSeconds) && estSeconds > 0 ? estSeconds : 0
+  return Math.min(6 * 60 * MINUTE, Math.max(20 * MINUTE, est * 3_000 + 10 * MINUTE))
+}
+
 function progressOf(job: HosakaJob): number | null {
   const r = job.result as { progress_percent?: unknown } | null
   return r && typeof r.progress_percent === 'number' ? Math.min(1, Math.max(0, r.progress_percent / 100)) : null
@@ -466,6 +491,7 @@ export async function driveCloudJob(
       signal,
       onPoll: (j) => hooks.onStage('computing', { progress: progressOf(j) }),
       stopWhen: keysPending,
+      maxWaitMs: jobPatienceMs(record.estSeconds),
     })
     return { job, record }
   }

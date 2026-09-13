@@ -284,6 +284,7 @@ export function Workshop(): JSX.Element | null {
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
   const stampFacing = useWorkshop((s) => s.stampFacing)
+  const clip = useWorkshop((s) => s.clip)
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -611,9 +612,21 @@ export function Workshop(): JSX.Element | null {
       {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
+        {/* Over the turn: what to do with the points in hand, and with nothing
+            in hand, what is waiting to come back. */}
+        {tool === 'select' && (selection.length > 0 ? (
+          <div className="benchclip" role="group" aria-label="Cut or duplicate the selection">
+            <button className="workshop__btn" onClick={() => w().cutSelection()} title="Take these points out and hold them for PASTE (their faces come too)">CUT</button>
+            <button className="workshop__btn" onClick={() => w().duplicateSelection()} title="Copy these points and put one down on the working plane, selected and ready to move">DUPLICATE</button>
+          </div>
+        ) : clip !== null && (
+          <div className="benchclip" role="group" aria-label="Paste the held points">
+            <button className="workshop__btn" onClick={() => w().pasteClip()} title="Put the held points down on the working plane, selected and ready to move">PASTE {clip.points.length}</button>
+          </div>
+        ))}
         {selection.length > 0 && (
           <div className="benchturn" role="group" aria-label="Turn the selection">
-            <button className="touchpad__key" title="A quarter turn left about the vertical (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
+            <button className="touchpad__key" title="A quarter turn left, in the working plane (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
               <RotateCcw size={18} strokeWidth={2.25} aria-hidden />
               <span className="touchpad__sub">LEFT</span>
             </button>

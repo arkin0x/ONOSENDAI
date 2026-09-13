@@ -2798,6 +2798,21 @@ kbd {
 }
 .benchpad .touchpad__sub,
 .benchturn .touchpad__sub { font-size: 8px; }
+/* CUT and DUPLICATE, or PASTE, on top of the turn keys. It stretches to the
+   width of the widest thing in the corner, the nudge pad, and its buttons
+   split that evenly, so every row in the column shares one left and one right
+   edge and the 8px the column already puts between rows is the only gap. */
+.benchclip {
+  align-self: stretch;
+  display: flex;
+  gap: 4px;
+}
+.benchclip .workshop__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px;
+}
+
 .benchturn {
   display: grid;
   grid-template-columns: repeat(2, 48px);

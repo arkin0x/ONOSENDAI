@@ -302,6 +302,102 @@ describe('workshop', () => {
     expect(w().turnPivot).toBeNull()
   })
 
+  it('taking FACE drops the selection, so its own panel can appear', () => {
+    w().setTool('add')
+    w().addVertex([0, 0, 0])
+    expect(w().selection).toHaveLength(1)
+    w().setTool('face')
+    // The face panel only shows with nothing else selected, so a point still
+    // held from SELECT hid FILL behind it.
+    expect(w().selection).toEqual([])
+    w().setTool('select')
+    w().selectVertex(0)
+    expect(w().selection).toHaveLength(1)
+    w().setTool('stamp')
+    expect(w().selection).toHaveLength(1)
+  })
+
+  it('CUT takes the points out and holds them; PASTE puts them back on the working plane, selected', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([0, 3 * T, 0]); w().addVertex([T, 3 * T, 0]); w().addVertex([T, 4 * T, 0])
+    w().setSelection([0, 1, 2])
+    w().cutSelection()
+    expect(w().current()!.vertices).toHaveLength(0)
+    expect(w().clip!.points).toHaveLength(3)
+
+    // The grid is now two units up: the lowest of the three rests there and
+    // the shape keeps its form.
+    w().setLevel(2 * T)
+    w().pasteClip()
+    const back = w().current()!.vertices.map((v) => ticksOf(v))
+    expect(back).toHaveLength(3)
+    expect(back.map((p) => p[1]).sort((a, b) => a - b)).toEqual([2 * T, 2 * T, 3 * T])
+    expect(back.map((p) => [p[0], p[2]])).toEqual([[0, 0], [T, 0], [T, 0]])
+    expect(w().selection).toEqual([0, 1, 2])
+  })
+
+  it('PASTE onto a vertical plane rests the points on it along that plane\'s own axis', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([0, 0, 0]); w().addVertex([2 * T, 0, 0])
+    w().setSelection([0, 1])
+    w().cutSelection()
+    w().setPlane(0)
+    w().setLevel(5 * T)
+    w().pasteClip()
+    const xs = w().current()!.vertices.map((v) => ticksOf(v)[0]).sort((a, b) => a - b)
+    // The pair was two units apart along X and stays two apart, resting at 5.
+    expect(xs).toEqual([5 * T, 7 * T])
+  })
+
+  it('DUPLICATE leaves the original, brings the faces among the points, and selects the copy', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([0, 0, 0]); w().addVertex([T, 0, 0]); w().addVertex([0, 0, T])
+    w().setSelection([0, 1, 2])
+    w().fillSelection()
+    const faces = w().current()!.faces.length
+    expect(faces).toBeGreaterThan(0)
+
+    w().setSelection([0, 1, 2])
+    w().duplicateSelection()
+    const s = w().current()!
+    expect(s.vertices).toHaveLength(6)
+    expect(s.faces).toHaveLength(faces * 2)
+    // The copy is what is selected, and it is the new half.
+    expect(w().selection).toEqual([3, 4, 5])
+    // Its face points at the copy's own vertices, not the original's.
+    expect(s.faces[s.faces.length - 1].every((i) => i >= 3)).toBe(true)
+  })
+
+  it('a turn happens in the working plane: on the +X grid the points keep their X', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([3 * T, 0, 0]); w().addVertex([3 * T, 0, 2 * T])
+    w().setPlane(0)
+    w().setSelection([0, 1])
+    w().rotateSelected(1)
+    const pts = w().current()!.vertices.map((v) => ticksOf(v))
+    expect(pts.every((p) => p[0] === 3 * T)).toBe(true)
+    // The pair lay along Z and now lies along Y: it turned inside the plane.
+    expect(new Set(pts.map((p) => p[2])).size).toBe(1)
+    expect(new Set(pts.map((p) => p[1])).size).toBe(2)
+  })
+
+  it('a turn on the floor is what it always was: about the vertical, Y untouched', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([0, 5 * T, 0]); w().addVertex([2 * T, 5 * T, 0])
+    w().setPlane(1)
+    w().setSelection([0, 1])
+    w().rotateSelected(1)
+    const pts = w().current()!.vertices.map((v) => ticksOf(v))
+    expect(pts.every((p) => p[1] === 5 * T)).toBe(true)
+    expect(new Set(pts.map((p) => p[0])).size).toBe(1)
+    expect(new Set(pts.map((p) => p[2])).size).toBe(2)
+  })
+
   it('opens holding VIEW, the tool that builds nothing', () => {
     w().setTool('stamp')
     w().closeWorkshop()

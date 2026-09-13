@@ -75,15 +75,62 @@ type P3 = [number, number, number]
  * middle snapped to the grid, and the caller keeps that point for the next
  * turn so the shape cycles home in four instead of walking a step each time.
  */
-function turnPivotFor(pts: P3[], step: number): [number, number] {
+/**
+ * The two axes a turn moves, for a working plane.
+ *
+ * A quarter turn happens in the plane you are building on, about its normal,
+ * which is what the plane number already names (stamps.ts WorkPlane: 1 the
+ * floor, 0 facing +X, 2 facing +Z). Taking them in this order, a turn of +1
+ * carries +a onto +b and +b onto -a, which is the right-handed quarter turn
+ * about the normal and is exactly what the floor has always done: for the
+ * floor the pair is (z, x), and +z goes to +x while +x goes to -z.
+ */
+export function turnAxes(plane: WorkPlane): [0 | 1 | 2, 0 | 1 | 2] {
+  return [((plane + 1) % 3) as 0 | 1 | 2, ((plane + 2) % 3) as 0 | 1 | 2]
+}
+
+function turnPivotFor(pts: P3[], step: number, axes: [0 | 1 | 2, 0 | 1 | 2] = [2, 0]): [number, number] {
+  const [a, b] = axes
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
-  for (const [x, , z] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z) }
+  for (const p of pts) { minX = Math.min(minX, p[a]); maxX = Math.max(maxX, p[a]); minZ = Math.min(minZ, p[b]); maxZ = Math.max(maxZ, p[b]) }
   const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
   const rem = (v: number): number => ((v % step) + step) % step
   const half = step / 2
   if ((rem(cx) === 0 && rem(cz) === 0) || (rem(cx) === half && rem(cz) === half)) return [cx, cz]
   const snap = (v: number): number => Math.round(v / step) * step
   return [snap(cx), snap(cz)]
+}
+
+/**
+ * Points lifted out of a shard, waiting to go back down.
+ *
+ * Held in absolute ticks, exactly where they were, so PASTE can put the shape
+ * back with its own form intact and only slide it onto the working plane. The
+ * faces come too, but only those whose three corners are all in hand: a face
+ * with a corner left behind is not a face.
+ */
+export interface ClipPoints {
+  points: Array<{ at: P3; c: [number, number, number] }>
+  faces: Array<[number, number, number]>
+}
+
+/** The selected points, exactly where they are, with the faces wholly among them. */
+function clipOf(s: ShardModel, selection: number[]): ClipPoints | null {
+  const taken = [...new Set(selection.filter((i) => s.vertices[i]))].sort((a, b) => a - b)
+  if (taken.length === 0) return null
+  const local = new Map(taken.map((i, k) => [i, k]))
+  return {
+    points: taken.map((i) => ({ at: ticksOf(s.vertices[i]), c: [...s.vertices[i].c] as [number, number, number] })),
+    faces: s.faces
+      .filter((f) => f.every((i) => local.has(i)))
+      .map((f) => f.map((i) => local.get(i) as number) as [number, number, number]),
+  }
+}
+
+/** "1 point" or "7 points", with its faces when it has any. */
+function countLabel(clip: ClipPoints): string {
+  const pts = `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}`
+  return clip.faces.length === 0 ? pts : `${pts} and ${clip.faces.length} face${clip.faces.length === 1 ? '' : 's'}`
 }
 
 export interface WorkshopState {
@@ -126,6 +173,8 @@ export interface WorkshopState {
   future: ShardModel[]
   /** One line about the last action, shown on the bench until the next edit. */
   notice: string | null
+  /** Points CUT or DUPLICATE took a copy of, for PASTE. Outlives the shard they came from. */
+  clip: ClipPoints | null
   /** Where the last turn pivoted, kept while the same selection turns again. */
   turnPivot: { key: string; at: [number, number] } | null
 
@@ -177,6 +226,12 @@ export interface WorkshopState {
   colorSelected: (c: [number, number, number]) => void
   colorAll: (c: [number, number, number]) => void
   deleteSelected: () => void
+  /** Take the selected points out of the shard and hold them for PASTE. */
+  cutSelection: () => void
+  /** Hold a copy of the selected points and put one down at once: copy and paste in a step. */
+  duplicateSelection: () => void
+  /** Put the held points down on the working plane, selected, ready to be moved. */
+  pasteClip: () => void
   pickForFace: (index: number) => void
   clearFacePick: () => void
   /** Make faces from the picked corners, in order. */
@@ -317,6 +372,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selection: [],
     facePick: [],
     selectedFace: null,
+    clip: null,
     palette: loadPalette(),
     level: 0,
     plane: FLOOR,
@@ -372,7 +428,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setUnit: (unit) => edit((s) => ({ ...s, unit: Math.max(0, Math.min(84, Math.round(unit))) })),
-    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null }),
+    // FACE works on corners it picks itself, and its panel only appears with
+    // nothing else selected, so a point still held from SELECT hid FILL behind
+    // it and the tool looked broken. Taking the tool clears the selection.
+    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null, ...(tool === 'face' ? { selection: [] } : {}) }),
     setExtent: (extent) => {
       const s = get().current()
       if (!s) return
@@ -503,7 +562,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     rotateSelected: (turns) => {
-      const { selection, turnPivot } = get()
+      const { selection, turnPivot, plane } = get()
       const s = get().current()
       if (!s || selection.length === 0) return
       const step = get().step()
@@ -512,16 +571,24 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const pts = chosen.map((i) => ticksOf(s.vertices[i]))
       // The same selection turned again turns about the same point; any other
       // edit forgets it (edit() clears it), and so does a change of DIVISION.
-      const key = `${step}:${[...chosen].sort((a, b) => a - b).join(',')}`
-      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(pts, step)
-      const [cx, cz] = at
+      // The plane is part of the key: turning, tipping the grid on its side and
+      // turning again are two different turns about two different axes.
+      const axes = turnAxes(plane)
+      const key = `${step}:${plane}:${[...chosen].sort((a, b) => a - b).join(',')}`
+      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(pts, step, axes)
+      const [ca, cb] = at
+      const [ax, bx] = axes
       let refused = false
       edit((m) => {
         const vertices = m.vertices.slice()
         chosen.forEach((i, k) => {
-          const [x, y, z] = pts[k]
-          const dx = x - cx, dz = z - cz
-          const p: P3 = turns === 1 ? [cx + dz, y, cz - dx] : [cx - dz, y, cz + dx]
+          // Only the two axes in the plane move; the one along its normal is
+          // what the turn goes around, so a point never leaves the plane it
+          // was built on.
+          const p = [...pts[k]] as P3
+          const da = pts[k][ax] - ca, db = pts[k][bx] - cb
+          p[ax] = turns === 1 ? ca - db : ca + db
+          p[bx] = turns === 1 ? cb + da : cb - da
           if (!validPoint(p, m.extent)) refused = true
           vertices[i] = vertexAt(p, vertices[i].c)
         })
@@ -566,6 +633,51 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }
       })
       set({ selection: [], selectedFace: null, facePick: [] })
+    },
+
+    cutSelection: () => {
+      const s = get().current()
+      const clip = s ? clipOf(s, get().selection) : null
+      if (!clip) return
+      set({ clip })
+      get().deleteSelected()
+      set({ notice: `${countLabel(clip)} cut. PASTE puts ${clip.points.length === 1 ? 'it' : 'them'} on the working plane.` })
+    },
+
+    duplicateSelection: () => {
+      const s = get().current()
+      const clip = s ? clipOf(s, get().selection) : null
+      if (!clip) return
+      set({ clip })
+      get().pasteClip()
+    },
+
+    pasteClip: () => {
+      const { clip, plane, level } = get()
+      const s = get().current()
+      if (!clip || !s || clip.points.length === 0) return
+      // Onto the working plane: the shape keeps its own form, and the whole of
+      // it slides along the plane's normal until its lowest point rests on the
+      // level the grid is at. Nothing is flattened, and the two coordinates in
+      // the plane are left where they were, so a duplicate lands over its
+      // original and the nudges carry it off.
+      const low = Math.min(...clip.points.map((q) => q.at[plane]))
+      const placed = clip.points.map((q) => {
+        const at = [...q.at] as P3
+        at[plane] = at[plane] + (level - low)
+        return { at, c: q.c }
+      })
+      if (placed.some((q) => !validPoint(q.at, s.extent))) {
+        set({ notice: 'Those points would land off the grid. Move the level, or grow the grid.' })
+        return
+      }
+      const base = s.vertices.length
+      const added = edit((m) => ({
+        ...m,
+        vertices: [...m.vertices, ...placed.map((q) => vertexAt(q.at, q.c))],
+        faces: [...m.faces, ...clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])],
+      }), `${countLabel(clip)} pasted on the plane, selected: move ${clip.points.length === 1 ? 'it' : 'them'} into place.`)
+      if (added) set({ selection: placed.map((_, k) => base + k), selectedFace: null, facePick: [] })
     },
 
     pickForFace: (index) => {

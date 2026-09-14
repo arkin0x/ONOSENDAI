@@ -4,6 +4,12 @@
  * While deploying, this draws what you are aiming, dimmed, where and at the
  * size it would land: a shard at 2^(unit - scaleExp) cells per model unit, or a
  * message as a note. Moving the cursor moves it, so you place by looking.
+ *
+ * The unit is the deploy bar's `deployUnit`, not the workshop model's, because
+ * the two can differ: SCALE MULTIPLIER changes the size this deployment goes
+ * out at and the ghost has to be the thing that lands, size included. It is
+ * seeded from the model's own unit, so a deploy that never touches the control
+ * ghosts exactly as it always did.
  */
 
 import { useFrame } from '@react-three/fiber'
@@ -25,18 +31,19 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const unit = useShards((s) => s.deployUnit)
   const group = useRef<Group>(null)
 
   const scale = useMemo(() => {
     if (!shard) return 1
-    const exp = shard.unit - scaleExp
+    const exp = unit - scaleExp
     return exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
-  }, [shard, scaleExp])
+  }, [shard, unit, scaleExp])
   // The region it will be sealed to, at the cursor: the preview is cropped
   // the way the placed shard will be, so what you see is what lands.
   const cursor = useCyberspace((s) => s.cursor)
   const deployHeight = useShards((s) => s.deployHeight)
-  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, shard.unit, scaleExp, axes) : undefined), [shard, cursor, deployHeight, scaleExp, axes])
+  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, unit, scaleExp, axes) : undefined), [shard, cursor, deployHeight, unit, scaleExp, axes])
 
   // Ride the live cursor, like the cursor cube does, rather than a React commit.
   useFrame(() => {

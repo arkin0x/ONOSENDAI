@@ -25,7 +25,7 @@ import { ClipboardPaste, Copy, Eye, Grid3x3, Link, Menu, MousePointer2, Pickaxe,
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
-import { DIVISIONS, MAX_EXTENT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
+import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
 import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
 import { formatCellSize } from '../lib/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
@@ -600,7 +600,7 @@ export function Workshop(): JSX.Element | null {
             <span className="workshop__value">2^</span>
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) - 1))} disabled={shard.unit <= 0} aria-label="Smaller unit">−</button>
             <span className="workshop__value">{shard.unit}</span>
-            <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= 84} aria-label="Larger unit">+</button>
+            <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= MAX_UNIT} aria-label="Larger unit">+</button>
             <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the shard at this size.">one unit = {formatCellSize(shard.unit)}</span>
           </div>
           <div className="workshop__row" role="group" aria-label="Grid division">

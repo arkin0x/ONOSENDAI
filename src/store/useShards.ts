@@ -15,7 +15,7 @@
  * turned up near you and could decrypt and verify.
  */
 
-import { normalizeStored } from '../lib/shards'
+import { clampUnit, normalizeStored } from '../lib/shards'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
@@ -91,6 +91,14 @@ export type DeployStatus = 'idle' | 'working' | 'done' | 'error'
 interface ShardsState {
   pending: DeployPending | null
   deployHeight: number
+  /**
+   * The size this deployment goes out at: one model unit is 2^deployUnit
+   * gibsons, exactly as `unit` means on the shard itself. Seeded from the
+   * shard's own unit when the deploy starts, so a deploy that never touches
+   * the control places the shard at the size the workshop built it.
+   * Meaningless for a message, which has no size.
+   */
+  deployUnit: number
   deployStatus: DeployStatus
   /** What the deploy is doing right now, for the button: computing, buying, publishing. */
   deployNote: string | null
@@ -118,6 +126,8 @@ interface ShardsState {
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
   setDeployHeight: (h: number) => void
+  /** Set the size this deployment goes out at, inside the same bounds the workshop uses. */
+  setDeployUnit: (unit: number) => void
   /** The highest height the deploy bar offers: this machine's, or HOSAKA's when cloud compute is on. */
   deployCeiling: () => number
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
@@ -264,6 +274,7 @@ export const useShards = create<ShardsState>((set, get) => {
   return {
     pending: null,
     deployHeight: 0,
+    deployUnit: 0,
     deployStatus: 'idle',
     deployNote: null,
     deployAsk: null,
@@ -281,12 +292,20 @@ export const useShards = create<ShardsState>((set, get) => {
     setNearbyOpen: (open) => set({ nearbyOpen: open }),
     setNearbyReturn: (r) => set({ nearbyReturn: r }),
 
-    startDeployShard: (shardId) => set({ pending: { type: 'shard', shardId }, deployStatus: 'idle', deployError: null }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployStatus: 'idle', deployError: null }),
+    // A new deploy starts at the shard's own size, so the last deploy's choice
+    // never carries silently into this one.
+    startDeployShard: (shardId) => set({
+      pending: { type: 'shard', shardId },
+      deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
+      deployStatus: 'idle',
+      deployError: null,
+    }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployStatus: 'idle', deployError: null }),
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
     // warns about.
     setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(get().deployCeiling(), Math.round(h))), deployAsk: null }),
+    setDeployUnit: (unit) => set({ deployUnit: clampUnit(unit) }),
     deployCeiling: () => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
@@ -296,7 +315,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight } = get()
+      const { pending, deployHeight, deployUnit } = get()
       if (!pending) return
       const cs = cyber()
       const at: Position = { ...cs.cursor }
@@ -324,8 +343,13 @@ export const useShards = create<ShardsState>((set, get) => {
       let text: string | undefined
       let innerTemplate
       if (pending.type === 'shard') {
-        shard = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
-        if (!shard || shard.vertices.length === 0) return
+        const model = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+        if (!model || model.vertices.length === 0) return
+        // The deploy carries its own size. A unit the deploy bar changed makes
+        // a copy rather than writing back to the bench, so the same shard can
+        // be placed twice at two sizes and the workshop's model is untouched
+        // either time; the payload `toPayload` builds takes the unit from here.
+        shard = model.unit === deployUnit ? model : { ...model, unit: deployUnit }
         innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
       } else {
         text = pending.text.trim()

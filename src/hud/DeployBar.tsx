@@ -8,9 +8,17 @@
  * that exact point finds it; each step up doubles the aligned cube it hides in
  * and the work it costs to find. The bar spells the radius out in real units
  * so the choice is legible rather than a bare number.
+ *
+ * A shard also has a size of its own, its `unit`, which the workshop sets as
+ * DEPLOY SCALE MULTIPLIER. SCALE MULTIPLIER here is the same quantity for this
+ * one deployment: it starts at the shard's own unit and changing it places the
+ * shard at that size without editing the model on the bench, so the same shard
+ * goes out as a trinket in one place and a monument in another. A message has
+ * no size, so the row is not offered for one.
  */
 
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { MAX_UNIT } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
@@ -23,6 +31,7 @@ export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   const height = useShards((s) => s.deployHeight)
+  const unit = useShards((s) => s.deployUnit)
   const status = useShards((s) => s.deployStatus)
   const error = useShards((s) => s.deployError)
   const note = useShards((s) => s.deployNote)
@@ -62,15 +71,31 @@ export function DeployBar(): JSX.Element | null {
         <button className="deploybar__cancel" onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
       </div>
 
+      {/* Both steppers read the store inside the press rather than the value
+          this render closed over: `bind` repeats the very same callback while
+          the button is held, so a captured `height` would set the same number
+          again and again and a held button would move exactly one step. */}
       <div className="deploybar__row deploybar__row--height">
         <span className="deploybar__label">HIDE AT HEIGHT</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height - 1))} disabled={height <= 0} aria-label="Lower height">−</button>
+        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1))} disabled={height <= 0} aria-label="Lower height">−</button>
         <span className="deploybar__value">{height}</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(height + 1))} disabled={height >= ceiling} aria-label="Higher height">+</button>
+        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1))} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
         </span>
       </div>
+
+      {/* How big the thing itself is, for this deployment only. The workshop's
+          model keeps its own unit whatever is chosen here. */}
+      {!isMessage && (
+        <div className="deploybar__row deploybar__row--unit">
+          <span className="deploybar__label">SCALE</span>
+          <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit - 1))} disabled={unit <= 0} aria-label="Smaller scale">−</button>
+          <span className="deploybar__value">2^{unit}</span>
+          <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit + 1))} disabled={unit >= MAX_UNIT} aria-label="Larger scale">+</button>
+          <span className="deploybar__radius">one unit = {formatCellSize(unit)}</span>
+        </div>
+      )}
 
       <div className="deploybar__row deploybar__hint">
         Aim with the movement controls; the ghost is where it lands.

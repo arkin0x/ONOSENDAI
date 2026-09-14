@@ -105,6 +105,26 @@ export const MAX_VERTICES = 512
 export const MAX_FACES = 1024
 
 /**
+ * The largest `unit` a shard can be built or deployed at.
+ *
+ * One unit is 2^unit gibsons and there are 2^33 gibsons to a meter, so 2^84 is
+ * about 2.4e15 meters, a quarter of a light year: past a sector and well past
+ * anything a shard should span. 0 is the floor, one gibson, about 116 pm.
+ */
+export const MAX_UNIT = 84
+
+/**
+ * A unit brought inside the bounds, as a whole number.
+ *
+ * The workshop's DEPLOY SCALE MULTIPLIER and the deploy bar's SCALE MULTIPLIER
+ * are the same quantity set in two places, so they clamp through one function
+ * rather than repeating the same two literals and drifting apart.
+ */
+export function clampUnit(unit: number): number {
+  return Math.max(0, Math.min(MAX_UNIT, Math.round(unit)))
+}
+
+/**
  * A new shard draws LINES: the first tap glows and the second draws a line,
  * so the very first thing you do is visible. Faces switch it to SOLID when
  * the first stamp with faces lands (see the workshop store).
@@ -227,7 +247,7 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (!Array.isArray(p.vertices) || !Array.isArray(p.colors) || !Array.isArray(p.faces)) return null
   if (p.vertices.length !== p.colors.length || p.vertices.length > MAX_VERTICES || p.faces.length > MAX_FACES) return null
   if (!MODES.includes(p.mode as ShardMode)) return null
-  if (!Number.isInteger(p.unit) || (p.unit as number) < 0 || (p.unit as number) > 84) return null
+  if (!Number.isInteger(p.unit) || (p.unit as number) < 0 || (p.unit as number) > MAX_UNIT) return null
   const rest = unpackTicks(p.ticks, p.vertices.length)
   if (!rest) return null
   const vertices: ShardVertex[] = []

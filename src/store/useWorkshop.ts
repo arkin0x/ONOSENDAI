@@ -36,6 +36,7 @@ import {
   MAX_FACES,
   MAX_VERTICES,
   clampColor,
+  clampUnit,
   fromPayload,
   newShard,
   pointKey,
@@ -433,7 +434,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
-    setUnit: (unit) => edit((s) => ({ ...s, unit: Math.max(0, Math.min(84, Math.round(unit))) })),
+    setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind
     // it and the tool looked broken. Taking the tool clears the selection.

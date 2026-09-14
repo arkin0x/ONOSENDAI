@@ -6014,3 +6014,46 @@ kbd {
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------------------
+   Sphere of interest follow-ups: the EARTH and REMOVE PIN keys.
+
+   Kept in one block at the end of the file on purpose. styles.css is touched
+   by more than one open branch at a time, and a block appended whole is a
+   trivial conflict to resolve compared with edits threaded through the
+   existing rules.
+
+   The pad's top row had two empty cells beside the cube. They are now the
+   pin key and the Earth key, so no key that a hand already knows the position
+   of has moved, and the pin cell simply stands empty while there is no pin.
+   --------------------------------------------------------------------------- */
+.touchpad {
+  grid-template-areas:
+    "pin     earth cube"
+    "away    up    toward"
+    "left    hub   right"
+    "zoomout down  zoomin";
+}
+.touchpad--scale {
+  grid-template-areas:
+    "pin     earth cube"
+    "zoomout hub   zoomin";
+}
+/* Earth blue, the same family as the planet's own graticule, so the key reads
+   as the thing it frames rather than as another scale key. */
+.touchpad__key--earth {
+  grid-area: earth;
+  color: #bcd9ff;
+  background: rgba(47, 129, 247, 0.55);
+  border-color: rgba(120, 180, 255, 0.9);
+}
+.touchpad__key--earth:active { background: rgba(70, 150, 255, 0.85); border-color: #e6f1ff; }
+/* Amber, the pin's own colour in the scene (palette WARN), so the key and the
+   marker it removes are plainly the same thing. */
+.touchpad__key--pin {
+  grid-area: pin;
+  color: #ffe3b0;
+  background: rgba(255, 176, 32, 0.42);
+  border-color: rgba(255, 200, 110, 0.9);
+}
+.touchpad__key--pin:active { background: rgba(255, 190, 70, 0.8); border-color: #fff4e0; }

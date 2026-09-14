@@ -42,6 +42,9 @@ import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { EarthPatch } from './EarthPatch'
+import { SphereOfInterest } from './SphereOfInterest'
+import { EarthPin } from './EarthPin'
+import { interestSphere, sphereFrameDistance } from '../lib/hyperspace/interest'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { CyberspaceLattice } from './CyberspaceLattice'
@@ -68,6 +71,24 @@ import { Travel } from './Travel'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
+
+/** The field of view the Canvas is created with, and what the sphere is framed against. */
+const FOV = 55
+
+/**
+ * Where a reframe puts the camera: the usual 26 cells, or far enough out for
+ * the whole sphere of interest to be in shot when there is one
+ * (interest.sphereFrameDistance, about 69 cells). Without this the ring was
+ * drawn 32 cells from the centre while the camera framed 13.5, so the
+ * boundary of the lit region was always outside the picture and the cut
+ * looked like missing data, which is the thing the ring exists to prevent.
+ * Clamped to the orbit's own limit so the camera never starts somewhere it
+ * cannot be dollied back to.
+ */
+function startDistance(hasSphere: boolean): number {
+  if (!hasSphere) return START_DISTANCE
+  return Math.min(GRID_RADIUS * 4, sphereFrameDistance(FOV))
+}
 
 /**
  * Time constant for the camera's follow, in seconds.
@@ -115,6 +136,8 @@ function World(): JSX.Element {
       <Earth axes={axes} />
       <CyberspaceLattice axes={axes} />
       <EarthPatch axes={axes} />
+      <SphereOfInterest axes={axes} />
+      <EarthPin axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />
@@ -385,7 +408,7 @@ function Rig(): JSX.Element {
     const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
-    c.object.position.set(x, y, z + START_DISTANCE)
+    c.object.position.set(x, y, z + startDistance(interestSphere(s.focus, s.scaleExp) !== null))
     locked.current = true
     prevOrigin.current = null
     c.update()
@@ -586,7 +609,7 @@ export function Scene(): JSX.Element {
   const covered = useWorkshop((s) => s.open)
   return (
     <Canvas
-      camera={{ fov: 55, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
+      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
       dpr={[1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.

@@ -21,6 +21,15 @@
  * (xyzAt de-interleaves each row once, ever). No Stop objects are
  * materialized here — a million of them per rebuild is exactly what the
  * columnar index exists to avoid — so picks carry heights, not stops.
+ *
+ * From 2^49 down, with the focus on a point on Earth, the landfall field is
+ * cut to the sphere of interest (interest.ts): only the stops inside a
+ * sphere of 2^(scaleExp + 5) gibsons around the focus are candidates, a
+ * budget of twenty thousand is spent among them by the same identity sample
+ * (SPHERE_MAX_POINTS: the cover is already decoded whole, so the cap is
+ * sized not to bite), and the one nearest the centre is always drawn. The
+ * cull is exact, in fixed point, on the same coordinate the placement
+ * uses; the cover that bounds the scan is ballCoverageRuns.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -30,7 +39,10 @@ import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
 import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
-import { coverageRuns } from '../lib/hyperspace/station'
+import { ballCoverageRuns, coverageRuns } from '../lib/hyperspace/station'
+import { interestSphere, isqrt, sphereDistance2, sphereSelection } from '../lib/hyperspace/interest'
+import { formatDistance } from '../lib/scale'
+import { WorldLabel } from './WorldLabel'
 import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
@@ -56,7 +68,32 @@ const REACH = GRID_RADIUS * 8
  * the margin but never reshuffles. The positions are hash-uniform, so a
  * height-keyed subset is as unbiased a sample as any.
  */
-const MAX_POINTS = 1_000
+export const MAX_POINTS = 1_000
+
+/**
+ * The budget inside a sphere of interest, which is a different problem and
+ * deserves a different number.
+ *
+ * The thousand above is sized for the unbounded view, where the population in
+ * range is most of a million and the sample IS the decimation. Inside the
+ * sphere the identity prefilter is switched off (ADMIT_ALL below), so every
+ * in-plane row in the ball cover is decoded and tested whatever the budget
+ * is: the expensive half of the work is already spent by the time the budget
+ * is consulted, and capping at a thousand only throws away points that have
+ * already been paid for. The cover at 2^49, where the sphere is largest,
+ * measured about 17,897 rows at the Moscone Center, so twenty thousand is
+ * chosen to sit above the whole cover: inside the sphere you see everything
+ * that is there, and the density label says so by reading "133 of 133".
+ *
+ * One constant for the whole regime, deliberately NOT a function of the
+ * sphere's size. drawnSet is nested in the budget as well as in the
+ * candidates, so a budget that shrank as you zoomed in would re-deal the
+ * sample at every step, which is the churn the identity sampler exists to
+ * prevent. A single number keeps nesting trivially true, because a smaller
+ * sphere's candidates are a subset of a larger one's and the budget did not
+ * move.
+ */
+export const SPHERE_MAX_POINTS = 20_000
 
 /**
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
@@ -95,6 +132,16 @@ const SLICE_MS = 12
  */
 const HARD_CAP_SLACK = 1.1
 
+/**
+ * The identity prefilter switched off: every row in the cover is decoded.
+ * Inside the sphere the prefilter cannot be sized, because the population
+ * it would be sized against (the stops inside) is only known after the
+ * decode it exists to avoid, and the cover is already small: at 2^49,
+ * where the sphere is largest, ballCoverageRuns bounds it to a few tens of
+ * thousands of rows, decoded once and cached in the index for good.
+ */
+export const ADMIT_ALL = 0x1_0000_0000
+
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
 let lastDrawn: { frameKey: string; set: Set<number> } | null = null
 
@@ -128,6 +175,35 @@ interface Built {
   frameKey: string
   /** The rebuildVersion the rows were read at. */
   version: number
+  /** The sphere of interest the rows were cut to ('' for none): a different
+   * sphere at the same frame is a different field. */
+  sphereKey: string
+  /** Inside the sphere, the landfall nearest its centre, with the exact
+   * distance in gibsons; always drawn (interest.ts). */
+  nearest: { height: number; distance: bigint } | null
+}
+
+/** The render position of a drawn stop, by height, or null when it is not in this build. */
+function vertexOf(built: Built, height: number): [number, number, number] | null {
+  for (let i = 0; i < built.heights.length; i++) {
+    if (built.heights[i] === height) {
+      const p = built.geometry.getAttribute('position')
+      return [p.getX(i), p.getY(i), p.getZ(i)]
+    }
+  }
+  return null
+}
+
+/** A one-point geometry for a marker over a dot, released when it moves. */
+function usePointGeometry(at: [number, number, number] | null): BufferGeometry | null {
+  const geometry = useMemo(() => {
+    if (!at) return null
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute(new Float32Array(at), 3))
+    return g
+  }, [at])
+  useEffect(() => () => { geometry?.dispose() }, [geometry])
+  return geometry
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
@@ -137,6 +213,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const syncStatus = useHyperspace((s) => s.sync.status)
   const destination = useHyperspace((s) => s.destination)
+  const focus = useCyberspace((s) => s.focus)
 
   // The calm-down gate: while syncing, an indexVersion bump only triggers a
   // geometry rebuild when the stop count changed materially. The ref carries
@@ -164,6 +241,10 @@ export function StopField({ axes }: Props): JSX.Element | null {
   const frameKey = `${anchorPlane} ${scaleExp} ` +
     `${axes.right.axis}${axes.right.dir} ${axes.up.axis}${axes.up.dir} ${axes.out.axis}${axes.out.dir}`
   const anchorKey = `${anchor.x} ${anchor.y} ${anchor.z}`
+  // The sphere of interest, when the zoom and the focus give one: landfalls
+  // only, so it is never consulted for the port cloud.
+  const sphere = anchorPlane === 0 ? interestSphere(focus, scaleExp) : null
+  const sphereKey = sphere ? `${sphere.height} ${sphere.centre.x} ${sphere.centre.y} ${sphere.centre.z}` : ''
 
   useEffect(() => {
     const job = { cancelled: false }
@@ -175,7 +256,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // keeps clicking a block (which re-anchors the scene on it) from
     // blanking and rebuilding the field mid-burst.
     const cur = builtRef.current
-    if (cur && cur.frameKey === frameKey && cur.version === rebuildVersion) {
+    if (cur && cur.frameKey === frameKey && cur.version === rebuildVersion && cur.sphereKey === sphereKey) {
       const drift = Math.max(
         Math.abs(cellDelta(anchor.x, cur.anchor.x, scaleExp)),
         Math.abs(cellDelta(anchor.y, cur.anchor.y, scaleExp)),
@@ -193,15 +274,34 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const index = getStopIndex()
     const wantPort = anchorPlane === 1
     // Nothing to build where the stops are not drawn (landfalls above 2^60).
-    if (!stopsDrawn(anchorPlane, scaleExp)) return
+    if (!stopsDrawn(anchorPlane, scaleExp)) { useHyperspace.getState().fieldDone(0, null); return }
     const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
-    const commit = (next: Built | null): void => {
+    /**
+     * The one place a build ends. Reports what reached the GPU to the store
+     * on the way through (useHyperspace.field), which is what lets the
+     * HYPERSPACE tag say DRAWING while the slices run and READY when they
+     * stop, and what feeds the density label under the ring. `inside` is the
+     * exact count of stops in the sphere, or null when there was no sphere.
+     */
+    const commit = (next: Built | null, inside: number | null = null): void => {
       if (job.cancelled) return
+      useHyperspace.getState().fieldDone(next ? next.heights.length : 0, inside)
       builtRef.current = next
       setBuilt(next)
     }
+    /** DEV: an empty build says so, rather than leaving the last one standing. */
+    const reportEmpty = (): void => {
+      if (!import.meta.env.DEV) return
+      const w = window as unknown as { __stopField?: unknown }
+      w.__stopField = {
+        rendered: 0, inRange: 0, threshold: 0, runTotal: 0, planeTotal: 0,
+        projected: 0, permCount: index.permCount, removed: 0, cappedBy: 'empty',
+        sphere: sphere ? { height: sphere.height, inside: 0, nearest: null, nearestGibsons: null } : null,
+      }
+    }
 
     if (index.size === 0 || index.permCount === 0) {
+      reportEmpty()
       commit(null)
       return
     }
@@ -212,10 +312,17 @@ export function StopField({ axes }: Props): JSX.Element | null {
     // decode, measured at ~7 microseconds a row, was the six-second boot
     // freeze once the index snapshot began delivering the whole line at
     // once, and the same freeze on VIEW NEAREST STOP.
-    const runs = coverageRuns(index, anchor.x, anchor.y, anchor.z, scaleExp, REACH + 2)
+    //
+    // Inside the sphere the cover is the sphere's own (ballCoverageRuns):
+    // the reach box at 2^49 is the whole hemisphere, and the point of the
+    // sphere is to look at a small piece of it.
+    const runs = sphere
+      ? ballCoverageRuns(index, sphere.centre, sphere.radius)
+      : coverageRuns(index, anchor.x, anchor.y, anchor.z, scaleExp, REACH + 2)
     let runTotal = 0
     for (const [runStart, runEnd] of runs) runTotal += runEnd - runStart
     if (runTotal === 0) {
+      reportEmpty()
       commit(null)
       return
     }
@@ -266,12 +373,13 @@ export function StopField({ axes }: Props): JSX.Element | null {
       }
     }
     if (planeTotal === 0) {
+      reportEmpty()
       commit(null)
       return
     }
     const total = useHyperspace.getState().sync.total
     const projected = projectedPopulation(planeTotal, index.permCount, total)
-    const threshold = sampleThreshold(projected, budget)
+    const threshold = sphere ? ADMIT_ALL : sampleThreshold(projected, budget)
     const rows: number[] = []
     for (const [runStart, runEnd] of runs) {
       for (let pos = runStart; pos < runEnd; pos++) {
@@ -295,10 +403,14 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const occupancy = scaleExp <= OCCUPANCY_SCALE_MAX
     const kept: number[] = []
     const centres: number[] = []
+    /** Parallel to kept inside the sphere: exact squared distance from its centre. */
+    const d2s: bigint[] = []
+    const sphereR2 = sphere ? sphere.radius * sphere.radius : 0n
     let i = 0
 
     const finish = (): void => {
       if (kept.length === 0) {
+        reportEmpty()
         commit(null)
         return
       }
@@ -312,7 +424,18 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // reshuffle again for the dots nearest the cut. Ten percent of slack
       // is many sigma of sampling noise and still bounds the buffer.
       const keptHeights = kept.map((row) => heightAt(index, row))
-      const draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
+      // Inside the sphere the candidates ARE the geometric cull, so drawnSet
+      // at the port budget is the whole decimation, exact and nested
+      // (interest.ts), with the nearest stop riding on top of it.
+      let draw: Set<number>
+      let nearest: Built['nearest'] = null
+      if (sphere) {
+        const sel = sphereSelection(keptHeights, d2s, SPHERE_MAX_POINTS)
+        draw = sel.drawn
+        if (sel.nearest) nearest = { height: sel.nearest.height, distance: isqrt(sel.nearest.d2) }
+      } else {
+        draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
+      }
       const count = draw.size
       const positions = new Float32Array(count * 3)
       const colors = new Float32Array(count * 3)
@@ -341,13 +464,17 @@ export function StopField({ axes }: Props): JSX.Element | null {
         // `removed` here is a dot that was drawn and then taken away.
         const prev = lastDrawn
         let removed = 0
-        if (prev && prev.frameKey === frameKey) for (const h of prev.set) if (!draw.has(h)) removed++
-        lastDrawn = { frameKey, set: draw }
+        const drawKey = `${frameKey} | ${sphereKey}`
+        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (!draw.has(h)) removed++
+        lastDrawn = { frameKey: drawKey, set: draw }
         const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
         const entry = {
           rendered: count, inRange: kept.length, threshold, runTotal,
           planeTotal, projected, permCount: index.permCount, total, removed,
           cappedBy: kept.length > budget * HARD_CAP_SLACK ? 'cap' : 'threshold',
+          sphere: sphere
+            ? { height: sphere.height, inside: kept.length, nearest: nearest?.height ?? null, nearestGibsons: nearest?.distance.toString() ?? null }
+            : null,
         }
         w.__stopField = entry
         const log = (w.__stopFieldLog ??= []) as unknown[]
@@ -361,7 +488,9 @@ export function StopField({ axes }: Props): JSX.Element | null {
         anchor: { ...anchor },
         frameKey,
         version: rebuildVersion,
-      })
+        sphereKey,
+        nearest,
+      }, sphere ? kept.length : null)
     }
 
     // Chip away between frames. The first slice runs synchronously, so the
@@ -376,10 +505,20 @@ export function StopField({ axes }: Props): JSX.Element | null {
         for (; i < batchEnd; i++) {
           const row = rows[i]
           const d = occupancy ? coordToXyz(stopCoordExact(stopAt(index, row))) : xyzAt(index, row)
+          // The sphere's cull, exact: bigint squared distance against the
+          // bigint squared radius, on the coordinate the placement itself
+          // uses (the index's nanometer-true shortcut, or the decimal
+          // derivation at occupancy zooms). Kept for the nearest pick.
+          let d2 = 0n
+          if (sphere) {
+            d2 = sphereDistance2(sphere, d.x, d.y, d.z)
+            if (d2 > sphereR2) continue
+          }
           const c = occupancy ? cellCentre(d, origin, scaleExp, axes) : pointCentre(d, origin, scaleExp, axes)
           if (Math.abs(c[0]) > REACH || Math.abs(c[1]) > REACH || Math.abs(c[2]) > REACH) continue
           kept.push(row)
           centres.push(c[0], c[1], c[2])
+          if (sphere) d2s.push(d2)
         }
         if (performance.now() - t0 >= SLICE_MS) {
           setTimeout(slice, 0)
@@ -388,13 +527,16 @@ export function StopField({ axes }: Props): JSX.Element | null {
       }
       finish()
     }
+    // One flag flip per rebuild, not one per slice: the cloud on screen is
+    // incomplete from here until commit.
+    useHyperspace.getState().fieldBuilding()
     slice()
 
     return () => { job.cancelled = true }
     // The spatial deps ride in the keys on purpose: listing the objects too
     // would re-run the build on identity changes that changed nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rebuildVersion, frameKey, anchorKey])
+  }, [rebuildVersion, frameKey, anchorKey, sphereKey])
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => { built?.geometry.dispose() }, [built])
@@ -412,24 +554,19 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
   // The chosen destination, re-marked in ACCENT. Found by height rather than
   // by identity because the destination can outlive a geometry rebuild.
-  const highlight = useMemo((): [number, number, number] | null => {
-    if (!built || destination === null) return null
-    for (let i = 0; i < built.heights.length; i++) {
-      if (built.heights[i] === destination) {
-        const p = built.geometry.getAttribute('position')
-        return [p.getX(i), p.getY(i), p.getZ(i)]
-      }
-    }
-    return null
-  }, [built, destination])
+  const highlight = useMemo(
+    () => (built && destination !== null ? vertexOf(built, destination) : null),
+    [built, destination],
+  )
+  const highlightGeometry = usePointGeometry(highlight)
 
-  const highlightGeometry = useMemo(() => {
-    if (!highlight) return null
-    const g = new BufferGeometry()
-    g.setAttribute('position', new Float32BufferAttribute(new Float32Array(highlight), 3))
-    return g
-  }, [highlight])
-  useEffect(() => () => { highlightGeometry?.dispose() }, [highlightGeometry])
+  // The landfall nearest the sphere's centre: a marker over its own dot,
+  // never a second dot (sphereSelection), and its name and distance.
+  const nearestAt = useMemo(
+    () => (built && built.nearest ? vertexOf(built, built.nearest.height) : null),
+    [built],
+  )
+  const nearestGeometry = usePointGeometry(nearestAt)
 
   if (!built || built.frameKey !== frameKey) return null
   if (!stopsDrawn(anchorPlane, scaleExp)) return null
@@ -507,6 +644,32 @@ export function StopField({ axes }: Props): JSX.Element | null {
             fog={false}
           />
         </points>
+      )}
+      {nearestGeometry && nearestAt && built.nearest && (
+        <>
+          <points geometry={nearestGeometry} frustumCulled={false}>
+            {/* No click handler here either: the dot beneath is the stop,
+                and clicking it selects it like any other landfall. */}
+            <pointsMaterial
+              color={ACCENT}
+              size={7}
+              sizeAttenuation={false}
+              transparent
+              opacity={0.95}
+              depthWrite={false}
+              toneMapped={false}
+              fog={false}
+            />
+          </points>
+          <WorldLabel
+            text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(built.nearest.distance)}`}
+            color={ACCENT}
+            at={nearestAt}
+            offset={[0.6, 0.6, 0]}
+            px={10}
+            opacity={0.95}
+          />
+        </>
       )}
     </group>
   )

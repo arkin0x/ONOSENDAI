@@ -15,6 +15,7 @@
  */
 import Decimal from 'decimal.js'
 import { sha256, hexToBytes, xyzToCoord, coordToXyz, PLANE_DATASPACE } from 'cyberspace-core'
+import { csMetresToLatLon } from '../earthSurface'
 
 export const LANDFALL_DOMAIN = new TextEncoder().encode('CYBERSPACE_LANDFALL_V1')
 
@@ -225,26 +226,11 @@ export function landfallCoordApprox(blockHashHex: string): bigint {
 
 /** Float64 inverse for labels: dataspace axis values to WGS84 lat/lon/alt (meters). */
 export function axesToLatLon(x: bigint, y: bigint, z: bigint): { lat: number; lon: number; altM: number } {
-  const xm = Number(x - AXIS_CENTER) / G_PER_M
-  const ym = Number(y - AXIS_CENTER) / G_PER_M
-  const zm = Number(z - AXIS_CENTER) / G_PER_M
-  // Undo the permutation: X_ecef = X_cs, Z_ecef = Y_cs, Y_ecef = Z_cs.
-  const X = xm
-  const Y = zm
-  const Z = ym
-  const e2 = F_F * (2 - F_F)
-  const p = Math.hypot(X, Y)
-  const lon = Math.atan2(Y, X)
-  let lat = Math.atan2(Z, p * (1 - e2))
-  let N = A_F
-  let alt = 0
-  for (let i = 0; i < 6; i++) {
-    const s = Math.sin(lat)
-    N = A_F / Math.sqrt(1 - e2 * s * s)
-    alt = p / Math.cos(lat) - N
-    lat = Math.atan2(Z, p * (1 - (e2 * N) / (N + alt)))
-  }
-  return { lat: (lat * 180) / Math.PI, lon: (lon * 180) / Math.PI, altM: alt }
+  return csMetresToLatLon({
+    x: Number(x - AXIS_CENTER) / G_PER_M,
+    y: Number(y - AXIS_CENTER) / G_PER_M,
+    z: Number(z - AXIS_CENTER) / G_PER_M,
+  })
 }
 
 export function coordToLatLon(coord: bigint): { lat: number; lon: number; altM: number } {

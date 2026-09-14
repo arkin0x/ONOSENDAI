@@ -19,6 +19,7 @@ import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
+import { formatLatLonDeg } from '../lib/earthSurface'
 import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
@@ -60,7 +61,7 @@ export function stopPlane(stop: Stop): Plane {
 /** A landfall as a place on Earth: "31.6°N 98.8°W". */
 export function formatLatLon(stop: Stop): string {
   const { lat, lon } = coordToLatLon(stop.coordApprox)
-  return `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}`
+  return formatLatLonDeg(lat, lon)
 }
 
 interface RideRun {
@@ -194,6 +195,7 @@ export async function startRide(): Promise<void> {
 const kindLabel = (stop: Stop): string => (stop.kind === 'port' ? 'PORT' : 'LANDFALL')
 
 export function HyperspacePanel(): JSX.Element {
+  const building = useHyperspace((s) => s.field.building)
   const sync = useHyperspace((s) => s.sync)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const destination = useHyperspace((s) => s.destination)
@@ -252,7 +254,10 @@ export function HyperspacePanel(): JSX.Element {
   }, [destination, position, plane, indexVersion, line])
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
-  const tag = ready ? `READY ${stopCount()} BLOCKS`
+  // DRAWING while the stop field is still chipping its rebuild out across
+  // frames (12 ms a slice), READY when it has committed. Same shape either
+  // way, so the button does not jump; the first word is the whole signal.
+  const tag = ready ? `${building ? 'DRAWING' : 'READY'} ${stopCount()} BLOCKS`
     : sync.status === 'error' ? 'ERROR'
       : sync.status === 'idle' ? 'IDLE'
         : sync.status === 'loading-cache'

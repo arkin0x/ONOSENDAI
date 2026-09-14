@@ -1,0 +1,178 @@
+/**
+ * SphereOfInterest.tsx - the boundary of the sphere of interest, drawn on
+ * the ground.
+ *
+ * From 2^49 down the stop field is cut to a sphere around the focus
+ * (interest.ts), and a cut that is not drawn looks like missing data: the
+ * dots just stop. This draws the circle where that sphere meets the
+ * ellipsoid, in the accent colour, so the edge of the lit region reads as
+ * a boundary that was planned. A label at the circle's northernmost point
+ * says how big the sphere is, in the units every other distance in the
+ * HUD uses, and which aligned height it is.
+ *
+ * Drawn the way EarthPatch draws its graticule: the ring's vertices are
+ * latitude/longitude pairs, each solved exactly on the ellipsoid by
+ * sphereRing, turned into float64 meter deltas from the render origin by
+ * surfaceVertex. So the circle sits on the same ground as the rulings and
+ * the coast at every zoom from 2^49 to 2^32, and fades out with them below
+ * human scale, where the sphere still culls but there is no ground left to
+ * draw its edge on. Lifted half a cell so it is never buried in the
+ * graticule where the two cross.
+ *
+ * Out of the fog: the scene fades to black from 21.6 cells to 96, and the
+ * ring is 32 cells out and framed from about 69 (Scene.startDistance), where
+ * the fog would have taken half of it. Everything else keeps the fog as its
+ * depth cue; the boundary is the one line that has to read at the distance
+ * it is drawn from.
+ */
+
+import { useEffect, useMemo } from 'react'
+import { BufferGeometry, Float32BufferAttribute } from 'three'
+import { ACCENT } from '../lib/palette'
+import type { ViewAxes } from '../lib/space'
+import { formatDistance } from '../lib/scale'
+import { GIBSONS_PER_M, csMetresToLatLon, originCsMetres, sphereRing, surfaceDetailOpacity, surfaceVertex } from '../lib/earthSurface'
+import { densityLabel, interestSphere } from '../lib/hyperspace/interest'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { useHyperspace } from '../store/useHyperspace'
+import { WorldLabel } from './WorldLabel'
+
+/**
+ * Vertices around the ring. Its radius is 32 cells at every zoom, so the
+ * chord sag at this count is four thousandths of a cell: a circle at any
+ * distance the camera can be from it.
+ */
+const SEGMENTS = 192
+
+interface BuiltRing {
+  geometry: BufferGeometry
+  /** The ring's northernmost point, where the radius label sits. */
+  labelAt: [number, number, number]
+  /** Its southernmost, where the density label sits. */
+  densityAt: [number, number, number]
+  label: string
+  opacity: number
+}
+
+/**
+ * The floor under the ring's own opacity.
+ *
+ * The ground fades out below human scale (earthSurface.surfaceDetailOpacity:
+ * full at 2^32, gone by 2^30) and the ring used to fade with it and then
+ * vanish altogether, while the cull it draws went right on cutting the field.
+ * A cut that is not drawn looks like missing data, which is the one thing
+ * this component exists to prevent, so the line keeps at least this much of
+ * itself at every zoom the sphere is active at.
+ */
+const RING_OPACITY_FLOOR = 0.45
+
+/**
+ * How far out along the southward radius the density label sits, as a
+ * fraction of the ring's own radius.
+ *
+ * Not 1. The camera frames the sphere at about 69 cells for a ring 32 cells
+ * across (Scene.startDistance), so the ring's southernmost point lands within
+ * a few percent of the bottom of the viewport, where the chat dock and the
+ * pad's own chrome sit on top of it: the label was drawn, and unreadable.
+ * Pulled inside the circle it is still plainly the bottom of the ring and it
+ * is clear of everything the HUD puts there.
+ */
+const DENSITY_INSET = 0.82
+
+/** Both ring labels, in CSS pixels held constant at any camera distance. */
+const LABEL_PX = 14
+
+export function SphereOfInterest({ axes }: { axes: ViewAxes }): JSX.Element | null {
+  const anchor = useCyberspace((s) => s.anchor)
+  const field = useHyperspace((s) => s.field)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const plane = useCyberspace((s) => s.anchorPlane)
+  const focus = useCyberspace((s) => s.focus)
+
+  const built = useMemo((): BuiltRing | null => {
+    if (plane !== 0) return null
+    const sphere = interestSphere(focus, scaleExp)
+    if (!sphere) return null
+    const opacity = Math.max(RING_OPACITY_FLOOR, surfaceDetailOpacity(scaleExp))
+    // The radius is a power of two gibsons, so this division is exact.
+    const radiusM = Number(sphere.radius) / GIBSONS_PER_M
+    // The centre in degrees, so the density label can sit on the southward
+    // radius rather than out on the ring itself (DENSITY_INSET).
+    const centreGeo = csMetresToLatLon(originCsMetres(sphere.centre))
+    const ring = sphereRing(originCsMetres(sphere.centre), radiusM, SEGMENTS)
+    if (!ring) return null
+
+    const originM = originCsMetres(alignedOrigin(anchor, scaleExp))
+    const cellM = 2 ** (scaleExp - 33)
+    const verts: number[] = []
+    // The two label anchors: highest latitude on the ring and lowest, so the
+    // radius reads at the top of the circle and the density at the bottom
+    // and the two are never on top of each other.
+    let top = ring[0]
+    let bottom = ring[0]
+    for (const pt of ring) {
+      verts.push(...surfaceVertex(pt[0], pt[1], 0.5 * cellM, originM, scaleExp, axes))
+      if (pt[0] > top[0]) top = pt
+      if (pt[0] < bottom[0]) bottom = pt
+    }
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(verts, 3))
+    const built = {
+      geometry,
+      labelAt: surfaceVertex(top[0], top[1], 2 * cellM, originM, scaleExp, axes),
+      densityAt: surfaceVertex(
+        centreGeo.lat + (bottom[0] - centreGeo.lat) * DENSITY_INSET,
+        centreGeo.lon + (bottom[1] - centreGeo.lon) * DENSITY_INSET,
+        2 * cellM, originM, scaleExp, axes,
+      ),
+      label: `r ${formatDistance(sphere.radius)} · h${sphere.height}`,
+      opacity,
+    }
+    // The same dev hook style as __stopField: lets a headless harness read
+    // the ring that reached the GPU rather than squint at a screenshot.
+    if (import.meta.env.DEV) {
+      geometry.computeBoundingSphere()
+      const w = window as unknown as { __sphereRing?: unknown }
+      w.__sphereRing = {
+        height: sphere.height,
+        label: built.label,
+        vertices: verts.length / 3,
+        // Cells, so a harness can tell whether it is in frame at all.
+        radiusCells: geometry.boundingSphere?.radius ?? null,
+        centreCells: geometry.boundingSphere?.center.toArray() ?? null,
+      }
+    }
+    return built
+  }, [focus, scaleExp, plane, anchor, axes])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || built) return
+    ;(window as unknown as { __sphereRing?: unknown }).__sphereRing = null
+  }, [built])
+
+  // GPU buffers are not garbage collected; release each ring when replaced.
+  useEffect(() => () => { built?.geometry.dispose() }, [built])
+
+  if (!built) return null
+
+  // How crowded the circle is. Both numbers are exact (interest.densityLabel);
+  // while the field is still chipping out its rebuild there is no honest
+  // count yet, so it says what it is doing instead of showing a stale one.
+  const density = field.building || field.inside === null
+    ? 'DRAWING HYPERJUMPS'
+    : densityLabel(field.drawn, field.inside)
+
+  return (
+    <group>
+      <lineLoop geometry={built.geometry} frustumCulled={false}>
+        <lineBasicMaterial color={ACCENT} transparent opacity={0.9 * built.opacity} toneMapped={false} fog={false} />
+      </lineLoop>
+      {/* Both labels at full opacity and at LABEL_PX, never at the ground's
+          fade: they are the two facts the ring exists to carry, and the
+          reason arkinox could not find the radius was an 11px string at the
+          ground's own brightness, 32 cells from where he was looking. */}
+      <WorldLabel text={built.label} color={ACCENT} at={built.labelAt} px={LABEL_PX} opacity={1} align="center" />
+      <WorldLabel text={density} color={ACCENT} at={built.densityAt} px={LABEL_PX} opacity={1} align="center" />
+    </group>
+  )
+}

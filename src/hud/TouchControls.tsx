@@ -23,9 +23,10 @@
  */
 
 import { useState } from 'react'
-import { Box } from 'lucide-react'
+import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
+import { viewEarth } from './HyperspacePanel'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { useShards } from '../store/useShards'
@@ -53,6 +54,7 @@ export function TouchControls(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const pin = useCyberspace((s) => s.pin)
   const live = useCyberspace((s) => s.live)
   const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
@@ -132,6 +134,23 @@ export function TouchControls(): JSX.Element {
             ladder. Viewing cyberspace itself is the CYBERSPACE button in the
             view menu, which is a different thing and stays where it is.
             On every pad, at your head or off it. */}
+        {/* REMOVE PIN: only while there is a pin to remove, so the cell is
+            empty the rest of the time and nothing moves when it appears.
+            The pin itself is dropped by a click on the globe or a POSITION
+            panel VIEW, and RETURN already clears it; this is the way to put
+            a look down without leaving the place you are looking at. */}
+        {pin && (
+          <button className="touchpad__key touchpad__key--pin" title={`Remove the pin at ${pin.label}`} aria-label="Remove the pin" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().clearPin() }}>
+            <MapPinOff size={16} strokeWidth={2.25} aria-hidden />
+          </button>
+        )}
+        {/* The planet at 2^52, the same thing the Hyperspace panel's EARTH
+            button means, through the same function so the two can never
+            drift: dataspace lined up, no viewed stop, the planet's centre.
+            Beside the cube, which is the other one-press view. */}
+        <button className="touchpad__key touchpad__key--earth" title="View Earth (2^52)" aria-label="View Earth" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewEarth() }}>
+          <Globe size={16} strokeWidth={2.25} aria-hidden />
+        </button>
         <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
           <Box size={16} strokeWidth={2.25} aria-hidden />
         </button>

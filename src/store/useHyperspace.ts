@@ -29,8 +29,32 @@ export interface HyperspaceSync {
   source: SyncSource
 }
 
+/**
+ * What the stop field is doing, so the HUD can say so rather than leave the
+ * user guessing whether a thin cloud is the answer or a half-finished one.
+ *
+ * The field rebuilds in 12 ms slices across frames (StopField.SLICE_MS), so a
+ * dense view fills in over several hundred milliseconds with nothing on screen
+ * to say it is still working. `building` is set once when a rebuild starts and
+ * cleared once when it commits: two writes per rebuild, never one per slice.
+ *
+ * `drawn` and `inside` are the last commit's counts. Inside a sphere of
+ * interest the identity prefilter is switched off (StopField.ADMIT_ALL), so
+ * every row in the cover is decoded and tested: `inside` is therefore the
+ * EXACT number of stops in the sphere, not an estimate, and `drawn` is what
+ * survived the thousand-point budget. Outside a sphere there is no sphere to
+ * count, so `inside` is null.
+ */
+export interface FieldStatus {
+  building: boolean
+  drawn: number
+  inside: number | null
+}
+
 interface HyperspaceState {
   sync: HyperspaceSync
+  /** The stop field's own progress and counts; see FieldStatus. */
+  field: FieldStatus
   /** Bumped whenever stops are added to the index. */
   indexVersion: number
   tipHeight: number | null
@@ -48,6 +72,10 @@ interface HyperspaceState {
   destination: number | null
   startSync: () => void
   setScrubHeight: (h: number | null) => void
+  /** The stop field starting a rebuild. Idempotent: a second call changes nothing. */
+  fieldBuilding: () => void
+  /** The stop field committing one. `inside` is null when the build had no sphere. */
+  fieldDone: (drawn: number, inside: number | null) => void
   setDestination: (h: number | null) => void
 }
 
@@ -57,6 +85,7 @@ let started = false
 
 export const useHyperspace = create<HyperspaceState>((set) => ({
   sync: { status: 'idle', loaded: 0, total: 0, error: null, source: 'relay' },
+  field: { building: false, drawn: 0, inside: null },
   indexVersion: 0,
   tipHeight: null,
   scrubHeight: null,
@@ -84,6 +113,14 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   },
 
   setScrubHeight: (h) => set({ scrubHeight: h }),
+  // Both guarded against writing an identical value: the field commits on
+  // every anchor nudge, and a no-op set would still notify every subscriber.
+  fieldBuilding: () => set((s) => (s.field.building ? {} : { field: { ...s.field, building: true } })),
+  fieldDone: (drawn, inside) => set((s) => (
+    !s.field.building && s.field.drawn === drawn && s.field.inside === inside
+      ? {}
+      : { field: { building: false, drawn, inside } }
+  )),
   setDestination: (h) => set({ destination: h }),
 }))
 

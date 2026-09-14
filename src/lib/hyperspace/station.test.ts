@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { coordToXyz, xyzToCoord } from 'cyberspace-core'
-import { buildIndex, coverageRuns, findStation, insertStop, maxAxisLca, maxAxisLcaViaAxes, nearestStops } from './station'
+import { ballCoverageRuns, buildIndex, coverageRuns, findStation, insertStop, maxAxisLca, maxAxisLcaViaAxes, nearestStops } from './station'
 import { keyHexAtSorted, rowByHeight } from './compactIndex'
 import { stepFor } from '../space'
 import type { Stop } from './stops'
@@ -177,5 +177,65 @@ describe('coverageRuns', () => {
       }
       expect(inReach).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('ballCoverageRuns', () => {
+  it('covers every stop inside the ball and none two radii out, at every sphere height', () => {
+    const rng = mulberry32(99)
+    const axisMax = (1n << 85n) - 1n
+    const clampAxis = (v: bigint): bigint => (v < 0n ? 0n : v > axisMax ? axisMax : v)
+    // A centre well inside the axis, so the planted offsets never clamp.
+    const c = { x: (1n << 84n) + rand85(rng) / 4n, y: (1n << 84n) - rand85(rng) / 4n, z: (1n << 84n) + rand85(rng) / 8n }
+    for (const height of [54, 45, 37]) {
+      const r = 1n << BigInt(height)
+      const stops: Stop[] = []
+      for (let h = 0; h < 200; h++) {
+        stops.push(syntheticStop(h, xyzToCoord(rand85(rng), rand85(rng), rand85(rng), h % 2 === 0 ? 0 : 1)))
+      }
+      // Planted through the ball's bounding cube, so some are inside the
+      // ball and some in its corners, and a ring of them two radii out.
+      const off = (span: bigint): bigint => (BigInt(Math.floor(rng() * 2 ** 40)) * (2n * span)) / (1n << 40n) - span
+      for (let h = 200; h < 400; h++) {
+        stops.push(syntheticStop(h, xyzToCoord(clampAxis(c.x + off(r)), clampAxis(c.y + off(r)), clampAxis(c.z + off(r)), 0)))
+      }
+      for (let h = 400; h < 420; h++) {
+        const dx = 2n * r + off(r / 2n)
+        stops.push(syntheticStop(h, xyzToCoord(clampAxis(c.x + dx), clampAxis(c.y + off(r / 2n)), clampAxis(c.z + off(r / 2n)), 0)))
+      }
+      const index = buildIndex(stops)
+      const runs = ballCoverageRuns(index, c, r)
+      for (let i = 0; i < runs.length; i++) {
+        expect(runs[i][0]).toBeLessThan(runs[i][1])
+        if (i > 0) expect(runs[i][0]).toBeGreaterThanOrEqual(runs[i - 1][1])
+      }
+      const covered = new Set<number>()
+      for (const [start, end] of runs) for (let p = start; p < end; p++) covered.add(index.perm[p])
+      let inside = 0
+      let far = 0
+      for (const stop of stops) {
+        const p = coordToXyz(stop.coordExact as bigint)
+        const dx = p.x - c.x
+        const dy = p.y - c.y
+        const dz = p.z - c.z
+        const d2 = dx * dx + dy * dy + dz * dz
+        const row = rowByHeight(index, stop.height)
+        if (d2 <= r * r) {
+          inside++
+          expect(covered.has(row)).toBe(true)
+        } else if (d2 >= 4n * r * r) {
+          far++
+          // The cover reaches at most a cube's diagonal (0.43 r) past the
+          // sphere, so a stop two radii out is never scanned.
+          expect(covered.has(row)).toBe(false)
+        }
+      }
+      expect(inside).toBeGreaterThan(50)
+      expect(far).toBeGreaterThan(10)
+    }
+  })
+
+  it('is empty for an empty index', () => {
+    expect(ballCoverageRuns(buildIndex([]), { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 1n << 54n)).toEqual([])
   })
 })

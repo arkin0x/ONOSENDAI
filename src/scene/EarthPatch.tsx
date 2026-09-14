@@ -16,9 +16,10 @@
  * by 2^49, so the band where Earth visibly curves is exactly the band the
  * globe could never reach.
  *
- * Below human scale (2^34) the patch fades, gone at 2^31: a graticule is a
- * map of places, and meter scale is where the view stops being about
- * places. The fade is deliberate teaching, zooming past the shoreline is
+ * Below 2^32 the patch fades, gone at 2^30: a graticule is a map of places,
+ * and half a metre a cell is the last height the planet is drawn at. Down to
+ * there the ground stays under your feet, so a venue is a place to stand;
+ * past it the fade is deliberate teaching, zooming past the floor is
  * supposed to feel like leaving geography for the microscopic.
  *
  * Graticule lines sit on 1/2/5-decade degree rulings anchored to the

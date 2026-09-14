@@ -42,6 +42,7 @@ import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { EarthPatch } from './EarthPatch'
+import { SphereOfInterest } from './SphereOfInterest'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { CyberspaceLattice } from './CyberspaceLattice'
@@ -115,6 +116,7 @@ function World(): JSX.Element {
       <Earth axes={axes} />
       <CyberspaceLattice axes={axes} />
       <EarthPatch axes={axes} />
+      <SphereOfInterest axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />

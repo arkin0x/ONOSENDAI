@@ -19,6 +19,7 @@ import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
+import { formatLatLonDeg } from '../lib/earthSurface'
 import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
@@ -60,7 +61,7 @@ export function stopPlane(stop: Stop): Plane {
 /** A landfall as a place on Earth: "31.6°N 98.8°W". */
 export function formatLatLon(stop: Stop): string {
   const { lat, lon } = coordToLatLon(stop.coordApprox)
-  return `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}`
+  return formatLatLonDeg(lat, lon)
 }
 
 interface RideRun {

@@ -25,9 +25,9 @@ import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
 import { COAST, EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
-import { EARTH_RADIUS_KM, originCsMetres, surfaceVertex } from '../lib/earthSurface'
+import { EARTH_RADIUS_KM, formatLatLonDeg, originCsMetres, surfaceHit, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { ownHyperspaceView } from '../store/useHyperspace'
+import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
 
@@ -172,15 +172,33 @@ export function Earth({ axes }: Props): JSX.Element | null {
             Slightly under the true radius so surface landfalls and the
             graticule are not z-fought away. Opaque on purpose: a
             transparent body would sort into the blended pass and stop
-            hiding the far side's dots. A click still recentres the orbit
-            on Earth. */}
+            hiding the far side's dots. A click orbits the POINT clicked,
+            not the planet: the sphere of interest (interest.ts) is centred
+            there once you zoom in, and the EARTH button is what still
+            means the centre. */}
         <mesh
           onClick={(e) => {
             if (e.delta > 8) return
             e.stopPropagation()
             markSceneTapHandled()
             ownHyperspaceView()
-            useCyberspace.getState().focusOn({ x: CENTRE, y: CENTRE, z: CENTRE }, 0, 'EARTH')
+            markViewedStop(null)
+            // Back faces only, so the raycaster's hit is the FAR inner
+            // surface: where the ray leaves the planet, not the ground
+            // under the pointer. Re-intersect the same ray with the sphere
+            // at the true mean radius in the mesh's own frame, whose
+            // origin is the planet's centre, and take the NEAR root. The
+            // drawn body is inscribed in that sphere, so a hit on it
+            // guarantees the ray meets the sphere; the max is against a
+            // rounding hair below zero at the very limb.
+            const mesh = e.eventObject
+            const o = mesh.worldToLocal(e.ray.origin.clone())
+            const d = mesh.worldToLocal(e.ray.origin.clone().add(e.ray.direction)).sub(o).normalize()
+            const b = o.dot(d)
+            const disc = b * b - o.lengthSq() + globe.radius * globe.radius
+            const near = o.addScaledVector(d, -b - Math.sqrt(Math.max(0, disc)))
+            const hit = surfaceHit([near.x, near.y, near.z], scaleExp, axes)
+            useCyberspace.getState().focusOn(hit.position, 0, `EARTH · ${formatLatLonDeg(hit.lat, hit.lon)}`)
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />

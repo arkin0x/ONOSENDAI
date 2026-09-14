@@ -110,6 +110,22 @@ export interface HosakaQuote {
   /** The wait in seconds, so a route's steps can be added up; older servers omit it. */
   est_seconds?: number | null
   hint: string | null
+  /**
+   * Axis trees HOSAKA already holds and will not build again, by name, as in
+   * ["x"]. A Cantor subtree root is a pure function of its base and height, so
+   * a block somebody has crossed lately is already on HOSAKA's disk. The price
+   * and the seconds above already have the saving in them; these three say how
+   * much of it there was, so the client can show why the number fell. Absent
+   * on a HOSAKA that does not keep an index, which is the same as none.
+   */
+  reused_axes?: string[]
+  reuse_saves_msats?: number
+  /**
+   * What the reuse takes off the wait. Often 0 while the price still falls: the
+   * three axes are built side by side, so reusing one only shortens the job
+   * when it was the tallest.
+   */
+  reuse_saves_seconds?: number
 }
 
 export type HosakaDepositStatus = 'pending' | 'settled' | 'expired'

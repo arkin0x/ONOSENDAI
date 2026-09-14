@@ -14,7 +14,7 @@ import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
-import { depositSettled, formatClock, satsLabel } from '../lib/cloud'
+import { depositSettled, formatClock, formatWait, satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
@@ -27,6 +27,14 @@ export function CloudApproval(): JSX.Element | null {
   const price = satsLabel(q.costMsats)
   const funding = cloud.status === 'funding'
   const steps = q.route ?? { steps: 1, cloudSteps: 1 }
+  // Work HOSAKA already has: a Cantor subtree root is a pure function of its
+  // base and height, so a block crossed lately is already on its disk. The
+  // price above has the saving in it; this says where it came from, since a
+  // number that drops with no explanation is a number nobody trusts.
+  const reuse = q.reuse && q.reuse.axes > 0 ? q.reuse : null
+  const saved = reuse
+    ? [reuse.savedMsats > 0 ? `${satsLabel(reuse.savedMsats)} less` : null, reuse.savedSeconds > 0 ? `${formatWait(reuse.savedSeconds)} sooner` : null].filter(Boolean).join(' and ')
+    : ''
   const body = q.route
     ? (
       <>
@@ -42,12 +50,26 @@ export function CloudApproval(): JSX.Element | null {
         Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
       </>
     )
+  const withReuse = (
+    <>
+      {body}
+      {reuse && (
+        <>
+          <br />
+          <span className="modal__reuse">
+            {reuse.axes === 1 ? 'One axis of this' : `${reuse.axes} axes of this`} {reuse.axes === 1 ? 'is' : 'are'} already computed and held by HOSAKA
+            {saved ? `: ${saved}` : ''}.
+          </span>
+        </>
+      )}
+    </>
+  )
   return (
     <ConfirmModal
       banner={<HosakaBanner />}
       title="Offload Estimate"
       figure={<span className="modal__price">{price}</span>}
-      body={body}
+      body={withReuse}
       confirmLabel={`PAY ${price.toUpperCase()}`}
       busy={funding}
       danger={false}

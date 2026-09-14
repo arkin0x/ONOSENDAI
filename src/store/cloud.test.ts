@@ -189,6 +189,28 @@ describe('cloud routes', () => {
     expect(storage.getItem('onosendai:cloudKeys')).toBeNull()
   })
 
+  it('carries HOSAKA\'s reuse into the quote, and says nothing when there is none', async () => {
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto', autoMaxSats: 0 } })
+    const to = lineUpH13()
+    // A HOSAKA that holds one of this hop's axes already: the price and the
+    // seconds it sends are the reduced ones, and it says how much it took off.
+    fake.quote.mockResolvedValue({ ...quote('hop'), reused_axes: ['x'], reuse_saves_msats: 2000, reuse_saves_seconds: 12 })
+    fake.submitHop.mockResolvedValue(funded())
+    await S().commit()
+    await vi.waitFor(() => { expect(S().cloud.quote).not.toBeNull() })
+    expect(S().cloud.quote!.reuse).toEqual({ axes: 1, savedMsats: 2000, savedSeconds: 12 })
+    S().declineCloud()
+
+    // A HOSAKA with nothing held, or one too old to have an index, says
+    // nothing at all rather than claiming a saving of zero.
+    fake.quote.mockResolvedValue(quote('hop'))
+    useCyberspace.setState({ cursor: { ...to } })
+    await S().commit()
+    await vi.waitFor(() => { expect(S().cloud.quote).not.toBeNull() })
+    expect(S().cloud.quote!.reuse).toBeUndefined()
+    S().declineCloud()
+  })
+
   it('under LOOT the hop is quoted and submitted asking for the destination cubes; COST asks for nothing extra', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
     const head = S().prevEventId

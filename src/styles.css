@@ -2810,6 +2810,14 @@ kbd {
   border-radius: 5px;
   background: rgba(6, 14, 22, 0.96);
 }
+/* The line under an offload estimate that says how much of the work HOSAKA
+   already had. Green, because it is money and time you are not spending. */
+.modal__reuse {
+  display: inline-block;
+  margin-top: 6px;
+  color: #52e39f;
+}
+
 .benchpaste__away {
   position: fixed;
   inset: 0;

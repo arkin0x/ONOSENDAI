@@ -16,6 +16,8 @@
  * Pure. The builder store mutates copies of these; the world draws them.
  */
 
+import { applyPose, wrapSpin, type Pose } from './pose'
+
 export type ShardMode = 'solid' | 'points' | 'lines'
 
 export interface ShardVertex {
@@ -70,6 +72,14 @@ export interface ShardModel {
   vertices: ShardVertex[]
   /** Triangles as vertex indices; drawn in `solid` mode only. */
   faces: Array<[number, number, number]>
+  /**
+   * Stands on the Earth: +Y to the ground's up at the place it is hidden,
+   * +Z facing `spin`. False for a shard on the bench and for one placed on
+   * cyberspace axes as built (lib/pose.ts).
+   */
+  up: boolean
+  /** The compass bearing +Z faces when `up`: whole degrees 0..359, clockwise from north. 0 otherwise. */
+  spin: number
   updatedAt: number
 }
 
@@ -92,6 +102,10 @@ export interface ShardPayload {
   ticks?: Array<[number, number, number] | number>
   colors: Array<[number, number, number]>
   faces: Array<[number, number, number]>
+  /** Present and true when the shard stands on the Earth where it is hidden (lib/pose.ts). Absent otherwise. */
+  up?: true
+  /** With `up`: the compass bearing +Z faces, a whole number 0..359. Ignored without `up`. */
+  spin?: number
 }
 
 export const MODES: ShardMode[] = ['solid', 'points', 'lines']
@@ -130,7 +144,7 @@ export function clampUnit(unit: number): number {
  * the first stamp with faces lands (see the workshop store).
  */
 export function newShard(name = 'Untitled shard'): ShardModel {
-  return { id: uuid(), name, unit: 0, extent: GRID_HALF, mode: 'lines', vertices: [], faces: [], updatedAt: Date.now() }
+  return { id: uuid(), name, unit: 0, extent: GRID_HALF, mode: 'lines', vertices: [], faces: [], up: false, spin: 0, updatedAt: Date.now() }
 }
 
 /** A grid point as a map key, so "the same point" is one string compare. */
@@ -169,9 +183,12 @@ export function validPoint(p: [number, number, number], extent: number = GRID_HA
  * MAX_EXTENT units). Those are split back into units and ticks.
  */
 export function normalizeStored(s: ShardModel): ShardModel {
-  const inTicks = s.vertices.some((v) => v.t === undefined && v.p.some((c) => Math.abs(c) > MAX_EXTENT))
-  if (!inTicks) return s
-  return { ...s, vertices: s.vertices.map((v) => vertexAt(v.p, v.c)) }
+  // Models from before the pose have no `up` or `spin`: they lie as built.
+  const stored = s as Partial<ShardModel>
+  const posed = stored.up === undefined || stored.spin === undefined ? { ...s, up: stored.up ?? false, spin: stored.spin ?? 0 } : s
+  const inTicks = posed.vertices.some((v) => v.t === undefined && v.p.some((c) => Math.abs(c) > MAX_EXTENT))
+  if (!inTicks) return posed
+  return { ...posed, vertices: posed.vertices.map((v) => vertexAt(v.p, v.c)) }
 }
 
 /** The grid half-width a shard needs to hold every vertex it has. */
@@ -202,6 +219,9 @@ export function toPayload(s: ShardModel): ShardPayload {
     ticks: packTicks(s.vertices.map((v) => v.t ?? [0, 0, 0])),
     colors: s.vertices.map((v) => v.c),
     faces: s.faces,
+    // Only a standing shard carries the pose: a payload without one is byte
+    // for byte what it was before the pose existed.
+    ...(s.up ? { up: true as const, spin: wrapSpin(s.spin) } : {}),
   }
 }
 
@@ -250,6 +270,9 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (!Number.isInteger(p.unit) || (p.unit as number) < 0 || (p.unit as number) > MAX_UNIT) return null
   const rest = unpackTicks(p.ticks, p.vertices.length)
   if (!rest) return null
+  if (p.up !== undefined && typeof p.up !== 'boolean') return null
+  if (p.spin !== undefined && (!Number.isInteger(p.spin) || (p.spin as number) < 0 || (p.spin as number) > 359)) return null
+  const up = p.up === true
   const vertices: ShardVertex[] = []
   for (let i = 0; i < p.vertices.length; i++) {
     const pt = p.vertices[i], c = p.colors[i]
@@ -276,6 +299,10 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
     mode: p.mode as ShardMode,
     vertices,
     faces,
+    // Only a payload that says so stands up; `spin` without `up` is ignored,
+    // the way the field is documented.
+    up,
+    spin: up ? wrapSpin(Number(p.spin ?? 0)) : 0,
     updatedAt: Date.now(),
   }
 }
@@ -294,14 +321,24 @@ export function toRender(p: [number, number, number]): [number, number, number] 
   return [p[0] / TICKS_PER_UNIT, p[1] / TICKS_PER_UNIT, (0 - p[2]) / TICKS_PER_UNIT]
 }
 
-export function flatten(s: ShardModel): { positions: Float32Array; colors: Float32Array; index: number[] } {
+export function flatten(s: ShardModel, pose?: Pose): { positions: Float32Array; colors: Float32Array; index: number[] } {
   const positions = new Float32Array(s.vertices.length * 3)
   const colors = new Float32Array(s.vertices.length * 3)
   s.vertices.forEach((v, i) => {
-    positions.set(toRender(ticksOf(v)), i * 3)
+    positions.set(toRender(posed(ticksOf(v), pose)), i * 3)
     colors.set(v.c, i * 3)
   })
   return { positions, colors, index: s.faces.flat() }
+}
+
+/**
+ * A vertex through a pose, if there is one: the shard standing on the Earth
+ * (lib/pose.ts) rather than lying on cyberspace axes as it was built. Applied
+ * in ticks, before `toRender`, so the pose is a turn of the shape and nothing
+ * about the screen.
+ */
+export function posed(t: [number, number, number], pose?: Pose): [number, number, number] {
+  return pose ? applyPose(pose, t) : t
 }
 
 /** Where the shard's vertices sit on average: what the workshop orbits. */

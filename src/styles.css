@@ -5979,6 +5979,25 @@ kbd {
 
 /* The deploy bar's estimate and its ask: the key's cost, and the yes. */
 .deploybar__est { font-size: 10px; color: var(--dim); }
+
+/* SNAP TO EARTH and FINE ROTATION read the way the publish switch reads: two
+   states, the live one lit, so there is never a doubt which one is on. */
+.deploybar__toggle {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 4px 9px;
+  border-radius: 4px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.deploybar__toggle.is-on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 .deploybar__ask { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
 .deploybar__ask .deploybar__deploy { min-width: 0; }
 .deploybar__decline {

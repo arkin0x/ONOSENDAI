@@ -260,6 +260,10 @@ export function preview(kind: StampKind, size: number, facing: Facing, color: [n
     name: kind,
     unit: 0,
     extent: GRID_HALF,
+    // A ghost on the bench, which is never posed: the bench builds on
+    // cyberspace axes and the snap happens at deploy (lib/pose.ts).
+    up: false,
+    spin: 0,
     mode: shape.faces.length ? 'solid' : 'lines',
     vertices: shape.points.map((p) => vertexAt(p, [...color] as [number, number, number])),
     faces: shape.faces,

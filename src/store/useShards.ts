@@ -16,6 +16,7 @@
  */
 
 import { clampUnit, normalizeStored } from '../lib/shards'
+import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
@@ -99,6 +100,23 @@ interface ShardsState {
    * Meaningless for a message, which has no size.
    */
   deployUnit: number
+  /**
+   * Stand this deployment on the Earth: its bottom to the ground at the place
+   * it is hidden, its +Z facing `deploySpin` (lib/pose.ts). Offered in
+   * dataspace at SNAP_MIN_HEIGHT and above, and written into the payload only
+   * when it is offered, so a shard can never claim to stand where there is no
+   * ground under it.
+   */
+  deployUp: boolean
+  /** The compass bearing the standing shard's +Z faces: whole degrees 0..359, clockwise from north. */
+  deploySpin: number
+  /**
+   * The camera owns the spin: while this is on, orbiting turns the shard so
+   * its +Z faces the way you are looking, which is how the bench presents it.
+   * A preview control, never written to the wire; what lands is `deploySpin`
+   * wherever it was left.
+   */
+  deployFollow: boolean
   deployStatus: DeployStatus
   /** What the deploy is doing right now, for the button: computing, buying, publishing. */
   deployNote: string | null
@@ -130,6 +148,12 @@ interface ShardsState {
   setDeployHeight: (h: number) => void
   /** Set the size this deployment goes out at, inside the same bounds the workshop uses. */
   setDeployUnit: (unit: number) => void
+  /** Stand it up, or lay it back on cyberspace axes as it was built. */
+  setDeployUp: (up: boolean) => void
+  /** Aim the standing shard: a compass bearing, wrapped into 0..359. */
+  setDeploySpin: (spin: number) => void
+  /** Hand the spin to the camera, or take it back. */
+  setDeployFollow: (follow: boolean) => void
   /** The highest height the deploy bar offers: this machine's, or HOSAKA's when cloud compute is on. */
   deployCeiling: () => number
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
@@ -304,6 +328,9 @@ export const useShards = create<ShardsState>((set, get) => {
     pending: null,
     deployHeight: 0,
     deployUnit: 0,
+    deployUp: false,
+    deploySpin: 0,
+    deployFollow: false,
     deployStatus: 'idle',
     deployNote: null,
     deployAsk: null,
@@ -327,15 +354,29 @@ export const useShards = create<ShardsState>((set, get) => {
     startDeployShard: (shardId) => set({
       pending: { type: 'shard', shardId },
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
+      // Flat, aimed north, the camera not driving: the last deploy's pose no
+      // more carries into this one than its size does.
+      deployUp: false,
+      deploySpin: 0,
+      deployFollow: false,
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployStatus: 'idle', deployError: null }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployFollow: false, deployStatus: 'idle', deployError: null }),
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
     // warns about.
-    setDeployHeight: (h) => set({ deployHeight: Math.max(0, Math.min(get().deployCeiling(), Math.round(h))), deployAsk: null }),
+    setDeployHeight: (h) => {
+      const height = Math.max(0, Math.min(get().deployCeiling(), Math.round(h)))
+      // Below the snap's height there is no snap: the control goes away, and
+      // so does what it was set to, rather than lying in wait.
+      const offered = snapOffered(cyber().plane, height)
+      set({ deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }) })
+    },
     setDeployUnit: (unit) => set({ deployUnit: clampUnit(unit) }),
+    setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
+    setDeploySpin: (spin) => set({ deploySpin: wrapSpin(spin) }),
+    setDeployFollow: (follow) => set({ deployFollow: follow }),
     deployCeiling: () => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
@@ -345,7 +386,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin } = get()
       if (!pending) return
       const cs = cyber()
       const at: Position = { ...cs.cursor }
@@ -379,7 +420,13 @@ export const useShards = create<ShardsState>((set, get) => {
         // a copy rather than writing back to the bench, so the same shard can
         // be placed twice at two sizes and the workshop's model is untouched
         // either time; the payload `toPayload` builds takes the unit from here.
-        shard = model.unit === deployUnit ? model : { ...model, unit: deployUnit }
+        // The pose goes out with the size, and only where there is ground to
+        // stand on: dataspace, at SNAP_MIN_HEIGHT and above (lib/pose.ts).
+        const up = deployUp && snapOffered(plane, deployHeight)
+        const spin = up ? wrapSpin(deploySpin) : 0
+        shard = model.unit === deployUnit && model.up === up && model.spin === spin
+          ? model
+          : { ...model, unit: deployUnit, up, spin }
         innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
       } else {
         text = pending.text.trim()

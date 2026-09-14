@@ -54,6 +54,13 @@ import { coordToXyz } from 'cyberspace-core'
 const TAP_SLOP = 8
 
 /** Same reach as WorldMessages and the sector cage: beyond this a stop is off-grid at this scale. */
+/**
+ * Pixel size of a landfall drawn inside a sphere of interest. Larger than a
+ * port's 3 because these are things to aim at rather than scenery, and well
+ * under the nearest marker's 9 so the one that is called out still stands out.
+ */
+const SPHERE_DOT_PX = 5
+
 const REACH = GRID_RADIUS * 8
 
 /**
@@ -532,7 +539,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
     useHyperspace.getState().fieldBuilding()
     slice()
 
-    return () => { job.cancelled = true }
+    // Cancelling is not finishing, so the flag has to come down here: the
+    // successor may look at the drift and decide there is nothing to do, in
+    // which case nobody would ever call commit and the tag would read
+    // DRAWING forever. A successor that does rebuild raises it again
+    // immediately, so the tag never flickers.
+    return () => { job.cancelled = true; useHyperspace.getState().fieldSettled() }
     // The spatial deps ride in the keys on purpose: listing the objects too
     // would re-run the build on identity changes that changed nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -614,14 +626,20 @@ export function StopField({ axes }: Props): JSX.Element | null {
           the cloud reads at every zoom instead of vanishing with distance.
           Landfalls: world-sized and attenuated, so the crust shrinks with the
           planet instead of blooming into a solid orange disc when the globe
-          is small on screen. toneMapped and fog both off for the BlackSun
+          is small on screen. Inside a sphere of interest that reverses: the
+          field is a handful of navigation targets rather than a crust, the
+          camera sits about 69 cells out to frame the ring, and the far edge
+          of the sphere is nearly three times the distance of the near edge,
+          which left the farthest stops too small to see or click. There they
+          are pixel-sized like the ports, a little larger, so every stop in
+          the ring reads the same whatever its depth. toneMapped and fog both off for the BlackSun
           reason: these colors are the encoding, and half the field sits
           beyond where the scene fog has already gone to black.
         */}
         <pointsMaterial
           vertexColors
-          size={portView ? 3 : 0.24}
-          sizeAttenuation={!portView}
+          size={portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24}
+          sizeAttenuation={!portView && sphere === null}
           transparent
           opacity={0.95}
           depthWrite={false}

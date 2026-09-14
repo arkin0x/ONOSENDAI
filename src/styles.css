@@ -6058,15 +6058,17 @@ kbd {
     "pin     earth cube"
     "zoomout hub   zoomin";
 }
-/* Earth blue, the same family as the planet's own graticule, so the key reads
-   as the thing it frames rather than as another scale key. */
+/* The same treatment as the cube key, because they are the same kind of
+   control: one frames the whole space, the other frames the planet. Telling
+   them apart is the glyph's job, not the colour's. Earth blue read as a
+   different class of button entirely (arkinox, 2026-09-14). */
 .touchpad__key--earth {
   grid-area: earth;
-  color: #bcd9ff;
-  background: rgba(47, 129, 247, 0.55);
-  border-color: rgba(120, 180, 255, 0.9);
+  color: #dcc2ff;
+  background: rgba(124, 58, 237, 0.62);
+  border-color: rgba(200, 150, 255, 0.9);
 }
-.touchpad__key--earth:active { background: rgba(70, 150, 255, 0.85); border-color: #e6f1ff; }
+.touchpad__key--earth:active { background: rgba(160, 100, 255, 0.85); border-color: #f0e6ff; }
 /* Amber, the pin's own colour in the scene (palette WARN), so the key and the
    marker it removes are plainly the same thing. */
 .touchpad__key--pin {

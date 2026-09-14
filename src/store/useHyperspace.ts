@@ -74,6 +74,8 @@ interface HyperspaceState {
   setScrubHeight: (h: number | null) => void
   /** The stop field starting a rebuild. Idempotent: a second call changes nothing. */
   fieldBuilding: () => void
+  /** Clear the working flag without touching the counts: a build was abandoned, not finished. */
+  fieldSettled: () => void
   /** The stop field committing one. `inside` is null when the build had no sphere. */
   fieldDone: (drawn: number, inside: number | null) => void
   setDestination: (h: number | null) => void
@@ -116,6 +118,11 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   // Both guarded against writing an identical value: the field commits on
   // every anchor nudge, and a no-op set would still notify every subscriber.
   fieldBuilding: () => set((s) => (s.field.building ? {} : { field: { ...s.field, building: true } })),
+  // A build that is abandoned rather than finished: the counts on screen are
+  // still the last real ones, so only the flag is cleared. Without this a
+  // cancelled rebuild whose successor decides it has nothing to do leaves the
+  // tag reading DRAWING with nobody left to finish it.
+  fieldSettled: () => set((s) => (s.field.building ? { field: { ...s.field, building: false } } : {})),
   fieldDone: (drawn, inside) => set((s) => (
     !s.field.building && s.field.drawn === drawn && s.field.inside === inside
       ? {}

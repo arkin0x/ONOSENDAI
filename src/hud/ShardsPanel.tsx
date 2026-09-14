@@ -18,6 +18,7 @@ import { useSettled } from './useSettled'
 import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards, type MyDeployment } from '../store/useShards'
+import { PublishSwitch } from './PublishSwitch'
 import { useWorkshop } from '../store/useWorkshop'
 import { Explanation } from './Explanation'
 
@@ -40,8 +41,6 @@ function depName(d: MyDeployment): string {
 function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
   const cashu = useCashu(d.type === 'message' ? d.text : null)
   const coin = cashu.found
-  const live = useCyberspace((s) => s.live)
-  const broadcasting = useShards((s) => s.broadcasting) === d.lookupId
   return (
     <li className={`shards__row shards__row--deployed ${viewing ? 'is-viewing' : ''}`}>
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
@@ -54,15 +53,9 @@ function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; 
           {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
         </span>
       </button>
-      {/* Deployed while LOCAL: signed and kept, never sent. This sends it. */}
-      {!d.published && live && (
-        <button
-          className="shards__broadcast"
-          disabled={broadcasting}
-          onClick={() => { void useShards.getState().broadcast(d.lookupId) }}
-          title="Send this region's bag to the relays now"
-        >{broadcasting ? 'SENDING' : 'BROADCAST'}</button>
-      )}
+      {/* Where this one thing is, and the way to send it without taking the
+          whole chain live with it. */}
+      {!d.published && <PublishSwitch lookupId={d.lookupId} published={false} />}
       <span className="shards__goto-hint" aria-hidden="true">▸</span>
     </li>
   )

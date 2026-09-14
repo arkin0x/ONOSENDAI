@@ -2810,6 +2810,30 @@ kbd {
   border-radius: 5px;
   background: rgba(6, 14, 22, 0.96);
 }
+/* LOCAL or LIVE for one hidden thing, in the language the big switch uses:
+   both words always on show, the true one lit, and only one of them a
+   button, since nothing can come back from a relay. */
+.pubswitch {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pubswitch__opt {
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  background: transparent;
+  border: 0;
+}
+.pubswitch__opt.is-on { color: var(--bg); background: var(--accent); }
+.pubswitch__go:not(:disabled) { color: var(--accent); cursor: pointer; }
+.pubswitch__go:not(:disabled):hover { background: rgba(0, 229, 255, 0.12); }
+.pubswitch__go.is-on { color: var(--bg); background: #52e39f; }
+
 /* The line under an offload estimate that says how much of the work HOSAKA
    already had. Green, because it is money and time you are not spending. */
 .modal__reuse {

@@ -480,7 +480,6 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!item) return
       const cs = cyber()
       const key = hexToBytes(item.keyHex)
-      const remaining = get().mine.filter((d) => d.lookupId === item.lookupId && d.eventId !== eventId)
       // Taking something down reaches the relay whenever the bag is already
       // there, LOCAL or not. LOCAL used to silence this, which meant a
       // published bag deleted while LOCAL was deleted only on this device and
@@ -489,10 +488,21 @@ export const useShards = create<ShardsState>((set, get) => {
       // and it tells the relay nothing it does not already hold.
       const wasPublic = get().mine.some((d) => d.lookupId === item.lookupId && d.published)
 
+      // What is really in this bag, gathered the way publishing gathers it:
+      // from the relay as well as from here (gatherInners, which only ever
+      // reads this identity's own envelopes, so a bag never holds anyone
+      // else's work). This device's own list is not the bag. Something hidden
+      // in the same region from another device is in the bag and not in the
+      // list, and going by the list alone both dropped it from a rewrite and,
+      // when it was the only other thing, deleted the whole envelope as if
+      // the bag were empty.
+      const gathered = await gatherInners(item.lookupId, key, wasPublic)
+      const left = gathered.filter((e) => e.id !== eventId)
+
       let mine: MyDeployment[]
-      if (remaining.length > 0) {
+      if (left.length > 0) {
         // Rewrite the region bag without this item; the newer bag replaces it.
-        const { event, published } = await publishBag(remaining.map((d) => d.inner), key, item.lookupId, item.height, wasPublic)
+        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic)
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
           .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published } : d))
@@ -519,13 +529,13 @@ export const useShards = create<ShardsState>((set, get) => {
       const wasInspecting = get().inspecting === eventId
       // The whole bag is gone only when nothing of ours is left in it. The
       // public list is a list of bags, so that is the grain it forgets at.
-      const deletedBags = remaining.length > 0
+      const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${item.inner.pubkey}:${item.lookupId}`]: true as const }
       set({ mine, deleted, deletedBags, discovered, inspecting: wasInspecting ? null : get().inspecting })
       if (wasInspecting) cs.clearFocus()
       saveMine(mine); saveDeleted(deleted)
-      if (remaining.length === 0) saveDeletedBags(deletedBags)
+      if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
     inspect: (eventId) => set({ inspecting: eventId }),

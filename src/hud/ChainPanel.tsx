@@ -8,10 +8,23 @@
  * The relay line is the one thing here that is not about cost. It says how
  * much of the chain exists anywhere but this device, which while Live is the
  * difference between moving and being seen to move.
+ *
+ * Under it, the same question one action at a time. Each row wears the
+ * compact tag, LIVE or LOCAL, and not the two-word switch the real control
+ * uses, for two reasons. The switch is twice as wide and would push the type
+ * and the id off a row that already has three fields in it. More than that, a
+ * switch is a thing you press: putting one on every row would offer a choice
+ * that does not exist, because publishing one action alone reveals nothing.
+ * A reader walks the chain forward from the spawn following each event's
+ * `previousId`, so an action whose parent is missing is never reached at all.
+ * The rows report; the one switch under COMMIT decides.
  */
 
+import { useEffect, useMemo, useRef } from 'react'
 import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
+import { parseAction } from '../lib/events'
+import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
@@ -27,6 +40,20 @@ export function ChainPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const respawns = useCyberspace((s) => s.respawns)
+
+  // Parsed once per chain change: the type is the only thing a row needs from
+  // inside the event, and re-parsing on every publish result would re-read the
+  // whole chain once per send.
+  const kinds = useMemo(() => events.map((e) => parseAction(e)?.type ?? null), [events])
+
+  // The newest action is at the bottom, because that is the order the
+  // publisher sends in and the order the chain is read in. Keep it in view as
+  // the chain grows, the way the chat dock keeps its newest line.
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    const el = list.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [events.length])
 
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
@@ -89,7 +116,7 @@ export function ChainPanel(): JSX.Element {
           <dt>Sats spent</dt>
           <dd>{spentMsats === 0 ? '0' : `${Math.ceil(spentMsats / 1000).toLocaleString()} (local)`}</dd>
         </div>
-        <div>
+        <div title="Live publishes nothing by itself. A chain still queued here goes out whole the next time you take an action while Live.">
           <dt>Published</dt>
           <dd>
             {sent} / {events.length}{' '}
@@ -103,6 +130,24 @@ export function ChainPanel(): JSX.Element {
           <dd>{respawns}</dd>
         </div>
       </dl>
+
+      {/* Every action, oldest first, and where it is. State only: there is no
+          control on a row. */}
+      <ol className="chainrows" ref={list}>
+        {events.map((e, i) => {
+          const tag = publishTag(published[e.id])
+          return (
+            <li key={e.id} className="chainrows__row">
+              <span className="chainrows__n">{i}</span>
+              <span className={`chainrows__type chainrows__type--${kinds[i] ?? 'unknown'}`}>
+                {(kinds[i] ?? 'unknown').replace('enter-hyperspace', 'enter').toUpperCase()}
+              </span>
+              <code className="chainrows__id" title={e.id}>{e.id.slice(0, 8)}…</code>
+              <span className={`tag tag--${tag}`} title={PUBLISH_TAG_TITLE[tag]}>{PUBLISH_TAG_LABEL[tag]}</span>
+            </li>
+          )
+        })}
+      </ol>
 
       <div className="hash">
         <span className="hash__label">genesis</span>

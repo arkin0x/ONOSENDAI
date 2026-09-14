@@ -13,9 +13,18 @@
  * Directions resolve through `moveDirection` against the axes currently on
  * screen, exactly as the keyboard does, so the pad obeys a free orbit the same
  * way WASD does and the two can never disagree about which way is up.
+ *
+ * The LOCAL/LIVE switch under COMMIT is the identity's only publishing
+ * control, and going LIVE asks first. Only that direction: LOCAL takes
+ * something back off the wire's path and needs no ceremony, while LIVE is the
+ * decision that the next thing you do is seen, and it carries everything
+ * already signed out with it (see lib/release.ts). Cancelling leaves the
+ * switch exactly where it was, on LOCAL.
  */
 
+import { useState } from 'react'
 import { Box } from 'lucide-react'
+import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
@@ -23,6 +32,21 @@ import { useShards } from '../store/useShards'
 import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+
+/**
+ * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
+ * lines included: `.modal__pre` is `white-space: pre-wrap` so the line
+ * breaks and the leading space on the first bullet survive to the screen.
+ */
+const GO_LIVE_BODY = [
+  'LIVE means actions you take and things you hide in cyberspace are published to relays so others can see them. LOCAL holds all the data on this device privately.',
+  '',
+  'If you switch to LIVE,',
+  ' - your next movement action will be published as well as your entire chain history',
+  '- hidden objects stay LOCAL until each one is published by clicking the LIVE button next to it',
+  '',
+  'Switch to LIVE now?',
+].join('\n')
 
 export function TouchControls(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
@@ -32,6 +56,10 @@ export function TouchControls(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
+  // Open only while going LOCAL to LIVE. The switch itself is not moved until
+  // the confirm, so a cancel, a tap on the backdrop, or the component going
+  // away all leave the identity on LOCAL.
+  const [goLive, setGoLive] = useState(false)
   // The scene's covering box reports when the region it draws is a clipped
   // stand-in; the zoom-out key is the remedy, so it echoes that (useUiHints).
   const coveringClipped = useUiHints((s) => s.coveringClipped)
@@ -182,12 +210,27 @@ export function TouchControls(): JSX.Element {
           <button
             className={`touchmode__opt ${live ? 'is-on' : ''}`}
             aria-pressed={live}
-            title="Live: publish every action to cyberspace.nostr1.com"
+            title="Live: your next action publishes it and the whole chain behind it to cyberspace.nostr1.com"
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(true) }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!live) setGoLive(true) }}
           >LIVE</button>
         </div>
       </div>}
+
+      {/* Outside the commit block: once it is up it stays up until it is
+          answered, even if the avatar stops being somewhere you can act. */}
+      {goLive && (
+        <ConfirmModal
+          title="Publishing"
+          body={<span className="modal__pre">{GO_LIVE_BODY}</span>}
+          confirmLabel="SWITCH TO LIVE"
+          cancelLabel="CANCEL"
+          danger={false}
+          cardClassName="golive"
+          onConfirm={() => { setGoLive(false); useCyberspace.getState().setLive(true) }}
+          onCancel={() => setGoLive(false)}
+        />
+      )}
     </>
   )
 }

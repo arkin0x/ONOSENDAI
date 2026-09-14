@@ -305,6 +305,12 @@ export interface CloudQuote {
   K: number
   /** A whole route's quote: the sum over its cloud steps, paid with one deposit. */
   route?: { steps: number; cloudSteps: number }
+  /**
+   * Work HOSAKA already holds, summed over the route's cloud steps: how many
+   * axis trees it does not have to build, and what that takes off this price
+   * and this wait. Absent when there is none, or when HOSAKA does not say.
+   */
+  reuse?: { axes: number; savedMsats: number; savedSeconds: number }
 }
 
 export interface CloudState {
@@ -1132,6 +1138,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // The steps run one after another, so their waits add, like their prices.
     let seconds = 0
     let secondsKnown = true
+    // What HOSAKA already holds, across every step of the route.
+    let reusedAxes = 0
+    let savedMsats = 0
+    let savedSeconds = 0
     try {
       for (const step of steps) {
         // Under LOOT a hop is quoted with the destination's cubes, since that
@@ -1146,6 +1156,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         if (typeof q.est_seconds === 'number') seconds += q.est_seconds
         else secondsKnown = false
         if (q.max_height > tallest) { tallest = q.max_height; estTime = q.est_time }
+        reusedAxes += q.reused_axes?.length ?? 0
+        savedMsats += q.reuse_saves_msats ?? 0
+        savedSeconds += q.reuse_saves_seconds ?? 0
       }
     } catch (err) {
       if (id !== requestId) return
@@ -1163,6 +1176,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       maxHeight: tallest,
       K: 0,
       route: { steps: plan.summary.steps, cloudSteps: steps.length },
+      ...(reusedAxes > 0 ? { reuse: { axes: reusedAxes, savedMsats, savedSeconds } } : {}),
     }
     if (needsApproval(total, cloudPrefs)) {
       set({ cloud: { ...get().cloud, status: 'confirm', quote, message: null } })

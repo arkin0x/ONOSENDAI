@@ -65,6 +65,13 @@ import { csMetresToLatLon, originCsMetres } from '../earthSurface'
 import { drawnSet } from './sample'
 
 /** The finest zoom at which the whole globe is still drawn is 2^50; the sphere takes over below it. */
+/**
+ * The zoom the planet is legible at: one cell is 2^52 gibsons, about 524 km,
+ * so the whole Earth sits in a couple of dozen cells. What the EARTH button
+ * and the EARTH key both frame it at.
+ */
+export const EARTH_SCALE_EXP = 52
+
 export const SPHERE_SCALE_MAX = 49
 
 /** The sphere's height is the zoom's exponent plus this: 32 cells of radius at every zoom. */

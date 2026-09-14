@@ -214,6 +214,11 @@ function usePointGeometry(at: [number, number, number] | null): BufferGeometry |
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
+  // gl_PointSize is in drawing-buffer pixels, so a size meant as CSS pixels
+  // has to carry the pixel ratio. Without this a 5px dot is 5 device pixels
+  // on a phone whose buffer is twice the CSS size, which is half of what was
+  // asked for and well under a touch target (arkinox, 2026-09-14).
+  const dpr = useThree((s) => s.viewport.dpr)
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -638,7 +643,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         */}
         <pointsMaterial
           vertexColors
-          size={portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24}
+          size={(portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24) * (portView || sphere ? dpr : 1)}
           sizeAttenuation={!portView && sphere === null}
           transparent
           opacity={0.95}
@@ -653,7 +658,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
               the dot beneath it rather than re-picking by a foreign index. */}
           <pointsMaterial
             color={ACCENT}
-            size={9}
+            size={9 * dpr}
             sizeAttenuation={false}
             transparent
             opacity={0.9}
@@ -670,7 +675,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
                 and clicking it selects it like any other landfall. */}
             <pointsMaterial
               color={ACCENT}
-              size={7}
+              size={7 * dpr}
               sizeAttenuation={false}
               transparent
               opacity={0.95}

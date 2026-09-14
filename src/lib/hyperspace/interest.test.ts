@@ -24,6 +24,7 @@ import {
   SPHERE_RADIUS_CELLS,
   sphereFrameDistance,
   densityLabel,
+  EARTH_SCALE_EXP,
 } from './interest'
 
 const CENTRE = 1n << 84n
@@ -315,5 +316,14 @@ describe('isqrt', () => {
     expect(isqrt(big * big)).toBe(big)
     expect(isqrt(big * big - 1n)).toBe(big - 1n)
     expect(isqrt(big * big + 1n)).toBe(big)
+  })
+})
+
+describe('EARTH_SCALE_EXP', () => {
+  it('is the zoom the EARTH button and the EARTH key share, so they cannot drift', () => {
+    expect(EARTH_SCALE_EXP).toBe(52)
+    // Well above the sphere's own ceiling: framing the planet is not a sphere view.
+    expect(EARTH_SCALE_EXP).toBeGreaterThan(SPHERE_SCALE_MAX)
+    expect(interestSphere(surface(), EARTH_SCALE_EXP)).toBeNull()
   })
 })

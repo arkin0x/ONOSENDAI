@@ -153,6 +153,16 @@ export const MAX_COMPUTE_HEIGHT = 20
  * the scene anchors on it, the explorer walks it, and the controls stand down
  * because nothing here is yours to move.
  */
+/** A place on Earth left marked in the scene. See `pin` on the store. */
+export interface EarthPin {
+  position: Position
+  plane: Plane
+  /** The zoom it was dropped at, which clicking it returns you to. */
+  scaleExp: number
+  /** What to call it: the same "EARTH · 37.8°N 122.4°W" the focus was given. */
+  label: string
+}
+
 export interface SpectateState {
   pubkey: string
   npub: string
@@ -480,6 +490,24 @@ export interface CyberspaceState {
    * the panel it is reached from is hidden while spectating.
    */
   focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
+  /**
+   * The pin: the place on Earth you asked to look at, left standing in the
+   * scene so the focal point is visible rather than implied.
+   *
+   * Deliberately NOT derived from `focus`, because it has to outlive a focus
+   * change: clicking a landfall moves the focus to that block and the pin
+   * stays where it was, which is what makes it possible to look around and
+   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
+   * REMOVE PIN. One at a time, so a second drop replaces the first.
+   */
+  pin: EarthPin | null
+  /** Drop the pin at a place on Earth. `scaleExp` defaults to the zoom you are at. */
+  dropPin: (position: Position, label: string, scaleExp?: number) => void
+  /** Take the pin away. */
+  clearPin: () => void
+  /** Look at the pin again, at the zoom it was dropped at. */
+  viewPin: () => void
   /** The zoom before the standing focus began, restored by clearFocus. */
   focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
@@ -2199,6 +2227,23 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane, ...(spectate ? { view: spectate.returnView } : {}) })
   },
 
+  pin: null,
+
+  dropPin: (position, label, scaleExp) => set({
+    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label },
+  }),
+
+  clearPin: () => set({ pin: null }),
+
+  viewPin: () => {
+    const { pin } = get()
+    if (!pin) return
+    // Driven, like a VIEW and unlike a block: the cursor comes with you, so a
+    // shard or a message composed from here lands at the pin rather than at
+    // your head. Standing at the venue is not required to hide something in it.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
+  },
+
   focusOn: (position, plane, label, scaleExp, drive = false) => {
     const next: Partial<CyberspaceState> = {
       focus: { position: { ...position }, plane, label, drive },
@@ -2222,6 +2267,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     const { position, plane, focusReturnScale, scaleExp, focus } = get()
     set({
       focus: null,
+      // RETURN ends the look, and the pin was the look's subject.
+      pin: null,
       anchor: position,
       anchorPlane: plane,
       // A cursor that went out with the view comes home with it.

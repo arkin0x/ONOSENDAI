@@ -198,7 +198,12 @@ export function Earth({ axes }: Props): JSX.Element | null {
             const disc = b * b - o.lengthSq() + globe.radius * globe.radius
             const near = o.addScaledVector(d, -b - Math.sqrt(Math.max(0, disc)))
             const hit = surfaceHit([near.x, near.y, near.z], scaleExp, axes)
-            useCyberspace.getState().focusOn(hit.position, 0, `EARTH · ${formatLatLonDeg(hit.lat, hit.lon)}`)
+            const label = `EARTH · ${formatLatLonDeg(hit.lat, hit.lon)}`
+            useCyberspace.getState().focusOn(hit.position, 0, label)
+            // Leave the pin standing at what was clicked, so the focal point
+            // is a thing in the scene and not just a camera target. It
+            // survives clicking a block; RETURN and REMOVE PIN take it away.
+            useCyberspace.getState().dropPin(hit.position, label)
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />

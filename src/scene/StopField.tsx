@@ -24,9 +24,10 @@
  *
  * From 2^49 down, with the focus on a point on Earth, the landfall field is
  * cut to the sphere of interest (interest.ts): only the stops inside a
- * sphere of 2^(scaleExp + 5) gibsons around the focus are candidates, the
- * port budget of a thousand is spent among them by the same identity
- * sample, and the one nearest the centre is always drawn and marked. The
+ * sphere of 2^(scaleExp + 5) gibsons around the focus are candidates, a
+ * budget of twenty thousand is spent among them by the same identity sample
+ * (SPHERE_MAX_POINTS: the cover is already decoded whole, so the cap is
+ * sized not to bite), and the one nearest the centre is always drawn. The
  * cull is exact, in fixed point, on the same coordinate the placement
  * uses; the cover that bounds the scan is ballCoverageRuns.
  */
@@ -67,7 +68,32 @@ const REACH = GRID_RADIUS * 8
  * the margin but never reshuffles. The positions are hash-uniform, so a
  * height-keyed subset is as unbiased a sample as any.
  */
-const MAX_POINTS = 1_000
+export const MAX_POINTS = 1_000
+
+/**
+ * The budget inside a sphere of interest, which is a different problem and
+ * deserves a different number.
+ *
+ * The thousand above is sized for the unbounded view, where the population in
+ * range is most of a million and the sample IS the decimation. Inside the
+ * sphere the identity prefilter is switched off (ADMIT_ALL below), so every
+ * in-plane row in the ball cover is decoded and tested whatever the budget
+ * is: the expensive half of the work is already spent by the time the budget
+ * is consulted, and capping at a thousand only throws away points that have
+ * already been paid for. The cover at 2^49, where the sphere is largest,
+ * measured about 17,897 rows at the Moscone Center, so twenty thousand is
+ * chosen to sit above the whole cover: inside the sphere you see everything
+ * that is there, and the density label says so by reading "133 of 133".
+ *
+ * One constant for the whole regime, deliberately NOT a function of the
+ * sphere's size. drawnSet is nested in the budget as well as in the
+ * candidates, so a budget that shrank as you zoomed in would re-deal the
+ * sample at every step, which is the churn the identity sampler exists to
+ * prevent. A single number keeps nesting trivially true, because a smaller
+ * sphere's candidates are a subset of a larger one's and the budget did not
+ * move.
+ */
+export const SPHERE_MAX_POINTS = 20_000
 
 /**
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
@@ -114,7 +140,7 @@ const HARD_CAP_SLACK = 1.1
  * where the sphere is largest, ballCoverageRuns bounds it to a few tens of
  * thousands of rows, decoded once and cached in the index for good.
  */
-const ADMIT_ALL = 0x1_0000_0000
+export const ADMIT_ALL = 0x1_0000_0000
 
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
 let lastDrawn: { frameKey: string; set: Set<number> } | null = null
@@ -248,10 +274,18 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const index = getStopIndex()
     const wantPort = anchorPlane === 1
     // Nothing to build where the stops are not drawn (landfalls above 2^60).
-    if (!stopsDrawn(anchorPlane, scaleExp)) return
+    if (!stopsDrawn(anchorPlane, scaleExp)) { useHyperspace.getState().fieldDone(0, null); return }
     const budget = wantPort ? MAX_POINTS : MAX_LANDFALL_POINTS
-    const commit = (next: Built | null): void => {
+    /**
+     * The one place a build ends. Reports what reached the GPU to the store
+     * on the way through (useHyperspace.field), which is what lets the
+     * HYPERSPACE tag say DRAWING while the slices run and READY when they
+     * stop, and what feeds the density label under the ring. `inside` is the
+     * exact count of stops in the sphere, or null when there was no sphere.
+     */
+    const commit = (next: Built | null, inside: number | null = null): void => {
       if (job.cancelled) return
+      useHyperspace.getState().fieldDone(next ? next.heights.length : 0, inside)
       builtRef.current = next
       setBuilt(next)
     }
@@ -396,7 +430,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
       let draw: Set<number>
       let nearest: Built['nearest'] = null
       if (sphere) {
-        const sel = sphereSelection(keptHeights, d2s, MAX_POINTS)
+        const sel = sphereSelection(keptHeights, d2s, SPHERE_MAX_POINTS)
         draw = sel.drawn
         if (sel.nearest) nearest = { height: sel.nearest.height, distance: isqrt(sel.nearest.d2) }
       } else {
@@ -456,7 +490,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         version: rebuildVersion,
         sphereKey,
         nearest,
-      })
+      }, sphere ? kept.length : null)
     }
 
     // Chip away between frames. The first slice runs synchronously, so the
@@ -493,6 +527,9 @@ export function StopField({ axes }: Props): JSX.Element | null {
       }
       finish()
     }
+    // One flag flip per rebuild, not one per slice: the cloud on screen is
+    // incomplete from here until commit.
+    useHyperspace.getState().fieldBuilding()
     slice()
 
     return () => { job.cancelled = true }

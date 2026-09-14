@@ -117,6 +117,21 @@ export function sphereFrameDistance(fovDeg: number, margin = 1.12): number {
   return (SPHERE_RADIUS_CELLS / Math.tan((fovDeg * Math.PI) / 360)) * margin
 }
 
+/**
+ * What the ring says about how crowded it is: "1,000 of 24,318 hyperjumps
+ * highlighted", or "133 of 133" when everything inside is drawn.
+ *
+ * Both numbers are exact. Inside a sphere the stop field switches its
+ * identity prefilter off (StopField.ADMIT_ALL) and decodes every row in the
+ * ball cover, so the count of stops inside is counted rather than projected;
+ * `drawn` is what survived the thousand-point budget. Nothing here is ever
+ * an estimate, so nothing here says "about".
+ */
+export function densityLabel(drawn: number, inside: number): string {
+  const n = (v: number): string => v.toLocaleString('en-US')
+  return `${n(drawn)} of ${n(inside)} hyperjump${inside === 1 ? '' : 's'} highlighted`
+}
+
 export function sphereHeight(scaleExp: number): number {
   return scaleExp + SPHERE_HEIGHT_OFFSET
 }

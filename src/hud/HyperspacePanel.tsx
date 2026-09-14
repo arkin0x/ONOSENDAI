@@ -195,6 +195,7 @@ export async function startRide(): Promise<void> {
 const kindLabel = (stop: Stop): string => (stop.kind === 'port' ? 'PORT' : 'LANDFALL')
 
 export function HyperspacePanel(): JSX.Element {
+  const building = useHyperspace((s) => s.field.building)
   const sync = useHyperspace((s) => s.sync)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const destination = useHyperspace((s) => s.destination)
@@ -253,7 +254,10 @@ export function HyperspacePanel(): JSX.Element {
   }, [destination, position, plane, indexVersion, line])
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
-  const tag = ready ? `READY ${stopCount()} BLOCKS`
+  // DRAWING while the stop field is still chipping its rebuild out across
+  // frames (12 ms a slice), READY when it has committed. Same shape either
+  // way, so the button does not jump; the first word is the whole signal.
+  const tag = ready ? `${building ? 'DRAWING' : 'READY'} ${stopCount()} BLOCKS`
     : sync.status === 'error' ? 'ERROR'
       : sync.status === 'idle' ? 'IDLE'
         : sync.status === 'loading-cache'

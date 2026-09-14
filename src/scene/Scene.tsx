@@ -43,6 +43,7 @@ import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { EarthPatch } from './EarthPatch'
 import { SphereOfInterest } from './SphereOfInterest'
+import { EarthPin } from './EarthPin'
 import { interestSphere, sphereFrameDistance } from '../lib/hyperspace/interest'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
@@ -136,6 +137,7 @@ function World(): JSX.Element {
       <CyberspaceLattice axes={axes} />
       <EarthPatch axes={axes} />
       <SphereOfInterest axes={axes} />
+      <EarthPin axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />

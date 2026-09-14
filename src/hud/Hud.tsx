@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from '../lib/scale'
 import { geocode } from '../lib/geocode'
+import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
@@ -133,6 +134,13 @@ function PositionPanel(): JSX.Element {
   const [viewNote, setViewNote] = useState<string | null>(null)
   const look = (typed: string, target: ViewTarget): void => {
     useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
+    // A place on Earth gets the pin: marking the focal point is the whole
+    // purpose of typing a latitude and longitude or a place name. A
+    // coordinate or a triple of axes that is not on the ground gets none,
+    // and leaves any standing pin alone.
+    if (target.plane === 0 && onEarthSurface(target.position)) {
+      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp)
+    }
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)

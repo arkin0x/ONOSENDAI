@@ -23,6 +23,7 @@ import {
   sphereSelection,
   SPHERE_RADIUS_CELLS,
   sphereFrameDistance,
+  densityLabel,
 } from './interest'
 
 const CENTRE = 1n << 84n
@@ -45,6 +46,18 @@ function mulberry32(seed: number): () => number {
 function offset(rng: () => number, r: bigint): bigint {
   return (BigInt(Math.floor(rng() * 2 ** 40)) * (2n * r)) / (1n << 40n) - r
 }
+
+describe('densityLabel', () => {
+  it('says how much of what is there is drawn, with separators and no hedging', () => {
+    expect(densityLabel(1000, 24318)).toBe('1,000 of 24,318 hyperjumps highlighted')
+    // The usual case once the budget sits above the cover: everything inside.
+    expect(densityLabel(133, 133)).toBe('133 of 133 hyperjumps highlighted')
+    expect(densityLabel(1, 1)).toBe('1 of 1 hyperjump highlighted')
+    expect(densityLabel(0, 0)).toBe('0 of 0 hyperjumps highlighted')
+    // Both numbers are counted, so the wording never softens into "about".
+    expect(densityLabel(1000, 24318)).not.toMatch(/about|~|approx/i)
+  })
+})
 
 describe('interestSphere', () => {
   it('is 2^(scaleExp + 5) gibsons: h54 (2097 km) at 2^49, h37 (16 m) at 2^32', () => {

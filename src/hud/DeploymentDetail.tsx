@@ -19,6 +19,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
 import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
+import { PublishSwitch } from './PublishSwitch'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -75,7 +76,11 @@ export function DeploymentDetail(): JSX.Element | null {
         </div>
         <div className="detail__field detail__field--relays">
           <span className="detail__key">relays</span>
-          <span className="detail__plain">{dep.published ? dep.relays.map((r) => r.replace('wss://', '')).join(', ') : 'local only — never published'}</span>
+          <span className="detail__plain">{dep.published ? dep.relays.map((r) => r.replace('wss://', '')).join(', ') : 'nowhere yet: signed and kept on this device'}</span>
+        </div>
+        <div className="detail__field detail__field--relays">
+          <span className="detail__key">published</span>
+          <PublishSwitch lookupId={dep.lookupId} published={dep.published} />
         </div>
 
       </div>

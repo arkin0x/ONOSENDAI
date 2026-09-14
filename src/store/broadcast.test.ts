@@ -69,12 +69,17 @@ describe('broadcasting a bag left LOCAL', () => {
     expect(useShards.getState().broadcasting).toBeNull()
   })
 
-  it('refuses while LOCAL, and says why', async () => {
+  it('sends one bag while the identity stays LOCAL, and leaves LOCAL alone', async () => {
+    // The point of the feature: reveal one thing without taking the movement
+    // chain live with it. A bag is a standalone envelope keyed to a region,
+    // so publishing one says nothing about where the avatar has been.
     useCyberspace.setState({ live: false })
-    expect(await useShards.getState().broadcast(LOOKUP)).toBe(false)
-    expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
-    expect(useShards.getState().broadcastError).toMatch(/LOCAL/)
-    expect(useShards.getState().mine[0].published).toBe(false)
+    expect(await useShards.getState().broadcast(LOOKUP)).toBe(true)
+    expect(vi.mocked(publishMany)).toHaveBeenCalledTimes(1)
+    expect(useShards.getState().mine[0].published).toBe(true)
+    expect(useShards.getState().broadcastError).toBeNull()
+    // The identity is still LOCAL: nothing of the chain went out with it.
+    expect(useCyberspace.getState().live).toBe(false)
   })
 
   it('keeps the deployment local when no relay takes the bag', async () => {

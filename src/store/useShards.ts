@@ -390,12 +390,20 @@ export const useShards = create<ShardsState>((set, get) => {
      * region half published from another device comes back whole rather than
      * being overwritten by this device's half.
      */
+    /**
+     * One bag, published now, whatever LOCAL says.
+     *
+     * LOCAL used to refuse this, which meant revealing one shard cost you the
+     * privacy of everything else: you had to go LIVE, which drains the whole
+     * movement chain onto the relay, and then remember to go back. A bag is
+     * not part of that chain. It is a standalone envelope keyed to a region,
+     * so sending one says nothing about where you have been, and asking for
+     * it by name is a decision about that one thing.
+     *
+     * It only goes one way. A relay cannot unsee a bag, so there is no path
+     * back from LIVE to LOCAL for something already sent.
+     */
     broadcast: async (lookupId) => {
-      const cs = cyber()
-      if (!cs.live) {
-        set({ broadcastError: 'Nothing is published while you are LOCAL. Switch to LIVE and try again.' })
-        return false
-      }
       if (get().broadcasting) return false
       const items = get().mine.filter((d) => d.lookupId === lookupId)
       if (items.length === 0) return false

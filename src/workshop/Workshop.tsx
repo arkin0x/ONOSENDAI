@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Eye, Grid3x3, Link, Menu, MousePointer2, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
+import { ClipboardPaste, Copy, Eye, Grid3x3, Link, Menu, MousePointer2, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Explanation } from '../hud/Explanation'
@@ -123,6 +123,10 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   const axes = useBenchView((s) => s.axes)
   const bind = useRepeatable()
   const w = useWorkshop.getState
+  const clip = useWorkshop((s) => s.clip)
+  // PASTE asks where before it puts anything down, since the answer is not
+  // obvious: back where it came from, or on the plane you are working on.
+  const [asking, setAsking] = useState(false)
   const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().step()) }
   const sub = (name: NudgeName): string => nudgeLabel(nudgeFor(axes, name))
   const arrows: Array<{ cell: string; glyph: string; name: NudgeName; key: string }> = [
@@ -135,6 +139,7 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   ]
   return (
     <div className="benchpad" role="group" aria-label="Move the selected points">
+      {points > 0 && (<>
       {arrows.map((a) => (
         <button key={a.cell} className={`touchpad__key touchpad__key--${a.cell}`} title={`${a.name} (${a.key}): ${sub(a.name)}`} aria-label={`Move ${a.name}, ${sub(a.name)}`} {...bind(move(a.name))}>
           {a.glyph}
@@ -152,6 +157,36 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
       <button className="touchpad__hub" title="Clear the selection (Esc)" aria-label={`${points} points selected. Tap to clear.`} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); w().selectVertex(null) }}>
         {points} {points === 1 ? 'PT' : 'PTS'}
       </button>
+    </>)}
+
+      {/* The clipboard, on the end of the row DELETE sits in: with points in
+          hand, take them or copy them; with nothing in hand, put back what is
+          held, in the cell CUT had. */}
+      {points > 0 ? (
+        <>
+          <button className="touchpad__key touchpad__key--cut" title="Cut the selected points, and their faces, to the clipboard" aria-label="Cut the selection" {...noCallout} onClick={() => w().cutSelection()}>
+            <Scissors size={15} strokeWidth={2.25} aria-hidden />
+          </button>
+          <button className="touchpad__key touchpad__key--dup" title="Duplicate the selected points where they stand, ready to be moved" aria-label="Duplicate the selection" {...noCallout} onClick={() => w().duplicateSelection()}>
+            <Copy size={15} strokeWidth={2.25} aria-hidden />
+          </button>
+        </>
+      ) : clip !== null && (
+        <button className="touchpad__key touchpad__key--cut" title={`Paste the ${clip.points.length} held point${clip.points.length === 1 ? '' : 's'}`} aria-label="Paste the held points" aria-haspopup="menu" aria-expanded={asking} {...noCallout} onClick={() => setAsking(true)}>
+          <ClipboardPaste size={15} strokeWidth={2.25} aria-hidden />
+        </button>
+      )}
+
+      {asking && (
+        <>
+          {/* Anywhere else puts the question away and pastes nothing. */}
+          <div className="benchpaste__away" onPointerDown={() => setAsking(false)} />
+          <div className="benchpaste" role="menu" aria-label="Where to paste">
+            <button className="workshop__btn" role="menuitem" title="Back on the exact points they were taken from" onClick={() => { setAsking(false); w().pasteClip('exact') }}>PASTE</button>
+            <button className="workshop__btn" role="menuitem" title="Resting on the plane you are working on, keeping its shape" onClick={() => { setAsking(false); w().pasteClip('floor') }}>PASTE FLOOR</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -284,6 +319,7 @@ export function Workshop(): JSX.Element | null {
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
   const stampFacing = useWorkshop((s) => s.stampFacing)
+  const clip = useWorkshop((s) => s.clip)
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -613,7 +649,7 @@ export function Workshop(): JSX.Element | null {
       <div className="ws__tools">
         {selection.length > 0 && (
           <div className="benchturn" role="group" aria-label="Turn the selection">
-            <button className="touchpad__key" title="A quarter turn left about the vertical (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
+            <button className="touchpad__key" title="A quarter turn left, in the working plane (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
               <RotateCcw size={18} strokeWidth={2.25} aria-hidden />
               <span className="touchpad__sub">LEFT</span>
             </button>
@@ -623,7 +659,7 @@ export function Workshop(): JSX.Element | null {
             </button>
           </div>
         )}
-        {selection.length > 0 && <ControlsPad points={selectedPoints} />}
+        {(selection.length > 0 || (tool === 'select' && clip !== null)) && <ControlsPad points={selectedPoints} />}
       {panel === 'tools' && (
         <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
           <div className="workshop__row" role="group" aria-label="Tool">

@@ -317,7 +317,7 @@ describe('workshop', () => {
     expect(w().selection).toHaveLength(1)
   })
 
-  it('CUT takes the points out and holds them; PASTE puts them back on the working plane, selected', () => {
+  it('CUT takes the points out and holds them; PASTE puts them back exactly where they were', () => {
     w().clearShard()
     w().setTool('add')
     w().addVertex([0, 3 * T, 0]); w().addVertex([T, 3 * T, 0]); w().addVertex([T, 4 * T, 0])
@@ -326,15 +326,27 @@ describe('workshop', () => {
     expect(w().current()!.vertices).toHaveLength(0)
     expect(w().clip!.points).toHaveLength(3)
 
-    // The grid is now two units up: the lowest of the three rests there and
-    // the shape keeps its form.
+    // The grid has moved two units up, and PASTE ignores it: the points go
+    // back on the exact ticks they were taken from.
     w().setLevel(2 * T)
     w().pasteClip()
     const back = w().current()!.vertices.map((v) => ticksOf(v))
-    expect(back).toHaveLength(3)
+    expect(back).toEqual([[0, 3 * T, 0], [T, 3 * T, 0], [T, 4 * T, 0]])
+    expect(w().selection).toEqual([0, 1, 2])
+  })
+
+  it('PASTE FLOOR rests the same shape on the working plane instead', () => {
+    w().clearShard()
+    w().setTool('add')
+    w().addVertex([0, 3 * T, 0]); w().addVertex([T, 3 * T, 0]); w().addVertex([T, 4 * T, 0])
+    w().setSelection([0, 1, 2])
+    w().cutSelection()
+    w().setLevel(2 * T)
+    w().pasteClip('floor')
+    const back = w().current()!.vertices.map((v) => ticksOf(v))
+    // The lowest of the three rests on the level; the shape keeps its form.
     expect(back.map((p) => p[1]).sort((a, b) => a - b)).toEqual([2 * T, 2 * T, 3 * T])
     expect(back.map((p) => [p[0], p[2]])).toEqual([[0, 0], [T, 0], [T, 0]])
-    expect(w().selection).toEqual([0, 1, 2])
   })
 
   it('PASTE onto a vertical plane rests the points on it along that plane\'s own axis', () => {
@@ -345,13 +357,13 @@ describe('workshop', () => {
     w().cutSelection()
     w().setPlane(0)
     w().setLevel(5 * T)
-    w().pasteClip()
+    w().pasteClip('floor')
     const xs = w().current()!.vertices.map((v) => ticksOf(v)[0]).sort((a, b) => a - b)
     // The pair was two units apart along X and stays two apart, resting at 5.
     expect(xs).toEqual([5 * T, 7 * T])
   })
 
-  it('DUPLICATE leaves the original, brings the faces among the points, and selects the copy', () => {
+  it('DUPLICATE copies where the points stand, keeps the faces, and selects only the copy', () => {
     w().clearShard()
     w().setTool('add')
     w().addVertex([0, 0, 0]); w().addVertex([T, 0, 0]); w().addVertex([0, 0, T])
@@ -365,8 +377,16 @@ describe('workshop', () => {
     const s = w().current()!
     expect(s.vertices).toHaveLength(6)
     expect(s.faces).toHaveLength(faces * 2)
-    // The copy is what is selected, and it is the new half.
+    // The copy stands exactly on its original, and it alone is selected: the
+    // selection is not widened to the points it shares its place with, or the
+    // nudges could never carry the copy off.
+    const pts = s.vertices.map((v) => ticksOf(v))
+    expect(pts.slice(3)).toEqual(pts.slice(0, 3))
     expect(w().selection).toEqual([3, 4, 5])
+    w().moveSelected(1, T)
+    const after = w().current()!.vertices.map((v) => ticksOf(v))
+    expect(after.slice(0, 3)).toEqual(pts.slice(0, 3))
+    expect(after.slice(3).map((p) => p[1])).toEqual([T, T, T])
     // Its face points at the copy's own vertices, not the original's.
     expect(s.faces[s.faces.length - 1].every((i) => i >= 3)).toBe(true)
   })

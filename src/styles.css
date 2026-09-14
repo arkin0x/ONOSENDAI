@@ -2775,15 +2775,45 @@ kbd {
 }
 /* The main pad's nine cells, for the selection: CONNECT and DELETE take the
  * corners the scale keys have out there. */
+/* Two cells on the end of the row DELETE sits in: CUT then DUPLICATE, or,
+   with nothing selected, PASTE in the cell CUT had. The container lets taps
+   through, since with nothing selected every cell but that one is empty and
+   the bench is underneath. */
 .benchpad {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(3, 48px);
+  grid-template-columns: repeat(5, 48px);
   grid-template-rows: repeat(3, 48px);
   gap: 4px;
+  pointer-events: none;
   grid-template-areas:
-    "away    up   toward"
-    "left    hub  right"
-    "connect down delete";
+    "away    up   toward .   ."
+    "left    hub  right  .   ."
+    "connect down delete cut dup";
+}
+.benchpad > * { pointer-events: auto; }
+.benchpad .touchpad__key--cut { grid-area: cut; }
+.benchpad .touchpad__key--dup { grid-area: dup; }
+
+/* Where to put the held points. It stands over the two keys, and anything
+   outside it is a tap that pastes nothing. */
+.benchpaste {
+  position: absolute;
+  right: 0;
+  bottom: 52px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(6, 14, 22, 0.96);
+}
+.benchpaste__away {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
 }
 .benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
 .benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }

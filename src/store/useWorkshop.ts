@@ -109,6 +109,9 @@ function turnPivotFor(pts: P3[], step: number, axes: [0 | 1 | 2, 0 | 1 | 2] = [2
  * faces come too, but only those whose three corners are all in hand: a face
  * with a corner left behind is not a face.
  */
+/** Where PASTE puts the held points: back where they came from, or on the working plane. */
+export type PastePlace = 'exact' | 'floor'
+
 export interface ClipPoints {
   points: Array<{ at: P3; c: [number, number, number] }>
   faces: Array<[number, number, number]>
@@ -230,8 +233,11 @@ export interface WorkshopState {
   cutSelection: () => void
   /** Hold a copy of the selected points and put one down at once: copy and paste in a step. */
   duplicateSelection: () => void
-  /** Put the held points down on the working plane, selected, ready to be moved. */
-  pasteClip: () => void
+  /**
+   * Put the held points down, selected and ready to be moved: `exact` where
+   * they were taken from, `floor` resting on the working plane.
+   */
+  pasteClip: (where?: PastePlace) => void
   pickForFace: (index: number) => void
   clearFacePick: () => void
   /** Make faces from the picked corners, in order. */
@@ -641,7 +647,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!clip) return
       set({ clip })
       get().deleteSelected()
-      set({ notice: `${countLabel(clip)} cut. PASTE puts ${clip.points.length === 1 ? 'it' : 'them'} on the working plane.` })
+      set({ notice: `${countLabel(clip)} cut. PASTE asks where to put ${clip.points.length === 1 ? 'it' : 'them'} back.` })
     },
 
     duplicateSelection: () => {
@@ -649,22 +655,23 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const clip = s ? clipOf(s, get().selection) : null
       if (!clip) return
       set({ clip })
-      get().pasteClip()
+      get().pasteClip('exact')
     },
 
-    pasteClip: () => {
+    pasteClip: (where = 'exact') => {
       const { clip, plane, level } = get()
       const s = get().current()
       if (!clip || !s || clip.points.length === 0) return
-      // Onto the working plane: the shape keeps its own form, and the whole of
-      // it slides along the plane's normal until its lowest point rests on the
-      // level the grid is at. Nothing is flattened, and the two coordinates in
-      // the plane are left where they were, so a duplicate lands over its
-      // original and the nudges carry it off.
+      // Where they came from, to the tick, which is what a copy is for: the
+      // shape returns to the place you took it from and the nudges carry it
+      // off from there. FLOOR is the other answer: the same shape, slid along
+      // the working plane's normal until its lowest point rests on the level
+      // the grid is at. Neither one flattens anything.
       const low = Math.min(...clip.points.map((q) => q.at[plane]))
+      const shift = where === 'floor' ? level - low : 0
       const placed = clip.points.map((q) => {
         const at = [...q.at] as P3
-        at[plane] = at[plane] + (level - low)
+        at[plane] = at[plane] + shift
         return { at, c: q.c }
       })
       if (placed.some((q) => !validPoint(q.at, s.extent))) {
@@ -676,7 +683,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         ...m,
         vertices: [...m.vertices, ...placed.map((q) => vertexAt(q.at, q.c))],
         faces: [...m.faces, ...clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])],
-      }), `${countLabel(clip)} pasted on the plane, selected: move ${clip.points.length === 1 ? 'it' : 'them'} into place.`)
+      }), `${countLabel(clip)} pasted ${where === 'floor' ? 'on the working plane' : 'where they were taken from'}, selected: move ${clip.points.length === 1 ? 'it' : 'them'} into place.`)
+      // The selection is set here rather than through setSelection, which
+      // widens to every vertex sharing a point: pasted exactly, the copy sits
+      // on its original and widening would take both, so the nudges could
+      // never carry the copy off alone.
       if (added) set({ selection: placed.map((_, k) => base + k), selectedFace: null, facePick: [] })
     },
 

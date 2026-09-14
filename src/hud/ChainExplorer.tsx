@@ -24,12 +24,27 @@ import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { ConfirmModal } from './ConfirmModal'
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
 
+/** How long an adoption stays on the chip: long enough to explain the move it caused. */
+const ADOPTED_MS = 8000
+
 export function ChainExplorer(): JSX.Element {
   const events = useCyberspace((s) => s.events)
+  const fork = useCyberspace((s) => s.forkNotice)
+  const [showFork, setShowFork] = useState(false)
+  // An adoption explains itself and goes; a drop is work that vanished and
+  // stays on the chip until somebody reads it.
+  const [fresh, setFresh] = useState(true)
+  useEffect(() => {
+    if (!fork || fork.dropped > 0) { setFresh(true); return }
+    setFresh(true)
+    const t = window.setTimeout(() => setFresh(false), ADOPTED_MS)
+    return () => window.clearTimeout(t)
+  }, [fork])
   const spectate = useCyberspace((s) => s.spectate)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   // Parsed once per chain change; the store caches, this just subscribes.
@@ -89,15 +104,64 @@ export function ChainExplorer(): JSX.Element {
 
   return (
     <div className="explorer">
-      <button
-        className="chip explorer__toggle"
-        {...noCallout}
-        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
-        aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
-        aria-pressed={open}
-      >
-        CHAIN {index + 1}/{actions.length}{atHead ? '' : ' HISTORY'}
-      </button>
+      {/* The chain is the thing that forks, so the chain's own chip is where a
+          fork is reported: what another device added, and what it cost. */}
+      {fork && fork.dropped > 0 ? (
+        <button
+          className="chip explorer__toggle explorer__toggle--dropped"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
+        >
+          {fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED
+        </button>
+      ) : fork && fork.adopted > 0 && fresh ? (
+        <button
+          className="chip explorer__toggle explorer__toggle--adopted"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
+        >
+          {fork.adopted} FROM ANOTHER DEVICE
+        </button>
+      ) : (
+        <button
+          className="chip explorer__toggle"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
+          aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          aria-pressed={open}
+        >
+          CHAIN {index + 1}/{actions.length}{atHead ? '' : ' HISTORY'}
+        </button>
+      )}
+
+      {showFork && fork && (
+        <ConfirmModal
+          title={fork.dropped > 0 ? 'Your chain forked' : 'Another device moved you'}
+          body={fork.dropped > 0 ? (<>
+            One identity has one chain, however many devices you are signed in
+            on. Two of them acted from the same point, so the chain forked, and
+            everyone reading it resolves the fork the same way: the earlier
+            action continues the chain.
+            <br /><br />
+            {fork.dropped} action{fork.dropped === 1 ? '' : 's'} taken on this
+            device {fork.dropped === 1 ? 'is' : 'are'} not in the chain any
+            more. Anything you paid HOSAKA for on that branch was spent.
+            <br /><br />
+            To avoid it, act on one device at a time.
+          </>) : (<>
+            {fork.adopted} action{fork.adopted === 1 ? '' : 's'} arrived from
+            another device signed in as you, which is why your avatar moved on
+            its own. Nothing of yours was lost.
+          </>)}
+          confirmLabel="UNDERSTOOD"
+          cancelLabel={null}
+          danger={false}
+          onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+          onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+        />
+      )}
 
       {open && action && (
         <div className={`explorer__body ${atHead ? '' : 'is-history'}`}>

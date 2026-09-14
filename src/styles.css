@@ -3468,13 +3468,13 @@ kbd {
    key, where a thumb reaching for the pad's edge kept landing on it. It sits
    above NEAR now, in its own row at the top right corner: out of the path to
    every other key, and clear of the chat that lives to the pad's left. */
-.touchpad__key--cube {
-  grid-area: cube;
-  color: #dcc2ff;
-  background: rgba(124, 58, 237, 0.62);
-  border-color: rgba(200, 150, 255, 0.9);
-}
-.touchpad__key--cube:active { background: rgba(160, 100, 255, 0.85); border-color: #f0e6ff; }
+/* Colour deliberately absent. A purple treatment lived here and never once
+   reached the screen: `.touchpad__key` below sets colour, background and
+   border at the same specificity and later in the file, so it won every time.
+   The key has always rendered as a plain key, and the rule was left claiming
+   otherwise, which is how the EARTH key came to be styled to match something
+   that did not exist (arkinox, 2026-09-14). */
+.touchpad__key--cube { grid-area: cube; }
 
 .touchpad__key {
   display: flex;
@@ -6058,17 +6058,11 @@ kbd {
     "pin     earth cube"
     "zoomout hub   zoomin";
 }
-/* The same treatment as the cube key, because they are the same kind of
-   control: one frames the whole space, the other frames the planet. Telling
-   them apart is the glyph's job, not the colour's. Earth blue read as a
-   different class of button entirely (arkinox, 2026-09-14). */
-.touchpad__key--earth {
-  grid-area: earth;
-  color: #dcc2ff;
-  background: rgba(124, 58, 237, 0.62);
-  border-color: rgba(200, 150, 255, 0.9);
-}
-.touchpad__key--earth:active { background: rgba(160, 100, 255, 0.85); border-color: #f0e6ff; }
+/* No colour of its own, which is what the cube key has always looked like in
+   practice (see the note on --cube): these are the same kind of control, one
+   frames the whole space and the other the planet, and the glyph tells them
+   apart. */
+.touchpad__key--earth { grid-area: earth; }
 /* Amber, the pin's own colour in the scene (palette WARN), so the key and the
    marker it removes are plainly the same thing. */
 .touchpad__key--pin {

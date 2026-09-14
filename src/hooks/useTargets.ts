@@ -20,6 +20,20 @@ const YOU = '#ff2323'
 const EARTH_CENTRE = 1n << 84n
 const EARTH_RADIUS = 6371n * 1000n * (1n << 33n)
 
+/**
+ * Whether a focus is on the planet: its centre, a point on its surface, or a
+ * landfall block. Judged by where the focus is rather than by what it is
+ * called, so every way of looking at Earth counts. Earth is 2^55.6 gibsons
+ * in radius and the next thing in dataspace is some 10^8 radii away, so a
+ * box of 2^57 a side around the centre holds the planet and nothing else.
+ */
+export function onEarth(focus: { position: { x: bigint; y: bigint; z: bigint }; plane: number } | null): boolean {
+  if (!focus || focus.plane !== 0) return false
+  const reach = 1n << 57n
+  const near = (v: bigint): boolean => (v > EARTH_CENTRE ? v - EARTH_CENTRE : EARTH_CENTRE - v) <= reach
+  return near(focus.position.x) && near(focus.position.y) && near(focus.position.z)
+}
+
 export function useTargets(): CyberTarget[] {
   const plane = useCyberspace((s) => s.anchorPlane)
   const spectating = useCyberspace((s) => s.spectate !== null)
@@ -28,6 +42,9 @@ export function useTargets(): CyberTarget[] {
   const headPlane = useCyberspace((s) => s.headPlane)
   const tracked = useCyberspace((s) => s.targets)
   const focus = useCyberspace((s) => s.focusPubkey())
+  // Looking at the planet, from anywhere on or in it: the marker points at
+  // its core, and says so, since from the surface the centre is straight down.
+  const viewingEarth = useCyberspace((s) => onEarth(s.focus))
   const people = usePresence((s) => s.people)
   const me = useCyberspace((s) => s.identity.pubkey)
 
@@ -60,7 +77,7 @@ export function useTargets(): CyberTarget[] {
     if (plane === 0) {
       out.push({
         id: 'earth',
-        label: 'EARTH',
+        label: viewingEarth ? "EARTH'S CORE" : 'EARTH',
         color: EARTH,
         at: { x: EARTH_CENTRE, y: EARTH_CENTRE, z: EARTH_CENTRE },
         radius: EARTH_RADIUS,
@@ -69,5 +86,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me])
+  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me, viewingEarth])
 }

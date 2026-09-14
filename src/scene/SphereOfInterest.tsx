@@ -18,6 +18,12 @@
  * human scale, where the sphere still culls but there is no ground left to
  * draw its edge on. Lifted half a cell so it is never buried in the
  * graticule where the two cross.
+ *
+ * Out of the fog: the scene fades to black from 21.6 cells to 96, and the
+ * ring is 32 cells out and framed from about 69 (Scene.startDistance), where
+ * the fog would have taken half of it. Everything else keeps the fog as its
+ * depth cue; the boundary is the one line that has to read at the distance
+ * it is drawn from.
  */
 
 import { useEffect, useMemo } from 'react'
@@ -107,7 +113,7 @@ export function SphereOfInterest({ axes }: { axes: ViewAxes }): JSX.Element | nu
   return (
     <group>
       <lineLoop geometry={built.geometry} frustumCulled={false}>
-        <lineBasicMaterial color={ACCENT} transparent opacity={0.9 * built.opacity} toneMapped={false} />
+        <lineBasicMaterial color={ACCENT} transparent opacity={0.9 * built.opacity} toneMapped={false} fog={false} />
       </lineLoop>
       <WorldLabel text={built.label} color={ACCENT} at={built.labelAt} px={11} opacity={0.9 * built.opacity} align="center" />
     </group>

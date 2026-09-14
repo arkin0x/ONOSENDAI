@@ -21,6 +21,8 @@ import {
   onEarthSurface,
   sphereDistance2,
   sphereSelection,
+  SPHERE_RADIUS_CELLS,
+  sphereFrameDistance,
 } from './interest'
 
 const CENTRE = 1n << 84n
@@ -60,6 +62,22 @@ describe('interestSphere', () => {
     for (let s = 49; s >= 32; s--) expect(interestSphere(surface(), s)!.height).toBe(s + 5)
   })
 
+  it('is 32 cells at every zoom, and the camera must sit about 69 out to frame it', () => {
+    expect(SPHERE_RADIUS_CELLS).toBe(32)
+    for (const s of [49, 45, 38, 32]) {
+      const sphere = interestSphere(surface(), s)!
+      // radius in gibsons divided by one cell in gibsons.
+      expect(Number(sphere.radius / (1n << BigInt(s)))).toBe(SPHERE_RADIUS_CELLS)
+    }
+    // The scene's 55 degree camera: 32 / tan(27.5) = 61.5 cells, plus the margin.
+    expect(sphereFrameDistance(55, 1)).toBeCloseTo(61.47, 2)
+    expect(sphereFrameDistance(55)).toBeCloseTo(68.85, 2)
+    // Inside the orbit's own limit (GRID_RADIUS * 4 = 96), and well past the
+    // 26 cells a reframe used, which framed 13.5.
+    expect(sphereFrameDistance(55)).toBeLessThan(96)
+    expect(sphereFrameDistance(55)).toBeGreaterThan(26)
+  })
+
   it('is centred exactly on the focus', () => {
     const sphere = interestSphere(surface(), 45)!
     expect(sphere.centre).toEqual(TEXAS)
@@ -80,14 +98,22 @@ describe('interestSphere', () => {
     expect(interestSphere(surface(EARTH_CENTRE), 40)).toBeNull()
     // A port: the same coordinate in ideaspace is not on Earth.
     expect(interestSphere(surface(TEXAS, 1), 40)).toBeNull()
-    // A free VIEW is a moving frame, not a chosen point.
-    expect(interestSphere(surface(TEXAS, 0, true), 40)).toBeNull()
     // Ten kilometers up is not the ground.
     const m = latLonToCsMetres(31.6, -98.8, 10_000)
     const u = (v: number): bigint => CENTRE + BigInt(Math.round(v * GIBSONS_PER_M))
     expect(interestSphere(surface({ x: u(m.x), y: u(m.y), z: u(m.z) }), 40)).toBeNull()
     // Deep space.
     expect(interestSphere(surface({ x: 12345n, y: 1n << 70n, z: 0n }), 40)).toBeNull()
+  })
+
+  it('is present for a place typed into the POSITION panel, which drives the cursor', () => {
+    // The VIEW field calls focusOn with drive true, so every latitude and
+    // longitude and every place by name arrives driven. Excluding those left
+    // the sphere off for the one path built to reach a place on Earth.
+    const driven = interestSphere(surface(TEXAS, 0, true), 45)
+    expect(driven).not.toBeNull()
+    expect(driven!.centre).toEqual(TEXAS)
+    expect(driven).toEqual(interestSphere(surface(TEXAS, 0, false), 45))
   })
 
   it('is present for a landfall, whose coordinate is on the ellipsoid', () => {

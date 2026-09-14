@@ -18,11 +18,16 @@
  *   centre  the standing focus, when it is a point on Earth: a dataspace
  *           position within SURFACE_TOLERANCE_M of the WGS84 ellipsoid.
  *           That is every landfall (their coordinates lie on the ellipsoid
- *           to a nanometer) and every point clicked on the globe (snapped to
- *           the surface by construction), and never the planet's centre
- *           (6371 km deep, the EARTH, CYBERSPACE and THE RIDE focuses), a
- *           port (ideaspace), or a free VIEW, whose focus is a moving frame
- *           rather than a chosen point. Absent otherwise.
+ *           to a nanometer), every point clicked on the globe (snapped to
+ *           the surface by construction), and every place typed into the
+ *           POSITION panel, which since the GO TO merge is how a latitude
+ *           and longitude or a place by name is reached. A driven focus
+ *           (the free VIEW, which brings the cursor along) counts: its
+ *           position is a chosen point, and useCyberspace's rideView moves
+ *           it only when the cursor walks past the field's reach, which
+ *           makes it a new chosen point rather than a moving frame. Never
+ *           the planet's centre (6371 km deep, the EARTH, CYBERSPACE and
+ *           THE RIDE focuses) or a port (ideaspace). Absent otherwise.
  *   radius  2^(scaleExp + SPHERE_HEIGHT_OFFSET) gibsons, an aligned height
  *           like everything else in the space: h54 at 2^49, h53 at 2^48,
  *           down to h37 at 2^32. In meters (2^33 gibsons each) that is
@@ -89,6 +94,29 @@ export interface FocusLike {
 }
 
 /** The sphere's height at a zoom: h54 at 2^49, h37 at 2^32. */
+/**
+ * The ring's radius in cells, at every zoom: the sphere is
+ * 2^(scaleExp + 5) gibsons and a cell is 2^scaleExp, so the ratio is
+ * 2^5 = 32 whatever the zoom. That is why the circle is the same size on
+ * screen all the way down.
+ */
+export const SPHERE_RADIUS_CELLS = 2 ** SPHERE_HEIGHT_OFFSET
+
+/**
+ * How far the camera must sit from the centre for the whole ring to be in
+ * shot, in cells.
+ *
+ * A perspective camera at distance d shows d * tan(fov / 2) cells either
+ * side of what it looks at, so a ring 32 cells out needs 32 / tan(fov / 2),
+ * which at the scene's 55 degrees is 61.5 cells, plus a margin so the circle
+ * does not sit exactly on the frame edge. The scene's own starting distance
+ * is 26 cells, which frames 13.5: the ring was always outside the shot, which
+ * is why the boundary could not be seen even when it was drawn.
+ */
+export function sphereFrameDistance(fovDeg: number, margin = 1.12): number {
+  return (SPHERE_RADIUS_CELLS / Math.tan((fovDeg * Math.PI) / 360)) * margin
+}
+
 export function sphereHeight(scaleExp: number): number {
   return scaleExp + SPHERE_HEIGHT_OFFSET
 }
@@ -101,12 +129,13 @@ export function onEarthSurface(position: Position): boolean {
 
 /**
  * The sphere of interest for a focus at a zoom, or null when there is none:
- * above 2^49, without a focus, with a focus that is not a chosen point on
- * Earth's surface in dataspace.
+ * above 2^49, without a focus, or with a focus that is not a point on
+ * Earth's surface in dataspace. Whether the cursor came along (`drive`) does
+ * not matter: what is looked at is a point either way.
  */
 export function interestSphere(focus: FocusLike | null, scaleExp: number): InterestSphere | null {
   if (scaleExp > SPHERE_SCALE_MAX) return null
-  if (focus === null || focus.plane !== 0 || focus.drive === true) return null
+  if (focus === null || focus.plane !== 0) return null
   if (!onEarthSurface(focus.position)) return null
   const height = sphereHeight(scaleExp)
   return {

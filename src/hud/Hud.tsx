@@ -221,7 +221,9 @@ function PositionPanel(): JSX.Element {
         {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
           <div className="viewat__recent">
-            <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>RECENT {recentOpen ? '▴' : '▾'}</button>
+            <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>
+              RECENT <span className="viewat__caret" aria-hidden="true">{recentOpen ? '▴' : '▾'}</span>
+            </button>
             {recentOpen && (
               <ul className="viewat__list">
                 {recent.map((r) => (

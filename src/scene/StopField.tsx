@@ -296,6 +296,13 @@ export function StopField({ axes }: Props): JSX.Element | null {
      * exact count of stops in the sphere, or null when there was no sphere.
      */
     const commit = (next: Built | null, inside: number | null = null): void => {
+      // `inside` is not optional in spirit when a sphere is up: the density
+      // label under the ring has no honest number until one arrives, so it
+      // says DRAWING instead, and a commit that leaves it null strands the
+      // label there for good. Every empty path passes 0, because "nothing
+      // inside the ring" is a real answer and the label should say so
+      // (arkinox, 2026-09-14: "still says DRAWING HYPERJUMPS forever if none
+      // are visible").
       if (job.cancelled) return
       useHyperspace.getState().fieldDone(next ? next.heights.length : 0, inside)
       builtRef.current = next
@@ -314,7 +321,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
     if (index.size === 0 || index.permCount === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
 
@@ -335,7 +342,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     for (const [runStart, runEnd] of runs) runTotal += runEnd - runStart
     if (runTotal === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
 
@@ -386,7 +393,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     }
     if (planeTotal === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
     const total = useHyperspace.getState().sync.total
@@ -423,7 +430,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const finish = (): void => {
       if (kept.length === 0) {
         reportEmpty()
-        commit(null)
+        commit(null, sphere ? 0 : null)
         return
       }
       // The drawn set, by identity. With the threshold sized from the

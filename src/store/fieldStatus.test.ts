@@ -58,6 +58,17 @@ describe('field status', () => {
     expect(field()).toBe(before)
   })
 
+  it('an empty sphere reports zero, never null: null is what strands the label', () => {
+    // The density label has no honest number while `inside` is null, so it
+    // says DRAWING HYPERJUMPS. A build that finds nothing inside the ring
+    // must therefore report 0 rather than leaving the count unset, or the
+    // label never comes back.
+    useHyperspace.getState().fieldBuilding()
+    useHyperspace.getState().fieldDone(0, 0)
+    expect(field().inside).toBe(0)
+    expect(field().inside).not.toBeNull()
+  })
+
   it('an empty sphere settles to READY with a zero count, not to DRAWING', () => {
     // No landfall within the radius is a real answer, and the tag must say so.
     useHyperspace.getState().fieldBuilding()

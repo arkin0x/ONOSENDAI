@@ -18,8 +18,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
-import { coordToLatLon, gpsToDataspaceXyz } from '../lib/hyperspace/landfall'
-import { geocode, parseLatLon } from '../lib/geocode'
+import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
@@ -196,30 +195,6 @@ const kindLabel = (stop: Stop): string => (stop.kind === 'port' ? 'PORT' : 'LAND
 
 export function HyperspacePanel(): JSX.Element {
   const sync = useHyperspace((s) => s.sync)
-  // GO TO: a place typed by hand, coordinates as they stand, anything else
-  // looked up once. The view goes there through the canonical mapping.
-  const [place, setPlace] = useState('')
-  const [finding, setFinding] = useState(false)
-  const [placeError, setPlaceError] = useState<string | null>(null)
-  const goToPlace = async (): Promise<void> => {
-    const text = place.trim()
-    if (!text) return
-    const typed = parseLatLon(text)
-    let target = typed ? { ...typed, name: `${typed.lat}, ${typed.lon}` } : null
-    if (!target) {
-      setFinding(true)
-      try {
-        target = await geocode(text)
-      } catch (err) {
-        setPlaceError(`Could not look that up: ${err instanceof Error ? err.message : String(err)}`)
-        setFinding(false)
-        return
-      }
-      setFinding(false)
-      if (!target) { setPlaceError(`No place found for "${text}". Try coordinates: latitude, longitude.`); return }
-    }
-    flyToPlace(target.lat, target.lon, target.name.toUpperCase())
-  }
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const destination = useHyperspace((s) => s.destination)
   const transit = useCyberspace((s) => s.transit)
@@ -432,24 +407,6 @@ export function HyperspacePanel(): JSX.Element {
       {atStop && progress === null && (
         <p className="hyper__why">ON THE LINE AT BLOCK {line!.fromHeight}: PICK A BLOCK AND RIDE, OR HOP TO LEAVE</p>
       )}
-      {/* A place on the planet, by coordinates or by name. The view goes
-          there at 2^38, thirty-two metres a cell, a few streets across. */}
-      <form
-        className="avatars__find hyper__goto"
-        onSubmit={(e) => { e.preventDefault(); void goToPlace() }}
-      >
-        <input
-          className="avatars__input"
-          value={place}
-          onChange={(e) => { setPlace(e.target.value); setPlaceError(null) }}
-          placeholder="latitude, longitude or a place name"
-          spellCheck={false}
-          autoComplete="off"
-          aria-label="Place on Earth to view"
-        />
-        <button className="avatars__go" type="submit" disabled={place.trim().length === 0 || finding}>{finding ? 'FINDING' : 'GO TO'}</button>
-      </form>
-      {placeError && <p className="notice">{placeError}</p>}
       <button
         className="hyper__btn hyper__btn--earth"
         onClick={viewEarth}
@@ -499,23 +456,6 @@ export function selectStopInScene(height: number): void {
     stopPlane(stop),
     `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
   )
-}
-
-/** The zoom a typed place arrives at: 2^38, thirty-two metres a cell, a few streets across the grid. */
-const PLACE_SCALE = 38
-
-/**
- * Fly to a place on the surface, by its GPS coordinate, through the same
- * canonical mapping a landfall uses (gpsToDataspaceXyz), so the point the
- * view lands on is the point the protocol means by that latitude and
- * longitude. Lines up dataspace exactly as EARTH does.
- */
-export function flyToPlace(lat: string, lon: string, label: string): void {
-  ownHyperspaceView()
-  markViewedStop(null)
-  useCyberspace.getState().setPlane(0)
-  const { x, y, z } = gpsToDataspaceXyz(lat, lon)
-  useCyberspace.getState().focusOn({ x, y, z }, 0, label, PLACE_SCALE)
 }
 
 /**

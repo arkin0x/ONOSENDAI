@@ -100,6 +100,8 @@ interface ShardsState {
   mine: MyDeployment[]
   discovered: Record<string, Hidden>
   deleted: Record<string, true>
+  /** Bags taken down from here, by `author:lookupId`: what the public LOOT list matches on. */
+  deletedBags: Record<string, true>
   inspecting: string | null
   scanning: boolean
   /** The region whose bag is being sent to the relays right now, by lookup id. */
@@ -145,6 +147,8 @@ interface ShardsState {
 
 const MINE_KEY = 'onosendai:deployments'
 const DELETED_KEY = 'onosendai:deployments-deleted'
+/** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
+const DELETED_BAGS_KEY = 'onosendai:bags-deleted'
 
 function loadMine(): MyDeployment[] {
   try {
@@ -172,6 +176,31 @@ function loadDeleted(): Record<string, true> {
 
 function saveDeleted(deleted: Record<string, true>): void {
   try { localStorage.setItem(DELETED_KEY, JSON.stringify(Object.keys(deleted))) } catch { /* quota or private mode */ }
+}
+
+/**
+ * The bags this identity has taken down.
+ *
+ * `deleted` above is keyed by the event id of the thing inside a bag, which
+ * is the right key for the Stash and for a scan. The public LOOT list is a
+ * list of bags, keyed by author and lookup id, and it never asked the Stash
+ * anything, so a bag taken down still appeared there. This is the key that
+ * list can match, and it lives on disk because that list survives a reload.
+ */
+export function loadDeletedBags(): Record<string, true> {
+  try {
+    const raw = localStorage.getItem(DELETED_BAGS_KEY)
+    const list = raw ? (JSON.parse(raw) as unknown) : []
+    const out: Record<string, true> = {}
+    if (Array.isArray(list)) for (const k of list) if (typeof k === 'string') out[k] = true
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveDeletedBags(bags: Record<string, true>): void {
+  try { localStorage.setItem(DELETED_BAGS_KEY, JSON.stringify(Object.keys(bags))) } catch { /* quota or private mode */ }
 }
 
 export function positionOf(d: { at: { x: string; y: string; z: string } }): Position {
@@ -271,6 +300,7 @@ export const useShards = create<ShardsState>((set, get) => {
     mine: loadMine(),
     discovered: {},
     deleted: loadDeleted(),
+    deletedBags: loadDeletedBags(),
     inspecting: null,
     scanning: false,
     broadcasting: null,
@@ -458,23 +488,43 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!item) return
       const cs = cyber()
       const key = hexToBytes(item.keyHex)
-      const remaining = get().mine.filter((d) => d.lookupId === item.lookupId && d.eventId !== eventId)
+      // Taking something down reaches the relay whenever the bag is already
+      // there, LOCAL or not. LOCAL used to silence this, which meant a
+      // published bag deleted while LOCAL was deleted only on this device and
+      // stayed on the relay for good, with nothing on screen saying so.
+      // Deleting is an explicit act on one bag, exactly as publishing one is,
+      // and it tells the relay nothing it does not already hold.
+      const wasPublic = get().mine.some((d) => d.lookupId === item.lookupId && d.published)
+
+      // What is really in this bag, gathered the way publishing gathers it:
+      // from the relay as well as from here (gatherInners, which only ever
+      // reads this identity's own envelopes, so a bag never holds anyone
+      // else's work). This device's own list is not the bag. Something hidden
+      // in the same region from another device is in the bag and not in the
+      // list, and going by the list alone both dropped it from a rewrite and,
+      // when it was the only other thing, deleted the whole envelope as if
+      // the bag were empty.
+      const gathered = await gatherInners(item.lookupId, key, wasPublic)
+      const left = gathered.filter((e) => e.id !== eventId)
 
       let mine: MyDeployment[]
-      if (remaining.length > 0) {
+      if (left.length > 0) {
         // Rewrite the region bag without this item; the newer bag replaces it.
-        const { event, published } = await publishBag(remaining.map((d) => d.inner), key, item.lookupId, item.height, cs.live)
+        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic)
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
           .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
-        if (cs.live && item.published) {
+        if (wasPublic) {
           const del = await cs.signEvent({
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
             content: 'hidden content removed',
-            tags: [['e', item.bagId], ['k', String(HIDDEN_KIND)]],
+            // kind 33330 is addressable, so the address is what a relay
+            // replaces and what NIP-09 asks for; the event id goes too, for
+            // relays that only match that.
+            tags: [['a', `${HIDDEN_KIND}:${item.inner.pubkey}:${item.lookupId}`], ['e', item.bagId], ['k', String(HIDDEN_KIND)]],
           })
           try { await publishMany(item.relays ?? relaySet(), del) } catch { /* best effort */ }
         }
@@ -485,9 +535,15 @@ export const useShards = create<ShardsState>((set, get) => {
       const discovered = { ...get().discovered }
       delete discovered[eventId]
       const wasInspecting = get().inspecting === eventId
-      set({ mine, deleted, discovered, inspecting: wasInspecting ? null : get().inspecting })
+      // The whole bag is gone only when nothing of ours is left in it. The
+      // public list is a list of bags, so that is the grain it forgets at.
+      const deletedBags = left.length > 0
+        ? get().deletedBags
+        : { ...get().deletedBags, [`${item.inner.pubkey}:${item.lookupId}`]: true as const }
+      set({ mine, deleted, deletedBags, discovered, inspecting: wasInspecting ? null : get().inspecting })
       if (wasInspecting) cs.clearFocus()
       saveMine(mine); saveDeleted(deleted)
+      if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
     inspect: (eventId) => set({ inspecting: eventId }),

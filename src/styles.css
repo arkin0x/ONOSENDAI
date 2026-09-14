@@ -258,6 +258,65 @@ body {
   color: var(--dim);
 }
 
+/* Mid-flight, and refused. Both mean "still on this device", but a refusal is
+ * not a choice and must not read like one. */
+.tag--sending {
+  color: var(--warn);
+}
+
+.tag--failed {
+  color: var(--danger);
+}
+
+/* One row per action of the chain, under the stats: index, kind, short id and
+ * the compact LIVE/LOCAL tag. Oldest first, which is both the order the chain
+ * is read in and the order the publisher sends in, with the box scrolled to
+ * the newest. Fixed height so a long chain cannot push the genesis and head
+ * lines, or the panels below this one, off the screen. */
+.chainrows {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 132px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.chainrows__row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.1);
+}
+
+.chainrows__row:last-child {
+  border-bottom: none;
+}
+
+.chainrows__n {
+  font-size: 9px;
+  color: var(--dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.chainrows__type {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.chainrows__type--spawn { color: var(--ok); }
+.chainrows__type--sidestep { color: var(--sidestep); }
+
+.chainrows__id {
+  font-size: 9px;
+  color: var(--dim);
+  opacity: 0.7;
+}
+
 /* Relay state, inline after the published count. */
 .relay {
   font-size: 9px;
@@ -1380,6 +1439,12 @@ kbd {
   font-size: 12px;
   line-height: 1.6;
   color: var(--dim);
+}
+
+/* A body kept exactly as it was written: line breaks and the leading space on
+ * a bullet survive, and long lines still wrap to the card. */
+.modal__pre {
+  white-space: pre-wrap;
 }
 
 .modal__row {
@@ -4867,6 +4932,18 @@ kbd {
 
 .modal__card.cloud {
   border-color: rgba(255, 210, 125, 0.5);
+}
+
+/* Going Live: not a destruction, so not the red card. Green, the same green
+   the LIVE half of the switch lights up in and the same green a published
+   action wears in the chain panel. */
+.modal__card.golive {
+  border-color: rgba(82, 227, 159, 0.5);
+}
+
+.modal__card.golive .modal__confirm {
+  background: var(--ok);
+  border-color: var(--ok);
 }
 
 .modal__card.invoice {

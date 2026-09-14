@@ -2013,7 +2013,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   setLive: (live) => {
     if (live === get().live) return
     saveLive(live)
-    set({ live, publishError: null })
+    // Going Local stops the publisher, and with it every retry, so an event
+    // left reading 'sending' or 'failed' would be describing something that
+    // is no longer happening: the panel would say RETRYING at a publisher
+    // that is not going to try. Both are demoted to what they actually are
+    // now, signed and held here, which is the same reason the last refusal is
+    // cleared off the panel on the line below.
+    const published = live
+      ? get().published
+      : Object.fromEntries(Object.entries(get().published)
+        .map(([id, st]) => [id, st === 'ok' ? st : 'queued' as const]))
+    set({ live, published, publishError: null })
   },
 
   respawn: async () => {

@@ -101,11 +101,11 @@ export function LootPanel(): JSX.Element {
       </div>
 
       <Explanation>
-        Identities can encrypt messages, 3D objects (shards), or other data by
-        location. These encrypted bundles are called "bags" and might have clues
-        as to where they can be found. The size is the area wherein the bag can be
-        found; larger is more work to decrypt but easier to find, smaller is less
-        work to decrypt but harder to find.
+        Identities can encrypt messages, 3D objects (shards), bitcoin (cashu
+        ecash), or other data by location. These encrypted bundles are called
+        "bags" and might have clues as to where they can be found. The size is
+        the area wherein the bag can be found; larger is more work to decrypt
+        but easier to find, smaller is less work to decrypt but harder to find.
       </Explanation>
 
       {/* Through a portal: the panel's backdrop-filter makes it a stacking context, under the panels below it. */}

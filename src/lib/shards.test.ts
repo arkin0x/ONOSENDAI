@@ -50,6 +50,56 @@ describe('payload', () => {
   })
 })
 
+describe('the pose on the wire', () => {
+  const standing: ShardModel = { ...tri, up: true, spin: 135 }
+
+  it('is absent from a shard that lies as it was built, byte for byte as before', () => {
+    const p = toPayload(tri)
+    expect('up' in p).toBe(false)
+    expect('spin' in p).toBe(false)
+    // An older payload, which has neither, reads back as lying flat.
+    const back = fromPayload(JSON.parse(JSON.stringify(p)), 'x')!
+    expect(back.up).toBe(false)
+    expect(back.spin).toBe(0)
+  })
+
+  it('round-trips a standing shard with its bearing', () => {
+    const back = fromPayload(JSON.parse(JSON.stringify(toPayload(standing))), 'x')!
+    expect(back.up).toBe(true)
+    expect(back.spin).toBe(135)
+  })
+
+  it('wraps the bearing it writes into 0..359', () => {
+    expect(toPayload({ ...standing, spin: 400 }).spin).toBe(40)
+    expect(toPayload({ ...standing, spin: -1 }).spin).toBe(359)
+  })
+
+  it('ignores a bearing on a shard that does not say it stands', () => {
+    const p = { ...toPayload(tri), spin: 90 }
+    const back = fromPayload(p, 'x')!
+    expect(back.up).toBe(false)
+    expect(back.spin).toBe(0)
+  })
+
+  it('refuses a pose it cannot draw', () => {
+    const p = toPayload(standing)
+    expect(fromPayload({ ...p, up: 'yes' }, 'x')).toBeNull()
+    expect(fromPayload({ ...p, spin: 1.5 }, 'x')).toBeNull()
+    expect(fromPayload({ ...p, spin: 360 }, 'x')).toBeNull()
+    expect(fromPayload({ ...p, spin: -1 }, 'x')).toBeNull()
+    expect(fromPayload({ ...p, spin: '90' }, 'x')).toBeNull()
+  })
+
+  it('fills the pose in on a model stored before it existed', () => {
+    const old = { ...tri } as Partial<ShardModel>
+    delete old.up
+    delete old.spin
+    const back = normalizeStored(old as ShardModel)
+    expect(back.up).toBe(false)
+    expect(back.spin).toBe(0)
+  })
+})
+
 describe('geometry', () => {
   it('flattens vertices and faces in order', () => {
     const f = flatten(tri)

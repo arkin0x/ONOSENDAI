@@ -29,7 +29,8 @@ import {
   LineBasicMaterial,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
+import { flatten, posed, ticksOf, toRender, type ShardModel } from '../lib/shards'
+import type { Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from '../lib/orient'
 import { faceEdges } from '../lib/outline'
@@ -69,6 +70,14 @@ interface Props {
    * region-encrypted.
    */
   clip?: Box
+  /**
+   * The shard standing on the Earth where it is hidden, in the view frame
+   * (lib/pose.ts drawPoseAt): the turn applied to every vertex before the
+   * render mapping, so the bottom faces the ground and +Z faces its spin.
+   * Absent for a shard lying on cyberspace axes as it was built, which is
+   * every shard hidden before the pose existed and every one in cyberspace.
+   */
+  pose?: Pose
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -79,13 +88,13 @@ const STATIC = [0, 0.9, 1] as const
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip }: Props): JSX.Element | null {
+export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose }: Props): JSX.Element | null {
   const { positions, colors, index, faces } = useMemo(() => {
-    const f = flatten(shard)
+    const f = flatten(shard, pose)
     const oriented = lit
       // Wound outward, and without the faces buried inside a join, which would
       // only fight the face they sit against (orient.ts).
-      ? (() => { const o = orientShard(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces); return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() } })()
+      ? (() => { const o = orientShard(shard.vertices.map((v) => toRender(posed(ticksOf(v), pose))), shard.faces); return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() } })()
       : f
     if (!clip || boxContains(clip, oriented.positions)) return { ...oriented, faces: shard.faces as number[][] }
     // Cropped to its region: the faces cut at the walls, and the points that
@@ -99,7 +108,7 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     const faces: number[][] = []
     for (let t = 0; t + 2 < cut.index.length; t += 3) faces.push([cut.index[t], cut.index[t + 1], cut.index[t + 2]])
     return { ...cut, faces }
-  }, [shard.vertices, shard.faces, lit, clip])
+  }, [shard.vertices, shard.faces, lit, clip, pose])
 
   // Live copies: the decode writes into these, the targets stay untouched.
   const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])

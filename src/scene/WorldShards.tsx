@@ -17,6 +17,7 @@ import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
+import { drawPoseAt } from '../lib/pose'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
@@ -49,7 +50,12 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         const scale = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
         // Sealed to one cube of side 2^height: nothing of it is drawn outside.
         const clip = regionBox(w.at, w.height, shard.unit, scaleExp, axes)
-        return { key: w.key, shard, centre, scale, clip }
+        // Standing on the ground, if that is how it was hidden. The pose is
+        // derived from the bag's own position, so every finder computes the
+        // same one without anything extra on the wire beyond `up` and `spin`.
+        // Dataspace only: cyberspace has no planet to stand on.
+        const pose = shard.up && w.plane === 0 ? drawPoseAt(w.at, shard.spin, axes) : undefined
+        return { key: w.key, shard, centre, scale, clip, pose }
       })
       .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldShards reads.
@@ -70,7 +76,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
         }
         return (
           <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world clip={w.clip} />
+            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world clip={w.clip} pose={w.pose} />
             {/* An invisible, generous tap target: shards can be a few pixels. */}
             <mesh onClick={open}>
               <sphereGeometry args={[hit, 8, 8]} />

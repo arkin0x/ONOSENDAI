@@ -56,6 +56,9 @@ function previewShard(unit: number): ShardModel {
     name: 'Tessier-Ashpool construct',
     unit,
     extent: GRID_HALF,
+    // The spawn construct is drawn on cyberspace axes, never stood up.
+    up: false,
+    spin: 0,
     mode: 'lines',
     vertices: path.map((p, i) => ({ p, c: i < 16 ? [0, 0.9, 1] : [0.97, 0.58, 0.1] })),
     faces: [],

@@ -15,12 +15,23 @@
  * shard at that size without editing the model on the bench, so the same shard
  * goes out as a trinket in one place and a monument in another. A message has
  * no size, so the row is not offered for one.
+ *
+ * SNAP TO EARTH is the third choice, and only where it means anything: in
+ * dataspace, at height 27 and above (lib/pose.ts SNAP_MIN_HEIGHT). A shard is
+ * built on cyberspace axes, and cyberspace Y is the planet's polar axis, so a
+ * shard built upright stands upright only at the poles and lies on its side at
+ * the equator. The snap turns it to the ground under it: bottom to Earth, +Z
+ * facing SPIN, a compass bearing in whole degrees. FINE ROTATION hands SPIN to
+ * the camera, so orbiting aims the shard and the ghost shows exactly what
+ * lands. Both travel inside the encrypted payload, so a finder decrypts the
+ * pose along with the shape and sees it as it was placed.
  */
 
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from '../lib/shards'
 import { formatCellSize } from '../lib/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
+import { snapOffered } from '../lib/pose'
 import { messagePreview } from '../lib/hidden'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
@@ -41,6 +52,10 @@ export function DeployBar(): JSX.Element | null {
   const autoMaxSats = useCyberspace((s) => s.cloudPrefs.autoMaxSats)
   const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
   const ladder = useCyberspace((s) => s.cloud.provider?.pricing?.hop)
+  const plane = useCyberspace((s) => s.plane)
+  const up = useShards((s) => s.deployUp)
+  const spin = useShards((s) => s.deploySpin)
+  const follow = useShards((s) => s.deployFollow)
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
   const hopLimit = useCalibration((s) => s.hopHeight)
@@ -97,8 +112,40 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
+      {/* Standing on the ground, where there is ground: dataspace, and big
+          enough that an orientation could ever be seen. */}
+      {!isMessage && snapOffered(plane, height) && (
+        <div className="deploybar__row deploybar__row--snap">
+          <span className="deploybar__label">SNAP TO EARTH</span>
+          <button
+            className={`deploybar__toggle ${up ? 'is-on' : ''}`}
+            aria-pressed={up}
+            onClick={() => useShards.getState().setDeployUp(!useShards.getState().deployUp)}
+            {...noCallout}
+          >{up ? 'ON' : 'OFF'}</button>
+          {up && <span className="deploybar__radius">bottom to Earth</span>}
+        </div>
+      )}
+
+      {!isMessage && snapOffered(plane, height) && up && (
+        <div className="deploybar__row deploybar__row--spin">
+          <span className="deploybar__label">FINE ROTATION</span>
+          <button
+            className={`deploybar__toggle ${follow ? 'is-on' : ''}`}
+            aria-pressed={follow}
+            onClick={() => useShards.getState().setDeployFollow(!useShards.getState().deployFollow)}
+            {...noCallout}
+          >{follow ? 'ON' : 'OFF'}</button>
+          <button className="deploybar__btn" {...bind(() => useShards.getState().setDeploySpin(useShards.getState().deploySpin - 1))} disabled={follow} aria-label="Turn counterclockwise">−</button>
+          <span className="deploybar__value">SPIN {spin}°</span>
+          <button className="deploybar__btn" {...bind(() => useShards.getState().setDeploySpin(useShards.getState().deploySpin + 1))} disabled={follow} aria-label="Turn clockwise">+</button>
+          {follow && <span className="deploybar__radius">orbit to aim</span>}
+        </div>
+      )}
+
       <div className="deploybar__row deploybar__hint">
         Aim with the movement controls; the ghost is where it lands.
+        {!isMessage && snapOffered(plane, height) && up && ' Stands the shard on the ground here, bottom to Earth. SPIN is the compass bearing its +Z faces.'}
         {height === 0
           ? ' At height 0 only someone on this exact point can find it.'
           : ` Anyone who computes this ${formatCellSize(height)} region can find and open it.`}

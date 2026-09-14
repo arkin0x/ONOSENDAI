@@ -40,6 +40,18 @@ interface Props {
   axes: ViewAxes
 }
 
+/**
+ * The credit line under a hidden thing, carried by the label it belongs to
+ * rather than placed near it. It used to be its own WorldLabel anchored three
+ * quarters of a cell below the item, which meant the text held a constant
+ * pixel size while the gap to it grew with camera depth: at a wide view the
+ * credit ended up an inch from what it credited, with nothing to say which
+ * item it belonged to (arkinox, 2026-09-14).
+ */
+function author(w: { author: string; mine: boolean }): string {
+  return `— ${shortAuthor(w.author, w.mine)}`
+}
+
 function shortAuthor(pubkey: string, mine: boolean): string {
   if (mine) return 'you'
   try {
@@ -126,16 +138,35 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
             <WorldMark kind={coin ? 'coin' : 'note'} at={w.centre} />
             {coin
               ? <>
-                  <WorldLabel text="₿" color={BITCOIN} at={w.centre} align="center" px={COIN_PX} />
-                  {/* Words left around the token are the message; the base64 is not. */}
+                  <WorldLabel
+                    text="₿"
+                    color={BITCOIN}
+                    at={w.centre}
+                    align="center"
+                    px={COIN_PX}
+                    sub={textWithoutToken(w.text) ? undefined : author(w)}
+                    subColor={ACCENT}
+                  />
+                  {/* Words left around the token are the message; the base64 is not.
+                      Held a fixed number of pixels below the coin rather than a
+                      fraction of a cell, so the gap does not breathe with depth. */}
                   {textWithoutToken(w.text) && (
-                    <WorldLabel text={messageBillboard(textWithoutToken(w.text))} color={NOTE} at={[w.centre[0], w.centre[1] - 0.75, w.centre[2]]} align="center" px={12} />
+                    <WorldLabel
+                      text={messageBillboard(textWithoutToken(w.text))}
+                      color={NOTE}
+                      at={w.centre}
+                      offsetPx={[0, -COIN_PX]}
+                      align="center"
+                      px={12}
+                      sub={author(w)}
+                      subColor={ACCENT}
+                    />
                   )}
                 </>
               : births[w.key] !== undefined
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
-                : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} />}
-            <WorldLabel text={`— ${shortAuthor(w.author, w.mine)}`} color={ACCENT} at={[w.centre[0], w.centre[1] - 0.9, w.centre[2]]} align="center" px={9} opacity={0.7} />
+                : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
+
             <mesh position={w.centre} onClick={open}>
               <sphereGeometry args={[1, 8, 8]} />
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />

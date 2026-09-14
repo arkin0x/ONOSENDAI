@@ -119,14 +119,17 @@ export function graticuleStep(windowDeg: number, minLines = 6): number {
 }
 
 /**
- * How strongly surface detail (the graticule patch, and later the
- * coastlines) is drawn at this scale. Full strength down to 2^34, the
- * spec's human scale, then fading out through meter scale: below that the
- * shore and the grid of places stop being what the view is about, and the
- * fade is the scale itself teaching that. Zero at and below 2^31.
+ * How strongly surface detail (the graticule patch and the coastlines) is
+ * drawn at this scale. Full strength down to 2^32, half a metre a cell,
+ * which is the last height the planet is drawn at and where you stand in a
+ * hall and place things on its floor. It used to start fading at 2^34, the
+ * spec's human scale, on the idea that metre scale is where the view stops
+ * being about places; standing at a venue with the ground gone underfoot
+ * said otherwise. Below 2^32 it fades, zero at and below 2^30, which is
+ * where the microscopic begins.
  */
-export const SURFACE_DETAIL_FULL = 34
-export const SURFACE_DETAIL_GONE = 31
+export const SURFACE_DETAIL_FULL = 32
+export const SURFACE_DETAIL_GONE = 30
 
 export function surfaceDetailOpacity(scaleExp: number): number {
   if (scaleExp >= SURFACE_DETAIL_FULL) return 1

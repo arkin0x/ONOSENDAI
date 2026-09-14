@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from '../lib/scale'
+import { geocode } from '../lib/geocode'
 import { canonicalViewAt, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
@@ -128,11 +129,41 @@ function PositionPanel(): JSX.Element {
   const [viewBad, setViewBad] = useState(false)
   const [recent, setRecent] = useState<RecentView[]>(() => loadRecent())
   const [recentOpen, setRecentOpen] = useState(false)
+  const [finding, setFinding] = useState(false)
+  const [viewNote, setViewNote] = useState<string | null>(null)
   const look = (typed: string, target: ViewTarget): void => {
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, undefined, true)
+    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
+  }
+  // What is typed is read as it stands: axes, a coordinate, or a latitude and
+  // longitude. Anything else is taken as a place by name and looked up once
+  // (geocode.ts); what comes back is a latitude and longitude, remembered as
+  // such under the place's own name, so the recent entry never needs the
+  // lookup again.
+  const view = async (): Promise<void> => {
+    const typed = viewText.trim()
+    const target = parseViewAt(typed, lookedPlane)
+    if (target) { setViewBad(false); look(typed, target); return }
+    if (!/[a-z]/i.test(typed)) { setViewBad(true); return }
+    setFinding(true)
+    setViewNote(null)
+    try {
+      const place = await geocode(typed)
+      if (!place) { setViewBad(true); setViewNote(`No place found for "${typed}".`); return }
+      const input = `${place.lat}, ${place.lon}`
+      const found = parseViewAt(input, 0)
+      if (!found) { setViewBad(true); return }
+      setViewBad(false)
+      setViewText(input)
+      look(input, { ...found, label: place.name.toUpperCase() })
+    } catch (err) {
+      setViewBad(true)
+      setViewNote(`Could not look that up: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setFinding(false)
+    }
   }
 
   // Every figure copies on a tap, raw: the grouping commas are for reading,
@@ -173,26 +204,21 @@ function PositionPanel(): JSX.Element {
         <span className="legend__label">View a coordinate</span>
         <form
           className="avatars__find"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const target = parseViewAt(viewText, lookedPlane)
-            if (!target) { setViewBad(true); return }
-            setViewBad(false)
-            look(viewText, target)
-          }}
+          onSubmit={(e) => { e.preventDefault(); void view() }}
         >
           <input
             className={`avatars__input ${viewBad ? 'is-bad' : ''}`}
             value={viewText}
-            onChange={(e) => { setViewText(e.target.value); setViewBad(false) }}
-            placeholder="x, y, z or a coordinate"
+            onChange={(e) => { setViewText(e.target.value); setViewBad(false); setViewNote(null) }}
+            placeholder="x, y, z · a coordinate · a place on Earth"
             spellCheck={false}
             autoComplete="off"
             aria-label="A place to view"
             aria-invalid={viewBad}
           />
-          <button className="avatars__go" type="submit" disabled={!viewText.trim()} title="Look at this place without moving">VIEW</button>
+          <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
         </form>
+        {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
           <div className="viewat__recent">
             <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>RECENT {recentOpen ? '▴' : '▾'}</button>

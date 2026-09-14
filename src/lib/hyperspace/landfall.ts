@@ -86,6 +86,50 @@ export function sinCos(xIn: Decimal): { sin: Decimal; cos: Decimal } {
   return { sin: sinSum, cos: cosSum.times(cosSign) }
 }
 
+/** First eccentricity squared, f(2 - f), in the same Decimal as the rest. */
+const WGS84_E2 = WGS84_F.times(new D(2).minus(WGS84_F))
+
+/** Latitude held to [-90, 90] and longitude wrapped to [-180, 180), as the CLI does before converting. */
+function clampLat(lat: Decimal): Decimal {
+  return lat.gt(90) ? new D(90) : lat.lt(-90) ? new D(-90) : lat
+}
+function wrapLon(lon: Decimal): Decimal {
+  let l = lon
+  while (l.gte(180)) l = l.minus(360)
+  while (l.lt(-180)) l = l.plus(360)
+  return l
+}
+
+/**
+ * A GPS coordinate as dataspace axis values, exactly as the CLI's canonical
+ * gps_to_dataspace_xyz produces them (spec version 2026-03-16-h34-corrected).
+ *
+ * The mapping is consensus-critical for a landfall, so a place typed by hand
+ * goes through the very same arithmetic rather than a float cousin of it:
+ * Decimal at precision 96 with ROUND_HALF_EVEN, the exact PI, the same
+ * Taylor sin and cos, latitude clamped to [-90, 90], longitude wrapped to
+ * [-180, 180), altitude forced to the ellipsoid surface, geodetic to ECEF
+ * through the prime vertical radius, metres to kilometres, the §9.4
+ * permutation (X_cs = X_ecef, Y_cs = Z_ecef, Z_cs = Y_ecef), and
+ * kmToAxisU's rounding and clamp. The reference values in the test were
+ * produced by that Python code, and they match to the gibson.
+ */
+export function gpsToDataspaceXyz(latDeg: number | string, lonDeg: number | string): { x: bigint; y: bigint; z: bigint } {
+  const lat = clampLat(new D(String(latDeg)))
+  const lon = wrapLon(new D(String(lonDeg)))
+  const latR = lat.times(PI).div(180)
+  const lonR = lon.times(PI).div(180)
+  const { sin: sinLat, cos: cosLat } = sinCos(latR)
+  const { sin: sinLon, cos: cosLon } = sinCos(lonR)
+  const one = new D(1)
+  const n = WGS84_A_M.div(one.minus(WGS84_E2.times(sinLat).times(sinLat)).sqrt())
+  const xM = n.times(cosLat).times(cosLon)
+  const yM = n.times(cosLat).times(sinLon)
+  const zM = n.times(one.minus(WGS84_E2)).times(sinLat)
+  const km = new D(1000)
+  return { x: kmToAxisU(xM.div(km)), y: kmToAxisU(zM.div(km)), z: kmToAxisU(yM.div(km)) }
+}
+
 /** km from the centre to a u85 axis value, ROUND_HALF_EVEN, clamped (§9.7 step 9). */
 export function kmToAxisU(kmFromCenter: Decimal): bigint {
   const u = kmFromCenter.times(UNITS_PER_KM).plus(new D(AXIS_CENTER.toString()))

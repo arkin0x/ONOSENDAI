@@ -4,14 +4,29 @@
  * The free view (arkinox, 2026-09-07): move the view anywhere in cyberspace
  * without the chain line and the grid coming along, which is what focusing
  * does. This reads what a person types into the POSITION panel: three
- * decimal axis values separated by commas or spaces, or a 64-hex coordinate
- * as the c and C tags carry it.
+ * decimal axis values separated by commas or spaces, a 64-hex coordinate as
+ * the c and C tags carry it, or a latitude and longitude, which names a
+ * point on Earth through the canonical GPS mapping (landfall.ts
+ * gpsToDataspaceXyz) and arrives at 2^38, thirty-two metres a cell. A place
+ * by name is not parsed here: it needs a lookup, and that is the panel's to
+ * do; what comes back is a latitude and longitude, which this reads.
  */
 
 import { AXIS_MAX, coordToXyz, type Plane } from 'cyberspace-core'
 import type { Position } from './space'
+import { parseLatLon } from './geocode'
+import { gpsToDataspaceXyz } from './hyperspace/landfall'
 
-export interface ViewTarget { position: Position; plane: Plane; label: string }
+export interface ViewTarget {
+  position: Position
+  plane: Plane
+  label: string
+  /** The zoom to arrive at, when the place implies one; a coordinate keeps the zoom you had. */
+  scaleExp?: number
+}
+
+/** Where a typed place on Earth lands: 2^38, thirty-two metres a cell, a few streets across the grid. */
+export const PLACE_SCALE = 38
 
 /** The place a typed string names, or null when it names nothing. */
 export function parseViewAt(text: string, plane: Plane): ViewTarget | null {
@@ -19,6 +34,13 @@ export function parseViewAt(text: string, plane: Plane): ViewTarget | null {
   if (/^[0-9a-f]{64}$/i.test(t)) {
     const c = coordToXyz(BigInt('0x' + t))
     return { position: { x: c.x, y: c.y, z: c.z }, plane: c.plane, label: `${t.slice(0, 8)}…${t.slice(-4)}` }
+  }
+  // Two numbers are a latitude and a longitude, a point on the planet. Three
+  // are axis values, so the two shapes never meet.
+  const geo = parseLatLon(t)
+  if (geo) {
+    const { x, y, z } = gpsToDataspaceXyz(geo.lat, geo.lon)
+    return { position: { x, y, z }, plane: 0, label: `${geo.lat}, ${geo.lon}`, scaleExp: PLACE_SCALE }
   }
   const parts = t.split(/[\s,]+/).filter(Boolean)
   if (parts.length !== 3 || !parts.every((p) => /^\d+$/.test(p))) return null

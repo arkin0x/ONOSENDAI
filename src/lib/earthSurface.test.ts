@@ -87,8 +87,10 @@ describe('surfaceDetailOpacity', () => {
   it('is full at human scale, gone below meter scale', () => {
     expect(surfaceDetailOpacity(49)).toBe(1)
     expect(surfaceDetailOpacity(34)).toBe(1)
-    expect(surfaceDetailOpacity(33)).toBeCloseTo(2 / 3, 5)
-    expect(surfaceDetailOpacity(31)).toBe(0)
+    // The ground holds to 2^32, the last height the planet is drawn at.
+    expect(surfaceDetailOpacity(32)).toBe(1)
+    expect(surfaceDetailOpacity(31)).toBeCloseTo(1 / 2, 5)
+    expect(surfaceDetailOpacity(30)).toBe(0)
     expect(surfaceDetailOpacity(0)).toBe(0)
   })
 })

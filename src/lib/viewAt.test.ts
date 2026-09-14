@@ -16,8 +16,30 @@ describe('parseViewAt', () => {
     expect(v.position).toEqual({ x: 5n, y: 6n, z: 7n })
     expect(v.plane).toBe(1)
   })
+  it('reads a latitude and longitude as a point on Earth, through the canonical mapping, arriving at 2^38', () => {
+    // The San Francisco reference triple from cyberspace-cli's own output.
+    const sf = parseViewAt('37.7749, -122.4194', 1)
+    expect(sf).toEqual({
+      position: { x: 19342813090588201868394006n, y: 19342813147212194597068734n, z: 19342813077231844489621127n },
+      plane: 0,
+      label: '37.7749, -122.4194',
+      scaleExp: 38,
+    })
+    // The plane typed for is ignored: Earth is a dataspace thing.
+    expect(parseViewAt('37.7749N 122.4194W', 1)?.position).toEqual(sf?.position)
+    // A small pair is a place near the origin of the map, not a refusal.
+    expect(parseViewAt('1, 2', 0)?.plane).toBe(0)
+    // Three numbers are still axes, so the two shapes never meet.
+    expect(parseViewAt('5, 6, 7', 0)?.plane).toBe(0)
+    expect(parseViewAt('5, 6, 7', 0)?.scaleExp).toBeUndefined()
+  })
+
   it('refuses anything else', () => {
-    expect(parseViewAt('1, 2', 0)).toBeNull()
+    // Two numbers used to be nothing; now they are a point on Earth, so what
+    // is refused is a pair that is not on Earth, and words that are not a
+    // place this parser can read (a name is the panel's to look up).
+    expect(parseViewAt('91, 0', 0)).toBeNull()
+    expect(parseViewAt('0, 181', 0)).toBeNull()
     expect(parseViewAt('a, b, c', 0)).toBeNull()
     expect(parseViewAt(`${(1n << 85n).toString()}, 0, 0`, 0)).toBeNull()
   })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { coordToHex } from 'cyberspace-core'
-import { landfallCoord, landfallCoordApprox, coordToLatLon } from './landfall'
+import { landfallCoord, landfallCoordApprox, coordToLatLon, gpsToDataspaceXyz } from './landfall'
 
 // DECK-0001 v3 §1.2 golden vectors (mainnet block hashes).
 const VECTORS: Array<[number, string, string, number, number]> = [
@@ -40,5 +40,29 @@ describe('landfall derivation (DECK-0001 v3 §1.2)', () => {
       expect(Math.abs(a.lon - b.lon)).toBeLessThan(1e-4)
       expect(Math.abs(a.altM - b.altM)).toBeLessThan(5)
     }
+  })
+})
+
+describe('gpsToDataspaceXyz', () => {
+  // Produced by cyberspace-cli's canonical gps_to_dataspace_xyz (Decimal,
+  // precision 96, ROUND_HALF_EVEN), spec version 2026-03-16-h34-corrected.
+  const REFERENCE: Array<[number, number, string, string, string]> = [
+    [0, 0, '19342813168621846444113920', '19342813113834066795298816', '19342813113834066795298816'],
+    [51.5007, -0.1246, '19342813148009793067356437', '19342813156512391784587309', '19342813113759745401253303'],
+    [-33.8568, 151.2153, '19342813073916910149282436', '19342813083483533274093808', '19342813135764830547981565'],
+    [37.7749, -122.4194, '19342813090588201868394006', '19342813147212194597068734', '19342813077231844489621127'],
+    [89.9999, 179.9999, '19342813113833970850900943', '19342813168438153392125810', '19342813113834066795466271'],
+  ]
+
+  it('matches the CLI to the gibson at five places, poles and antimeridian included', () => {
+    for (const [lat, lon, x, y, z] of REFERENCE) {
+      expect(gpsToDataspaceXyz(lat, lon)).toEqual({ x: BigInt(x), y: BigInt(y), z: BigInt(z) })
+    }
+  })
+
+  it('clamps latitude and wraps longitude as the CLI does', () => {
+    expect(gpsToDataspaceXyz(95, 0)).toEqual(gpsToDataspaceXyz(90, 0))
+    expect(gpsToDataspaceXyz(0, 180)).toEqual(gpsToDataspaceXyz(0, -180))
+    expect(gpsToDataspaceXyz(0, 540)).toEqual(gpsToDataspaceXyz(0, 180))
   })
 })

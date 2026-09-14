@@ -47,6 +47,45 @@ async function localDeployment(): Promise<MyDeployment> {
   }
 }
 
+describe('taking a published bag down', () => {
+  beforeEach(async () => {
+    const dep = await localDeployment()
+    useShards.setState({ mine: [{ ...dep, published: true, relays: ['wss://relay.test'] }], deleted: {}, deletedBags: {}, discovered: {} })
+    vi.mocked(publishMany).mockClear()
+    localStorage.removeItem('onosendai:bags-deleted')
+  })
+
+  it('tells the relay even while LOCAL, since the bag is already out there', async () => {
+    // LOCAL used to silence this, which deleted the bag on this device only
+    // and left it on the relay for good with nothing on screen saying so.
+    useCyberspace.setState({ live: false })
+    const id = useShards.getState().mine[0].eventId
+    await useShards.getState().deleteInstance(id)
+    expect(vi.mocked(publishMany)).toHaveBeenCalledTimes(1)
+    const [, del] = vi.mocked(publishMany).mock.calls[0]
+    expect(del.kind).toBe(5)
+    // kind 33330 is addressable, so the address is what a relay replaces.
+    expect(del.tags.some((t) => t[0] === 'a' && t[1].startsWith('33330:'))).toBe(true)
+    expect(del.tags.some((t) => t[0] === 'e')).toBe(true)
+    expect(useShards.getState().mine).toHaveLength(0)
+  })
+
+  it('remembers the bag by the key the public list uses, on disk', async () => {
+    const item = useShards.getState().mine[0]
+    await useShards.getState().deleteInstance(item.eventId)
+    const key = `${item.inner.pubkey}:${item.lookupId}`
+    expect(useShards.getState().deletedBags[key]).toBe(true)
+    expect(JSON.parse(localStorage.getItem('onosendai:bags-deleted') ?? '[]')).toContain(key)
+  })
+
+  it('says nothing to the relay for a bag that was never on it', async () => {
+    useShards.setState({ mine: [{ ...useShards.getState().mine[0], published: false, relays: [] }] })
+    useCyberspace.setState({ live: true })
+    await useShards.getState().deleteInstance(useShards.getState().mine[0].eventId)
+    expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
+  })
+})
+
 describe('broadcasting a bag left LOCAL', () => {
   beforeEach(async () => {
     useShards.setState({ mine: [await localDeployment()], broadcasting: null, broadcastError: null })

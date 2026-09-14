@@ -79,6 +79,20 @@ export function mergeLoot(prev: LootItem[], incoming: LootItem[]): LootItem[] {
 }
 
 /**
+ * The list after a backfill.
+ *
+ * A backfill that came back under its limit is the whole answer for that
+ * relay set, so a bag missing from it is a bag the relay no longer has and it
+ * goes. The list used to be the union of everything ever seen, kept on disk,
+ * so a bag its hider took down stayed on screen for good and survived a
+ * reload. An answer that hit the limit was cut short and says nothing about
+ * what is missing, so nothing is dropped from it.
+ */
+export function afterBackfill(prev: LootItem[], found: LootItem[], limit: number): LootItem[] {
+  return mergeLoot(found.length < limit ? [] : prev, found)
+}
+
+/**
  * The region a bag is encrypted to, as a size: a single gibson at height 0,
  * else the side of the aligned cube. Deliberately not "within X": on someone
  * else's bag that reads as a distance from the viewer, and where the bag is

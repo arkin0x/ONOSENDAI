@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NostrEvent } from './events'
-import { formatBytes, mergeLoot, payloadBytes, regionLabel, summarizeBag } from './loot'
+import { formatBytes, mergeLoot, payloadBytes, regionLabel, summarizeBag, afterBackfill, type LootItem } from './loot'
 
 const pk = (n: number): string => n.toString(16).padStart(64, '0')
 const lookup = (n: number): string => (n + 1).toString(16).padStart(64, 'a')
@@ -40,6 +40,25 @@ describe('payloadBytes', () => {
     expect(payloadBytes('Zm8=')).toBe(2)
     expect(payloadBytes('Zg==')).toBe(1)
     expect(payloadBytes('')).toBe(0)
+  })
+})
+
+const row = (key: string, createdAt = 10): LootItem => ({ bagId: key, key, author: 'a'.repeat(64), lookupId: 'b'.repeat(64), height: 8, createdAt, bytes: 10, riddle: '' })
+
+describe('afterBackfill', () => {
+  it('drops what a complete answer left out, and keeps everything when the answer was cut short', () => {
+    const had = [row('one'), row('two')]
+    // Under the limit: the relay has spoken in full, so "two" is gone.
+    expect(afterBackfill(had, [row('one')], 500).map((i) => i.key)).toEqual(['one'])
+    // At the limit: the answer was truncated and proves nothing about "two".
+    const full = Array.from({ length: 3 }, (_, i) => row(`f${i}`))
+    expect(afterBackfill(had, full, 3).map((i) => i.key).sort()).toEqual(['f0', 'f1', 'f2', 'one', 'two'])
+  })
+
+  it('takes the newer copy of a bag that was rewritten', () => {
+    const older = { ...row('same', 10), bagId: 'old' }
+    const newer = { ...row('same', 20), bagId: 'new' }
+    expect(afterBackfill([older], [newer], 500)).toEqual([newer])
   })
 })
 

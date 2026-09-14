@@ -2907,6 +2907,19 @@ kbd {
   color: #52e39f;
 }
 
+/* The chain chip when a fold from another device changed this chain. Amber
+   for work that went, since it is a loss and it waits to be read; the accent
+   for work that arrived, since it is only an explanation and it fades. */
+.explorer__toggle--dropped {
+  color: var(--bg);
+  background: var(--warn);
+  border-color: var(--warn);
+}
+.explorer__toggle--adopted {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .benchpaste__away {
   position: fixed;
   inset: 0;

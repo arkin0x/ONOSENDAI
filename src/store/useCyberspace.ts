@@ -67,6 +67,7 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
+import { fetchChainEvents } from '../lib/chains'
 import {
   buildChain,
   hopTemplate,
@@ -414,6 +415,22 @@ export interface CyberspaceState {
   pendingTarget: Position | null
   /** The route a commit beyond the ceiling is executing; null otherwise. */
   plan: MovePlan | null
+  /**
+   * What the last fold from elsewhere did to this chain.
+   *
+   * One identity has one chain, however many devices are signed in. When two
+   * of them act from the same head the chain forks, and every reader, this
+   * device included, resolves it the same way: follow the oldest child at the
+   * branch, breaking a tie on the smaller event id (events.ts buildChain).
+   * So one branch wins for everybody and the other one's actions are simply
+   * not in the chain any more. That used to happen in silence, and a silent
+   * loss of work you paid HOSAKA for is the worst way to learn about it.
+   *
+   * `adopted` is how many actions came from another device, which explains an
+   * avatar that moved on its own. `dropped` is how many of this device's
+   * actions the fork took out.
+   */
+  forkNotice: { adopted: number; dropped: number; at: number } | null
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
   spentMsats: number
   /** How many times this identity has respawned; each one began a new chain. */
@@ -502,6 +519,8 @@ export interface CyberspaceState {
   setPlane: (plane: Plane) => void
   applyProofMessage: (msg: ProofResponse) => void
   setLive: (live: boolean) => void
+  /** Put the fork notice away once it has been read. */
+  clearForkNotice: () => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
   /**
    * §3.2: a new spawn event, which by being newer retires every prior action.
@@ -870,6 +889,25 @@ function wakeSigner(): void {
   // dead, the pending request's timeout reconnects and asks again itself.
   if (pendingSigns > 0) return
   void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
+}
+
+/** How long a pre-flight look at the relay is worth. Past this, move anyway. */
+const HEAD_CHECK_MS = 1500
+
+/**
+ * This identity's chain from the relay, or nothing if the relay is slow or
+ * unreachable. Bounded on purpose: this runs in front of every commit, and
+ * the answer is only ever used to avoid forking, never to permit moving.
+ */
+async function freshHead(pubkey: string): Promise<NostrEvent[]> {
+  try {
+    return await Promise.race([
+      fetchChainEvents(pubkey),
+      new Promise<NostrEvent[]>((resolve) => { setTimeout(() => resolve([]), HEAD_CHECK_MS) }),
+    ])
+  } catch {
+    return []
+  }
 }
 
 const pubkeyHex = currentSigner.pubkey
@@ -1566,6 +1604,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   proof: IDLE_PROOF,
   publishError: null,
   live: loadLive(),
+  forkNotice: null,
   signerKind: currentSigner.kind,
   loginError: null,
 
@@ -1613,6 +1652,31 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (get().proof.status === 'computing') return
     // Looking at history: nothing here is a place you can move from.
     if (!get().atHead()) return
+
+    // One look at the relay before signing anything.
+    //
+    // An action names the one before it, so an action signed from a head
+    // another device has already moved past forks the chain, and a fork is
+    // work thrown away: the earlier branch wins for every reader and the
+    // other branch's actions, paid hops included, stop being in the chain.
+    // The live subscription usually has us up to date, so this only catches
+    // the gap between an event reaching the relay and reaching us. LOCAL
+    // changes nothing here: it decides what this device publishes, not
+    // whether it can read. It is bounded and it fails open, because an
+    // unreachable relay must never stop someone moving, and a device that is
+    // genuinely offline cannot be warned at all.
+    const beforeHead = get().prevEventId
+    if (beforeHead !== null) {
+      const fresh = await freshHead(get().identity.pubkey)
+      if (fresh.length > 0) get().adoptChain(fresh)
+      if (get().prevEventId !== beforeHead) {
+        set({
+          pendingTarget: null,
+          proof: { ...IDLE_PROOF, status: 'infeasible', message: 'Another device moved you. Re-aim from where you are now.' },
+        })
+        return
+      }
+    }
 
     // A provisional identity (logged in, never placed) has no genesis yet. Sign
     // its spawn now, on this first deliberate move, rather than at login. This
@@ -2010,6 +2074,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
   },
 
+  clearForkNotice: () => set({ forkNotice: null }),
+
   setLive: (live) => {
     if (live === get().live) return
     saveLive(live)
@@ -2318,6 +2384,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
     const d = derive(saved)
     const following = cur.atHead()
+    // What this fold cost and what it brought. Dropped actions are this
+    // device's own work that the fork took out of the chain; adopted ones are
+    // another device's, and are why the avatar just moved on its own.
+    const kept = new Set(chainEvents.map((e) => e.id))
+    const dropped = cur.events.filter((e) => !kept.has(e.id)).length
+    const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
     set({
       events: d.events,
       genesisId: d.genesisId,
@@ -2331,6 +2403,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       // Follow to the new head only if you were living at it; browsing history
       // or spectating keeps its view while the chain updates underneath.
       ...(following ? { anchor: d.position, anchorPlane: d.headPlane, cursor: d.position, exploreIndex: null } : {}),
+      // A drop is kept until it is read; an adoption is just an explanation
+      // for the movement and fades on its own. A fold that changed nothing
+      // says nothing.
+      ...(dropped > 0 || adopted > 0 ? { forkNotice: { adopted, dropped, at: Date.now() } } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
   },

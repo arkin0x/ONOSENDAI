@@ -4353,10 +4353,12 @@ kbd {
 }
 
 @media (max-width: 1100px) {
-  /* In the instrument stack now; nothing to reposition on a phone. */
-  .hyperbar {
-    margin-top: 6px;
-  }
+  /* No margin here. The bar floated on its own once and needed the nudge;
+     it lives in the instrument stack now, which spaces its children with
+     gap: 8px. The leftover margin added to that gap rather than replacing
+     it, so every .hyperbar chip sat 14px below its neighbour while the
+     chips that are not .hyperbar sat at 8, which is the uneven spacing
+     arkinox kept seeing under XOR BITS (2026-09-15). */
 
   .hyperbar__meta {
     white-space: normal;

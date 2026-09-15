@@ -26,9 +26,9 @@ import { useState } from 'react'
 import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
-import { viewEarth } from './HyperspacePanel'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
+import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { useShards } from '../store/useShards'
 import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
@@ -148,7 +148,13 @@ export function TouchControls(): JSX.Element {
             button means, through the same function so the two can never
             drift: dataspace lined up, no viewed stop, the planet's centre.
             Beside the cube, which is the other one-press view. */}
-        <button className="touchpad__key touchpad__key--earth" title="View Earth (2^52)" aria-label="View Earth" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewEarth() }}>
+        {/* Zoom only, like the cube beside it: it takes you to the scale the
+            planet is legible at and leaves what you are looking at alone.
+            It used to call viewEarth, which also re-targets the planet's
+            centre, so pressing it while looking at a place threw the place
+            away (arkinox, 2026-09-14). adjustScale takes a delta, so the
+            delta is whatever gets this view to EARTH_SCALE_EXP. */}
+        <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
           <Globe size={16} strokeWidth={2.25} aria-hidden />
         </button>
         <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>

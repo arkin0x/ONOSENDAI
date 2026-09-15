@@ -54,6 +54,13 @@ import { coordToXyz } from 'cyberspace-core'
 const TAP_SLOP = 8
 
 /** Same reach as WorldMessages and the sector cage: beyond this a stop is off-grid at this scale. */
+/**
+ * Pixel size of a landfall drawn inside a sphere of interest. Larger than a
+ * port's 3 because these are things to aim at rather than scenery, and well
+ * under the nearest marker's 9 so the one that is called out still stands out.
+ */
+const SPHERE_DOT_PX = 5
+
 const REACH = GRID_RADIUS * 8
 
 /**
@@ -207,6 +214,11 @@ function usePointGeometry(at: [number, number, number] | null): BufferGeometry |
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
+  // gl_PointSize is in drawing-buffer pixels, so a size meant as CSS pixels
+  // has to carry the pixel ratio. Without this a 5px dot is 5 device pixels
+  // on a phone whose buffer is twice the CSS size, which is half of what was
+  // asked for and well under a touch target (arkinox, 2026-09-14).
+  const dpr = useThree((s) => s.viewport.dpr)
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -284,6 +296,13 @@ export function StopField({ axes }: Props): JSX.Element | null {
      * exact count of stops in the sphere, or null when there was no sphere.
      */
     const commit = (next: Built | null, inside: number | null = null): void => {
+      // `inside` is not optional in spirit when a sphere is up: the density
+      // label under the ring has no honest number until one arrives, so it
+      // says DRAWING instead, and a commit that leaves it null strands the
+      // label there for good. Every empty path passes 0, because "nothing
+      // inside the ring" is a real answer and the label should say so
+      // (arkinox, 2026-09-14: "still says DRAWING HYPERJUMPS forever if none
+      // are visible").
       if (job.cancelled) return
       useHyperspace.getState().fieldDone(next ? next.heights.length : 0, inside)
       builtRef.current = next
@@ -302,7 +321,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
 
     if (index.size === 0 || index.permCount === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
 
@@ -323,7 +342,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     for (const [runStart, runEnd] of runs) runTotal += runEnd - runStart
     if (runTotal === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
 
@@ -374,7 +393,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     }
     if (planeTotal === 0) {
       reportEmpty()
-      commit(null)
+      commit(null, sphere ? 0 : null)
       return
     }
     const total = useHyperspace.getState().sync.total
@@ -411,7 +430,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const finish = (): void => {
       if (kept.length === 0) {
         reportEmpty()
-        commit(null)
+        commit(null, sphere ? 0 : null)
         return
       }
       // The drawn set, by identity. With the threshold sized from the
@@ -532,7 +551,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
     useHyperspace.getState().fieldBuilding()
     slice()
 
-    return () => { job.cancelled = true }
+    // Cancelling is not finishing, so the flag has to come down here: the
+    // successor may look at the drift and decide there is nothing to do, in
+    // which case nobody would ever call commit and the tag would read
+    // DRAWING forever. A successor that does rebuild raises it again
+    // immediately, so the tag never flickers.
+    return () => { job.cancelled = true; useHyperspace.getState().fieldSettled() }
     // The spatial deps ride in the keys on purpose: listing the objects too
     // would re-run the build on identity changes that changed nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -614,14 +638,20 @@ export function StopField({ axes }: Props): JSX.Element | null {
           the cloud reads at every zoom instead of vanishing with distance.
           Landfalls: world-sized and attenuated, so the crust shrinks with the
           planet instead of blooming into a solid orange disc when the globe
-          is small on screen. toneMapped and fog both off for the BlackSun
+          is small on screen. Inside a sphere of interest that reverses: the
+          field is a handful of navigation targets rather than a crust, the
+          camera sits about 69 cells out to frame the ring, and the far edge
+          of the sphere is nearly three times the distance of the near edge,
+          which left the farthest stops too small to see or click. There they
+          are pixel-sized like the ports, a little larger, so every stop in
+          the ring reads the same whatever its depth. toneMapped and fog both off for the BlackSun
           reason: these colors are the encoding, and half the field sits
           beyond where the scene fog has already gone to black.
         */}
         <pointsMaterial
           vertexColors
-          size={portView ? 3 : 0.24}
-          sizeAttenuation={!portView}
+          size={(portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24) * (portView || sphere ? dpr : 1)}
+          sizeAttenuation={!portView && sphere === null}
           transparent
           opacity={0.95}
           depthWrite={false}
@@ -635,7 +665,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
               the dot beneath it rather than re-picking by a foreign index. */}
           <pointsMaterial
             color={ACCENT}
-            size={9}
+            size={9 * dpr}
             sizeAttenuation={false}
             transparent
             opacity={0.9}
@@ -652,7 +682,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
                 and clicking it selects it like any other landfall. */}
             <pointsMaterial
               color={ACCENT}
-              size={7}
+              size={7 * dpr}
               sizeAttenuation={false}
               transparent
               opacity={0.95}

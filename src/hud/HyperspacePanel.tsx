@@ -19,6 +19,7 @@ import { Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
+import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
 import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
@@ -481,7 +482,7 @@ export function viewEarth(): void {
   // Earth is a dataspace thing (§9.1): looking at it lines up dataspace, so
   // that RETURN, and the next commit, stay in the plane the planet is in.
   useCyberspace.getState().setPlane(0)
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52)
+  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP)
 }
 
 /**

@@ -1002,6 +1002,8 @@ body {
 }
 .viewat__toggle:hover .viewat__caret { color: var(--fg); }
 .viewat__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+/* A row is the place and the mark that forgets it, the shard list's shape. */
+.viewat__list li { display: flex; gap: 3px; align-items: stretch; }
 .viewat__item {
   width: 100%;
   text-align: left;
@@ -1015,7 +1017,24 @@ body {
   padding: 5px 8px;
   cursor: pointer;
 }
+.viewat__item { flex: 1 1 auto; min-width: 0; }
 .viewat__item:hover { border-color: var(--accent, #00e5ff); }
+/* The shard list's delete: the same glyph at the same weight, on the right of
+   the row it removes, turning to the danger colour only under a pointer. */
+.viewat__forget {
+  flex: none;
+  width: 28px;
+  font-family: var(--mono);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 0 2px;
+  color: var(--dim);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.viewat__forget:hover { color: var(--danger); border-color: var(--danger); }
 .viewat__plane { display: inline-block; margin-right: 8px; padding: 1px 5px; font-size: 8px; }
 
 .legend__label {

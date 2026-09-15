@@ -73,3 +73,13 @@ export function canonicalViewAt(text: string): string {
 export function rememberView(list: RecentView[], entry: RecentView): RecentView[] {
   return [entry, ...list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)].slice(0, 3)
 }
+
+/**
+ * A place dropped from the recent list, by the same identity rememberView uses
+ * to replace one: the text typed and the plane it was read on. Nothing else in
+ * the entry is part of what makes it that place, and matching on the label
+ * would drop two different coordinates that happen to share a name.
+ */
+export function forgetView(list: RecentView[], entry: Pick<RecentView, 'input' | 'plane'>): RecentView[] {
+  return list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)
+}

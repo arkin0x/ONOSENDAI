@@ -22,7 +22,7 @@ const template = (nonce?: string, target = 16) => {
 describe('avatarMine', () => {
   it('serializes and hashes exactly as NIP-01 (nostr-tools agrees)', () => {
     const t = template('42')
-    expect(JSON.parse(serializeEvent(t))).toEqual([0, me, 1_800_000_000, 10333, t.tags, t.content])
+    expect(JSON.parse(serializeEvent(t))).toEqual([0, me, 1_800_000_000, 11333, t.tags, t.content])
     expect(eventId(t)).toBe(getEventHash({ ...t, id: '', sig: '' } as never))
   })
 

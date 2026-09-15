@@ -1,7 +1,7 @@
 /**
  * avatar.ts - the shape others see for you, as a shard.
  *
- * Kind 10333, replaceable: one per pubkey, the newest wins, and it changes
+ * Kind 11333, replaceable: one per pubkey, the newest wins, and it changes
  * without a respawn. It was 33331, addressable with a `d` fixed at "avatar",
  * which is emulating replaceable semantics with the wrong tool: a constant `d`
  * asks every reader to trust a convention where the relay could enforce the
@@ -17,7 +17,7 @@
 
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from './shards'
 
-export const AVATAR_KIND = 10333
+export const AVATAR_KIND = 11333
 
 export interface AvatarTemplate { kind: number; created_at: number; tags: string[][]; content: string }
 

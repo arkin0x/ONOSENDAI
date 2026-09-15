@@ -53,7 +53,7 @@ const built = () => {
 describe('useAvatars', () => {
   beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
-  it('adopting a shard signs a kind 10333 event with no d tag, publishes it and keeps a copy', async () => {
+  it('adopting a shard signs a kind 11333 event with no d tag, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
     expect(await useAvatars.getState().adopt(built())).toBe(true)
     const ev = vi.mocked(publish).mock.calls[0][0]

@@ -11,7 +11,7 @@ const built = () => {
   return s
 }
 
-describe('avatar events (kind 10333)', () => {
+describe('avatar events (kind 11333)', () => {
   it('writes the shard as a replaceable event and reads it back', () => {
     const shard = built()
     const t = avatarTemplate(shard, 1700000000)

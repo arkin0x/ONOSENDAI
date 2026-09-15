@@ -3450,8 +3450,8 @@ kbd {
   grid-template-areas:
     ".       .    cube"
     "away    up   toward"
-    "left    hub  right"
-    "zoomout down zoomin";
+    "left    down right"
+    "zoomout hub  zoomin";
 }
 /* Off your own head only scale is left to drive, so the pad folds to the
  * scale row with the cube above it. The direction cells leave the grid
@@ -6048,12 +6048,16 @@ kbd {
    pin key and the Earth key, so no key that a hand already knows the position
    of has moved, and the pin cell simply stands empty while there is no pin.
    --------------------------------------------------------------------------- */
+/* DOWN sits under UP, and the scale reads between the two keys that change
+   it. It used to be the other way round, with the scale marooned among the
+   direction keys and DOWN a row away from UP, which is the one pairing on the
+   pad a thumb expects without looking (arkinox, 2026-09-15). */
 .touchpad {
   grid-template-areas:
     "pin     earth cube"
     "away    up    toward"
-    "left    hub   right"
-    "zoomout down  zoomin";
+    "left    down  right"
+    "zoomout hub   zoomin";
 }
 .touchpad--scale {
   grid-template-areas:

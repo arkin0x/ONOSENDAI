@@ -6139,3 +6139,22 @@ kbd {
   border-color: rgba(255, 200, 110, 0.9);
 }
 .touchpad__key--pin:active { background: rgba(255, 190, 70, 0.8); border-color: #fff4e0; }
+
+
+/* ---------------------------------------------------------------------------
+   Taking a local key with you (LoginModal, lib/keyExport).
+   --------------------------------------------------------------------------- */
+.login__row { display: flex; gap: 6px; flex-wrap: wrap; }
+.login__backup {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--warn);
+  background: rgba(247, 147, 26, 0.06);
+  border: 1px solid rgba(247, 147, 26, 0.4);
+  border-radius: 6px;
+  padding: 8px;
+  resize: vertical;
+  word-break: break-all;
+}

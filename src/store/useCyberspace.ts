@@ -23,6 +23,7 @@ import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+import { exportNcryptsec } from '../lib/keyExport'
 import {
   deferredReconnect,
   localSigner,
@@ -622,6 +623,14 @@ export interface CyberspaceState {
   useBunker: (uri: string) => Promise<void>
   /** Clear a shown login error. */
   clearLoginError: () => void
+  /**
+   * This device's own key as an encrypted `ncryptsec1…`, or a thrown error.
+   *
+   * Only a local signer has a key to give: an extension and a bunker hold
+   * theirs. The password rule lives in lib/keyExport, not here and not in the
+   * markup, so no caller can offer an unprotected export by forgetting a check.
+   */
+  exportKey: (password: string, again: string) => string
 
   /** HOSAKA cloud compute: the flow in progress and its pending job. */
   cloud: CloudState
@@ -2513,6 +2522,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
   },
   useNewKey: async () => { await switchTo(randomSigner()) },
+  exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
   useNsec: async (nsec) => {
     try { await switchTo(signerFromNsec(nsec)) }
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { xyzToCoord } from 'cyberspace-core'
-import { canonicalViewAt, parseViewAt, rememberView } from './viewAt'
+import { canonicalViewAt, forgetView, parseViewAt, rememberView, type RecentView } from './viewAt'
 
 describe('parseViewAt', () => {
   it('reads three decimal axis values', () => {
@@ -42,6 +42,28 @@ describe('parseViewAt', () => {
     expect(parseViewAt('0, 181', 0)).toBeNull()
     expect(parseViewAt('a, b, c', 0)).toBeNull()
     expect(parseViewAt(`${(1n << 85n).toString()}, 0, 0`, 0)).toBeNull()
+  })
+})
+
+describe('forgetView', () => {
+  const a: RecentView = { input: '1, 2, 3', label: '1, 2, 3', plane: 0 }
+  const b: RecentView = { input: '4, 5, 6', label: '4, 5, 6', plane: 0 }
+  const c: RecentView = { input: '1, 2, 3', label: '1, 2, 3', plane: 1 }
+
+  it('drops the one place and leaves the rest in order', () => {
+    expect(forgetView([a, b, c], a)).toEqual([b, c])
+    expect(forgetView([a, b, c], b)).toEqual([a, c])
+  })
+
+  it('matches on the text and the plane, the way rememberView replaces', () => {
+    // The same text read on the other plane is a different place.
+    expect(forgetView([a, c], { input: '1, 2, 3', plane: 0 })).toEqual([c])
+    expect(forgetView([a, c], { input: '1, 2, 3', plane: 1 })).toEqual([a])
+  })
+
+  it('leaves a list that does not hold it alone', () => {
+    expect(forgetView([a, b], { input: 'nowhere', plane: 0 })).toEqual([a, b])
+    expect(forgetView([], a)).toEqual([])
   })
 })
 

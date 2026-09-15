@@ -8,7 +8,7 @@ import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from '../lib/scale'
 import { geocode } from '../lib/geocode'
 import { onEarthSurface } from '../lib/hyperspace/interest'
-import { canonicalViewAt, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { canonicalViewAt, forgetView, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -235,8 +235,18 @@ function PositionPanel(): JSX.Element {
             {recentOpen && (
               <ul className="viewat__list">
                 {recent.map((r) => (
-                  <li key={r.input}>
+                  <li key={`${r.plane}:${r.input}`}>
                     <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, target) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}</button>
+                    {/* The shard list's delete, in the same place and the same
+                        shape: the mark on the right of the row it removes. No
+                        confirmation, unlike a shard, because a place is one
+                        line of text that typing it again brings straight back. */}
+                    <button
+                      className="viewat__forget"
+                      title={`Forget ${r.label}`}
+                      aria-label={`Forget ${r.label}`}
+                      onClick={() => { const next = forgetView(recent, r); setRecent(next); saveRecent(next) }}
+                    >×</button>
                   </li>
                 ))}
               </ul>

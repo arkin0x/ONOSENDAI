@@ -275,6 +275,17 @@ function BenchViewMenu(): JSX.Element {
   )
 }
 
+/**
+ * The mark inside a round icon button, in pixels.
+ *
+ * One number for the whole app: the touchpad's EARTH and cube keys are 38px
+ * squares with a 16px mark, and every other round icon button matches them so
+ * a hand learns one size. A new icon button takes this, not a number of its
+ * own.
+ */
+const ICON_PX = 16
+
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
@@ -459,8 +470,8 @@ export function Workshop(): JSX.Element | null {
             row onto a second line and pushed the panel down with it. */}
         {!panel && (
           <span className="ws__history">
-            <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={20} strokeWidth={2.25} aria-hidden /></button>
-            <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={20} strokeWidth={2.25} aria-hidden /></button>
+            <button className="chip ws__icon" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={ICON_PX} strokeWidth={2.25} aria-hidden /></button>
+            <button className="chip ws__icon" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={ICON_PX} strokeWidth={2.25} aria-hidden /></button>
           </span>
         )}
       </div>
@@ -488,9 +499,15 @@ export function Workshop(): JSX.Element | null {
           </div>
           {/* The shape others see for you: this shard, published as kind 33331,
               drawn in the dodecahedron's cell wherever you are drawn. */}
-          <div className="workshop__row" role="group" aria-label="My avatar">
-            <span className="workshop__label">MY AVATAR</span>
-            <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+          <div className="workshop__avatar" role="group" aria-label="My avatar">
+            <div className="workshop__row">
+              <span className="workshop__label">MY AVATAR</span>
+              <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+            </div>
+            {/* The buttons take their own row and share it evenly, the way NEW
+                SHARD and PASTE do. On the name's line a long shard name pushed
+                them off the edge (arkinox, 2026-09-15). */}
+            <div className="workshop__list-row">
             {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it. */}
             {myAvatar && !minePublished && !phase && (
               live
@@ -522,6 +539,7 @@ export function Workshop(): JSX.Element | null {
             {myAvatar && !phase && (
               <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the dodecahedron; it owes no work">DODECAHEDRON</button>
             )}
+            </div>
             {/* The price (spec 8.10): 16 bits for any avatar, 6 more per doubling of
                 its reach in gibsons, 3 per doubling of vertices plus faces beyond 32;
                 the whole event is hashed per try, so bytes cost as well. */}
@@ -552,6 +570,28 @@ export function Workshop(): JSX.Element | null {
             </div>
           )}
           <ul className="workshop__list">
+            {/* The avatar is not one of these shards. It lives in its own store,
+                read back from the kind 33331 event you published, which is why
+                deleting the shard it was built from leaves the avatar standing
+                (arkinox found this by doing it). It gets a row anyway so the
+                shape you are wearing is visible and can be copied back into the
+                workshop, and no row that would change it: the way to change an
+                avatar is USE THIS SHARD or DODECAHEDRON above. */}
+            {myAvatar && (
+              <li className="workshop__list-avatar">
+                <span className="workshop__pick workshop__pick--static">
+                  <span className="workshop__pick-name">{myAvatar.name}</span>
+                  <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
+                </span>
+                <span className="workshop__tag" title="The shape others see for you. Change it with USE THIS SHARD above.">AVATAR</span>
+                <button
+                  className="workshop__mini"
+                  title="Copy it into your shards, where you can edit it"
+                  onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your shards.`) }}
+                >⧉</button>
+                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => { void navigator.clipboard.writeText(JSON.stringify(toPayload(myAvatar))).then(() => say('Avatar copied.'), () => say('Could not reach the clipboard.')) }}>COPY</button>
+              </li>
+            )}
             {shards.map((s) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>

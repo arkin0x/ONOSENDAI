@@ -16,7 +16,7 @@ import { anchorIndex, runAnchorSync, type SyncSource } from '../lib/hyperspace/a
 import { stopByHeight } from '../lib/hyperspace/compactIndex'
 import type { Stop } from '../lib/hyperspace/stops'
 import type { StopIndex } from '../lib/hyperspace/station'
-import { useCyberspace } from './useCyberspace'
+import { useCyberspace, type CyberFocus } from './useCyberspace'
 
 export interface HyperspaceSync {
   status: 'idle' | 'loading-cache' | 'syncing' | 'ready' | 'error'
@@ -65,6 +65,19 @@ interface HyperspaceState {
   /** The zoom to restore when the owned view exits; captured when hyperspace
    * first takes the focus, because its views re-frame at their own scales. */
   returnScaleExp: number | null
+  /**
+   * The focus that was standing when hyperspace took the camera, restored
+   * whole when it gives it back. Null means there was none and the exit goes
+   * home to the avatar, which is what it always did.
+   *
+   * This exists because "give the camera back" and "go home" are not the same
+   * instruction. Tapping a block while looking at a place in the POSITION
+   * panel used to end with the place thrown away and the zoom wound back to
+   * whatever it was before the place was ever typed, because clearFocus
+   * restores the scale remembered at the FIRST focus of the session, not the
+   * one hyperspace borrowed from.
+   */
+  returnFocus: CyberFocus | null
   /** The stop height the owned hyperspace focus is on, or null when the
    * focus is not a stop (EARTH's centre) or hyperspace has no view. */
   viewedStop: number | null
@@ -93,6 +106,7 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
   scrubHeight: null,
   viewOwned: false,
   returnScaleExp: null,
+  returnFocus: null,
   viewedStop: null,
   destination: null,
 
@@ -151,7 +165,8 @@ export function ownHyperspaceView(): void {
   // First ownership: remember the zoom the user was actually at, because the
   // hyperspace views re-frame at their own scales and RETURN must not strand
   // the camera there.
-  useHyperspace.setState({ viewOwned: true, returnScaleExp: useCyberspace.getState().scaleExp })
+  const cs = useCyberspace.getState()
+  useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: cs.focus })
 }
 
 /** Record which stop the owned focus is on (null for a non-stop focus like
@@ -165,12 +180,25 @@ export function markViewedStop(height: number | null): void {
  * hyperspace set it (never a shard's focus, never a running spectate).
  */
 export function exitHyperspaceView(): void {
-  const { viewOwned: owned, returnScaleExp } = useHyperspace.getState()
-  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, viewedStop: null })
+  const { viewOwned: owned, returnScaleExp, returnFocus } = useHyperspace.getState()
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
   const cs = useCyberspace.getState()
-  if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
-  // Back at the zoom the user left, not whatever a stop view chose.
-  if (owned && returnScaleExp !== null && returnScaleExp !== cs.scaleExp) {
+  if (!owned || cs.spectate !== null || cs.focus === null) return
+
+  // Hand the camera back to whoever had it, which is not always the avatar.
+  // A place typed into the POSITION panel is a focus of its own, and tapping a
+  // block from it borrows the camera rather than replacing what the person was
+  // doing; closing the overlay is "give it back", not "go home".
+  if (returnFocus !== null) {
+    cs.focusOn(returnFocus.position, returnFocus.plane, returnFocus.label, returnScaleExp ?? undefined, returnFocus.drive)
+    return
+  }
+
+  cs.clearFocus()
+  // Back at the zoom the user left, not whatever a stop view chose. Read the
+  // scale fresh: clearFocus has just written one, and comparing against the
+  // snapshot taken before it ran let the two disagree silently.
+  if (returnScaleExp !== null && returnScaleExp !== useCyberspace.getState().scaleExp) {
     useCyberspace.setState({ scaleExp: returnScaleExp })
   }
 }

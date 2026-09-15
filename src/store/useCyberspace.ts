@@ -416,6 +416,15 @@ export interface CompletedRide {
   mp: string
 }
 
+/** What the camera is looking at, when it is not looking at your own head. */
+export interface CyberFocus {
+  position: Position
+  plane: Plane
+  label: string
+  /** The cursor came along (VIEW): the pad drives it here. */
+  drive?: boolean
+}
+
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
   position: Position
@@ -489,7 +498,7 @@ export interface CyberspaceState {
    * is somewhere you are not. Exclusive with spectating in practice, because
    * the panel it is reached from is hidden while spectating.
    */
-  focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
+  focus: CyberFocus | null
   /**
    * The pin: the place on Earth you asked to look at, left standing in the
    * scene so the focal point is visible rather than implied.

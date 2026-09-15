@@ -125,13 +125,19 @@ describe('ticks', () => {
     const s = { ...newShard('t'), vertices: [v([0, 0, 0]), v([TICKS_PER_UNIT, 0, 0]), v([40, -30, 24 + 2 * TICKS_PER_UNIT]), v([0, 0, 0])] }
     expect(s.vertices[2]).toEqual({ p: [0, -1, 2], t: [40, 90, 24], c: [1, 0, 0] })
     expect(s.vertices[1]).toEqual({ p: [1, 0, 0], c: [1, 0, 0] })
+    // Out on the wire, Z is negated into the published frame (DECK-0004 §2):
+    // 24 + 2 units forward becomes the same distance back, which is three
+    // units short with 96 ticks of remainder.
     const wire = toPayload(s)
-    expect(wire.vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, -1, 2], [0, 0, 0]])
-    expect(wire.ticks).toEqual([-2, [40, 90, 24], -1])
+    expect(wire.v).toBe(2)
+    expect(wire.vertices).toEqual([[0, 0, 0], [1, 0, 0], [0, -1, -3], [0, 0, 0]])
+    expect(wire.ticks).toEqual([-2, [40, 90, 96], -1])
     const back = fromPayload(wire, 'x')!
     expect(back.vertices).toEqual(s.vertices)
-    const old = { ...wire, ticks: undefined }
-    expect(fromPayload(old, 'y')!.vertices.map((x) => ticksOf(x))).toEqual([[0, 0, 0], [TICKS_PER_UNIT, 0, 0], [0, -TICKS_PER_UNIT, 2 * TICKS_PER_UNIT], [0, 0, 0]])
+    // A v1 payload was written in this client's own frame, so it is read as
+    // it stands; the same numbers marked v2 would come back mirrored.
+    const old = { ...wire, v: 1 as const, ticks: undefined }
+    expect(fromPayload(old, 'y')!.vertices.map((x) => ticksOf(x))).toEqual([[0, 0, 0], [TICKS_PER_UNIT, 0, 0], [0, -TICKS_PER_UNIT, -3 * TICKS_PER_UNIT], [0, 0, 0]])
     expect(unpackTicks([-3], 4)).toBeNull()
     expect(unpackTicks([[120, 0, 0]], 1)).toBeNull()
     expect(packTicks([])).toEqual([])
@@ -153,5 +159,49 @@ describe('ticks', () => {
     expect(unitsLabel(40)).toBe('1/3')
     expect(unitsLabel(-30)).toBe('-1/4')
     expect(unitsLabel(2 * 120 + 90)).toBe('2 3/4')
+  })
+})
+
+describe('DECK-0004 §2: the wire is right-handed, this client is not', () => {
+  const model = {
+    ...newShard('flip'),
+    vertices: [
+      { p: [1, 2, 3] as [number, number, number], c: [1, 0, 0] as [number, number, number] },
+      { p: [0, 0, 0] as [number, number, number], t: [0, 0, 40] as [number, number, number], c: [0, 1, 0] as [number, number, number] },
+    ],
+    faces: [],
+  }
+
+  it('writes v2 and negates Z on the way out', () => {
+    const p = toPayload(model)
+    expect(p.v).toBe(2)
+    expect(p.vertices[0]).toEqual([1, 2, -3])
+    // A third of a unit forward becomes a third back: the floor and the
+    // remainder move together, which is why the flip is done on total ticks.
+    expect(p.vertices[1]).toEqual([0, 0, -1])
+    expect(unpackTicks(p.ticks, 2)![1]).toEqual([0, 0, 80])
+  })
+
+  it('round trips: out and back is what went in', () => {
+    const back = fromPayload(toPayload(model), 'id')!
+    expect(ticksOf(back.vertices[0])).toEqual(ticksOf(model.vertices[0]))
+    expect(ticksOf(back.vertices[1])).toEqual(ticksOf(model.vertices[1]))
+  })
+
+  it('reads a v1 payload unchanged, because v1 was already this frame', () => {
+    const v2 = toPayload(model)
+    const v1 = { ...v2, v: 1 as const }
+    const fromV2 = fromPayload(v2, 'a')!
+    const fromV1 = fromPayload(v1, 'b')!
+    expect(ticksOf(fromV2.vertices[0])).toEqual([120, 240, 360])
+    expect(ticksOf(fromV1.vertices[0])).toEqual([120, 240, -360])
+  })
+
+  it('takes both versions and nothing else', () => {
+    const p = toPayload(model)
+    expect(fromPayload({ ...p, v: 1 }, 'x')).not.toBeNull()
+    expect(fromPayload({ ...p, v: 2 }, 'x')).not.toBeNull()
+    expect(fromPayload({ ...p, v: 3 }, 'x')).toBeNull()
+    expect(fromPayload({ ...p, v: 0 }, 'x')).toBeNull()
   })
 })

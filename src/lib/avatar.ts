@@ -1,8 +1,14 @@
 /**
  * avatar.ts - the shape others see for you, as a shard.
  *
- * Kind 33331 (decided 2026-09-07), addressable with `d` = "avatar": one per
- * pubkey, the newest wins, and it changes without a respawn. The content is
+ * Kind 10333, replaceable: one per pubkey, the newest wins, and it changes
+ * without a respawn. It was 33331, addressable with a `d` fixed at "avatar",
+ * which is emulating replaceable semantics with the wrong tool: a constant `d`
+ * asks every reader to trust a convention where the relay could enforce the
+ * rule. Spec 8.10. The break was clean because nothing was published: a query
+ * for 33331 across four relays returned nothing while the same query returned
+ * bags and movement. 33331 now belongs to a standalone SNO object, where a `d`
+ * the author chooses is a real key. The content is
  * a shard payload as the workshop writes it. Drawn in place of the wireframe
  * dodecahedron wherever an avatar is drawn, at true scale: one gibson on the
  * bench is one cell, the size the white avatar shows there. An empty content
@@ -11,8 +17,7 @@
 
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from './shards'
 
-export const AVATAR_KIND = 33331
-export const AVATAR_D = 'avatar'
+export const AVATAR_KIND = 10333
 
 export interface AvatarTemplate { kind: number; created_at: number; tags: string[][]; content: string }
 
@@ -21,7 +26,9 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
   return {
     kind: AVATAR_KIND,
     created_at: createdAt,
-    tags: [['d', AVATAR_D], ...(shard ? [['name', shard.name]] : [])],
+    // No `d`: a replaceable kind has no second key, and writing one would
+    // only invite a reader to filter on it.
+    tags: shard ? [['name', shard.name]] : [],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
 }
@@ -29,7 +36,6 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
 /** The shard an avatar event carries, or null when it carries none or is not one. */
 export function avatarFromEvent(ev: { kind: number; pubkey: string; content: string; tags: string[][] }): ShardModel | null {
   if (ev.kind !== AVATAR_KIND) return null
-  if (!ev.tags.some((t) => t[0] === 'd' && t[1] === AVATAR_D)) return null
   if (!ev.content) return null
   try {
     return fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)

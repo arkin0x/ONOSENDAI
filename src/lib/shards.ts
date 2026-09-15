@@ -85,7 +85,8 @@ export interface ShardModel {
 
 /** Wire form: what goes in an event's content, public or decrypted. */
 export interface ShardPayload {
-  v: 1
+  /** 1 was this client's own frame; 2 is the published one (DECK-0004 §2). */
+  v: 1 | 2
   type: 'shard'
   name: string
   unit: number
@@ -207,17 +208,47 @@ export function validFace(f: [number, number, number], count: number): boolean {
   return f.every((i) => Number.isInteger(i) && i >= 0 && i < count) && new Set(f).size === 3
 }
 
+/**
+ * The wire's handedness, and why it is not this client's.
+ *
+ * DECK-0004 §2: an SNO payload is right-handed with Y up and +Z toward the
+ * viewer, which is the glTF and three.js convention, so that any tool can read
+ * one without a special case. Cyberspace's own +Z is the black sun, away from
+ * the viewer, and everything in this client is built in that frame.
+ *
+ * The two differ by one sign, so the conversion is a negation of Z and it
+ * happens here, at the payload boundary, and nowhere else. Nothing inside the
+ * client changes: no stored model moves, no renderer changes, nothing already
+ * on screen looks different. What changes is that what goes out on the wire is
+ * readable by anyone.
+ *
+ * `v` says which frame a payload is in. `1` is what this client wrote while the
+ * format lived only here, and its Z is already this client's, so it is read
+ * unchanged. `2` is the published convention and is negated on the way in and
+ * on the way out. A publisher writes 2 forever.
+ */
+export const WIRE_VERSION = 2
+
+/** A vertex with its Z negated, on total ticks so the floor and the remainder stay consistent. */
+function flipZ(v: ShardVertex): ShardVertex {
+  const [x, y, z] = ticksOf(v)
+  // `0 - z` rather than `-z`, for the reason toRender gives: negating a zero
+  // gives -0, which deep equality and object keys treat as a different number.
+  return vertexAt([x, y, 0 - z], v.c)
+}
+
 export function toPayload(s: ShardModel): ShardPayload {
+  const vertices = s.vertices.map(flipZ)
   return {
-    v: 1,
+    v: WIRE_VERSION,
     type: 'shard',
     name: s.name,
     unit: s.unit,
     extent: s.extent,
     mode: s.mode,
-    vertices: s.vertices.map((v) => v.p),
-    ticks: packTicks(s.vertices.map((v) => v.t ?? [0, 0, 0])),
-    colors: s.vertices.map((v) => v.c),
+    vertices: vertices.map((v) => v.p),
+    ticks: packTicks(vertices.map((v) => v.t ?? [0, 0, 0])),
+    colors: vertices.map((v) => v.c),
     faces: s.faces,
     // Only a standing shard carries the pose: a payload without one is byte
     // for byte what it was before the pose existed.
@@ -263,7 +294,7 @@ export function unpackTicks(packed: unknown, count: number): Array<[number, numb
 export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (!raw || typeof raw !== 'object') return null
   const p = raw as Partial<ShardPayload>
-  if (p.v !== 1 || p.type !== 'shard') return null
+  if ((p.v !== 1 && p.v !== WIRE_VERSION) || p.type !== 'shard') return null
   if (!Array.isArray(p.vertices) || !Array.isArray(p.colors) || !Array.isArray(p.faces)) return null
   if (p.vertices.length !== p.colors.length || p.vertices.length > MAX_VERTICES || p.faces.length > MAX_FACES) return null
   if (!MODES.includes(p.mode as ShardMode)) return null
@@ -281,7 +312,9 @@ export function fromPayload(raw: unknown, id: string): ShardModel | null {
     if (!whole.every(Number.isInteger)) return null
     const r = rest[i]
     const colour = clampColor(c.map(Number) as [number, number, number])
-    vertices.push(r[0] === 0 && r[1] === 0 && r[2] === 0 ? { p: whole, c: colour } : { p: whole, t: r, c: colour })
+    const read: ShardVertex = r[0] === 0 && r[1] === 0 && r[2] === 0 ? { p: whole, c: colour } : { p: whole, t: r, c: colour }
+    // A v1 payload is already in this client's frame; a v2 one is the wire's.
+    vertices.push(p.v === WIRE_VERSION ? flipZ(read) : read)
   }
   const faces: Array<[number, number, number]> = []
   for (const f of p.faces) {

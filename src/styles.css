@@ -6028,6 +6028,13 @@ kbd {
 
 /* NEARBY: a chip that stays while anything decrypted is around you, glowing
  * like the find chip; the way to the list while the menu is locked. */
+/* The mark takes the label's colour, so a chip reads as one thing.
+   .presence__head inherits its colour from .hyperbar, which is the foreground
+   cyan, while .hyperbar__label is the bitcoin orange: the SCANNING chip came
+   out with an orange word and a cyan figure beside it (arkinox, 2026-09-15).
+   The two rules below have equal specificity, so the nearby override must stay
+   second; its chip is accent throughout, label included. */
+.presence .presence__head svg { color: #f7931a; }
 .nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }

@@ -11,12 +11,13 @@ const built = () => {
   return s
 }
 
-describe('avatar events (kind 33331)', () => {
-  it('writes the shard as an addressable event and reads it back', () => {
+describe('avatar events (kind 11333)', () => {
+  it('writes the shard as a replaceable event and reads it back', () => {
     const shard = built()
     const t = avatarTemplate(shard, 1700000000)
     expect(t.kind).toBe(AVATAR_KIND)
-    expect(t.tags).toEqual([['d', 'avatar'], ['name', 'Arches']])
+    // No `d`: replaceable kinds have no second key (spec 8.10).
+    expect(t.tags).toEqual([['name', 'Arches']])
     const back = avatarFromEvent({ ...t, pubkey: 'ab'.repeat(32) })!
     expect(back.name).toBe('Arches')
     expect(back.vertices.map((v) => ticksOf(v).join())).toEqual(shard.vertices.map((v) => ticksOf(v).join()))
@@ -27,7 +28,7 @@ describe('avatar events (kind 33331)', () => {
     const none = avatarTemplate(null, 1)
     expect(none.content).toBe('')
     expect(avatarFromEvent({ ...none, pubkey: 'x' })).toBeNull()
-    expect(avatarFromEvent({ kind: 3330, pubkey: 'x', tags: [['d', 'avatar']], content: '{}' })).toBeNull()
+    expect(avatarFromEvent({ kind: 3330, pubkey: 'x', tags: [], content: '{}' })).toBeNull()
     expect(avatarFromEvent({ kind: AVATAR_KIND, pubkey: 'x', tags: [], content: 'not json' })).toBeNull()
   })
   it('draws at true scale: a gibson on the bench is a cell, whatever the grid size', () => {

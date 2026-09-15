@@ -18,7 +18,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
-import { AVATAR_D, AVATAR_KIND, avatarFromEvent, avatarTemplate } from '../lib/avatar'
+import { AVATAR_KIND, avatarFromEvent, avatarTemplate } from '../lib/avatar'
 import { nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, mineInWorker, type AvatarMiner } from '../lib/avatarWorker'
 import type { NostrEvent } from '../lib/events'
@@ -92,7 +92,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     const last = get().asked[pubkey] ?? 0
     if (now - last < REFRESH_MS) return
     set({ asked: { ...get().asked, [pubkey]: now } })
-    query({ kinds: [AVATAR_KIND], authors: [pubkey], '#d': [AVATAR_D] })
+    query({ kinds: [AVATAR_KIND], authors: [pubkey] })
       .then((events) => {
         const newest = [...events].sort((a, b) => b.created_at - a.created_at)[0]
         // An empty answer says nothing: a relay that is down, or has not seen

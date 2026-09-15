@@ -22,7 +22,7 @@ const template = (nonce?: string, target = 16) => {
 describe('avatarMine', () => {
   it('serializes and hashes exactly as NIP-01 (nostr-tools agrees)', () => {
     const t = template('42')
-    expect(JSON.parse(serializeEvent(t))).toEqual([0, me, 1_800_000_000, 33331, t.tags, t.content])
+    expect(JSON.parse(serializeEvent(t))).toEqual([0, me, 1_800_000_000, 11333, t.tags, t.content])
     expect(eventId(t)).toBe(getEventHash({ ...t, id: '', sig: '' } as never))
   })
 
@@ -36,7 +36,7 @@ describe('avatarMine', () => {
   it('nonceTagged replaces an earlier nonce and keeps the rest', () => {
     const t = nonceTagged(nonceTagged(template(), '1', 16), '2', 20)
     expect(t.tags.filter((x) => x[0] === 'nonce')).toEqual([['nonce', '2', '20']])
-    expect(t.tags[0]).toEqual(['d', 'avatar'])
+    expect(t.tags[0]).toEqual(['name', 'Wedge'])
   })
 
   it('mines the floor for a one-gibson wedge, and the verdict is paid', () => {

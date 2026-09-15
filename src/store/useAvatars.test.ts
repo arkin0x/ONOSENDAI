@@ -53,15 +53,17 @@ const built = () => {
 describe('useAvatars', () => {
   beforeEach(() => { useAvatars.setState({ shards: {}, asked: {}, mining: null, phase: null, minedMs: null, adoptError: null, mineEvent: null, minePublished: false }); useCyberspace.setState({ live: true }); localStorage.clear(); vi.mocked(query).mockClear(); vi.mocked(publish).mockClear() })
 
-  it('adopting a shard signs a kind 33331 event with d=avatar, publishes it and keeps a copy', async () => {
+  it('adopting a shard signs a kind 11333 event with no d tag, publishes it and keeps a copy', async () => {
     const me = useCyberspace.getState().identity.pubkey
     expect(await useAvatars.getState().adopt(built())).toBe(true)
     const ev = vi.mocked(publish).mock.calls[0][0]
     expect(ev.kind).toBe(AVATAR_KIND)
     expect(ev.pubkey).toBe(me)
-    expect(ev.tags.slice(0, 2)).toEqual([['d', 'avatar'], ['name', 'Arches']])
+    expect(ev.tags[0]).toEqual(['name', 'Arches'])
+    // Replaceable: no `d` tag at all (spec 8.10). The rest is the nonce.
+    expect(ev.tags.some((t: string[]) => t[0] === 'd')).toBe(false)
     // Paid: the floor for a one-gibson triangle, committed before mining and carried by the id.
-    expect(ev.tags[2]).toEqual(['nonce', expect.any(String), '16'])
+    expect(ev.tags.find((t: string[]) => t[0] === 'nonce')).toEqual(['nonce', expect.any(String), '16'])
     expect(verifyAvatarWork(ev)).toMatchObject({ ok: true, required: 16, committed: 16 })
     expect(useAvatars.getState().mining).toBeNull()
     expect(useAvatars.getState().shards[me]?.name).toBe('Arches')

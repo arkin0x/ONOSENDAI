@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AVATAR_KIND, avatarFromEvent, avatarScale, avatarTemplate } from './avatar'
+import { AVATAR_KIND, SPECTATOR_SCALE_MIN_EXP, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from './avatar'
 import { newShard, ticksOf } from 'sno-core/shards'
 
 const built = () => {
@@ -43,5 +43,35 @@ describe('avatar events (kind 11333)', () => {
     const shard = built()
     shard.vertices.push({ p: [16, 0, 0], c: [1, 1, 1] })
     expect(avatarScale(shard)).toBe(0.25)
+  })
+})
+
+describe('spectatorScale', () => {
+  it('changes nothing below the spectator range', () => {
+    // The avatar filling its cell is right everywhere you can actually move:
+    // the cell is the unit, so a marker that fills it says "here" exactly.
+    for (const exp of [0, 1, 33, 60, 79, SPECTATOR_SCALE_MIN_EXP]) {
+      expect(spectatorScale(exp)).toBe(1)
+    }
+  })
+
+  it('halves with every step out above it, so the avatar holds its size in gibsons', () => {
+    expect(spectatorScale(81)).toBe(1 / 2)
+    expect(spectatorScale(82)).toBe(1 / 4)
+    expect(spectatorScale(83)).toBe(1 / 8)
+    expect(spectatorScale(84)).toBe(1 / 16)
+  })
+
+  it('leaves the avatar a thirty-second of cyberspace across at full zoom out', () => {
+    // Cyberspace is 2^85 gibsons a side, so a cell at 2^84 is half of it per
+    // axis: an eighth by volume, which is what an unscaled avatar was filling.
+    const cellsAcrossCyberspace = 2 ** 85 / 2 ** 84
+    const avatarCells = spectatorScale(84)
+    expect(cellsAcrossCyberspace).toBe(2)
+    expect(avatarCells / cellsAcrossCyberspace).toBe(1 / 32)
+  })
+
+  it('never reaches zero, so the avatar is always something', () => {
+    expect(spectatorScale(84)).toBeGreaterThan(0)
   })
 })

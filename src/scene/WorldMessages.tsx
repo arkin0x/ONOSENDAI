@@ -5,6 +5,23 @@
  * text, and a short marker of who left it. Held to a constant pixel size like
  * every other world label, so a message stays readable at any zoom rather than
  * shrinking to nothing. Culled past the same reach as everything else.
+ *
+ * Placed with markerCentre, not cellCentre, and the difference is the whole of
+ * a bug worth naming. GO TO IT focuses the camera on the item, and a plain
+ * focus frames the CONTINUOUS point: cursorOffset returns the sub-cell
+ * fraction minus a half above scaleExp 33, and [0, 0, 0] at or below it.
+ * cellCentre snaps the item to its aligned cell, which is always [0, 0, 0]
+ * when the anchor is the item. So above 33 the camera looked at the point
+ * while the note was drawn at its cell, and the two sat up to half a cell
+ * apart. The gap is a different slice of the coordinate's bits at every zoom,
+ * so every step out threw the note somewhere else near the middle, and it only
+ * came right at 33, where cursorOffset switches to [0, 0, 0] and the two
+ * conventions finally agree (arkinox, 2026-09-16).
+ *
+ * markerCentre is exactly that policy: the cell where you could stand in it,
+ * the point where it is one of half a million. cursorOffset's own comment
+ * already says "same policy as markerCentre"; this file simply was not using
+ * it.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -15,11 +32,11 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
-import { findCashuToken, textWithoutToken } from '../lib/cashu'
+import { findCashuToken } from '../lib/cashu'
 
 const TAP_SLOP = 8
 
@@ -112,7 +129,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'message' && w.text && w.plane === anchorPlane)
-      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: cellCentre(w.at, origin, scaleExp, axes) }))
+      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: markerCentre(w.at, origin, scaleExp, axes) }))
       .filter((w) => Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,40 +146,28 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
           markSceneTapHandled()
           useShards.getState().selectSecret(w.key)
         }
-        // Money reads as money: a coin hidden here shows the mark and nothing
-        // else, because its token is two thousand characters of base64 and
-        // says nothing to anybody. Everything else shows what it says, cut.
+        // Money reads as money: a coin is the turning diamond and the ₿, and
+        // nothing else. Its token is two thousand characters of base64 that
+        // say nothing to anybody, and the words someone leaves around one are
+        // usually about the coin rather than worth reading at distance. They
+        // used to hang under the mark as a second label, which in a field of
+        // coins was a field of paragraphs; the mark alone is legible at any
+        // zoom and the words are one tap away, which is where the rest of the
+        // message already lived (arkinox, 2026-09-16).
         const coin = findCashuToken(w.text) !== null
         return (
           <group key={w.key}>
             <WorldMark kind={coin ? 'coin' : 'note'} at={w.centre} />
             {coin
-              ? <>
-                  <WorldLabel
-                    text="₿"
-                    color={BITCOIN}
-                    at={w.centre}
-                    align="center"
-                    px={COIN_PX}
-                    sub={textWithoutToken(w.text) ? undefined : author(w)}
-                    subColor={ACCENT}
-                  />
-                  {/* Words left around the token are the message; the base64 is not.
-                      Held a fixed number of pixels below the coin rather than a
-                      fraction of a cell, so the gap does not breathe with depth. */}
-                  {textWithoutToken(w.text) && (
-                    <WorldLabel
-                      text={messageBillboard(textWithoutToken(w.text))}
-                      color={NOTE}
-                      at={w.centre}
-                      offsetPx={[0, -COIN_PX]}
-                      align="center"
-                      px={12}
-                      sub={author(w)}
-                      subColor={ACCENT}
-                    />
-                  )}
-                </>
+              ? <WorldLabel
+                  text="₿"
+                  color={BITCOIN}
+                  at={w.centre}
+                  align="center"
+                  px={COIN_PX}
+                  sub={author(w)}
+                  subColor={ACCENT}
+                />
               : births[w.key] !== undefined
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
                 : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}

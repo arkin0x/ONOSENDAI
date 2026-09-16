@@ -11,7 +11,7 @@
 import { useMemo } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import type { ThreeEvent } from '@react-three/fiber'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
@@ -43,7 +43,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
       .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
       .map((w) => {
         const shard = w.shard!
-        const centre = cellCentre(w.at, origin, scaleExp, axes)
+        const centre = markerCentre(w.at, origin, scaleExp, axes)
         // 2^(unit - scaleExp) render cells per model unit, in fixed point so
         // the ratio survives past a double at large separations of the two.
         const exp = shard.unit - scaleExp

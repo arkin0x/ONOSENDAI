@@ -13,6 +13,7 @@ import {
   boundaryCoord,
   boundaryHeight,
   canonicalQuaternion,
+  OCCUPANCY_SCALE_MAX,
   cellCentre,
   cellDelta,
   cellOffset,
@@ -28,6 +29,7 @@ import {
   subCellFraction,
   topDownQuaternion,
   trailingZeros,
+  markerCentre,
   viewAxes,
   type Position,
   type ViewAxes, pointCentre } from './space'
@@ -716,5 +718,73 @@ describe('step', () => {
     expect(formatStep(0)).toBe('1 gibson')
     expect(formatStep(10)).toBe('1,024 gibsons')
     expect(formatStep(40)).toBe('2^40 gibsons')
+  })
+})
+
+/**
+ * The camera and the thing it was sent to look at must agree on where that
+ * thing is. GO TO IT sets the anchor to the item, and a plain focus frames the
+ * continuous point (useCyberspace cursorOffset): [0, 0, 0] at or below
+ * OCCUPANCY_SCALE_MAX, and the sub-cell fraction minus a half above it.
+ *
+ * WorldMessages and WorldShards drew their items with cellCentre, which snaps
+ * to the aligned cell and is therefore always [0, 0, 0] when the anchor IS the
+ * item. Above 33 the camera looked at the point and the item was drawn at its
+ * cell, up to half a cell apart, on a different slice of the coordinate's bits
+ * at every zoom: the item flicked to a new spot near the middle on every step
+ * out and only came right at 33 (arkinox, 2026-09-16).
+ */
+describe('a focused item sits where the camera looks', () => {
+  // What useCyberspace.cursorOffset returns for a plain focus. Kept in the
+  // same shape as the store's so a change there fails here.
+  const cameraTarget = (anchor: Position, scaleExp: number, axes: ViewAxes): [number, number, number] => {
+    if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
+    const origin = alignedOrigin(anchor, scaleExp)
+    return [axes.right, axes.up, axes.out].map(
+      (a) => (cellDelta(anchor[a.axis], origin[a.axis], scaleExp) - 0.5) * a.dir,
+    ) as [number, number, number]
+  }
+
+  // A coordinate with bits set all the way down, so the sub-cell fraction is
+  // different at every scale rather than accidentally zero.
+  const item: Position = {
+    x: 0b1011010011100101110100111n * 1000003n + 7n,
+    y: 0b1101001110010111010011101n * 1000033n + 11n,
+    z: 0b1110010111010011101001011n * 1000037n + 13n,
+  }
+
+  const axes = viewAxes(canonicalQuaternion())
+
+  // Multiplying a zero delta by an axis direction of -1 yields -0, which is
+  // equal to 0 by every arithmetic rule and unequal to it by toEqual. The
+  // renderer cannot tell them apart either.
+  const flat = (v: [number, number, number]): number[] => v.map((n) => (n === 0 ? 0 : n))
+
+  it('agrees at every zoom when the item is placed with markerCentre', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const origin = alignedOrigin(item, scaleExp)
+      const drawn = markerCentre(item, origin, scaleExp, axes)
+      const looked = cameraTarget(item, scaleExp, axes)
+      expect(flat(drawn), `scaleExp ${scaleExp}`).toEqual(flat(looked))
+    }
+  })
+
+  it('is exactly what cellCentre got wrong above the occupancy scale', () => {
+    // Below and at 33 the old code was right, which is why the bug only showed
+    // when zoomed out past it.
+    for (let scaleExp = 0; scaleExp <= OCCUPANCY_SCALE_MAX; scaleExp++) {
+      expect(flat(cellCentre(item, alignedOrigin(item, scaleExp), scaleExp, axes))).toEqual(flat(cameraTarget(item, scaleExp, axes)))
+    }
+    // Above it, the snap parts company with the camera, and by a different
+    // amount on every step: that is the jolting.
+    const gaps = new Set<string>()
+    for (let scaleExp = OCCUPANCY_SCALE_MAX + 1; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const snapped = cellCentre(item, alignedOrigin(item, scaleExp), scaleExp, axes)
+      const looked = cameraTarget(item, scaleExp, axes)
+      expect(flat(snapped)).not.toEqual(flat(looked))
+      gaps.add(looked.map((n) => n.toFixed(6)).join(','))
+    }
+    // Many distinct offsets, not one steady one: the item moved every step.
+    expect(gaps.size).toBeGreaterThan(10)
   })
 })

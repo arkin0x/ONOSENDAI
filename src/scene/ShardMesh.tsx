@@ -29,7 +29,7 @@ import {
   LineBasicMaterial,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { flatten, posed, ticksOf, toRender, type ShardModel } from 'sno-core/shards'
+import { expandFaceColors, flatten, posed, ticksOf, toRender, type ShardModel } from 'sno-core/shards'
 import type { Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from 'sno-core/orient'
@@ -88,7 +88,12 @@ const STATIC = [0, 0.9, 1] as const
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose }: Props): JSX.Element | null {
+  // A face that carries its own colour needs three corners of its own, or the
+  // colour would bleed across every edge it shares. Expanded here and nowhere
+  // else, so the winding pass, the clipper and the face picker below never
+  // learn the feature exists.
+  const shard = useMemo(() => expandFaceColors(given), [given])
   const { positions, colors, index, faces } = useMemo(() => {
     const f = flatten(shard, pose)
     const oriented = lit

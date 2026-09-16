@@ -615,3 +615,103 @@ describe('faces and palette', () => {
     expect(w().palette).not.toContain('#ffffff')
   })
 })
+
+/**
+ * A colour on one face is a different thing from a colour on its corners, and
+ * a palette is a list the indices point into. Both are easy to write in a way
+ * that looks right on the bench and is wrong on the wire, so both are checked
+ * here rather than by eye.
+ */
+describe('face colors and palettes', () => {
+  beforeEach(() => {
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], palettes: [], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    w().create('t')
+    w().placeStamp([0, 0, 0])
+  })
+
+  const red: [number, number, number] = [1, 0, 0]
+
+  it('gives one face a hard colour and leaves every other face looking as it did', () => {
+    const before = w().current()!
+    expect(before.facecolors).toBeUndefined()
+    const wasLit = before.faces.map((f) => f.reduce((acc, i) => acc + before.vertices[i].c[0], 0) / 3)
+
+    w().colorFace(2, red)
+    const after = w().current()!
+    // Every face now carries a colour, because the list is per face and has to
+    // be complete or the wire cannot say which face it means.
+    expect(after.facecolors).toHaveLength(after.faces.length)
+    expect(after.facecolors![2]).toEqual(red)
+    // The rest were filled in from what they already looked like: the average
+    // of their corners, so nothing else on the object changed appearance.
+    after.facecolors!.forEach((c, i) => { if (i !== 2) expect(c[0]).toBeCloseTo(wasLit[i], 6) })
+    // And the corners were not touched, which is the whole point: a corner
+    // belongs to every face around it.
+    expect(after.vertices).toEqual(before.vertices)
+  })
+
+  it('takes the colour in hand along, so the next SEAM uses what the swatch shows', () => {
+    w().colorFace(0, red)
+    expect(w().color).toEqual(red)
+  })
+
+  it('ignores a face that is not there', () => {
+    const before = w().current()!
+    w().colorFace(999, red)
+    expect(w().current()!.facecolors).toBeUndefined()
+    expect(w().current()).toEqual(before)
+  })
+
+  it('gives the faces back to their corners, and undo puts them back', () => {
+    w().colorFace(2, red)
+    expect(w().current()!.facecolors).toBeDefined()
+    w().clearFaceColors()
+    expect(w().current()!.facecolors).toBeUndefined()
+    w().undo()
+    expect(w().current()!.facecolors![2]).toEqual(red)
+  })
+
+  it('switching palettes keeps every index and changes what the indices name', () => {
+    // Four colours taken from the built-in by index, so each really is a
+    // colour the wire can carry.
+    const four = [0, 2, 4, 6].map((i) => BUILT_IN[i]) as typeof BUILT_IN
+    const at = (c: [number, number, number]): [number, number, number] => c.map((n) => n / 255) as [number, number, number]
+    w().colorAll(at(BUILT_IN[2]))
+    const id = w().savePalette('four', four)
+    expect(w().palettes).toHaveLength(1)
+
+    w().usePalette(id)
+    const on = w().current()!
+    expect(on.palette).toEqual(four)
+    expect(on.paletteName).toBe('four')
+    // Index 2 in the built-in was the colour; index 2 in the new palette is a
+    // different colour, and that is what switching a palette means.
+    expect(on.vertices[0].c).toEqual(at(four[2]))
+
+    w().usePalette(null)
+    const back = w().current()!
+    expect(back.palette).toBeUndefined()
+    expect(back.vertices[0].c).toEqual(at(BUILT_IN[2]))
+  })
+
+  it('forgetting a palette leaves the object that is on it alone', () => {
+    const four = [0, 2, 4, 6].map((i) => BUILT_IN[i]) as typeof BUILT_IN
+    const id = w().savePalette('four', four)
+    w().usePalette(id)
+    const colors = w().current()!.vertices.map((v) => v.c)
+    w().forgetPalette(id)
+    expect(w().palettes).toHaveLength(0)
+    // The palette travels on the model, so losing its name loses nothing else.
+    expect(w().current()!.palette).toEqual(four)
+    expect(w().current()!.vertices.map((v) => v.c)).toEqual(colors)
+  })
+
+  it('names a palette, and renaming an unnamed one falls back rather than blanking it', () => {
+    const id = w().savePalette('   ', [BUILT_IN[0], BUILT_IN[1]])
+    expect(w().palettes[0].name).toBe('untitled')
+    w().renamePalette(id, 'sunset')
+    expect(w().palettes[0].name).toBe('sunset')
+    w().renamePalette(id, '   ')
+    expect(w().palettes[0].name).toBe('sunset')
+  })
+})

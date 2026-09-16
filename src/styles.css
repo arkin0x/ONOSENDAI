@@ -6158,3 +6158,90 @@ kbd {
   resize: vertical;
   word-break: break-all;
 }
+
+/* The way back out of face colours, in the object's stat line: a button that
+   reads as a sentence, because it is one. */
+.workshop__link {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+
+/* ---------- The palette, full screen ----------
+
+   A colour here is an index into a list of 256, so the thing worth looking at
+   is the list. The old wheel offered every colour a screen can make, which was
+   honest while a colour could be anything and became a lie the moment it could
+   not. This is full screen because 256 swatches large enough to hit with a
+   thumb do not fit anywhere else. */
+.palettes {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  background: rgba(3, 6, 12, 0.96);
+}
+.palettes__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.palettes__title { margin: 0; font-size: 11px; letter-spacing: 0.24em; color: var(--accent); font-weight: 600; }
+.palettes__sub { margin: 5px 0 0; font-size: 10px; line-height: 1.5; color: var(--dim); max-width: 60ch; }
+
+.palettes__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 4px; }
+.palettes__body button { touch-action: manipulation; }
+.palettes__band + .palettes__band { margin-top: 16px; }
+.palettes__band-title {
+  margin: 0 0 7px;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.palettes__band-title span { color: var(--dim); letter-spacing: 0.06em; margin-left: 8px; font-weight: 400; }
+
+/* Eight across, which is one hue ramp per row in the built-in, so the sheet is
+   read as ramps rather than scanned as a wall. */
+.palettes__grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.palettes__sw {
+  aspect-ratio: 1;
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #05070d;
+  -webkit-tap-highlight-color: transparent;
+}
+.palettes__sw.is-on { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+
+.palettes__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+}
+.palettes__label { font-size: 8px; letter-spacing: 0.16em; color: var(--dim); }
+.palettes__one { display: inline-flex; align-items: center; gap: 2px; }
+.palettes__one .workshop__mode em { font-style: normal; color: var(--dim); margin-left: 5px; }
+.palettes__name { flex: 1; min-width: 120px; }
+
+@media (min-width: 720px) {
+  .palettes__grid { grid-template-columns: repeat(16, 1fr); }
+  .palettes__sw { min-height: 34px; }
+}

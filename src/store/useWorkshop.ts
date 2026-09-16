@@ -46,9 +46,9 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, cloneVertex } from 'sno-core/shards'
+  type ShardVertex, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
-import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
+import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
@@ -58,6 +58,30 @@ export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
 
 const STORAGE = 'onosendai:shards'
 const PALETTE_STORAGE = 'onosendai:palette'
+const PALETTES_STORAGE = 'onosendai:palettes'
+
+/** A palette with a name somebody gave it. The name is this browser's, not the wire's. */
+export interface NamedPalette {
+  id: string
+  name: string
+  colors: Palette
+}
+
+function loadPalettes(): NamedPalette[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PALETTES_STORAGE) ?? '[]') as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.filter((p): p is NamedPalette => (
+      !!p && typeof p.id === 'string' && typeof p.name === 'string'
+      && Array.isArray(p.colors) && p.colors.length >= 2 && p.colors.length <= 256
+      && p.colors.every((c: unknown) => Array.isArray(c) && c.length === 3 && c.every((n) => Number.isInteger(n) && n >= 0 && n <= 255))
+    ))
+  } catch { return [] }
+}
+
+function savePalettes(list: NamedPalette[]): void {
+  try { localStorage.setItem(PALETTES_STORAGE, JSON.stringify(list)) } catch { /* quota or private mode */ }
+}
 const AVATAR_KEY = 'onosendai:workshop-avatar'
 /** Undo depth per shard. */
 const HISTORY = 64
@@ -163,8 +187,10 @@ export interface WorkshopState {
   facePick: number[]
   /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
   selectedFace: number | null
-  /** Swatches to hand: newest first, every color the picker ever settled on, then the defaults. */
+  /** The swatch row: hexes the author has reached for, all of them palette colours. */
   palette: string[]
+  /** Palettes this browser knows, beyond the built-in. Named for people, not for the wire. */
+  palettes: NamedPalette[]
   /** The Y the add and stamp tools place on, in ticks: the grid plane moves up and down. */
   level: number
   /** The working grid's normal axis: 1 the floor, 0 facing +X, 2 facing +Z (stamps.ts WorkPlane). */
@@ -226,6 +252,10 @@ export interface WorkshopState {
   selectConnected: () => void
   selectFace: (index: number | null) => void
   deleteSelectedFace: () => void
+  /** The colour onto one face as a hard seam, not onto its corners. */
+  colorFace: (index: number, c: [number, number, number]) => void
+  /** Give every face back to its corners: the object interpolates again. */
+  clearFaceColors: () => void
   /** Put a color at the front of the palette (moving it there if it is already in). */
   rememberColor: (hex: string) => void
   forgetColor: (hex: string) => void
@@ -238,6 +268,15 @@ export interface WorkshopState {
   rotateSelected: (turns: 1 | -1) => void
   colorSelected: (c: [number, number, number]) => void
   colorAll: (c: [number, number, number]) => void
+  /** Keep a palette under a name, and return its id. */
+  savePalette: (name: string, colors: Palette) => string
+  renamePalette: (id: string, name: string) => void
+  forgetPalette: (id: string) => void
+  /**
+   * Put the current shard on another palette, keeping every index.
+   * `id` is a saved palette, or null for the built-in.
+   */
+  usePalette: (id: string | null) => void
   deleteSelected: () => void
   /** Take the selected points out of the shard and hold them for PASTE. */
   cutSelection: () => void
@@ -390,6 +429,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selectedFace: null,
     clip: null,
     palette: loadPalette(),
+    palettes: loadPalettes(),
     level: 0,
     plane: FLOOR,
     division: 1,
@@ -544,6 +584,97 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (selectedFace === null) return
       get().removeFace(selectedFace)
       set({ selectedFace: null })
+    },
+
+    /**
+     * A hard colour on one face.
+     *
+     * Colouring a face's three corners is not the same thing: a corner belongs
+     * to every face that touches it, so the colour bleeds across every shared
+     * edge. A face colour is carried per face (DECK-0003 §1.4a) and stops at
+     * the edge, which is what makes a crisp seam possible at all.
+     *
+     * The first one fills the rest of the list from what each face already
+     * looks like, the average of its corners, so turning one face hard leaves
+     * every other face looking exactly as it did.
+     */
+    colorFace: (index, c) => {
+      set({ color: clampColor(c) })
+      edit((s) => {
+        if (!s.faces[index]) return null
+        const current = s.facecolors && s.facecolors.length === s.faces.length
+          ? s.facecolors
+          : s.faces.map((f) => {
+            const sum = f.reduce((acc, i) => {
+              const v = s.vertices[i]
+              return v ? [acc[0] + v.c[0], acc[1] + v.c[1], acc[2] + v.c[2]] : acc
+            }, [0, 0, 0])
+            return sum.map((n) => n / 3) as [number, number, number]
+          })
+        const facecolors = current.slice()
+        facecolors[index] = clampColor(c)
+        return { ...s, facecolors }
+      }, 'That face keeps its own color now.')
+    },
+
+    clearFaceColors: () => {
+      edit((s) => (s.facecolors ? { ...s, facecolors: undefined } : null), 'Faces blend across their corners again.')
+    },
+
+    savePalette: (name, colors) => {
+      const id = uuid()
+      const list = [...get().palettes, { id, name: name.trim().slice(0, 48) || 'untitled', colors }]
+      set({ palettes: list })
+      savePalettes(list)
+      return id
+    },
+
+    renamePalette: (id, name) => {
+      const list = get().palettes.map((p) => (p.id === id ? { ...p, name: name.trim().slice(0, 48) || p.name } : p))
+      set({ palettes: list })
+      savePalettes(list)
+    },
+
+    forgetPalette: (id) => {
+      const list = get().palettes.filter((p) => p.id !== id)
+      set({ palettes: list })
+      savePalettes(list)
+      // A shard still on it keeps its colours: the palette is carried on the
+      // model, so forgetting the name does not take the colours away.
+    },
+
+    /**
+     * Move the current shard onto another palette, keeping every index.
+     *
+     * This is what an indexed format has always meant by switching palettes:
+     * the indices stay and what they name changes, so the object looks
+     * different afterwards. The face colours move with the vertices, and the
+     * current colour moves too, so the swatch under the cursor still points at
+     * the same slot it did before.
+     */
+    usePalette: (id) => {
+      const next = id === null ? undefined : get().palettes.find((p) => p.id === id)?.colors
+      const nextName = id === null ? undefined : get().palettes.find((p) => p.id === id)?.name
+      if (id !== null && !next) return
+      edit((s) => {
+        const from = s.palette ?? BUILT_IN
+        const to = next ?? BUILT_IN
+        if (samePalette(s.palette, next)) return null
+        const moved = remap(s.vertices.map((v) => v.c), from, to)
+        return {
+          ...s,
+          vertices: s.vertices.map((v, i) => ({ ...v, c: moved[i] })),
+          ...(s.facecolors ? { facecolors: remap(s.facecolors, from, to) } : {}),
+          palette: next,
+          paletteName: nextName,
+        }
+      }, next ? `Now on "${nextName}". Every color kept its index.` : 'Back on the built-in palette. Every color kept its index.')
+      // The colour in hand follows the same rule as everything else.
+      const s = get().current()
+      if (s) {
+        const hex = snapHex(s.palette ?? BUILT_IN, rgbToHex(get().color))
+        if (hex) set({ color: hexToRgb(hex) })
+      }
     },
 
     rememberColor: (hex) => {

@@ -26,7 +26,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
-import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from 'sno-core/shards'
+import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useAvatars } from '../store/useAvatars'
@@ -340,10 +340,35 @@ export function Workshop(): JSX.Element | null {
   // and the sheet behind the dropper holds all 256.
   const hex = rgbToHex(color)
 
+  /**
+   * Put a shard on the clipboard, or say why not. Two silences lived here.
+   *
+   * An empty shard copied happily. A brand new object is zero vertices, and
+   * the payload that comes out is well formed, so pasting one into snocrash
+   * reported success and put nothing on the bench. "Nothing happens" was the
+   * whole of the bug report and it was accurate. Nothing is worth copying
+   * until there is something in it.
+   *
+   * And where there is no clipboard at all, `navigator.clipboard?.writeText(x)
+   * .then(...)` short-circuits the ENTIRE chain, not just the call: the button
+   * did nothing and said nothing. The check is explicit now, and the avatar's
+   * COPY goes through here too, where it used to reach for
+   * navigator.clipboard with no guard and throw.
+   */
+  const copyShard = (s: ShardModel, ok: string): void => {
+    if (s.vertices.length === 0) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
+    const clip = navigator.clipboard
+    if (!clip) { say('The clipboard is not available here.'); return }
+    void clip.writeText(JSON.stringify(toPayload(s))).then(
+      () => say(ok),
+      () => say('The clipboard refused that.'),
+    )
+  }
+
   const copy = (id: string): void => {
     const s = w().shards.find((x) => x.id === id)
     if (!s) return
-    navigator.clipboard?.writeText(JSON.stringify(toPayload(s))).then(() => say(`Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)).catch(() => say('The clipboard is not available here.'))
+    copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
   }
   const importText = (text: string): void => {
     const id = w().importText(text)
@@ -509,7 +534,7 @@ export function Workshop(): JSX.Element | null {
                   title="Copy it into your shards, where you can edit it"
                   onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your shards.`) }}
                 >⧉</button>
-                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => { void navigator.clipboard.writeText(JSON.stringify(toPayload(myAvatar))).then(() => say('Avatar copied.'), () => say('Could not reach the clipboard.')) }}>COPY</button>
+                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}>COPY</button>
               </li>
             )}
             {shards.map((s) => (

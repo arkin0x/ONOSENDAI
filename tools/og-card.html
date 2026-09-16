@@ -1,0 +1,138 @@
+<!doctype html>
+<!--
+  og-card.html - the link preview, at public/og.png.
+
+  Rendered at exactly 1200x630, which is what every platform crops to:
+
+    node -e "const{chromium}=require('playwright');(async()=>{
+      const b=await chromium.launch({args:['--allow-file-access-from-files']});
+      const p=await b.newPage({viewport:{width:1200,height:630}});
+      await p.goto('file://'+process.cwd()+'/tools/og-card.html',{waitUntil:'networkidle'});
+      await p.evaluate(()=>document.fonts.ready);
+      await p.screenshot({path:'public/og.png'});await b.close();})()"
+
+  playwright is not a dependency of this app: this is a one-off render, and any
+  headless Chromium pointed at this file at that size produces the same card.
+
+  og-hero.png beside this file is a real frame of the scene at scaleExp 80,
+  captured with the HUD hidden. It is a capture and not a mock: the grid floor,
+  the sector cage and the Black Sun are what the app actually draws. To replace
+  it, screenshot the canvas at 2400x1260 and keep the ring near (1000, 520),
+  which is the point the CSS below frames against. The world labels are drawn
+  into the canvas rather than the DOM, so they cannot be hidden with CSS and
+  survive as faint detail; at card size that reads as instrumentation.
+
+  The typeface is the app's own file from public/fonts, so the card is set in
+  the same type as the thing it links to. Check the render rather than assuming:
+  a silent fallback to a system mono changes every width here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  /* The app's own face, the file it ships, so the card is set in the same
+     type as the thing it links to. */
+  @font-face {
+    font-family: 'Monaspace Krypton';
+    src: url('../public/fonts/MonaspaceKrypton-Regular.woff') format('woff');
+    font-weight: 400;
+    font-display: block;
+  }
+  /* ONOSENDAI's tokens, from src/styles.css. */
+  :root {
+    --bg: #05070d;
+    --fg: #c8f5ff;
+    --dim: #6f8ea0;
+    --accent: #00e5ff;
+    --border: #1d3547;
+    /* The wordmark's own three bands, measured off public/logo.png. */
+    --plum: #78004E;
+    --blue: #0062CD;
+    --teal: #06A4A4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    background: var(--bg);
+    font-family: 'Monaspace Krypton', ui-monospace, SFMono-Regular, Menlo, monospace;
+    position: relative;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A real frame of the thing itself: the grid floor receding, the sector
+     cage, the Black Sun.
+     
+     Framed by measurement rather than by eye. In hero.png (2400 x 1260) the
+     ring's centre sits at about (1000, 520). Drawn at 0.6 scale that is
+     (600, 312), and this panel is 700 wide, so -250px puts the ring a little
+     right of the panel's middle with the grid floor still running under it. */
+  .scene {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 700px;
+    background-image: url('./og-hero.png');
+    background-size: 1440px auto;
+    background-position: -250px -10px;
+    background-repeat: no-repeat;
+  }
+  /* Dissolve its left edge into the ground rather than ending on a seam, and
+     take the top corner down so nothing competes with the wordmark. */
+  .scene::after {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(to right, var(--bg) 0%, rgba(5,7,13,0.88) 18%, rgba(5,7,13,0.35) 46%, rgba(5,7,13,0) 74%),
+      linear-gradient(to bottom, rgba(5,7,13,0.45) 0%, rgba(5,7,13,0) 26%);
+  }
+
+  /* The wordmark's bands, in the order they sit in the logo. */
+  .spine {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 6px;
+    background: linear-gradient(to bottom, var(--plum) 0%, var(--plum) 33%, var(--blue) 33%, var(--blue) 66%, var(--teal) 66%);
+  }
+
+  .plate {
+    position: absolute; left: 76px; top: 0; bottom: 0; width: 600px;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 30px; z-index: 2;
+  }
+
+  .eyebrow {
+    font-size: 17px; letter-spacing: 0.4em; color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  /* The wordmark itself, not typeset: those offset bands are the identity. */
+  .mark { width: 560px; height: auto; display: block; filter: drop-shadow(0 0 26px rgba(0, 229, 255, 0.28)); }
+
+  .tagline {
+    font-size: 22px; line-height: 1.6; color: #9dc0d2; max-width: 520px;
+  }
+  .tagline b { color: var(--fg); font-weight: 400; }
+
+  .meta {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 14px; letter-spacing: 0.14em; color: var(--dim);
+    text-transform: uppercase;
+    padding-top: 12px; border-top: 1px solid var(--border); width: max-content;
+  }
+  .meta .dot { color: var(--border); }
+  .meta .host { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="scene"></div>
+  <div class="spine"></div>
+  <div class="plate">
+    <div class="eyebrow">Spatial Explorer</div>
+    <img class="mark" src="../public/logo.png" alt="ONOSENDAI">
+    <p class="tagline">Every nostr key decodes to a coordinate. <b>You are already somewhere in it.</b></p>
+    <div class="meta">
+      <span>Cyberspace Protocol v2</span>
+      <span class="dot">/</span>
+      <span>2^85 gibsons a side</span>
+      <span class="dot">/</span>
+      <span class="host">onosendai.tech</span>
+    </div>
+  </div>
+</body>
+</html>

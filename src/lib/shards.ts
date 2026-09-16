@@ -85,9 +85,8 @@ export interface ShardModel {
 
 /** Wire form: what goes in an event's content, public or decrypted. */
 export interface ShardPayload {
-  /** 1 was this client's own frame; 2 is the published one (DECK-0004 §2). */
+  /** 1 was this client's own frame; 2 is the published one (DECK-0003 §2). */
   v: 1 | 2
-  type: 'shard'
   name: string
   unit: number
   /** Grid half-width the shard was built on; absent in older payloads (8). */
@@ -203,6 +202,28 @@ export function clampColor(c: [number, number, number]): [number, number, number
   return c.map((v) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0))) as [number, number, number]
 }
 
+/**
+ * Decimal places a colour channel is written with (DECK-0003 §1.3).
+ *
+ * A publisher MUST write at most four. It is the single largest cost in the
+ * format and the precision buys nothing: four places is 10,000 steps per
+ * channel where eight-bit colour, which is what a screen shows, has 256. The
+ * saving is not marginal. A worst-case vertex costs 87 bytes with full double
+ * precision and 52 at four places, because `0.8039215686274510` is eighteen
+ * characters and `0.8039` is six, three times over per vertex. At the format's
+ * ceiling that is the difference between an object every relay takes and one
+ * that is over strfry's stock limit before its face colours are counted.
+ *
+ * A reader still takes whatever arrives and only clamps: this is an obligation
+ * on writers, and rejecting a payload for being too precise would help nobody.
+ */
+export const COLOR_PLACES = 4
+
+/** A colour as it goes on the wire: clamped, and no more precise than it should be. */
+export function wireColor(c: [number, number, number]): [number, number, number] {
+  return clampColor(c).map((v) => Number(v.toFixed(COLOR_PLACES))) as [number, number, number]
+}
+
 /** A face needs three distinct vertices that exist. */
 export function validFace(f: [number, number, number], count: number): boolean {
   return f.every((i) => Number.isInteger(i) && i >= 0 && i < count) && new Set(f).size === 3
@@ -211,7 +232,7 @@ export function validFace(f: [number, number, number], count: number): boolean {
 /**
  * The wire's handedness, and why it is not this client's.
  *
- * DECK-0004 §2: an SNO payload is right-handed with Y up and +Z toward the
+ * DECK-0003 §2: an SNO payload is right-handed with Y up and +Z toward the
  * viewer, which is the glTF and three.js convention, so that any tool can read
  * one without a special case. Cyberspace's own +Z is the black sun, away from
  * the viewer, and everything in this client is built in that frame.
@@ -241,14 +262,13 @@ export function toPayload(s: ShardModel): ShardPayload {
   const vertices = s.vertices.map(flipZ)
   return {
     v: WIRE_VERSION,
-    type: 'shard',
     name: s.name,
     unit: s.unit,
     extent: s.extent,
     mode: s.mode,
     vertices: vertices.map((v) => v.p),
     ticks: packTicks(vertices.map((v) => v.t ?? [0, 0, 0])),
-    colors: vertices.map((v) => v.c),
+    colors: vertices.map((v) => wireColor(v.c)),
     faces: s.faces,
     // Only a standing shard carries the pose: a payload without one is byte
     // for byte what it was before the pose existed.
@@ -294,7 +314,11 @@ export function unpackTicks(packed: unknown, count: number): Array<[number, numb
 export function fromPayload(raw: unknown, id: string): ShardModel | null {
   if (!raw || typeof raw !== 'object') return null
   const p = raw as Partial<ShardPayload>
-  if ((p.v !== 1 && p.v !== WIRE_VERSION) || p.type !== 'shard') return null
+  // DECK-0003 §1.1a: there is no `type` field. Payloads written before that
+  // deck carry `type: "shard"`; it is ignored here and never rejected on,
+  // because the field is noise and rejecting on noise would refuse every
+  // object anyone else writes correctly.
+  if (p.v !== 1 && p.v !== WIRE_VERSION) return null
   if (!Array.isArray(p.vertices) || !Array.isArray(p.colors) || !Array.isArray(p.faces)) return null
   if (p.vertices.length !== p.colors.length || p.vertices.length > MAX_VERTICES || p.faces.length > MAX_FACES) return null
   if (!MODES.includes(p.mode as ShardMode)) return null

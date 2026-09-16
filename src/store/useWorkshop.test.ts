@@ -232,7 +232,7 @@ describe('workshop', () => {
     w().setDivision(1)
     expect(w().current()!.vertices.map((v) => ticksOf(v))).toEqual([[70, 0, 80], [30, 0, 0]])
     // The wire is the published frame, whose Z is the negative of this
-    // client's (DECK-0004 §2), so a vertex 80 ticks forward goes out 80 back:
+    // client's (DECK-0003 §2), so a vertex 80 ticks forward goes out 80 back:
     // one whole unit less, with 40 ticks of remainder.
     const wire = JSON.parse(w().exportCurrent()!)
     expect(wire.v).toBe(2)

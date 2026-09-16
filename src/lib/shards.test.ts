@@ -39,8 +39,30 @@ describe('payload', () => {
     expect(fromPayload({ ...p, colors: p.colors.slice(1) }, 'x')).toBeNull()
     expect(fromPayload({ ...p, mode: 'voxels' }, 'x')).toBeNull()
     expect(fromPayload({ ...p, unit: 99 }, 'x')).toBeNull()
-    expect(fromPayload({ ...p, type: 'note' }, 'x')).toBeNull()
     expect(fromPayload('nope', 'x')).toBeNull()
+  })
+
+  it('ignores a `type` field rather than requiring or rejecting on it', () => {
+    // DECK-0003 §1.1a: the format has no such field. Payloads written before
+    // that deck carry `type: "shard"`, and rejecting on it would refuse every
+    // object anyone else writes correctly.
+    const p = toPayload(tri)
+    expect(p).not.toHaveProperty('type')
+    for (const type of ['shard', 'note', 17, null]) {
+      expect(fromPayload({ ...p, type }, 'x'), String(type)).not.toBeNull()
+    }
+  })
+
+  it('writes colours at four decimal places and no more', () => {
+    // The largest cost in the format, and the precision buys nothing: four
+    // places is 10,000 steps per channel where a screen shows 256.
+    const messy = { ...tri, vertices: tri.vertices.map((v) => ({ ...v, c: [0.8039215686274510, 1 / 3, 0] as [number, number, number] })) }
+    for (const c of toPayload(messy).colors) {
+      for (const channel of c) expect(String(channel).replace(/^\d+\.?/, '').length, String(channel)).toBeLessThanOrEqual(4)
+    }
+    // A reader still takes whatever arrives.
+    const back = fromPayload({ ...toPayload(tri), colors: tri.vertices.map(() => [0.8039215686274510, 0.1, 0.1]) }, 'x')
+    expect(back!.vertices[0].c[0]).toBe(0.8039215686274510)
   })
 
   it('clamps colors into 0..1', () => {
@@ -125,7 +147,7 @@ describe('ticks', () => {
     const s = { ...newShard('t'), vertices: [v([0, 0, 0]), v([TICKS_PER_UNIT, 0, 0]), v([40, -30, 24 + 2 * TICKS_PER_UNIT]), v([0, 0, 0])] }
     expect(s.vertices[2]).toEqual({ p: [0, -1, 2], t: [40, 90, 24], c: [1, 0, 0] })
     expect(s.vertices[1]).toEqual({ p: [1, 0, 0], c: [1, 0, 0] })
-    // Out on the wire, Z is negated into the published frame (DECK-0004 §2):
+    // Out on the wire, Z is negated into the published frame (DECK-0003 §2):
     // 24 + 2 units forward becomes the same distance back, which is three
     // units short with 96 ticks of remainder.
     const wire = toPayload(s)
@@ -162,7 +184,7 @@ describe('ticks', () => {
   })
 })
 
-describe('DECK-0004 §2: the wire is right-handed, this client is not', () => {
+describe('DECK-0003 §2: the wire is right-handed, this client is not', () => {
   const model = {
     ...newShard('flip'),
     vertices: [

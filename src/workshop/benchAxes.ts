@@ -11,7 +11,7 @@
 
 import { create } from 'zustand'
 import { Quaternion, Vector3, type Camera } from 'three'
-import type { WorkPlane } from '../lib/stamps'
+import type { WorkPlane } from 'sno-core/stamps'
 
 export type NudgeName = 'up' | 'down' | 'left' | 'right' | 'away' | 'toward'
 

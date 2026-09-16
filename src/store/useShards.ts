@@ -15,7 +15,7 @@
  * turned up near you and could decrypt and verify.
  */
 
-import { clampUnit, normalizeStored } from '../lib/shards'
+import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -37,7 +37,7 @@ import {
 } from '../lib/hidden'
 import { useWorkshop } from './useWorkshop'
 import { useCeremony } from './useCeremony'
-import type { ShardModel } from '../lib/shards'
+import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import type { NearbyReturn } from '../lib/nearbyReturn'

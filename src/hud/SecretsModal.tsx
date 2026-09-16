@@ -15,7 +15,7 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { KeyRound } from 'lucide-react'
-import { formatCellSize } from '../lib/scale'
+import { formatCellSize } from 'sno-core/scale'
 import { formatAgo } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets, bytesOf, heldList, type HeldKey, type SecretsSort } from '../store/useSecrets'

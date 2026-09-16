@@ -29,7 +29,7 @@ vi.mock('../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { newShard, type ShardModel, type ShardPayload } from '../lib/shards'
+import { newShard, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { SNAP_MIN_HEIGHT } from '../lib/pose'
 import { useCyberspace } from './useCyberspace'
 import { useSecrets } from './useSecrets'

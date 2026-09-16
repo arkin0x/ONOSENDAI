@@ -23,7 +23,7 @@
 import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
-import { fromPayload, toPayload, type ShardModel } from './shards'
+import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import type { Position } from './space'
 

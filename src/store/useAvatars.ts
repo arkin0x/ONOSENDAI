@@ -23,7 +23,7 @@ import { nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, mineInWorker, type AvatarMiner } from '../lib/avatarWorker'
 import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
-import { fromPayload, toPayload, type ShardModel } from '../lib/shards'
+import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'

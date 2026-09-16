@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react'
-import { formatCellSize } from '../lib/scale'
+import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
 import { cashuStateLabel, composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'

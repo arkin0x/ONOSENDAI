@@ -15,7 +15,7 @@
  * puts the dodecahedron back.
  */
 
-import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from './shards'
+import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 
 export const AVATAR_KIND = 11333
 

@@ -21,14 +21,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { ClipboardPaste, Copy, Eye, Grid3x3, Link, Menu, MousePointer2, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
+import { ClipboardPaste, Copy, Eye, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
+import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
-import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from '../lib/shards'
-import { hsvToRgb, rgbToHsv, type Hsv } from '../lib/hsv'
-import { formatCellSize } from '../lib/scale'
-import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from '../lib/stamps'
+import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, hexToRgb, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode } from 'sno-core/shards'
+import { formatCellSize } from 'sno-core/scale'
+import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useAvatars } from '../store/useAvatars'
 import { avatarReach, avatarWork } from 'cyberspace-core'
 import { avatarTemplate } from '../lib/avatar'
@@ -37,7 +37,6 @@ import { minerCount } from '../lib/avatarWorker'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
-import { BUILT_IN, snapHex } from '../lib/snoPalette'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
@@ -46,7 +45,6 @@ const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
 
 const LONG_PRESS_MS = 550
-const SETTLE_MS = 500
 const TOAST_MS = 4000
 
 /** One line under the tool row. SELECT needs none: the pad appears when something is selected. */
@@ -192,60 +190,6 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   )
 }
 
-/**
- * The mixer: HUE, SATURATION and BRIGHTNESS, each a slider on a track painted
- * with what that slider would give, the colour they make at the top and a hex
- * field for a colour from elsewhere. It opens on the colour in hand; when that
- * has no saturation or no brightness (white, grey, black) those two open at
- * the middle, so the first touch of HUE gives a colour rather than another grey.
- */
-const MID = 50
-function opening(hex: string): Hsv {
-  const [h, s, v] = rgbToHsv(hexToRgb(hex))
-  return [Math.round(h), s === 0 ? MID : Math.round(s), v === 0 ? MID : Math.round(v)]
-}
-function Mixer({ hex, onChange, onSettle }: { hex: string; onChange: (hex: string) => void; onSettle: (hex: string) => void }): JSX.Element {
-  const [hsv, setHsv] = useState<Hsv>(() => opening(hex))
-  const [text, setText] = useState(hex)
-  const made = rgbToHex(hsvToRgb(hsv))
-  // A swatch tapped while the mixer is up moves the sliders to it.
-  useEffect(() => { if (hex !== made) { setHsv(opening(hex)); setText(hex) } }, [hex]) // eslint-disable-line react-hooks/exhaustive-deps
-  const slide = (i: 0 | 1 | 2) => (e: { target: { value: string } }): void => {
-    const next = [...hsv] as Hsv
-    next[i] = Number(e.target.value)
-    const out = rgbToHex(hsvToRgb(next))
-    setHsv(next); setText(out); onChange(out)
-  }
-  const typed = (value: string): void => {
-    setText(value)
-    const m = /^#?([0-9a-f]{6})$/i.exec(value.trim())
-    if (!m) return
-    const out = '#' + m[1].toLowerCase()
-    setHsv(opening(out)); onChange(out)
-  }
-  const at = (h: number, sat: number, v: number): string => rgbToHex(hsvToRgb([h, sat, v]))
-  const tracks = [
-    'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
-    `linear-gradient(to right, ${at(hsv[0], 0, hsv[2])}, ${at(hsv[0], 100, hsv[2])})`,
-    `linear-gradient(to right, #000, ${at(hsv[0], hsv[1], 100)})`,
-  ]
-  const rows: Array<[string, number, number]> = [['HUE', 360, hsv[0]], ['SATURATION', 100, hsv[1]], ['BRIGHTNESS', 100, hsv[2]]]
-  return (
-    <div className="ws__mixer" role="group" aria-label="Mix a color">
-      <div className="ws__mixer-head">
-        <span className="workshop__swatch workshop__swatch--sample" style={{ background: made }} aria-hidden />
-        <input className="ws__mixer-hex" value={text} onChange={(e) => typed(e.target.value)} onBlur={() => onSettle(made)} spellCheck={false} aria-label="Hex color" />
-      </div>
-      {rows.map(([label, max, value], i) => (
-        <label key={label} className="ws__mixer-row">
-          <span className="workshop__label">{label}</span>
-          <input type="range" min={0} max={max} step={1} value={value} style={{ background: tracks[i] }} onChange={slide(i as 0 | 1 | 2)} onPointerUp={() => onSettle(made)} onKeyUp={() => onSettle(made)} aria-label={label} />
-        </label>
-      ))}
-    </div>
-  )
-}
-
 /** The bench's axes as the compass draws them: model +Z is render -Z (shards.ts toRender). */
 const BENCH_DIRS = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, -1) }
 
@@ -351,9 +295,6 @@ export function Workshop(): JSX.Element | null {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [deleteColor, setDeleteColor] = useState<string | null>(null)
-  const settle = useRef<number>()
-  const picked = useRef(false)
-  useEffect(() => () => window.clearTimeout(settle.current), [])
   // A tap anywhere outside the colour bar shuts it, except while SELECT is
   // the tool, when colouring the selection is the work and the bar stays.
   useEffect(() => {
@@ -382,18 +323,6 @@ export function Workshop(): JSX.Element | null {
     document.addEventListener('pointerdown', shut, true)
     return () => document.removeEventListener('pointerdown', shut, true)
   }, [viewOpen])
-  // The mixer shuts with the column, and on a tap anywhere else.
-  useEffect(() => { if (!colorBar) setPickerOpen(false) }, [colorBar])
-  useEffect(() => {
-    if (!pickerOpen) return
-    const shut = (e: PointerEvent): void => {
-      const el = e.target as HTMLElement | null
-      if (el?.closest('.ws__mixer, .workshop__color')) return
-      setPickerOpen(false)
-    }
-    document.addEventListener('pointerdown', shut, true)
-    return () => document.removeEventListener('pointerdown', shut, true)
-  }, [pickerOpen])
   const bind = useRepeatable()
 
   if (!open) return null
@@ -406,28 +335,10 @@ export function Workshop(): JSX.Element | null {
   const extent = shard?.extent ?? MIN_EXTENT
   const minExtent = shard ? Math.max(MIN_EXTENT, neededExtent(shard)) : MIN_EXTENT
 
-  // The picker paints live and, once the wheel has settled, puts the color at
-  // the front of the palette; leaving the picker settles it at once.
+  // Every colour in reach is a palette colour now, so there is nothing to snap
+  // and nothing to settle: the swatch row holds hexes taken from the built-in,
+  // and the sheet behind the dropper holds all 256.
   const hex = rgbToHex(color)
-  const pick = (value: string): void => {
-    // Snapped at the one door every colour comes through, so the bench never
-    // shows a colour a shard cannot carry (lib/snoPalette). Without it, a
-    // colour would shift the moment it was deployed: across the sRGB cube the
-    // mean snap is 0.041 in OKLab where a just-noticeable difference is 0.02.
-    const snapped = snapHex(BUILT_IN, value)
-    if (!snapped) return
-    value = snapped
-    w().colorSelected(hexToRgb(value))
-    picked.current = true
-    window.clearTimeout(settle.current)
-    settle.current = window.setTimeout(() => { picked.current = false; w().rememberColor(value) }, SETTLE_MS)
-  }
-  const settled = (value: string): void => {
-    if (!picked.current) return
-    window.clearTimeout(settle.current)
-    picked.current = false
-    w().rememberColor(value)
-  }
 
   const copy = (id: string): void => {
     const s = w().shards.find((x) => x.id === id)
@@ -489,6 +400,7 @@ export function Workshop(): JSX.Element | null {
           <div className="ws__stats">
             {shard.vertices.length} vertices · {shard.faces.length} faces · unit 2^{shard.unit} = {formatCellSize(shard.unit)}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
+            {shard.facecolors && <> · <button className="workshop__link" onClick={() => w().clearFaceColors()} title="Give every face back to its corners, so colors blend across them again">{shard.facecolors.length} face colors, clear</button></>}
           </div>
           <div className="workshop__row">
             <span className="workshop__label">DRAW</span>
@@ -779,6 +691,12 @@ export function Workshop(): JSX.Element | null {
         {facing && selectedFace !== null && (
           <div className="benchops" role="group" aria-label="Selected face">
             <span className="workshop__value workshop__value--wide">face {selectedFace + 1} of {shard?.faces.length ?? 0}</span>
+            {/* A hard colour, which colouring the corners cannot give: a corner
+                belongs to every face touching it, so that bleeds across the
+                shared edges. This stops at the edge. */}
+            <button className="workshop__btn" onClick={() => w().colorFace(selectedFace, w().color)} title="Give this face the current color as a hard seam, not blended from its corners">
+              <PaintBucket size={12} strokeWidth={2.25} aria-hidden /> SEAM
+            </button>
             <button className="workshop__btn workshop__btn--danger" onClick={() => w().deleteSelectedFace()} title="Remove this face (Del)">DELETE FACE</button>
             <button className="workshop__btn" onClick={() => w().selectFace(null)} title="Keep it (Esc)">CANCEL</button>
           </div>
@@ -793,7 +711,7 @@ export function Workshop(): JSX.Element | null {
         {(tool !== 'face' || selectedFace !== null) && (colorBar ? (
           <div className={`ws__color ${tool === 'select' ? '' : 'is-open'}`} role="group" aria-label="Color">
             <span className="workshop__label">COLOR</span>
-            <button className={`workshop__color ${pickerOpen ? 'is-on' : ''}`} onClick={() => setPickerOpen((o) => !o)} aria-pressed={pickerOpen} title="Mix a color: hue, saturation, brightness" aria-label="Mix a color" {...noCallout}>
+            <button className={`workshop__color ${pickerOpen ? 'is-on' : ''}`} onClick={() => setPickerOpen((o) => !o)} aria-pressed={pickerOpen} title="All 256 colors, and which palette this object is on" aria-label="Open the palette" {...noCallout}>
               <Pipette size={13} strokeWidth={2.25} aria-hidden />
             </button>
             <div className="workshop__swatches">
@@ -806,7 +724,7 @@ export function Workshop(): JSX.Element | null {
         ) : (
           <button className="chip ws__colorchip" style={{ background: hex }} onClick={() => { setColorOpen(true); if (narrow && panel === 'tools') setPanel(null) }} title={`Color ${hex}. Tap for the palette.`} aria-label={`Color ${hex}, tap for the palette`} />
         ))}
-        {colorBar && pickerOpen && (tool !== 'face' || selectedFace !== null) && <Mixer hex={hex} onChange={pick} onSettle={settled} />}
+        {pickerOpen && <PaletteModal onClose={() => setPickerOpen(false)} />}
       </div>
 
       {deleteColor !== null && (

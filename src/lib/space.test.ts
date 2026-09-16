@@ -19,6 +19,7 @@ import {
   claimScreenAxes,
   clampAxis,
   flipHandedness,
+  formatStep,
   originShift,
   renderDirection,
   rotateView,
@@ -704,5 +705,16 @@ describe('pointCentre', () => {
   it('keeps sub-cell offsets exact at scale 0', () => {
     const origin = { x: 100n, y: 200n, z: 300n }
     expect(pointCentre({ x: 101n, y: 202n, z: 303n }, origin, 0, AX)).toEqual([0.5, 1.5, 2.5])
+  })
+})
+
+// Moved here when scale.ts went to sno-core: a step is measured in gibsons and
+// gibsons are cyberspace's, so this test never belonged beside the cell-size
+// formatting it was filed with.
+describe('step', () => {
+  it('reads in gibsons, singular at 2^0', () => {
+    expect(formatStep(0)).toBe('1 gibson')
+    expect(formatStep(10)).toBe('1,024 gibsons')
+    expect(formatStep(40)).toBe('2^40 gibsons')
   })
 })

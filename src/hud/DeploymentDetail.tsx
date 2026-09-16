@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { formatCellSize } from '../lib/scale'
+import { formatCellSize } from 'sno-core/scale'
 import { messagePreview } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'

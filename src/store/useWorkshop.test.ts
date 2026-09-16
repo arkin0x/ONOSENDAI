@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { TICKS_PER_UNIT as T, ticksOf } from '../lib/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
+import { BUILT_IN, hexAt, snapHex } from '../lib/snoPalette'
 
 const w = () => useWorkshop.getState()
 
@@ -585,22 +586,32 @@ describe('faces and palette', () => {
   })
 
   it('remembers a picked color at the front once, moves a repeat forward, ignores junk, forgets on request', () => {
+    // Everything remembered is snapped into the SNO palette first, so the
+    // swatch row can only ever hold colours an object can actually carry.
+    const near = snapHex(BUILT_IN, '#123456') as string
     w().rememberColor('#123456')
-    expect(w().palette[0]).toBe('#123456')
+    expect(w().palette[0]).toBe(near)
     expect(w().palette).toHaveLength(DEFAULT_PALETTE.length + 1)
     w().rememberColor('#FFFFFF')
     expect(w().palette[0]).toBe('#ffffff')
     expect(w().palette.filter((h) => h === '#ffffff')).toHaveLength(1)
     w().rememberColor('nonsense')
     expect(w().palette).toHaveLength(DEFAULT_PALETTE.length + 1)
-    w().forgetColor('#123456')
-    expect(w().palette).not.toContain('#123456')
+    w().forgetColor(near)
+    expect(w().palette).not.toContain(near)
+  })
+
+  it('every swatch it starts with is a colour the wire can carry', () => {
+    for (const hex of DEFAULT_PALETTE) expect(snapHex(BUILT_IN, hex)).toBe(hex)
+    expect(snapHex(BUILT_IN, 'nonsense')).toBeNull()
   })
 
   it('keeps 24 colors, the oldest falling off the end', () => {
-    for (let i = 0; i < 30; i++) w().rememberColor('#' + i.toString(16).padStart(6, '0'))
+    // Snapping collapses near neighbours, so walk the SNO palette by index to
+    // get thirty colours that really are distinct.
+    for (let i = 0; i < 30; i++) w().rememberColor(hexAt(BUILT_IN, i * 7))
     expect(w().palette).toHaveLength(24)
-    expect(w().palette[0]).toBe('#00001d')
+    expect(w().palette[0]).toBe(hexAt(BUILT_IN, 29 * 7))
     expect(w().palette).not.toContain('#ffffff')
   })
 })

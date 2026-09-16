@@ -37,6 +37,7 @@ import { minerCount } from '../lib/avatarWorker'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { BUILT_IN, snapHex } from '../lib/snoPalette'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
@@ -409,6 +410,13 @@ export function Workshop(): JSX.Element | null {
   // the front of the palette; leaving the picker settles it at once.
   const hex = rgbToHex(color)
   const pick = (value: string): void => {
+    // Snapped at the one door every colour comes through, so the bench never
+    // shows a colour a shard cannot carry (lib/snoPalette). Without it, a
+    // colour would shift the moment it was deployed: across the sRGB cube the
+    // mean snap is 0.041 in OKLab where a just-noticeable difference is 0.02.
+    const snapped = snapHex(BUILT_IN, value)
+    if (!snapped) return
+    value = snapped
     w().colorSelected(hexToRgb(value))
     picked.current = true
     window.clearTimeout(settle.current)

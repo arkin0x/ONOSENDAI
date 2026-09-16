@@ -48,6 +48,7 @@ import {
   type ShardModel,
   type ShardVertex, cloneVertex } from '../lib/shards'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from '../lib/stamps'
+import { BUILT_IN, hexAt, snapHex } from '../lib/snoPalette'
 import { newell, triangulate } from '../lib/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
@@ -61,7 +62,15 @@ const AVATAR_KEY = 'onosendai:workshop-avatar'
 /** Undo depth per shard. */
 const HISTORY = 64
 /** The swatches every workshop starts with. */
-export const DEFAULT_PALETTE = ['#00e5ff', '#ff2323', '#52e39f', '#ffb020', '#c07dff', '#f7931a', '#ffffff', '#2f81f7']
+/**
+ * The swatches a new workshop starts with, taken from the SNO palette by index
+ * rather than written as hex, so every one of them is a colour a shard can
+ * actually carry on the wire (lib/snoPalette).
+ *
+ * 226 is this client's own cyan, 238 pure red, 246 a spring green, 249 amber,
+ * 243 violet, 228 the instrument orange, 225 white, 239 pure blue.
+ */
+export const DEFAULT_PALETTE = [226, 238, 246, 249, 243, 228, 225, 239].map((i) => hexAt(BUILT_IN, i))
 /** Swatches the palette keeps before the oldest falls off the end. */
 const PALETTE_MAX = 24
 const HEX = /^#[0-9a-f]{6}$/
@@ -538,7 +547,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     rememberColor: (hex) => {
-      const h = hex.toLowerCase()
+      const snapped = snapHex(BUILT_IN, hex)
+      if (!snapped) return
+      const h = snapped.toLowerCase()
       if (!HEX.test(h)) return
       const palette = [h, ...get().palette.filter((x) => x !== h)].slice(0, PALETTE_MAX)
       set({ palette }); savePalette(palette)

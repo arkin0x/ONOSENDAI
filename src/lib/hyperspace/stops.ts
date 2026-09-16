@@ -111,6 +111,25 @@ export function stopCoordHex(stop: Stop): string {
  */
 export const LANDFALL_SCALE_MAX = 60
 
+/**
+ * Above this zoom a landfall is a speck in the crust, not a thing anybody
+ * points at.
+ *
+ * Earth's radius is about 2^55.6 gibsons, so the globe spans roughly six cells
+ * at 2^54 and a tenth of one by 2^60, while a landfall dot is 0.24 cells and a
+ * cube is floored at 0.15. Those are constants in cells, and the camera sits a
+ * constant number of cells out, so they hold a constant size on screen while
+ * the planet shrinks away beneath them: by 2^60 a single dot was wider than
+ * the world it was supposed to be a place on, and the crust read as a clot of
+ * orange rather than a coastline.
+ *
+ * From 2^54 up the landfalls are drawn a pixel wide and unattenuated, which
+ * says "there are hyperjumps here" and lets Earth look like Earth. At or below
+ * 2^53 they are back to their world size, where they are large enough to aim
+ * at and selection works as it always did (arkinox, 2026-09-16).
+ */
+export const LANDFALL_DETAIL_SCALE_MAX = 53
+
 /** Whether the stop layers (field, cubes, burst) draw at all in this plane at this zoom. */
 export function stopsDrawn(plane: 0 | 1, scaleExp: number): boolean {
   return plane === 1 || scaleExp <= LANDFALL_SCALE_MAX

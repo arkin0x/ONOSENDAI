@@ -17,7 +17,7 @@ import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopByHeight, getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { nearestStops } from '../lib/hyperspace/station'
-import { stopsDrawn, type Stop } from '../lib/hyperspace/stops'
+import { LANDFALL_DETAIL_SCALE_MAX, stopsDrawn, type Stop } from '../lib/hyperspace/stops'
 import { selectStopInScene, stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
 
@@ -51,6 +51,14 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     const index = getStopIndex()
     if (index.size === 0) return []
     if (!stopsDrawn(anchorPlane, scaleExp)) return []
+    // On the landfall shell, far enough out, a cube is worse than nothing: it
+    // is floored at MIN_CELLS to stay visible, and by 2^60 that floor is wider
+    // than Earth itself, so the thing marking a place on the planet swallows
+    // the planet. The field's dots carry the crust there, and the destination
+    // keeps its own fixed-size accent marker in StopField, so nothing is lost
+    // by standing the cubes down. Ideaspace is untouched: ports are sparse
+    // landmarks in a volume and earn a cube at every zoom.
+    if (anchorPlane === 0 && scaleExp > LANDFALL_DETAIL_SCALE_MAX) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const anchorCoord = xyzToCoord(anchor.x, anchor.y, anchor.z, anchorPlane)
     const candidates: Stop[] = []

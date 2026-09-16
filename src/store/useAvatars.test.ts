@@ -21,7 +21,7 @@ import { publish, query } from '../lib/relay'
 import { AVATAR_KIND, avatarTemplate } from '../lib/avatar'
 import { eventId, mineChunk, nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, type AvatarMiner } from '../lib/avatarWorker'
-import { newShard } from '../lib/shards'
+import { newShard } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 import { AVATAR_SIGN_PATIENCE_MS, setAvatarMiner, useAvatars } from './useAvatars'
 

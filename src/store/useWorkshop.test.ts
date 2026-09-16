@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T, ticksOf } from '../lib/shards'
+import { TICKS_PER_UNIT as T, ticksOf } from 'sno-core/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
-import { BUILT_IN, hexAt, snapHex } from '../lib/snoPalette'
+import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
 
 const w = () => useWorkshop.getState()
 

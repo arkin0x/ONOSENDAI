@@ -28,8 +28,8 @@
  */
 
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
-import { MAX_UNIT } from '../lib/shards'
-import { formatCellSize } from '../lib/scale'
+import { MAX_UNIT } from 'sno-core/shards'
+import { formatCellSize } from 'sno-core/scale'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
 import { messagePreview } from '../lib/hidden'

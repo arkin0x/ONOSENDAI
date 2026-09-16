@@ -13,7 +13,7 @@ import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { messagePreview, type Hidden } from '../lib/hidden'
 import { regionLabel } from '../lib/loot'
-import { GRID_HALF, type ShardModel } from '../lib/shards'
+import { GRID_HALF, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
 

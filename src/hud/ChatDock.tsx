@@ -19,7 +19,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
 import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
-import { formatCellSize } from '../lib/scale'
+import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */

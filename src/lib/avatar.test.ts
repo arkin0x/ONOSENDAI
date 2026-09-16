@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AVATAR_KIND, avatarFromEvent, avatarScale, avatarTemplate } from './avatar'
-import { newShard, ticksOf } from './shards'
+import { newShard, ticksOf } from 'sno-core/shards'
 
 const built = () => {
   const s = newShard('me')

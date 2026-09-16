@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { formatDistance } from '../lib/scale'
+import { formatDistance } from 'sno-core/scale'
 import { targetScreens, type CyberTarget } from '../lib/targets'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'

@@ -15,7 +15,7 @@ import { usePresence, type Person } from '../store/usePresence'
 import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
-import { formatDistance } from '../lib/scale'
+import { formatDistance } from 'sno-core/scale'
 
 function ageLabel(at: number, now: number): string {
   const s = Math.max(0, now - at)

@@ -5,7 +5,7 @@
 
 import { useState } from 'react'
 import { formatBig, formatStep } from '../lib/space'
-import { formatCellSizeLong } from '../lib/scale'
+import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
 import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, forgetView, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'

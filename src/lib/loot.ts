@@ -12,7 +12,7 @@
 
 import type { NostrEvent } from './events'
 import { ciphertextOf, heightHint, HIDDEN_KIND } from './hidden'
-import { formatCellSize } from './scale'
+import { formatCellSize } from 'sno-core/scale'
 
 export interface LootItem {
   /** The envelope's event id; changes when the hider rewrites the bag. */

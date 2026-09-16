@@ -3,7 +3,7 @@ import { getEventHash } from 'nostr-tools/pure'
 import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
 import { avatarTemplate } from './avatar'
 import { blocksOf, describeDuration, eventId, leadingZeros, mineChunk, nonceTagged, serializeEvent, triesPerSec } from './avatarMine'
-import { newShard, toPayload } from './shards'
+import { newShard, toPayload } from 'sno-core/shards'
 
 const me = 'ab'.repeat(32)
 const wedge = () => {

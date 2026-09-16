@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bytesToHex } from './events'
 import { regionKeyAt } from './shardCrypto'
-import { newShard, type ShardModel } from './shards'
+import { newShard, type ShardModel } from 'sno-core/shards'
 import {
   HIDDEN_KIND,
   bagInners,

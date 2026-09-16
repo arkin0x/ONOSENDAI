@@ -33,20 +33,18 @@
  */
 
 import type { Plane } from 'cyberspace-core'
+import { applyPose, wrapSpin, type Pose, type V3 } from 'sno-core/pose'
 import type { Position, ViewAxes } from './space'
 import { axesToLatLon } from './hyperspace/landfall'
 
-export type V3 = [number, number, number]
+// Re-exported so every caller here still reaches the whole idea of a pose
+// through one module. The two operations below are the format's, because a
+// payload written by one client has to read back the same in another; the rest
+// of this file is about a planet, which is why the rest of this file is here.
+export { applyPose, wrapSpin, type Pose, type V3 }
 
 /** The local frame at a point on the planet, unit vectors in cyberspace axes. */
 export interface Frame { east: V3; up: V3; north: V3 }
-
-/**
- * A pose as nine numbers: the three frame vectors the shard's own axes land
- * on, +X then +Y then +Z, each in cyberspace axes. Applying it to a vertex
- * (x, y, z) gives x * pose[0..2] + y * pose[3..5] + z * pose[6..8].
- */
-export type Pose = readonly [number, number, number, number, number, number, number, number, number]
 
 /**
  * The smallest deploy height that offers the snap. arkinox: 27 is about as
@@ -59,12 +57,6 @@ export const SNAP_MIN_HEIGHT = 27
 /** Whether the deploy modal offers SNAP TO EARTH: dataspace only, and tall enough to matter. */
 export function snapOffered(plane: Plane, height: number): boolean {
   return plane === 0 && height >= SNAP_MIN_HEIGHT
-}
-
-/** A spin as the wire carries it: a whole number of degrees, 0..359. */
-export function wrapSpin(spin: number): number {
-  const n = Math.round(spin) % 360
-  return n < 0 ? n + 360 : n
 }
 
 /** ECEF (x, y, z) written in cyberspace axes: X stays, Y and Z swap. */
@@ -104,16 +96,6 @@ export function poseMatrix(frame: Frame, spin: number): Pose {
 /** The pose of a shard hidden at a position with a spin. */
 export function poseAt(position: Position, spin: number): Pose {
   return poseMatrix(frameOf(position), spin)
-}
-
-/** A vertex (in any linear unit) carried into the pose. */
-export function applyPose(pose: Pose, v: V3): V3 {
-  const [x, y, z] = v
-  return [
-    x * pose[0] + y * pose[3] + z * pose[6],
-    x * pose[1] + y * pose[4] + z * pose[7],
-    x * pose[2] + y * pose[5] + z * pose[8],
-  ]
 }
 
 /**

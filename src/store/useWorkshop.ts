@@ -46,10 +46,10 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, cloneVertex } from '../lib/shards'
-import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from '../lib/stamps'
-import { BUILT_IN, hexAt, snapHex } from '../lib/snoPalette'
-import { newell, triangulate } from '../lib/triangulate'
+  type ShardVertex, cloneVertex } from 'sno-core/shards'
+import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
+import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
+import { newell, triangulate } from 'sno-core/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 

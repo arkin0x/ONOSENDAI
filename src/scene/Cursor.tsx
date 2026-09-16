@@ -15,7 +15,7 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { formatDistance } from '../lib/scale'
+import { formatDistance } from 'sno-core/scale'
 import { axisDistance } from '../lib/nearby'
 import { WorldLabel } from './WorldLabel'
 import {

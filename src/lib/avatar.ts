@@ -45,6 +45,35 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
 }
 
 /**
+ * Where the avatar stops being a place and starts being a dot.
+ *
+ * An avatar is one cell across at every zoom, which is right nearly
+ * everywhere: the cell is the unit you move in, so a marker that fills it says
+ * "here" exactly. It stops being right at the top of the ladder. Cyberspace is
+ * 2^85 gibsons on a side, so a cell at 2^84 is half the cube per axis, an
+ * eighth of it by volume, and an avatar filling that says almost nothing about
+ * where anybody is. Spectating someone at full zoom out showed a shape the
+ * size of an octant and no way to tell which part of the cube it sat in.
+ *
+ * So from 2^80 up the avatar halves with every step out, reaching a sixteenth
+ * of a cell at 2^84, which is a thirty-second of cyberspace across: small
+ * enough to point at a place, large enough to still be a shape. Below 2^80
+ * nothing changes, because nothing was wrong there.
+ *
+ * Halving per step rather than a fixed small size on purpose: the avatar then
+ * holds a constant size in gibsons across the whole spectator range instead of
+ * doubling in real terms at each step out, so zooming out reads as pulling
+ * away from something rather than watching it grow to meet you.
+ */
+export const SPECTATOR_SCALE_MIN_EXP = 80
+
+/** How much to shrink an avatar drawn at this zoom. 1 below the spectator range. */
+export function spectatorScale(scaleExp: number): number {
+  if (scaleExp <= SPECTATOR_SCALE_MIN_EXP) return 1
+  return 2 ** -(scaleExp - SPECTATOR_SCALE_MIN_EXP)
+}
+
+/**
  * Widest an avatar may reach from its centre, in cells: a shard built beyond
  * this is shrunk to it, so nobody's avatar blots out the field.
  */

@@ -47,7 +47,7 @@ import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../l
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
-import { stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
+import { LANDFALL_DETAIL_SCALE_MAX, stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
 import { coordToXyz } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
@@ -630,6 +630,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
     selectStopInScene(height)
   }
 
+  // Far enough out that the planet is smaller than its own crust: a landfall
+  // becomes one pixel, unattenuated, so Earth reads as Earth. See
+  // LANDFALL_DETAIL_SCALE_MAX. The sphere of interest and the port view have
+  // their own sizing and are left alone.
+  const fine = !portView && sphere === null && scaleExp > LANDFALL_DETAIL_SCALE_MAX
+
   return (
     <group position={rebase}>
       <points geometry={built.geometry} onClick={pick} frustumCulled={false}>
@@ -650,8 +656,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
         */}
         <pointsMaterial
           vertexColors
-          size={(portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24) * (portView || sphere ? dpr : 1)}
-          sizeAttenuation={!portView && sphere === null}
+          size={fine ? dpr : (portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24) * (portView || sphere ? dpr : 1)}
+          sizeAttenuation={!portView && sphere === null && !fine}
           transparent
           opacity={0.95}
           depthWrite={false}

@@ -60,28 +60,34 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* A real frame of the thing itself: the grid floor receding, the sector
-     cage, the Black Sun.
-     
-     Framed by measurement rather than by eye. In hero.png (2400 x 1260) the
-     ring's centre sits at about (1000, 520). Drawn at 0.6 scale that is
-     (600, 312), and this panel is 700 wide, so -250px puts the ring a little
-     right of the panel's middle with the grid floor still running under it. */
+  /* A real frame of the thing itself: the Black Sun, the dotted rays of the
+     point field, the cyan hyperjump beam with an avatar in it and its readout,
+     and the edge of a neon structure beyond.
+
+     Framed by measurement. In og-hero.png (1614 x 944) the ring is centred
+     near (450, 662) with a radius of about 168. At 0.6 scale that is (270,
+     397) and 101, so offsetting by (470, 24) puts the ring's centre at about
+     (740, 421) and its whole circle between x 639 and 841: clear of the text
+     column and of the meta line, which ends near x 672, and far enough left
+     that a slice of the hexagon still reaches the right edge. */
   .scene {
-    position: absolute; top: 0; right: 0; bottom: 0; width: 700px;
+    position: absolute; inset: 0;
     background-image: url('./og-hero.png');
-    background-size: 1440px auto;
-    background-position: -250px -10px;
     background-repeat: no-repeat;
+    background-size: 968px auto;
+    background-position: 470px 24px;
   }
-  /* Dissolve its left edge into the ground rather than ending on a seam, and
-     take the top corner down so nothing competes with the wordmark. */
+  /* Dark behind the type, clear by the time it reaches the ring's left edge,
+     so the ring reads whole and the fade does not dim it. The picture is 566
+     tall at this scale and the card 630, so it starts at y 24 and ends at 590;
+     the vertical gradient melts both edges into the ground instead of leaving
+     the beam's lines to stop dead at a seam. */
   .scene::after {
     content: '';
     position: absolute; inset: 0;
     background:
-      linear-gradient(to right, var(--bg) 0%, rgba(5,7,13,0.88) 18%, rgba(5,7,13,0.35) 46%, rgba(5,7,13,0) 74%),
-      linear-gradient(to bottom, rgba(5,7,13,0.45) 0%, rgba(5,7,13,0) 26%);
+      linear-gradient(to right, var(--bg) 0%, rgba(5,7,13,0.97) 40%, rgba(5,7,13,0.55) 49%, rgba(5,7,13,0) 54%),
+      linear-gradient(to bottom, var(--bg) 0%, var(--bg) 3.8%, rgba(5,7,13,0) 10%, rgba(5,7,13,0) 84%, var(--bg) 93.7%, var(--bg) 100%);
   }
 
   /* The wordmark's bands, in the order they sit in the logo. */
@@ -91,7 +97,7 @@
   }
 
   .plate {
-    position: absolute; left: 76px; top: 0; bottom: 0; width: 600px;
+    position: absolute; left: 76px; top: 0; bottom: 0; width: 540px;
     display: flex; flex-direction: column; justify-content: center;
     gap: 30px; z-index: 2;
   }
@@ -102,35 +108,54 @@
   }
 
   /* The wordmark itself, not typeset: those offset bands are the identity. */
-  .mark { width: 560px; height: auto; display: block; filter: drop-shadow(0 0 26px rgba(0, 229, 255, 0.28)); }
+  .mark { width: 520px; height: auto; display: block; filter: drop-shadow(0 0 26px rgba(0, 229, 255, 0.28)); }
 
+  /* The two lines of copy sit closer to each other than to the wordmark and
+     the rule, so they read as one statement and its invitation. */
+  .copy { display: flex; flex-direction: column; gap: 14px; }
   .tagline {
-    font-size: 22px; line-height: 1.6; color: #9dc0d2; max-width: 520px;
+    font-size: 20px; line-height: 1.55; color: #9dc0d2; max-width: 500px;
   }
-  .tagline b { color: var(--fg); font-weight: 400; }
+  .call { font-size: 20px; line-height: 1.55; color: #9dc0d2; max-width: 520px; }
+  .call b { color: var(--fg); font-weight: 400; }
 
   .meta {
-    display: flex; align-items: center; gap: 12px;
-    font-size: 14px; letter-spacing: 0.14em; color: var(--dim);
+    display: flex; align-items: center; gap: 9px;
+    font-size: 12px; letter-spacing: 0.08em; color: var(--dim);
     text-transform: uppercase;
     padding-top: 12px; border-top: 1px solid var(--border); width: max-content;
   }
   .meta .dot { color: var(--border); }
+
+  /* The app's own mark, top right, in its own hyperjump yellow. Drawn from the
+     pinned-tab vector with its outer square removed (that file is the mark cut
+     out of a filled square), so it is crisp at any size and has no box. */
+  .glyph {
+    position: absolute; top: 34px; right: 40px; width: 66px; height: 66px; z-index: 3;
+    filter: drop-shadow(0 0 10px rgba(255, 255, 0, 0.45)) drop-shadow(0 0 22px rgba(255, 255, 0, 0.18));
+  }
   .meta .host { color: var(--accent); }
 </style>
 </head>
 <body>
   <div class="scene"></div>
   <div class="spine"></div>
+  <svg class="glyph" viewBox="0 0 500 500" aria-hidden="true"><g transform="translate(0,500) scale(0.1,-0.1)" fill="#FFFF00">
+    <path d="M3262 3922 l107 -187 -972 -3 -972 -3 -211 -366 c-115 -202 -214 -368 -220 -370 -5 -2 -106 164 -223 369 l-215 371 28 51 c16 28 64 113 108 189 l80 137 1191 0 1192 -1 107 -187z m1046 51 c44 -76 92 -161 108 -189 l28 -51 -591 -1024 -592 -1024 -220 -3 c-122 -1 -221 0 -221 4 0 3 212 372 471 821 258 448 475 825 481 838 9 19 -16 67 -197 381 -114 197 -209 364 -212 371 -4 11 76 13 430 13 l435 0 80 -137z m-2499 -1639 l479 -829 431 -3 c237 -1 431 -4 431 -6 0 -3 -96 -170 -213 -373 l-213 -368 -224 0 -224 0 -588 1018 c-323 560 -588 1024 -588 1030 0 10 34 71 172 310 24 41 44 65 49 60 5 -5 225 -382 488 -839z"/>
+  </g></svg>
+
   <div class="plate">
-    <div class="eyebrow">Spatial Explorer</div>
+    <div class="eyebrow">Cyberspace Explorer</div>
     <img class="mark" src="../public/logo.png" alt="ONOSENDAI">
-    <p class="tagline">Every nostr key decodes to a coordinate. <b>You are already somewhere in it.</b></p>
+    <div class="copy">
+      <p class="tagline">Encrypt data to a location. Build your digital world. Find hidden treasures. Visit real places on Earth.</p>
+      <p class="call">Cyberspace is all around you. <b>Start your journey now.</b></p>
+    </div>
     <div class="meta">
       <span>Cyberspace Protocol v2</span>
-      <span class="dot">/</span>
-      <span>2^85 gibsons a side</span>
-      <span class="dot">/</span>
+      <span class="dot">&middot;</span>
+      <span>The digital fabric of reality</span>
+      <span class="dot">&middot;</span>
       <span class="host">onosendai.tech</span>
     </div>
   </div>

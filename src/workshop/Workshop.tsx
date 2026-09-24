@@ -344,6 +344,10 @@ export function Workshop(): JSX.Element | null {
     return () => document.removeEventListener('pointerdown', shut, true)
   }, [viewOpen])
   const bind = useRepeatable()
+  // Every hook above this line, none below it: the early return that follows
+  // changes which hooks run, and React counts them. This one sat after the
+  // return for a day and opening the workshop threw React #310 (2026-09-24).
+  const stacked = useMemo(() => (shard ? stackedCount(shard) : 0), [shard])
 
   if (!open) return null
   const w = useWorkshop.getState
@@ -352,7 +356,6 @@ export function Workshop(): JSX.Element | null {
 
   const selectedPoints = shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
   const one = selection.length === 1 && shard ? shard.vertices[selection[0]] : null
-  const stacked = useMemo(() => (shard ? stackedCount(shard) : 0), [shard])
   const extent = shard?.extent ?? MIN_EXTENT
   const minExtent = shard ? Math.max(MIN_EXTENT, neededExtent(shard)) : MIN_EXTENT
 

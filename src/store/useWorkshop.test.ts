@@ -511,7 +511,7 @@ describe('workshop', () => {
     expect(w().current()!.vertices.every((v) => v.c.join() === '0,1,0')).toBe(true)
   })
 
-  it('a paste that would carry the shard past 512 vertices is refused, and one that lands on 512 is not', () => {
+  it('a paste past 512 vertices is allowed: the format sets no ceiling (DECK-0003 §1.8, 2026-09-24)', () => {
     const T2 = 1
     const fillTo = (n: number): void => {
       const cur = w().current()!
@@ -520,19 +520,16 @@ describe('workshop', () => {
     }
     const square = { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]].map((at) => ({ at: at as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [] }
 
-    // 510 + 4 = 514: refused, nothing changes, the STAMP notice says why.
     fillTo(510)
     useWorkshop.setState({ clip: square, notice: null })
     w().pasteClip()
-    expect(w().current()!.vertices).toHaveLength(510)
-    expect(w().notice).toMatch(/No room.*512 vertices/)
+    expect(w().current()!.vertices).toHaveLength(514)
+    expect(w().notice).not.toMatch(/No room/)
 
-    // 508 + 4 = 512: exactly the limit, allowed.
-    fillTo(508)
+    fillTo(2000)
     useWorkshop.setState({ clip: square, notice: null })
     w().pasteClip()
-    expect(w().current()!.vertices).toHaveLength(512)
-    expect(w().notice).not.toMatch(/No room/)
+    expect(w().current()!.vertices).toHaveLength(2004)
   })
 
   it('duplicates as an independent copy and removes', () => {
@@ -570,12 +567,12 @@ describe('workshop', () => {
     expect(w().shards.find((x) => x.id === found)!.name).toBe(`${s.name} copy`)
   })
 
-  it('stamps that cannot fit leave a notice and the shard alone', () => {
+  it('stamps past 512 vertices: the format sets no ceiling (DECK-0003 §1.8, 2026-09-24)', () => {
     w().setStampSize(4)
     for (let i = 0; i < 70; i++) w().placeStamp([(i % 5) * 3 - 6, 0, (Math.floor(i / 5) % 5) * 3 - 6])
     const n = w().current()!.vertices.length
-    expect(n).toBeLessThanOrEqual(512)
-    expect(w().notice).toMatch(/No room/)
+    expect(n).toBeGreaterThan(512)
+    expect(w().notice ?? '').not.toMatch(/No room/)
   })
 })
 

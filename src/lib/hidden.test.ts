@@ -110,15 +110,17 @@ describe('shardRefusal: why no reader could open a shard', () => {
     faces: Array.from({ length: f }, (_, i) => [i % Math.max(1, v), (i + 1) % Math.max(1, v), (i + 2) % Math.max(1, v)] as [number, number, number]),
   })
 
-  it('names the vertex count, the limit and how many to remove', () => {
-    expect(shardRefusal(withCounts(516, 258))).toBe('This shard has 516 vertices and the format holds 512. Remove 4 and try again.')
-  })
-  it('names the face count the same way', () => {
-    expect(shardRefusal(withCounts(12, 1025))).toMatch(/1,025 faces and the format holds 1,024\. Remove 1/)
+  it('has no size in it: 516 vertices and 1,025 faces are shards like any other (DECK-0003 §1.8, 2026-09-24)', () => {
+    expect(shardRefusal(withCounts(516, 258))).toBeNull()
+    expect(shardRefusal(withCounts(12, 1025))).toBeNull()
+    expect(shardRefusal(withCounts(3000, 6000))).toBeNull()
   })
   it('is silent for a shard every reader accepts, and plain about an empty one', () => {
-    expect(shardRefusal(withCounts(512, 1024))).toBeNull()
     expect(shardRefusal(withCounts(3, 1))).toBeNull()
     expect(shardRefusal(withCounts(0, 0))).toBe('This shard has no vertices.')
+  })
+  it('catches what the reader would refuse for any other reason', () => {
+    const broken: ShardModel = { ...withCounts(3, 1), faces: [[0, 1, 7]] }
+    expect(shardRefusal(broken)).toMatch(/refuses this shard/)
   })
 })

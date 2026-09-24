@@ -33,8 +33,6 @@ import {
   MAX_EXTENT,
   MIN_EXTENT,
   neededExtent,
-  MAX_FACES,
-  MAX_VERTICES,
   clampColor,
   clampUnit,
   fromPayload,
@@ -410,12 +408,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
   /**
    * Apply an edit to the current shard, remember what it was, stamp it, persist.
    *
-   * The format's hard limits are checked here, once, for every edit: a paste
-   * or a fill that would carry the shard past MAX_VERTICES or MAX_FACES is
-   * refused with the same notice STAMP gives. Only STAMP used to check, and a
-   * checkered floor pasted square by square reached 516 vertices, which every
-   * reader refuses, so it deployed and nobody could open it (arkinox,
-   * 2026-09-24).
+   * No size check here or anywhere: the format sets no ceiling on vertices or
+   * faces (DECK-0003 §1.8, 2026-09-24), and the event's size is the relay's
+   * concern. For one day there was one, after a floor pasted to 516 vertices
+   * was refused by every reader; the answer was to drop the limit, not to
+   * enforce it earlier.
    */
   const edit = (fn: (s: ShardModel) => ShardModel | null, notice: string | null = null): boolean => {
     const { shards, currentId, past } = get()
@@ -423,10 +420,6 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (i < 0) return false
     const next = fn(shards[i])
     if (!next) return false
-    if (next.vertices.length > MAX_VERTICES || next.faces.length > MAX_FACES) {
-      set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` })
-      return false
-    }
     const list = shards.slice()
     list[i] = { ...next, updatedAt: Date.now() }
     set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null })
@@ -541,7 +534,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       if (!s || !validPoint(at, s.extent)) return
       const res = stamp(s, stampKind, stampSize, stampFacing, at, color, plane)
-      if (!res) { set({ notice: `No room: a shard holds up to ${MAX_VERTICES} vertices and ${MAX_FACES} faces.` }); return }
+      if (!res) { set({ notice: 'That stamp could not be placed here.' }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
       edit(() => ({ ...res.shard, mode }), notice)
       set({ selection: [], selectedFace: null, facePick: [] })

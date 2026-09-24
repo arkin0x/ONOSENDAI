@@ -24,12 +24,13 @@
  *
  * From 2^49 down, with the focus on a point on Earth, the landfall field is
  * cut to the sphere of interest (interest.ts): only the stops inside a
- * sphere of 2^(scaleExp + 5) gibsons around the focus are candidates, a
- * budget of twenty thousand is spent among them by the same identity sample
- * (SPHERE_MAX_POINTS: the cover is already decoded whole, so the cap is
- * sized not to bite), and the one nearest the centre is always drawn. The
- * cull is exact, in fixed point, on the same coordinate the placement
- * uses; the cover that bounds the scan is ballCoverageRuns.
+ * sphere of 2^(scaleExp + 5) gibsons around the focus are candidates, the
+ * same thousand-point budget as the open view is spent among them by the
+ * same identity sample (SPHERE_MAX_POINTS), and the one nearest the centre
+ * is always drawn. The cull is exact, in fixed point, on the same
+ * coordinate the placement uses; the cover that bounds the scan is
+ * ballCoverageRuns. The density label under the ring says how many of the
+ * stops inside made the cut.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -40,7 +41,7 @@ import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, p
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
 import { ballCoverageRuns, coverageRuns } from '../lib/hyperspace/station'
-import { interestSphere, isqrt, sphereDistance2, sphereSelection } from '../lib/hyperspace/interest'
+import { interestSphere, isqrt, sphereDistance2, sphereDotScale, sphereSelection } from '../lib/hyperspace/interest'
 import { formatDistance } from 'sno-core/scale'
 import { WorldLabel } from './WorldLabel'
 import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
@@ -78,19 +79,22 @@ const REACH = GRID_RADIUS * 8
 export const MAX_POINTS = 1_000
 
 /**
- * The budget inside a sphere of interest, which is a different problem and
- * deserves a different number.
+ * The budget inside a sphere of interest: the same thousand as the open view.
  *
- * The thousand above is sized for the unbounded view, where the population in
- * range is most of a million and the sample IS the decimation. Inside the
- * sphere the identity prefilter is switched off (ADMIT_ALL below), so every
- * in-plane row in the ball cover is decoded and tested whatever the budget
- * is: the expensive half of the work is already spent by the time the budget
- * is consulted, and capping at a thousand only throws away points that have
- * already been paid for. The cover at 2^49, where the sphere is largest,
- * measured about 17,897 rows at the Moscone Center, so twenty thousand is
- * chosen to sit above the whole cover: inside the sphere you see everything
- * that is there, and the density label says so by reading "133 of 133".
+ * It was twenty thousand, sized above the whole ball cover so that inside
+ * the sphere you saw everything there was and the label read "133 of 133".
+ * That was right where a sphere holds a few hundred stops and wrong where it
+ * holds thousands: at 2^49 the sphere around a point on Earth held 13,076
+ * landfalls, every one drawn at five pixels under the bloom, and the frame
+ * was a solid orange sheet with the ring, the labels and the planet gone
+ * behind it; 2^48 held 3,276 and was a wall too. From 2^47 down, with a few
+ * hundred inside, it read (arkinox, 2026-09-24). The readable density is
+ * therefore the budget, and it is the same number the open view was sized
+ * to: a thousand dots is a field, whatever zoom it is drawn at. The label
+ * keeps telling the truth, "1,000 of 13,076", because `inside` is counted,
+ * not projected (ADMIT_ALL below). The cover is still decoded whole; the cap
+ * throws away dots that were paid for, and that is cheaper than a frame
+ * nobody can read.
  *
  * One constant for the whole regime, deliberately NOT a function of the
  * sphere's size. drawnSet is nested in the budget as well as in the
@@ -100,7 +104,7 @@ export const MAX_POINTS = 1_000
  * sphere's candidates are a subset of a larger one's and the budget did not
  * move.
  */
-export const SPHERE_MAX_POINTS = 20_000
+export const SPHERE_MAX_POINTS = MAX_POINTS
 
 /**
  * The landfall shell needs its own, far smaller budget. Ports fill a volume,
@@ -650,13 +654,17 @@ export function StopField({ axes }: Props): JSX.Element | null {
           of the sphere is nearly three times the distance of the near edge,
           which left the farthest stops too small to see or click. There they
           are pixel-sized like the ports, a little larger, so every stop in
-          the ring reads the same whatever its depth. toneMapped and fog both off for the BlackSun
+          the ring reads the same whatever its depth. The size ramps in
+          (interest.sphereDotScale): half at 2^49, where the sphere has just
+          replaced the attenuated crust, and full by 2^46, so the switch is
+          a step in the same direction the zoom is going rather than a jump
+          to fat dots. toneMapped and fog both off for the BlackSun
           reason: these colors are the encoding, and half the field sits
           beyond where the scene fog has already gone to black.
         */}
         <pointsMaterial
           vertexColors
-          size={fine ? dpr : (portView ? 3 : sphere ? SPHERE_DOT_PX : 0.24) * (portView || sphere ? dpr : 1)}
+          size={fine ? dpr : (portView ? 3 : sphere ? SPHERE_DOT_PX * sphereDotScale(scaleExp) : 0.24) * (portView || sphere ? dpr : 1)}
           sizeAttenuation={!portView && sphere === null && !fine}
           transparent
           opacity={0.95}

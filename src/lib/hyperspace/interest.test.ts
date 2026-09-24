@@ -24,8 +24,7 @@ import {
   SPHERE_RADIUS_CELLS,
   sphereFrameDistance,
   densityLabel,
-  EARTH_SCALE_EXP,
-} from './interest'
+  EARTH_SCALE_EXP, DOT_TOP_FRACTION, sphereDotScale } from './interest'
 
 const CENTRE = 1n << 84n
 const EARTH_CENTRE: Position = { x: CENTRE, y: CENTRE, z: CENTRE }
@@ -141,6 +140,26 @@ describe('interestSphere', () => {
       expect(interestSphere(surface(p), 49)!.centre).toEqual(p)
       expect(interestSphere(surface(p), 32)!.radius).toBe(1n << 37n)
       expect(interestSphere(surface(p), 50)).toBeNull()
+    }
+  })
+})
+
+describe('the dot size inside the sphere', () => {
+  it('is full from 2^46 down, half where the sphere begins at 2^49, and a straight slope between', () => {
+    expect(sphereDotScale(46)).toBe(1)
+    expect(sphereDotScale(45)).toBe(1)
+    expect(sphereDotScale(32)).toBe(1)
+    expect(sphereDotScale(49)).toBeCloseTo(0.5, 10)
+    expect(sphereDotScale(48)).toBeCloseTo(2 / 3, 10)
+    expect(sphereDotScale(47)).toBeCloseTo(5 / 6, 10)
+  })
+  it('never grows as you zoom out, and never drops below the top fraction', () => {
+    let prev = sphereDotScale(30)
+    for (let s = 31; s <= 60; s++) {
+      const k = sphereDotScale(s)
+      expect(k).toBeLessThanOrEqual(prev)
+      expect(k).toBeGreaterThanOrEqual(DOT_TOP_FRACTION)
+      prev = k
     }
   })
 })

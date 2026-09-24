@@ -8,8 +8,11 @@
  * sits above the whole range of hashHeight, so the filter admits every row
  * there can ever be rather than merely every row seen so far.
  *
- * And "133 of 133" is only the usual case if the draw budget inside the
- * sphere is bigger than the cover, which is what SPHERE_MAX_POINTS is for.
+ * And the first number is the readable density: the same thousand the open
+ * view is sized to (SPHERE_MAX_POINTS), so a sphere that holds 13,076
+ * landfalls draws a thousand of them and says so, instead of drawing all of
+ * them into a solid sheet. "133 of 133" is what a sphere with fewer than a
+ * thousand inside reads.
  */
 import { describe, expect, it } from 'vitest'
 import { ADMIT_ALL, MAX_POINTS, SPHERE_MAX_POINTS } from './StopField'
@@ -34,24 +37,30 @@ describe('the sphere regime admits every row in the cover', () => {
     expect(max).toBeGreaterThan(2 ** 31)
   })
 
-  it('the sphere budget sits above the cover, so the cap does not bite', () => {
-    // The ball cover at 2^49, where the sphere is largest, measured about
-    // 17,897 rows at the Moscone Center. The budget is above the whole cover,
-    // so every stop inside the sphere is drawn and the label reads n of n.
-    expect(SPHERE_MAX_POINTS).toBeGreaterThan(17_897)
-    // The unbounded view keeps the number it was sized for.
+  it('the sphere budget is the readable thousand, the same as the open view', () => {
+    // At 2^49 the sphere around a point on Earth held 13,076 landfalls and at
+    // 2^48 3,276; drawn whole at five pixels under the bloom they were a
+    // solid sheet (arkinox, 2026-09-24). The budget is the density a person
+    // can read, and the label carries the rest: "1,000 of 13,076".
     expect(MAX_POINTS).toBe(1_000)
-    expect(SPHERE_MAX_POINTS).toBeGreaterThan(MAX_POINTS)
+    expect(SPHERE_MAX_POINTS).toBe(MAX_POINTS)
+    expect(SPHERE_MAX_POINTS).toBeLessThan(3_276)
   })
 
   it('one budget for the whole regime keeps the sample nested as you zoom in', () => {
     // A smaller sphere's candidates are a subset of a larger one's, and the
-    // budget does not move, so no dot that stays inside is ever re-dealt.
+    // budget does not move, so no dot that stays inside is ever re-dealt: a
+    // height drawn in the large sphere is drawn in the small one. The small
+    // sphere fills its budget from fewer candidates, so it may draw MORE;
+    // zooming in only ever adds dots, never takes one away.
     const big = Array.from({ length: 5_000 }, (_, i) => i * 7)
     const small = big.filter((_, i) => i % 3 === 0)
     const drawnBig = drawnSet(big, SPHERE_MAX_POINTS)
     const drawnSmall = drawnSet(small, SPHERE_MAX_POINTS)
-    for (const h of small) expect(drawnSmall.has(h)).toBe(drawnBig.has(h))
+    for (const h of small) if (drawnBig.has(h)) expect(drawnSmall.has(h)).toBe(true)
+    expect(drawnBig.size).toBe(SPHERE_MAX_POINTS)
+    expect(drawnSmall.size).toBe(SPHERE_MAX_POINTS)
+    expect(drawnSmall.size).toBeGreaterThan([...small].filter((h) => drawnBig.has(h)).length)
   })
 
   it('the cap still bounds the buffer when a sphere really does hold more', () => {

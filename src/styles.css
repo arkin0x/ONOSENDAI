@@ -1713,9 +1713,21 @@ kbd {
   box-shadow: 0 0 18px rgba(0, 229, 255, 0.15);
   backdrop-filter: blur(10px);
   font-size: 10px;
+  /* Never taller than the screen; the record scrolls inside and EXIT stays put. */
+  max-height: calc(100vh - 28px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
 }
 
+/* Pinned while the rest scrolls, so EXIT is always where the hand left it.
+   The negative margins run the head's background out to the card's edges. */
 .detail__head {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: -10px -12px 0;
+  padding: 10px 12px 8px;
+  background: rgba(6, 14, 22, 0.97);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1761,6 +1773,8 @@ kbd {
 }
 
 .detail__field--relays { align-items: start; }
+
+.detail__field .pubswitch { justify-self: start; }
 
 .detail__key {
   font-size: 8px;
@@ -1814,6 +1828,9 @@ kbd {
     right: 14px;
     bottom: 14px;
     width: auto;
+    /* A sheet, not a wall: the bottom quarter of the screen, scrolling inside. */
+    max-height: 25vh;
+    max-height: 25dvh;
   }
 }
 

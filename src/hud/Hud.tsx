@@ -15,6 +15,7 @@ import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
+import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
 import { LootPanel } from './LootPanel'
 import { ChainPanel } from './ChainPanel'
@@ -75,6 +76,7 @@ function IdentityPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const profile = useProfile(identity.pubkey)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
 
   const name = profileLabel(profile, identity.npub)
 
@@ -92,7 +94,10 @@ function IdentityPanel(): JSX.Element {
           <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>
           <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
         </div>
-        <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+        <div className="identity__acts">
+          <button className="identity__change" onClick={() => setProfileOpen(true)}>PROFILE</button>
+          <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+        </div>
       </div>
 
       <Explanation>
@@ -103,6 +108,7 @@ function IdentityPanel(): JSX.Element {
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </section>
   )
 }

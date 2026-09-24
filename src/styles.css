@@ -2939,24 +2939,33 @@ kbd {
 .benchpad {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(5, 48px);
+  grid-template-columns: repeat(3, 48px);
   grid-template-rows: repeat(3, 48px);
   gap: 4px;
   pointer-events: none;
   grid-template-areas:
-    "away    up   toward .   ."
-    "left    hub  right  .   ."
-    "connect down delete cut dup";
+    "away    up   toward"
+    "left    hub  right"
+    "connect down delete";
 }
 .benchpad > * { pointer-events: auto; }
-.benchpad .touchpad__key--cut { grid-area: cut; }
-.benchpad .touchpad__key--dup { grid-area: dup; }
 
-/* Where to put the held points. It stands over the two keys, and anything
-   outside it is a tap that pastes nothing. */
+/* The clipboard row: first in the bottom-left column, so the pad, TURN and
+   the color column in the other corner never stand on it. */
+.benchclip {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+.benchclip .touchpad__key { width: 48px; height: 48px; flex-direction: column; gap: 2px; font-size: 17px; }
+.benchclip .touchpad__sub { font-size: 8px; }
+.benchclip .touchpad__key--paste { color: var(--accent); }
+
+/* Where to put the held points. It opens above the clipboard row, and
+   anything outside it is a tap that pastes nothing. */
 .benchpaste {
   position: absolute;
-  right: 0;
+  left: 0;
   bottom: 52px;
   z-index: 2;
   display: flex;

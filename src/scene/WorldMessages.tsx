@@ -153,7 +153,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // used to hang under the mark as a second label, which in a field of
         // coins was a field of paragraphs; the mark alone is legible at any
         // zoom and the words are one tap away, which is where the rest of the
-        // message already lived (arkinox, 2026-09-16).
+        // message already lived (arkinox, 2026-09-16). The credit line went the
+        // same way: "you" under your own coin said nothing the tap does not
+        // (arkinox, 2026-09-24).
         const coin = findCashuToken(w.text) !== null
         return (
           <group key={w.key}>
@@ -165,8 +167,6 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
                   at={w.centre}
                   align="center"
                   px={COIN_PX}
-                  sub={author(w)}
-                  subColor={ACCENT}
                 />
               : births[w.key] !== undefined
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
@@ -226,8 +226,13 @@ function WorldMark({ kind, at }: { kind: 'coin' | 'note'; at: [number, number, n
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
     g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX[kind]))
-    // The coin turns; a note stays where it was left.
-    if (kind === 'coin') g.rotation.y = state.clock.elapsedTime * 0.6
+    // The coin turns; a note stays where it was left. Two axes at speeds that
+    // do not divide evenly, so the diamond tumbles slowly instead of spinning
+    // on a spit, the way a selected hyperjump does (StopCubes).
+    if (kind === 'coin') {
+      g.rotation.y = state.clock.elapsedTime * 0.6
+      g.rotation.z = state.clock.elapsedTime * 0.41
+    }
   })
 
   return (

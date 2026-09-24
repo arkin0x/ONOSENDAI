@@ -52,6 +52,7 @@ import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-
 import { newell, triangulate } from 'sno-core/triangulate'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
+import { weld } from '../lib/weld'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
 export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
@@ -278,6 +279,13 @@ export interface WorkshopState {
    */
   usePalette: (id: string | null) => void
   deleteSelected: () => void
+  /**
+   * Fold points standing on one spot into one: the selection when two or more
+   * are selected, else the whole shard. Faces that disagreed on colour keep
+   * their own (lib/weld). Never automatic: a paste lands on its original on
+   * purpose, to be moved.
+   */
+  weld: () => void
   /** Take the selected points out of the shard and hold them for PASTE. */
   cutSelection: () => void
   /** Hold a copy of the selected points and put one down at once: copy and paste in a step. */
@@ -794,6 +802,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
           .map((f) => f.map((i) => remap.get(i) as number) as [number, number, number])
         return { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }
       })
+      set({ selection: [], selectedFace: null, facePick: [] })
+    },
+
+    weld: () => {
+      const s = get().current()
+      if (!s) return
+      const { selection } = get()
+      const res = weld(s, selection.length >= 2 ? new Set(selection) : undefined)
+      if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
+      const n = res.shard.vertices.length
+      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`)
       set({ selection: [], selectedFace: null, facePick: [] })
     },
 

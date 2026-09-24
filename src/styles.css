@@ -6245,3 +6245,70 @@ kbd {
   .palettes__grid { grid-template-columns: repeat(16, 1fr); }
   .palettes__sw { min-height: 34px; }
 }
+
+/* ---------- Profile modal (who you are, to everyone else) ---------- */
+.identity__acts { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+
+.modal__card.profile {
+  border-color: rgba(0, 229, 255, 0.5);
+  max-width: 460px;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.profile__banner {
+  height: 72px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.05) center / cover no-repeat;
+  border: 1px solid rgba(0, 229, 255, 0.18);
+}
+.profile__banner--empty {
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.profile__fields { gap: 10px; }
+.profile__fields .login__label { display: block; margin-bottom: 4px; }
+.profile__server { display: flex; flex-direction: column; gap: 6px; }
+.profile__select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+
+.profile__row { display: flex; align-items: center; gap: 8px; }
+.profile__row .login__input { flex: 1; }
+.profile__upload {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  cursor: pointer;
+}
+.profile__upload:hover:not(:disabled) { background: rgba(0, 229, 255, 0.16); }
+.profile__upload:disabled { opacity: 0.4; cursor: default; }
+
+.profile__textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 9px;
+  border-radius: 3px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+.profile__textarea:focus, .profile__select:focus { outline: none; border-color: rgba(0, 229, 255, 0.5); }
+
+.profile__status { margin: 12px 0 0; font-size: 10px; line-height: 1.5; color: var(--dim); overflow-wrap: anywhere; }
+.profile__status--ok { color: var(--ok); }
+.profile__status--err { color: var(--danger); }

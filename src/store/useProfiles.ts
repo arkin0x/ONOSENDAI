@@ -34,6 +34,8 @@ interface ProfilesState {
   /** Ask for a profile; a miss is queued and fetched in the next batch. */
   request: (pubkey: string) => void
   get: (pubkey: string) => Profile | null | undefined
+  /** A kind 0 in hand (one you just published): cached now, not after the next batch. */
+  remember: (ev: NostrEvent) => void
 }
 
 const STORAGE = 'onosendai:profiles'
@@ -130,6 +132,17 @@ export const useProfiles = create<ProfilesState>((set, get) => {
     },
 
     get: (pubkey) => get().profiles[pubkey],
+
+    remember: (ev) => {
+      const p = parseProfile(ev)
+      if (!p) return
+      const have = get().profiles[ev.pubkey]
+      // A newer kind 0 than the one just handed in is already the truth.
+      if (have && have.at > p.at) return
+      const next = { ...get().profiles, [ev.pubkey]: p }
+      set({ profiles: next })
+      saveCacheSoon(next)
+    },
   }
 })
 

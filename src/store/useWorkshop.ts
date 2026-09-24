@@ -286,6 +286,10 @@ export interface WorkshopState {
   weld: () => void
   /** Take the selected points out of the shard and hold them for PASTE. */
   cutSelection: () => void
+  /** Hold a copy of the selected points for PASTE and leave them where they are. */
+  copySelection: () => void
+  /** Let the held points go; PASTE goes with them. */
+  clearClip: () => void
   /** Hold a copy of the selected points and put one down at once: copy and paste in a step. */
   duplicateSelection: () => void
   /**
@@ -817,6 +821,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       get().deleteSelected()
       set({ notice: `${countLabel(clip)} cut. PASTE asks where to put ${clip.points.length === 1 ? 'it' : 'them'} back.` })
     },
+
+    copySelection: () => {
+      const s = get().current()
+      const clip = s ? clipOf(s, get().selection) : null
+      if (!clip) return
+      set({ clip, notice: `${countLabel(clip)} copied. PASTE puts ${clip.points.length === 1 ? 'it' : 'them'} down, on any tool.` })
+    },
+
+    clearClip: () => set({ clip: null }),
 
     duplicateSelection: () => {
       const s = get().current()

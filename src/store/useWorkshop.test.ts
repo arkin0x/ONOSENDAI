@@ -532,6 +532,22 @@ describe('workshop', () => {
     expect(w().current()!.vertices).toHaveLength(2004)
   })
 
+  it('COPY holds the selection and leaves the shard alone; PASTE then adds it; CLEAR lets it go', () => {
+    w().placeStamp([0, 0, 0])
+    const before = w().current()!.vertices.length
+    w().selectVertex(0)
+    w().selectConnected()
+    expect(w().selection.length).toBe(before)
+    w().copySelection()
+    expect(w().clip?.points).toHaveLength(before)
+    expect(w().current()!.vertices).toHaveLength(before)
+    w().selectVertex(null)
+    w().pasteClip('exact')
+    expect(w().current()!.vertices).toHaveLength(before * 2)
+    w().clearClip()
+    expect(w().clip).toBeNull()
+  })
+
   it('duplicates as an independent copy and removes', () => {
     w().addVertex([0, 0, 0])
     const src = w().currentId!

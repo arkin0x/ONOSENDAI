@@ -40,6 +40,7 @@ import { useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
+import { stackedCount } from '../lib/weld'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -332,6 +333,7 @@ export function Workshop(): JSX.Element | null {
 
   const selectedPoints = shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
   const one = selection.length === 1 && shard ? shard.vertices[selection[0]] : null
+  const stacked = useMemo(() => (shard ? stackedCount(shard) : 0), [shard])
   const extent = shard?.extent ?? MIN_EXTENT
   const minExtent = shard ? Math.max(MIN_EXTENT, neededExtent(shard)) : MIN_EXTENT
 
@@ -705,6 +707,14 @@ export function Workshop(): JSX.Element | null {
         {one && (
           <div className="benchops" role="status" aria-label="Selected point">
             <span className="workshop__value workshop__value--wide">at ({ticksOf(one).map(unitsLabel).join(', ')})</span>
+          </div>
+        )}
+        {stacked > 0 && (
+          <div className="benchops" role="group" aria-label="Weld stacked points">
+            <span className="workshop__value workshop__value--wide">{stacked} stacked</span>
+            {/* Never automatic: a paste lands on its original on purpose, to be
+                moved. This is the deliberate act once the shape is settled. */}
+            <button className="workshop__btn" onClick={() => w().weld()} title={selection.length >= 2 ? 'Fold the selected points that stand on one spot into one' : 'Fold every point standing on another into one; faces that disagree on color keep their own'}>WELD</button>
           </div>
         )}
         {selectedPoints >= 3 && (

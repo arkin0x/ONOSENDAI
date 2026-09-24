@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T, ticksOf } from 'sno-core/shards'
+import { TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
 
@@ -511,6 +511,27 @@ describe('workshop', () => {
     expect(w().current()!.vertices.every((v) => v.c.join() === '0,1,0')).toBe(true)
   })
 
+  it('a paste past 512 vertices is allowed: the format sets no ceiling (DECK-0003 §1.8, 2026-09-24)', () => {
+    const T2 = 1
+    const fillTo = (n: number): void => {
+      const cur = w().current()!
+      const vertices = Array.from({ length: n }, (_, i) => vertexAt([i * T2 - 300, 0, 0], [0, 0.9, 1]))
+      useWorkshop.setState({ shards: w().shards.map((x) => (x.id === cur.id ? { ...x, vertices, faces: [] } : x)) })
+    }
+    const square = { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]].map((at) => ({ at: at as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [] }
+
+    fillTo(510)
+    useWorkshop.setState({ clip: square, notice: null })
+    w().pasteClip()
+    expect(w().current()!.vertices).toHaveLength(514)
+    expect(w().notice).not.toMatch(/No room/)
+
+    fillTo(2000)
+    useWorkshop.setState({ clip: square, notice: null })
+    w().pasteClip()
+    expect(w().current()!.vertices).toHaveLength(2004)
+  })
+
   it('duplicates as an independent copy and removes', () => {
     w().addVertex([0, 0, 0])
     const src = w().currentId!
@@ -546,12 +567,12 @@ describe('workshop', () => {
     expect(w().shards.find((x) => x.id === found)!.name).toBe(`${s.name} copy`)
   })
 
-  it('stamps that cannot fit leave a notice and the shard alone', () => {
+  it('stamps past 512 vertices: the format sets no ceiling (DECK-0003 §1.8, 2026-09-24)', () => {
     w().setStampSize(4)
     for (let i = 0; i < 70; i++) w().placeStamp([(i % 5) * 3 - 6, 0, (Math.floor(i / 5) % 5) * 3 - 6])
     const n = w().current()!.vertices.length
-    expect(n).toBeLessThanOrEqual(512)
-    expect(w().notice).toMatch(/No room/)
+    expect(n).toBeGreaterThan(512)
+    expect(w().notice ?? '').not.toMatch(/No room/)
   })
 })
 

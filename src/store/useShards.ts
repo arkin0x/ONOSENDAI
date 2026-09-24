@@ -31,6 +31,7 @@ import {
   bagTemplate,
   messageInnerTemplate,
   shardInnerTemplate,
+  shardRefusal,
   unbag,
   type Hidden,
   type HiddenType,
@@ -172,7 +173,13 @@ interface ShardsState {
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   addDiscovered: (items: Hidden[]) => void
   setScanning: (scanning: boolean) => void
-  testDiscovery: (eventId: string) => Promise<boolean>
+  /**
+   * Prove the round trip a stranger would make: derive the key from the
+   * coordinate, ask the relays, open what comes back. `refused` means the bag
+   * came back and this item is in it, but the format refuses it, so no client
+   * can show it; the fix is in the workshop, not on the relay.
+   */
+  testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused'>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
   /** The clicked item, mine or discovered, as one shape. */
@@ -427,6 +434,14 @@ export const useShards = create<ShardsState>((set, get) => {
         shard = model.unit === deployUnit && model.up === up && model.spin === spin
           ? model
           : { ...model, unit: deployUnit, up, spin }
+        // The same round trip every reader makes, before the seal: an item the
+        // format refuses would deploy, show for its author from this device,
+        // and open as nothing for everyone else (a 516-vertex floor, 2026-09-24).
+        const refusal = shardRefusal(shard)
+        if (refusal) {
+          set({ deployStatus: 'error', deployError: refusal })
+          return
+        }
         innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
       } else {
         text = pending.text.trim()
@@ -635,15 +650,19 @@ export const useShards = create<ShardsState>((set, get) => {
 
     testDiscovery: async (eventId) => {
       const item = get().mine.find((d) => d.eventId === eventId)
-      if (!item || !item.published) return false
+      if (!item || !item.published) return 'missing'
       // Region key derived fresh from the coordinate, as a stranger would.
       const rk = regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
+      let refused = false
       for (const ev of events) {
         const items = await unbag(ev, rk.key)
-        if (items.some((h) => h.eventId === eventId)) return true
+        if (items.some((h) => h.eventId === eventId)) return 'found'
+        // The bag opened and this item is in it, signed, yet unbag dropped it:
+        // the format refused it, and every other client will too.
+        if (!refused) refused = (await bagInners(ev, rk.key)).some((e) => e.id === eventId)
       }
-      return false
+      return refused ? 'refused' : 'missing'
     },
 
     pendingShard: () => {

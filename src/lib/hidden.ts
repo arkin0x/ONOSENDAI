@@ -90,6 +90,22 @@ export interface Hidden {
   text?: string
 }
 
+/**
+ * Why no reader could open this shard, or null when every reader can.
+ *
+ * A bag is opened with the same `fromPayload` every client runs, and an item
+ * it refuses is dropped in silence (fromInner). So the check runs before the
+ * seal: the same round trip a stranger's client will make. There is no size
+ * in it, because the format has no ceiling (DECK-0003 §1.8); what remains is
+ * the malformed and the empty, which the workshop should never produce and
+ * which this catches if it ever does.
+ */
+export function shardRefusal(shard: ShardModel): string | null {
+  if (shard.vertices.length === 0) return 'This shard has no vertices.'
+  if (!fromPayload(toPayload(shard), shard.id)) return 'The format refuses this shard as it is, so nobody could open it. Check it in the workshop.'
+  return null
+}
+
 /** The inner shard event template (kind 3330), signed by the author. */
 export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number): EventTemplate {
   return {

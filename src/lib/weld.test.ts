@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILT_IN, hexAt } from 'sno-core/snoPalette'
-import { MAX_VERTICES, fromPayload, hexToRgb, newShard, toPayload, unpackTicks, type ShardModel, type ShardPayload } from 'sno-core/shards'
+import { fromPayload, hexToRgb, newShard, toPayload, unpackTicks, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { stackedCount, weld } from './weld'
 import floorPayload from '../store/fixtures/disco-floor-516.json'
 
@@ -89,7 +89,7 @@ describe('weld', () => {
     expect(res.shard.faces).toHaveLength(2)
   })
 
-  it('takes arkinox\'s 516-vertex floor to 291 vertices, 258 faces, through fromPayload, looking the same', () => {
+  it('takes arkinox\'s 516-vertex floor to 291 vertices and 258 faces, looking the same, and both pass fromPayload now that the format has no ceiling', () => {
     const p = floorPayload as unknown as ShardPayload
     const ticks = unpackTicks(p.ticks, p.vertices.length)!
     const model: ShardModel = {
@@ -105,7 +105,8 @@ describe('weld', () => {
       faces: p.faces as P3[],
     }
     expect(model.vertices).toHaveLength(516)
-    expect(fromPayload(toPayload(model), 'floor')).toBeNull()
+    // Until 2026-09-24 every reader refused this at 516; the format sets no ceiling now (DECK-0003 §1.8).
+    expect(fromPayload(toPayload(model), 'floor')).not.toBeNull()
 
     const res = weld(model)!
     expect(res.merged).toBe(516 - 291)
@@ -115,7 +116,6 @@ describe('weld', () => {
     // colour, so this floor needs no face colours to keep its look.
     expect(res.colored).toBe(false)
     expect(res.shard.facecolors).toBeUndefined()
-    expect(res.shard.vertices.length).toBeLessThanOrEqual(MAX_VERTICES)
     // Every face still shows the colour it showed.
     expect(look(res.shard)).toEqual(look(model))
     // And every reader now takes it.

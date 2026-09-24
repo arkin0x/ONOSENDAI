@@ -109,6 +109,30 @@ export interface FocusLike {
  */
 export const SPHERE_RADIUS_CELLS = 2 ** SPHERE_HEIGHT_OFFSET
 
+/** The zoom at which a dot inside the sphere is drawn at its full size. */
+export const DOT_FULL_SCALE_EXP = 46
+/** What fraction of full size a dot is drawn at where the sphere first appears (2^49). */
+export const DOT_TOP_FRACTION = 0.5
+
+/**
+ * How large a dot inside the sphere is drawn, as a fraction of its full size.
+ *
+ * The sphere replaces the attenuated crust at 2^49, and the crust's dots
+ * there are small: a fixed five pixels a step later read as a different
+ * kind of thing, and with thousands inside the sphere, as a sheet. So the
+ * dots come in at half size where the sphere begins and grow linearly to
+ * full size by 2^46, where a sphere holds a few hundred stops and each one
+ * is worth its full mark. Below that nothing changes. arkinox's ladder of
+ * 2026-09-24: 2^50 fine, 2^49 unreadable, 2^48 too crowded, 2^47 and 2^46
+ * acceptable; this and the budget make 50 to 45 one slope.
+ */
+export function sphereDotScale(scaleExp: number): number {
+  if (scaleExp <= DOT_FULL_SCALE_EXP) return 1
+  const span = SPHERE_SCALE_MAX - DOT_FULL_SCALE_EXP
+  const t = Math.min(1, (scaleExp - DOT_FULL_SCALE_EXP) / span)
+  return 1 - t * (1 - DOT_TOP_FRACTION)
+}
+
 /**
  * How far the camera must sit from the centre for the whole ring to be in
  * shot, in cells.

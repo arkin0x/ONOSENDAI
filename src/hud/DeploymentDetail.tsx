@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatCellSize } from 'sno-core/scale'
-import { messagePreview } from '../lib/hidden'
+import { messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
@@ -39,7 +39,7 @@ export function DeploymentDetail(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const dep = useShards((s) => s.mine.find((d) => d.eventId === s.inspecting) ?? null)
   const [confirm, setConfirm] = useState(false)
-  const [test, setTest] = useState<'idle' | 'testing' | 'found' | 'missing'>('idle')
+  const [test, setTest] = useState<'idle' | 'testing' | 'found' | 'missing' | 'refused'>('idle')
 
   useEffect(() => { if (inspecting && !dep) useShards.getState().inspect(null) }, [inspecting, dep])
   useEffect(() => { setTest('idle') }, [inspecting])
@@ -51,9 +51,11 @@ export function DeploymentDetail(): JSX.Element | null {
   const exit = (): void => { useShards.getState().inspect(null); useCyberspace.getState().clearFocus() }
   const runTest = async (): Promise<void> => {
     setTest('testing')
-    const ok = await useShards.getState().testDiscovery(dep.eventId)
-    setTest(ok ? 'found' : 'missing')
+    setTest(await useShards.getState().testDiscovery(dep.eventId))
   }
+  // Why the format refuses it, when it does: the same words the deploy bar
+  // would have used, so the fix is named here too.
+  const refusal = test === 'refused' && dep.shard ? shardRefusal(dep.shard) : null
 
   return (
     <div className="detail" role="dialog" aria-label={`Deployment ${name}`}>
@@ -91,7 +93,14 @@ export function DeploymentDetail(): JSX.Element | null {
           {test === 'testing' && 'DERIVING REGION KEY…'}
           {test === 'found' && '✓ FOUND & OPENED FROM THE RELAY'}
           {test === 'missing' && '✗ NOT FOUND — TAP TO RETRY'}
+          {test === 'refused' && '✗ ON THE RELAY, BUT NO CLIENT CAN OPEN IT'}
         </button>
+      )}
+      {test === 'refused' && (
+        <p className="detail__refusal">
+          The bag is there and this item is in it, signed, but the format refuses it, so every client drops it and only this device shows it.
+          {refusal ? ` ${refusal}` : ''} Fix it in the workshop and hide it again; DELETE removes this copy.
+        </p>
       )}
 
       <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, at: positionOf(dep), height: dep.height }} />

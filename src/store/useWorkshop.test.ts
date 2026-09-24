@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T, ticksOf } from 'sno-core/shards'
+import { TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
 import { DEFAULT_PALETTE, useWorkshop } from './useWorkshop'
 import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
 
@@ -509,6 +509,30 @@ describe('workshop', () => {
     expect(w().current()!.vertices[0].c).not.toEqual([1, 0, 0])
     w().colorAll([0, 1, 0])
     expect(w().current()!.vertices.every((v) => v.c.join() === '0,1,0')).toBe(true)
+  })
+
+  it('a paste that would carry the shard past 512 vertices is refused, and one that lands on 512 is not', () => {
+    const T2 = 1
+    const fillTo = (n: number): void => {
+      const cur = w().current()!
+      const vertices = Array.from({ length: n }, (_, i) => vertexAt([i * T2 - 300, 0, 0], [0, 0.9, 1]))
+      useWorkshop.setState({ shards: w().shards.map((x) => (x.id === cur.id ? { ...x, vertices, faces: [] } : x)) })
+    }
+    const square = { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]].map((at) => ({ at: at as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [] }
+
+    // 510 + 4 = 514: refused, nothing changes, the STAMP notice says why.
+    fillTo(510)
+    useWorkshop.setState({ clip: square, notice: null })
+    w().pasteClip()
+    expect(w().current()!.vertices).toHaveLength(510)
+    expect(w().notice).toMatch(/No room.*512 vertices/)
+
+    // 508 + 4 = 512: exactly the limit, allowed.
+    fillTo(508)
+    useWorkshop.setState({ clip: square, notice: null })
+    w().pasteClip()
+    expect(w().current()!.vertices).toHaveLength(512)
+    expect(w().notice).not.toMatch(/No room/)
   })
 
   it('duplicates as an independent copy and removes', () => {

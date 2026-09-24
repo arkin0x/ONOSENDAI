@@ -15,6 +15,7 @@ import {
   bagTemplate,
   messageInnerTemplate,
   shardInnerTemplate,
+  shardRefusal,
   unbag,
 } from './hidden'
 
@@ -98,5 +99,26 @@ describe('bagInners (rebuild source)', () => {
     const outer = await bag([s, m])
     const inners = await bagInners(outer, rk.key)
     expect(inners.map((e) => e.id).sort()).toEqual([s.id, m.id].sort())
+  })
+})
+
+describe('shardRefusal: why no reader could open a shard', () => {
+  const vertex = (i: number): ShardModel['vertices'][number] => ({ p: [i % 16, Math.floor(i / 16) % 16, Math.floor(i / 256)], c: [1, 1, 1] })
+  const withCounts = (v: number, f: number): ShardModel => ({
+    ...newShard('floor'),
+    vertices: Array.from({ length: v }, (_, i) => vertex(i)),
+    faces: Array.from({ length: f }, (_, i) => [i % Math.max(1, v), (i + 1) % Math.max(1, v), (i + 2) % Math.max(1, v)] as [number, number, number]),
+  })
+
+  it('names the vertex count, the limit and how many to remove', () => {
+    expect(shardRefusal(withCounts(516, 258))).toBe('This shard has 516 vertices and the format holds 512. Remove 4 and try again.')
+  })
+  it('names the face count the same way', () => {
+    expect(shardRefusal(withCounts(12, 1025))).toMatch(/1,025 faces and the format holds 1,024\. Remove 1/)
+  })
+  it('is silent for a shard every reader accepts, and plain about an empty one', () => {
+    expect(shardRefusal(withCounts(512, 1024))).toBeNull()
+    expect(shardRefusal(withCounts(3, 1))).toBeNull()
+    expect(shardRefusal(withCounts(0, 0))).toBe('This shard has no vertices.')
   })
 })

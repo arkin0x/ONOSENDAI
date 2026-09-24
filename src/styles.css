@@ -1957,6 +1957,14 @@ kbd {
   font-weight: 700;
 }
 .detail__test--missing { color: var(--danger); border-color: var(--danger); }
+.detail__test--refused { color: var(--danger); border-color: var(--danger); }
+.detail__refusal {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
 
 /* ---------- Deploy bar ----------
 

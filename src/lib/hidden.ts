@@ -23,7 +23,7 @@
 import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
-import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { MAX_FACES, MAX_VERTICES, fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import type { Position } from './space'
 
@@ -88,6 +88,25 @@ export interface Hidden {
   type: HiddenType
   shard?: ShardModel
   text?: string
+}
+
+/**
+ * Why no reader could open this shard, or null when every reader can.
+ *
+ * A bag is opened with the same `fromPayload` every client runs, and an item
+ * it refuses is dropped in silence (fromInner). So the check runs before the
+ * seal: the same round trip a stranger's client will make, with the two
+ * limits named in numbers when they are the reason, because "the format
+ * refuses it" tells a person nothing to fix.
+ */
+export function shardRefusal(shard: ShardModel): string | null {
+  const v = shard.vertices.length
+  const f = shard.faces.length
+  if (v > MAX_VERTICES) return `This shard has ${v.toLocaleString()} vertices and the format holds ${MAX_VERTICES}. Remove ${(v - MAX_VERTICES).toLocaleString()} and try again.`
+  if (f > MAX_FACES) return `This shard has ${f.toLocaleString()} faces and the format holds ${MAX_FACES.toLocaleString()}. Remove ${(f - MAX_FACES).toLocaleString()} and try again.`
+  if (v === 0) return 'This shard has no vertices.'
+  if (!fromPayload(toPayload(shard), shard.id)) return 'The format refuses this shard as it is, so nobody could open it. Check it in the workshop.'
+  return null
 }
 
 /** The inner shard event template (kind 3330), signed by the author. */

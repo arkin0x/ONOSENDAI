@@ -3026,6 +3026,10 @@ kbd {
   inset: 0;
   z-index: 1;
 }
+/* FLIP's question, PASTE's twin: its key sits in the right-hand corner, so
+   it opens above the key and runs leftward from its right edge. */
+.benchflip { position: relative; }
+.benchpaste--flip { left: auto; right: 0; bottom: calc(100% + 6px); }
 .benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
 .benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
 .benchpad .touchpad__key--connect .touchpad__sub,

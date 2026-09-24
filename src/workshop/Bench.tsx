@@ -561,10 +561,10 @@ export function Bench(): JSX.Element {
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  const onFace = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP || e.faceIndex === undefined) return
+  const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
+    if (e.delta > TAP_SLOP) return
     e.stopPropagation()
-    useWorkshop.getState().selectFace(e.faceIndex)
+    useWorkshop.getState().selectFace(face)
   }
 
   return (

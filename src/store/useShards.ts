@@ -338,6 +338,18 @@ function nextBagAt(lookupId: string): number {
 export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
+  /** Take down an object hidden by reference (NIP-09), once no bag names it. */
+  async function retractObject(object: NostrEvent, relays: string[] = relaySet()): Promise<void> {
+    const d = object.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+    const del = await cyber().signEvent({
+      kind: 5,
+      created_at: Math.floor(Date.now() / 1000),
+      content: 'hidden object removed',
+      tags: [['a', `${OBJECT_KIND}:${object.pubkey}:${d}`], ['e', object.id], ['k', String(OBJECT_KIND)]],
+    })
+    await publishMany(relays, del)
+  }
+
   /** Build and publish the region bag. */
   async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
@@ -545,9 +557,18 @@ export const useShards = create<ShardsState>((set, get) => {
         } else {
           inner = await cs.signEvent(innerTemplate)
         }
-        const existing = await gatherInners(rk.lookupId, rk.key, live)
-        const allInners = mergeEntries(existing, [ref ?? inner])
-        const { event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live)
+        let event: NostrEvent
+        let published: boolean
+        try {
+          const existing = await gatherInners(rk.lookupId, rk.key, live)
+          const allInners = mergeEntries(existing, [ref ?? inner])
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live))
+        } catch (err) {
+          // The object went out but no bag names it: take it back rather than
+          // leave a preview on the relay that nothing will ever clean up.
+          if (ref && live) await retractObject(inner).catch(() => undefined)
+          throw err
+        }
 
         const item: MyDeployment = {
           eventId: inner.id,
@@ -611,7 +632,16 @@ export const useShards = create<ShardsState>((set, get) => {
         const existing = await gatherInners(lookupId, key, true)
         // Objects hidden by reference go out before the bag that names them.
         const me = cyber().identity.pubkey
-        for (const d of items) if (d.ref && d.inner.pubkey === me) await publishMany(relaySet(), d.inner)
+        for (const d of items) {
+          if (!d.ref || d.inner.pubkey !== me) continue
+          // A bag naming an object no relay holds would be a permanent hole
+          // for everyone, carried forward by every later rewrite. Stop here.
+          const sent = await publishMany(relaySet(), d.inner)
+          if (!sent.ok) {
+            set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.' })
+            return false
+          }
+        }
         const allInners = mergeEntries(existing, items.map(entryOf))
         const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true)
         if (!published) {
@@ -680,9 +710,12 @@ export const useShards = create<ShardsState>((set, get) => {
       const me = cs.identity.pubkey
 
       let mine: MyDeployment[]
+      // Whether the relays now hold a bag that no longer names this item.
+      let unnamed = false
       if (left.length > 0) {
         // Rewrite the region bag without this item; the newer bag replaces it.
         const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic)
+        unnamed = published
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
           .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published } : d))
@@ -698,22 +731,17 @@ export const useShards = create<ShardsState>((set, get) => {
             // relays that only match that.
             tags: [['a', `${HIDDEN_KIND}:${me}:${item.lookupId}`], ['e', item.bagId], ['k', String(HIDDEN_KIND)]],
           })
-          try { await publishMany(item.relays ?? relaySet(), del) } catch { /* best effort */ }
+          try { unnamed = (await publishMany(item.relays ?? relaySet(), del)).ok } catch { /* best effort */ }
         }
         mine = get().mine.filter((d) => d.eventId !== eventId)
       }
       // A shard hidden by reference is also its own event. Once no bag names
       // it, take that down too (NIP-09), if it is ours to take down: it is
       // sealed, but its preview would otherwise sit on the relay for good.
-      if (item.ref && item.inner.pubkey === me && wasPublic) {
-        const d = item.inner.tags.find((t) => t[0] === 'd')?.[1] ?? ''
-        const del = await cs.signEvent({
-          kind: 5,
-          created_at: Math.floor(Date.now() / 1000),
-          content: 'hidden object removed',
-          tags: [['a', `${OBJECT_KIND}:${me}:${d}`], ['e', item.inner.id], ['k', String(OBJECT_KIND)]],
-        })
-        try { await publishMany(item.relays ?? relaySet(), del) } catch { /* best effort */ }
+      // Only once the relays hold a bag that no longer names it: retracting it
+      // while the old bag still does would leave that bag with a hole.
+      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed) {
+        try { await retractObject(item.inner, item.relays ?? relaySet()) } catch { /* best effort */ }
         forgetReference(item.ref)
       }
 
@@ -763,7 +791,9 @@ export const useShards = create<ShardsState>((set, get) => {
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
       let refused = false
       for (const ev of events) {
-        const items = await unbag(ev, rk.key, resolveReference)
+        const h = BigInt(item.height)
+        const p = positionOf(item)
+        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane })
         if (items.some((h) => h.eventId === eventId)) return 'found'
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.

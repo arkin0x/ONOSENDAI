@@ -18,9 +18,17 @@ if (typeof localStorage === 'undefined') {
 }
 
 const sent: { kind: number; tags: string[][]; id: string }[] = []
+/** Kinds every relay refuses in the current test. */
+const refused = new Set<number>()
+/** What the relay holds for a bag query in the current test. */
+let relayBags: unknown[] = []
 vi.mock('../lib/relay', () => ({
-  publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => { sent.push(ev); return { ok: true } }),
-  query: vi.fn(async () => []),
+  publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
+    if (refused.has(ev.kind)) return { ok: false }
+    sent.push(ev)
+    return { ok: true }
+  }),
+  query: vi.fn(async () => relayBags),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
@@ -54,6 +62,8 @@ const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as
 
 beforeEach(() => {
   sent.length = 0
+  refused.clear()
+  relayBags = []
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useCyberspace.setState({ live: true })
 })
@@ -95,5 +105,65 @@ describe('hiding a large shard by reference', () => {
     expect(retraction.tags).toContainEqual(['k', String(OBJECT_KIND)])
     expect(retraction.tags).toContainEqual(['e', big.inner.id])
     expect(useShards.getState().mine.map((d) => d.eventId)).toEqual([small.eventId])
+  })
+})
+
+describe('the review fixes', () => {
+  it('broadcast stops, publishing no bag, when no relay takes an object the bag names', async () => {
+    useCyberspace.setState({ live: false })
+    await deploy(3000)
+    const dep = useShards.getState().mine[0]
+    expect(dep.published).toBe(false)
+    refused.add(OBJECT_KIND)
+    expect(await useShards.getState().broadcast(dep.lookupId)).toBe(false)
+    expect(sent.some((e) => e.kind === HIDDEN_KIND)).toBe(false)
+    expect(useShards.getState().broadcastError).toMatch(/No relay took a shard/)
+  })
+
+  it('broadcast from LOCAL publishes the object before the bag', async () => {
+    useCyberspace.setState({ live: false })
+    await deploy(3000)
+    const dep = useShards.getState().mine[0]
+    expect(await useShards.getState().broadcast(dep.lookupId)).toBe(true)
+    expect(sent.map((e) => e.kind)).toEqual([OBJECT_KIND, HIDDEN_KIND])
+  })
+
+  it('does not retract the object when the bag rewrite fails', async () => {
+    await deploy(3000)
+    await deploy(3)
+    const [big] = useShards.getState().mine
+    sent.length = 0
+    refused.add(HIDDEN_KIND)
+    await useShards.getState().deleteInstance(big.eventId)
+    expect(sent.some((e) => e.kind === 5)).toBe(false)
+  })
+
+  it('when the reference is the last entry, deletes the bag and retracts the object', async () => {
+    await deploy(3000)
+    const [big] = useShards.getState().mine
+    sent.length = 0
+    await useShards.getState().deleteInstance(big.eventId)
+    const kinds = sent.filter((e) => e.kind === 5).map((e) => e.tags.find((t) => t[0] === 'k')?.[1])
+    expect(kinds.sort()).toEqual([String(HIDDEN_KIND), String(OBJECT_KIND)].sort())
+  })
+
+  it('a reference only the relay copy of the bag holds survives a rewrite from this device', async () => {
+    await deploy(3)
+    const dep = useShards.getState().mine[0]
+    const foreignRef = ['a', `33331:${'f'.repeat(64)}:elsewhere`, '', 'c'.repeat(64)]
+    const { bagTemplate } = await import('../lib/hidden')
+    const tpl = await bagTemplate([dep.inner, foreignRef], hexToBytes(dep.keyHex), dep.lookupId, dep.height, 1)
+    relayBags = [await useCyberspace.getState().signEvent(tpl)]
+    await deploy(4)
+    const entries = await bagEntries(lastBag(), hexToBytes(dep.keyHex))
+    expect(entries.filter(isReference)).toEqual([foreignRef])
+    expect(entries.filter((e) => !isReference(e))).toHaveLength(2)
+  })
+
+  it('a deployment keeps its reference across a reload', async () => {
+    await deploy(3000)
+    const saved = JSON.parse(localStorage.getItem('onosendai:deployments') ?? '[]')
+    const stored = Array.isArray(saved) ? saved.find((d: { ref?: unknown }) => d.ref) : undefined
+    expect(stored?.ref).toEqual(useShards.getState().mine[0].ref)
   })
 })

@@ -109,7 +109,10 @@ export function useDiscovery(): void {
         const keyHex = region ? keys.get(region) : undefined
         if (!keyHex || !region) continue
         // One envelope holds a bag; unbag flattens it to items.
-        const items = await unbag(ev, hexToBytes(keyHex), resolveReference)
+        // A reference without its own point is drawn at the base of this region.
+        const h = BigInt(heights.get(region) ?? 0)
+        const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
+        const items = await unbag(ev, hexToBytes(keyHex), resolveReference, origin)
         if (items.length > 0) opened.push(region)
         found.push(...items)
       }

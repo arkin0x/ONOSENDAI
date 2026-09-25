@@ -117,9 +117,41 @@ describe('rewriting a bag keeps its references', () => {
     const m = finalizeEvent(messageInnerTemplate('note', at, 0, 2), sk)
     const ref = referenceTo(o, at, 0, '')
     const entries = await bagEntries(await bag([m, ref]), rk.key)
-    expect(entries).toEqual([m, ref])
-    expect(entries.map(entryKey)).toEqual([m.id, `a:33331:${pk}:placement-1`])
+    // By JSON: nostr-tools marks a verified event with a symbol, which the decrypted copy does not carry.
+    expect(JSON.parse(JSON.stringify(entries))).toEqual(JSON.parse(JSON.stringify([m, ref])))
+    expect(entries.map(entryKey)).toEqual([m.id, `a:33331:${pk}:placement-1@${positionHex(at, 0)}`])
     expect(isReference(entries[1])).toBe(true)
+  })
+})
+
+describe('the review fixes', () => {
+  it('a reference without a point is drawn at the region origin, and dropped without one', async () => {
+    const o = await object()
+    const bare: Reference = ['a', `33331:${pk}:placement-1`, '']
+    const outer = await bag([bare])
+    expect(await unbag(outer, rk.key, relay([o]))).toHaveLength(0)
+    const origin = { at: { x: 1n, y: 2n, z: 3n }, plane: 1 as const }
+    const items = await unbag(outer, rk.key, relay([o]), origin)
+    expect(items).toHaveLength(1)
+    expect(items[0].at).toEqual(origin.at)
+    expect(items[0].plane).toBe(1)
+  })
+  it('one bag makes at most MAX_REFERENCES_PER_BAG lookups', async () => {
+    const { MAX_REFERENCES_PER_BAG } = await import('./hidden')
+    const refs: Reference[] = Array.from({ length: MAX_REFERENCES_PER_BAG + 20 }, (_, i) => ['e', i.toString(16).padStart(64, '0'), '', positionHex(at, 0)])
+    let calls = 0
+    await unbag(await bag(refs), rk.key, async () => { calls++; return null })
+    expect(calls).toBe(MAX_REFERENCES_PER_BAG)
+  })
+  it('one object placed at two points is two entries', () => {
+    const a1: Reference = ['a', `33331:${pk}:x`, '', 'aa']
+    const a2: Reference = ['a', `33331:${pk}:x`, '', 'bb']
+    expect(entryKey(a1)).not.toBe(entryKey(a2))
+  })
+  it('a rewrite carries forward inline items this client cannot verify, such as unsigned ones', async () => {
+    const unsigned = { kind: 1, pubkey: pk, created_at: 5, tags: [], content: 'from the CLI' }
+    const entries = await bagEntries(await bag([unsigned as unknown as NostrEvent]), rk.key)
+    expect(entries).toEqual([unsigned])
   })
 })
 

@@ -3,7 +3,7 @@
  *
  * A reference is `["a", "<kind>:<pubkey>:<d>", relay, coord]`, which follows
  * its author's edits, or `["e", id, relay, coord]`, which pins one version.
- * The relay hint is tried first, then the user's relays. Discovery rescans
+ * Only the user's relays are asked; a hint among them goes first. Discovery rescans
  * often, so each answer is kept for a minute; a miss is kept too, so a
  * missing object costs one query a minute rather than one per scan.
  */
@@ -15,10 +15,17 @@ import type { NostrEvent } from './events'
 const TTL_MS = 60_000
 const cache = new Map<string, { at: number; event: Promise<NostrEvent | null> }>()
 
+/**
+ * The relays to ask: the user's own, with the hint first only when it is one
+ * of them. A hint anywhere else is ignored. Asking a relay the bag's author
+ * chose would tell that relay who found the bag and when, which a hider could
+ * use as a beacon on people moving in LOCAL mode, and every new relay may ask
+ * the finder to sign in.
+ */
 function relaysFor(ref: Reference): string[] {
   const hint = ref[2]
   const all = relaySet()
-  return hint && /^wss?:\/\//.test(hint) && !all.includes(hint) ? [hint, ...all] : all
+  return hint && all.includes(hint) ? [hint, ...all.filter((r) => r !== hint)] : all
 }
 
 async function fetchReference(ref: Reference): Promise<NostrEvent | null> {

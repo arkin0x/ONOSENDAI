@@ -79,10 +79,25 @@ export function isReference(x: unknown): x is Reference {
   return Array.isArray(x) && (x[0] === 'a' || x[0] === 'e') && typeof x[1] === 'string' && x[1].length > 0 && x.every((v) => typeof v === 'string')
 }
 
-/** A stable identity for an entry, for de-duplicating a bag's list. */
+/**
+ * A stable identity for an entry, for de-duplicating a bag's list. A
+ * reference's point is part of it: one object placed at two points is two
+ * entries, and removing one must not remove the other.
+ */
 export function entryKey(e: BagEntry): string {
-  return isReference(e) ? `${e[0]}:${e[1]}` : e.id
+  return isReference(e) ? `${e[0]}:${e[1]}@${e[3] ?? ''}` : e.id
 }
+
+/**
+ * The most references one bag may make this client fetch, and how many at
+ * once. Opening a bag is cheap; each reference is a relay query, so a bag
+ * stuffed with them must not turn one find into a flood.
+ */
+export const MAX_REFERENCES_PER_BAG = 64
+const REFERENCE_CONCURRENCY = 4
+
+/** Where a reference without its own point is drawn: the base of the region the bag is sealed to. */
+export interface RegionOrigin { at: Position; plane: Plane }
 
 /** Whether a shard is large enough to hide by reference. */
 export function wantsReference(shard: ShardModel): boolean {
@@ -306,7 +321,7 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden
  * region key, or a bag that is not an array. Each item that does not verify is
  * dropped, not the whole bag.
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -315,14 +330,22 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   try { entries = JSON.parse(json) } catch { return [] }
   if (!Array.isArray(entries)) return []
   const keyHex = bytesToHex(regionKey)
-  // References are fetched in parallel; an entry that cannot be fetched or
-  // opened is a missing entry, dropped like an item that fails to verify.
-  const found = await Promise.all(entries.map(async (entry) => {
-    if (isReference(entry)) return resolve ? fromReference(entry, outer, regionKey, keyHex, resolve).catch(() => null) : null
-    if (Array.isArray(entry)) return null
-    return fromInner(entry as NostrEvent, outer, keyHex)
-  }))
-  return found.filter((h): h is Hidden => h !== null)
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as NostrEvent, outer, keyHex)))
+  // References are fetched a few at a time, and only so many per bag; an
+  // entry that cannot be fetched or opened is a missing entry, dropped like
+  // an item that fails to verify.
+  if (resolve) {
+    const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e)).slice(0, MAX_REFERENCES_PER_BAG)
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < refs.length) {
+        const [ref, i] = refs[next++]
+        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, resolve, origin).catch(() => null)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, refs.length) }, worker))
+  }
+  return out.filter((h): h is Hidden => h !== null)
 }
 
 /**
@@ -333,9 +356,11 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
  * someone else's object is a placement, attributed to the bag's author, while
  * the content stays that event's own (spec §7.6).
  */
-async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference): Promise<Hidden | null> {
+async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, origin?: RegionOrigin): Promise<Hidden | null> {
+  // The point is optional (spec §7.6): without one the entry is located no
+  // more precisely than the region, and is drawn at the region's base.
   const coordHex = ref[3]
-  if (!coordHex) return null
+  if (!coordHex && !origin) return null
   const target = await resolve(ref)
   if (!target || !verifyEvent(target)) return null
   if (ref[0] === 'e' && target.id !== ref[1]) return null
@@ -348,7 +373,7 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
   const plain = await decryptForRegion(regionKey, enc[2])
   if (plain === null) return null
 
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = coordHex ? coordToXyz(hexToCoord(coordHex)) : { ...origin!.at, plane: origin!.plane }
   const base = {
     eventId: target.id,
     inner: target,
@@ -388,10 +413,12 @@ export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Prom
 }
 
 /**
- * Every entry currently in one of your own envelopes, for rewriting it: the
- * inline items that verify and were signed by the bag's author, and every
- * well-formed reference, carried forward as it is. A rewrite that kept only
- * events would silently drop what was hidden by reference.
+ * Every entry currently in one of your own envelopes, for rewriting it,
+ * carried forward as it is: inline items (whether or not this client could
+ * render them, signed or not, since another client writing with the same key
+ * may leave items this one does not know) and every well-formed reference.
+ * A rewrite that kept only what this client understands would silently drop
+ * the rest, which is exactly what happened to references before.
  */
 export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Promise<BagEntry[]> {
   const ct = ciphertextOf(outer)
@@ -401,7 +428,7 @@ export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Prom
   try {
     const arr = JSON.parse(json)
     if (!Array.isArray(arr)) return []
-    return arr.filter((e): e is BagEntry => isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && (e as NostrEvent).pubkey === outer.pubkey && verifyEvent(e as NostrEvent)))
+    return arr.filter((e): e is BagEntry => isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && typeof (e as NostrEvent).kind === 'number'))
   } catch { return [] }
 }
 

@@ -1,7 +1,7 @@
 /**
  * useAvatars.ts - who looks like what.
  *
- * Every avatar drawn asks here for its shape: the kind 33331 event of that
+ * Every avatar drawn asks here for its shape: the kind 11333 event of that
  * pubkey (lib/avatar), fetched once and refreshed now and then, null meaning
  * the dodecahedron. An avatar is drawn only when it has paid its work (spec
  * 8.10, cyberspace-core's verifyAvatarWork); one that has not is the

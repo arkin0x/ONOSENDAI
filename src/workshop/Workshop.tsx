@@ -535,7 +535,7 @@ export function Workshop(): JSX.Element | null {
               <button className={`workshop__mode ${!showAvatar ? 'is-on' : ''}`} aria-pressed={!showAvatar} onClick={() => w().setShowAvatar(false)} title="Hide it">HIDE</button>
             </div>
           </div>
-          {/* The shape others see for you: this shard, published as kind 33331,
+          {/* The shape others see for you: this shard, published as kind 11333,
               drawn in the dodecahedron's cell wherever you are drawn. */}
           <div className="workshop__avatar" role="group" aria-label="My avatar">
             <div className="workshop__row">
@@ -609,7 +609,7 @@ export function Workshop(): JSX.Element | null {
           )}
           <ul className="workshop__list">
             {/* The avatar is not one of these shards. It lives in its own store,
-                read back from the kind 33331 event you published, which is why
+                read back from the kind 11333 event you published, which is why
                 deleting the shard it was built from leaves the avatar standing
                 (arkinox found this by doing it). It gets a row anyway so the
                 shape you are wearing is visible and can be copied back into the

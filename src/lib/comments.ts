@@ -158,6 +158,8 @@ interface Parsed {
   rootAddress: string
   parentId: string
   parentKind: number
+  /** The parent's address from a lowercase `a` tag, when the parent is addressable (NIP-22). */
+  parentAddress: string | null
 }
 
 function firstTag(ev: NostrEvent, name: string): string[] | undefined {
@@ -175,7 +177,8 @@ export function parseComment(ev: NostrEvent): Parsed | null {
   const ciphertext = enc && enc[1] === ENCRYPTED_SCHEME && enc[2] ? enc[2] : null
   const preview = ev.content.trim().slice(0, MAX_COMMENT_LENGTH)
   if (!ciphertext && !preview) return null
-  return { id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, preview, ciphertext, rootAddress: root, parentId: parent, parentKind }
+  const parentAddress = firstTag(ev, 'a')?.[1] ?? null
+  return { id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, preview, ciphertext, rootAddress: root, parentId: parent, parentKind, parentAddress }
 }
 
 /** The words of every sealed comment the key opens, by event id. A wrong key opens nothing and says nothing. */
@@ -196,20 +199,24 @@ export async function openComments(events: NostrEvent[], key: Uint8Array): Promi
  * Comments on other items in the same bag, and replies whose parent is not
  * here, are left out.
  */
-export function threadComments(events: NostrEvent[], subject: Pick<CommentSubject, 'author' | 'lookupId' | 'itemId'>, opened: ReadonlyMap<string, string> = new Map()): Comment[] {
+export function threadComments(events: NostrEvent[], subject: Pick<CommentSubject, 'author' | 'lookupId' | 'itemId' | 'target'>, opened: ReadonlyMap<string, string> = new Map()): Comment[] {
   const address = bagAddress(subject)
-  const byId = new Map<string, Comment & { parentKind: number }>()
+  const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
+  // An item hidden by an `a` reference keeps its address when its author
+  // edits it, while its event id changes; a comment made on any version
+  // names that address, so it stays under the item across edits.
+  const itemAddress = subject.target?.address
   for (const ev of events) {
     const c = parseComment(ev)
     if (!c || c.rootAddress !== address || byId.has(c.id)) continue
     const words = opened.get(c.id)
     const sealed = c.ciphertext !== null && words === undefined
-    byId.set(c.id, { id: c.id, pubkey: c.pubkey, createdAt: c.createdAt, text: words ?? (sealed ? PLACEHOLDER : c.preview), sealed, parentId: c.parentId, parentKind: c.parentKind, replies: [] })
+    byId.set(c.id, { id: c.id, pubkey: c.pubkey, createdAt: c.createdAt, text: words ?? (sealed ? PLACEHOLDER : c.preview), sealed, parentId: c.parentId, parentKind: c.parentKind, parentAddress: c.parentAddress, replies: [] })
   }
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && c.parentId === subject.itemId) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && (c.parentId === subject.itemId || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

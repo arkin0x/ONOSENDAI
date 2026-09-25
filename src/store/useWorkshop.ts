@@ -25,7 +25,6 @@ import {
   DIVISIONS,
   GRID_HALF,
   TICKS_PER_UNIT,
-  centroid,
   normalizeStored,
   ticksOf,
   vertexAt,
@@ -48,6 +47,7 @@ import {
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
+import { flipFace, flipSurface, windAdded, windOutward } from 'sno-core/winding'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { weld } from '../lib/weld'
@@ -251,6 +251,12 @@ export interface WorkshopState {
   selectConnected: () => void
   selectFace: (index: number | null) => void
   deleteSelectedFace: () => void
+  /** FLIP FACE: the selected face turned round, its front to its back (DECK-0003 §1.4). */
+  flipSelectedFace: () => void
+  /** FLIP SURFACE: the selected face turned, and every face joined to it by clean edges turned to agree. */
+  flipSelectedSurface: () => void
+  /** AUTO: every face of the shard wound outward by the guess (sno-core orient). */
+  autoWind: () => void
   /** The colour onto one face as a hard seam, not onto its corners. */
   colorFace: (index: number, c: [number, number, number]) => void
   /** Give every face back to its corners: the object interpolates again. */
@@ -398,14 +404,6 @@ function facesFor(pts: P3[]): Tris | null {
   if (out.length === 0) return null
   out.hull = true
   return out
-}
-
-/** The face wound so its normal points away from `centre`. */
-function awayFrom(s: ShardModel, f: Tri, centre: P3): Tri {
-  const [a, b, c] = f.map((i) => ticksOf(s.vertices[i]))
-  const n = newell([a, b, c])
-  const m: P3 = [(a[0] + b[0] + c[0]) / 3 - centre[0], (a[1] + b[1] + c[1]) / 3 - centre[1], (a[2] + b[2] + c[2]) / 3 - centre[2]]
-  return n[0] * m[0] + n[1] * m[1] + n[2] * m[2] < 0 ? [f[0], f[2], f[1]] : f
 }
 
 export const useWorkshop = create<WorkshopState>((set, get) => {
@@ -602,6 +600,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (selectedFace === null) return
       get().removeFace(selectedFace)
       set({ selectedFace: null })
+    },
+
+    flipSelectedFace: () => {
+      const { selectedFace } = get()
+      if (selectedFace === null) return
+      edit((s) => (s.faces[selectedFace] ? flipFace(s, selectedFace) : null), 'Face turned round.')
+    },
+
+    flipSelectedSurface: () => {
+      const { selectedFace } = get()
+      if (selectedFace === null) return
+      edit((s) => (s.faces[selectedFace] ? flipSurface(s, selectedFace) : null), 'Surface turned round.')
+    },
+
+    autoWind: () => {
+      edit((s) => (s.faces.length ? windOutward(s) : null), 'Every face turned to look outward.')
     },
 
     /**
@@ -899,7 +913,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
           .map((t) => [facePick[t[0]], facePick[t[1]], facePick[t[2]]] as [number, number, number])
           .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(f)))
         if (!faces.length) return null
-        const next = { ...cur, faces: [...cur.faces, ...faces] }
+        // Wound outward, or to agree with a face it closes onto (sno-core winding).
+        const next = windAdded({ ...cur, faces: [...cur.faces, ...faces] }, cur.faces.length)
         return { ...next, mode: solidIfFirstFaces(cur, next).mode }
       }, solidIfFirstFaces(s, { ...s, faces: [[0, 0, 0]] }).notice)
       set({ facePick: [] })
@@ -917,17 +932,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const pts = idx.map((i) => ticksOf(s.vertices[i]))
       const faces = facesFor(pts)
       if (!faces) { set({ notice: 'Those points do not make a face: they lie on one line.' }); return }
-      const centre = centroid(s)
       const before = s.faces.length
       edit((cur) => {
         const have = new Set(cur.faces.map(faceKey))
         const fresh = faces
           .map((t) => [idx[t[0]], idx[t[1]], idx[t[2]]] as [number, number, number])
           .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(f)))
-          // A flat fill faces away from the shard's middle; the hull already does.
-          .map((f) => faces.hull ? f : awayFrom(cur, f, centre))
         if (!fresh.length) return null
-        const next = { ...cur, faces: [...cur.faces, ...fresh] }
+        // Wound outward, on the wire where the front is read (DECK-0003 §1.4),
+        // or to agree with a face it closes onto. Measured in model ticks, as
+        // this once was, outward came out inward: the model frame is a mirror.
+        const next = windAdded({ ...cur, faces: [...cur.faces, ...fresh] }, cur.faces.length)
         return { ...next, mode: solidIfFirstFaces(cur, next).mode }
       })
       const added = (get().current()?.faces.length ?? before) - before

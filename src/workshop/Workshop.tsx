@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { ClipboardPaste, Copy, Eye, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
+import { ClipboardPaste, Copy, Eye, FlipVertical2, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { PaletteModal } from './PaletteModal'
@@ -55,7 +55,7 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   view: 'Look around: one finger orbits, two pan, pinch zooms. The compass turns the view a quarter at a time. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
-  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it.',
+  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; DELETE FACE removes it. A dark face shows its back: FLIP turns it round.',
 }
 
 type Panel = 'menu' | 'tools' | 'grid'
@@ -162,12 +162,14 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
 }
 
 /**
- * The clipboard row: CUT and COPY while points are in hand, PASTE whenever
- * something is held, on every tool. It stands first in the bottom-left column
- * so nothing else there or in the color column ever covers it (arkinox,
- * 2026-09-24). PASTE asks where before it puts anything down, since the
- * answer is not obvious: back where it came from, or on the plane you are
- * working on. CLEAR lets the held points go, and PASTE with them.
+ * The clipboard row: FILL while three or more points are in hand, CUT and
+ * COPY while any are, PASTE whenever something is held, on every tool. It
+ * stands first in the bottom-left column so nothing else there or in the
+ * color column ever covers it (arkinox, 2026-09-24); FILL joined it at its
+ * left end the same evening, out of the right-hand corner. PASTE asks where
+ * before it puts anything down, since the answer is not obvious: back where
+ * it came from, or on the plane you are working on. CLEAR lets the held
+ * points go, and PASTE with them.
  */
 function ClipRow({ points }: { points: number }): JSX.Element | null {
   const w = useWorkshop.getState
@@ -178,6 +180,12 @@ function ClipRow({ points }: { points: number }): JSX.Element | null {
   const held = clip ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : ''
   return (
     <div className="benchclip" role="group" aria-label="Clipboard">
+      {points >= 3 && (
+        <button className="touchpad__key" title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)" aria-label="Fill the selection" {...noCallout} onClick={() => w().fillSelection()}>
+          <Triangle size={15} strokeWidth={2.25} aria-hidden />
+          <span className="touchpad__sub">FILL</span>
+        </button>
+      )}
       {points > 0 && (
         <>
           <button className="touchpad__key" title="Cut the selected points, and their faces, to the clipboard" aria-label="Cut the selection" {...noCallout} onClick={() => w().cutSelection()}>
@@ -204,6 +212,36 @@ function ClipRow({ points }: { points: number }): JSX.Element | null {
             <button className="workshop__btn" role="menuitem" title="Back on the exact points they were taken from" onClick={() => { setAsking(false); w().pasteClip('exact') }}>PASTE</button>
             <button className="workshop__btn" role="menuitem" title="Resting on the plane you are working on, keeping its shape" onClick={() => { setAsking(false); w().pasteClip('floor') }}>PASTE FLOOR</button>
             <button className="workshop__btn workshop__btn--danger" role="menuitem" title={`Let the ${held} go; PASTE goes with them`} onClick={() => { setAsking(false); w().clearClip() }}>CLEAR CLIPBOARD</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * FLIP, for the FACE tool. Which way a face looks is its winding (DECK-0003
+ * §1.4), and this is how an author turns it. It asks how much before it
+ * turns anything, the way PASTE asks where: the face in hand, its whole
+ * surface, or every face by the bench's outward guess. AUTO needs no face.
+ */
+function FlipKey({ face }: { face: number | null }): JSX.Element {
+  const w = useWorkshop.getState
+  const [asking, setAsking] = useState(false)
+  const pick = (fn: () => void) => (): void => { setAsking(false); fn() }
+  return (
+    <div className="benchflip">
+      <button className="workshop__btn" aria-haspopup="menu" aria-expanded={asking} onClick={() => setAsking((o) => !o)} title="Turn faces round: which side is the front">
+        <FlipVertical2 size={12} strokeWidth={2.25} aria-hidden /> FLIP
+      </button>
+      {asking && (
+        <>
+          {/* Anywhere else puts the question away and turns nothing. */}
+          <div className="benchpaste__away" onPointerDown={() => setAsking(false)} />
+          <div className="benchpaste benchpaste--flip" role="menu" aria-label="What to flip">
+            <button className="workshop__btn" role="menuitem" disabled={face === null} title="This face turned round, its back to the front" onClick={pick(() => w().flipSelectedFace())}>FLIP FACE</button>
+            <button className="workshop__btn" role="menuitem" disabled={face === null} title="This face turned round, and every face joined to it by an edge turned to agree" onClick={pick(() => w().flipSelectedSurface())}>FLIP SURFACE</button>
+            <button className="workshop__btn" role="menuitem" title="Every face in the shard turned to look outward, by the bench's best guess" onClick={pick(() => w().autoWind())}>AUTO</button>
           </div>
         </>
       )}
@@ -724,8 +762,8 @@ export function Workshop(): JSX.Element | null {
         </div>
       </div>
 
-      {/* Bottom right: FILL for a set of points, face actions while a face is in
-          hand, the color column under either. */}
+      {/* Bottom right: face actions while a face is in hand, the color column
+          under them. FILL for a set of points is on the clipboard row. */}
       <div className="ws__corner">
         {one && (
           <div className="benchops" role="status" aria-label="Selected point">
@@ -740,15 +778,10 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().weld()} title={selection.length >= 2 ? 'Fold the selected points that stand on one spot into one' : 'Fold every point standing on another into one; faces that disagree on color keep their own'}>WELD</button>
           </div>
         )}
-        {selectedPoints >= 3 && (
-          <div className="benchops" role="group" aria-label="Fill the selection">
-            <span className="workshop__value workshop__value--wide">{selectedPoints} points</span>
-            <button className="workshop__btn" onClick={() => w().fillSelection()} title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)">FILL</button>
-          </div>
-        )}
         {facing && selectedFace !== null && (
           <div className="benchops" role="group" aria-label="Selected face">
             <span className="workshop__value workshop__value--wide">face {selectedFace + 1} of {shard?.faces.length ?? 0}</span>
+            <FlipKey face={selectedFace} />
             {/* A hard colour, which colouring the corners cannot give: a corner
                 belongs to every face touching it, so that bleeds across the
                 shared edges. This stops at the edge. */}
@@ -759,11 +792,19 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" onClick={() => w().selectFace(null)} title="Keep it (Esc)">CANCEL</button>
           </div>
         )}
+        {/* FACE in hand and nothing picked: FLIP alone, so AUTO is always
+            reachable; FLIP FACE and FLIP SURFACE wait for a face. */}
+        {tool === 'face' && !facing && selection.length === 0 && (shard?.faces.length ?? 0) > 0 && (
+          <div className="benchops" role="group" aria-label="Flip">
+            <FlipKey face={null} />
+          </div>
+        )}
         {facing && selectedFace === null && (
           <div className="benchops" role="group" aria-label="Face corners">
             <span className="workshop__value workshop__value--wide">{facePick.length} corner{facePick.length === 1 ? '' : 's'}</span>
             <button className="workshop__btn" disabled={facePick.length < 3} onClick={() => w().fill()} title="Join the corners into a face (Enter)">FILL</button>
             <button className="workshop__btn" onClick={() => w().clearFacePick()} title="Drop the picks (Esc)">CANCEL</button>
+            <FlipKey face={null} />
           </div>
         )}
         {(tool !== 'face' || selectedFace !== null) && (colorBar ? (

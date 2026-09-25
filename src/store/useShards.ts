@@ -20,6 +20,8 @@ import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
+import { forgetReference, resolveReference } from '../lib/references'
+import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
@@ -27,8 +29,16 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } 
 import { useSecrets } from './useSecrets'
 import {
   HIDDEN_KIND,
+  OBJECT_KIND,
+  bagEntries,
   bagInners,
   bagTemplate,
+  entryKey,
+  objectTemplate,
+  referenceTo,
+  wantsReference,
+  type BagEntry,
+  type Reference,
   messageInnerTemplate,
   shardInnerTemplate,
   shardRefusal,
@@ -47,8 +57,14 @@ import type { NearbyReturn } from '../lib/nearbyReturn'
 export interface MyDeployment {
   /** The item's stable identity: its signed inner event id. */
   eventId: string
-  /** The signed inner event, so the region bag can be rebuilt from here. */
+  /**
+   * The signed inner event, so the region bag can be rebuilt from here. For a
+   * shard hidden by reference it is the signed kind 33331 object, which is
+   * what `broadcast` republishes beside the bag.
+   */
   inner: NostrEvent
+  /** Set when the item is hidden by reference: the entry the bag carries instead of `inner` (spec §7.6). */
+  ref?: Reference
   /** The envelope currently holding it; changes when the bag is rewritten. */
   bagId: string
   type: HiddenType
@@ -78,6 +94,8 @@ export interface WorldItem {
   createdAt?: number
   /** The bag's lookup id, for anything addressed to the bag (comments). */
   lookupId?: string
+  /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
+  target?: ItemTarget
 }
 
 /** What a deploy is placing, before it lands. */
@@ -286,12 +304,22 @@ function storedAt(p: Position): { x: string; y: string; z: string } {
   return { x: p.x.toString(), y: p.y.toString(), z: p.z.toString() }
 }
 
-/** Union of inner events by id, order preserved. */
-function mergeInners(a: NostrEvent[], b: NostrEvent[]): NostrEvent[] {
-  const seen = new Set(a.map((e) => e.id))
+/** What a deployment contributes to its region's bag: the reference if it has one, else the inner event. */
+function entryOf(d: Pick<MyDeployment, 'inner' | 'ref'>): BagEntry {
+  return d.ref ?? d.inner
+}
+
+/** Union of bag entries by identity (event id, or the reference's target), order preserved. */
+function mergeEntries(a: BagEntry[], b: BagEntry[]): BagEntry[] {
+  const seen = new Set(a.map(entryKey))
   const out = a.slice()
-  for (const e of b) if (!seen.has(e.id)) { seen.add(e.id); out.push(e) }
+  for (const e of b) { const k = entryKey(e); if (!seen.has(k)) { seen.add(k); out.push(e) } }
   return out
+}
+
+/** A fresh `d` for one placement of an object: 16 random bytes, derived from nothing (DECK-0003 §3.4). */
+function placementId(): string {
+  return bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
 }
 
 /**
@@ -311,22 +339,26 @@ export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
   /** Build and publish the region bag. */
-  async function publishBag(inners: NostrEvent[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
     const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt))
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
 
-  /** The author's current bag inners for a region: relay (authoritative) + local. */
-  async function gatherInners(lookupId: string, key: Uint8Array, live: boolean): Promise<NostrEvent[]> {
-    const local = get().mine.filter((d) => d.lookupId === lookupId).map((d) => d.inner)
+  /**
+   * The author's current bag entries for a region: relay (authoritative) +
+   * local. Entries, not just events: a reference in the relay's copy must
+   * survive the rewrite even when this device never saw it.
+   */
+  async function gatherInners(lookupId: string, key: Uint8Array, live: boolean): Promise<BagEntry[]> {
+    const local = get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)
     if (!live) return local
     try {
       const events = await query({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
       const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
-      const relay = newest ? await bagInners(newest, key) : []
-      return mergeInners(relay, local)
+      const relay = newest ? await bagEntries(newest, key) : []
+      return mergeEntries(relay, local)
     } catch {
       return local
     }
@@ -353,7 +385,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
-        eventId: h.eventId, inner: h.inner, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text,
+        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
         relays: relaySet(), createdAt: h.createdAt, published: true,
       })
@@ -495,15 +527,32 @@ export const useShards = create<ShardsState>((set, get) => {
           rk = await regionKeyOffThread(at, deployHeight, MAX_COMPUTE_HEIGHT)
         }
         set({ deployNote: 'Sealing and publishing' })
-        const inner = await cs.signEvent(innerTemplate)
         const live = cs.live
+        // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
+        // becomes its own kind 33331 object sealed with the same key, and the
+        // bag carries only a tag naming it. The object goes out first, so a
+        // published bag never names something the relay does not have.
+        let inner: NostrEvent
+        let ref: Reference | undefined
+        if (pending.type === 'shard' && shard && wantsReference(shard)) {
+          inner = await cs.signEvent(await objectTemplate(shard, rk.key, placementId(), createdAt))
+          if (live) {
+            const sent = await publishMany(relaySet(), inner)
+            if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
+          }
+          ref = referenceTo(inner, at, plane, relaySet()[0] ?? '')
+          forgetReference(ref)
+        } else {
+          inner = await cs.signEvent(innerTemplate)
+        }
         const existing = await gatherInners(rk.lookupId, rk.key, live)
-        const allInners = mergeInners(existing, [inner])
+        const allInners = mergeEntries(existing, [ref ?? inner])
         const { event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live)
 
         const item: MyDeployment = {
           eventId: inner.id,
           inner,
+          ref,
           bagId: event.id,
           type: pending.type,
           shard,
@@ -560,7 +609,10 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         const key = hexToBytes(items[0].keyHex)
         const existing = await gatherInners(lookupId, key, true)
-        const allInners = mergeInners(existing, items.map((d) => d.inner))
+        // Objects hidden by reference go out before the bag that names them.
+        const me = cyber().identity.pubkey
+        for (const d of items) if (d.ref && d.inner.pubkey === me) await publishMany(relaySet(), d.inner)
+        const allInners = mergeEntries(existing, items.map(entryOf))
         const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true)
         if (!published) {
           set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.' })
@@ -587,7 +639,7 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
         const found: Hidden[] = []
-        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex)))
+        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex), resolveReference))
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
@@ -623,7 +675,9 @@ export const useShards = create<ShardsState>((set, get) => {
       // when it was the only other thing, deleted the whole envelope as if
       // the bag were empty.
       const gathered = await gatherInners(item.lookupId, key, wasPublic)
-      const left = gathered.filter((e) => e.id !== eventId)
+      const gone = entryKey(entryOf(item))
+      const left = gathered.filter((e) => entryKey(e) !== gone)
+      const me = cs.identity.pubkey
 
       let mine: MyDeployment[]
       if (left.length > 0) {
@@ -642,11 +696,25 @@ export const useShards = create<ShardsState>((set, get) => {
             // kind 33330 is addressable, so the address is what a relay
             // replaces and what NIP-09 asks for; the event id goes too, for
             // relays that only match that.
-            tags: [['a', `${HIDDEN_KIND}:${item.inner.pubkey}:${item.lookupId}`], ['e', item.bagId], ['k', String(HIDDEN_KIND)]],
+            tags: [['a', `${HIDDEN_KIND}:${me}:${item.lookupId}`], ['e', item.bagId], ['k', String(HIDDEN_KIND)]],
           })
           try { await publishMany(item.relays ?? relaySet(), del) } catch { /* best effort */ }
         }
         mine = get().mine.filter((d) => d.eventId !== eventId)
+      }
+      // A shard hidden by reference is also its own event. Once no bag names
+      // it, take that down too (NIP-09), if it is ours to take down: it is
+      // sealed, but its preview would otherwise sit on the relay for good.
+      if (item.ref && item.inner.pubkey === me && wasPublic) {
+        const d = item.inner.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+        const del = await cs.signEvent({
+          kind: 5,
+          created_at: Math.floor(Date.now() / 1000),
+          content: 'hidden object removed',
+          tags: [['a', `${OBJECT_KIND}:${me}:${d}`], ['e', item.inner.id], ['k', String(OBJECT_KIND)]],
+        })
+        try { await publishMany(item.relays ?? relaySet(), del) } catch { /* best effort */ }
+        forgetReference(item.ref)
       }
 
       const deleted = { ...get().deleted, [eventId]: true as const }
@@ -657,7 +725,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // public list is a list of bags, so that is the grain it forgets at.
       const deletedBags = left.length > 0
         ? get().deletedBags
-        : { ...get().deletedBags, [`${item.inner.pubkey}:${item.lookupId}`]: true as const }
+        : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
       set({ mine, deleted, deletedBags, discovered, inspecting: wasInspecting ? null : get().inspecting })
       if (wasInspecting) cs.clearFocus()
       saveMine(mine); saveDeleted(deleted)
@@ -695,7 +763,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
       let refused = false
       for (const ev of events) {
-        const items = await unbag(ev, rk.key)
+        const items = await unbag(ev, rk.key, resolveReference)
         if (items.some((h) => h.eventId === eventId)) return 'found'
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.
@@ -716,11 +784,11 @@ export const useShards = create<ShardsState>((set, get) => {
       const me = useCyberspace.getState().identity.pubkey
       for (const d of get().mine) {
         seen.add(d.eventId)
-        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt, lookupId: d.lookupId })
+        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt, lookupId: d.lookupId, target: itemTargetOf(d.inner, d.ref) })
       }
       for (const h of Object.values(get().discovered)) {
         if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt, lookupId: h.lookupId })
+        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt, lookupId: h.lookupId, target: itemTargetOf(h.inner, h.ref) })
       }
       return out
     },

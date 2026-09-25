@@ -8,10 +8,19 @@
  * the inner signature, and renders by the inner kind. Nothing about where the
  * thing is, or what it is, leaks: the coordinate lives inside the ciphertext.
  *
- * Two inner kinds so far:
+ * A bag is a list of entries (spec §7.6). An entry that is an event is an
+ * item carried inline; two inner kinds so far:
  *   - a shard, kind 3330 (v1's shard kind), geometry in the content;
  *   - a message, kind 1, text in the content.
  * Both carry their coordinate in a `C` tag, decoded on discovery.
+ *
+ * An entry that is an array is a reference: `["a", "<kind>:<pubkey>:<d>",
+ * relay, coord]` or `["e", id, relay, coord]`, naming an event published on
+ * its own. That event is FF-1 partially encrypted: a public preview in
+ * `content` and `["encrypted", "aes-256-gcm", ct, "cyberspace:region"]`,
+ * sealed with the same region key as the bag and saying nothing about where
+ * it is. A large shard is hidden this way, as a kind 33331 object (DECK-0003
+ * §3.2, §3.4), so one big shard does not make the whole bag big.
  *
  * The envelope carries the NIP-70 `-` tag: a relay that honours it will accept
  * the event only from its author, so no one else can republish your chalk.
@@ -43,6 +52,66 @@ export const MAX_CHAT_LENGTH = 500
 export const SHARD_KIND = 3330
 /** A plain note, inside the envelope. */
 export const MESSAGE_KIND = 1
+/** A standalone SNO object (DECK-0003 §3.1); a shard hidden by reference is one of these (§3.4). */
+export const OBJECT_KIND = 33331
+/** FF-1's key derivation for a key computed from a place rather than served (spec §7.6). */
+export const REGION_KEY_DERIVATION = 'cyberspace:region'
+/** The public face of an object hidden by reference: what any client that cannot open it shows. */
+export const OBJECT_PREVIEW = 'This object is hidden at a place in cyberspace. Find it with ONOSENDAI: https://onosendai.tech'
+/**
+ * A shard whose payload is larger than this is hidden by reference. Every
+ * shard an author hides in one region shares one bag, and the bag is
+ * rewritten whole on every change, so a large shard carried inline makes
+ * every later change to that region pay for it again. 16 KB is roughly a
+ * few hundred vertices; smaller shards stay inline, one fetch instead of two.
+ */
+export const REFERENCE_THRESHOLD_BYTES = 16_384
+
+/** A reference entry (spec §7.6): ["a" | "e", target, relay hint, coord hex]. */
+export type Reference = string[]
+/** One entry of a bag's list: an inline item, or a reference. */
+export type BagEntry = NostrEvent | Reference
+/** Fetches the event a reference names, or null. Injected so this file stays pure. */
+export type ResolveReference = (ref: Reference) => Promise<NostrEvent | null>
+
+/** A well-formed reference entry: an `a` or `e` tag of strings. */
+export function isReference(x: unknown): x is Reference {
+  return Array.isArray(x) && (x[0] === 'a' || x[0] === 'e') && typeof x[1] === 'string' && x[1].length > 0 && x.every((v) => typeof v === 'string')
+}
+
+/** A stable identity for an entry, for de-duplicating a bag's list. */
+export function entryKey(e: BagEntry): string {
+  return isReference(e) ? `${e[0]}:${e[1]}` : e.id
+}
+
+/** Whether a shard is large enough to hide by reference. */
+export function wantsReference(shard: ShardModel): boolean {
+  return new TextEncoder().encode(JSON.stringify(toPayload(shard))).length > REFERENCE_THRESHOLD_BYTES
+}
+
+/**
+ * The kind 33331 object a large shard is hidden as (DECK-0003 §3.4): the
+ * payload sealed with the region key, a public preview, and a `d` the caller
+ * chooses. The caller passes a fresh random `d` for every placement, because
+ * 33331 is addressable: two placements of one shard under one `d` would
+ * replace each other on the relay, and each is sealed to a different place.
+ * No `name`, `C`, `h`, hint or sector tag: nothing that could say where.
+ */
+export async function objectTemplate(shard: ShardModel, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
+  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(shard)))
+  return {
+    kind: OBJECT_KIND,
+    created_at: createdAt,
+    content: OBJECT_PREVIEW,
+    tags: [['d', d], ['alt', OBJECT_PREVIEW], ['encrypted', ALGO, ciphertext, REGION_KEY_DERIVATION]],
+  }
+}
+
+/** The reference entry that hides a signed object at a point (spec §7.6). */
+export function referenceTo(object: NostrEvent, at: Position, plane: Plane, relayHint: string): Reference {
+  const d = object.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+  return ['a', `${object.kind}:${object.pubkey}:${d}`, relayHint, positionHex(at, plane)]
+}
 
 /**
  * Longest hidden message. The relay is the only hard limit and it is far
@@ -88,6 +157,13 @@ export interface Hidden {
   type: HiddenType
   shard?: ShardModel
   text?: string
+  /**
+   * Set when the item was hidden by reference: the entry itself, which is what
+   * a rewrite of the bag must carry forward. `inner` is then the referenced
+   * event (the kind 33331 object), and its author may differ from `author`,
+   * the key that placed it (spec §7.6).
+   */
+  ref?: Reference
 }
 
 /**
@@ -158,7 +234,7 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: NostrEvent[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND): Promise<EventTemplate> {
+export async function bagTemplate(inners: BagEntry[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND): Promise<EventTemplate> {
   const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inners))
   return {
     kind,
@@ -230,21 +306,74 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden
  * region key, or a bag that is not an array. Each item that does not verify is
  * dropped, not the whole bag.
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
   if (!json) return []
-  let inners: unknown
-  try { inners = JSON.parse(json) } catch { return [] }
-  if (!Array.isArray(inners)) return []
+  let entries: unknown
+  try { entries = JSON.parse(json) } catch { return [] }
+  if (!Array.isArray(entries)) return []
   const keyHex = bytesToHex(regionKey)
-  const out: Hidden[] = []
-  for (const inner of inners) {
-    const h = fromInner(inner as NostrEvent, outer, keyHex)
-    if (h) out.push(h)
+  // References are fetched in parallel; an entry that cannot be fetched or
+  // opened is a missing entry, dropped like an item that fails to verify.
+  const found = await Promise.all(entries.map(async (entry) => {
+    if (isReference(entry)) return resolve ? fromReference(entry, outer, regionKey, keyHex, resolve).catch(() => null) : null
+    if (Array.isArray(entry)) return null
+    return fromInner(entry as NostrEvent, outer, keyHex)
+  }))
+  return found.filter((h): h is Hidden => h !== null)
+}
+
+/**
+ * One reference entry of a bag -> a Hidden, or null.
+ *
+ * The referenced event must verify, must be the one the reference names, and
+ * must open with this bag's region key. It may be by another author: placing
+ * someone else's object is a placement, attributed to the bag's author, while
+ * the content stays that event's own (spec §7.6).
+ */
+async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference): Promise<Hidden | null> {
+  const coordHex = ref[3]
+  if (!coordHex) return null
+  const target = await resolve(ref)
+  if (!target || !verifyEvent(target)) return null
+  if (ref[0] === 'e' && target.id !== ref[1]) return null
+  if (ref[0] === 'a') {
+    const [kind, pubkey, ...rest] = ref[1].split(':')
+    if (String(target.kind) !== kind || target.pubkey !== pubkey || tag(target, 'd') !== rest.join(':')) return null
   }
-  return out
+  const enc = target.tags.find((t) => t[0] === 'encrypted')
+  if (!enc || enc[1] !== ALGO || !enc[2]) return null
+  const plain = await decryptForRegion(regionKey, enc[2])
+  if (plain === null) return null
+
+  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const base = {
+    eventId: target.id,
+    inner: target,
+    keyHex,
+    ref,
+    bagId: outer.id,
+    lookupId: tag(outer, 'd') ?? '',
+    author: outer.pubkey,
+    at: { x, y, z },
+    plane,
+    height: heightHint(outer),
+    createdAt: target.created_at,
+  }
+  if (target.kind === OBJECT_KIND) {
+    let raw: unknown
+    try { raw = JSON.parse(plain) } catch { return null }
+    const shard = fromPayload(raw, target.id)
+    if (!shard) return null
+    return { ...base, type: 'shard', shard }
+  }
+  if (target.kind === MESSAGE_KIND) {
+    if (!plain) return null
+    return { ...base, type: 'message', text: plain.slice(0, MAX_MESSAGE_LENGTH) }
+  }
+  return null
 }
 
 /**
@@ -256,6 +385,24 @@ export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Prom
   if (outer.kind !== CHAT_BAG_KIND) return []
   const inners = await bagInners(outer, regionKey)
   return inners.filter((e) => e.kind === CHAT_KIND && typeof e.content === 'string' && e.content.length > 0)
+}
+
+/**
+ * Every entry currently in one of your own envelopes, for rewriting it: the
+ * inline items that verify and were signed by the bag's author, and every
+ * well-formed reference, carried forward as it is. A rewrite that kept only
+ * events would silently drop what was hidden by reference.
+ */
+export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Promise<BagEntry[]> {
+  const ct = ciphertextOf(outer)
+  if (!ct) return []
+  const json = await decryptForRegion(regionKey, ct)
+  if (!json) return []
+  try {
+    const arr = JSON.parse(json)
+    if (!Array.isArray(arr)) return []
+    return arr.filter((e): e is BagEntry => isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && (e as NostrEvent).pubkey === outer.pubkey && verifyEvent(e as NostrEvent)))
+  } catch { return [] }
 }
 
 /** The signed inner events currently in an envelope's bag (unverified passthrough). */

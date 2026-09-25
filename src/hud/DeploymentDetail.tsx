@@ -17,6 +17,7 @@ import { messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
+import { itemTargetOf } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
 import { PublishSwitch } from './PublishSwitch'
@@ -68,7 +69,7 @@ export function DeploymentDetail(): JSX.Element | null {
       {isMessage && <div className="detail__message">“{dep.text}”</div>}
 
       <div className="detail__grid">
-        <Field label="kind" value={isMessage ? 'message (kind 1)' : 'shard (kind 3330)'} />
+        <Field label="kind" value={isMessage ? 'message (kind 1)' : dep.ref ? 'shard (kind 33331, by reference)' : 'shard (kind 3330)'} />
         <Field label="event" value={shortHex(dep.eventId, 10, 8)} full={dep.eventId} />
         <Field label="lookup" value={shortHex(dep.lookupId, 10, 8)} full={dep.lookupId} />
         <Field label="coord" value={`${shortHex(dep.at.x, 6, 4)} / ${shortHex(dep.at.y, 6, 4)} / ${shortHex(dep.at.z, 6, 4)}`} full={`${dep.at.x}\n${dep.at.y}\n${dep.at.z}`} />
@@ -103,7 +104,7 @@ export function DeploymentDetail(): JSX.Element | null {
         </p>
       )}
 
-      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, at: positionOf(dep), height: dep.height }} />
+      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
 
       <button className="detail__delete" onClick={() => setConfirm(true)}>DELETE FROM CYBERSPACE</button>
 

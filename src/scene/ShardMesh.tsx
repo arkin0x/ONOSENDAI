@@ -88,6 +88,22 @@ interface Props {
 const STATIC = [0, 0.9, 1] as const
 
 /**
+ * The shard's own face index for a ray's hit on either side of a face, or
+ * null for a hit on anything else. Both face meshes carry `faceOf`, the map
+ * from a drawn triangle to its face: the bench leaves out faces buried in a
+ * join, so the triangle's index is not the face's. A face must answer a tap
+ * from behind as well as from in front; each mesh is hit only on the
+ * triangles that face the ray, so the outsides alone let a tap pass through
+ * a face seen from behind to the next front beyond it (arkinox's Disco
+ * Floor, 2026-09-25).
+ */
+export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; faceIndex?: number | null }): number | null {
+  const map = i.object.userData.faceOf
+  const k = i.faceIndex
+  return map && k != null && map[k] !== undefined ? map[k] : null
+}
+
+/**
  * Colour written opaque, alpha written as 0: the tag. (Blending needs the
  * material transparent, which the face already is for its opacity.)
  */
@@ -244,18 +260,20 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
 
   if (shard.vertices.length === 0) return null
   const opacity = ghost ? 0.45 : 1
+  // The nearest hit is on whichever side faces the tap; it answers and stops it there.
+  const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
   return (
     <group scale={scale}>
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
-          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const k = e.faceIndex; if (k != null && drawn[k] !== undefined) onFaceClick(e, drawn[k]) } } : {})}>
+          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
               : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
           {lit && inside && (
-            <mesh geometry={inside} frustumCulled={false}>
+            <mesh geometry={inside} frustumCulled={false} {...pick}>
               {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside. */}
               <meshLambertMaterial vertexColors flatShading color="#6a6a6a" side={FrontSide} transparent opacity={opacity} />
             </mesh>

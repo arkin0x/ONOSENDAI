@@ -24,7 +24,7 @@ import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
 import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
-import { ShardMesh } from '../scene/ShardMesh'
+import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
 
 /** A press that travels further than this is an orbit, not a tap. */
@@ -265,10 +265,11 @@ function Handles(): JSX.Element | null {
       // the tap was on a face beside the corner. If a face is under the tap and
       // the ray passes farther from the corner than its drawn dot, the face wins.
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
-      const face = e.intersections.find((i) => i.object.name === 'shard-faces')
+      // Either side of a face, the nearer first (ShardMesh faceOfHit).
+      const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
       // The dot's drawn radius in world units: its pixels times the group's own scale.
       const drawn = DOT_ON_R * (e.object.parent?.scale.x ?? 1)
-      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face.faceIndex); return }
+      if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
       w.pickForFace(first)
     }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.

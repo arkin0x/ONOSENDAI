@@ -142,3 +142,27 @@ describe('comments on an item hidden by reference', () => {
     expect(parent).toEqual({ id: 'y', kind: 3330, pubkey: 'a'.repeat(64), address: undefined })
   })
 })
+
+describe('comments on an addressable item survive its edits', () => {
+  it('a comment on an older version stays under the item after the object is edited', async () => {
+    const { commentTemplate, itemParent, threadComments, itemTargetOf } = await import('./comments')
+    const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
+    const author = 'a'.repeat(64)
+    const objectAuthor = 'b'.repeat(64)
+    const address = `33331:${objectAuthor}:placement`
+    const base = { author, lookupId: 'c'.repeat(64), type: 'shard' as const, at: { x: 1n, y: 2n, z: 3n }, height: 4, target: itemTargetOf({ kind: 33331, pubkey: objectAuthor }, ['a', address, '', 'e'.repeat(64)]) }
+    const v1 = { ...base, itemId: '1'.repeat(64) }
+    const v2 = { ...base, itemId: '2'.repeat(64) }
+    const onV1 = finalizeEvent({ ...commentTemplate(v1, itemParent(v1), 'ct', 10), content: 'on v1' }, generateSecretKey())
+    expect(threadComments([onV1], v2).map((c) => c.id)).toEqual([onV1.id])
+  })
+  it('an inline item, with no address, still threads by id only', async () => {
+    const { commentTemplate, itemParent, threadComments } = await import('./comments')
+    const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
+    const subject = { author: 'a'.repeat(64), lookupId: 'c'.repeat(64), itemId: '1'.repeat(64), type: 'shard' as const, at: { x: 1n, y: 2n, z: 3n }, height: 4 }
+    const other = { ...subject, itemId: '9'.repeat(64) }
+    const c = finalizeEvent({ ...commentTemplate(subject, itemParent(subject), 'ct', 10), content: 'hi' }, generateSecretKey())
+    expect(threadComments([c], subject)).toHaveLength(1)
+    expect(threadComments([c], other)).toHaveLength(0)
+  })
+})

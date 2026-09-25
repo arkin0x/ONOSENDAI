@@ -105,9 +105,21 @@ body {
 }
 /* The build version at the foot of the menu, with room around it so it
    reads as a signature and not as one more panel. */
+/* The license line sits directly above the build and takes the gap above it. */
+.hud__license {
+  flex: 0 0 auto;
+  padding: 36px 0 0;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+.hud__license a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.hud__license a:hover { color: var(--fg); }
+
 .hud__version {
   flex: 0 0 auto;
-  padding: 36px 0 44px;
+  padding: 8px 0 44px;
   text-align: center;
   font-size: 9px;
   letter-spacing: 0.12em;

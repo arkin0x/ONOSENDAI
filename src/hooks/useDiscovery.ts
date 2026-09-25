@@ -144,8 +144,8 @@ export function useDiscovery(): void {
         })))
       }
       if (id === reqId.current) {
-        const known = useShards.getState().discovered
-        const fresh = found.filter((h) => !known[h.eventId])
+        // Asked before addDiscovered, which records these as seen.
+        const fresh = useShards.getState().freshOf(found)
         useShards.getState().addDiscovered(found)
         useShards.getState().setScanning(false)
         // The ceremony: only for what this scan opened for the first time.

@@ -172,6 +172,12 @@ interface ShardsState {
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   addDiscovered: (items: Hidden[]) => void
+  /**
+   * The items among these that earn the reveal and the toast: never opened on
+   * this device before, not this identity's own, not deleted. The scan and a
+   * rescan both ask here, so "new" means one thing everywhere.
+   */
+  freshOf: (items: Hidden[]) => Hidden[]
   setScanning: (scanning: boolean) => void
   /**
    * Prove the round trip a stranger would make: derive the key from the
@@ -187,6 +193,33 @@ interface ShardsState {
 }
 
 const MINE_KEY = 'onosendai:deployments'
+/**
+ * Event ids this device has ever opened, newest last. `discovered` is memory
+ * only and starts empty on every load, so without this the first scan after a
+ * reload revealed everything it opened again, with the decode and the toast,
+ * as if it had never been found (arkinox, 2026-09-25). Ids only: the items
+ * themselves are refetched from the relay as they always were.
+ */
+const SEEN_KEY = 'onosendai:seen'
+/** Enough for years of finds; the oldest fall off past it. */
+const SEEN_MAX = 5000
+
+function loadSeen(): Set<string> {
+  try {
+    const list = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]')
+    return new Set(Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [])
+  } catch { return new Set() }
+}
+const seen = loadSeen()
+
+function remember(ids: string[]): void {
+  let added = false
+  for (const id of ids) if (!seen.has(id)) { seen.add(id); added = true }
+  if (!added) return
+  const list = [...seen].slice(-SEEN_MAX)
+  if (list.length < seen.size) { seen.clear(); for (const id of list) seen.add(id) }
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(list)) } catch { /* quota or private mode */ }
+}
 const DELETED_KEY = 'onosendai:deployments-deleted'
 /** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
 const DELETED_BAGS_KEY = 'onosendai:bags-deleted'
@@ -557,8 +590,7 @@ export const useShards = create<ShardsState>((set, get) => {
         for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex)))
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
-        const { discovered, deleted } = get()
-        const fresh = found.filter((h) => !discovered[h.eventId] && !deleted[h.eventId])
+        const fresh = get().freshOf(found)
         if (found.length > 0) get().addDiscovered(found)
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
         return found.length
@@ -643,7 +675,14 @@ export const useShards = create<ShardsState>((set, get) => {
       let changed = false
       for (const h of items) if (!discovered[h.eventId] && !deleted[h.eventId]) { discovered[h.eventId] = h; changed = true }
       if (changed) set({ discovered })
+      remember(items.map((h) => h.eventId))
       claimOwn(items)
+    },
+
+    freshOf: (items) => {
+      const { discovered, deleted, mine } = get()
+      const own = new Set(mine.map((d) => d.eventId))
+      return items.filter((h) => !discovered[h.eventId] && !deleted[h.eventId] && !own.has(h.eventId) && !seen.has(h.eventId))
     },
 
     setScanning: (scanning) => set({ scanning }),

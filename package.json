@@ -2,7 +2,7 @@
   "name": "onosendai-v2",
   "private": true,
   "version": "2.0.0-mvp.0",
-  "license": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+  "license": "CC-BY-SA-4.0",
   "repository": "https://github.com/arkin0x/ONOSENDAI.git",
   "author": "arkin0x <arkinox+onosendai@pm.me>",
   "type": "module",

@@ -308,3 +308,7 @@ npm test        # view geometry and coordinate maths
 
 The protocol maths itself is tested in `cyberspace-cli-js` against golden
 vectors shared with the Python implementation.
+
+## License
+
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The full legal code is in `LICENSE`.

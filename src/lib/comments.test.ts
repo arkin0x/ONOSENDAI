@@ -117,3 +117,28 @@ describe('NIP-22 comment on a hidden item, sealed per FF-1', () => {
     expect(countComments(thread)).toBe(4)
   })
 })
+
+describe('comments on an item hidden by reference', () => {
+  it('answer the referenced object by kind, author and address', async () => {
+    const { commentTemplate, itemParent, itemTargetOf } = await import('./comments')
+    const author = 'a'.repeat(64)
+    const objectAuthor = 'b'.repeat(64)
+    const address = `33331:${objectAuthor}:placement`
+    const subject = {
+      author, lookupId: 'c'.repeat(64), itemId: 'd'.repeat(64), type: 'shard' as const,
+      target: itemTargetOf({ kind: 33331, pubkey: objectAuthor }, ['a', address, '', 'e'.repeat(64)]),
+      at: { x: 1n, y: 2n, z: 3n }, height: 4,
+    }
+    const parent = itemParent(subject)
+    expect(parent).toEqual({ id: 'd'.repeat(64), kind: 33331, pubkey: objectAuthor, address })
+    const t = commentTemplate(subject, parent, 'ct', 1)
+    expect(t.tags).toContainEqual(['a', address, ''])
+    expect(t.tags).toContainEqual(['k', '33331'])
+    expect(t.tags).toContainEqual(['A', `33330:${author}:${'c'.repeat(64)}`])
+  })
+  it('an inline item keeps the old parent: kind 3330 by the bag author, no a tag', async () => {
+    const { itemParent } = await import('./comments')
+    const parent = itemParent({ author: 'a'.repeat(64), lookupId: 'x', itemId: 'y', type: 'shard', at: { x: 1n, y: 2n, z: 3n }, height: 4 })
+    expect(parent).toEqual({ id: 'y', kind: 3330, pubkey: 'a'.repeat(64), address: undefined })
+  })
+})

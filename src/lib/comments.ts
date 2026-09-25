@@ -46,6 +46,12 @@ export interface CommentSubject {
   /** The inner item's event id. */
   itemId: string
   type: HiddenType
+  /**
+   * The item's own event, when it is not simply an inline item by the bag's
+   * author: a shard hidden by reference is a kind 33331 object, perhaps by
+   * another author, with an address of its own (spec §7.6).
+   */
+  target?: ItemTarget
   /** Where the bag is hidden and the height it is encrypted to: what the region key derives from. */
   at: Position
   height: number
@@ -56,6 +62,21 @@ export interface CommentParent {
   id: string
   kind: number
   pubkey: string
+  /** The parent's address, when it is addressable: NIP-22 then names it by `a` as well as `e`. */
+  address?: string
+}
+
+/** The kind, author and address of the event a comment's item is, when the bag's author and inline kind do not say it. */
+export interface ItemTarget {
+  kind: number
+  pubkey: string
+  address?: string
+}
+
+/** The target of an item hidden by reference: its referenced event, addressed when the reference is an `a` tag. */
+export function itemTargetOf(inner: { kind: number; pubkey: string } | undefined, ref: string[] | undefined): ItemTarget | undefined {
+  if (!inner || !ref) return undefined
+  return { kind: inner.kind, pubkey: inner.pubkey, address: ref[0] === 'a' ? ref[1] : undefined }
 }
 
 export interface Comment {
@@ -80,7 +101,8 @@ export function itemKind(type: HiddenType): number {
 
 /** The item as a parent: a top-level comment answers the item. */
 export function itemParent(subject: CommentSubject): CommentParent {
-  return { id: subject.itemId, kind: itemKind(subject.type), pubkey: subject.author }
+  const t = subject.target
+  return { id: subject.itemId, kind: t?.kind ?? itemKind(subject.type), pubkey: t?.pubkey ?? subject.author, address: t?.address }
 }
 
 /** A comment as a parent: a reply answers the comment. */
@@ -104,6 +126,7 @@ export function commentTemplate(subject: Pick<CommentSubject, 'author' | 'lookup
       ['K', String(HIDDEN_KIND)],
       ['P', subject.author],
       ['e', parent.id, '', parent.pubkey],
+      ...(parent.address ? [['a', parent.address, '']] : []),
       ['k', String(parent.kind)],
       ['p', parent.pubkey],
       [...CLIENT_TAG],

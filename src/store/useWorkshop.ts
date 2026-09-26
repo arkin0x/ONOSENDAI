@@ -951,7 +951,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),
 
-    clearShard: () => { edit((s) => ({ ...s, vertices: [], faces: [] })); set({ selection: [], selectedFace: null, facePick: [] }) },
+    // Everything drawn goes, placements included (their refs with them); undo brings it back.
+    clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], selectedFace: null, facePick: [] }) },
 
     undo: () => {
       const { past, shards, currentId } = get()

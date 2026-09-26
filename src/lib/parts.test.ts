@@ -56,6 +56,32 @@ describe('an object of parts alone', () => {
     expect(shardRefusal(s)).toBeNull()
   })
 
+  it('deploys: the store seals it into a bag with its placements intact', async () => {
+    const { useShards } = await import('../store/useShards')
+    const { useCyberspace } = await import('../store/useCyberspace')
+    useCyberspace.setState({ live: false })
+    useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
+    const id = useWorkshop.getState().importText(COLUMN_WALL)!
+    useShards.getState().startDeployShard(id)
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployError).toBeNull()
+    expect(useShards.getState().deployStatus).toBe('done')
+    const mine = useShards.getState().mine
+    expect(mine).toHaveLength(1)
+    const payload = JSON.parse(mine[0].inner.content)
+    expect(payload.parts).toHaveLength(4)
+    expect(payload.refs[0][1]).toMatch(/^33331:e8ed3798/)
+  })
+
+  it('CLEAR takes the placements too, and undo brings them back', () => {
+    const id = useWorkshop.getState().importText(COLUMN_WALL)!
+    useWorkshop.getState().select(id)
+    useWorkshop.getState().clearShard()
+    expect(useWorkshop.getState().current()!.parts).toBeUndefined()
+    useWorkshop.getState().undo()
+    expect(useWorkshop.getState().current()!.parts).toHaveLength(4)
+  })
+
   it('resolves to four columns when the reference answers, and four placeholders when it does not', async () => {
     const m = fromPayload(JSON.parse(COLUMN_WALL), 'wall')!
     const ref = m.refs![0] as Ref

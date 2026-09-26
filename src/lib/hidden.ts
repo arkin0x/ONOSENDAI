@@ -192,7 +192,7 @@ export interface Hidden {
  * which this catches if it ever does.
  */
 export function shardRefusal(shard: ShardModel): string | null {
-  if (shard.vertices.length === 0) return 'This shard has no vertices.'
+  if (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0) return 'This shard has no vertices and places nothing.'
   if (!fromPayload(toPayload(shard), shard.id)) return 'The format refuses this shard as it is, so nobody could open it. Check it in the workshop.'
   return null
 }

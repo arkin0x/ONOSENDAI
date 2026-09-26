@@ -450,7 +450,7 @@ export function Workshop(): JSX.Element | null {
    * navigator.clipboard with no guard and throw.
    */
   const copyShard = (s: ShardModel, ok: string): void => {
-    if (s.vertices.length === 0) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
+    if (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
     const clip = navigator.clipboard
     if (!clip) { say('The clipboard is not available here.'); return }
     void clip.writeText(JSON.stringify(toPayload(s))).then(
@@ -630,11 +630,12 @@ export function Workshop(): JSX.Element | null {
                 <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}>COPY</button>
               </li>
             )}
-            {shards.map((s) => (
+            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26). */}
+            {[...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).map((s) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
                   <span className="workshop__pick-name">{s.name}</span>
-                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f · {s.mode}</span>
+                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>
                 <button className="workshop__mini" title="Duplicate" onClick={() => w().duplicate(s.id)}>⧉</button>
                 <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copy(s.id)}>COPY</button>

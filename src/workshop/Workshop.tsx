@@ -121,7 +121,9 @@ function Toast(): JSX.Element | null {
  * right now), the corners CONNECT and DELETE, the hub counts the points and
  * clears them.
  */
-function ControlsPad({ points }: { points: number }): JSX.Element {
+function ControlsPad({ points, objects = 0 }: { points: number; objects?: number }): JSX.Element {
+  // Points and placed objects move, turn, cut and copy together.
+  const held = points + objects
   const axes = useBenchView((s) => s.axes)
   const bind = useRepeatable()
   const w = useWorkshop.getState
@@ -137,7 +139,7 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
   ]
   return (
     <div className="benchpad" role="group" aria-label="Move the selected points">
-      {points > 0 && (<>
+      {held > 0 && (<>
       {arrows.map((a) => (
         <button key={a.cell} className={`touchpad__key touchpad__key--${a.cell}`} title={`${a.name} (${a.key}): ${sub(a.name)}`} aria-label={`Move ${a.name}, ${sub(a.name)}`} {...bind(move(a.name))}>
           {a.glyph}
@@ -152,8 +154,8 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
         <Trash2 size={14} strokeWidth={2.25} aria-hidden />
         <span className="touchpad__sub">DELETE</span>
       </button>
-      <button className="touchpad__hub" title="Clear the selection (Esc)" aria-label={`${points} points selected. Tap to clear.`} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); w().selectVertex(null) }}>
-        {points} {points === 1 ? 'PT' : 'PTS'}
+      <button className="touchpad__hub" title="Clear the selection (Esc)" aria-label={`${points} points and ${objects} objects selected. Tap to clear.`} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); w().selectVertex(null) }}>
+        {points > 0 && `${points} ${points === 1 ? 'PT' : 'PTS'}`}{points > 0 && objects > 0 && ' · '}{objects > 0 && `${objects} OBJ`}
       </button>
     </>)}
 
@@ -171,13 +173,14 @@ function ControlsPad({ points }: { points: number }): JSX.Element {
  * it came from, or on the plane you are working on. CLEAR lets the held
  * points go, and PASTE with them.
  */
-function ClipRow({ points }: { points: number }): JSX.Element | null {
+function ClipRow({ points, objects = 0 }: { points: number; objects?: number }): JSX.Element | null {
+  const inHand = points + objects
   const w = useWorkshop.getState
   const clip = useWorkshop((s) => s.clip)
   const [asking, setAsking] = useState(false)
   useEffect(() => { if (clip === null) setAsking(false) }, [clip])
-  if (points === 0 && clip === null) return null
-  const held = clip ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : ''
+  if (inHand === 0 && clip === null) return null
+  const held = clip ? [clip.points.length ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : '', clip.parts.length ? `${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ') : ''
   return (
     <div className="benchclip" role="group" aria-label="Clipboard">
       {points >= 3 && (
@@ -186,7 +189,7 @@ function ClipRow({ points }: { points: number }): JSX.Element | null {
           <span className="touchpad__sub">FILL</span>
         </button>
       )}
-      {points > 0 && (
+      {inHand > 0 && (
         <>
           <button className="touchpad__key" title="Cut the selected points, and their faces, to the clipboard" aria-label="Cut the selection" {...noCallout} onClick={() => w().cutSelection()}>
             <Scissors size={15} strokeWidth={2.25} aria-hidden />
@@ -328,6 +331,7 @@ export function Workshop(): JSX.Element | null {
   const shards = useWorkshop((s) => s.shards)
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
+  const partSel = useWorkshop((s) => s.partSel)
   const facePick = useWorkshop((s) => s.facePick)
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
@@ -729,8 +733,8 @@ export function Workshop(): JSX.Element | null {
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
         {tool === 'face' && <FaceRow face={selectedFace} picks={facePick.length} faces={shard?.faces.length ?? 0} />}
-        <ClipRow points={selectedPoints} />
-        {selection.length > 0 && (
+        <ClipRow points={selectedPoints} objects={partSel.length} />
+        {(selection.length > 0 || partSel.length > 0) && (
           <div className="benchturn" role="group" aria-label="Turn the selection">
             <button className="touchpad__key" title="A quarter turn left, in the working plane (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
               <RotateCcw size={18} strokeWidth={2.25} aria-hidden />
@@ -742,7 +746,7 @@ export function Workshop(): JSX.Element | null {
             </button>
           </div>
         )}
-        {selection.length > 0 && <ControlsPad points={selectedPoints} />}
+        {(selection.length > 0 || partSel.length > 0) && <ControlsPad points={selectedPoints} objects={partSel.length} />}
       {panel === 'tools' && (
         <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
           <div className="workshop__row" role="group" aria-label="Tool">

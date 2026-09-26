@@ -11,59 +11,21 @@
  */
 
 import { useState } from 'react'
-import { formatCellSize } from 'sno-core/scale'
-import { cashuLabel } from '../lib/cashu'
-import { cashuStateLabel, composeVerdict, SETTLE_MS, useCashu } from './useCashu'
+import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
-import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
+import { MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards, type MyDeployment } from '../store/useShards'
-import { PublishSwitch } from './PublishSwitch'
+import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { Explanation } from './Explanation'
+import { bagsOf, useStash } from './stash'
+import { BagRow } from './StashModals'
 
-function positionOf(d: MyDeployment): { x: bigint; y: bigint; z: bigint } {
-  return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
-}
-
-function depName(d: MyDeployment): string {
-  return d.type === 'message' ? messagePreview(d.text ?? '', 24) : d.shard?.name ?? 'shard'
-}
-
-/**
- * One hidden thing in the STASH. A message carrying a Cashu token shows the
- * coin instead of the pen, what it holds, and whether anyone has taken it:
- * the mint says which proofs are spent (useCashu), so REDEEMED means found.
- * The coin is decided by the token being there, not by its being readable:
- * one this client cannot decode still shows the mark, reads "cashu token",
- * and says UNREADABLE, the same rule the world and the loot list follow.
- */
-function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
-  const cashu = useCashu(d.type === 'message' ? d.text : null)
-  const coin = cashu.found
-  return (
-    <li className={`shards__row shards__row--deployed ${viewing ? 'is-viewing' : ''}`}>
-      <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
-        <span className="avatars__who">
-          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{coin ? '₿' : d.type === 'message' ? '✎' : '◇'}</span>
-          {coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : depName(d)}
-        </span>
-        <span className="shards__meta">
-          {d.height === 0 ? 'exact gibson' : formatCellSize(d.height)} · {d.published ? 'LIVE' : 'LOCAL'}{d.plane === 1 ? ' · ideaspace' : ''}
-          {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
-        </span>
-      </button>
-      {/* Where this one thing is, and the way to send it without taking the
-          whole chain live with it. */}
-      {!d.published && <PublishSwitch lookupId={d.lookupId} published={false} />}
-      <span className="shards__goto-hint" aria-hidden="true">▸</span>
-    </li>
-  )
-}
+/** How many bags the panel shows before VIEW ALL. */
+const RECENT_BAGS = 3
 
 export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
-  const inspecting = useShards((s) => s.inspecting)
   const scanning = useShards((s) => s.scanning)
   const [composing, setComposing] = useState(false)
   const [message, setMessage] = useState('')
@@ -78,12 +40,7 @@ export function ShardsPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const broadcastError = useShards((s) => s.broadcastError)
   const localCount = mine.filter((d) => !d.published).length
-
-  const goTo = (d: MyDeployment): void => {
-    useShards.getState().inspect(d.eventId)
-    const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
-    useCyberspace.getState().focusOn(positionOf(d), d.plane, depName(d), unit)
-  }
+  const bags = bagsOf(mine)
 
   const placeMessage = (): void => {
     const t = message.trim()
@@ -105,14 +62,20 @@ export function ShardsPanel(): JSX.Element {
           box inside a scrolling panel, and the panel could not be scrolled
           past it. What the stash is for is what is hidden. */}
       <div className="shards__section">
-        <div className="shards__actions">
-          <button className="avatars__go" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
-          <button className="avatars__go" onClick={() => { useWorkshop.getState().create(); useWorkshop.getState().openWorkshop() }}>NEW MODEL</button>
+        <div>
+          <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
         </div>
       </div>
 
       <div className="shards__section">
-        <span className="legend__label">Leave a hidden message</span>
+        <span className="legend__label">Place a hidden object</span>
+        <div>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}>◇ DEPLOY AN OBJECT</button>
+        </div>
+      </div>
+
+      <div className="shards__section">
+        <span className="legend__label">Place a hidden message</span>
         {composing ? (
           <div className="shards__compose">
             <textarea
@@ -147,16 +110,18 @@ export function ShardsPanel(): JSX.Element {
           )}
           {broadcastError && <span className="shards__note shards__note--warn">{broadcastError}</span>}
           <ul className="avatars__list">
-            {mine.map((d) => (
-              <DeployedRow key={d.eventId} d={d} viewing={inspecting === d.eventId} onGo={() => goTo(d)} />
+            {bags.slice(0, RECENT_BAGS).map((b) => (
+              <BagRow key={b.lookupId} bag={b} onOpen={() => useStash.getState().openBag(b.lookupId)} />
             ))}
           </ul>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openBags()}>VIEW ALL STASHED BAGS ({bags.length})</button>
         </div>
       )}
 
       <Explanation>
-        Build 3D objects (shards), messages, and encrypt them at a location in
-        cyberspace for others to find.
+        Build 3D objects and messages, and encrypt them at a location in
+        cyberspace for others to find. Everything you hide at one place travels
+        together as one bag.
       </Explanation>
     </section>
   )

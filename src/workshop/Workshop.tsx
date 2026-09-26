@@ -68,7 +68,7 @@ function Intro(): JSX.Element | null {
   if (!show) return null
   const done = (): void => { try { localStorage.setItem(INTRO_KEY, '1') } catch { /* private mode */ } setShow(false) }
   return (
-    <div className="workshop__intro" role="note" aria-label="How to make a shard">
+    <div className="workshop__intro" role="note" aria-label="How to make an object">
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
         <li><b>STAMP</b> a shape: pick one under TOOLS, tap the grid where the ghost shows.</li>
@@ -241,7 +241,7 @@ function FaceRow({ face, picks, faces }: { face: number | null; picks: number; f
   return (
     <div className="benchclip" role="group" aria-label="Faces">
       {faces > 0 && (
-        <button className="touchpad__key" title="Every face in the shard turned to look outward, by the bench's best guess" aria-label="Turn every face outward" {...noCallout} onClick={() => w().autoWind()}>
+        <button className="touchpad__key" title="Every face in the object turned to look outward, by the bench's best guess" aria-label="Turn every face outward" {...noCallout} onClick={() => w().autoWind()}>
           <WandSparkles size={15} strokeWidth={2.25} aria-hidden />
           <span className="touchpad__sub">AUTO</span>
         </button>
@@ -476,8 +476,8 @@ export function Workshop(): JSX.Element | null {
   }
   const importText = (text: string): void => {
     const id = w().importText(text)
-    if (id) { setPasteOpen(false); setPasteText(''); say('Pasted as a new shard.') }
-    else say('That is not a shard.')
+    if (id) { setPasteOpen(false); setPasteText(''); say('Pasted as a new object.') }
+    else say('That is not an object.')
   }
   const paste = async (): Promise<void> => {
     try {
@@ -490,7 +490,7 @@ export function Workshop(): JSX.Element | null {
   const ToolIcon = TOOL_ICON[tool]
 
   return (
-    <div className="workshop" role="dialog" aria-label="Shard workshop">
+    <div className="workshop" role="dialog" aria-label="Object workshop">
       <div className="workshop__bench">
         <Bench />
       </div>
@@ -524,7 +524,7 @@ export function Workshop(): JSX.Element | null {
       </div>
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
-          <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Shard name" spellCheck={false} />
+          <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Object name" spellCheck={false} />
           <div className="ws__stats">
             {shard.vertices.length} vertices · {shard.faces.length} faces · unit 2^{shard.unit} = {formatCellSize(shard.unit)}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
@@ -553,7 +553,7 @@ export function Workshop(): JSX.Element | null {
               <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
             </div>
             {/* The buttons take their own row and share it evenly, the way NEW
-                SHARD and PASTE do. On the name's line a long shard name pushed
+                OBJECT and PASTE do. On the name's line a long object name pushed
                 them off the edge (arkinox, 2026-09-15). */}
             <div className="workshop__list-row">
             {/* Adopted while LOCAL: signed and kept and drawn for you, but no relay has it. */}
@@ -581,7 +581,7 @@ export function Workshop(): JSX.Element | null {
                       : `"${shard.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
                   })
                 }}
-                title="Publish this shard as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
+                title="Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
               >USE THIS SHARD</button>
             )}
             {myAvatar && !phase && (
@@ -606,11 +606,11 @@ export function Workshop(): JSX.Element | null {
           <div className="ws__panel-title">SHARDS ({shards.length})</div>
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
-            <button className="workshop__btn" onClick={() => void paste()} title="A shard copied from here or anywhere">PASTE</button>
+            <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
           </div>
           {pasteOpen && (
             <div className="workshop__paste">
-              <textarea className="workshop__paste-box" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder='Paste a shard here: {"v":1,"type":"shard",...}' aria-label="Shard to import" spellCheck={false} />
+              <textarea className="workshop__paste-box" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder='Paste an object here: {"v":2,"name":"…","vertices":[…],…}' aria-label="Object to import" spellCheck={false} />
               <div className="workshop__list-row">
                 <button className="workshop__btn" disabled={!pasteText.trim()} onClick={() => importText(pasteText)}>IMPORT</button>
                 <button className="workshop__btn" onClick={() => { setPasteOpen(false); setPasteText('') }}>CANCEL</button>
@@ -620,7 +620,7 @@ export function Workshop(): JSX.Element | null {
           <ul className="workshop__list">
             {/* The avatar is not one of these shards. It lives in its own store,
                 read back from the kind 11333 event you published, which is why
-                deleting the shard it was built from leaves the avatar standing
+                deleting the object it was built from leaves the avatar standing
                 (arkinox found this by doing it). It gets a row anyway so the
                 shape you are wearing is visible and can be copied back into the
                 workshop, and no row that would change it: the way to change an
@@ -634,8 +634,8 @@ export function Workshop(): JSX.Element | null {
                 <span className="workshop__tag" title="The shape others see for you. Change it with USE THIS SHARD above.">AVATAR</span>
                 <button
                   className="workshop__mini"
-                  title="Copy it into your shards, where you can edit it"
-                  onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your shards.`) }}
+                  title="Copy it into your objects, where you can edit it"
+                  onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your objects.`) }}
                 >⧉</button>
                 <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}>COPY</button>
               </li>
@@ -657,7 +657,7 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />
             <Explanation>
-              A shard is colored points on a grid of whole units, drawn SOLID (faces, colors blending
+              An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
               across them), POINTS (every point a light) or LINES (one line through the points in the
               order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
               or by dragging a box, to move, color or delete them together, and CONNECT takes everything
@@ -667,7 +667,7 @@ export function Workshop(): JSX.Element | null {
               blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
               DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
               the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
-              the shard at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
+              the object at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc clears then closes.
             </Explanation>
@@ -690,7 +690,7 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) - 1))} disabled={shard.unit <= 0} aria-label="Smaller unit">−</button>
             <span className="workshop__value">{shard.unit}</span>
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= MAX_UNIT} aria-label="Larger unit">+</button>
-            <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the shard at this size.">one unit = {formatCellSize(shard.unit)}</span>
+            <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the object at this size.">one unit = {formatCellSize(shard.unit)}</span>
           </div>
           <div className="workshop__row" role="group" aria-label="Grid division">
             <span className="workshop__label">DIVISION</span>
@@ -719,7 +719,7 @@ export function Workshop(): JSX.Element | null {
           className="workshop__deploy"
           disabled={!hasContent}
           onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id); w().closeWorkshop() } }}
-          title="Place this shard in the world"
+          title="Place this object in the world"
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>

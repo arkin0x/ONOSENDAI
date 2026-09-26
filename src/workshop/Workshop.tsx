@@ -354,6 +354,8 @@ export function Workshop(): JSX.Element | null {
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
   // The avatar's price (spec 8.10), memoised on the geometry; a hook, so it sits with the others.
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
+  // Something to deploy or clear: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
+  const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
   const work = useMemo(() => {
     if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
     const payload = toPayload(shard)
@@ -644,7 +646,7 @@ export function Workshop(): JSX.Element | null {
             ))}
           </ul>
           <div className="workshop__row">
-            <button className="workshop__btn workshop__btn--danger" disabled={shard.vertices.length === 0} onClick={() => { if (window.confirm('Delete all vertices and faces in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
+            <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />
             <Explanation>
               A shard is colored points on a grid of whole units, drawn SOLID (faces, colors blending
@@ -707,7 +709,7 @@ export function Workshop(): JSX.Element | null {
       <div className="ws__exit">
         <button
           className="workshop__deploy"
-          disabled={!shard || shard.vertices.length === 0}
+          disabled={!hasContent}
           onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id); w().closeWorkshop() } }}
           title="Place this shard in the world"
         >DEPLOY ▸</button>

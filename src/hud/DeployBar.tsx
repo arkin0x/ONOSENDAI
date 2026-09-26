@@ -73,7 +73,7 @@ export function DeployBar(): JSX.Element | null {
 
   const isMessage = pending.type === 'message'
   const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
-  const empty = isMessage ? pending.text.trim().length === 0 : !shard || shard.vertices.length === 0
+  const empty = isMessage ? pending.text.trim().length === 0 : !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   const working = status === 'working'
 
   return (

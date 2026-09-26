@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AddEquation,
@@ -25,11 +25,17 @@ import {
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
+  BoxGeometry,
+  EdgesGeometry,
   Line,
   LineBasicMaterial,
+  Matrix4,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { expandFaceColors, flatten, posed, ticksOf, toRender, type ShardModel } from 'sno-core/shards'
+import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
+import { partMatrix, refKey, type Placed } from 'sno-core/parts'
+import { useResolved, type Resolved } from '../lib/parts'
+import { ACCENT } from '../lib/palette'
 import type { Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from 'sno-core/orient'
@@ -83,6 +89,13 @@ interface Props {
    * every shard hidden before the pose existed and every one in cyberspace.
    */
   pose?: Pose
+  /**
+   * A placed object's own placements, already resolved by the parent's draw
+   * (DECK-0003 §1.10). Given, this mesh is a part: it fetches nothing itself
+   * and follows the chain the parent resolved, which is what bounds the depth
+   * at four and makes a loop a placeholder.
+   */
+  nested?: Placed[]
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -109,7 +122,10 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested }: Props): JSX.Element | null {
+  // The objects this one places, fetched once for the whole app; a part's own
+  // parts come resolved from its parent instead.
+  const resolved = useResolved(nested ? null : given)
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
   // else, so the winding pass, the clipper and the face picker below never
@@ -258,13 +274,18 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
     if (t >= 1) done.current = true
   })
 
-  if (shard.vertices.length === 0) return null
+  const placements = (given.parts?.length ?? 0) > 0
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} />
+    : null
+  // An object may be nothing but the arrangement of others (§1.9 rule 13).
+  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
   const opacity = ghost ? 0.45 : 1
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
   const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
   return (
     <group scale={scale}>
+      {placements}
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
@@ -293,4 +314,53 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
       )}
     </group>
   )
+}
+
+/** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
+const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
+
+/**
+ * A pose, which turns ticks before the render mapping, as the same turn in
+ * render space: the flip on Z, the turn, the flip back. Placements are placed
+ * in render space, and a part stands on the Earth with its parent (§1.10: it
+ * loses its own `up` and `spin` to the parent's placement).
+ */
+function poseMatrix(pose: Pose): Matrix4 {
+  const f = [1, 1, -1]
+  // applyPose: out[j] = sum_i v[i] * pose[i * 3 + j], so the column-vector matrix is M[j][i] = pose[i * 3 + j].
+  const m = (j: number, i: number): number => f[j] * pose[i * 3 + j] * f[i]
+  return new Matrix4().set(m(0, 0), m(0, 1), m(0, 2), 0, m(1, 0), m(1, 1), m(1, 2), 0, m(2, 0), m(2, 1), m(2, 2), 0, 0, 0, 0, 1)
+}
+
+/**
+ * Each placed object where its placement stands, or a placeholder there: a
+ * wireframe cube one unit on a side in the accent, for anything not fetched,
+ * not valid, too deep, a loop, or scaled out of range (§1.10). Nothing is
+ * drawn for a reference still being fetched, so opening an object does not
+ * flash cubes before its parts arrive. Parts are not clipped to the region:
+ * a hidden object's parts are its author's to place.
+ */
+function Placements({ shard, byRef, nested, lit, ghost, world, pose }: {
+  shard: ShardModel
+  byRef: Map<string, Resolved>
+  nested?: Placed[]
+  lit: boolean
+  ghost: boolean
+  world: boolean
+  pose?: Pose
+}): JSX.Element | null {
+  const list: Array<{ part: Part; r: Resolved | undefined }> = nested
+    ? nested.map((p) => ({ part: p.part, r: p }))
+    : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
+  const turn = useMemo(() => (pose ? poseMatrix(pose) : null), [pose])
+  if (list.length === 0) return null
+  const drawn = list.map(({ part, r }, i) => {
+    if (!r) return null
+    const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
+    const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
+    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} />
+    return <group key={i} matrix={matrix} matrixAutoUpdate={false}>{body}</group>
+  })
+  return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}</group> : <>{drawn}</>
 }

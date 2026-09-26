@@ -117,7 +117,7 @@ describe('shardRefusal: why no reader could open a shard', () => {
   })
   it('is silent for a shard every reader accepts, and plain about an empty one', () => {
     expect(shardRefusal(withCounts(3, 1))).toBeNull()
-    expect(shardRefusal(withCounts(0, 0))).toBe('This shard has no vertices.')
+    expect(shardRefusal(withCounts(0, 0))).toBe('This shard has no vertices and places nothing.')
   })
   it('catches what the reader would refuse for any other reason', () => {
     const broken: ShardModel = { ...withCounts(3, 1), faces: [[0, 1, 7]] }

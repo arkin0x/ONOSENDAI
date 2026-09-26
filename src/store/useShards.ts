@@ -499,7 +499,8 @@ export const useShards = create<ShardsState>((set, get) => {
       let innerTemplate
       if (pending.type === 'shard') {
         const model = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
-        if (!model || model.vertices.length === 0) return
+        // An object of parts alone is an object (DECK-0003 §1.9 rule 13).
+        if (!model || (model.vertices.length === 0 && (model.parts?.length ?? 0) === 0)) return
         // The deploy carries its own size. A unit the deploy bar changed makes
         // a copy rather than writing back to the bench, so the same shard can
         // be placed twice at two sizes and the workshop's model is untouched

@@ -6375,3 +6375,9 @@ kbd {
 .ws__slot.is-full { border-style: solid; }
 .ws__slot-name { font-size: 11px; }
 .ws__slot-meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
+
+/* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
+.modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.stash-modal .avatars__list { max-height: 55vh; overflow-y: auto; }
+.shards__type--bag { letter-spacing: 0.1em; min-width: 0; }
+.objpick__row:disabled { opacity: 0.45; cursor: default; }

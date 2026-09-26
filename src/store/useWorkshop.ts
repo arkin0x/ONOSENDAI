@@ -515,7 +515,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFace: null, facePick: [], aim: null }),
 
     create: (name) => {
-      const s = newShard(name ?? `Shard ${get().shards.length + 1}`)
+      const s = newShard(name ?? `Object ${get().shards.length + 1}`)
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)

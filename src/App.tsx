@@ -7,6 +7,7 @@ import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { DeploymentDetail } from './hud/DeploymentDetail'
+import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
@@ -220,6 +221,7 @@ export default function App(): JSX.Element {
       <Workshop />
       <DeployBar />
       <DeploymentDetail />
+      <StashModals />
       <SecretModal />
       <LootDetail />
       <NearbyLootModal />

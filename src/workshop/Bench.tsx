@@ -18,7 +18,7 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3 } from 'three'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
@@ -26,6 +26,8 @@ import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, typ
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { partMatrix } from 'sno-core/parts'
+import { useCyberspace } from '../store/useCyberspace'
 
 /** A press that travels further than this is an orbit, not a tap. */
 const TAP_SLOP = 8
@@ -115,7 +117,10 @@ function Grid(): JSX.Element {
     // re-rendered yet.
     const w = useWorkshop.getState()
     const at = snap(e.point, w.level, w.step(), w.plane)
-    if (w.tool === 'stamp') w.placeStamp(at)
+    if (w.tool === 'stamp' && w.stampMode === 'object') {
+      const me = useCyberspace.getState().identity.pubkey
+      w.placeObject(at, w.currentId ? `33331:${me}:${w.currentId}` : undefined)
+    } else if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
@@ -166,11 +171,25 @@ function Ghost(): JSX.Element | null {
   const facing = useWorkshop((s) => s.stampFacing)
   const color = useWorkshop((s) => s.color)
   const plane = useWorkshop((s) => s.plane)
+  const mode = useWorkshop((s) => s.stampMode)
+  const object = useWorkshop((s) => s.stampObject)
+  const unit = useWorkshop((s) => s.current()?.unit ?? 0)
   // Built once per shape, color and plane; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
-  const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color, plane) : null), [tool, kind, size, facing, color, plane])
+  const model = useMemo(() => (tool === 'stamp' && mode === 'shape' ? preview(kind, size, facing, color, plane) : null), [tool, mode, kind, size, facing, color, plane])
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   if (!aim) return null
+  if (tool === 'stamp' && mode === 'object') {
+    if (!object) return null
+    // Through the same placement a tap makes (store placeObject), so the ghost
+    // stands exactly where and how the object will.
+    const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
+    return (
+      <group matrix={m} matrixAutoUpdate={false}>
+        <ShardMesh shard={object.shard} ghost />
+      </group>
+    )
+  }
   if (tool === 'add') {
     return (
       <mesh position={UP(aim)}>

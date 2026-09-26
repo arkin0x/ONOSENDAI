@@ -168,6 +168,16 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
   }
 }
 
+/**
+ * An object chosen to stamp with OBJECT: the reference each placement will
+ * name, and the object as it was when chosen, which is what the ghost draws.
+ */
+export interface StampObject {
+  ref: Ref
+  name: string
+  shard: ShardModel
+}
+
 /** "1 point" or "7 points", with its faces and placed objects when it has any. */
 function countLabel(clip: ClipPoints): string {
   const bits: string[] = []
@@ -236,6 +246,18 @@ export interface WorkshopState {
   togglePart: (index: number) => void
   /** Replace the placed-object selection, as the box does. */
   setPartSelection: (indices: number[]) => void
+  /** STAMP places a built-in shape, or a published object by reference (DECK-0003 §1.10). */
+  stampMode: 'shape' | 'object'
+  /** The object OBJECT stamps, chosen in the picker. */
+  stampObject: StampObject | null
+  setStampMode: (mode: 'shape' | 'object') => void
+  setStampObject: (object: StampObject | null) => void
+  /**
+   * Place the chosen object at `at`, turned by the stamp's facing. `self` is
+   * this object's own address if this key published it, so an object is never
+   * made to place itself (every reader would draw a loop placeholder).
+   */
+  placeObject: (at: P3, self?: string) => void
 
   openWorkshop: (id?: string) => void
   closeWorkshop: () => void
@@ -472,6 +494,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     plane: FLOOR,
     division: 1,
     turnPivot: null,
+    stampMode: 'shape',
+    stampObject: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
     stampKind: 'block',
@@ -543,7 +567,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setShowAvatar: (on) => { set({ showAvatar: on }); try { localStorage.setItem(AVATAR_KEY, on ? '1' : '0') } catch { /* private mode */ } },
     step: () => TICKS_PER_UNIT / get().division,
     setColor: (c) => set({ color: clampColor(c) }),
-    setStampKind: (stampKind) => set({ stampKind }),
+    setStampKind: (stampKind) => set({ stampKind, stampMode: 'shape' }),
     setStampSize: (size) => set({ stampSize: Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size))) }),
     turnStamp: () => set({ stampFacing: ((get().stampFacing + 1) % 4) as Facing }),
 
@@ -551,6 +575,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const a = get().aim
       if (a === p || (a && p && a[0] === p[0] && a[1] === p[1] && a[2] === p[2])) return
       set({ aim: p })
+    },
+
+    setStampMode: (stampMode) => set({ stampMode }),
+    setStampObject: (stampObject) => set({ stampObject, stampMode: 'object' }),
+
+    placeObject: (at, self) => {
+      const { stampObject, stampFacing } = get()
+      const s = get().current()
+      if (!s || !validPoint(at, s.extent)) return
+      if (!stampObject) { set({ notice: 'Choose an object to stamp first: tap the slot under OBJECT.' }); return }
+      if (self && stampObject.ref[1] === self) { set({ notice: 'An object cannot place itself.' }); return }
+      const { shard } = addPart(s, stampObject.ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
+      edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)
+      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
     },
 
     placeStamp: (at) => {

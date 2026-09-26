@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { ClipboardPaste, Copy, Eye, FlipVertical2, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Wrench, X } from 'lucide-react'
+import { Box, ClipboardPaste, Copy, Eye, FlipVertical2, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { PaletteModal } from './PaletteModal'
@@ -41,6 +41,7 @@ import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedCount } from '../lib/weld'
+import { ObjectPicker } from './ObjectPicker'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -332,6 +333,9 @@ export function Workshop(): JSX.Element | null {
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
+  const stampMode = useWorkshop((s) => s.stampMode)
+  const stampObject = useWorkshop((s) => s.stampObject)
+  const [picking, setPicking] = useState(false)
   const facePick = useWorkshop((s) => s.facePick)
   const selectedFace = useWorkshop((s) => s.selectedFace)
   const palette = useWorkshop((s) => s.palette)
@@ -766,16 +770,35 @@ export function Workshop(): JSX.Element | null {
                 <span className="workshop__label">SHAPE</span>
                 <div className="workshop__shapes">
                   {STAMPS.map((k: StampKind) => (
-                    <button key={k} className={`workshop__tool ${stampKind === k ? 'is-on' : ''}`} aria-pressed={stampKind === k} onClick={() => w().setStampKind(k)} title={STAMP_HELP[k]}>{k.toUpperCase()}</button>
+                    <button key={k} className={`workshop__tool ${stampMode === 'shape' && stampKind === k ? 'is-on' : ''}`} aria-pressed={stampMode === 'shape' && stampKind === k} onClick={() => w().setStampKind(k)} title={STAMP_HELP[k]}>{k.toUpperCase()}</button>
                   ))}
+                  {/* A published object, placed by reference (DECK-0003 §1.10): it
+                      stays that object and follows its author's edits. */}
+                  <button className={`workshop__tool ${stampMode === 'object' ? 'is-on' : ''}`} aria-pressed={stampMode === 'object'} onClick={() => { w().setStampMode('object'); if (!w().stampObject) setPicking(true) }} title="Stamp a published object, placed by reference">
+                    <Box size={12} strokeWidth={2.25} aria-hidden />OBJECT
+                  </button>
                 </div>
               </div>
+              {stampMode === 'object' && (
+                <div className="workshop__row" role="group" aria-label="Object to stamp">
+                  <span className="workshop__label">OBJECT</span>
+                  <button className={`ws__slot ${stampObject ? 'is-full' : ''}`} onClick={() => setPicking(true)} title={stampObject ? 'Choose another object' : 'Choose an object'}>
+                    {stampObject
+                      ? <><span className="ws__slot-name">{stampObject.name}</span><span className="ws__slot-meta">{stampObject.shard.vertices.length} v · {stampObject.shard.faces.length} f{stampObject.shard.parts?.length ? ` · ${stampObject.shard.parts.length} obj` : ''} · CHANGE</span></>
+                      : <span className="ws__slot-meta">EMPTY · tap to choose</span>}
+                  </button>
+                </div>
+              )}
               <div className="workshop__row">
-                <span className="workshop__label">SIZE</span>
-                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize - 1))} disabled={stampSize <= MIN_SIZE} aria-label="Smaller">−</button>
-                <span className="workshop__value">{stampSize}</span>
-                <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize + 1))} disabled={stampSize >= MAX_SIZE} aria-label="Larger">+</button>
-                {FACED[stampKind] && (
+                {stampMode === 'shape' && (
+                  <>
+                    <span className="workshop__label">SIZE</span>
+                    <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize - 1))} disabled={stampSize <= MIN_SIZE} aria-label="Smaller">−</button>
+                    <span className="workshop__value">{stampSize}</span>
+                    <button className="workshop__btn" {...bind(() => w().setStampSize(w().stampSize + 1))} disabled={stampSize >= MAX_SIZE} aria-label="Larger">+</button>
+                  </>
+                )}
+                {(stampMode === 'object' || FACED[stampKind]) && (
                   <>
                     <span className="workshop__label workshop__label--gap">FACING</span>
                     <button className="workshop__btn" onClick={() => w().turnStamp()} title="Turn a quarter (Q)">{FACING_LABEL[stampFacing]} ↻</button>
@@ -838,6 +861,8 @@ export function Workshop(): JSX.Element | null {
         ))}
         {pickerOpen && <PaletteModal onClose={() => setPickerOpen(false)} />}
       </div>
+
+      {picking && <ObjectPicker onClose={() => setPicking(false)} />}
 
       {deleteColor !== null && (
         <ConfirmModal

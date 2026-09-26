@@ -33,9 +33,9 @@ import {
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
-import { partMatrix, refKey, type Placed } from 'sno-core/parts'
+import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
-import { ACCENT } from '../lib/palette'
+import { ACCENT, WARN } from '../lib/palette'
 import type { Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from 'sno-core/orient'
@@ -96,6 +96,10 @@ interface Props {
    * at four and makes a loop a placeholder.
    */
   nested?: Placed[]
+  /** A tap on a placed object, with its index in `parts`: the workshop's SELECT takes it whole. */
+  onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
+  /** Placements drawn with the selection's box around them. */
+  selectedParts?: number[]
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -122,7 +126,7 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
  */
 const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts }: Props): JSX.Element | null {
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
@@ -275,7 +279,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -340,7 +344,7 @@ function poseMatrix(pose: Pose): Matrix4 {
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
-function Placements({ shard, byRef, nested, lit, ghost, world, pose }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -348,6 +352,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose }: {
   ghost: boolean
   world: boolean
   pose?: Pose
+  onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
+  selected?: number[]
 }): JSX.Element | null {
   const list: Array<{ part: Part; r: Resolved | undefined }> = nested
     ? nested.map((p) => ({ part: p.part, r: p }))
@@ -360,7 +366,22 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose }: {
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
     if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} />
-    return <group key={i} matrix={matrix} matrixAutoUpdate={false}>{body}</group>
+    // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
+    const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
+    return (
+      <group key={i} matrix={matrix} matrixAutoUpdate={false} {...(onPartClick ? { onClick: (e: ThreeEvent<MouseEvent>) => onPartClick(e, i) } : {})}>
+        {body}
+        {box && (
+          <lineSegments
+            geometry={CUBE_EDGES}
+            position={[(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2]}
+            scale={[Math.max(box.max[0] - box.min[0], 0.05) + 0.1, Math.max(box.max[1] - box.min[1], 0.05) + 0.1, Math.max(box.max[2] - box.min[2], 0.05) + 0.1]}
+          >
+            <lineBasicMaterial color={WARN} toneMapped={false} />
+          </lineSegments>
+        )}
+      </group>
+    )
   })
   return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}</group> : <>{drawn}</>
 }

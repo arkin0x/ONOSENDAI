@@ -518,7 +518,7 @@ describe('workshop', () => {
       const vertices = Array.from({ length: n }, (_, i) => vertexAt([i * T2 - 300, 0, 0], [0, 0.9, 1]))
       useWorkshop.setState({ shards: w().shards.map((x) => (x.id === cur.id ? { ...x, vertices, faces: [] } : x)) })
     }
-    const square = { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]].map((at) => ({ at: at as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [] }
+    const square = { points: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]].map((at) => ({ at: at as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [], parts: [] }
 
     fillTo(510)
     useWorkshop.setState({ clip: square, notice: null })

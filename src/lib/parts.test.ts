@@ -93,3 +93,72 @@ describe('an object of parts alone', () => {
     expect(found).toHaveLength(4)
   })
 })
+
+describe('selecting placed objects in the workshop', () => {
+  const open = (): string => {
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], clip: null })
+    const id = useWorkshop.getState().importText(COLUMN_WALL)!
+    useWorkshop.getState().select(id)
+    return id
+  }
+  const w = () => useWorkshop.getState()
+
+  it('a tap selects a placed object whole, a second tap takes it out, and a point tap clears it', () => {
+    open()
+    w().togglePart(1)
+    expect(w().partSel).toEqual([1])
+    w().togglePart(3)
+    expect(w().partSel).toEqual([1, 3])
+    w().togglePart(1)
+    expect(w().partSel).toEqual([3])
+    w().selectVertex(null)
+    expect(w().partSel).toEqual([])
+  })
+
+  it('the box selects by where each object stands, and ignores indices past the end', () => {
+    open()
+    w().setPartSelection([2, 0, 9, 0])
+    expect(w().partSel).toEqual([0, 2])
+  })
+
+  it('a nudge moves the selected objects and leaves the rest', () => {
+    open()
+    w().selectPart(1)
+    w().moveSelected(1, 120)
+    const parts = w().current()!.parts!
+    expect(parts[1].at).toEqual([480, 120, 0])
+    expect(parts[0].at).toEqual([0, 0, 0])
+  })
+
+  it('a turn swings the object about its pivot and turns it a quarter', () => {
+    open()
+    w().selectPart(1)
+    w().rotateSelected(1)
+    const q = w().current()!.parts![1]
+    expect(q.turn.some((t) => t !== 0)).toBe(true)
+  })
+
+  it('delete removes the selected placements and keeps the reference while others use it', () => {
+    open()
+    w().setPartSelection([1, 2])
+    w().deleteSelected()
+    const s = w().current()!
+    expect(s.parts).toHaveLength(2)
+    expect(s.refs).toHaveLength(1)
+    expect(w().partSel).toEqual([])
+  })
+
+  it('copy then paste places another of the same object, selected, by the same reference', () => {
+    open()
+    w().selectPart(0)
+    w().copySelection()
+    expect(w().clip?.parts).toHaveLength(1)
+    w().selectVertex(null)
+    w().pasteClip('exact')
+    const s = w().current()!
+    expect(s.parts).toHaveLength(5)
+    expect(s.refs).toHaveLength(1)
+    expect(w().partSel).toEqual([4])
+  })
+})
+

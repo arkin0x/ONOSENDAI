@@ -146,9 +146,10 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
  * left end the same evening, out of the right-hand corner. PASTE asks where
  * before it puts anything down, since the answer is not obvious: back where
  * it came from, or on the plane you are working on. CLEAR lets the held
- * points go, and PASTE with them. VERTS leads the row under SELECT: every
- * point in the object in hand at once (arkinox, 2026-09-27); `verts` is how
- * many there are, 0 off SELECT.
+ * points go, and PASTE with them. VERTS and FACES lead the row under
+ * SELECT (arkinox, 2026-09-27): VERTS takes every point, FACES every point a
+ * face uses, so loose points stay out. `verts` is how many points there are,
+ * 0 off SELECT.
  */
 function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?: number; verts?: number }): JSX.Element | null {
   const inHand = points + objects
@@ -164,6 +165,12 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
         <button className="touchpad__key" title={`Select all ${verts} points`} aria-label="Select every point" {...noCallout} onClick={() => { useWorkshop.setState({ partSel: [] }); w().setSelection([...Array(verts).keys()]) }}>
           <Waypoints size={15} strokeWidth={2.25} aria-hidden />
           <span className="touchpad__sub">VERTS</span>
+        </button>
+      )}
+      {verts > 0 && (w().current()?.faces.length ?? 0) > 0 && (
+        <button className="touchpad__key" title="Select every point that belongs to a face" aria-label="Select every point on a face" {...noCallout} onClick={() => { useWorkshop.setState({ partSel: [] }); w().setSelection([...new Set(w().current()?.faces.flat() ?? [])]) }}>
+          <Triangle size={15} strokeWidth={2.25} aria-hidden />
+          <span className="touchpad__sub">FACES</span>
         </button>
       )}
       {points >= 3 && (

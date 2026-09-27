@@ -2,8 +2,8 @@
  * colorTools.test.ts - the dropper, the recent row, and the clipboard keys
  * (ported with snocrash's color corner, arkinox 2026-09-27).
  *
- * The dropper takes the one selected point's color, or a selected face's as
- * the average of its corners, snapped onto the object's palette, into hand and
+ * The dropper takes the one selected point's color, or a selected face's
+ * (its hard color when it has one, else the average of its corners), snapped onto the object's palette, into hand and
  * onto the front of the recent row. The recent row holds only colors somebody
  * picked: it starts empty, and the starter swatches older builds seeded are
  * dropped unless they were picked. COPY holds the selection without moving it
@@ -65,6 +65,15 @@ describe('the dropper', () => {
     const want = snapHex(BUILT_IN, rgbToHex(mean))!
     expect(rgbToHex(w().color)).toBe(want)
     expect(w().palette).toEqual([want])
+  })
+
+  it('takes a face\'s hard color (SEAM) when it has one, not the average of its corners', () => {
+    const s = w().current()!
+    const GREEN = hexAt(BUILT_IN, 246)
+    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], selectedFace: 0 })
+    w().sampleColor()
+    expect(rgbToHex(w().color)).toBe(GREEN)
+    expect(w().palette[0]).toBe(GREEN)
   })
 
   it('does nothing with several points, or none, in hand, and paints nothing ever', () => {

@@ -375,7 +375,8 @@ export interface WorkshopState {
   colorConnected: (c: [number, number, number]) => void
   /**
    * The dropper: the color of the one selected point, or of the selected
-   * face as the average of its corners, snapped onto the object's palette,
+   * face (its hard color when it has one, else the average of its corners),
+   * snapped onto the object's palette,
    * put in hand and at the front of the recent row.
    */
   sampleColor: () => void
@@ -879,7 +880,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       if (!s) return
       const corners = selection.length === 1 ? selection : selection.length === 0 && selectedFace !== null ? s.faces[selectedFace] ?? [] : []
-      const cs = corners.map((i) => s.vertices[i]?.c).filter((c): c is P3 => !!c)
+      // A face with a hard color (SEAM) shows that color, so that is what the
+      // dropper takes. Face colors are all or none (sno-core shards): once one
+      // face has a seam, every face carries its own.
+      const seam = selection.length === 0 && selectedFace !== null && s.facecolors?.length === s.faces.length ? s.facecolors[selectedFace] : undefined
+      const cs = seam ? [seam] : corners.map((i) => s.vertices[i]?.c).filter((c): c is P3 => !!c)
       if (cs.length === 0) return
       const mean = [0, 1, 2].map((k) => cs.reduce((t, c) => t + c[k], 0) / cs.length) as P3
       const hex = snapHex(s.palette ?? BUILT_IN, rgbToHex(clampColor(mean)))

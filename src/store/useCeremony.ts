@@ -62,7 +62,8 @@ function previewShard(unit: number): ShardModel {
     mode: 'lines',
     vertices: path.map((p, i) => ({ p, c: i < 16 ? [0, 0.9, 1] : [0.97, 0.58, 0.1] })),
     faces: [],
-    updatedAt: Math.floor(Date.now() / 1000),
+    // Milliseconds, as every other object's edit time is.
+    updatedAt: Date.now(),
   }
 }
 

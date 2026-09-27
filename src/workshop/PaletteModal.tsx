@@ -15,12 +15,13 @@
  * one's name.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Plus, Trash2, X } from 'lucide-react'
-import { BUILT_IN, BUILT_IN_NAME, hexAt, type Palette } from 'sno-core/snoPalette'
+import { Check, Download, Plus, Trash2, Upload, X } from 'lucide-react'
+import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
-import { useWorkshop } from '../store/useWorkshop'
+import { paletteNevent, usePaletteNet } from '../store/usePaletteNet'
+import { useWorkshop, type NamedPalette } from '../store/useWorkshop'
 import { ConfirmModal } from '../hud/ConfirmModal'
 
 /** How the built-in is laid out, so the sheet can be read rather than scanned. */
@@ -30,11 +31,25 @@ const BANDS = [
   { from: 224, to: 255, title: 'SIGNATURES', note: "the client's own colors, the gamut corners, deep grounds" },
 ]
 
+/**
+ * How long the overlay takes to fold away.
+ *
+ * Short enough that picking several colors in a row does not feel like waiting
+ * on an animation, long enough that the direction it goes is legible. The
+ * color is applied before the fold starts, so this delays nothing but the
+ * unmount.
+ */
+const FOLD_MS = 190
+
 export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const palettes = useWorkshop((s) => s.palettes)
   const color = useWorkshop((s) => s.color)
   const w = useWorkshop.getState
+  const n = usePaletteNet.getState
+  const busy = usePaletteNet((s) => s.publishing)
+  /** Colors this author has reached for, newest first (useWorkshop.palette). */
+  const recent = useWorkshop((s) => s.palette)
 
   const active: Palette = shard?.palette ?? BUILT_IN
   const activeName = shard?.palette ? (shard.paletteName ?? 'a palette of its own') : BUILT_IN_NAME
@@ -50,13 +65,136 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   const [picked, setPicked] = useState<number[]>([])
   const [switching, setSwitching] = useState<{ id: string | null; name: string } | null>(null)
   const [forgetting, setForgetting] = useState<{ id: string; name: string } | null>(null)
+  const [ref, setRef] = useState('')
+  const [pasteName, setPasteName] = useState('')
+  // Said here rather than through the store's toast, which this modal covers.
+  const [note, setNote] = useState<string | null>(null)
+  const [shared, setShared] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+  const [folding, setFolding] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const foldTimer = useRef<number | null>(null)
+
+  // A fold in flight when this unmounts would call onClose into nothing.
+  useEffect(() => () => { if (foldTimer.current !== null) window.clearTimeout(foldTimer.current) }, [])
+
+  /**
+   * Close by folding the overlay back into the color chip that opened it.
+   *
+   * The point is where it goes, not that it goes: this sheet is the chip's
+   * contents, and shrinking it into the chip says so, where fading it out in
+   * place would leave it belonging to the screen. Picking a color is a
+   * decision, and the fold is the sheet acknowledging it rather than the
+   * author having to dismiss a thing they are finished with.
+   *
+   * The transform cannot be written in CSS, because the chip sits in a corner
+   * that moves with the layout, so its distance from the middle of the screen
+   * is not a constant. Both rectangles are measured here and handed to the
+   * stylesheet as custom properties.
+   *
+   * With reduced motion asked for, or with no chip on screen to fold into
+   * (the bench is closed), it just closes.
+   */
+  const fold = (): void => {
+    if (folding) return
+    const root = rootRef.current
+    const chip = document.querySelector('.ws__colorchip')
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!root || !chip || still) { onClose(); return }
+    const from = root.getBoundingClientRect()
+    const to = chip.getBoundingClientRect()
+    root.style.setProperty('--fold-x', `${to.left + to.width / 2 - (from.left + from.width / 2)}px`)
+    root.style.setProperty('--fold-y', `${to.top + to.height / 2 - (from.top + from.height / 2)}px`)
+    root.style.setProperty('--fold-scale', `${to.width / from.width}`)
+    setFolding(true)
+    foldTimer.current = window.setTimeout(onClose, FOLD_MS)
+  }
+
+  /**
+   * Put a palette on nostr, or publish an edit of one already there.
+   *
+   * An edit is a new event that names the old one, because a palette event is
+   * immutable (DECK-0003 §1.3b). Objects already pointing at the old event
+   * keep the colours they were published with, which is the point of it.
+   */
+  const share = async (p: NamedPalette): Promise<void> => {
+    setNote(null); setShared(null)
+    const where = await n().publishPalette(p.name, p.colors, p.event)
+    // The store says why it failed, and says it into a toast this modal is
+    // painted over, so it is repeated here rather than left unsaid.
+    if (!where) { setNote(n().notice ?? 'That palette did not go out.'); return }
+    w().notePalettePublished(p.id, where)
+    setShared(paletteNevent(where))
+    setNote(p.event ? `"${p.name}" is edited. This is the new event; the old one still says what it said.` : `"${p.name}" is on nostr.`)
+  }
+
+  /**
+   * Whether what is in the box names an event to go and fetch, rather than
+   * being the palette itself.
+   *
+   * Anything that is not a pointer is treated as the colors, which is the
+   * common case: the tools people build palettes in hand out text, not nostr
+   * references.
+   */
+  const pointer = /^(nostr:)?(nevent1|naddr1)[023456789acdefghjklmnpqrstuvwxyz]{20,}$/i.test(ref.trim())
+
+  /**
+   * Take in somebody else's palette, whether it is on nostr or on the clipboard.
+   *
+   * The two are one button because they are one intention. A pointer is
+   * fetched and keeps the name its author gave it; anything else is read as
+   * colors and needs a name here, because a pasted list carries none. espy's
+   * copy format names each color but never the palette.
+   */
+  const bring = async (): Promise<void> => {
+    setNote(null); setShared(null)
+
+    if (!pointer) {
+      const read = parsePaletteText(ref)
+      if ('problem' in read) { setNote(explainPasteProblem(read.problem, read.found)); return }
+      const name = pasteName.trim() || 'a pasted palette'
+      const id = w().savePalette(name, read.colors)
+      setRef(''); setPasteName('')
+      setNote(`"${name}", ${read.colors.length} colors, is in the list.`)
+      setSwitching({ id, name })
+      return
+    }
+
+    setReading(true)
+    try {
+      const got = await n().fetchPalette(ref)
+      if (!got) { setNote(n().notice ?? 'Nothing came back.'); return }
+      const name = got.name ?? 'a palette from nostr'
+      const id = w().savePalette(name, got.colors, got.event)
+      setRef('')
+      setNote(`"${name}", ${got.colors.length} colors, is in the list.`)
+      setSwitching({ id, name })
+    } finally {
+      // Released whatever happened, so a relay that never answers does not
+      // leave the button dead for the rest of the session.
+      setReading(false)
+    }
+  }
+
+  /**
+   * Put a color in hand and fold the sheet away.
+   *
+   * The single place a color leaves this sheet, so the recent row and the
+   * palette below it cannot drift apart in what picking means. The fold lives
+   * here rather than at each call site for the same reason: a second way out
+   * that forgot to close would be a bug nobody noticed until they met it.
+   */
+  const useColor = (hex: string): void => {
+    w().colorSelected(hexToRgbLocal(hex))
+    fold()
+  }
 
   const take = (index: number): void => {
     if (making) {
       setPicked((p) => (p.includes(index) ? p.filter((i) => i !== index) : p.length < 256 ? [...p, index] : p))
       return
     }
-    w().colorSelected(hexToRgbLocal(hexAt(active, index)))
+    useColor(hexAt(active, index))
   }
 
   const create = (): void => {
@@ -70,12 +208,11 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   const sheet = making ? BUILT_IN : active
 
   // Through a portal, for the reason ConfirmModal gives: this is rendered from
-  // inside .ws__corner, which is positioned and carries a z-index and is
-  // therefore a stacking context. A z-index of 300 inside a context that sits
-  // at 3 is still 3 against the rest of the page, so a full-screen modal left
-  // in there paints under the chip row.
+  // inside .ws__corner, which has a z-index and a backdrop-filter and is
+  // therefore a stacking context, so a full-screen modal left in there paints
+  // under the chip row that follows it.
   return createPortal(
-    <div className="modal palettes" role="dialog" aria-modal="true" aria-label="Palette">
+    <div className={`modal palettes${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-modal="true" aria-label="Palette">
       <div className="palettes__head">
         <div>
           <h2 className="palettes__title">PALETTE</h2>
@@ -85,10 +222,40 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
               : `${activeName} · ${active.length} colors · a color on the wire is an index into this`}
           </p>
         </div>
-        <button className="chip ws__icon" onClick={onClose} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
+        <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
       </div>
 
       <div className="palettes__body">
+        {/*
+          What you just used, above what you could use.
+
+          256 swatches is a lot to hunt through for the color you were working
+          in ten seconds ago, and an object is usually built out of a handful
+          of them. Hidden while building a palette, where the row would be a
+          second set of swatches meaning something different from the ones
+          below it.
+        */}
+        {!making && recent.length > 0 && (
+          <section className="palettes__band">
+            <h3 className="palettes__band-title">RECENT <span>{recent.length} colors, newest first</span></h3>
+            <div className="palettes__grid">
+              {recent.map((h) => {
+                const i = active.findIndex((_, n) => hexAt(active, n) === h)
+                return (
+                  <button
+                    key={h}
+                    className={`palettes__sw ${h === hex ? 'is-on' : ''}`}
+                    style={{ background: h }}
+                    title={i >= 0 ? `${i} · ${h}` : `${h}, not in this palette`}
+                    aria-label={`Recently used color ${h}`}
+                    aria-pressed={h === hex}
+                    onClick={() => useColor(h)}
+                  />
+                )
+              })}
+            </div>
+          </section>
+        )}
         {(making ? BANDS : [{ from: 0, to: sheet.length - 1, title: activeName.toUpperCase(), note: `${sheet.length} colors` }]).map((band) => (
           <section key={band.title + band.from} className="palettes__band">
             <h3 className="palettes__band-title">{band.title} <span>{band.note}</span></h3>
@@ -141,6 +308,15 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
                 <button className={`workshop__mode ${activeId === p.id ? 'is-on' : ''}`} onClick={() => setSwitching({ id: p.id, name: p.name })}>
                   {p.name} <em>{p.colors.length}</em>
                 </button>
+                <button
+                  className="workshop__mini"
+                  disabled={busy}
+                  title={p.event ? `Publish an edit of "${p.name}"` : `Publish "${p.name}" to nostr`}
+                  aria-label={p.event ? `Publish an edit of ${p.name}` : `Publish ${p.name}`}
+                  onClick={() => { void share(p) }}
+                >
+                  <Upload size={11} strokeWidth={2.25} />
+                </button>
                 <button className="workshop__mini workshop__mini--danger" title={`Forget "${p.name}"`} aria-label={`Forget ${p.name}`} onClick={() => setForgetting({ id: p.id, name: p.name })}>
                   <Trash2 size={11} strokeWidth={2.25} />
                 </button>
@@ -150,6 +326,55 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
             <button className="workshop__btn" onClick={() => { setMaking(true); setPicked([]) }}>
               <Plus size={12} strokeWidth={2.25} /> NEW PALETTE
             </button>
+
+            <div className="palettes__row">
+              <span className="palettes__label">BRING ONE IN</span>
+              {/* A textarea rather than an input because the thing most often
+                  pasted here is many lines of "Name - #hex", and a 256 color
+                  palette in a one line box cannot be checked before it is
+                  taken. */}
+              <textarea
+                className="avatars__input login__input palettes__paste"
+                value={ref}
+                onChange={(e) => setRef(e.target.value)}
+                rows={2}
+                placeholder={'nevent1…, or paste colors:\nTomato - #FC4755'}
+                aria-label="A palette event to read, or a list of colors"
+                spellCheck={false}
+              />
+              <button className="workshop__btn" disabled={!ref.trim() || reading} onClick={() => { void bring() }}>
+                <Download size={12} strokeWidth={2.25} /> BRING IT IN
+              </button>
+            </div>
+
+            {/* Only for pasted colors. A fetched palette keeps the name its
+                author published it under, and offering to rename it here would
+                quietly break the link between the two. */}
+            {!pointer && ref.trim() !== '' && (
+              <div className="palettes__row">
+                <span className="palettes__label">CALL IT</span>
+                <input
+                  className="avatars__input login__input palettes__name"
+                  value={pasteName}
+                  onChange={(e) => setPasteName(e.target.value)}
+                  placeholder="a name for it"
+                  aria-label="A name for the pasted palette"
+                  spellCheck={false}
+                />
+              </div>
+            )}
+
+            {shared && (
+              <div className="palettes__row">
+                <span className="palettes__label">POINT AT IT</span>
+                {/* Read-only and selectable: this is the reference an object
+                    carries, and it is only useful if it can be copied out. */}
+                <input className="avatars__input login__input palettes__name" value={shared} readOnly spellCheck={false} aria-label="This palette's reference" onFocus={(e) => e.currentTarget.select()} />
+                <button className="workshop__btn" onClick={() => { void navigator.clipboard?.writeText(shared).catch(() => { /* select it by hand */ }) }}>COPY</button>
+              </div>
+            )}
+
+            {note && <p className="palettes__note">{note}</p>}
           </>
         )}
       </div>

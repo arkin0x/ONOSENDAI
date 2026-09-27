@@ -60,11 +60,29 @@ const STORAGE = 'onosendai:shards'
 const PALETTE_STORAGE = 'onosendai:palette'
 const PALETTES_STORAGE = 'onosendai:palettes'
 
+/**
+ * Where a palette this browser knows lives on nostr (DECK-0003 §1.3b).
+ *
+ * A palette event is a regular event, so it cannot be replaced: correcting one
+ * publishes a second event that names the first. That is why this is kept at
+ * all. `id` is the newest version, which is what a reference points at, and
+ * `genesis` is the first, which is what lets an edit say where the chain
+ * started without a reader walking the whole of it.
+ */
+export interface PublishedPalette {
+  id: string
+  genesis: string
+  /** Where it was seen, for the relay hint in a chain tag and in an nevent. */
+  relays: string[]
+}
+
 /** A palette with a name somebody gave it. The name is this browser's, not the wire's. */
 export interface NamedPalette {
   id: string
   name: string
   colors: Palette
+  /** Set once it has been published, or once it came from somebody's event. */
+  event?: PublishedPalette
 }
 
 function loadPalettes(): NamedPalette[] {
@@ -75,8 +93,15 @@ function loadPalettes(): NamedPalette[] {
       !!p && typeof p.id === 'string' && typeof p.name === 'string'
       && Array.isArray(p.colors) && p.colors.length >= 2 && p.colors.length <= 256
       && p.colors.every((c: unknown) => Array.isArray(c) && c.length === 3 && c.every((n) => Number.isInteger(n) && n >= 0 && n <= 255))
-    ))
+    // A half-written `event` is dropped rather than carried: every use of it
+    // writes an id into a tag, and a tag holding `undefined` would publish an
+    // edit chain that points nowhere.
+    )).map((p) => (validEvent(p.event) ? p : { id: p.id, name: p.name, colors: p.colors }))
   } catch { return [] }
+}
+
+function validEvent(e: PublishedPalette | undefined): boolean {
+  return !e || (typeof e.id === 'string' && typeof e.genesis === 'string' && Array.isArray(e.relays))
 }
 
 function savePalettes(list: NamedPalette[]): void {
@@ -85,9 +110,8 @@ function savePalettes(list: NamedPalette[]): void {
 const AVATAR_KEY = 'onosendai:workshop-avatar'
 /** Undo depth per shard. */
 const HISTORY = 64
-/** The swatches every workshop starts with. */
 /**
- * The swatches a new workshop starts with, taken from the SNO palette by index
+ * The swatches older builds seeded the recent row with, taken from the SNO palette by index
  * rather than written as hex, so every one of them is a colour a shard can
  * actually carry on the wire (lib/snoPalette).
  *
@@ -185,6 +209,27 @@ function countLabel(clip: ClipPoints): string {
   if (clip.faces.length) bits.push(`${clip.faces.length} face${clip.faces.length === 1 ? '' : 's'}`)
   if (clip.parts.length) bits.push(`${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}`)
   return bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : bits[0] ?? 'nothing'
+}
+
+/**
+ * Every vertex reachable from a selection, following the two things that join
+ * one vertex to another: a face, which joins its three corners, and a shared
+ * point, since two stamps that touch keep their own corners so an edge between
+ * different colors stays crisp.
+ *
+ * Union-find rather than a graph walk because the joins arrive in no order and
+ * both kinds are the same operation on a set. Returned sorted, so a selection
+ * built from it is in the same order as one built by hand.
+ */
+function connectedTo(s: ShardModel, selection: number[]): number[] {
+  const parent = s.vertices.map((_, i) => i)
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
+  const join = (a: number, b: number): void => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+  const byPoint = new Map<string, number>()
+  s.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); const first = byPoint.get(k); if (first === undefined) byPoint.set(k, i); else join(first, i) })
+  for (const f of s.faces) { join(f[0], f[1]); join(f[1], f[2]) }
+  const roots = new Set(selection.filter((i) => s.vertices[i]).map(find))
+  return s.vertices.map((_, i) => i).filter((i) => roots.has(find(i)))
 }
 
 export interface WorkshopState {
@@ -317,7 +362,24 @@ export interface WorkshopState {
   colorSelected: (c: [number, number, number]) => void
   colorAll: (c: [number, number, number]) => void
   /** Keep a palette under a name, and return its id. */
-  savePalette: (name: string, colors: Palette) => string
+  savePalette: (name: string, colors: Palette, event?: PublishedPalette) => string
+  /**
+   * Remember where a palette went, so the next publish of it is an edit.
+   *
+   * Without this an edit would be a second unrelated palette on the network
+   * rather than the next link in one chain, and nothing could walk back to
+   * what the colours used to be.
+   */
+  notePalettePublished: (id: string, event: PublishedPalette) => void
+  /** The colour onto the selection and everything joined to it by faces. */
+  colorConnected: (c: [number, number, number]) => void
+  /**
+   * The dropper: the color of the one selected point, or of the selected
+   * face (its hard color when it has one, else the average of its corners),
+   * snapped onto the object's palette,
+   * put in hand and at the front of the recent row.
+   */
+  sampleColor: () => void
   renamePalette: (id: string, name: string) => void
   forgetPalette: (id: string) => void
   /**
@@ -380,12 +442,32 @@ function save(shards: ShardModel[]): void {
   try { localStorage.setItem(STORAGE, JSON.stringify(shards)) } catch { /* quota or private mode */ }
 }
 
+/**
+ * The recent row without the starter swatches nobody picked.
+ *
+ * The row is colors you have reached for, so it starts empty (arkinox,
+ * 2026-09-27). Older builds seeded it with DEFAULT_PALETTE, and a remembered
+ * color goes to the front, so the seeds never picked are still at the tail in
+ * their seeded order: that run comes off, and anything picked stays.
+ */
+export function unseeded(list: string[]): string[] {
+  let end = list.length
+  let next = DEFAULT_PALETTE.length
+  while (end > 0) {
+    const k = DEFAULT_PALETTE.indexOf(list[end - 1])
+    if (k < 0 || k >= next) break
+    next = k
+    end--
+  }
+  return list.slice(0, end)
+}
+
 function loadPalette(): string[] {
   try {
     const raw = localStorage.getItem(PALETTE_STORAGE)
     const list: unknown = raw ? JSON.parse(raw) : null
-    return Array.isArray(list) && list.every((h) => typeof h === 'string' && HEX.test(h)) ? list : DEFAULT_PALETTE
-  } catch { return DEFAULT_PALETTE }
+    return Array.isArray(list) && list.every((h) => typeof h === 'string' && HEX.test(h)) ? unseeded(list) : []
+  } catch { return [] }
 }
 
 function loadShowAvatar(): boolean {
@@ -657,15 +739,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       const { selection } = get()
       if (!s || selection.length === 0) return
-      // Union-find over vertices: a shared point joins, a face joins its three corners.
-      const parent = s.vertices.map((_, i) => i)
-      const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
-      const join = (a: number, b: number): void => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
-      const byPoint = new Map<string, number>()
-      s.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); const first = byPoint.get(k); if (first === undefined) byPoint.set(k, i); else join(first, i) })
-      for (const f of s.faces) { join(f[0], f[1]); join(f[1], f[2]) }
-      const roots = new Set(selection.map(find))
-      const out = s.vertices.map((_, i) => i).filter((i) => roots.has(find(i)))
+      const out = connectedTo(s, selection)
       const grew = out.length > selection.length
       set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
     },
@@ -730,12 +804,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       edit((s) => (s.facecolors ? { ...s, facecolors: undefined } : null), 'Faces blend across their corners again.')
     },
 
-    savePalette: (name, colors) => {
+    savePalette: (name, colors, event) => {
       const id = uuid()
-      const list = [...get().palettes, { id, name: name.trim().slice(0, 48) || 'untitled', colors }]
+      const list = [...get().palettes, { id, name: name.trim().slice(0, 48) || 'untitled', colors, ...(event ? { event } : {}) }]
       set({ palettes: list })
       savePalettes(list)
       return id
+    },
+
+    notePalettePublished: (id, event) => {
+      const list = get().palettes.map((p) => (p.id === id ? { ...p, event } : p))
+      set({ palettes: list })
+      savePalettes(list)
     },
 
     renamePalette: (id, name) => {
@@ -793,6 +873,24 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!HEX.test(h)) return
       const palette = [h, ...get().palette.filter((x) => x !== h)].slice(0, PALETTE_MAX)
       set({ palette }); savePalette(palette)
+    },
+
+    sampleColor: () => {
+      const { selection, selectedFace } = get()
+      const s = get().current()
+      if (!s) return
+      const corners = selection.length === 1 ? selection : selection.length === 0 && selectedFace !== null ? s.faces[selectedFace] ?? [] : []
+      // A face with a hard color (SEAM) shows that color, so that is what the
+      // dropper takes. Face colors are all or none (sno-core shards): once one
+      // face has a seam, every face carries its own.
+      const seam = selection.length === 0 && selectedFace !== null && s.facecolors?.length === s.faces.length ? s.facecolors[selectedFace] : undefined
+      const cs = seam ? [seam] : corners.map((i) => s.vertices[i]?.c).filter((c): c is P3 => !!c)
+      if (cs.length === 0) return
+      const mean = [0, 1, 2].map((k) => cs.reduce((t, c) => t + c[k], 0) / cs.length) as P3
+      const hex = snapHex(s.palette ?? BUILT_IN, rgbToHex(clampColor(mean)))
+      if (!hex) return
+      set({ color: hexToRgb(hex) })
+      get().rememberColor(hex)
     },
 
     forgetColor: (hex) => {
@@ -878,6 +976,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     colorSelected: (c) => {
       const { selection, selectedFace } = get()
       set({ color: clampColor(c) })
+      get().rememberColor(rgbToHex(clampColor(c)))
       // With no points selected, a selected face takes the color for its corners.
       const face = selection.length === 0 && selectedFace !== null ? get().current()?.faces[selectedFace] : undefined
       if (selection.length === 0 && !face) return
@@ -892,7 +991,26 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     colorAll: (c) => {
       set({ color: clampColor(c) })
+      get().rememberColor(rgbToHex(clampColor(c)))
       edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })) }))
+    },
+
+    // The whole piece you are pointing at, without having to select it first.
+    // The selection is left alone on purpose: this paints a group, it does not
+    // take one, and growing the selection underneath would move every later
+    // nudge and delete onto vertices nobody asked for.
+    colorConnected: (c) => {
+      const { selection } = get()
+      set({ color: clampColor(c) })
+      get().rememberColor(rgbToHex(clampColor(c)))
+      if (selection.length === 0) return
+      edit((s) => {
+        const reach = connectedTo(s, selection)
+        if (reach.length === 0) return null
+        const chosen = new Set(reach)
+        const vertices = s.vertices.map((v, i) => (chosen.has(i) ? { ...v, c: clampColor(c) } : v))
+        return { ...s, vertices }
+      })
     },
 
     deleteSelected: () => {

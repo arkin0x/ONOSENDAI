@@ -438,6 +438,19 @@ function load(): ShardModel[] {
   } catch { return [] }
 }
 
+/**
+ * The object edited most recently: the one at the top of the workshop's list.
+ *
+ * The stored list is in the order objects were made, so its first entry is the
+ * oldest, and opening that on every fresh load kept bringing back the same old
+ * object (arkinox, 2026-09-27).
+ */
+export function newestId(shards: ShardModel[]): string | null {
+  let best: ShardModel | null = null
+  for (const s of shards) if (!best || (s.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = s
+  return best?.id ?? null
+}
+
 function save(shards: ShardModel[]): void {
   try { localStorage.setItem(STORAGE, JSON.stringify(shards)) } catch { /* quota or private mode */ }
 }
@@ -590,7 +603,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     openWorkshop: (id) => {
       const { shards } = get()
-      const currentId = id ?? get().currentId ?? shards[0]?.id ?? get().create()
+      const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
       set({ open: true, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
     },
 
@@ -622,7 +635,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     remove: (id) => {
       const list = get().shards.filter((s) => s.id !== id)
-      const currentId = get().currentId === id ? (list[0]?.id ?? null) : get().currentId
+      const currentId = get().currentId === id ? newestId(list) : get().currentId
       set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
     },
 

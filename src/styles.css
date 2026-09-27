@@ -6443,3 +6443,8 @@ kbd {
    on one row and the reference is wide enough to read. */
 .palettes__row { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; }
 .palettes__note { flex: 1 0 100%; margin: 0; font-size: 11px; line-height: 1.5; color: var(--dim); }
+
+/* The deploy bar's TURN row: three quarter-turn keys that read their angle, and RESET. */
+.deploybar__row--turn { flex-wrap: wrap; }
+.deploybar__turn { width: auto; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.deploybar__turn.is-on { color: var(--accent); border-color: var(--accent); }

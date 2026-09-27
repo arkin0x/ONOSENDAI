@@ -34,6 +34,7 @@ import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { WorldLabel } from './WorldLabel'
+import { turnShard } from '../lib/turn'
 
 interface Props {
   axes: ViewAxes
@@ -41,7 +42,10 @@ interface Props {
 
 export function ShardGhost({ axes }: Props): JSX.Element | null {
   const pending = useShards((s) => s.pending)
-  const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  const model = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  // What will land: the model turned by the deploy bar's TURN row, the same function the deploy uses.
+  const deployTurn = useShards((s) => s.deployTurn)
+  const shard = useMemo(() => (model ? turnShard(model, deployTurn) : null), [model, deployTurn])
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const unit = useShards((s) => s.deployUnit)
   const group = useRef<Group>(null)

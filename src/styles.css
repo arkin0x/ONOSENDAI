@@ -6381,3 +6381,8 @@ kbd {
 .stash-modal .avatars__list { max-height: 55vh; overflow-y: auto; }
 .shards__type--bag { letter-spacing: 0.1em; min-width: 0; }
 .objpick__row:disabled { opacity: 0.45; cursor: default; }
+
+/* The deploy bar's TURN row: three quarter-turn keys that read their angle, and RESET. */
+.deploybar__row--turn { flex-wrap: wrap; }
+.deploybar__turn { width: auto; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.deploybar__turn.is-on { color: var(--accent); border-color: var(--accent); }

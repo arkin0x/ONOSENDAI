@@ -55,6 +55,7 @@ export function DeployBar(): JSX.Element | null {
   const plane = useCyberspace((s) => s.plane)
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
+  const turn = useShards((s) => s.deployTurn)
   const follow = useShards((s) => s.deployFollow)
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
@@ -109,6 +110,20 @@ export function DeployBar(): JSX.Element | null {
           <span className="deploybar__value">2^{unit}</span>
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit + 1))} disabled={unit >= MAX_UNIT} aria-label="Larger scale">+</button>
           <span className="deploybar__radius">one unit = {formatCellSize(unit)}</span>
+        </div>
+      )}
+
+      {/* Quarter turns about the object's own origin, for this deployment only:
+          exact on the lattice, and every reader draws them (lib/turn.ts). */}
+      {!isMessage && (
+        <div className="deploybar__row deploybar__row--turn">
+          <span className="deploybar__label">TURN</span>
+          {(['X', 'Y', 'Z'] as const).map((name, axis) => (
+            <button key={name} className={`deploybar__btn deploybar__turn ${turn[axis] ? 'is-on' : ''}`} onClick={() => useShards.getState().turnDeploy(axis as 0 | 1 | 2)} aria-label={`Turn a quarter about ${name}, now ${turn[axis] * 90} degrees`} {...noCallout}>
+              ↻{name} {turn[axis] * 90}°
+            </button>
+          ))}
+          <button className="deploybar__btn deploybar__turn" disabled={turn.every((t) => t === 0)} onClick={() => useShards.getState().resetDeployTurn()} aria-label="Turn back to how it was built" {...noCallout}>RESET</button>
         </div>
       )}
 

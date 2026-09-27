@@ -52,6 +52,7 @@ import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import type { NearbyReturn } from '../lib/nearbyReturn'
+import { turnShard, type Turns } from '../lib/turn'
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -129,6 +130,11 @@ interface ShardsState {
   deployUp: boolean
   /** The compass bearing the standing shard's +Z faces: whole degrees 0..359, clockwise from north. */
   deploySpin: number
+  /** Quarter turns on X, Y and Z for this deployment only (lib/turn.ts); the model keeps its own. */
+  deployTurn: Turns
+  /** One more quarter turn about an axis (0 X, 1 Y, 2 Z), wrapping at four. */
+  turnDeploy: (axis: 0 | 1 | 2) => void
+  resetDeployTurn: () => void
   /**
    * The camera owns the spin: while this is on, orbiting turns the shard so
    * its +Z faces the way you are looking, which is how the bench presents it.
@@ -414,6 +420,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deployUnit: 0,
     deployUp: false,
     deploySpin: 0,
+    deployTurn: [0, 0, 0],
     deployFollow: false,
     deployStatus: 'idle',
     deployNote: null,
@@ -442,11 +449,12 @@ export const useShards = create<ShardsState>((set, get) => {
       // more carries into this one than its size does.
       deployUp: false,
       deploySpin: 0,
+      deployTurn: [0, 0, 0],
       deployFollow: false,
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployFollow: false, deployStatus: 'idle', deployError: null }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployStatus: 'idle', deployError: null }),
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
     // warns about.
@@ -461,6 +469,8 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
     setDeploySpin: (spin) => set({ deploySpin: wrapSpin(spin) }),
     setDeployFollow: (follow) => set({ deployFollow: follow }),
+    turnDeploy: (axis) => { const t = [...get().deployTurn] as Turns; t[axis] = (t[axis] + 1) % 4; set({ deployTurn: t }) },
+    resetDeployTurn: () => set({ deployTurn: [0, 0, 0] }),
     deployCeiling: () => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
@@ -470,7 +480,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit, deployUp, deploySpin } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn } = get()
       if (!pending) return
       const cs = cyber()
       const at: Position = { ...cs.cursor }
@@ -509,9 +519,12 @@ export const useShards = create<ShardsState>((set, get) => {
         // stand on: dataspace, at SNAP_MIN_HEIGHT and above (lib/pose.ts).
         const up = deployUp && snapOffered(plane, deployHeight)
         const spin = up ? wrapSpin(deploySpin) : 0
-        shard = model.unit === deployUnit && model.up === up && model.spin === spin
+        // The TURN row turns this copy by quarter turns (lib/turn.ts); the
+        // workshop's model is never touched.
+        const turned = turnShard(model, deployTurn)
+        shard = turned === model && model.unit === deployUnit && model.up === up && model.spin === spin
           ? model
-          : { ...model, unit: deployUnit, up, spin }
+          : { ...turned, unit: deployUnit, up, spin }
         // The same round trip every reader makes, before the seal: an item the
         // format refuses would deploy, show for its author from this device,
         // and open as nothing for everyone else (a 516-vertex floor, 2026-09-24).

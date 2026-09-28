@@ -155,6 +155,7 @@ interface Parsed {
   preview: string
   /** The sealed words, when the comment carries them in our scheme. */
   ciphertext: string | null
+  /** The root scope: a bag's address (`A`) for a hidden item, an event id (`E`) for an action (social.ts). */
   rootAddress: string
   parentId: string
   parentKind: number
@@ -169,7 +170,7 @@ function firstTag(ev: NostrEvent, name: string): string[] | undefined {
 /** A kind 1111 event as a comment, or null when it is not one we can place. */
 export function parseComment(ev: NostrEvent): Parsed | null {
   if (ev.kind !== COMMENT_KIND) return null
-  const root = firstTag(ev, 'A')?.[1]
+  const root = firstTag(ev, 'A')?.[1] ?? firstTag(ev, 'E')?.[1]
   const parent = firstTag(ev, 'e')?.[1]
   const parentKind = Number(firstTag(ev, 'k')?.[1])
   if (!root || !parent || !Number.isFinite(parentKind)) return null
@@ -200,12 +201,20 @@ export async function openComments(events: NostrEvent[], key: Uint8Array): Promi
  * here, are left out.
  */
 export function threadComments(events: NostrEvent[], subject: Pick<CommentSubject, 'author' | 'lookupId' | 'itemId' | 'target'>, opened: ReadonlyMap<string, string> = new Map()): Comment[] {
-  const address = bagAddress(subject)
-  const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
   // An item hidden by an `a` reference keeps its address when its author
   // edits it, while its event id changes; a comment made on any version
   // names that address, so it stays under the item across edits.
-  const itemAddress = subject.target?.address
+  return threadUnder(events, bagAddress(subject), subject.itemId, subject.target?.address, opened)
+}
+
+/**
+ * The comments under one thing, threaded, whatever the root scope: `root` is
+ * what the comments' `A` or `E` tag names, `itemId` (or `itemAddress`) what a
+ * top-level comment answers. For an action (social.ts) both are its id.
+ */
+export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map()): Comment[] {
+  const address = root
+  const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
   for (const ev of events) {
     const c = parseComment(ev)
     if (!c || c.rootAddress !== address || byId.has(c.id)) continue
@@ -216,7 +225,7 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && (c.parentId === subject.itemId || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && (c.parentId === itemId || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

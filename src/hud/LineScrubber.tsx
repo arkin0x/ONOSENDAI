@@ -9,9 +9,14 @@
  * Open state IS scrubHeight in the store, so the H key and the chip drive
  * one mechanism and cannot disagree. No per-height ticks: the line is
  * hundreds of thousands of blocks, only the fill and the mark are drawn.
+ *
+ * # beside the rail takes a block number typed in and goes straight to it
+ * (arkinox, 2026-09-28): at this length, scrubbing to one exact block is
+ * guesswork.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Hash } from 'lucide-react'
 import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
@@ -19,8 +24,8 @@ import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownH
 import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
-/** The coarse step: the line is ~900k blocks, single steps are the last few. */
-const JUMP = 1000
+/** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
+const JUMP = 100
 
 export function LineScrubber(): JSX.Element {
   const sync = useHyperspace((s) => s.sync)
@@ -29,6 +34,8 @@ export function LineScrubber(): JSX.Element {
   const destination = useHyperspace((s) => s.destination)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const bind = useRepeatable()
+  // The typed block number, open while # is pressed.
+  const [typing, setTyping] = useState<string | null>(null)
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
 
@@ -123,6 +130,13 @@ export function LineScrubber(): JSX.Element {
   }
 
   const tip = tipHeight ?? 0
+  const typedHeight = typing !== null && /^\d+$/.test(typing.trim()) ? Number(typing.trim()) : null
+  const typedOk = typedHeight !== null && typedHeight <= tip
+  const goTyped = (): void => {
+    if (!typedOk || typedHeight === null) return
+    useHyperspace.getState().setScrubHeight(typedHeight)
+    setTyping(null)
+  }
   const fraction = tip <= 0 ? 0 : (scrubHeight ?? tip) / tip
   const stop = scrubHeight !== null ? getStopByHeight(scrubHeight) : undefined
   const syncPercent = sync.total > 0 ? Math.round((sync.loaded / sync.total) * 100) : 0
@@ -196,7 +210,33 @@ export function LineScrubber(): JSX.Element {
 
             <button className="explorer__btn" title="Forward one block (hold to repeat)" aria-label="Forward one block" disabled={scrubHeight === tip} {...bind(step(1))}>▶</button>
             <button className="explorer__btn" title={`Forward ${JUMP} blocks (hold to repeat)`} aria-label={`Forward ${JUMP} blocks`} disabled={scrubHeight === tip} {...bind(step(JUMP))}>»</button>
+            <button
+              className={`explorer__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
+              title="Go to a block number"
+              aria-label="Type a block number to go to"
+              aria-expanded={typing !== null}
+              {...noCallout}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setTyping((t) => (t === null ? '' : null)) }}
+            ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
           </div>
+
+          {typing !== null && (
+            <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>
+              <input
+                className="linescrub__goto-input"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoFocus
+                placeholder={`block 0 to ${tip}`}
+                aria-label="Block number"
+                value={typing}
+                onChange={(e) => setTyping(e.target.value.replace(/[^\d]/g, ''))}
+                onKeyDown={(e) => { if (e.key === 'Escape') setTyping(null) }}
+              />
+              <button className="linescrub__set" type="submit" disabled={!typedOk}>GO</button>
+              {typedHeight !== null && !typedOk && <span className="linescrub__goto-note">The newest block is {tip}.</span>}
+            </form>
+          )}
 
           <div className="explorer__meta linescrub__meta">
             <div className="linescrub__info">

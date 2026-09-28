@@ -12,14 +12,21 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  AXIS_BYTE,
   bytesToHex,
   cantorPair,
+  computeAxisMerkleRoot,
   computeHopProof,
   computeSidestepProof,
   deriveRegionKeys,
+  encodeNonce,
   hexToBytes,
   intToBytesBE,
+  meetsPrice,
+  seedPrefix,
   sha256Hex,
+  sidestepAttempts,
+  sidestepGrindHash,
   sidestepLanding,
   type Plane,
 } from 'cyberspace-core'
@@ -135,6 +142,7 @@ function sidestepResult(move: CloudMove): CloudSidestepResult {
     merkle_y: bytesToHex(p.merkleY),
     merkle_z: bytesToHex(p.merkleZ),
     openings: { x: hex(p.openings.x), y: hex(p.openings.y), z: hex(p.openings.z) },
+    mn: encodeNonce(p.nonce),
     lca_heights: p.lcaHeights,
     previous_event_id: move.prevEventId,
     terrain_k: p.terrainK,
@@ -204,6 +212,33 @@ describe('verifyCloudSidestep', () => {
     const result = sidestepResult(off)
     // The paths and hash are internally consistent for 4097; the geometry is what fails.
     expect(verifyCloudSidestep(result, off)).toEqual(['geometry:x'])
+  })
+
+  it('rejects a missing or malformed mn, and checks no opening without one', () => {
+    const noNonce: Partial<CloudSidestepResult> = { ...good }
+    delete noNonce.mn
+    expect(verifyCloudSidestep(noNonce as CloudSidestepResult, SIDESTEP)).toEqual(['mn'])
+    expect(verifyCloudSidestep({ ...good, mn: '1' }, SIDESTEP)).toEqual(['mn'])
+    expect(verifyCloudSidestep({ ...good, mn: 'ABCDEF0123456789' }, SIDESTEP)).toEqual(['mn'])
+  })
+
+  it('rejects a nonce that misses the price, whose samples then miss too', () => {
+    // A = ceil((2^13 + 2^9) / 8) = 1088: almost any other nonce misses.
+    const roots = [good.merkle_x, good.merkle_y, good.merkle_z].map(hexToBytes)
+    const attempts = sidestepAttempts(good.lca_heights)
+    expect(attempts).toBe(1088n)
+    let miss = 0n
+    while (meetsPrice(sidestepGrindHash(hexToBytes(PREV), roots, miss), attempts)) miss++
+    const failed = verifyCloudSidestep({ ...good, mn: encodeNonce(miss) }, SIDESTEP)
+    expect(failed).toContain('price')
+  })
+
+  it('rejects openings drawn anywhere but G, as version 2 drew them from the roots', () => {
+    // The trees are honest; only the sample positions are not the ones G draws.
+    const elsewhere = new Uint8Array(32).fill(7)
+    const hex = (paths: Uint8Array[][]): string[][] => paths.map((q) => q.map(bytesToHex))
+    const axis = (a: 'x' | 'y') => hex(computeAxisMerkleRoot(seedPrefix(hexToBytes(PREV), AXIS_BYTE[a]), AXIS_BYTE[a], SIDESTEP.from[a], SIDESTEP.to[a]).openingsFor(elsewhere))
+    expect(verifyCloudSidestep({ ...good, openings: { ...good.openings, x: axis('x'), y: axis('y') } }, SIDESTEP)).toEqual(['openings:x', 'openings:y'])
   })
 
   it('rejects malformed roots and paths without throwing', () => {

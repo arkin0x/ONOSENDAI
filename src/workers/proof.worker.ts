@@ -12,6 +12,7 @@ import {
   alignedBase,
   computeHopProof,
   computeSidestepProof,
+  encodeNonce,
   encodeOpenings,
   estimateHopCost,
   estimateSidestepCost,
@@ -33,14 +34,17 @@ export interface ProofRequest {
 
 /**
  * What a sidestep event carries beyond the proof hash (spec §8.5): the
- * per-axis Merkle roots, the destination leaf's inclusion path on each axis,
- * and the LCA heights that tell a verifier how long each path should be.
- * Already hex, so the main thread can drop them straight into tags.
+ * per-axis Merkle roots, the openings on each axis, the re-roll nonce the
+ * sampled openings were drawn under, and the LCA heights that tell a verifier
+ * how long each path should be. Already hex, so the main thread can drop them
+ * straight into tags.
  */
 export interface SidestepTags {
   merkleRoots: [string, string, string]
   /** Per-axis mp segments (spec 8.5): every opening's siblings, leaf first, as hex. */
   openings: [string, string, string]
+  /** The `mn` tag (spec 6.10, 8.5): the nonce as 16 lowercase hex. */
+  mnHex: string
   lcaHeights: [number, number, number]
 }
 
@@ -121,11 +125,14 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         proofHash: proof.proofHash,
         terrainK: proof.terrainK,
         lca: { x: proof.lcaHeights[0], y: proof.lcaHeights[1], z: proof.lcaHeights[2] },
-        totalOps: estimate.totalHashes,
+        // The trees' hashes plus the price's attempts: the core searches the
+        // nonce upward from 0, one SHA-256 each, so it made nonce + 1.
+        totalOps: estimate.totalHashes + Number(proof.nonce) + 1,
         sidestep: {
           merkleRoots: [bytesToHex(proof.merkleX), bytesToHex(proof.merkleY), bytesToHex(proof.merkleZ)],
           // §8.5: every opening's siblings leaf first per axis, empty where the axis did not move.
           openings: [encodeOpenings(proof.openings.x), encodeOpenings(proof.openings.y), encodeOpenings(proof.openings.z)],
+          mnHex: encodeNonce(proof.nonce),
           lcaHeights: proof.lcaHeights,
         },
       }

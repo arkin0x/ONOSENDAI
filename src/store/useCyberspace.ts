@@ -408,6 +408,9 @@ export interface TransitState {
 
 /** A finished ride, as the worker pool hands it back (§5.4 and §5.5). */
 export interface CompletedRide {
+  /** The chain head the ride was computed against: the seed of every leaf,
+   * so it must be the `previous` the event is published under. */
+  previousId: string
   toCoordHex: string
   fromHeight: number
   toHeight: number
@@ -415,6 +418,8 @@ export interface CompletedRide {
   asOf?: number
   rootHex: string
   mp: string
+  /** The re-roll nonce (§5.5), the `mn` tag. */
+  mnHex: string
 }
 
 /** What the camera is looking at, when it is not looking at your own head. */
@@ -2343,6 +2348,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // either way the head is on the line, and `c` is its coordinate.
     const line = lineStateOf(buildChain(events))
     if (!transit && !line) return
+    // Every leaf was seeded by the head the ride started from (§5.3). Signed
+    // under any other `previous` it would be a ride whose every leaf is wrong,
+    // so a head that moved while the proof ran (a fork adopted from another
+    // device) refuses the ride instead of publishing it.
+    if (ride.previousId !== prevEventId) {
+      throw new Error('Your chain moved while the ride was computing, and the proof is bound to where it started. Ride again from here.')
+    }
     const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit?.enterCoordHex ?? line?.coordHex
     if (!prevCoordHex) return
     const template = hyperjumpTemplate({
@@ -2356,6 +2368,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       asOf: ride.asOf,
       rootHex: ride.rootHex,
       mp: ride.mp,
+      mnHex: ride.mnHex,
     })
     let event: NostrEvent
     try {

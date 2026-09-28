@@ -22,7 +22,7 @@
  */
 
 import { buildMovePlan, localOnly, type RouteProfile } from './movePlan'
-import { projectCantorMs } from './calibration'
+import { projectCantorMs, sidestepHashes } from './calibration'
 import type { SignerKind } from './signers'
 
 /**
@@ -88,7 +88,7 @@ export function stepSeconds(
   const event = EVENT_SECONDS[inputs.signerKind] ?? EVENT_SECONDS.local
   if (kind === 'sidestep') {
     const rate = inputs.sha256PerSec && inputs.sha256PerSec > 0 ? inputs.sha256PerSec : 500_000
-    return (2 ** (height + 1)) / rate + event
+    return sidestepHashes(height) / rate + event
   }
   const ms = inputs.cantorMsByHeight ? projectCantorMs(inputs.cantorMsByHeight, height) : NaN
   // Three axes may move in one hop, and the worker runs them one after another.

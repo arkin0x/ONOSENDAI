@@ -17,7 +17,8 @@ import { messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
-import { itemTargetOf } from '../lib/comments'
+import { Reactions } from './Reactions'
+import { itemKind, itemTargetOf } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
 import { PublishSwitch } from './PublishSwitch'
@@ -103,6 +104,11 @@ export function DeploymentDetail(): JSX.Element | null {
           {refusal ? ` ${refusal}` : ''} Fix it in the workshop and hide it again; DELETE removes this copy.
         </p>
       )}
+
+      <Reactions
+        target={{ id: dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type) }}
+        alsoTell={[me]}
+      />
 
       <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
 

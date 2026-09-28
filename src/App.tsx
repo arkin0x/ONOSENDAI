@@ -11,6 +11,8 @@ import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { ActionModal } from './hud/ActionModal'
+import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
@@ -53,6 +55,8 @@ const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
 
 export default function App(): JSX.Element {
+  // Reactions and comments that tag you: the first page per identity, then a poll.
+  useNotificationsLoop()
   // The keyboard is unconditional. The on-screen controls are a second way in,
   // not a replacement: both call the same store actions, so WASD and the pad
   // cannot drift apart, and nothing about having a pointer takes the keys away.
@@ -190,6 +194,8 @@ export default function App(): JSX.Element {
           <ToastChip />
           <ChainExplorer />
           <BitReadout />
+          {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
+          <NotificationsToast />
           {/* Under XOR BITS, spaced as the rest are: what was just found, what
               is open to you here, then the scan. */}
           <KeyFoundChip />
@@ -223,6 +229,8 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <StashModals />
       <SecretModal />
+      <ActionModal />
+      <NotificationsModal />
       <LootDetail />
       <NearbyLootModal />
       <HosakaOffer hidden={crowded || secretOpen} />

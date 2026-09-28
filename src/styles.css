@@ -6579,3 +6579,119 @@ kbd {
 
 /* Leaving a key that exists only on this device. */
 .login__note--warn { color: var(--warn); }
+
+/* The chain explorer's way into an action's reactions and comments. */
+.explorer__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: none;
+}
+.explorer__comments:active { background: rgba(0, 229, 255, 0.2); }
+
+/* Reactions: one row per emoji and the faces who used it, then one-tap picks. */
+.reactions { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.reactions__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.reactions__row { display: flex; align-items: center; gap: 10px; }
+.reactions__glyph { width: 26px; flex-shrink: 0; text-align: center; font-size: 18px; line-height: 1; }
+.reactions__img { width: 22px; height: 22px; object-fit: contain; }
+.reactions__faces { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.reactions__more { font-size: 10px; color: var(--dim); }
+.reactions__pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.reactions__btn {
+  width: 38px;
+  height: 34px;
+  font-size: 17px;
+  line-height: 1;
+  border-radius: 8px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  cursor: pointer;
+}
+.reactions__btn.is-on { background: rgba(0, 229, 255, 0.2); border-color: var(--accent); }
+.reactions__btn:disabled { opacity: 0.5; cursor: default; }
+
+/* NOTIFICATIONS in the identity panel: a pulsing red dot while anything is unread. */
+.identity__row { display: flex; margin-top: 8px; }
+.identity__notif { position: relative; flex: 1; }
+.notif__dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3b5c;
+  box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.7);
+  animation: notif-pulse 1.6s ease-out infinite;
+}
+@keyframes notif-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.7); }
+  70% { box-shadow: 0 0 0 8px rgba(255, 59, 92, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .notif__dot { animation: none; } }
+
+/* The toast under XOR BITS. */
+.notif__toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+.notif__toast-glyph { font-size: 15px; line-height: 1; display: inline-flex; }
+.notif__icon { color: var(--accent); vertical-align: middle; }
+.notif__toast-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56vw; }
+
+/* The history modal. */
+.modal__card.notif { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+.notif__title { color: var(--accent); }
+.notif__scroll { overflow-y: auto; min-height: 0; flex: 1; }
+.notif__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.notif__row { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(200, 245, 255, 0.08); }
+.notif__glyph { width: 24px; flex-shrink: 0; text-align: center; font-size: 18px; line-height: 1.2; }
+.notif__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.notif__head { display: flex; align-items: center; gap: 6px; }
+.notif__who { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif__when { margin-left: auto; font-size: 9px; color: var(--dim); flex-shrink: 0; }
+.notif__verb { margin: 0; font-size: 10px; color: var(--dim); }
+.notif__words { margin: 0; font-size: 11px; line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
+.notif__words--sealed { color: var(--dim); font-style: italic; }
+.notif__view { align-self: flex-start; }
+.notif__end { padding: 12px 0; text-align: center; font-size: 9px; letter-spacing: 0.14em; color: var(--dim); min-height: 16px; }
+
+/* # beside the block rail, and the block number it asks for. */
+.linescrub__hash { display: inline-flex; align-items: center; justify-content: center; }
+.linescrub__hash.is-on { color: var(--accent); border-color: var(--accent); }
+.linescrub__goto { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.linescrub__goto-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 5px;
+}
+.linescrub__goto-note { flex: 1 0 100%; font-size: 9px; color: var(--warn); }

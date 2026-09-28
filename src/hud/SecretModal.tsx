@@ -18,6 +18,8 @@ import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { spectate } from '../lib/spectator'
 import { ProfilePic } from './ProfileBadge'
 import { Comments } from './Comments'
+import { Reactions } from './Reactions'
+import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
@@ -93,6 +95,13 @@ export function SecretModal(): JSX.Element | null {
           <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
           <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
         </dl>
+
+        {/* Reactions carry no words, only the item's id, so they need no seal
+            (arkinox, 2026-09-28): the item's author and the hider are told. */}
+        <Reactions
+          target={{ id: item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type) }}
+          alsoTell={[author]}
+        />
 
         {item.author && item.lookupId && (
           <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />

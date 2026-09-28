@@ -15,6 +15,10 @@
  * place you can move from; LATEST brings them back. It says LATEST, not LIVE,
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
+ *
+ * "💬 Comments (N)" opens the reactions and public comments on the action
+ * under the mark (ActionModal; arkinox, 2026-09-28). The count is asked for
+ * once the mark rests, not per step of a scrub.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -25,9 +29,16 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
+import { useActionComments } from '../hooks/useSocial'
+import { countComments } from '../lib/comments'
+import { ACTION_KIND } from '../lib/social'
+import { useSocialUi } from '../store/useSocialUi'
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
+
+/** How long the mark rests on an action before its comments are counted. */
+const COUNT_AFTER_MS = 450
 
 /** How long an adoption stays on the chip: long enough to explain the move it caused. */
 const ADOPTED_MS = 8000
@@ -58,6 +69,24 @@ export function ChainExplorer(): JSX.Element {
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
     [action, actions, index, secretKeys],
   )
+
+  // The action the mark has rested on, and its comment count.
+  const [settled, setSettled] = useState<string | null>(null)
+  useEffect(() => {
+    const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
+    return () => window.clearTimeout(t)
+  }, [action?.id])
+  const counted = useActionComments(action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
+  const commentCount = action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
+  // Counted again when the modal closes: something may have been said there.
+  const modalOpen = useSocialUi((s) => s.action !== null)
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (wasOpen.current && !modalOpen) counted.refresh()
+    wasOpen.current = modalOpen
+    // counted.refresh is a fresh closure each render; the transition is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen])
 
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
@@ -238,6 +267,9 @@ export function ChainExplorer(): JSX.Element {
               <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}
             </div>
           )}
+          <button className="explorer__comments" {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useSocialUi.getState().openAction(action) }}
+          >💬 Comments{commentCount === null ? '' : ` (${commentCount})`}</button>
         </div>
       )}
     </div>

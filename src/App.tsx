@@ -11,6 +11,7 @@ import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { ActionModal } from './hud/ActionModal'
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
@@ -223,6 +224,7 @@ export default function App(): JSX.Element {
       <DeploymentDetail />
       <StashModals />
       <SecretModal />
+      <ActionModal />
       <LootDetail />
       <NearbyLootModal />
       <HosakaOffer hidden={crowded || secretOpen} />

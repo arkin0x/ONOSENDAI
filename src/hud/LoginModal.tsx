@@ -11,7 +11,17 @@ import {
   normalizeSignerRelay,
 } from '../lib/signers'
 import { MIN_PASSWORD, backupFileName, exportProblem } from '../lib/keyExport'
+import { shortHex } from '../lib/time'
+import { ProfilePic } from './ProfileBadge'
+import { useProfile } from '../hooks/useProfile'
+import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+
+const KIND_LABEL: Record<string, string> = {
+  local: 'Local key',
+  nip07: 'Browser extension',
+  nip46: 'Remote signer',
+}
 
 type View = 'login' | 'qr'
 
@@ -19,6 +29,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
   const signerKind = useCyberspace((s) => s.signerKind)
   const identity = useCyberspace((s) => s.identity)
   const loginError = useCyberspace((s) => s.loginError)
+  const profile = useProfile(identity.pubkey)
 
   const [view, setView] = useState<View>('login')
   const [credential, setCredential] = useState('')
@@ -133,6 +144,25 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
 
+        {view === 'login' && (
+          <>
+            <div className="login__current">
+              <ProfilePic pubkey={identity.pubkey} size={40} />
+              <div className="login__current-text">
+                <span className="secret__name">{profileLabel(profile, identity.npub)}</span>
+                <span className="login__kind">{KIND_LABEL[signerKind] ?? signerKind}</span>
+                <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+              </div>
+            </div>
+            {/* Switching signs nothing (useCyberspace switchTo): a new identity's
+                spawn waits for its first move (arkinox, 2026-09-28). */}
+            <p className="login__note">
+              Switching signs nothing. An identity you have moved before returns to its own chain;
+              a new one waits at its spawn point until you first move it.
+            </p>
+          </>
+        )}
+
         {view === 'qr' ? (
           <div className="login__qr-flow">
             <p className="login__qr-instruction">Scan with a Nostr signer to connect this identity.</p>
@@ -213,6 +243,12 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
             {loginError && <p className="notice login__error">{loginError}</p>}
 
             <div className="login__or"><span>OR</span></div>
+            {signerKind === 'local' && (
+              <p className="login__note login__note--warn">
+                This key lives only on this device. Back it up below before switching away,
+                or you cannot come back to this identity.
+              </p>
+            )}
             <div className="login__options">
               <button className="secret__act login__act" disabled={disabled} onClick={() => void run('new', () => useCyberspace.getState().useNewKey())}>
                 {busy === 'new' ? 'CREATING…' : 'NEW RANDOM KEY'}

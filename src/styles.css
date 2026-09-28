@@ -6576,3 +6576,6 @@ kbd {
 .deploybar__row--turn { flex-wrap: wrap; }
 .deploybar__turn { width: auto; padding: 0 8px; font-variant-numeric: tabular-nums; }
 .deploybar__turn.is-on { color: var(--accent); border-color: var(--accent); }
+
+/* Leaving a key that exists only on this device. */
+.login__note--warn { color: var(--warn); }

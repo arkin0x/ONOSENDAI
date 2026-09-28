@@ -17,8 +17,8 @@ import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
 import type { EventTemplate, NostrEvent } from './events'
-import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay } from './loginCredentials'
-export { DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay } from './loginCredentials'
+import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
+export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
 export { SIGN_PATIENCE_MS, SignerTimeout, signWithin } from './signWithin'
@@ -196,7 +196,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
   const clientSecretKey = generateSecretKey()
   const uri = nip46.createNostrConnectURI({
     clientPubkey: getPublicKey(clientSecretKey),
-    relays: [relay],
+    relays: signerRelays(relay),
     secret: randomHex(generateSecretKey()),
     perms: ['get_public_key', 'sign_event'],
     name: 'ONOSENDAI',
@@ -210,9 +210,10 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
       const bunker = await nip46.BunkerSigner.fromURI(
         clientSecretKey,
         uri,
-        // Keep the whole login handshake on the relay encoded in the QR.
+        // Keep the whole login handshake on the relays encoded in the QR.
         // Automatic switch_relays interoperability varies between signers and
-        // can strand the get_public_key response on a relay we never selected.
+        // can strand the get_public_key response on a relay we never selected;
+        // the QR names two relays by default so neither is a single point.
         { pool: getPool() as never, skipSwitchRelays: true },
         signal ?? 300_000,
       )
@@ -231,12 +232,18 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
   }
 }
 
-/** Restore a previously approved client-initiated Nostr Connect session. */
-async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array): Promise<Signer> {
+/**
+ * Restore a previously approved client-initiated Nostr Connect session.
+ *
+ * The pubkey is the one saved at login, not asked for again: asking on every
+ * reload needs the signer app awake before anything can sign, with no bound on
+ * the wait, and an answer naming another account (the app switched accounts)
+ * would put a different key behind the chain on screen.
+ */
+async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array, pubkey: string): Promise<Signer> {
   const bp = await nip46.parseBunkerInput(bunkerUri)
   if (!bp) throw new Error('The saved Nostr Connect session is invalid.')
   const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: getPool() as never })
-  const pubkey = await bunker.getPublicKey()
   return wrapBunkerSigner(bunker, clientSecretKey, pubkey, bunkerUri, true)
 }
 
@@ -269,8 +276,16 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
   if (pref.kind === 'nip07') return nip07Signer()
   if (pref.kind === 'nip46' && pref.bunkerUri) {
     const clientSk = pref.clientNsec ? (nip19.decode(pref.clientNsec).data as Uint8Array) : undefined
-    if (pref.nostrConnectSession && clientSk) return nostrConnectSessionSigner(pref.bunkerUri, clientSk)
-    return nip46Signer(pref.bunkerUri, clientSk)
+    if (pref.nostrConnectSession && clientSk) return nostrConnectSessionSigner(pref.bunkerUri, clientSk, pref.pubkey)
+    // A bunker still does its handshake, and answers with the account it holds
+    // now. Refuse one that is not the account saved here: signing as it would
+    // continue this pubkey's chain under another key.
+    const signer = await nip46Signer(pref.bunkerUri, clientSk)
+    if (signer.pubkey !== pref.pubkey) {
+      await signer.close?.()
+      throw new Error('Your signer is now on a different account than the one logged in here. Switch it back, or log in again.')
+    }
+    return signer
   }
   throw new Error('Unusable signer preference')
 }

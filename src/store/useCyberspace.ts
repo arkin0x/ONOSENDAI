@@ -2559,7 +2559,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
   },
   useNostrConnect: async (session, signal, onConnected) => {
-    try { await switchTo(await session.connect(signal, onConnected)) }
+    try {
+      const signer = await session.connect(signal, onConnected)
+      // Left the QR screen while the signer was answering: do not switch.
+      if (signal?.aborted) { await signer.close?.(); return }
+      await switchTo(signer)
+    }
     catch (err) {
       if (!signal?.aborted) set({ loginError: err instanceof Error ? err.message : String(err) })
     }

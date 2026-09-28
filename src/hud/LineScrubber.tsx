@@ -24,8 +24,8 @@ import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownH
 import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 
-/** The coarse step: the line is ~900k blocks, single steps are the last few. */
-const JUMP = 1000
+/** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
+const JUMP = 100
 
 export function LineScrubber(): JSX.Element {
   const sync = useHyperspace((s) => s.sync)

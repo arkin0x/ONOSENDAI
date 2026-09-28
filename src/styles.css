@@ -4351,6 +4351,134 @@ kbd {
   cursor: not-allowed;
 }
 
+.login__primary,
+.login__options,
+.login__qr-flow,
+.login__relay {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login__options { gap: 11px; }
+
+.login__options .login__act {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+}
+
+.login__act--primary {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.08);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+}
+
+.login__or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.login__or::before,
+.login__or::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: rgba(200, 245, 255, 0.1);
+}
+
+.login__qr-flow {
+  align-items: stretch;
+}
+
+.login__qr-instruction {
+  margin: 0 0 4px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.login__qr-link {
+  align-self: center;
+  display: block;
+  max-width: 100%;
+  padding: 8px;
+  border-radius: 7px;
+  background: #f4fbff;
+  line-height: 0;
+}
+
+.login__qr {
+  display: block;
+  width: min(264px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.login__waiting {
+  margin: 4px 0 6px;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.login__relay {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(200, 245, 255, 0.08);
+}
+
+.login__back {
+  align-self: center;
+  margin-top: 8px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.login__back:hover { color: var(--accent); }
+
+.login__backup-details {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(200, 245, 255, 0.08);
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.login__backup-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.login__backup-details[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login__backup-details[open] summary { margin-bottom: 4px; }
+
 /* ---------- Hyperspace ---------- */
 
 /* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,

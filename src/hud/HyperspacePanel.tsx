@@ -92,14 +92,23 @@ export function abortRide(): void {
 export async function startRide(): Promise<void> {
   if (riding) return
   const destination = useHyperspace.getState().destination
-  const transit = useCyberspace.getState().transit
-  // A boarding this session, or the chain head already on the line: after a
-  // ride you stand at a stop and the next ride chains from it (§4.3), with
-  // no second boarding; after a reload an enter-hyperspace head is still a
-  // boarding. Either gives the ride its `previous` and its seed.
+  if (destination === null) return
+  // The chain head decides everything: an enter-hyperspace head is a boarding
+  // (this session's or one from before a reload), a hyperjump head is standing
+  // at its stop and the next ride chains from it with no second boarding
+  // (§4.3). Its id is the ride's `previous`, so it is also the seed of every
+  // leaf (§5.3) and of the re-roll price (§5.5). The boarding's own id is not
+  // used: when the head has moved since (a fork adopted from another device),
+  // leaves seeded by it would be published under a different `previous` and
+  // every one of them would be wrong.
   const line = lineStateOf(useCyberspace.getState().actions())
-  if (destination === null || (transit === null && line === null)) return
-  const previousId = transit?.enterEventId ?? line!.previousId
+  if (line === null) {
+    if (useCyberspace.getState().transit !== null) {
+      useRideRun.setState({ error: 'Your chain moved off the line since boarding. Board again to ride.' })
+    }
+    return
+  }
+  const previousId = line.previousId
   const destStop = getStopByHeight(destination)
   if (destStop === undefined) {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
@@ -110,7 +119,7 @@ export async function startRide(): Promise<void> {
   // station set bound is not declared, because no station is computed (§5.2).
   let fromHeight: number
   let asOf: number | undefined
-  if (line !== null && line.fromHeight !== null) {
+  if (line.fromHeight !== null) {
     fromHeight = line.fromHeight
     asOf = undefined
   } else {
@@ -173,6 +182,7 @@ export async function startRide(): Promise<void> {
       controller.signal,
     )
     await useCyberspace.getState().completeRide({
+      previousId,
       asOf,
       toCoordHex: coordToHex(stopCoordExact(destStop)),
       fromHeight,

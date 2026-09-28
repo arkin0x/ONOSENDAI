@@ -38,6 +38,7 @@ describe('chain stats count rides', () => {
 
   it('a completed ride adds a hyperjump and the blocks it passed', async () => {
     await useCyberspace.getState().completeRide({
+      previousId: useCyberspace.getState().prevEventId,
       toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f57',
       fromHeight: 398, toHeight: 500, asOf: 600, rootHex: '1'.repeat(64), mp: '',
     })

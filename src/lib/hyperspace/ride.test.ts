@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../events'
-import { bytesToHex, sha256 } from 'cyberspace-core'
+import { bytesToHex, hexToBytes, sha256 } from 'cyberspace-core'
 import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from './ride'
 
 const PREV = 'ab'.repeat(32)
@@ -166,6 +166,98 @@ describe('full ride round trip (prover and verifier agree)', () => {
     })
     expect(bad.ok).toBe(false)
   })
+})
+
+/**
+ * Real rides from the relay, recomputed from Bitcoin's block hashes. A Level 2
+ * audit on 2026-09-28 reported seven published rides whose roots did not match
+ * and blamed this client for computing leaves from wrong (byte-reversed) block
+ * hashes. It was the audit: it keyed recomputed leaves by height alone, so
+ * rides over the same heights overwrote each other's leaves. Recomputed per
+ * ride, every leaf of all seven matches and every root is exact. These are
+ * sampled openings from three of them, each leaf rebuilt here from the block
+ * hash in display order (as explorers and kind-321 anchors print it) and
+ * carried up its published path to the published root. A byte-order or seed
+ * regression in computeRideLeaf fails this.
+ */
+const PUBLISHED_OPENINGS = [
+  {
+    event: '43628b3880fb004f3f1236f298152fd093e3e0f3740fb4029b9ed9716249ae5c',
+    previous: '9a542c89185f096f20ef7cb2c235d72f3a617b6e72d2fc39facb7d9429d327a9',
+    root: '3d5ad294710aceb2a05529534252df3ecdc51a74d74923982040500bfbfbb21d',
+    height: 363896,
+    index: 161,
+    blockHash: '00000000000000000ee9da2d6b75cbeb876ec5edea0cf4758519b1b0cac6c916',
+    path: [
+      '741a73c6bb520bb157937d184d586504f8186414b9dcb95959c87aeaba1bb139',
+      '8431914d2134041580e5b03fd624cb96f10153c06541a6ad7d2fe1b09f63a7f5',
+      'a4f068d6d5838072f16cdcd8c778963e8741f66dd1d7c8a24821c7138e1e54a4',
+      'f6871244267b64e9240f6597052e9847959f84f626ba9ddd6618773f2043ea65',
+      'b11a042c22cb32e2876e4607ea958505020b08cc6210b4074f9e7e357324a9c2',
+      '677cd384dbf9fd26a27291b7d0b47513190cf96b966c94e79dd9d66912b7076f',
+      '5d2dc97bbdc0a7609da1755b09d56869b3f3c46e752a107eb808fc8039cacf64',
+      '59e58ed0221eabdd776875ace250af9fb00c0ceaa852626c6742eed093ae5803',
+    ],
+  },
+  {
+    event: '5222e768c6d6a2583b839bb94db9d4170573974dff6263f969dbe12ce4b62afd',
+    previous: '11b587c54e034d6a45fad85102a9ccee7c63adee083d2e83c1244e608afe6dc5',
+    root: 'c04d15060424e65945b1fd01cad1ec5762034c1af3899d92ef9f6f2bba9927bc',
+    height: 146240,
+    index: 89,
+    blockHash: '0000000000000546ab1a679dce0543a4b30f1d69249e87ef8509274f7f85ba43',
+    path: [
+      '2dba055054f68095adac6e596678248de7c1fd065a4f098136a505092049f8e5',
+      '965fadc63350379960b2338a58d04049a360dd75dd68eaafdc3371c52e4f817f',
+      'b1322e55f7dd315dd88619cb1cba173d99298074f562d3d50db5b496d634d2f3',
+      '6a23777c624103fa6febd25f530d7674ddc4d47bcdfab1e3d0d3413bdef2caf4',
+      '689ce512e309f16ca2eff2b8da31446540dfe5a50cd5d70a2e2db6725c1db30e',
+      'ffbca407116e5e82d195efd04718c7bcd3976eb656735a2dd96e89920b9e1e2b',
+      '403e66a37dbcd2a1deb4ceac285460c975e8a98104394095a5707130828b0b12',
+      '7ceb578082dcf1eba542a7e8614bf65af502c26d14ce6d11f3569de7fe85afa0',
+      '4374cbdf6abcb03cf8be5f9dd2b9e85ee510d838b287fae1c1217610abb35bb5',
+    ],
+  },
+  {
+    event: '6c98e33191f30bccd5882f318326e59126d997f8e4cf2d7986b89f8f6ef411e8',
+    previous: '011f772fe6f8121ea86111c73a9728d6613cb0b858bd13c9c85602349e764eba',
+    root: '8d97171a9c889dc6378c4ccce8ade223311c44e5fcba48252de4364bd6d39016',
+    height: 339035,
+    index: 16493,
+    blockHash: '000000000000000014f466dd447c06774d53849c6febd1d1fd7ace0213b78a92',
+    path: [
+      '18806973a4b2357900851b0fdcd06cb47b84d6c058cfcbeaa4147eb3562c3ddf',
+      '1e63eeaddad40811b1b85cb4d3c185580445603f719c28e8ed9f58a0331d7579',
+      'ce945ee3faf15c935a6e4580361468985a69a810b6a7d65d93341288a3fbd9b5',
+      '5e14025920240aaac8b55ae99dfa013be32c8ad1606277ad611dd3546a238268',
+      'c9c5f6095ef818cef0c3f2da9b250c25b44845c6fd5e45b594994f4364b0fb50',
+      '72a6c00f7b541863b3fd08817a1af9542afc51e52cca944189f38dbc5c31f887',
+      'bb3abe1b05c0f4ae8ade4cd2f25743630da7b79514434728fe46e7c43214a5b0',
+      'bc826624850d6010da5c0dcd45dd6b314b0dd6e5e278a61146c4a3b2f3fadbca',
+      '34418d163f40f24c57537c39892a21741f4fe5c01fdde4def9da0ef2fef1ddc9',
+      'fac82d6e3ae85ccc12322800feb02fb8a4aaa671786d964342e6d89b03aed224',
+      'b05c5b83242b6bae7476bbc10fffec9689bb782ebd97cbdf325bf61ec5a9fe80',
+      '0142f42568493d19c2934da98cc0ecbf0f4447f6bb9d9c9e5eb3f793aa40900d',
+      'd250b7bf406a6f8f0cfc5920fde6467b1cee7fe3289c957f1a39d0ea0893daf5',
+      '1265dab003ed03121aeac838ad2d19ada16724a32ccc18659a530abcc15b0e99',
+      '1fc3d11f9a0f73f7c471215475238dc8445daec8d851df1d4d1cf69af26c003c',
+      '1dd2817c67d184d0bbf06aefb0aa5825ac434d25548de1d55149aa3b5759d0e5',
+    ],
+  },
+]
+
+describe('published rides recompute exactly from display-order block hashes', () => {
+  for (const o of PUBLISHED_OPENINGS) {
+    it(`${o.event.slice(0, 10)} block ${o.height}`, () => {
+      const leaf = computeRideLeaf(o.previous, o.height, o.blockHash)
+      expect(verifyInclusion(leaf, o.index, o.path.map(hexToBytes), hexToBytes(o.root))).toBe(true)
+      // The internal (byte-reversed) order is a different block to the line.
+      const reversed = o.blockHash.match(/../g)!.reverse().join('')
+      if (lineTerrainK(reversed) !== lineTerrainK(o.blockHash)) {
+        expect(verifyInclusion(computeRideLeaf(o.previous, o.height, reversed), o.index, o.path.map(hexToBytes), hexToBytes(o.root))).toBe(false)
+      }
+    })
+  }
 })
 
 describe('cost estimates', () => {

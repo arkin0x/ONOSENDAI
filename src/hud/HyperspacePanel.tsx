@@ -21,8 +21,8 @@ import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
-import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
-import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
+import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
+import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
@@ -161,7 +161,7 @@ export async function startRide(): Promise<void> {
   rideAbort = controller
   useRideRun.setState({
     error: null,
-    progress: { done: 0, total: blocks.length, etaMs: null },
+    progress: { done: 0, total: blocks.length, etaMs: null, price: null },
     path: { fromHeight, toHeight: destination },
   })
   // The ride is a spectacle: pull back to the whole cube so the path can be
@@ -176,7 +176,7 @@ export async function startRide(): Promise<void> {
     81,
   )
   try {
-    const { rootHex, mp } = await computeRideProof(
+    const { rootHex, mp, mnHex } = await computeRideProof(
       { previousEventIdHex: previousId, blocks },
       (p) => useRideRun.setState({ progress: p }),
       controller.signal,
@@ -189,6 +189,7 @@ export async function startRide(): Promise<void> {
       toHeight: destination,
       rootHex,
       mp,
+      mnHex,
     })
     useHyperspace.getState().setDestination(null)
   } catch (err) {
@@ -354,11 +355,12 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Expected work</dt>
-                    <dd>{formatOps(expectedRidePairs(estimate.length))} PAIRS</dd>
+                    <dd>{formatOps(expectedRidePairs(estimate.length) + expectedPricePairs(estimate.length))} PAIRS</dd>
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration(estimate.length * benchMs)}</dd>
+                    {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
+                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration((estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs)}</dd>
                   </div>
                 </>
               )}
@@ -367,7 +369,9 @@ export function HyperspacePanel(): JSX.Element {
               STATION is where boarding sets you down: your nearest block as
               of the synced tip, ties to the lowest height. The ride runs from
               it to the destination; all of the per-block work runs locally
-              and resumes if interrupted.
+              and resumes if interrupted. A re-roll price of about one
+              thirty-second more follows the blocks, so a proof that skipped
+              some cannot cheaply retry its samples.
             </Explanation>
           </>
         )}
@@ -376,13 +380,15 @@ export function HyperspacePanel(): JSX.Element {
       {progress !== null && (
         <>
           <p className="hyper__progress">
-            RIDING {progress.done}/{progress.total}
+            {progress.price === null
+              ? `RIDING ${progress.done}/${progress.total}`
+              : `PRICE ${progress.price.attempts}/~${progress.price.expected}`}
             {progress.etaMs !== null && ` · ETA ${formatMs(progress.etaMs)}`}
           </p>
           <div className="bar">
             <div
               className="bar__fill bar__fill--computing"
-              style={{ width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 100}%` }}
+              style={{ width: `${rideFraction(progress) * 100}%` }}
             />
           </div>
         </>

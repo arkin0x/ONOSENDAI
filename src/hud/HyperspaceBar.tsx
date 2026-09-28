@@ -13,6 +13,7 @@
 import { formatMs } from '../lib/space'
 import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { rideFraction } from '../lib/hyperspace/ridePool'
 import { abortRide, useRideRun } from './HyperspacePanel'
 
 export function HyperspaceBar(): JSX.Element | null {
@@ -37,11 +38,16 @@ export function HyperspaceBar(): JSX.Element | null {
   }
 
   const label = progress !== null
-    ? `RIDING ${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 100}%`
+    ? `RIDING ${Math.round(rideFraction(progress) * 100)}%`
     : 'HYPERSPACE · BOARDED'
-  const meta = progress !== null
-    ? `BLOCK ${progress.done}/${progress.total}${progress.etaMs !== null ? ` · ETA ${formatMs(progress.etaMs)}` : ''}`
-    : 'PICK A BLOCK AND RIDE · MOVING CANCELS'
+  // Every block first, then the re-roll price (§5.5): attempts against the
+  // expected count, which an unlucky search can pass.
+  const eta = progress?.etaMs != null ? ` · ETA ${formatMs(progress.etaMs)}` : ''
+  const meta = progress === null
+    ? 'PICK A BLOCK AND RIDE · MOVING CANCELS'
+    : progress.price === null
+      ? `BLOCK ${progress.done}/${progress.total}${eta}`
+      : `PRICE ${progress.price.attempts}/~${progress.price.expected}${eta}`
 
   // One gesture whatever the stage: stop any pool, forget the boarding. The
   // wire needs nothing, the next ordinary hop cancels it there (§3.3).

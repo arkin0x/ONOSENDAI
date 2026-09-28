@@ -17,6 +17,7 @@ import {
   buildChain,
   chainHead,
   hopTemplate,
+  hyperjumpTemplate,
   parseAction,
   positionHex,
   sectorTags,
@@ -165,6 +166,30 @@ describe('sidestep (§8.5)', () => {
     expect(tagsNamed(ss, 'hx')).toEqual([['hx', '2']])
     expect(tagsNamed(ss, 'hy')).toEqual([['hy', '0']])
     expect(tagsNamed(ss, 'hz')).toEqual([['hz', '0']])
+  })
+})
+
+describe('hyperjump (DECK-0001 §5.2)', () => {
+  const stop = '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56'
+  const hj = hyperjumpTemplate({
+    createdAt: 1, genesisId: ZERO, previousId: ZERO, prevCoordHex: ZERO, toCoordHex: stop,
+    fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '11'.repeat(32), mp: '', mnHex: '000000000000002a',
+  })
+
+  it('carries the re-roll nonce after the openings and before the sector', () => {
+    expect(hj.tags.map((t) => t[0])).toEqual([
+      'A', 'e', 'e', 'c', 'C', 'from_height', 'B', 'as_of', 'proof', 'mp', 'mn', 'X', 'Y', 'Z', 'S',
+    ])
+    expect(tagsNamed(hj, 'mn')).toEqual([['mn', '000000000000002a']])
+  })
+
+  it('parses mn, reads a ride from before the price as having none, and refuses a malformed one', () => {
+    expect(parseAction(sign(hj))?.mn).toBe('000000000000002a')
+    const old = parseAction(sign({ ...hj, tags: hj.tags.filter((t) => t[0] !== 'mn') }))
+    expect(old?.type).toBe('hyperjump')
+    expect(old?.mn).toBeUndefined()
+    const bad = sign({ ...hj, tags: hj.tags.map((t) => (t[0] === 'mn' ? ['mn', '2a'] : t)) })
+    expect(parseAction(bad)).toBeNull()
   })
 })
 

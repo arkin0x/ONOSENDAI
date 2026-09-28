@@ -24,7 +24,7 @@ function chainAtStop() {
   const at = { x, y, z }
   const enter = finalizeEvent(enterHyperspaceTemplate({ createdAt: 1_700_000_001, genesisId: spawn.id, previousId: spawn.id, at, plane, proofHash: 'a'.repeat(64) }), sk)
   const stopCoord = '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56'
-  const jump = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_002, genesisId: spawn.id, previousId: enter.id, prevCoordHex: pubkey, toCoordHex: stopCoord, fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '' }), sk)
+  const jump = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_002, genesisId: spawn.id, previousId: enter.id, prevCoordHex: pubkey, toCoordHex: stopCoord, fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }), sk)
   return { sk, pubkey, events: [spawn, enter, jump] as NostrEvent[], stopCoord }
 }
 
@@ -46,7 +46,7 @@ describe('riding again from a stop', () => {
     await useCyberspace.getState().completeRide({
       previousId: prevId,
       toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f57',
-      fromHeight: 398, toHeight: 500, rootHex: '1'.repeat(64), mp: '',
+      fromHeight: 398, toHeight: 500, rootHex: '1'.repeat(64), mp: '', mnHex: '0'.repeat(16),
     })
     const events = useCyberspace.getState().events
     expect(events).toHaveLength(before.length + 1)
@@ -66,7 +66,7 @@ describe('riding again from a stop', () => {
     const { events } = useCyberspace.getState()
     // A chain whose head is the spawn: not on the line, and no boarding.
     useCyberspace.setState({ events: events.slice(0, 1), prevEventId: events[0].id })
-    await useCyberspace.getState().completeRide({ previousId: events[0].id, toCoordHex: 'a'.repeat(64), fromHeight: 1, toHeight: 2, rootHex: '0'.repeat(64), mp: '' })
+    await useCyberspace.getState().completeRide({ previousId: events[0].id, toCoordHex: 'a'.repeat(64), fromHeight: 1, toHeight: 2, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) })
     expect(useCyberspace.getState().events).toHaveLength(1)
   })
 })
@@ -79,7 +79,7 @@ describe('a ride is published under the head it was seeded by', () => {
     // head, where every one of its leaves would be wrong.
     const { sk, events } = chainAtStop()
     const [spawn, enter] = events
-    const moved = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_003, genesisId: spawn.id, previousId: enter.id, prevCoordHex: enter.tags.find((t) => t[0] === 'C')![1], toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56', fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '' }), sk)
+    const moved = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_003, genesisId: spawn.id, previousId: enter.id, prevCoordHex: enter.tags.find((t) => t[0] === 'C')![1], toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56', fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }), sk)
     useCyberspace.setState({
       events: [spawn, enter, moved], genesisId: spawn.id, prevEventId: moved.id,
       transit: { stage: 'boarded', enterEventId: enter.id, enterCoordHex: enter.tags.find((t) => t[0] === 'C')![1] },
@@ -87,7 +87,7 @@ describe('a ride is published under the head it was seeded by', () => {
     await expect(useCyberspace.getState().completeRide({
       previousId: enter.id,
       toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f57',
-      fromHeight: 100, toHeight: 500, asOf: 600, rootHex: '1'.repeat(64), mp: '',
+      fromHeight: 100, toHeight: 500, asOf: 600, rootHex: '1'.repeat(64), mp: '', mnHex: '0'.repeat(16),
     })).rejects.toThrow('chain moved')
     expect(useCyberspace.getState().events).toHaveLength(3)
     expect(useCyberspace.getState().prevEventId).toBe(moved.id)

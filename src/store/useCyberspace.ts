@@ -418,6 +418,8 @@ export interface CompletedRide {
   asOf?: number
   rootHex: string
   mp: string
+  /** The re-roll nonce (§5.5), the `mn` tag. */
+  mnHex: string
 }
 
 /** What the camera is looking at, when it is not looking at your own head. */
@@ -2366,6 +2368,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       asOf: ride.asOf,
       rootHex: ride.rootHex,
       mp: ride.mp,
+      mnHex: ride.mnHex,
     })
     let event: NostrEvent
     try {

@@ -70,6 +70,12 @@ export interface ActionEvent {
   asOf?: number
   /** Hyperjump only: the sampled openings, as written in the `mp` tag. */
   mp?: string
+  /**
+   * Hyperjump and sidestep: the re-roll nonce of the `mn` tag (DECK-0001
+   * §5.5, spec 6.10), exactly 16 lowercase hex. Absent on a ride or sidestep
+   * published before the re-roll price, which stands only if exempt by id.
+   */
+  mn?: string
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -211,6 +217,8 @@ export interface HyperjumpInput {
   rootHex: string
   /** The sampled openings; empty string for a zero-length ride. */
   mp: string
+  /** The re-roll nonce (§5.5), 16 lowercase hex; all zeros for a zero-length ride. */
+  mnHex: string
 }
 
 /** DECK-0001 v3 §5.2: ride the line from the station (or current stop) to a stop. */
@@ -231,6 +239,7 @@ export function hyperjumpTemplate(i: HyperjumpInput): EventTemplate {
       ...(i.asOf !== undefined ? [['as_of', String(i.asOf)]] : []),
       ['proof', i.rootHex],
       ['mp', i.mp],
+      ['mn', i.mnHex],
       ...sectorTags({ x: at.x, y: at.y, z: at.z }),
     ],
   }
@@ -307,6 +316,10 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   if (!genesisId || !HEX_64.test(genesisId)) return null
   if (!previousId || !HEX_64.test(previousId)) return null
   if (!proofHash || !HEX_64.test(proofHash)) return null
+  // The re-roll nonce: optional here, because events from before the price
+  // carry none and stand if exempt, but never malformed.
+  const mn = tag(ev, 'mn')
+  if (mn !== undefined && !/^[0-9a-f]{16}$/.test(mn)) return null
   if (type === 'sidestep') {
     for (const t of ['mr', 'mp', 'hx', 'hy', 'hz']) if (tag(ev, t) === undefined) return null
   }
@@ -334,8 +347,10 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
       toHeight: Number.parseInt(toStr, 10),
       asOf: asOfStr !== undefined ? Number.parseInt(asOfStr, 10) : undefined,
       mp: tag(ev, 'mp'),
+      ...(mn !== undefined ? { mn } : {}),
     }
   }
+  if (type === 'sidestep' && mn !== undefined) return { ...base, type, prevCoordHex, genesisId, previousId, proofHash, mn }
   return { ...base, type, prevCoordHex, genesisId, previousId, proofHash }
 }
 

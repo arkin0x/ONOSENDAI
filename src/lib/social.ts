@@ -25,10 +25,11 @@ export const REACTION_KIND = 7
 export const ACTION_KIND = 3333
 
 /**
- * The reactions offered with one tap. `+` is NIP-25's like, drawn as a heart;
- * the rest are the ones people already use on ONOSENDAI posts.
+ * The reactions offered with one tap, in arkinox's order (2026-09-28). `+` is
+ * NIP-25's like, drawn as a heart. Any other emoji someone reacts with, from
+ * another client, still shows in the list; this is only what is offered.
  */
-export const REACTIONS = ['+', '🤙', '🔥', '😎', '🩵', '👍'] as const
+export const REACTIONS = ['+', '👍', '🔥', '😎', '🤔', '🤯'] as const
 
 /** What a reaction or comment answers: its event id, author and kind. */
 export interface SocialTarget {

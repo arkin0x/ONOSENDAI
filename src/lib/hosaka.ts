@@ -200,9 +200,10 @@ export interface CloudSidestepResult {
   merkle_x: string
   merkle_y: string
   merkle_z: string
-  /** Per axis, the destination leaf's sibling hashes leaf-first; empty where the axis did not move. */
-  /** Per-axis openings (spec 6.10): the destination leaf's path, then eight sampled paths, each a list of sibling hashes leaf first; empty for a still axis. */
+  /** Per-axis openings (spec 6.10): the destination leaf's path, then eight paths sampled from G, each a list of sibling hashes leaf first; empty for a still axis. */
   openings: { x: string[][]; y: string[][]; z: string[][] }
+  /** The re-roll nonce (spec 6.10) as 16 lowercase hex, exactly the event's `mn` tag. */
+  mn: string
   lca_heights: [number, number, number]
   /** JSON numbers above 2^53: never read, only recomputed. */
   bases?: unknown

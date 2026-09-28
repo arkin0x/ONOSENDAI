@@ -147,6 +147,8 @@ export interface SidestepInput extends HopInput {
    * sampled paths, every sibling leaf first, one hex string per axis; an axis
    * that did not move contributes an empty string. */
   openings: [string, string, string]
+  /** The re-roll nonce the samples were drawn under (spec 6.10), 16 lowercase hex. */
+  mnHex: string
   lcaHeights: [number, number, number]
 }
 
@@ -161,6 +163,7 @@ export function sidestepTemplate(i: SidestepInput): EventTemplate {
       ...hop.tags.slice(1, 6),
       ['mr', i.merkleRoots.join(':')],
       ['mp', i.openings.join(':')],
+      ['mn', i.mnHex],
       ['hx', String(hx)],
       ['hy', String(hy)],
       ['hz', String(hz)],

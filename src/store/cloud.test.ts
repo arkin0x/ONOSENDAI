@@ -44,7 +44,7 @@ vi.mock('../lib/workers', async (importOriginal) => {
   return { ...actual, postProof: vi.fn(), cancelProof: vi.fn() }
 })
 
-import { cantorPair, computeHopProof, computeSidestepProof, bytesToHex, hexToBytes, intToBytesBE, sha256Hex } from 'cyberspace-core'
+import { cantorPair, computeHopProof, computeSidestepProof, bytesToHex, encodeNonce, hexToBytes, intToBytesBE, sha256Hex } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../lib/cloud'
 import { wallSource } from '../lib/movePlan'
@@ -79,7 +79,7 @@ function sidestepResult(from: Position, to: Position, plane: 0 | 1, prev: string
   const hex = (paths: Uint8Array[][]): string[][] => paths.map((q) => q.map(bytesToHex))
   return {
     proof_hash: p.proofHash, merkle_x: bytesToHex(p.merkleX), merkle_y: bytesToHex(p.merkleY), merkle_z: bytesToHex(p.merkleZ),
-    openings: { x: hex(p.openings.x), y: hex(p.openings.y), z: hex(p.openings.z) },
+    openings: { x: hex(p.openings.x), y: hex(p.openings.y), z: hex(p.openings.z) }, mn: encodeNonce(p.nonce),
     lca_heights: p.lcaHeights, previous_event_id: prev, terrain_k: p.terrainK, region_m_hex: p.regionM.toString(16), compute_msats: 300,
   }
 }
@@ -507,6 +507,7 @@ describe('cloud routes', () => {
     expect(ev.tags.find((t) => t[0] === 'proof')?.[1]).toBe(p.proofHash)
     expect(ev.tags.find((t) => t[0] === 'mr')?.[1]).toBe([p.merkleX, p.merkleY, p.merkleZ].map(bytesToHex).join(':'))
     expect(ev.tags.find((t) => t[0] === 'mp')?.[1]).toBe([p.openings.x.map((q) => q.map(bytesToHex).join('')).join(''), '', ''].join(':'))
+    expect(ev.tags.find((t) => t[0] === 'mn')?.[1]).toBe(encodeNonce(p.nonce))
     expect(ev.tags.find((t) => t[0] === 'hx')?.[1]).toBe('13')
     await vi.waitFor(() => { expect(S().plan).toBeNull() })
 

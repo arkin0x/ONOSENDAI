@@ -144,14 +144,24 @@ describe('sidestep (§8.5)', () => {
     to: { x: 8n, y: 0n, z: 0n }, plane: 0, proofHash: ZERO,
     merkleRoots: ['11'.repeat(32), '22'.repeat(32), '33'.repeat(32)],
     openings: ['aa'.repeat(32) + 'bb'.repeat(32), '', ''],
+    mnHex: '00000000000000ff',
     lcaHeights: [2, 0, 0],
   })
 
-  it('carries the merkle tags after the proof and before the sector', () => {
+  it('carries the merkle tags and the nonce after the proof and before the sector', () => {
     expect(ss.tags.map((t) => t[0])).toEqual([
-      'A', 'e', 'e', 'c', 'C', 'proof', 'mr', 'mp', 'hx', 'hy', 'hz', 'X', 'Y', 'Z', 'S',
+      'A', 'e', 'e', 'c', 'C', 'proof', 'mr', 'mp', 'mn', 'hx', 'hy', 'hz', 'X', 'Y', 'Z', 'S',
     ])
     expect(tagsNamed(ss, 'A')).toEqual([['A', 'sidestep']])
+    expect(tagsNamed(ss, 'mn')).toEqual([['mn', '00000000000000ff']])
+  })
+
+  it('parses mn, and reads a version 2 sidestep as having none', () => {
+    const ev = sign(ss)
+    expect(parseAction(ev)?.mn).toBe('00000000000000ff')
+    const v2 = parseAction(sign({ ...ss, tags: ss.tags.filter((t) => t[0] !== 'mn') }))
+    expect(v2?.type).toBe('sidestep')
+    expect(v2?.mn).toBeUndefined()
   })
 
   it('joins per-axis roots and proofs with colons, empty for still axes', () => {

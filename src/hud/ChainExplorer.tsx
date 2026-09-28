@@ -16,13 +16,13 @@
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
  *
- * "💬 Comments (N)" opens the reactions and public comments on the action
+ * COMMENTS (N), with a speech-bubble icon, opens the reactions and public comments on the action
  * under the mark (ActionModal; arkinox, 2026-09-28). The count is asked for
  * once the mark rests, not per step of a scrub.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound } from 'lucide-react'
+import { KeyRound, MessageCircle } from 'lucide-react'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
@@ -269,7 +269,7 @@ export function ChainExplorer(): JSX.Element {
           )}
           <button className="explorer__comments" {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useSocialUi.getState().openAction(action) }}
-          >💬 Comments{commentCount === null ? '' : ` (${commentCount})`}</button>
+          ><MessageCircle size={11} strokeWidth={2.25} aria-hidden />Comments{commentCount === null ? '' : ` (${commentCount})`}</button>
         </div>
       )}
     </div>

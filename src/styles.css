@@ -6451,6 +6451,9 @@ kbd {
 
 /* The chain explorer's way into an action's reactions and comments. */
 .explorer__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   align-self: flex-start;
   margin-top: 4px;
   padding: 4px 9px;

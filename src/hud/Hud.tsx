@@ -15,6 +15,7 @@ import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
+import { NotificationsButton } from './Notifications'
 import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
 import { LootPanel } from './LootPanel'
@@ -98,6 +99,9 @@ function IdentityPanel(): JSX.Element {
           <button className="identity__change" onClick={() => setProfileOpen(true)}>PROFILE</button>
           <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
         </div>
+      </div>
+      <div className="identity__row">
+        <NotificationsButton />
       </div>
 
       <Explanation>

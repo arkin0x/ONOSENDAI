@@ -4,7 +4,8 @@
  * Three ways in, one modal:
  * - NOTIFICATIONS in the identity panel, with a pulsing red dot in its top
  *   right corner while anything is unread;
- * - a toast under XOR BITS while anything is unread, "🤙 (face) and N more…";
+ * - a toast under XOR BITS while anything is unread, "🤙 (face) and N more…"
+ *   (a speech-bubble icon in place of the emoji when the newest is a comment);
  * - the modal itself: every notification, newest first, loading older ones
  *   as you scroll, each saying who, what, and what it was on, with a button
  *   that goes there (the move's modal, your deployment, or the thread a
@@ -13,6 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MessageCircle } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import type { Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
@@ -30,9 +32,13 @@ import { useShards } from '../store/useShards'
 import { useSocialUi } from '../store/useSocialUi'
 import { ProfilePic } from './ProfileBadge'
 
-/** The glyph a notification leads with: the reaction itself, or a speech bubble for words. */
+/**
+ * The glyph a notification leads with: the reaction itself, or for words the
+ * lucide speech bubble the chain explorer's COMMENTS button wears
+ * (arkinox, 2026-09-28).
+ */
 function glyphOf(n: Notification): JSX.Element {
-  if (n.what === 'comment') return <>💬</>
+  if (n.what === 'comment') return <MessageCircle className="notif__icon" size={16} strokeWidth={2.25} aria-hidden />
   return n.image ? <img className="reactions__img" src={n.image} alt={n.content} /> : <>{reactionGlyph(n.content)}</>
 }
 

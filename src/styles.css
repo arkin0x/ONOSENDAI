@@ -6525,7 +6525,8 @@ kbd {
   cursor: pointer;
   text-align: left;
 }
-.notif__toast-glyph { font-size: 15px; line-height: 1; }
+.notif__toast-glyph { font-size: 15px; line-height: 1; display: inline-flex; }
+.notif__icon { color: var(--accent); vertical-align: middle; }
 .notif__toast-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56vw; }
 
 /* The history modal. */

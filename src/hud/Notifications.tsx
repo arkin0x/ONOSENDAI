@@ -43,7 +43,8 @@ function glyphOf(n: Notification): JSX.Element {
 }
 
 function verbOf(n: Notification): string {
-  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? 'your hidden item' : 'your comment'
+  // A target found nowhere is kept rather than missed, and said as a possibility.
+  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
   return n.on.type === 'comment' ? 'replied to your comment' : `commented on ${on}`
 }

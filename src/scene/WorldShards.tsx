@@ -8,9 +8,8 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useMemo } from 'react'
-import { markSceneTapHandled } from '../hooks/useCanvasTap'
-import type { ThreeEvent } from '@react-three/fiber'
+import { useMemo, useRef } from 'react'
+import type { Group } from 'three'
 import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -18,9 +17,7 @@ import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { drawPoseAt } from '../lib/pose'
-
-/** A press that travels further than this is an orbit, not a tap. */
-const TAP_SLOP = 8
+import { TapTarget } from './TapTarget'
 
 const REACH = GRID_RADIUS * 8
 
@@ -66,25 +63,24 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => {
-        const hit = Math.max(0.6, w.scale * 2)
-        const open = (e: ThreeEvent<MouseEvent>): void => {
-          if (e.delta > TAP_SLOP) return
-          e.stopPropagation()
-          markSceneTapHandled()
-          useShards.getState().selectSecret(w.key)
-        }
-        return (
-          <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world clip={w.clip} pose={w.pose} />
-            {/* An invisible, generous tap target: shards can be a few pixels. */}
-            <mesh onClick={open}>
-              <sphereGeometry args={[hit, 8, 8]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
-          </group>
-        )
-      })}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} />)}
     </>
+  )
+}
+
+/**
+ * One shard in the world, and the tap target that is exactly what it draws:
+ * measured from the drawn group, and off while it is too small to see
+ * (TapTarget; arkinox, 2026-09-30).
+ */
+function PlacedShard({ w, birth }: { w: { key: string; shard: import('sno-core/shards').ShardModel; centre: [number, number, number]; scale: number; clip: ReturnType<typeof regionBox>; pose: ReturnType<typeof drawPoseAt> | undefined }; birth: number | undefined }): JSX.Element {
+  const drawn = useRef<Group>(null)
+  return (
+    <group position={w.centre}>
+      <group ref={drawn}>
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world clip={w.clip} pose={w.pose} />
+      </group>
+      <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />
+    </group>
   )
 }

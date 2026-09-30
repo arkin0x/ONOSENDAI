@@ -25,10 +25,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
@@ -37,8 +36,10 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
+import { TapTarget } from './TapTarget'
 
-const TAP_SLOP = 8
+/** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
+const TAP_PX = 44
 
 const REACH = GRID_RADIUS * 8
 /** The message color: a warm note against the cool field. */
@@ -140,12 +141,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   return (
     <>
       {placed.map((w) => {
-        const open = (e: ThreeEvent<MouseEvent>): void => {
-          if (e.delta > TAP_SLOP) return
-          e.stopPropagation()
-          markSceneTapHandled()
-          useShards.getState().selectSecret(w.key)
-        }
+        const open = (): void => useShards.getState().selectSecret(w.key)
         // Money reads as money: a coin is the turning diamond and the ₿, and
         // nothing else. Its token is two thousand characters of base64 that
         // say nothing to anybody, and the words someone leaves around one are
@@ -172,10 +168,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
                 : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
 
-            <mesh position={w.centre} onClick={open}>
-              <sphereGeometry args={[1, 8, 8]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
+            {/* The mark is a fixed size on screen at any zoom, so its target is
+                too: a fingertip over the mark (TapTarget). */}
+            <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
           </group>
         )
       })}

@@ -26,6 +26,7 @@ import { nip19 } from 'nostr-tools'
 import { exportNcryptsec } from '../lib/keyExport'
 import {
   deferredReconnect,
+  loginCredentialKind,
   localSigner,
   randomSigner,
   signerFromNcryptsec,
@@ -38,6 +39,7 @@ import {
   saveSignerPref,
   type Signer,
   type SignerKind,
+  type NostrConnectSession,
   signWithin,
 } from '../lib/signers'
 import {
@@ -622,10 +624,14 @@ export interface CyberspaceState {
   useNsec: (nsec: string) => Promise<void>
   /** Replace the identity from an ncryptsec and its password. */
   useNcryptsec: (ncryptsec: string, password: string) => Promise<void>
+  /** Use the single login field's nsec, ncryptsec, or bunker URI. */
+  useLogin: (credential: string, password?: string) => Promise<void>
   /** Switch to the browser extension (NIP-07). */
   useExtension: () => Promise<void>
   /** Switch to a remote bunker (NIP-46) from its bunker:// URI. */
   useBunker: (uri: string) => Promise<void>
+  /** Wait for and activate a client-initiated Nostr Connect QR session. */
+  useNostrConnect: (session: NostrConnectSession, signal?: AbortSignal, onConnected?: () => void) => Promise<void>
   /** Clear a shown login error. */
   clearLoginError: () => void
   /**
@@ -2544,6 +2550,19 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     try { await switchTo(signerFromNcryptsec(ncryptsec, password)) }
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
   },
+  useLogin: async (credential, password = '') => {
+    const kind = loginCredentialKind(credential)
+    try {
+      if (kind === 'nsec') await switchTo(signerFromNsec(credential))
+      else if (kind === 'ncryptsec') {
+        if (!password) throw new Error('Enter the password for this ncryptsec.')
+        await switchTo(signerFromNcryptsec(credential, password))
+      } else if (kind === 'bunker') await switchTo(await nip46Signer(credential))
+      else throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
+    } catch (err) {
+      set({ loginError: err instanceof Error ? err.message : String(err) })
+    }
+  },
   useExtension: async () => {
     try { await switchTo(await nip07Signer()) }
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
@@ -2551,6 +2570,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   useBunker: async (uri) => {
     try { await switchTo(await nip46Signer(uri)) }
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  },
+  useNostrConnect: async (session, signal, onConnected) => {
+    try {
+      const signer = await session.connect(signal, onConnected)
+      // Left the QR screen while the signer was answering: do not switch.
+      if (signal?.aborted) { await signer.close?.(); return }
+      await switchTo(signer)
+    }
+    catch (err) {
+      if (!signal?.aborted) set({ loginError: err instanceof Error ? err.message : String(err) })
+    }
   },
   clearLoginError: () => set({ loginError: null }),
 

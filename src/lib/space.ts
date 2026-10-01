@@ -162,14 +162,29 @@ export function pointCentre(
  */
 export const OCCUPANCY_SCALE_MAX = 33
 
-/** Placement for stop markers: the cell when you could stand there, the
- * point when it is one of half a million. */
+/**
+ * Whether markerCentre places continuously at this scale: above
+ * OCCUPANCY_SCALE_MAX it does, at and below it snaps to the cell.
+ *
+ * Its own function because a shard's clip box has to be measured in the
+ * frame the shard is drawn in, and that frame is decided here and nowhere
+ * else (lib/clip.ts regionBox). With the test written out in both places,
+ * the shard and its walls followed two different rules from 2^34 to 2^79
+ * and sat up to half a cell apart (arkinox, 2026-10-01).
+ */
+export function markerContinuous(scaleExp: number): boolean {
+  return scaleExp > OCCUPANCY_SCALE_MAX
+}
+
+/** Placement for stop markers, shards and messages: the cell when you could
+ * stand there, the point when it is one of half a million. The shard ghost
+ * uses it too, so what you aim is exactly where the shard then appears. */
 export function markerCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
 ): [number, number, number] {
-  return scaleExp <= OCCUPANCY_SCALE_MAX
-    ? cellCentre(p, origin, scaleExp, axes)
-    : pointCentre(p, origin, scaleExp, axes)
+  return markerContinuous(scaleExp)
+    ? pointCentre(p, origin, scaleExp, axes)
+    : cellCentre(p, origin, scaleExp, axes)
 }
 
 /**

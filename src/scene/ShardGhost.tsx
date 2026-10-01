@@ -14,6 +14,15 @@
  * deployed shard will, because both come from one function of the position
  * (lib/pose.ts).
  *
+ * The position follows the same rule. A deploy hides the shard at exactly the
+ * cursor's coordinate, and WorldShards draws it with markerCentre, so the
+ * ghost is drawn with markerCentre too, and its clip box comes from the one
+ * regionBox both use. It used to be drawn at the cursor's cell centre while
+ * the landed shard sat at its true position, so from 2^34 to 2^79 the shard
+ * appeared up to half a cell from where it was aimed (arkinox, 2026-10-01).
+ * Inside the cursor's cell either way: a true position is drawn within half a
+ * cell of its cell's centre on every axis.
+ *
  * FINE ROTATION hands the spin to the camera. Every frame the look direction
  * is read back into cyberspace axes and turned into a compass bearing at the
  * cursor, so orbiting turns the shard to face the way you are looking: the
@@ -26,7 +35,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import { Group } from 'three'
-import { CONTINUOUS_SCALE_MIN, placeCentre, type ViewAxes } from '../lib/space'
+import { markerCentre, type ViewAxes } from '../lib/space'
 import { bearingOf, csDirection, drawPoseAt, frameOf, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -59,10 +68,9 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // the way the placed shard will be, so what you see is what lands.
   const cursor = useCyberspace((s) => s.cursor)
   const deployHeight = useShards((s) => s.deployHeight)
-  // In the frame the ghost is drawn in: placeCentre puts it on the cursor's
-  // true position from CONTINUOUS_SCALE_MIN up, and the region it seals to
-  // has to be measured from there.
-  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, unit, scaleExp, axes, scaleExp >= CONTINUOUS_SCALE_MIN) : undefined), [shard, cursor, deployHeight, unit, scaleExp, axes])
+  // regionBox measures it in the frame markerCentre draws the ghost in, the
+  // same frame the landed shard's box is measured in.
+  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, unit, scaleExp, axes) : undefined), [shard, cursor, deployHeight, unit, scaleExp, axes])
 
   // Standing on the ground at the cursor, if that is what is being deployed.
   const plane = useCyberspace((s) => s.plane)
@@ -82,7 +90,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     const g = group.current
     if (!g) return
     const s = useCyberspace.getState()
-    const b = placeCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+    const b = markerCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     g.position.set(b[0], b[1], b[2])
 
     // FINE ROTATION: the camera owns the spin. The direction from the camera
@@ -99,7 +107,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
 
   const cursorAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    return placeCentre(st.cursor, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
+    return markerCentre(st.cursor, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 
   // A message ghosts as a dim note that follows the cursor.

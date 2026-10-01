@@ -18,30 +18,30 @@ export { boxContains, clipMesh, clipPoints, type Box, type Mesh } from 'sno-core
 
 import type { Box } from 'sno-core/clip'
 import type { ViewAxes } from './space'
-import { alignTo, stepFor, type Position } from './space'
+import { alignTo, markerContinuous, stepFor, type Position } from './space'
 
 /**
  * The region cube of side 2^height that contains `at`, in the render frame of
  * a shard placed at `at` with model units of 2^unit gibsons.
  *
- * The shard's group sits at the centre of the cell holding `at` at the
- * current zoom, so the frame's origin is that world point: the aligned
- * coordinate plus half a cell. Each render axis is one world axis with a
- * direction, as cellCentre maps them, so a box edge on a world axis lands on
- * its render axis at (edge minus origin) over 2^unit, flipped when the axis
- * points the other way.
+ * The shard's group sits where markerCentre draws it, and the frame's origin
+ * is the world point that is drawn there. At and below OCCUPANCY_SCALE_MAX
+ * that is the centre of the cell holding `at` at the current zoom: the
+ * aligned coordinate plus half a cell. Above it, markerCentre places the
+ * shard at its true position, so the frame's origin is `at` itself and there
+ * is no half cell. Which of the two applies is markerContinuous's answer,
+ * the same one markerCentre acts on, so the walls cannot follow a different
+ * rule from the shard they seal: when this measured from the cell centre at
+ * every zoom, from 2^34 to 2^79 the box sat up to half a cell off the shard
+ * it was drawn on (arkinox, 2026-10-01).
  *
- * `continuous` says the shard was placed at its true position instead
- * (pointCentre, which is what placeCentre does from CONTINUOUS_SCALE_MIN up).
- * Its group then sits on `at` itself, so the frame's origin is `at` and the
- * half cell does not apply. Measured from the cell centre, the box would sit
- * up to half a cell off the shard it seals, which at the zoom where that
- * shard is visible is half its own size.
+ * Each render axis is one world axis with a direction, as markerCentre maps
+ * them, so a box edge on a world axis lands on its render axis at (edge
+ * minus origin) over 2^unit, flipped when the axis points the other way.
  */
-export function regionBox(
-  at: Position, height: number, unit: number, scaleExp: number, axes: ViewAxes, continuous = false,
-): Box {
+export function regionBox(at: Position, height: number, unit: number, scaleExp: number, axes: ViewAxes): Box {
   const h = BigInt(height)
+  const continuous = markerContinuous(scaleExp)
   const half = continuous ? 0 : Number(stepFor(scaleExp)) / 2
   const perUnit = 2 ** unit
   const min: [number, number, number] = [0, 0, 0]

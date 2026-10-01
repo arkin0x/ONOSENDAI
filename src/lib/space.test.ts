@@ -1004,3 +1004,41 @@ describe('continuous placement from 2^80 up', () => {
     }
   })
 })
+
+/**
+ * The shard ghost is drawn with markerCentre, the rule the landed shard is
+ * drawn with, at the cursor's coordinate, which is exactly where a deploy
+ * hides it. So the ghost IS where the shard will appear. These pin what that
+ * does to the ghost against the cursor cube it rides (arkinox, 2026-10-01).
+ */
+describe('the shard ghost against the cursor cube', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+
+  it('sits on the cube centre, exactly as before, at 2^33 and below', () => {
+    for (let scaleExp = 0; scaleExp <= OCCUPANCY_SCALE_MAX; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: HERE.x + 3n * step, y: HERE.y - step, z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      expect(markerCentre(cursor, origin, scaleExp, axes)).toEqual(placeCentre(cursor, origin, scaleExp, axes))
+    }
+  })
+
+  it('stays inside the cursor cube at every zoom', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: clampAxis(HERE.x + 3n * step), y: clampAxis(HERE.y - step), z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      const ghost = markerCentre(cursor, origin, scaleExp, axes)
+      const cube = placeCentre(cursor, origin, scaleExp, axes)
+      // From 2^80 up the cube itself is centred on the true point.
+      const cell = scaleExp >= CONTINUOUS_SCALE_MIN ? ghost : cellCentre(cursor, origin, scaleExp, axes)
+      expect(cube).toEqual(cell)
+      for (let i = 0; i < 3; i++) expect(Math.abs(ghost[i] - cell[i])).toBeLessThanOrEqual(0.5)
+    }
+  })
+})

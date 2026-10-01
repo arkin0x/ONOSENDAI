@@ -16,6 +16,14 @@
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
  *
+ * The chip also reports what a fold from another device did to your chain:
+ * actions it brought, actions it dropped, and in their own words the two
+ * cases a count hides, a chain replaced by a newer spawn and published
+ * moves overturned by an older branch (arkinox, 2026-10-01). They stay
+ * here, on the chain's own chip, rather than under the LIVE/LOCAL switch:
+ * they report something that already happened to the chain, while the
+ * strip there reports a publishing state that is still in force.
+ *
  * COMMENTS (N), with a speech-bubble icon, opens the reactions and public comments on the action
  * under the mark (ActionModal; arkinox, 2026-09-28). The count is asked for
  * once the mark rests, not per step of a scrub.
@@ -135,7 +143,20 @@ export function ChainExplorer(): JSX.Element {
     <div className="explorer">
       {/* The chain is the thing that forks, so the chain's own chip is where a
           fork is reported: what another device added, and what it cost. */}
-      {fork && fork.dropped > 0 ? (
+      {fork && (fork.replaced || fork.overturned > 0) ? (
+        // The two cases the generic counts used to hide: the whole chain
+        // superseded by a newer spawn, and published moves taken out by
+        // another device's older branch (arkinox, 2026-10-01). Both stay on
+        // the chip until read, like any drop.
+        <button
+          className="chip explorer__toggle explorer__toggle--dropped"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label={`${fork.replaced ? 'Your chain was replaced by a new spawn from another device' : `${fork.overturned} of your published moves were overturned by another device`}. Tap to read why.`}
+        >
+          {fork.replaced ? 'CHAIN REPLACED BY A NEW SPAWN' : `${fork.overturned} PUBLISHED MOVE${fork.overturned === 1 ? '' : 'S'} OVERTURNED`}
+        </button>
+      ) : fork && fork.dropped > 0 ? (
         <button
           className="chip explorer__toggle explorer__toggle--dropped"
           {...noCallout}
@@ -165,7 +186,43 @@ export function ChainExplorer(): JSX.Element {
         </button>
       )}
 
-      {showFork && fork && (
+      {showFork && fork && (fork.replaced ? (
+        <ConfirmModal
+          title="Your chain was replaced by a new spawn from another device"
+          cardClassName="chainexplain"
+          scroll
+          body={<>
+            <p><b>What happened:</b> another device signed in as you published a new spawn. A spawn is the first event of a chain: it places your identity at the coordinate your public key decodes to. The protocol places every identity by its newest spawn (spec §3.2), so the chain that new spawn starts is now your chain, for every reader and on this device. Your avatar moved to where that chain puts you.</p>
+            <p><b>Why the other device did it:</b> usually one of two things. Either it respawned, which starts a new chain on purpose, or it had started a chain before it could confirm whether this identity already had one (offline, or the relays did not answer) and, when it found this chain, its user chose to keep its own chain and publish it.</p>
+            <p><b>What happened to your previous chain:</b> its {fork.dropped} action{fork.dropped === 1 ? '' : 's'} on this device {fork.dropped === 1 ? 'is' : 'are'} no longer part of your chain. The ones that were published stay on the relays as history, but they no longer place you. Anything you paid HOSAKA for on that chain was spent. Region keys those moves found stay in your Secrets.</p>
+            <p><b>What this device did by itself:</b> it adopted the new chain without asking, because a newer spawn from your own identity on a chain this device had already confirmed is a legitimate change made by you on another device.</p>
+            <p><b>What you can do:</b> nothing is required; your next move continues the new chain. If you did not respawn or choose to keep another chain on any of your devices, someone else may be using this identity's key.</p>
+          </>}
+          confirmLabel="UNDERSTOOD"
+          cancelLabel={null}
+          danger={false}
+          onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+          onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+        />
+      ) : fork.overturned > 0 ? (
+        <ConfirmModal
+          title={`Another device's older branch overturned ${fork.overturned} of your published move${fork.overturned === 1 ? '' : 's'}`}
+          cardClassName="chainexplain"
+          scroll
+          body={<>
+            <p><b>What happened:</b> {fork.overturned} move{fork.overturned === 1 ? '' : 's'} this device had already published {fork.overturned === 1 ? 'is' : 'are'} no longer part of your chain, for every reader. Another device signed in as you had moves from an earlier point of the chain that it had not published yet (it was LOCAL or offline), and it has now published them.</p>
+            <p><b>Why its moves won:</b> both branches continue from the same action, so the chain forked. Every reader resolves a fork the same way: the older of the two next actions by created_at (the time each event says it was signed) continues the chain, a tie going to the smaller event id. The other device's first move after the fork is older than this device's, so its branch continues the chain. If that device runs this version of ONOSENDAI, it was shown both branches before publishing, was told that publishing would override these moves, and its user chose to publish.</p>
+            <p><b>What happened to your moves:</b> they stay on the relays as a branch that no reader follows.{fork.dropped > fork.overturned ? ` ${fork.dropped - fork.overturned} unpublished action${fork.dropped - fork.overturned === 1 ? '' : 's'} built on them went with them.` : ''} Anything you paid HOSAKA for on that branch was spent. Region keys those moves found stay in your Secrets.</p>
+            <p><b>What this device did by itself:</b> it adopted the winning branch, which is why your avatar moved. {fork.adopted} action{fork.adopted === 1 ? '' : 's'} arrived from the other device.</p>
+            <p><b>What you can do:</b> nothing is required; your next move continues from where you stand now. To avoid this, act on one device at a time, or let a device that was LOCAL or offline publish before moving on another.</p>
+          </>}
+          confirmLabel="UNDERSTOOD"
+          cancelLabel={null}
+          danger={false}
+          onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+          onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+        />
+      ) : (
         <ConfirmModal
           title={fork.dropped > 0 ? 'Your chain forked' : 'Another device moved you'}
           body={fork.dropped > 0 ? (<>
@@ -190,7 +247,7 @@ export function ChainExplorer(): JSX.Element {
           onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
           onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
         />
-      )}
+      ))}
 
       {open && action && (
         <div className={`explorer__body ${atHead ? '' : 'is-history'}`}>

@@ -6,8 +6,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../../events'
-import { bytesToHex, sha256 } from 'cyberspace-core'
-import { CALIBRATION_KS, K_LINE, SAMPLES, buildRideProof, calibrationHashes, computeRideLeaf, decodeOpenings, encodeOpenings, exactRidePairs, inclusionPath, lineTerrainK, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from '../ride'
+import { bytesToHex, hexToBytes, sha256 } from 'cyberspace-core'
+import { CALIBRATION_KS, K_LINE, SAMPLES, ZERO_NONCE_HEX, attemptsRequired, be32, be64, buildRideProof, calibrationHashes, computeRideLeaf, decodeNonce, decodeOpenings, encodeNonce, encodeOpenings, exactRidePairs, expectedPricePairs, grindAttempt, inclusionPath, isGrandfatheredV1Hyperjump, lineTerrainK, meetsPrice, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from '../ride'
+import { GRANDFATHERED_V1_HYPERJUMPS, GRANDFATHERED_V1_HYPERJUMPS_SOURCE } from '../grandfathered'
 
 const PREV = 'ab'.repeat(32)
 
@@ -99,30 +100,33 @@ describe('full ride round trip (prover and verifier agree)', () => {
   it('a synthetic 5-block ride proves and verifies at Level 1', async () => {
     const blocks = rideBlocks(100, 105)
     const leaves = blocks.map((b) => computeRideLeaf(PREV, b, fakeHash(b)))
-    const proof = buildRideProof(leaves)
+    const proof = buildRideProof(PREV, leaves)
     const result = await verifyRideLevel1({
       previousEventIdHex: PREV,
       fromHeight: 100,
       toHeight: 105,
       rootHex: proof.rootHex,
       mp: proof.mp,
+      mn: proof.mnHex,
       blockHashFor: (h) => fakeHash(h),
     })
     expect(result.reason).toBeNull()
     expect(result.ok).toBe(true)
     expect(result.checked).toBe(SAMPLES)
+    expect(result.grandfathered).toBe(false)
   })
 
   it('rejects a proof built under a different chain position', async () => {
     const blocks = rideBlocks(100, 105)
     const leaves = blocks.map((b) => computeRideLeaf('cd'.repeat(32), b, fakeHash(b)))
-    const proof = buildRideProof(leaves)
+    const proof = buildRideProof('cd'.repeat(32), leaves)
     const result = await verifyRideLevel1({
       previousEventIdHex: PREV,
       fromHeight: 100,
       toHeight: 105,
       rootHex: proof.rootHex,
       mp: proof.mp,
+      mn: proof.mnHex,
       blockHashFor: (h) => fakeHash(h),
     })
     expect(result.ok).toBe(false)
@@ -131,7 +135,7 @@ describe('full ride round trip (prover and verifier agree)', () => {
   it('rejects a tampered opening', async () => {
     const blocks = rideBlocks(200, 203)
     const leaves = blocks.map((b) => computeRideLeaf(PREV, b, fakeHash(b)))
-    const proof = buildRideProof(leaves)
+    const proof = buildRideProof(PREV, leaves)
     const tampered = proof.mp.replace(/^../, proof.mp.startsWith('00') ? '11' : '00')
     const result = await verifyRideLevel1({
       previousEventIdHex: PREV,
@@ -139,33 +143,244 @@ describe('full ride round trip (prover and verifier agree)', () => {
       toHeight: 203,
       rootHex: proof.rootHex,
       mp: tampered,
+      mn: proof.mnHex,
       blockHashFor: (h) => fakeHash(h),
     })
     expect(result.ok).toBe(false)
   })
 
-  it('accepts only the zero root for a zero-length ride', async () => {
-    const proof = buildRideProof([])
-    expect(proof.rootHex).toBe('0'.repeat(64))
-    const ok = await verifyRideLevel1({
-      previousEventIdHex: PREV,
-      fromHeight: 7,
-      toHeight: 7,
-      rootHex: proof.rootHex,
-      mp: '',
-      blockHashFor: (h) => fakeHash(h),
+  it('a zero-length ride carries the zero root, an all-zero mn and nothing else', async () => {
+    const proof = buildRideProof(PREV, [])
+    expect(proof).toEqual({ rootHex: '0'.repeat(64), mp: '', mnHex: ZERO_NONCE_HEX })
+    const verify = (rootHex: string, mn: string | null) => verifyRideLevel1({
+      previousEventIdHex: PREV, fromHeight: 7, toHeight: 7, rootHex, mp: '', mn, blockHashFor: (h) => fakeHash(h),
     })
-    expect(ok.ok).toBe(true)
-    const bad = await verifyRideLevel1({
-      previousEventIdHex: PREV,
-      fromHeight: 7,
-      toHeight: 7,
-      rootHex: 'ab'.repeat(32),
-      mp: '',
-      blockHashFor: (h) => fakeHash(h),
-    })
-    expect(bad.ok).toBe(false)
+    expect((await verify(proof.rootHex, proof.mnHex)).ok).toBe(true)
+    expect((await verify('ab'.repeat(32), proof.mnHex)).ok).toBe(false)
+    expect((await verify(proof.rootHex, '0000000000000001')).ok).toBe(false)
+    // Without an mn it is an old-format ride, and this one is not listed.
+    expect((await verify(proof.rootHex, null)).ok).toBe(false)
   })
+})
+
+/**
+ * DECK-0001 decks/hyperjump-reference.py at cyberspace 7f724d5. Its block
+ * hashes are synthetic: for each height the first of
+ * sha256("CYBERSPACE_TEST_BLOCK" || be64(b) || be32(j)), j = 0, 1, ..., whose
+ * ride height K + 6 is at most 10, so every leaf is cheap.
+ */
+function syntheticBlockHash(b: number): string {
+  const domain = new TextEncoder().encode('CYBERSPACE_TEST_BLOCK')
+  for (let j = 0; ; j++) {
+    const hex = bytesToHex(sha256(new Uint8Array([...domain, ...be64(b), ...be32(j)])))
+    if (lineTerrainK(hex) + K_LINE <= 10) return hex
+  }
+}
+
+const ZERO = '00'.repeat(32)
+const RANGE_32 = Array.from({ length: 32 }, (_, i) => i.toString(16).padStart(2, '0')).join('')
+
+describe('ride openings version 2: golden vectors', () => {
+  it('the synthetic block hash and one leaf', () => {
+    expect(syntheticBlockHash(900001)).toBe('4cc35fd75b8cbdea8bb92adb8ff97f54413dc0af8240fed67d81058ee234b678')
+    expect(bytesToHex(computeRideLeaf(ZERO, 900001, syntheticBlockHash(900001))))
+      .toBe('ffde7ee869b9b0c4a780f2ac0f481e257070e96294e0a5ead72486857f24633a')
+  })
+
+  it('one attempt: grind_attempt(zero, zero_root, 0)', () => {
+    expect(bytesToHex(grindAttempt(ZERO, new Uint8Array(32), 0n)))
+      .toBe('4bac0e5bb9c3bd5058732e2715457c036f87144879e923cdd2a54eab31303707')
+  })
+
+  it('a 40-block ride: root, nonce, G and first sample, and it passes Level 1', async () => {
+    const blocks = rideBlocks(900000, 900040)
+    const leaves = blocks.map((b) => computeRideLeaf(ZERO, b, syntheticBlockHash(b)))
+    const proof = buildRideProof(ZERO, leaves)
+    expect(proof.rootHex).toBe('83187e3a539d79fa9d218843f37d25912b9fb7fbe3d198948d74063e0193a8f3')
+    expect(proof.mnHex).toBe('0000000000000000')
+    const G = grindAttempt(ZERO, hexToBytes(proof.rootHex), 0n)
+    expect(bytesToHex(G)).toBe('1ba2e1b836822a7d2263d6e4d83df1d6eb9b70cfa6f77c29ff79d4c09926b08e')
+    expect(sampleIndices(G, 40)[0]).toBe(21)
+    expect(attemptsRequired(40)).toBe(2)
+
+    const verify = (over: { mp?: string; mn?: string | null; previousEventIdHex?: string }) => verifyRideLevel1({
+      previousEventIdHex: ZERO, fromHeight: 900000, toHeight: 900040, rootHex: proof.rootHex, mp: proof.mp, mn: proof.mnHex,
+      blockHashFor: syntheticBlockHash, ...over,
+    })
+    expect(await verify({})).toEqual({ ok: true, checked: SAMPLES, reason: null, grandfathered: false })
+
+    // A nonce that misses the price: G for nonce 2 is above 2^255 and A is 2.
+    expect(meetsPrice(grindAttempt(ZERO, hexToBytes(proof.rootHex), 2n), 2)).toBe(false)
+    expect((await verify({ mn: '0000000000000002' })).reason).toBe('the mn nonce does not meet the price')
+
+    // Version 1 openings (samples drawn from the root) do not pass under G.
+    const layers = merkleLayers(leaves)
+    const v1Domain = new TextEncoder().encode('CYBERSPACE_HYPERSPACE_SAMPLE_V1')
+    const v1 = Array.from({ length: SAMPLES }, (_, i) => {
+      const d = sha256(new Uint8Array([...v1Domain, ...hexToBytes(proof.rootHex), ...be32(i)]))
+      return Number(BigInt('0x' + bytesToHex(d)) % 40n)
+    })
+    expect((await verify({ mp: encodeOpenings(v1.map((i) => inclusionPath(layers, i))) })).ok).toBe(false)
+
+    // Bound to its chain position: the same proof under another previous fails.
+    expect((await verify({ previousEventIdHex: RANGE_32 })).ok).toBe(false)
+    // Malformed or missing mn.
+    expect((await verify({ mn: '00' })).reason).toBe('malformed mn')
+    expect((await verify({ mn: null })).ok).toBe(false)
+  })
+
+  it('a 1-block ride under bytes(0..31)', () => {
+    const leaf = computeRideLeaf(RANGE_32, 900001, syntheticBlockHash(900001))
+    const proof = buildRideProof(RANGE_32, [leaf])
+    expect(proof.rootHex).toBe('20ef123bafc81ad21a14ffc1d5ffe3be7481ff142a60c5021c0875ac6d2953f0')
+    expect(proof.mnHex).toBe('0000000000000000')
+    const G = grindAttempt(RANGE_32, hexToBytes(proof.rootHex), 0n)
+    expect(bytesToHex(G)).toBe('e1a04954bdc47c37af1eee22123da22faa2716529b1199fc2e91a9682197ef5f')
+    expect(sampleIndices(G, 1)[0]).toBe(0)
+  })
+
+  it('the mn tag is 16 lowercase hex, big-endian', () => {
+    expect(encodeNonce(0n)).toBe(ZERO_NONCE_HEX)
+    expect(encodeNonce(0x1234n)).toBe('0000000000001234')
+    expect(encodeNonce((1n << 64n) - 1n)).toBe('ffffffffffffffff')
+    expect(() => encodeNonce(1n << 64n)).toThrow()
+    expect(decodeNonce('0000000000001234')).toBe(0x1234n)
+    expect(decodeNonce('000000000000123')).toBeNull()
+    expect(decodeNonce('000000000000123A')).toBeNull()
+  })
+
+  it('the price is about one thirty-second of the ride, and nothing for a zero-length one', () => {
+    expect(attemptsRequired(0)).toBe(1)
+    expect(attemptsRequired(32)).toBe(1)
+    expect(attemptsRequired(33)).toBe(2)
+    expect(attemptsRequired(320_000)).toBe(10_000)
+    expect(expectedPricePairs(0)).toBe(0)
+    expect(expectedPricePairs(320_000)).toBe(10_000 * 2 ** 16)
+  })
+})
+
+describe('rides from before the re-roll price (§5.8)', () => {
+  const listed = '43628b3880fb004f3f1236f298152fd093e3e0f3740fb4029b9ed9716249ae5c'
+  const input = {
+    previousEventIdHex: PREV, fromHeight: 363971, toHeight: 363734, rootHex: 'ab'.repeat(32), mp: 'not openings',
+    blockHashFor: (): string => { throw new Error('a listed ride is not recomputed') },
+  }
+
+  it('a listed ride without mn is accepted without re-checking its root or openings', async () => {
+    expect(await verifyRideLevel1({ ...input, eventId: listed, mn: null }))
+      .toEqual({ ok: true, checked: 0, reason: null, grandfathered: true })
+  })
+
+  it('an unlisted ride without mn is invalid', async () => {
+    const r = await verifyRideLevel1({ ...input, eventId: 'ee'.repeat(32), mn: null })
+    expect(r.ok).toBe(false)
+    expect(r.grandfathered).toBe(false)
+    expect((await verifyRideLevel1({ ...input, mn: null })).ok).toBe(false)
+  })
+
+  it('a listed id that carries an mn is checked like any other ride', async () => {
+    expect((await verifyRideLevel1({ ...input, eventId: listed, mn: ZERO_NONCE_HEX, blockHashFor: fakeHash })).ok).toBe(false)
+  })
+
+  it('embeds the 16 ids of decks/grandfathered-v1-hyperjumps.txt with their source commit', () => {
+    expect(GRANDFATHERED_V1_HYPERJUMPS.size).toBe(16)
+    for (const id of GRANDFATHERED_V1_HYPERJUMPS) expect(id).toMatch(/^[0-9a-f]{64}$/)
+    expect(GRANDFATHERED_V1_HYPERJUMPS_SOURCE).toMatch(/^[0-9a-f]{40}$/)
+    expect(isGrandfatheredV1Hyperjump(listed)).toBe(true)
+    expect(isGrandfatheredV1Hyperjump(undefined)).toBe(false)
+  })
+})
+
+/**
+ * Real rides from the relay, recomputed from Bitcoin's block hashes. A Level 2
+ * audit on 2026-09-28 reported seven published rides whose roots did not match
+ * and blamed this client for computing leaves from wrong (byte-reversed) block
+ * hashes. It was the audit: it keyed recomputed leaves by height alone, so
+ * rides over the same heights overwrote each other's leaves. Recomputed per
+ * ride, every leaf of all seven matches and every root is exact. These are
+ * sampled openings from three of them, each leaf rebuilt here from the block
+ * hash in display order (as explorers and kind-321 anchors print it) and
+ * carried up its published path to the published root. A byte-order or seed
+ * regression in computeRideLeaf fails this.
+ */
+const PUBLISHED_OPENINGS = [
+  {
+    event: '43628b3880fb004f3f1236f298152fd093e3e0f3740fb4029b9ed9716249ae5c',
+    previous: '9a542c89185f096f20ef7cb2c235d72f3a617b6e72d2fc39facb7d9429d327a9',
+    root: '3d5ad294710aceb2a05529534252df3ecdc51a74d74923982040500bfbfbb21d',
+    height: 363896,
+    index: 161,
+    blockHash: '00000000000000000ee9da2d6b75cbeb876ec5edea0cf4758519b1b0cac6c916',
+    path: [
+      '741a73c6bb520bb157937d184d586504f8186414b9dcb95959c87aeaba1bb139',
+      '8431914d2134041580e5b03fd624cb96f10153c06541a6ad7d2fe1b09f63a7f5',
+      'a4f068d6d5838072f16cdcd8c778963e8741f66dd1d7c8a24821c7138e1e54a4',
+      'f6871244267b64e9240f6597052e9847959f84f626ba9ddd6618773f2043ea65',
+      'b11a042c22cb32e2876e4607ea958505020b08cc6210b4074f9e7e357324a9c2',
+      '677cd384dbf9fd26a27291b7d0b47513190cf96b966c94e79dd9d66912b7076f',
+      '5d2dc97bbdc0a7609da1755b09d56869b3f3c46e752a107eb808fc8039cacf64',
+      '59e58ed0221eabdd776875ace250af9fb00c0ceaa852626c6742eed093ae5803',
+    ],
+  },
+  {
+    event: '5222e768c6d6a2583b839bb94db9d4170573974dff6263f969dbe12ce4b62afd',
+    previous: '11b587c54e034d6a45fad85102a9ccee7c63adee083d2e83c1244e608afe6dc5',
+    root: 'c04d15060424e65945b1fd01cad1ec5762034c1af3899d92ef9f6f2bba9927bc',
+    height: 146240,
+    index: 89,
+    blockHash: '0000000000000546ab1a679dce0543a4b30f1d69249e87ef8509274f7f85ba43',
+    path: [
+      '2dba055054f68095adac6e596678248de7c1fd065a4f098136a505092049f8e5',
+      '965fadc63350379960b2338a58d04049a360dd75dd68eaafdc3371c52e4f817f',
+      'b1322e55f7dd315dd88619cb1cba173d99298074f562d3d50db5b496d634d2f3',
+      '6a23777c624103fa6febd25f530d7674ddc4d47bcdfab1e3d0d3413bdef2caf4',
+      '689ce512e309f16ca2eff2b8da31446540dfe5a50cd5d70a2e2db6725c1db30e',
+      'ffbca407116e5e82d195efd04718c7bcd3976eb656735a2dd96e89920b9e1e2b',
+      '403e66a37dbcd2a1deb4ceac285460c975e8a98104394095a5707130828b0b12',
+      '7ceb578082dcf1eba542a7e8614bf65af502c26d14ce6d11f3569de7fe85afa0',
+      '4374cbdf6abcb03cf8be5f9dd2b9e85ee510d838b287fae1c1217610abb35bb5',
+    ],
+  },
+  {
+    event: '6c98e33191f30bccd5882f318326e59126d997f8e4cf2d7986b89f8f6ef411e8',
+    previous: '011f772fe6f8121ea86111c73a9728d6613cb0b858bd13c9c85602349e764eba',
+    root: '8d97171a9c889dc6378c4ccce8ade223311c44e5fcba48252de4364bd6d39016',
+    height: 339035,
+    index: 16493,
+    blockHash: '000000000000000014f466dd447c06774d53849c6febd1d1fd7ace0213b78a92',
+    path: [
+      '18806973a4b2357900851b0fdcd06cb47b84d6c058cfcbeaa4147eb3562c3ddf',
+      '1e63eeaddad40811b1b85cb4d3c185580445603f719c28e8ed9f58a0331d7579',
+      'ce945ee3faf15c935a6e4580361468985a69a810b6a7d65d93341288a3fbd9b5',
+      '5e14025920240aaac8b55ae99dfa013be32c8ad1606277ad611dd3546a238268',
+      'c9c5f6095ef818cef0c3f2da9b250c25b44845c6fd5e45b594994f4364b0fb50',
+      '72a6c00f7b541863b3fd08817a1af9542afc51e52cca944189f38dbc5c31f887',
+      'bb3abe1b05c0f4ae8ade4cd2f25743630da7b79514434728fe46e7c43214a5b0',
+      'bc826624850d6010da5c0dcd45dd6b314b0dd6e5e278a61146c4a3b2f3fadbca',
+      '34418d163f40f24c57537c39892a21741f4fe5c01fdde4def9da0ef2fef1ddc9',
+      'fac82d6e3ae85ccc12322800feb02fb8a4aaa671786d964342e6d89b03aed224',
+      'b05c5b83242b6bae7476bbc10fffec9689bb782ebd97cbdf325bf61ec5a9fe80',
+      '0142f42568493d19c2934da98cc0ecbf0f4447f6bb9d9c9e5eb3f793aa40900d',
+      'd250b7bf406a6f8f0cfc5920fde6467b1cee7fe3289c957f1a39d0ea0893daf5',
+      '1265dab003ed03121aeac838ad2d19ada16724a32ccc18659a530abcc15b0e99',
+      '1fc3d11f9a0f73f7c471215475238dc8445daec8d851df1d4d1cf69af26c003c',
+      '1dd2817c67d184d0bbf06aefb0aa5825ac434d25548de1d55149aa3b5759d0e5',
+    ],
+  },
+]
+
+describe('published rides recompute exactly from display-order block hashes', () => {
+  for (const o of PUBLISHED_OPENINGS) {
+    it(`${o.event.slice(0, 10)} block ${o.height}`, () => {
+      const leaf = computeRideLeaf(o.previous, o.height, o.blockHash)
+      expect(verifyInclusion(leaf, o.index, o.path.map(hexToBytes), hexToBytes(o.root))).toBe(true)
+      // The internal (byte-reversed) order is a different block to the line.
+      const reversed = o.blockHash.match(/../g)!.reverse().join('')
+      if (lineTerrainK(reversed) !== lineTerrainK(o.blockHash)) {
+        expect(verifyInclusion(computeRideLeaf(o.previous, o.height, reversed), o.index, o.path.map(hexToBytes), hexToBytes(o.root))).toBe(false)
+      }
+    })
+  }
 })
 
 describe('cost estimates', () => {

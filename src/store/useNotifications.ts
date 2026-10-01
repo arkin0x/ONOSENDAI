@@ -11,16 +11,22 @@
  *
  * A comment sealed to one of your own bags is opened with that bag's region
  * key, which this device can derive because it hid the bag.
+ *
+ * Only ONOSENDAI's own traffic is kept (lib/notifications.ts classify): a
+ * like on an ordinary note is not a notification here (arkinox, 2026-09-30).
+ * What cannot be told apart from the event alone is settled by looking its
+ * target up, once per page, and kept when the target cannot be found.
  */
 
 import { create } from 'zustand'
 import { COMMENT_KIND } from '../lib/comments'
 import { relaysFor } from '../lib/inbox'
-import { mergeNotifications, toNotification, unreadCount, type Notification } from '../lib/notifications'
+import { classify, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
+import { GENERAL_RELAYS } from '../lib/contacts'
 import { queryAny } from '../lib/relay'
 import { decryptForRegion, regionKeyAt } from '../lib/shardCrypto'
 import { REACTION_KIND } from '../lib/social'
-import { MAX_COMPUTE_HEIGHT } from './useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { positionOf, useShards } from './useShards'
 
 /** Notifications per page, first and older. */
@@ -52,10 +58,28 @@ interface NotificationsState {
   markSeen: () => void
 }
 
+/** Your moves and your hidden items, as this device knows them. */
+function knownHere(): Known {
+  return {
+    actions: new Set(useCyberspace.getState().events.map((e) => e.id)),
+    items: new Map(useShards.getState().mine.map((d) => [d.eventId, d.lookupId])),
+  }
+}
+
 async function fetchPage(me: string, bounds: { until?: number; since?: number }): Promise<Notification[]> {
   const relays = await relaysFor([me])
   const found = await queryAny(relays, { kinds: [REACTION_KIND, COMMENT_KIND], '#p': [me], limit: PAGE, ...bounds })
-  return found.map((ev) => toNotification(ev, me)).filter((n): n is Notification => n !== null)
+  const known = knownHere()
+  const candidates = found.map((ev) => classify(ev, me, known)).filter((c): c is Candidate => c !== null)
+  // The targets that decide whether a notification is ONOSENDAI's, looked up
+  // together where your notes live as well as where this app reads.
+  const ids = [...new Set(candidates.flatMap((c) => (c.lookup ? [c.lookup.id] : [])))]
+  const targets = new Map<string, Target>()
+  if (ids.length) {
+    const events = await queryAny([...new Set([...relays, ...GENERAL_RELAYS])], { ids, limit: ids.length }).catch(() => [])
+    for (const ev of events) targets.set(ev.id, { kind: ev.kind, tags: ev.tags })
+  }
+  return candidates.map((c) => resolve(c, targets)).filter((n): n is Notification => n !== null)
 }
 
 /** The words of sealed comments on your own bags, by notification id. */

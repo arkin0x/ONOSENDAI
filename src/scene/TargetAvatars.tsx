@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from 'react'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { AvatarShape } from './AvatarShape'
 import { WorldLabel } from './WorldLabel'
@@ -43,7 +43,7 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     return list
       // Someone standing in the other plane is not here (§2.4).
       .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane)
-      .map((t) => ({ ...t, centre: cellCentre(t.at, origin, scaleExp, axes) }))
+      .map((t) => ({ ...t, centre: placeCentre(t.at, origin, scaleExp, axes) }))
       .filter((t) => Math.hypot(...t.centre) <= REACH)
     // targets is what targetList reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps

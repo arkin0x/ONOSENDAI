@@ -21,8 +21,8 @@ import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
-import { expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
-import { calibrate, computeRideProof, leafBenchmarkMs, type RideProgress } from '../lib/hyperspace/ridePool'
+import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
+import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
@@ -92,14 +92,23 @@ export function abortRide(): void {
 export async function startRide(): Promise<void> {
   if (riding) return
   const destination = useHyperspace.getState().destination
-  const transit = useCyberspace.getState().transit
-  // A boarding this session, or the chain head already on the line: after a
-  // ride you stand at a stop and the next ride chains from it (§4.3), with
-  // no second boarding; after a reload an enter-hyperspace head is still a
-  // boarding. Either gives the ride its `previous` and its seed.
+  if (destination === null) return
+  // The chain head decides everything: an enter-hyperspace head is a boarding
+  // (this session's or one from before a reload), a hyperjump head is standing
+  // at its stop and the next ride chains from it with no second boarding
+  // (§4.3). Its id is the ride's `previous`, so it is also the seed of every
+  // leaf (§5.3) and of the re-roll price (§5.5). The boarding's own id is not
+  // used: when the head has moved since (a fork adopted from another device),
+  // leaves seeded by it would be published under a different `previous` and
+  // every one of them would be wrong.
   const line = lineStateOf(useCyberspace.getState().actions())
-  if (destination === null || (transit === null && line === null)) return
-  const previousId = transit?.enterEventId ?? line!.previousId
+  if (line === null) {
+    if (useCyberspace.getState().transit !== null) {
+      useRideRun.setState({ error: 'Your chain moved off the line since boarding. Board again to ride.' })
+    }
+    return
+  }
+  const previousId = line.previousId
   const destStop = getStopByHeight(destination)
   if (destStop === undefined) {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
@@ -110,7 +119,7 @@ export async function startRide(): Promise<void> {
   // station set bound is not declared, because no station is computed (§5.2).
   let fromHeight: number
   let asOf: number | undefined
-  if (line !== null && line.fromHeight !== null) {
+  if (line.fromHeight !== null) {
     fromHeight = line.fromHeight
     asOf = undefined
   } else {
@@ -152,7 +161,7 @@ export async function startRide(): Promise<void> {
   rideAbort = controller
   useRideRun.setState({
     error: null,
-    progress: { done: 0, total: blocks.length, etaMs: null },
+    progress: { done: 0, total: blocks.length, etaMs: null, price: null },
     path: { fromHeight, toHeight: destination },
   })
   // The ride is a spectacle: pull back to the whole cube so the path can be
@@ -167,18 +176,20 @@ export async function startRide(): Promise<void> {
     81,
   )
   try {
-    const { rootHex, mp } = await computeRideProof(
+    const { rootHex, mp, mnHex } = await computeRideProof(
       { previousEventIdHex: previousId, blocks },
       (p) => useRideRun.setState({ progress: p }),
       controller.signal,
     )
     await useCyberspace.getState().completeRide({
+      previousId,
       asOf,
       toCoordHex: coordToHex(stopCoordExact(destStop)),
       fromHeight,
       toHeight: destination,
       rootHex,
       mp,
+      mnHex,
     })
     useHyperspace.getState().setDestination(null)
   } catch (err) {
@@ -344,11 +355,12 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Expected work</dt>
-                    <dd>{formatOps(expectedRidePairs(estimate.length))} PAIRS</dd>
+                    <dd>{formatOps(expectedRidePairs(estimate.length) + expectedPricePairs(estimate.length))} PAIRS</dd>
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration(estimate.length * benchMs)}</dd>
+                    {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
+                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration((estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs)}</dd>
                   </div>
                 </>
               )}
@@ -357,7 +369,9 @@ export function HyperspacePanel(): JSX.Element {
               STATION is where boarding sets you down: your nearest block as
               of the synced tip, ties to the lowest height. The ride runs from
               it to the destination; all of the per-block work runs locally
-              and resumes if interrupted.
+              and resumes if interrupted. A re-roll price of about one
+              thirty-second more follows the blocks, so a proof that skipped
+              some cannot cheaply retry its samples.
             </Explanation>
           </>
         )}
@@ -366,13 +380,15 @@ export function HyperspacePanel(): JSX.Element {
       {progress !== null && (
         <>
           <p className="hyper__progress">
-            RIDING {progress.done}/{progress.total}
+            {progress.price === null
+              ? `RIDING ${progress.done}/${progress.total}`
+              : `PRICE ${progress.price.attempts}/~${progress.price.expected}`}
             {progress.etaMs !== null && ` · ETA ${formatMs(progress.etaMs)}`}
           </p>
           <div className="bar">
             <div
               className="bar__fill bar__fill--computing"
-              style={{ width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 100}%` }}
+              style={{ width: `${rideFraction(progress) * 100}%` }}
             />
           </div>
         </>

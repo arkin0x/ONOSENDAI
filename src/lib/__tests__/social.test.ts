@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools'
-import type { NostrEvent } from './events'
-import { threadUnder } from './comments'
-import { readRelaysOf } from './inbox'
-import { ACTION_KIND, actionCommentTemplate, deletedBy, groupReactions, parseReaction, reactionGlyph, reactionTemplate, unreactTemplate } from './social'
+import type { NostrEvent } from '../events'
+import { threadUnder } from '../comments'
+import { readRelaysOf } from '../inbox'
+import { ACTION_KIND, actionCommentTemplate, deletedBy, groupReactions, parseReaction, reactionGlyph, reactionTemplate, unreactTemplate } from '../social'
 
 const alice = generateSecretKey()
 const bob = generateSecretKey()

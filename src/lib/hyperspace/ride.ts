@@ -2,23 +2,38 @@
  * ride.ts: DECK-0001 v3 §5. A ride passes the blocks strictly between the two
  * endpoints plus the destination; each carries seeded Cantor work at height
  * K_b + K_LINE, hashed into a leaf, Merkle-aggregated into the proof root,
- * with SAMPLES Fiat-Shamir openings for Level 1 verification.
+ * with SAMPLES openings for Level 1 verification.
+ *
+ * Openings version 2 (§5.5, §5.8): the sample positions come from G, which
+ * costs a re-roll price to find. One attempt is one Cantor tree at
+ * GRIND_HEIGHT, and the prover needs a nonce whose G, times A = ceil(n / 32),
+ * stays below 2^256, so a prover that skipped blocks pays about one
+ * thirty-second of the ride for every fresh set of samples.
  *
  * Everything here is consensus-critical and pure; the worker pool wraps it.
  */
 import { alignedBase, bytesToHex, computeSubtreeCantor, hexToBytes, intToBytesBE, sha256 } from 'cyberspace-core'
 import type { ActionEvent } from '../events'
+import { GRANDFATHERED_V1_HYPERJUMPS } from './grandfathered'
 
 export const K_LINE = 6
 export const RIDE_MAX_HEIGHT = 16 + K_LINE
 export const SAMPLES = 32
+/** The height of one re-roll attempt's Cantor tree (§5.5). */
+export const GRIND_HEIGHT = 16
 export const PAD_LEAF = new Uint8Array(32)
+/** The `mn` of a zero-length ride, which has no price (§5.6). */
+export const ZERO_NONCE_HEX = '0'.repeat(16)
 
 const enc = new TextEncoder()
 export const HYPERSPACE_TERRAIN_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_TERRAIN_V1')
 export const HYPERSPACE_SEED_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_SEED_V1')
 export const HYPERSPACE_LEAF_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_LEAF_V1')
-export const HYPERSPACE_SAMPLE_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_SAMPLE_V1')
+export const HYPERSPACE_GRIND_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_GRIND_V1')
+export const HYPERSPACE_SAMPLE_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_SAMPLE_V2')
+
+const TWO_256 = 1n << 256n
+const NONCE_LIMIT = 1n << 64n
 
 const AXIS_MASK = (1n << 85n) - 1n
 
@@ -34,7 +49,7 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out
 }
 
-export function be64(n: number): Uint8Array {
+export function be64(n: number | bigint): Uint8Array {
   const out = new Uint8Array(8)
   let v = BigInt(n)
   for (let i = 7; i >= 0; i--) {
@@ -87,7 +102,6 @@ export function computeRideLeaf(previousEventIdHex: string, height: number, bloc
   return sha256(concat(HYPERSPACE_LEAF_DOMAIN, be64(height), intToBytesBE(cantorT)))
 }
 
-/** The heights a ride from `from` to `to` passes: (lo, hi], ascending. */
 /**
  * Where the chain head puts you on the line, or null when it does not.
  *
@@ -117,6 +131,7 @@ export function lineStateOf(actions: ActionEvent[]): LineState | null {
   return null
 }
 
+/** The heights a ride from `from` to `to` passes: (lo, hi], ascending. */
 export function rideBlocks(fromHeight: number, toHeight: number): number[] {
   const lo = Math.min(fromHeight, toHeight)
   const hi = Math.max(fromHeight, toHeight)
@@ -193,12 +208,69 @@ export function merkleRoot(leaves: Uint8Array[]): Uint8Array {
   return top.length === 1 ? top[0] : PAD_LEAF
 }
 
-/** §5.5: Fiat-Shamir sample indices among the n real leaves. */
-export function sampleIndices(root: Uint8Array, n: number, samples: number = SAMPLES): number[] {
+/** §5.5: A, the price in attempts. Each succeeds with probability 1/A. */
+export function attemptsRequired(n: number): number {
+  return Math.max(1, Math.ceil(n / SAMPLES))
+}
+
+/**
+ * §5.5: one re-roll attempt, one Cantor tree at GRIND_HEIGHT. Returns G.
+ *
+ *   seed_nonce = sha256(GRIND_DOMAIN || previous_event_id || root || be64(nonce))
+ *   g_base     = ((int(seed_nonce) mod 2^85) >> 16) << 16
+ *   G          = sha256(GRIND_DOMAIN || seed_nonce || int_to_bytes_be_min(cantor(g_base, 16)))
+ */
+export function grindAttempt(previousEventIdHex: string, root: Uint8Array, nonce: bigint): Uint8Array {
+  if (previousEventIdHex.length !== 64) throw new Error('previousEventIdHex must be 64 hex chars')
+  if (root.length !== 32) throw new Error('root must be 32 bytes')
+  if (nonce < 0n || nonce >= NONCE_LIMIT) throw new Error('the nonce is an unsigned 64-bit integer')
+  const seed = sha256(concat(HYPERSPACE_GRIND_DOMAIN, hexToBytes(previousEventIdHex), root, be64(nonce)))
+  const cantorG = computeSubtreeCantor(alignedBase(bytesToBigInt(seed) & AXIS_MASK, GRIND_HEIGHT), GRIND_HEIGHT, GRIND_HEIGHT)
+  return sha256(concat(HYPERSPACE_GRIND_DOMAIN, seed, intToBytesBE(cantorG)))
+}
+
+/** §5.5: the price is met when G, as a 256-bit big-endian integer, times A is below 2^256. */
+export function meetsPrice(G: Uint8Array, attempts: number): boolean {
+  return bytesToBigInt(G) * BigInt(attempts) < TWO_256
+}
+
+/**
+ * The first nonce from `start` whose attempt meets the price, searching
+ * upward on this thread, as the golden vectors do. The worker pool spreads
+ * the same search over disjoint ranges (ridePool.ts); any valid nonce
+ * verifies.
+ */
+export function findRideNonce(
+  previousEventIdHex: string,
+  root: Uint8Array,
+  n: number,
+  start = 0n,
+): { nonce: bigint; G: Uint8Array } {
+  const attempts = attemptsRequired(n)
+  for (let nonce = start; nonce < NONCE_LIMIT; nonce++) {
+    const G = grindAttempt(previousEventIdHex, root, nonce)
+    if (meetsPrice(G, attempts)) return { nonce, G }
+  }
+  throw new Error('no 64-bit nonce meets the price')
+}
+
+/** The `mn` tag (§5.2): the nonce as exactly 16 lowercase hex characters, big-endian. */
+export function encodeNonce(nonce: bigint): string {
+  if (nonce < 0n || nonce >= NONCE_LIMIT) throw new Error('the nonce is an unsigned 64-bit integer')
+  return nonce.toString(16).padStart(16, '0')
+}
+
+/** The nonce in an `mn` tag, or null unless it is exactly 16 lowercase hex characters. */
+export function decodeNonce(hex: string): bigint | null {
+  return /^[0-9a-f]{16}$/.test(hex) ? BigInt('0x' + hex) : null
+}
+
+/** §5.5: sample indices among the n real leaves, drawn from G. */
+export function sampleIndices(G: Uint8Array, n: number, samples: number = SAMPLES): number[] {
   if (n <= 0) return []
   const out: number[] = []
   for (let i = 0; i < samples; i++) {
-    const digest = sha256(concat(HYPERSPACE_SAMPLE_DOMAIN, root, be32(i)))
+    const digest = sha256(concat(HYPERSPACE_SAMPLE_DOMAIN, G, be32(i)))
     out.push(Number(bytesToBigInt(digest) % BigInt(n)))
   }
   return out
@@ -248,29 +320,65 @@ export function decodeOpenings(mp: string, depth: number): Uint8Array[][] | null
 export interface RideProof {
   rootHex: string
   mp: string
+  /** The re-roll nonce (§5.5), the value of the `mn` tag. */
+  mnHex: string
+}
+
+/** §5.6: a zero-length ride's proof. No price and nothing to sample. */
+export const ZERO_LENGTH_PROOF: Readonly<RideProof> = { rootHex: '0'.repeat(64), mp: '', mnHex: ZERO_NONCE_HEX }
+
+/** The ride's Merkle tree (§5.4): every layer, which the openings are read from, and the root. */
+export interface RideTree {
+  layers: Uint8Array[][]
+  root: Uint8Array
+  /** The real leaf count, which A and the sample indices are taken over. */
+  n: number
+}
+
+/** Leaves must be in ascending height order for rideBlocks(from, to), and at least one. */
+export function rideTree(leaves: Uint8Array[]): RideTree {
+  if (leaves.length === 0) throw new Error('a zero-length ride has no tree (§5.6)')
+  const layers = merkleLayers(leaves)
+  return { layers, root: layers[layers.length - 1][0], n: leaves.length }
+}
+
+/** §5.5: the proof, once a nonce meeting the price and its G are known. */
+export function rideProofFor(tree: RideTree, nonce: bigint, G: Uint8Array): RideProof {
+  const paths = sampleIndices(G, tree.n).map((i) => inclusionPath(tree.layers, i))
+  return { rootHex: bytesToHex(tree.root), mp: encodeOpenings(paths), mnHex: encodeNonce(nonce) }
 }
 
 /**
- * Compute the full ride proof from precomputed leaves (§5.4 and §5.5).
- * Leaves must be in ascending height order for rideBlocks(from, to).
+ * The full ride proof from precomputed leaves (§5.4, §5.5), on this thread,
+ * with the nonce searched upward from 0 as in the golden vectors. The worker
+ * pool does the same in parallel and resumably (ridePool.ts).
  */
-export function buildRideProof(leaves: Uint8Array[]): RideProof {
-  if (leaves.length === 0) {
-    return { rootHex: '0'.repeat(64), mp: '' } // §5.6 zero-length ride
-  }
-  const layers = merkleLayers(leaves)
-  const root = layers[layers.length - 1][0]
-  const indices = sampleIndices(root, leaves.length)
-  const paths = indices.map((i) => inclusionPath(layers, i))
-  return { rootHex: bytesToHex(root), mp: encodeOpenings(paths) }
+export function buildRideProof(previousEventIdHex: string, leaves: Uint8Array[]): RideProof {
+  if (leaves.length === 0) return { ...ZERO_LENGTH_PROOF }
+  const tree = rideTree(leaves)
+  const { nonce, G } = findRideNonce(previousEventIdHex, tree.root, tree.n)
+  return rideProofFor(tree, nonce, G)
+}
+
+/**
+ * Whether a ride is one of those published before openings version 2 and
+ * exempt under §5.8: it carries no `mn` tag, and its root and openings are
+ * accepted without re-checking.
+ */
+export function isGrandfatheredV1Hyperjump(eventId: string | undefined): boolean {
+  return eventId !== undefined && GRANDFATHERED_V1_HYPERJUMPS.has(eventId)
 }
 
 export interface RideVerifyInput {
+  /** The event's id. Consulted only when `mn` is null: such a ride stands only if listed (§5.8). */
+  eventId?: string
   previousEventIdHex: string
   fromHeight: number
   toHeight: number
   rootHex: string
   mp: string
+  /** The `mn` tag's value, or null when the event has none. */
+  mn: string | null
   /** Block hash for a height, 64 lowercase hex. */
   blockHashFor: (height: number) => string | Promise<string>
 }
@@ -279,39 +387,66 @@ export interface RideVerifyResult {
   ok: boolean
   checked: number
   reason: string | null
+  /** True when the ride has no `mn` and is on the §5.8 list, so its root and
+   * openings were accepted unchecked. Everything else still needs checking. */
+  grandfathered: boolean
 }
 
-/** Level 1 verification (§5.5): recompute the sampled leaves from scratch. */
+/**
+ * Level 1 verification of a ride's proof (§5.5 steps 3 to 6): the re-roll
+ * price from one attempt, then the sampled leaves recomputed from scratch and
+ * carried up their paths. The chain structure, the station and the stop
+ * coordinate (steps 1 and 2) are the caller's to check, for a grandfathered
+ * ride as for any other.
+ */
 export async function verifyRideLevel1(input: RideVerifyInput): Promise<RideVerifyResult> {
+  const fail = (checked: number, reason: string): RideVerifyResult => ({ ok: false, checked, reason, grandfathered: false })
+  if (input.mn === null || input.mn === undefined) {
+    return isGrandfatheredV1Hyperjump(input.eventId)
+      ? { ok: true, checked: 0, reason: null, grandfathered: true }
+      : fail(0, 'no mn tag, and not a ride exempt under §5.8')
+  }
+  const nonce = decodeNonce(input.mn)
+  if (nonce === null) return fail(0, 'malformed mn')
   const blocks = rideBlocks(input.fromHeight, input.toHeight)
   const n = blocks.length
   if (n === 0) {
-    const ok = input.rootHex === '0'.repeat(64) && input.mp === ''
-    return { ok, checked: 0, reason: ok ? null : 'zero-length ride must carry the zero root' }
+    const zero = ZERO_LENGTH_PROOF
+    return input.rootHex === zero.rootHex && input.mp === zero.mp && input.mn === zero.mnHex
+      ? { ok: true, checked: 0, reason: null, grandfathered: false }
+      : fail(0, 'a zero-length ride carries the zero root, an all-zero mn and no openings')
   }
-  if (!/^[0-9a-f]{64}$/.test(input.rootHex)) return { ok: false, checked: 0, reason: 'malformed root' }
+  if (!/^[0-9a-f]{64}$/.test(input.rootHex)) return fail(0, 'malformed root')
   const root = hexToBytes(input.rootHex)
-  const depth = merkleDepth(n)
-  const indices = sampleIndices(root, n)
-  const paths = decodeOpenings(input.mp, depth)
-  if (paths === null || paths.length !== indices.length) {
-    return { ok: false, checked: 0, reason: 'malformed openings' }
-  }
+  const G = grindAttempt(input.previousEventIdHex, root, nonce)
+  if (!meetsPrice(G, attemptsRequired(n))) return fail(0, 'the mn nonce does not meet the price')
+  const indices = sampleIndices(G, n)
+  const paths = decodeOpenings(input.mp, merkleDepth(n))
+  if (paths === null || paths.length !== indices.length) return fail(0, 'malformed openings')
   for (let s = 0; s < indices.length; s++) {
     const idx = indices[s]
     const height = blocks[idx]
     const hash = await input.blockHashFor(height)
     const leaf = computeRideLeaf(input.previousEventIdHex, height, hash)
     if (!verifyInclusion(leaf, idx, paths[s], root)) {
-      return { ok: false, checked: s, reason: `opening ${s} (block ${height}) does not verify` }
+      return fail(s, `opening ${s} (block ${height}) does not verify`)
     }
   }
-  return { ok: true, checked: indices.length, reason: null }
+  return { ok: true, checked: indices.length, reason: null, grandfathered: false }
 }
 
 /** Expected Cantor pairings for a ride of n blocks (mean 2^K_LINE * (3/2)^16). */
 export function expectedRidePairs(n: number): number {
   return n * Math.round(2 ** K_LINE * (3 / 2) ** 16)
+}
+
+/**
+ * Expected Cantor pairings for the re-roll price of a ride of n blocks: A
+ * attempts of one GRIND_HEIGHT tree each (§5.5), about one thirty-second of
+ * the ride. A zero-length ride has no price (§5.6).
+ */
+export function expectedPricePairs(n: number): number {
+  return n === 0 ? 0 : attemptsRequired(n) * 2 ** GRIND_HEIGHT
 }
 
 /** Exact pairings for known block hashes: sum of 2^(K_b + K_LINE). */

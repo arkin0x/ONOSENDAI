@@ -50,6 +50,13 @@ export interface ChainFacts {
    * chain arriving, not an action taken here, and must not open the gate.
    */
   headSent: boolean
+  /**
+   * Bumped by a deliberate request to publish now that is not itself an
+   * action: answering the held-chain prompt with "Keep the local chain"
+   * (arkinox, 2026-10-01). The answer is the action taken on purpose, so it
+   * opens the gate the way a new head would. Absent reads as unchanged.
+   */
+  release?: number
 }
 
 /** Read the facts out of the store, or out of anything shaped like it. */
@@ -57,8 +64,9 @@ export function chainFacts(s: {
   live: boolean
   prevEventId: string
   published: Record<string, PublishStatus>
+  publishRequest?: number
 }): ChainFacts {
-  return { live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok' }
+  return { live: s.live, headId: s.prevEventId, headSent: s.published[s.prevEventId] === 'ok', release: s.publishRequest }
 }
 
 /**
@@ -70,6 +78,7 @@ export function chainFacts(s: {
  * | LOCAL to LIVE | shut: the flip publishes nothing |
  * | LIVE, a new head this device signed | open: and the backlog goes with it |
  * | LIVE, a head adopted from the relay | unchanged: not an action of ours |
+ * | LIVE, a deliberate publish request (`release` bumped) | open |
  * | anything else | unchanged |
  *
  * A respawn while LIVE counts as a new action, because that is what it is:
@@ -81,7 +90,34 @@ export function gateAfter(open: boolean, prev: ChainFacts, next: ChainFacts): bo
   if (!next.live) return false
   if (!prev.live) return false
   if (next.headId !== prev.headId && !next.headSent) return true
+  if ((next.release ?? 0) !== (prev.release ?? 0)) return true
   return open
+}
+
+/**
+ * Whether the publisher may send now. The gate above says whether the chain
+ * has been released by an action; a HELD chain is a second, independent
+ * stop: a chain started before the relays could say whether this identity
+ * already had one stays on this device whatever LIVE says, until they answer
+ * (chainHold.ts; arkinox, 2026-10-01). Holding does not touch the gate, so an
+ * action taken while LIVE and held still opens it, and the moment the hold is
+ * lifted the chain goes out exactly as if it had never been held.
+ *
+ * A pending choice between two versions of the chain (a held chain that met
+ * a relay chain, or unpublished moves that fork against another device's
+ * published ones) stops it the same way: whichever version the person picks
+ * decides what goes out, so nothing goes out before they pick.
+ *
+ * | LIVE | gate | held | choice pending | sends |
+ * |---|---|---|---|---|
+ * | no | any | any | any | no |
+ * | yes | shut | any | any | no |
+ * | yes | open | yes | any | no |
+ * | yes | open | no | yes | no |
+ * | yes | open | no | no | yes |
+ */
+export function maySend(s: { live: boolean; held: boolean; chainConflict?: unknown }, open: boolean): boolean {
+  return s.live && open && !s.held && !s.chainConflict
 }
 
 /**

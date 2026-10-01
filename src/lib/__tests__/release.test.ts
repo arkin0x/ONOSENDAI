@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { chainFacts, gateAfter, publishTag, PUBLISH_TAG_LABEL } from '../release'
+import { chainFacts, gateAfter, maySend, publishTag, PUBLISH_TAG_LABEL } from '../release'
 
 const facts = (live: boolean, headId: string, headSent = false): ReturnType<typeof chainFacts> =>
   ({ live, headId, headSent })
@@ -61,5 +61,21 @@ describe('the tag one action wears', () => {
     expect(PUBLISH_TAG_LABEL.local).toBe('LOCAL')
     expect(PUBLISH_TAG_LABEL.sending).toBe('SENDING')
     expect(PUBLISH_TAG_LABEL.failed).toBe('FAILED')
+  })
+})
+
+describe('a deliberate publish request and a held chain', () => {
+  it('opens the gate on a bumped request while LIVE, and not while LOCAL', () => {
+    const at = (live: boolean, release: number) => ({ live, headId: 'a', headSent: false, release })
+    expect(gateAfter(false, at(true, 0), at(true, 1))).toBe(true)
+    expect(gateAfter(false, at(false, 0), at(false, 1))).toBe(false)
+    expect(gateAfter(false, at(true, 1), at(true, 1))).toBe(false)
+  })
+
+  it('never sends a held chain, gate open or not', () => {
+    expect(maySend({ live: true, held: false }, true)).toBe(true)
+    expect(maySend({ live: true, held: true }, true)).toBe(false)
+    expect(maySend({ live: true, held: false }, false)).toBe(false)
+    expect(maySend({ live: false, held: false }, true)).toBe(false)
   })
 })

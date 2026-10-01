@@ -23,6 +23,7 @@ import {
   recommendedHopHeight,
   recommendedSidestepHeight,
   sidestepCeiling,
+  sidestepHashes,
   startCalibration,
   type CalibrationCacheEntry,
 } from '../calibration'
@@ -92,6 +93,14 @@ describe('sidestepCeiling', () => {
   it('derives the largest wall 2^(h+1) hashes fit in the budget', () => {
     // 1.5M hashes/s for 60 s affords 9e7 hashes: 2^26 fits, 2^27 does not.
     expect(sidestepCeiling(1_500_000)).toBe(25)
+  })
+
+  it('counts the re-roll price: exactly 2^26 hashes no longer affords h25', () => {
+    // The h25 tree alone is 2^26 hashes, and its price of 2^22 attempts adds
+    // an eighth (spec 6.10), so a budget of exactly 2^26 buys h24.
+    expect(sidestepHashes(25)).toBe(2 ** 26 + 2 ** 23)
+    expect(sidestepCeiling(2 ** 26 / 60)).toBe(24)
+    expect(sidestepCeiling((2 ** 26 + 2 ** 23) / 60)).toBe(25)
   })
 
   it('clamps both ends of the range', () => {

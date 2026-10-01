@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { computeSidestepProof, bytesToHex } from 'cyberspace-core'
+import { computeSidestepProof, bytesToHex, encodeNonce } from 'cyberspace-core'
 import {
   CloudFlowError,
   balanceLabel,
@@ -240,7 +240,7 @@ describe('cloudProofResponse', () => {
     const p = computeSidestepProof(0n, 0n, 0n, 4096n, 0n, 0n, 0, 'ab'.repeat(32))
     const result = {
       proof_hash: p.proofHash, merkle_x: bytesToHex(p.merkleX), merkle_y: bytesToHex(p.merkleY), merkle_z: bytesToHex(p.merkleZ),
-      openings: { x: p.openings.x.map((q) => q.map(bytesToHex)), y: [], z: [] }, lca_heights: p.lcaHeights,
+      openings: { x: p.openings.x.map((q) => q.map(bytesToHex)), y: [], z: [] }, mn: encodeNonce(p.nonce), lca_heights: p.lcaHeights,
       previous_event_id: 'ab'.repeat(32), terrain_k: p.terrainK, region_m_hex: p.regionM.toString(16), compute_msats: 300,
     }
     const record: PendingCloudJob = { ...base, action: 'sidestep', to: wirePosition({ x: 4096n, y: 0n, z: 0n }), stage: 'computing', deposit: null }
@@ -253,6 +253,8 @@ describe('cloudProofResponse', () => {
     expect(msg.sidestep).toEqual({
       merkleRoots: [bytesToHex(p.merkleX), bytesToHex(p.merkleY), bytesToHex(p.merkleZ)],
       openings: [p.openings.x.map((q) => q.map(bytesToHex).join('')).join(''), '', ''],
+      // The nonce comes through exactly as HOSAKA sent it, the `mn` tag's value.
+      mnHex: encodeNonce(p.nonce),
       lcaHeights: [13, 0, 0],
     })
     expect(msg.source).toBe('cloud')

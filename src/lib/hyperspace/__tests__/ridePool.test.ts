@@ -15,16 +15,19 @@
  */
 import { describe, expect, it } from 'vitest'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { buildRideProof, computeRideLeaf, rideBlocks, verifyRideLevel1 } from '../ride'
+import { K_LINE, be32, be64, buildRideProof, computeRideLeaf, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
 import {
   RIDE_CHUNK_SIZE,
   assembleLeaves,
   calibrate,
   computeRideProof,
+  grindCheckpoint,
+  grindKey,
   leafBenchmarkMs,
   leafKey,
   pendingBlocks,
   planChunks,
+  rideFraction,
 } from '../ridePool'
 import type { RideJob, RideProgress } from '../ridePool'
 
@@ -96,8 +99,8 @@ describe('assembly order', () => {
     for (const b of arrival) {
       byHeight.set(b.height, bytesToHex(computeRideLeaf(PREV, b.height, b.blockHash)))
     }
-    const proof = buildRideProof(assembleLeaves(blocks, byHeight))
-    const direct = buildRideProof(blocks.map((b) => computeRideLeaf(PREV, b.height, b.blockHash)))
+    const proof = buildRideProof(PREV, assembleLeaves(blocks, byHeight))
+    const direct = buildRideProof(PREV, blocks.map((b) => computeRideLeaf(PREV, b.height, b.blockHash)))
     expect(proof.rootHex).toBe(direct.rootHex)
     expect(proof.mp).toBe(direct.mp)
     const result = await verifyRideLevel1({
@@ -106,6 +109,7 @@ describe('assembly order', () => {
       toHeight: 12,
       rootHex: proof.rootHex,
       mp: proof.mp,
+      mn: proof.mnHex,
       blockHashFor: (h) => fakeHash(h),
     })
     expect(result.reason).toBeNull()
@@ -123,9 +127,8 @@ describe('computeRideProof (sequential fallback under node)', () => {
   it('empty job resolves immediately to the zero-length proof', async () => {
     const seen: RideProgress[] = []
     const proof = await computeRideProof({ previousEventIdHex: PREV, blocks: [] }, (p) => seen.push(p))
-    expect(proof.rootHex).toBe('0'.repeat(64))
-    expect(proof.mp).toBe('')
-    expect(seen[seen.length - 1]).toEqual({ done: 0, total: 0, etaMs: null })
+    expect(proof).toEqual({ rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) })
+    expect(seen[seen.length - 1]).toEqual({ done: 0, total: 0, etaMs: null, price: null })
   })
 
   it('a 4-block job runs end to end and Level-1-verifies', async () => {
@@ -138,13 +141,40 @@ describe('computeRideProof (sequential fallback under node)', () => {
       toHeight: 10,
       rootHex: proof.rootHex,
       mp: proof.mp,
+      mn: proof.mnHex,
       blockHashFor: (h) => fakeHash(h),
     })
     expect(result.reason).toBeNull()
     expect(result.ok).toBe(true)
-    // Final forced progress call reports completion; under 20 fresh leaves
-    // the ETA stays null rather than extrapolating from noise.
-    expect(seen[seen.length - 1]).toEqual({ done: 4, total: 4, etaMs: null })
+    // Final forced progress call reports completion, the price paid in one
+    // attempt (A is 1 below 33 blocks); under 20 fresh leaves the ETA stays
+    // null rather than extrapolating from noise.
+    expect(seen[seen.length - 1]).toEqual({ done: 4, total: 4, etaMs: null, price: { attempts: 1, expected: 1 } })
+  })
+
+  it('searches past nonces that miss the price, and matches the one-thread proof', async () => {
+    // A 40-block synthetic ride (decks/hyperjump-reference.py's line) under
+    // 'ab' x 32: A is 2 and nonces 0 and 1 both miss, so the search has to
+    // keep going, and it must land on the same proof the reference would.
+    const domain = new TextEncoder().encode('CYBERSPACE_TEST_BLOCK')
+    const synthetic = (b: number): string => {
+      for (let j = 0; ; j++) {
+        const hex = bytesToHex(sha256(new Uint8Array([...domain, ...be64(b), ...be32(j)])))
+        if (lineTerrainK(hex) + K_LINE <= 10) return hex
+      }
+    }
+    const blocks = rideBlocks(900000, 900040).map((height) => ({ height, blockHash: synthetic(height) }))
+    const seen: RideProgress[] = []
+    const proof = await computeRideProof({ previousEventIdHex: PREV, blocks }, (p) => seen.push(p))
+    expect(proof.rootHex).toBe('d3a1d8de00558e8c31018c80b24e8cbf588941829f217fd1f01c9419c5dd2930')
+    expect(proof.mnHex).toBe('0000000000000002')
+    expect(proof).toEqual(buildRideProof(PREV, blocks.map((b) => computeRideLeaf(PREV, b.height, b.blockHash))))
+    expect(seen[seen.length - 1].price).toEqual({ attempts: 3, expected: 2 })
+    const result = await verifyRideLevel1({
+      previousEventIdHex: PREV, fromHeight: 900000, toHeight: 900040, rootHex: proof.rootHex, mp: proof.mp, mn: proof.mnHex,
+      blockHashFor: synthetic,
+    })
+    expect(result.ok).toBe(true)
   })
 
   it('rejects a second concurrent call', async () => {
@@ -161,6 +191,34 @@ describe('computeRideProof (sequential fallback under node)', () => {
     await expect(
       computeRideProof({ previousEventIdHex: PREV, blocks: syntheticBlocks(6, 10) }, () => {}, controller.signal),
     ).rejects.toThrow('aborted')
+  })
+})
+
+describe('the price search checkpoint', () => {
+  it('is the lowest range still in flight, else the next range to hand out', () => {
+    expect(grindCheckpoint([], 24)).toBe(24)
+    expect(grindCheckpoint([16, 8, 32], 40)).toBe(8)
+    expect(grindCheckpoint([40], 48)).toBe(40)
+  })
+
+  it('is keyed by chain position and root, never shared across either', () => {
+    expect(grindKey(PREV, '11'.repeat(32))).not.toBe(grindKey(OTHER_PREV, '11'.repeat(32)))
+    expect(grindKey(PREV, '11'.repeat(32))).not.toBe(grindKey(PREV, '22'.repeat(32)))
+    // Inside the ride's key range, so a proven ride's cleanup takes it too.
+    expect(grindKey(PREV, '11'.repeat(32)).startsWith(`${PREV}:`)).toBe(true)
+  })
+})
+
+describe('rideFraction: one bar over the leaves and the price', () => {
+  it('weighs the price as A blocks at the end, and never pins at full while searching', () => {
+    expect(rideFraction({ done: 0, total: 0, etaMs: null, price: null })).toBe(1)
+    expect(rideFraction({ done: 0, total: 64, etaMs: null, price: null })).toBe(0)
+    // 64 blocks, A = 2: every leaf done is 64 of 66.
+    expect(rideFraction({ done: 64, total: 64, etaMs: null, price: null })).toBeCloseTo(64 / 66)
+    const searching = rideFraction({ done: 64, total: 64, etaMs: null, price: { attempts: 2, expected: 2 } })
+    expect(searching).toBeGreaterThan(64 / 66)
+    expect(searching).toBeLessThan(1)
+    expect(rideFraction({ done: 64, total: 64, etaMs: null, price: { attempts: 50, expected: 2 } })).toBeLessThan(1)
   })
 })
 

@@ -98,14 +98,25 @@ export function hopCeiling(cantorMsByHeight: Record<number, number>, budgetMs: n
 }
 
 /**
- * The largest sidestep height whose ~2^(h+1) hashes fit the budget at the
- * measured rate, clamped to [20, 40]. The default when the rate is junk.
+ * SHA-256 work of a single-axis sidestep at height h, in tree hashes: the
+ * tree's ~2^(h+1), plus the re-roll price (spec 6.10) of A = 2^h / 8 attempts,
+ * each three compressions against a tree hash's one and a half on average,
+ * so two tree hashes apiece. One eighth more than the tree.
+ */
+export function sidestepHashes(height: number): number {
+  return 2 ** (height + 1) + 2 * Math.max(1, Math.ceil(2 ** height / 8))
+}
+
+/**
+ * The largest sidestep height whose work (sidestepHashes) fits the budget at
+ * the measured rate, clamped to [20, 40]. The default when the rate is junk.
  */
 export function sidestepCeiling(sha256PerSec: number, budgetMs: number = SIDESTEP_BUDGET_MS): number {
   if (!Number.isFinite(sha256PerSec) || sha256PerSec <= 0) return DEFAULT_SIDESTEP_HEIGHT
   const affordable = sha256PerSec * (budgetMs / 1000)
-  // Largest h with 2^(h+1) <= affordable.
-  const h = Math.floor(Math.log2(affordable)) - 1
+  // Largest h with 2^(h+1) <= affordable, then one lower if the price tips it over.
+  let h = Math.floor(Math.log2(affordable)) - 1
+  if (sidestepHashes(h) > affordable) h -= 1
   return Math.min(SIDESTEP_CEILING_MAX, Math.max(SIDESTEP_CEILING_MIN, h))
 }
 

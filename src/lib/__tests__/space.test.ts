@@ -32,8 +32,10 @@ import {
   markerCentre,
   viewAxes,
   type Position,
-  type ViewAxes, pointCentre } from '../space'
+  type ViewAxes, pointCentre,
+  CONTINUOUS_SCALE_MIN, aimCentres, anchorCentre, deployPoint, itemCentre, placeCentre, type AxisDirection } from '../space'
 import { alignedOrigin } from '../../store/useCyberspace'
+import { coveringBox } from '../covering'
 
 describe('scale helpers', () => {
   it('computes step sizes as powers of two', () => {
@@ -786,5 +788,418 @@ describe('a focused item sits where the camera looks', () => {
     }
     // Many distinct offsets, not one steady one: the item moved every step.
     expect(gaps.size).toBeGreaterThan(10)
+  })
+})
+
+
+/**
+ * From 2^80 to 2^84 the whole of cyberspace is at most 32 cells to an axis,
+ * and down at 2^84 it is two: snapped to cells, everything in it lands on one
+ * of eight places. So in that range every layer that places a position does
+ * it continuously, the way markerCentre already placed shards, messages and
+ * stops, and the camera follows you to where you are drawn. Below it nothing
+ * changes (arkinox, 2026-10-01).
+ */
+describe('continuous placement from 2^80 up', () => {
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) {
+      out.push(viewAxes(q))
+      q = rotateView(q, dirs[i % 4])
+    }
+    return out
+  })()
+  const flat = (v: number[]): number[] => v.map((n) => (n === 0 ? 0 : n))
+
+  // Coordinates with bits set all the way down and spread over the whole
+  // axis, so every scale sees a different, nonzero sub-cell fraction.
+  const POINTS: Position[] = [
+    { x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn, y: 0x0fedcba9876543210abcn, z: (3n << 82n) + 0x123456789abcdef0123n },
+    { x: 0x2468ace13579bdf02468n, y: (1n << 84n) + (1n << 83n) + 0x13579bdf2468ace1n, z: 0x1ffffffffffffffffffffn },
+    { x: AXIS_MAX, y: 0n, z: (1n << 80n) * 17n + 12345n },
+    { x: (1n << 80n) * 9n, y: (1n << 80n) * 31n + (1n << 79n), z: 7n },
+  ]
+  const ORIGIN_OF = (p: Position, s: number): Position => alignedOrigin(p, s)
+
+  it('names 2^80 as the threshold and reaches the top of the ladder', () => {
+    expect(CONTINUOUS_SCALE_MIN).toBe(80)
+    expect(MAX_SCALE_EXP).toBe(84)
+  })
+
+  it('still snaps to the cell at 2^79 and every scale below it', () => {
+    for (let scaleExp = 0; scaleExp < CONTINUOUS_SCALE_MIN; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes), `scaleExp ${scaleExp}`).toEqual(cellCentre(p, origin, scaleExp, axes))
+          }
+        }
+        // Where the avatar stands: its cell centre, the render origin itself.
+        expect(flat(anchorCentre(anchor, scaleExp, VIEWS[0]))).toEqual([0, 0, 0])
+      }
+    }
+  })
+
+  it('places continuously from 2^80 through 2^84', () => {
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes)).toEqual(pointCentre(p, origin, scaleExp, axes))
+          }
+        }
+      }
+    }
+  })
+
+  it('separates things that share a cell at 2^84 instead of stacking them', () => {
+    // Two coordinates in the same 2^84 octant, far apart inside it. Snapped,
+    // they are one place; placed, they are as far apart as they really are.
+    const a: Position = { x: 1n << 81n, y: 1n << 81n, z: 1n << 81n }
+    const b: Position = { x: 3n << 82n, y: 1n << 83n, z: (1n << 84n) - 1n }
+    const origin = ORIGIN_OF(a, 84)
+    const axes = viewAxes(canonicalQuaternion())
+    expect(cellCentre(a, origin, 84, axes)).toEqual(cellCentre(b, origin, 84, axes))
+    const pa = placeCentre(a, origin, 84, axes)
+    const pb = placeCentre(b, origin, 84, axes)
+    expect(pb[0] - pa[0]).toBeCloseTo(0.75 - 0.125, 4)
+    expect(pb[1] - pa[1]).toBeCloseTo(0.5 - 0.125, 4)
+    // Cyberspace +Z is out of the screen's negative: the canonical view looks along it.
+    expect(Math.abs(pb[2] - pa[2])).toBeCloseTo(1 - 0.125, 3)
+  })
+
+  it('agrees with markerCentre in the range, so avatars, trails and shards cannot part', () => {
+    // markerCentre is what places shards, messages, coins and stops;
+    // placeCentre is what places the avatars, the trail, the cursor and the
+    // ghost. In the range the two must be the same function.
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes)).toEqual(markerCentre(p, origin, scaleExp, axes))
+          }
+        }
+      }
+    }
+  })
+
+  it('draws you where every other layer would draw your coordinate', () => {
+    // The avatar is drawn at anchorCentre; a trail vertex, a shard you stand
+    // on or the cursor parked on you are drawn at placeCentre of the same
+    // coordinate. One place, at every scale.
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        for (const axes of VIEWS) {
+          expect(flat(anchorCentre(anchor, scaleExp, axes))).toEqual(flat(placeCentre(anchor, ORIGIN_OF(anchor, scaleExp), scaleExp, axes)))
+        }
+      }
+    }
+  })
+
+  it('puts you inside your own cell, never across its walls', () => {
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        for (const v of anchorCentre(anchor, scaleExp, VIEWS[0])) {
+          expect(v).toBeGreaterThanOrEqual(-0.5)
+          expect(v).toBeLessThan(0.5)
+        }
+      }
+    }
+  })
+
+  it('a re-anchor in the range moves a fixed point by exactly the origin shift', () => {
+    // The camera absorbs a commit by adding originShift to its position and
+    // its target; anything it is not looking at must then stay put on screen.
+    // Continuous placement moves a fixed point by the same whole number of
+    // cells, up to cellDelta's ten-thousandth of a cell when the point's
+    // delta changes sign (see originShift), so the residual is held to that.
+    let moved = 0
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      for (const from of POINTS) {
+        for (const d of [1n, 2n, 5n]) {
+          const to: Position = {
+            x: clampAxis(from.x + d * step + 3n),
+            y: clampAxis(from.y - d * step),
+            z: clampAxis(from.z + (d % 2n === 0n ? step : -step)),
+          }
+          const before = alignedOrigin(from, scaleExp)
+          const after = alignedOrigin(to, scaleExp)
+          for (const axes of VIEWS) {
+            const shift = originShift(before, after, scaleExp, axes)
+            if (shift.some((v) => v !== 0)) moved++
+            // The shift between aligned origins is a whole number of cells.
+            for (const v of shift) expect(Number.isInteger(v)).toBe(true)
+            for (const w of [...POINTS, from, to]) {
+              const wasAt = placeCentre(w, before, scaleExp, axes)
+              const nowAt = placeCentre(w, after, scaleExp, axes)
+              for (let i = 0; i < 3; i++) expect(Math.abs(nowAt[i] - wasAt[i] - shift[i])).toBeLessThanOrEqual(1e-4 + 1e-12)
+            }
+          }
+        }
+      }
+    }
+    expect(moved).toBeGreaterThan(0)
+  })
+
+  it('keeps the covering box around both ends of a move in the range', () => {
+    // The covering box is the protocol's aligned region and stays on the
+    // grid; the ends of the move are now drawn at their true positions, and
+    // they must still be inside it.
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      for (const from of POINTS) {
+        for (const d of [0n, 1n, 3n]) {
+          const to: Position = { x: clampAxis(from.x + d * step), y: clampAxis(from.y - d * step + 99n), z: from.z }
+          const origin = alignedOrigin(from, scaleExp)
+          for (const axes of VIEWS) {
+            const c = coveringBox(from, to, origin, scaleExp, axes, 1000)
+            for (const p of [from, to]) {
+              const at = placeCentre(p, origin, scaleExp, axes)
+              for (let i = 0; i < 3; i++) {
+                expect(at[i]).toBeGreaterThanOrEqual(c.centre[i] - c.size[i] / 2 - 1e-9)
+                expect(at[i]).toBeLessThanOrEqual(c.centre[i] + c.size[i] / 2 + 1e-9)
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+
+  it('keeps an aligned region cage around what is in it, at any height', () => {
+    // The sector cage, the deploy region, the chat room and the secret
+    // regions all centre a 2^h region the same way: its low corner in cells,
+    // plus (side - 1) / 2. Kept in that shape here so the property is pinned:
+    // a region at least a cell wide sits on the grid, a smaller one sits at
+    // its true place inside its cell, and either way every point in it is
+    // drawn inside the cage.
+    const cage = (base: bigint, h: number, origin: bigint, scaleExp: number): { lo: number; hi: number } => {
+      const exp = h - scaleExp
+      const side = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
+      const centre = cellDelta(base, origin, scaleExp) + (side - 1) / 2
+      return { lo: centre - side / 2, hi: centre + side / 2 }
+    }
+    const axes: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const h of [60, 76, 79, 80, 82, 84]) {
+        for (const anchor of POINTS) {
+          const origin = alignedOrigin(anchor, scaleExp)
+          for (const p of POINTS) {
+            const base = (p.x >> BigInt(h)) << BigInt(h)
+            const { lo, hi } = cage(base, h, origin.x, scaleExp)
+            const at = placeCentre(p, origin, scaleExp, axes)[0]
+            expect(at).toBeGreaterThanOrEqual(lo - 1e-4)
+            expect(at).toBeLessThanOrEqual(hi + 1e-4)
+            // At or above the cell, the cage's walls fall on the grid's.
+            if (h >= scaleExp) expect(Number.isInteger(lo + 0.5)).toBe(true)
+          }
+        }
+      }
+    }
+  })
+})
+
+/**
+ * The shard ghost is drawn with markerCentre, the rule the landed shard is
+ * drawn with, at the cursor's coordinate, which is exactly where a deploy
+ * hides it. So the ghost IS where the shard will appear. These pin what that
+ * does to the ghost against the cursor cube it rides (arkinox, 2026-10-01).
+ */
+describe('the shard ghost against the cursor cube', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+
+  it('sits on the cube centre, exactly as before, at 2^33 and below', () => {
+    for (let scaleExp = 0; scaleExp <= OCCUPANCY_SCALE_MAX; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: HERE.x + 3n * step, y: HERE.y - step, z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      expect(markerCentre(cursor, origin, scaleExp, axes)).toEqual(aimCentres(cursor, origin, scaleExp, axes).cell)
+    }
+  })
+
+  it('stays inside the cursor cube, the grid cell, at every zoom', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: clampAxis(HERE.x + 3n * step), y: clampAxis(HERE.y - step), z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      const ghost = markerCentre(cursor, origin, scaleExp, axes)
+      const { cell } = aimCentres(cursor, origin, scaleExp, axes)
+      expect(cell).toEqual(cellCentre(cursor, origin, scaleExp, axes))
+      for (let i = 0; i < 3; i++) expect(Math.abs(ghost[i] - cell[i])).toBeLessThanOrEqual(0.5)
+    }
+  })
+})
+
+/**
+ * The cursor's outline is the grid cell it aims at, at every zoom; only what
+ * marks the coordinate itself sits at the continuous point. From 2^80 up the
+ * outline used to float around the point and drew as a second box offset
+ * from the covering box by part of a cell (arkinox, 2026-10-01).
+ */
+describe('the cursor outline fits the grid', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+  const onGrid = (v: number): boolean => Math.abs(v + 0.5 - Math.round(v + 0.5)) <= 1e-9
+  const MOVES: Array<[AxisDirection['axis'], number]> = [['x', 1], ['x', 2], ['y', -1], ['z', 1], ['x', -1], ['y', -3], ['z', -2]]
+
+  it('is the grid cell, inside the covering box, with its point inside it, at every zoom', () => {
+    let checked = 0
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const origin = alignedOrigin(HERE, scaleExp)
+      for (const [axis, cells] of MOVES) {
+        const cursor: Position = { ...HERE, [axis]: clampAxis(HERE[axis] + BigInt(cells) * step) }
+        const { cell, point } = aimCentres(cursor, origin, scaleExp, axes)
+        expect(cell).toEqual(cellCentre(cursor, origin, scaleExp, axes))
+        expect(point).toEqual(placeCentre(cursor, origin, scaleExp, axes))
+        if (scaleExp < CONTINUOUS_SCALE_MIN) expect(point).toEqual(cell)
+        const cover = coveringBox(HERE, cursor, origin, scaleExp, axes, 1000)
+        for (let i = 0; i < 3; i++) {
+          // Its faces are grid planes, the covering box's are too, and the
+          // one sits inside the other: they can only meet face to face.
+          const lo = cell[i] - 0.5, hi = cell[i] + 0.5
+          expect(onGrid(lo) && onGrid(hi)).toBe(true)
+          const clo = cover.centre[i] - cover.size[i] / 2, chi = cover.centre[i] + cover.size[i] / 2
+          expect(onGrid(clo) && onGrid(chi)).toBe(true)
+          expect(lo).toBeGreaterThanOrEqual(clo - 1e-9)
+          expect(hi).toBeLessThanOrEqual(chi + 1e-9)
+          expect(point[i]).toBeGreaterThanOrEqual(lo - 1e-9)
+          expect(point[i]).toBeLessThan(hi + 1e-9)
+          checked++
+        }
+      }
+    }
+    expect(checked).toBe((MAX_SCALE_EXP + 1) * MOVES.length * 3)
+  })
+})
+
+
+/**
+ * A hidden item is drawn at its true coordinate plus half a gibson at every
+ * zoom (itemCentre), so a scene built from many shards keeps its layout as
+ * you zoom out, instead of each piece re-pegging to a cell centre of its own
+ * (arkinox, 2026-10-01: the vaporwave oasis, the roman columns poking through
+ * their roof at 2^2 and every piece stacked on one point at 2^5).
+ */
+describe('hidden items keep their layout at every zoom', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) { out.push(viewAxes(q)); q = rotateView(q, dirs[i % 4]) }
+    return out
+  })()
+  // A little scene: a column, a roof above it, a floor off centre, gibsons apart.
+  const BASE: Position = { x: (1n << 70n) + 1234567n, y: (1n << 60n) + 89n, z: (1n << 75n) + 4321n }
+  const SCENE: Position[] = [
+    BASE,
+    { x: BASE.x + 4n, y: BASE.y, z: BASE.z },
+    { x: BASE.x + 8n, y: BASE.y + 10n, z: BASE.z + 15n },
+    { x: BASE.x + 8n, y: BASE.y - 1n, z: BASE.z + 15n },
+    { x: BASE.x - 7n, y: BASE.y + 3n, z: BASE.z - 22n },
+  ]
+
+  it('is the cell centre at 2^0, exactly as items were always drawn there', () => {
+    for (const p of SCENE) {
+      for (const ax of VIEWS) {
+        const origin = alignedOrigin(BASE, 0)
+        expect(itemCentre(p, origin, 0, ax)).toEqual(cellCentre(p, origin, 0, ax).map((v) => v + 0))
+      }
+    }
+  })
+
+  it('keeps every pair at its true offset, scaled by 2^-zoom, from 2^0 to 2^84', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const origin = alignedOrigin(BASE, scaleExp)
+      for (const ax of VIEWS) {
+        const drawn = SCENE.map((p) => itemCentre(p, origin, scaleExp, ax))
+        for (let i = 0; i < SCENE.length; i++) {
+          for (let j = 0; j < SCENE.length; j++) {
+            ;[ax.right, ax.up, ax.out].forEach((a, k) => {
+              const want = (Number(SCENE[i][a.axis] - SCENE[j][a.axis]) / 2 ** scaleExp) * a.dir
+              // cellDelta's fixed point, once per item.
+              expect(Math.abs(drawn[i][k] - drawn[j][k] - want), `scaleExp ${scaleExp}`).toBeLessThanOrEqual(2e-4)
+            })
+          }
+        }
+      }
+    }
+  })
+
+  it('is what the cell snap broke: at 2^2 the gap from floor to roof changed', () => {
+    // The roof sits 11 gibsons above the floor: 2.75 cells at 2^2. Snapped to
+    // cell centres the two moved by different amounts and the gap was wrong.
+    const origin = alignedOrigin(BASE, 2)
+    const floor = SCENE[3], roof = SCENE[2]
+    const y = (p: Position, f: typeof cellCentre): number => f(p, origin, 2, axes)[1]
+    expect(y(roof, itemCentre) - y(floor, itemCentre)).toBeCloseTo(11 / 4, 4)
+    expect(y(roof, cellCentre) - y(floor, cellCentre)).not.toBeCloseTo(11 / 4, 2)
+  })
+})
+
+/**
+ * Where a deploy hides its item: the centre of the cursor's cell at the zoom
+ * you build in, or of the region when the bag is smaller than a cell; the
+ * cursor itself at 2^0 (arkinox's option A, 2026-10-01).
+ */
+describe('deployPoint', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const C: Position = { x: (1n << 70n) + 0x123456789n, y: (1n << 50n) + 0x2n, z: 0x1fffn }
+  const inBlock = (p: Position, q: Position, k: number): boolean =>
+    (['x', 'y', 'z'] as const).every((a) => alignTo(p[a], k) === alignTo(q[a], k))
+
+  it('is the cursor itself at 2^0, at any height', () => {
+    for (const h of [0, 1, 8, 40]) expect(deployPoint(C, 0, h)).toEqual(C)
+  })
+
+  it('is the centre of the cursor cell when the bag is at least a cell', () => {
+    for (const s of [1, 2, 5, 13, 33, 60, 84]) {
+      for (const h of [s, s + 1, Math.min(85, s + 20)]) {
+        const p = deployPoint(C, s, h)
+        for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], s) + (1n << BigInt(s - 1)))
+        expect(inBlock(p, C, s)).toBe(true)
+        expect(inBlock(p, C, h)).toBe(true)
+      }
+    }
+  })
+
+  it('is the centre of the region, inside the cursor cell, when the bag is smaller than a cell', () => {
+    for (const s of [3, 9, 40]) {
+      for (const h of [0, 1, 2, s - 1]) {
+        const p = deployPoint(C, s, h)
+        if (h === 0) expect(p).toEqual(C)
+        else for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], h) + (1n << BigInt(h - 1)))
+        // In the region the key comes from, and in the cell the cursor aims at.
+        expect(inBlock(p, C, h)).toBe(true)
+        expect(inBlock(p, C, s)).toBe(true)
+      }
+    }
+  })
+
+  it('lands inside the cursor cube, within half a gibson of its centre', () => {
+    for (let s = 0; s <= MAX_SCALE_EXP; s++) {
+      const origin = alignedOrigin(C, s)
+      const landed = itemCentre(deployPoint(C, s, MAX_SCALE_EXP), origin, s, axes)
+      const cube = aimCentres(C, origin, s, axes).cell
+      for (let i = 0; i < 3; i++) {
+        expect(Math.abs(landed[i] - cube[i])).toBeLessThanOrEqual(0.5 / 2 ** s + 2e-4)
+      }
+    }
   })
 })

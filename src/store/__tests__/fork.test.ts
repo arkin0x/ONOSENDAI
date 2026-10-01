@@ -8,7 +8,7 @@
  * chain. This is about saying so instead of doing it in silence.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -20,8 +20,9 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-import { ACTION_KIND, type NostrEvent } from '../../lib/events'
+import { ACTION_KIND, spawnTemplate, type NostrEvent } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
+import { placeSpawn } from '../fixtures/placeSpawn'
 
 const S = () => useCyberspace.getState()
 const hex = (n: number): string => n.toString(16).padStart(64, '0')
@@ -51,12 +52,17 @@ describe('a chain forked across two devices', () => {
   // Every case starts from the bare spawn: a hop left on the chain by the
   // case before it would be one more child at the branch and would decide
   // the next fork.
-  const fresh = {
-    events: [...S().events],
-    prevEventId: S().prevEventId,
-    genesisId: S().genesisId,
-    published: { ...S().published },
-  }
+  let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published'>
+
+  beforeAll(async () => {
+    await placeSpawn()
+    fresh = {
+      events: [...S().events],
+      prevEventId: S().prevEventId,
+      genesisId: S().genesisId,
+      published: { ...S().published },
+    }
+  })
 
   beforeEach(() => {
     useCyberspace.setState({ ...fresh, events: [...fresh.events], published: { ...fresh.published }, forkNotice: null })
@@ -100,5 +106,32 @@ describe('a chain forked across two devices', () => {
     expect(S().forkNotice).not.toBeNull()
     S().clearForkNotice()
     expect(S().forkNotice).toBeNull()
+  })
+
+  it('says so when another device\'s older branch overturned moves this device had published', () => {
+    const spawn = S().events[0]
+    const ours = hop(hex(6), spawn.id, spawn.id, spawn.created_at + 20, hex(0xbb))
+    // Ours went out: on the relay, and marked so here.
+    useCyberspace.setState({ events: [spawn, ours], prevEventId: ours.id, published: { ...S().published, [ours.id]: 'ok' } })
+    const theirs = hop(hex(7), spawn.id, spawn.id, spawn.created_at + 10, hex(0xcc))
+    S().adoptChain([theirs])
+    expect(S().prevEventId).toBe(theirs.id)
+    expect(S().forkNotice).toMatchObject({ dropped: 1, overturned: 1, replaced: false, adopted: 1 })
+    // The rest of the other device's branch arrives as its own fold: the
+    // unread notice grows, it is not replaced by a bare adoption.
+    S().adoptChain([hop(hex(10), theirs.id, spawn.id, spawn.created_at + 30, hex(0xdd))])
+    expect(S().forkNotice).toMatchObject({ dropped: 1, overturned: 1, adopted: 2 })
+  })
+
+  it('names a chain replaced by a newer spawn from another device', () => {
+    const spawn = S().events[0]
+    const ours = hop(hex(8), spawn.id, spawn.id, spawn.created_at + 20, hex(0xbb))
+    useCyberspace.setState({ events: [spawn, ours], prevEventId: ours.id, published: { ...S().published, [ours.id]: 'ok' } })
+    const respawn: NostrEvent = { ...spawnTemplate(S().identity.pubkey, spawn.created_at + 100), id: hex(9), pubkey: S().identity.pubkey, sig: '0'.repeat(128) }
+    S().adoptChain([respawn])
+    expect(S().genesisId).toBe(respawn.id)
+    // The whole previous chain left, and none of it counts as "overturned":
+    // nothing forked, a newer spawn took over.
+    expect(S().forkNotice).toMatchObject({ replaced: true, dropped: 2, overturned: 0, adopted: 1 })
   })
 })

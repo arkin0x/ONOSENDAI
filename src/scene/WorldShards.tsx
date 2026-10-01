@@ -8,21 +8,20 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useMemo } from 'react'
-import { markSceneTapHandled } from '../hooks/useCanvasTap'
-import type { ThreeEvent } from '@react-three/fiber'
-import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
+import { useMemo, useRef } from 'react'
+import type { Group } from 'three'
+import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { drawPoseAt } from '../lib/pose'
-
-/** A press that travels further than this is an orbit, not a tap. */
-const TAP_SLOP = 8
+import { TapTarget, farCullDoublings } from './TapTarget'
 
 const REACH = GRID_RADIUS * 8
+/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
+const FAR_CULL = farCullDoublings()
 
 interface Props {
   axes: ViewAxes
@@ -41,15 +40,22 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
+      // Not drawn at all once it cannot show a pixel at any distance; a shard
+      // with placed objects is exempt, since they can be far larger than it.
+      .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
       .map((w) => {
         const shard = w.shard!
-        const centre = markerCentre(w.at, origin, scaleExp, axes)
+        // At its true place, at every zoom (itemCentre): a scene of many
+        // shards keeps its layout as you zoom out.
+        const centre = itemCentre(w.at, origin, scaleExp, axes)
         // 2^(unit - scaleExp) render cells per model unit, in fixed point so
         // the ratio survives past a double at large separations of the two.
         const exp = shard.unit - scaleExp
         const scale = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
         // Sealed to one cube of side 2^height: nothing of it is drawn outside.
-        const clip = regionBox(w.at, w.height, shard.unit, scaleExp, axes)
+        // In the shard's own frame, so the cut, and the shape, is the same
+        // at every zoom; the ghost is sealed the same way.
+        const clip = regionBox(w.at, w.height, shard.unit, axes)
         // Standing on the ground, if that is how it was hidden. The pose is
         // derived from the bag's own position, so every finder computes the
         // same one without anything extra on the wire beyond `up` and `spin`.
@@ -66,25 +72,24 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => {
-        const hit = Math.max(0.6, w.scale * 2)
-        const open = (e: ThreeEvent<MouseEvent>): void => {
-          if (e.delta > TAP_SLOP) return
-          e.stopPropagation()
-          markSceneTapHandled()
-          useShards.getState().selectSecret(w.key)
-        }
-        return (
-          <group key={w.key} position={w.centre}>
-            <ShardMesh shard={w.shard} scale={w.scale} birth={births[w.key]} world clip={w.clip} pose={w.pose} />
-            {/* An invisible, generous tap target: shards can be a few pixels. */}
-            <mesh onClick={open}>
-              <sphereGeometry args={[hit, 8, 8]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
-          </group>
-        )
-      })}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} />)}
     </>
+  )
+}
+
+/**
+ * One shard in the world, and the tap target that is exactly what it draws:
+ * measured from the drawn group, and off while it is too small to see
+ * (TapTarget; arkinox, 2026-09-30).
+ */
+function PlacedShard({ w, birth }: { w: { key: string; shard: import('sno-core/shards').ShardModel; centre: [number, number, number]; scale: number; clip: ReturnType<typeof regionBox>; pose: ReturnType<typeof drawPoseAt> | undefined }; birth: number | undefined }): JSX.Element {
+  const drawn = useRef<Group>(null)
+  return (
+    <group position={w.centre}>
+      <group ref={drawn}>
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world clip={w.clip} pose={w.pose} />
+      </group>
+      <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />
+    </group>
   )
 }

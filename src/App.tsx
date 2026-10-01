@@ -20,6 +20,8 @@ import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
+import { ChainConflictPrompt } from './hud/ChainConflict'
+import { ChainStatusModal } from './hud/ChainStatus'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -240,6 +242,10 @@ export default function App(): JSX.Element {
       <InvoiceModal />
       <PaidModal />
       <CreditedModal />
+      {/* A held chain that met a chain on the relays: up until answered, over everything. */}
+      <ChainConflictPrompt />
+      {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
+      <ChainStatusModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

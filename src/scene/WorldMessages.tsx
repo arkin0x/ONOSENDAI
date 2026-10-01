@@ -18,27 +18,29 @@
  * came right at 33, where cursorOffset switches to [0, 0, 0] and the two
  * conventions finally agree (arkinox, 2026-09-16).
  *
- * markerCentre is exactly that policy: the cell where you could stand in it,
- * the point where it is one of half a million. cursorOffset's own comment
- * already says "same policy as markerCentre"; this file simply was not using
- * it.
+ * The lesson holds and the policy has moved on: a hidden item is now drawn
+ * at its true coordinate plus half a gibson at every zoom (itemCentre), so a
+ * scene of many items keeps its layout as you zoom out, and an item focus
+ * (focusItem) frames exactly that place, so the camera and the note still
+ * agree at every zoom (arkinox, 2026-10-01).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
-import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
+import { TapTarget } from './TapTarget'
 
-const TAP_SLOP = 8
+/** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
+const TAP_PX = 44
 
 const REACH = GRID_RADIUS * 8
 /** The message color: a warm note against the cool field. */
@@ -129,7 +131,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'message' && w.text && w.plane === anchorPlane)
-      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: markerCentre(w.at, origin, scaleExp, axes) }))
+      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: itemCentre(w.at, origin, scaleExp, axes) }))
       .filter((w) => Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,12 +142,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   return (
     <>
       {placed.map((w) => {
-        const open = (e: ThreeEvent<MouseEvent>): void => {
-          if (e.delta > TAP_SLOP) return
-          e.stopPropagation()
-          markSceneTapHandled()
-          useShards.getState().selectSecret(w.key)
-        }
+        const open = (): void => useShards.getState().selectSecret(w.key)
         // Money reads as money: a coin is the turning diamond and the ₿, and
         // nothing else. Its token is two thousand characters of base64 that
         // say nothing to anybody, and the words someone leaves around one are
@@ -172,10 +169,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
                 ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
                 : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
 
-            <mesh position={w.centre} onClick={open}>
-              <sphereGeometry args={[1, 8, 8]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
+            {/* The mark is a fixed size on screen at any zoom, so its target is
+                too: a fingertip over the mark (TapTarget). */}
+            <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
           </group>
         )
       })}

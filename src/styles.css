@@ -2138,6 +2138,127 @@ kbd {
   }
 }
 
+/*
+ * The bar never covers the centre of the screen, where the ghost shows what is
+ * being hidden: the title and the deploy button are pinned and the rows
+ * between them scroll inside the bar. On a phone, and anywhere this client
+ * lays out for touch, the bar takes at most a quarter of the screen's height
+ * (arkinox's rule, 2026-10-01). On a desktop it stops above the middle. dvh is
+ * the height actually visible, browser bars and all; vh stands in where dvh
+ * is not known.
+ */
+.deploybar {
+  max-height: calc(50vh - 24px);
+  max-height: calc(50dvh - 24px);
+}
+@media (max-width: 1100px) {
+  .deploybar {
+    max-height: 25vh;
+    max-height: 25dvh;
+    padding-bottom: 10px;
+  }
+}
+.deploybar__head,
+.deploybar__foot {
+  flex-shrink: 0;
+}
+.deploybar__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.deploybar__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Room for the scrollbar, and a fade at the bottom edge that says there is
+     more; the padding under the last row keeps it clear of the fade. */
+  padding-right: 4px;
+  margin-right: -4px;
+  padding-bottom: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.35) transparent;
+}
+
+/* The bag's settings: its scope, two switches and the riddle (DeployBar BagControls). */
+.deploybar__bag {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+.deploybar__scope {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--ok);
+}
+.deploybar__bag .ui-field {
+  margin: 8px 0 0;
+}
+/* The label bold, as arkinox wrote it; the hint under it plain. */
+.deploybar__bag .ui-field__label {
+  font-weight: 700;
+}
+.deploybar__bag .ui-field__hint {
+  font-size: 9px;
+}
+.deploybar__bag sup {
+  font-size: 0.78em;
+  line-height: 0;
+  vertical-align: super;
+}
+.deploybar__riddle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.deploybar__riddle .ui-field__text {
+  cursor: default;
+}
+/* The same field as the comments composer and the login inputs. */
+.deploybar__input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font: inherit;
+  /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
+  font-size: 16px;
+}
+@media (min-width: 1101px) {
+  .deploybar__input { font-size: 12px; }
+}
+.deploybar__input:focus {
+  outline: none;
+  border-color: rgba(0, 229, 255, 0.5);
+}
+.deploybar__input::placeholder {
+  color: var(--dim);
+  opacity: 0.7;
+}
+.deploybar__count {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .shards__row--deployed {
   display: grid;
   grid-template-columns: 1fr auto auto;

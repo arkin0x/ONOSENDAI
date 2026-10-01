@@ -25,14 +25,34 @@
  * the camera, so orbiting aims the shard and the ghost shows exactly what
  * lands. Both travel inside the encrypted payload, so a finder decrypts the
  * pose along with the shape and sees it as it was placed.
+ *
+ * Three more choices belong to the BAG rather than to this item, because a bag
+ * is one event per author and region holding everything hidden there (spec
+ * §7.6) (arkinox, 2026-10-01):
+ *   - PUBLISH HEIGHT HINT: whether the bag carries its `h` tag (spec §8.6, optional).
+ *   - PUBLISH SECTOR HINT: a hint naming the bag's sector, heights of 30 on
+ *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
+ *     must be at least the bag's height, so it is off above height 30.
+ *   - HINT MESSAGE: a riddle in the bag's plaintext `content` (spec §7.7).
+ * When the cursor's region already holds your bag, they start at that bag's
+ * settings and the bar says they apply to everything you hid there.
+ *
+ * On a phone the bar is capped at a quarter of the screen's height so what is
+ * being hidden stays in view at the centre (arkinox's rule, 2026-10-01). The
+ * title and the deploy button are pinned and everything between them scrolls,
+ * so the button is always one tap away however many rows are open.
  */
 
+import { useEffect, useMemo } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
+import { SCAN_MAX_HEIGHT, ownBagIn, regionOf, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
-import { messagePreview } from '../lib/hidden'
+import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
+import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
+import { deployPoint } from '../lib/space'
+import { Field, Switch } from './ui/Switch'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
@@ -61,6 +81,17 @@ export function DeployBar(): JSX.Element | null {
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
   const hopLimit = useCalibration((s) => s.hopHeight)
   const bind = useRepeatable()
+  const bag = useShards((s) => s.deployBag)
+  const mine = useShards((s) => s.mine)
+  // The region the deploy would land in, as a string, so the bar re-renders
+  // when the cursor crosses into another region and not on every step.
+  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, s.scaleExp, height), s.plane, height))
+  const existing = useMemo(() => ownBagIn(mine, region), [mine, region])
+  // Hooks stay above the early return below. The controls take this region's
+  // bag settings when the cursor's region changes (seedDeployBag decides).
+  useEffect(() => {
+    if (pending) useShards.getState().seedDeployBag(existing)
+  }, [pending, existing])
 
   const inputs = { localMax: Math.min(MAX_COMPUTE_HEIGHT, hopLimit), cloudMode, cloudCap }
   const ceiling = deployCeiling(inputs)
@@ -78,14 +109,18 @@ export function DeployBar(): JSX.Element | null {
   const working = status === 'working'
 
   return (
-    <div className="deploybar" role="dialog" aria-label="Deploy shard">
-      <div className="deploybar__row">
+    <div className="deploybar" role="dialog" aria-label={isMessage ? 'Hide message' : 'Deploy shard'}>
+      <div className="deploybar__row deploybar__head">
         <span className="deploybar__eye" aria-hidden="true">◇</span>
         <span className="deploybar__title">
           {isMessage ? 'HIDE MESSAGE' : 'DEPLOY'} <strong>{name}</strong>
         </span>
         <button className="deploybar__cancel" onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
       </div>
+
+      {/* Everything between the title and the button scrolls inside the bar,
+          which a phone caps at a quarter of the screen (styles.css). */}
+      <div className="deploybar__body">
 
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while
@@ -182,6 +217,10 @@ export function DeployBar(): JSX.Element | null {
             : `Computed by HOSAKA; its price for 2^${height} is not known yet.`}
       </div>
 
+      <BagControls height={height} bag={bag} existing={existing?.count ?? 0} />
+      </div>
+
+      <div className="deploybar__foot">
       {error && <div className="deploybar__row notice">{error}</div>}
 
       {/* The ask takes the button's place: the same green, now the yes, with
@@ -203,6 +242,75 @@ export function DeployBar(): JSX.Element | null {
           {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
         </button>
       )}
+      </div>
+    </div>
+  )
+}
+
+/** 2 to a power, the power raised, legible at the bar's small type. */
+function Pow({ e }: { e: number }): JSX.Element {
+  return <>2<sup>{e}</sup></>
+}
+
+/**
+ * The bag's three public settings (lib/hidden.ts BagSettings), for shards and
+ * messages alike. `existing` is how many of your things the cursor's region
+ * already holds: the settings are that bag's, and the bar says so.
+ */
+function BagControls({ height, bag, existing }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number }): JSX.Element {
+  const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
+  // A hint must be at least the bag's height (spec §7.7); a sector is 2^30.
+  const sectorFits = height <= SECTOR_HEIGHT
+  // A finer box another client wrote is kept as it is while the switch stays on.
+  const otherBox = bag.hint && !isSectorHint(bag.hint) ? bag.hint : null
+  return (
+    <div className="deploybar__bag">
+      <div className="deploybar__scope">
+        {existing > 0
+          ? <>You already hid {existing === 1 ? 'one thing' : `${existing} things`} in this region. These settings are its bag&apos;s, so they apply to everything you hid here as well as this.</>
+          : <>These settings belong to this region&apos;s bag: anything else you hide in this region later shares them.</>}
+      </div>
+
+      <Field id="deploy-height-hint" label="Publish height hint" hint="Tells seekers what height they must calculate to in order to find this.">
+        <Switch id="deploy-height-hint" checked={bag.heightTag} onCheckedChange={(v) => set({ heightTag: v })} />
+      </Field>
+
+      <Field
+        id="deploy-sector-hint"
+        label="Publish sector hint"
+        hint={otherBox
+          ? <>This bag already carries a hint box of heights {otherBox.join(', ')}, written by another client. On keeps it as it is; off removes it.</>
+          : sectorFits
+            ? <>Tells seekers which sector this is hidden in: one cube <Pow e={SECTOR_HEIGHT} /> gibsons on a side, instead of all of cyberspace at <Pow e={AXIS_BITS} /> on a side. That cuts their search from <Pow e={searchExponent(height, AXIS_BITS)} /> regions of this size to <Pow e={searchExponent(height, SECTOR_HEIGHT)} />.</>
+            : <>Not available at height {height}: a sector is <Pow e={SECTOR_HEIGHT} /> gibsons on a side, smaller than this region, so no sector can contain it.</>}
+      >
+        <Switch
+          id="deploy-sector-hint"
+          checked={bag.hint !== null}
+          disabled={!otherBox && !sectorFits}
+          onCheckedChange={(v) => set({ hint: v ? SECTOR_HINT : null })}
+        />
+      </Field>
+
+      <div className="deploybar__riddle">
+        <label className="ui-field__text" htmlFor="deploy-riddle">
+          <span className="ui-field__label">Hint message</span>
+          <span className="ui-field__hint">Leave an optional hint for seekers to help them find this so they don&apos;t have to search all of cyberspace.</span>
+        </label>
+        <textarea
+          id="deploy-riddle"
+          className="deploybar__input"
+          rows={2}
+          maxLength={MAX_RIDDLE_LENGTH}
+          value={bag.riddle}
+          onChange={(e) => set({ riddle: e.target.value })}
+          placeholder="A riddle, a landmark, a clue"
+        />
+        <div className="deploybar__count">
+          <span>Public: anyone can read it without finding this.</span>
+          <span>{bag.riddle.length}/{MAX_RIDDLE_LENGTH}</span>
+        </div>
+      </div>
     </div>
   )
 }

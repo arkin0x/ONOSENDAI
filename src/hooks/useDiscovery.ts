@@ -110,9 +110,12 @@ export function useDiscovery(): void {
         if (!keyHex || !region) continue
         // One envelope holds a bag; unbag flattens it to items.
         // A reference without its own point is drawn at the base of this region.
-        const h = BigInt(heights.get(region) ?? 0)
+        // The height is the key's own, so a bag whose hider left `h` off
+        // (spec §8.6, arkinox 2026-10-01) is read at its true size.
+        const height = heights.get(region) ?? 0
+        const h = BigInt(height)
         const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
-        const items = await unbag(ev, hexToBytes(keyHex), resolveReference, origin)
+        const items = await unbag(ev, hexToBytes(keyHex), resolveReference, origin, height)
         if (items.length > 0) opened.push(region)
         found.push(...items)
       }

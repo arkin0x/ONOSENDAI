@@ -60,6 +60,7 @@ import {
   canonicalQuaternion,
   cellDelta,
   clampAxis,
+  itemCentre,
   placeCentre,
   rotateView,
   stepFor,
@@ -431,6 +432,12 @@ export interface CyberFocus {
   label: string
   /** The cursor came along (VIEW): the pad drives it here. */
   drive?: boolean
+  /**
+   * A hidden item (a shard, a message) is what is being looked at: the camera
+   * frames it where it is drawn, its true place (itemCentre), rather than by
+   * the stop markers' policy.
+   */
+  item?: boolean
 }
 
 export interface CyberspaceState {
@@ -587,6 +594,8 @@ export interface CyberspaceState {
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
   /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
+  /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
+  focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /** Stop looking; the scene returns to your avatar. */
   clearFocus: () => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
@@ -2286,6 +2295,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set(next)
   },
 
+  focusItem: (position, plane, label, scaleExp) => {
+    get().focusOn(position, plane, label, scaleExp)
+    const focus = get().focus
+    if (focus) set({ focus: { ...focus, item: true } })
+  },
+
   clearFocus: () => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
@@ -2979,6 +2994,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // A driven focus (the free view) frames its cursor like your head does,
     // so the camera follows the pad; a plain focus frames the viewed point.
     if (focus !== null && !focus.drive) {
+      // A hidden item is drawn at its true place at every zoom, so that is
+      // what is framed; on the stop markers' policy below, the camera framed
+      // the item's cell centre at and below 2^33 while the item sat up to half
+      // a cell away, wandering on screen as you zoomed (arkinox, 2026-10-01).
+      if (focus.item) return itemCentre(anchor, alignedOrigin(anchor, scaleExp), scaleExp, focusAxes)
       // Same policy as markerCentre: at occupancy zooms the marker snaps to
       // its cell, whose cube centre is the aligned origin itself.
       if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]

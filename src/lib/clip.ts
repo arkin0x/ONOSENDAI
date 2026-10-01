@@ -17,41 +17,40 @@
 export { boxContains, clipMesh, clipPoints, type Box, type Mesh } from 'sno-core/clip'
 
 import type { Box } from 'sno-core/clip'
-import type { ViewAxes } from './space'
-import { alignTo, stepFor, type Position } from './space'
+import type { Position, ViewAxes } from './space'
 
 /**
- * The region cube of side 2^height that contains `at`, in the render frame of
- * a shard placed at `at` with model units of 2^unit gibsons.
+ * The region cube of side 2^height that contains `at`, in the frame of a
+ * shard placed at `at` with model units of 2^unit gibsons.
  *
- * The shard's group sits at the centre of the cell holding `at` at the
- * current zoom, so the frame's origin is that world point: the aligned
- * coordinate plus half a cell. Each render axis is one world axis with a
- * direction, as cellCentre maps them, so a box edge on a world axis lands on
- * its render axis at (edge minus origin) over 2^unit, flipped when the axis
- * points the other way.
+ * The shard's group sits where itemCentre draws it, at `at` plus half a
+ * gibson, at every zoom, so that world point is the frame's origin and the
+ * zoom does not enter into it. Which part of a shard lies inside its bag's
+ * region is a fact about the data, and now it is drawn as one: the same box,
+ * the same cut, the same shape at every zoom. It used to be measured from the
+ * frame of the zoom's cell, where the shard was snapped, and once a cell was
+ * larger than the region the snap carried the shard out of its own region
+ * and the clipper cut it away. A 16-gibson shard hidden off centre in a 2^4
+ * region drew 7, 7, 10, 14, 6, 10, 0 and 0 triangles from 2^0 to 2^7, and
+ * nothing from 2^6 while it was still about 8 px across (arkinox,
+ * 2026-10-01).
  *
- * `continuous` says the shard was placed at its true position instead
- * (pointCentre, which is what placeCentre does from CONTINUOUS_SCALE_MIN up).
- * Its group then sits on `at` itself, so the frame's origin is `at` and the
- * half cell does not apply. Measured from the cell centre, the box would sit
- * up to half a cell off the shard it seals, which at the zoom where that
- * shard is visible is half its own size.
+ * Each render axis is one world axis with a direction, as itemCentre maps
+ * them, so a box edge on a world axis lands on its render axis at (edge minus
+ * origin) over 2^unit, flipped when the axis points the other way. In render
+ * space the walls fall where the region cages draw them: the item's place
+ * plus (edge minus at minus half a gibson) is the edge's own place.
  */
-export function regionBox(
-  at: Position, height: number, unit: number, scaleExp: number, axes: ViewAxes, continuous = false,
-): Box {
+export function regionBox(at: Position, height: number, unit: number, axes: ViewAxes): Box {
   const h = BigInt(height)
-  const half = continuous ? 0 : Number(stepFor(scaleExp)) / 2
   const perUnit = 2 ** unit
   const min: [number, number, number] = [0, 0, 0]
   const max: [number, number, number] = [0, 0, 0]
   ;[axes.right, axes.up, axes.out].forEach((a, i) => {
     const v = at[a.axis]
     const base = (v >> h) << h
-    const origin = continuous ? v : alignTo(v, scaleExp)
-    const lo = (Number(base - origin) - half) / perUnit
-    const hi = (Number(base + (1n << h) - origin) - half) / perUnit
+    const lo = (Number(base - v) - 0.5) / perUnit
+    const hi = (Number(base + (1n << h) - v) - 0.5) / perUnit
     if (a.dir >= 0) { min[i] = lo; max[i] = hi } else { min[i] = -hi; max[i] = -lo }
   })
   return { min, max }

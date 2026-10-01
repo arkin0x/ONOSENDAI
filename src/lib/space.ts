@@ -162,14 +162,23 @@ export function pointCentre(
  */
 export const OCCUPANCY_SCALE_MAX = 33
 
+/**
+ * Whether markerCentre places continuously at this scale: above
+ * OCCUPANCY_SCALE_MAX it does, at and below it snaps to the cell. Stops and
+ * the transit avatar follow it; hidden items do not (itemCentre).
+ */
+export function markerContinuous(scaleExp: number): boolean {
+  return scaleExp > OCCUPANCY_SCALE_MAX
+}
+
 /** Placement for stop markers: the cell when you could stand there, the
  * point when it is one of half a million. */
 export function markerCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
 ): [number, number, number] {
-  return scaleExp <= OCCUPANCY_SCALE_MAX
-    ? cellCentre(p, origin, scaleExp, axes)
-    : pointCentre(p, origin, scaleExp, axes)
+  return markerContinuous(scaleExp)
+    ? pointCentre(p, origin, scaleExp, axes)
+    : cellCentre(p, origin, scaleExp, axes)
 }
 
 /**
@@ -209,6 +218,58 @@ export function placeCentre(
   return scaleExp >= CONTINUOUS_SCALE_MIN
     ? pointCentre(p, origin, scaleExp, axes)
     : cellCentre(p, origin, scaleExp, axes)
+}
+
+/**
+ * Where a hidden item (a shard, a message, a coin) is drawn: its true
+ * coordinate plus half a gibson, at every zoom.
+ *
+ * A coordinate names a whole unit gibson, and the half puts the item at that
+ * gibson's centre, which at 2^0 is exactly the cell centre items were always
+ * drawn at. What changed is the zooms above that. Items used to be drawn at
+ * the centre of their cell at the current zoom (markerCentre, the cell at
+ * and below 2^33), so zooming out re-pegged every piece of a scene built
+ * from many shards to a cell centre of its own, each jumping by up to half a
+ * cell and pieces sharing a cell stacking on one point: arkinox's vaporwave
+ * oasis "gets shuffled and doesnt look quite right as the models get
+ * re-pegged to valid cells in the zoom level" (2026-10-01). At its true place
+ * a scene keeps its layout at every zoom, the way a photo does when you step
+ * back from it. Stops keep markerCentre: there the snap is on purpose.
+ */
+export function itemCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  // Adding zero folds the -0 a flipped axis makes of a zero offset.
+  return [axes.right, axes.up, axes.out].map(
+    (a) => cellOffset(p[a.axis], origin[a.axis], scaleExp, a.dir) + 0,
+  ) as [number, number, number]
+}
+
+/**
+ * The coordinate a deploy hides its item at: the centre of the cursor's cell
+ * at the zoom you are building in, so the item lands where the ghost sat,
+ * centred in the cursor cube (arkinox's option A, 2026-10-01).
+ *
+ * The centre of an aligned block of 2^k gibsons is its low corner plus
+ * 2^(k - 1). At k = 0 the block is one gibson and the cursor's own coordinate
+ * is its centre. k is the zoom, unless the bag's height is lower: a region
+ * smaller than a cell must still hold the item, since its key is derived from
+ * the region the item is in, so then the block is the region itself. Either
+ * way the block holds the cursor and sits inside both the cursor's cell and
+ * the cursor's region, so the item stays in the region the deploy cage shows.
+ * A coordinate is a whole gibson, so the item is drawn half a gibson past
+ * the exact centre (itemCentre): a quarter of a cell at 2^1, an eighth at
+ * 2^2, nothing visible above that.
+ */
+export function deployPoint(cursor: Position, scaleExp: number, height: number): Position {
+  const k = Math.max(0, Math.min(scaleExp, height))
+  if (k === 0) return { ...cursor }
+  const half = 1n << BigInt(k - 1)
+  return {
+    x: alignTo(cursor.x, k) + half,
+    y: alignTo(cursor.y, k) + half,
+    z: alignTo(cursor.z, k) + half,
+  }
 }
 
 /**

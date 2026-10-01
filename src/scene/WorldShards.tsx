@@ -10,7 +10,7 @@
 
 import { useMemo, useRef } from 'react'
 import type { Group } from 'three'
-import { CONTINUOUS_SCALE_MIN, GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
@@ -40,19 +40,17 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
       .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
       .map((w) => {
         const shard = w.shard!
-        const centre = markerCentre(w.at, origin, scaleExp, axes)
+        // At its true place, at every zoom (itemCentre): a scene of many
+        // shards keeps its layout as you zoom out.
+        const centre = itemCentre(w.at, origin, scaleExp, axes)
         // 2^(unit - scaleExp) render cells per model unit, in fixed point so
         // the ratio survives past a double at large separations of the two.
         const exp = shard.unit - scaleExp
         const scale = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
         // Sealed to one cube of side 2^height: nothing of it is drawn outside.
-        // Measured in the continuous frame from CONTINUOUS_SCALE_MIN up, where
-        // the ghost that deployed it is drawn the same way, so the two seal
-        // identically. Below that the cell frame is kept as it was, although
-        // markerCentre already places the shard continuously above
-        // OCCUPANCY_SCALE_MAX: aligning those two from 34 to 79 is a separate
-        // change to finer zooms, left for its own decision.
-        const clip = regionBox(w.at, w.height, shard.unit, scaleExp, axes, scaleExp >= CONTINUOUS_SCALE_MIN)
+        // In the shard's own frame, so the cut, and the shape, is the same
+        // at every zoom; the ghost is sealed the same way.
+        const clip = regionBox(w.at, w.height, shard.unit, axes)
         // Standing on the ground, if that is how it was hidden. The pose is
         // derived from the bag's own position, so every finder computes the
         // same one without anything extra on the wire beyond `up` and `spin`.

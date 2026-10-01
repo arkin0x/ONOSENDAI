@@ -119,7 +119,7 @@ export function LootDetail(): JSX.Element | null {
 
   const view = (o: OpenedItem): void => {
     close()
-    useCyberspace.getState().focusOn(o.at, o.plane, o.label, o.unit)
+    useCyberspace.getState().focusItem(o.at, o.plane, o.label, o.unit)
   }
   // Fly there and open the item's own modal (SecretModal) on top.
   const details = (o: OpenedItem): void => {

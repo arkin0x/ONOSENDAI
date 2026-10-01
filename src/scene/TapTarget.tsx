@@ -52,8 +52,6 @@ export const MAX_SCREENS = 2
  * screen. A taller one would only make the bound more generous than needed.
  */
 export const MAX_VIEWPORT_PX = 2160
-/** How often the drawn box is measured again, in frames. */
-const MEASURE_EVERY = 20
 
 const noRaycast = (): void => {}
 
@@ -124,7 +122,6 @@ interface Props {
 export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
   const hit = useRef<Mesh>(null)
   const box = useRef(new Box3())
-  const frame = useRef(0)
   const centre = useRef(new Vector3())
   const size = useRef(new Vector3())
 
@@ -146,7 +143,12 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
 
     const drawn = measure?.current
     if (!drawn) { m.raycast = noRaycast; return }
-    if (frame.current++ % MEASURE_EVERY === 0 || box.current.isEmpty()) box.current.setFromObject(drawn)
+    // Measured every frame, from the geometry as it is drawn now: a shard
+    // clipped to its region changes shape with the zoom, and a measurement
+    // even a few frames old kept a target alive over nothing (arkinox,
+    // 2026-10-01: still tappable at 2^9 after vanishing at 2^5). The cost is
+    // one cached bounding box per child geometry.
+    box.current.setFromObject(drawn)
     if (box.current.isEmpty()) { m.raycast = noRaycast; return }
     // Inside the shard: it surrounds the view, so it is not a thing to tap.
     if (box.current.containsPoint(cam.position)) { m.raycast = noRaycast; return }

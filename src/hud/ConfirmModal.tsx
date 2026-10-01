@@ -23,21 +23,31 @@ interface Props {
   /** The cancel button's label; null for a modal with nothing to cancel,
    * which has the one button. Tapping the backdrop still calls onCancel. */
   cancelLabel?: string | null
+  /**
+   * What a tap on the backdrop does instead of onCancel, for a modal whose
+   * cancel button is itself an answer, where a stray tap must never pick it:
+   * the held-chain prompt sets itself aside rather than choosing.
+   */
+  onBackdrop?: () => void
+  /** Wraps the body in its own scroll box, for an explanation longer than a phone screen. */
+  scroll?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
   // Through a portal: every .panel has a backdrop-filter, which makes it a
   // stacking context, so a fixed modal rendered inside one panel would be
   // painted under the panels that follow it in the column.
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onCancel}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onBackdrop ?? onCancel}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
         <h2 className="modal__title">{title}</h2>
         {figure !== undefined && <div className="modal__figure">{figure}</div>}
-        <p className="modal__body">{body}</p>
+        {/* A div, not a paragraph: an explanation's lists and tables are not
+            valid inside a <p>. */}
+        <div className={`modal__body ${scroll ? 'modal__body--scroll' : ''}`}>{body}</div>
         <div className="modal__row">
           {cancelLabel !== null && <button className="modal__cancel" onClick={onCancel} disabled={busy}>{cancelLabel}</button>}
           <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy}>

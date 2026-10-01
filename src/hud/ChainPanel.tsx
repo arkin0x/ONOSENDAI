@@ -28,6 +28,9 @@ import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
+import { useChainStatus } from './ChainStatus'
+import { holdReason } from '../lib/chainHold'
+import { useChainUi } from '../store/useChainUi'
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
@@ -40,6 +43,10 @@ export function ChainPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const respawns = useCyberspace((s) => s.respawns)
+  const held = useCyberspace((s) => s.held)
+  const check = useCyberspace((s) => s.selfCheck)
+  // The same status the strip under the LIVE/LOCAL switch shows (ChainStatus.tsx).
+  const status = useChainStatus()
 
   // Parsed once per chain change: the type is the only thing a row needs from
   // inside the event, and re-parsing on every publish result would re-read the
@@ -57,9 +64,18 @@ export function ChainPanel(): JSX.Element {
 
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
-  const relayState = !live
+  // HELD first: whatever LIVE says, a held chain is going nowhere until the
+  // relays answer. Then the two ways a LIVE queue can be stuck, which used to
+  // read QUEUED as if it were merely waiting its turn.
+  const relayState = held
+    ? 'HELD'
+    : !live
     ? 'LOCAL'
-    : statuses.includes('failed')
+    : status?.kind === 'waiting' && status.why === 'offline'
+      ? 'OFFLINE'
+      : status?.kind === 'waiting'
+        ? 'NO RELAY'
+        : statuses.includes('failed')
       ? 'RETRYING'
       : statuses.includes('sending')
         ? 'SENDING'
@@ -120,7 +136,7 @@ export function ChainPanel(): JSX.Element {
           <dt>Published</dt>
           <dd>
             {sent} / {events.length}{' '}
-            <span className={`relay relay--${relayState.toLowerCase()}`}>{relayState}</span>
+            <span className={`relay relay--${relayState.toLowerCase().replace(' ', '')}`}>{relayState}</span>
           </dd>
         </div>
         {/* Last and apart: each respawn began a new chain, so this is a fact
@@ -159,6 +175,19 @@ export function ChainPanel(): JSX.Element {
       </div>
 
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
+      {/* The strip under the switch is only drawn with the touch controls; the
+          panel says the same for whoever reads it here. */}
+      {status?.kind === 'conflict' ? (
+        <p className="notice">
+          CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
+          <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
+        </p>
+      ) : held ? (
+        <p className="notice notice--held">
+          HELD on this device: {holdReason(check)}. Nothing publishes until the relays confirm whether this identity already has a chain.
+          <button className="tag tag--tap" onClick={() => useChainUi.getState().setExplaining(true)}>WHY</button>
+        </p>
+      ) : null}
 
       <Explanation>
         To alter your position in cyberspace, you must compute the cantor root for

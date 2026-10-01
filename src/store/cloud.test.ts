@@ -12,7 +12,7 @@
  * paid but never claimed after a reload, or a cancelled flow landing late.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { fake, storage } = vi.hoisted(() => {
   const m = new Map<string, string>()
@@ -53,6 +53,7 @@ import { HosakaError, type HosakaDeposit, type HosakaJob, type HosakaLimits } fr
 import type { Position } from '../lib/space'
 import { postProof } from '../lib/workers'
 import { useCyberspace } from './useCyberspace'
+import { placeSpawn } from './fixtures/placeSpawn'
 import { useToast } from './useToast'
 import { useSecrets } from './useSecrets'
 
@@ -120,6 +121,8 @@ const S = useCyberspace.getState
 const idle = (): Promise<void> => vi.waitFor(() => { expect(S().cloud.status).toBe('idle') }, { timeout: 5000 })
 
 describe('cloud routes', () => {
+  // A chain to route on: the page no longer signs a spawn on load.
+  beforeAll(placeSpawn)
   beforeEach(() => {
     // This machine stops at h12 for hops AND sidesteps, so an h13 move has no local way and is
     // the cloud's (HOSAKA is used only when needed); the caps are already known.

@@ -22,7 +22,7 @@
  */
 
 import { publish } from './relay'
-import { chainFacts, gateAfter } from './release'
+import { chainFacts, gateAfter, maySend } from './release'
 import { useCyberspace } from '../store/useCyberspace'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
@@ -39,7 +39,7 @@ let backoff = RETRY_MS
 async function pump(): Promise<void> {
   if (inFlight) return
   const s = useCyberspace.getState()
-  if (!s.live || !released) return
+  if (!maySend(s, released)) return
   const next = s.events.find((e) => s.published[e.id] !== 'ok')
   if (!next) return
 
@@ -55,12 +55,12 @@ async function pump(): Promise<void> {
   if (result.ok) {
     now.setPublishStatus(next.id, 'ok')
     backoff = RETRY_MS
-    if (now.live && released) void pump()
+    if (maySend(now, released)) void pump()
     return
   }
 
   now.setPublishStatus(next.id, 'failed', result.reason)
-  if (!now.live || !released) return
+  if (!maySend(now, released)) return
   retryHandle = window.setTimeout(() => {
     retryHandle = null
     backoff = Math.min(backoff * 2, RETRY_MAX_MS)
@@ -77,10 +77,10 @@ export function startPublisher(): void {
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
     released = gateAfter(released, chainFacts(prev), chainFacts(s))
-    if (s.live === prev.live && s.events === prev.events) return
-    if (!s.live || !released) {
-      // Local, or Live with the gate still shut: stop retrying. An in-flight
-      // send is allowed to finish.
+    if (s.live === prev.live && s.events === prev.events && s.held === prev.held && s.publishRequest === prev.publishRequest) return
+    if (!maySend(s, released)) {
+      // Local, Live with the gate still shut, or a held chain: stop retrying.
+      // An in-flight send is allowed to finish.
       if (retryHandle !== null) { clearTimeout(retryHandle); retryHandle = null }
       return
     }

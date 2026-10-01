@@ -33,6 +33,7 @@ import { useShards } from '../store/useShards'
 import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -56,6 +57,10 @@ export function TouchControls(): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const pin = useCyberspace((s) => s.pin)
   const live = useCyberspace((s) => s.live)
+  // What the chain's publishing is doing when the switch alone cannot say:
+  // held, a conflict waiting for a choice, or LIVE with nothing reachable.
+  // Null, and not drawn, when there is nothing to report.
+  const chainStatus = useChainStatus()
   const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
   // Open only while going LOCAL to LIVE. The switch itself is not moved until
@@ -127,7 +132,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}`} role="group" aria-label="Move cursor and change scale">
+      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label="Move cursor and change scale">
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -195,7 +200,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {home && <div className="touchops">
+      {home && <div className={`touchops${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
           title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}
@@ -240,6 +245,9 @@ export function TouchControls(): JSX.Element {
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!live) setGoLive(true) }}
           >LIVE</button>
         </div>
+        {/* Directly under the switch, which itself never changes: it says
+            what was chosen, this says what is happening (ChainStatus.tsx). */}
+        {chainStatus && <ChainStatusStrip status={chainStatus} />}
       </div>}
 
       {/* Outside the commit block: once it is up it stays up until it is

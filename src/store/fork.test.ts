@@ -8,7 +8,7 @@
  * chain. This is about saying so instead of doing it in silence.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -22,6 +22,7 @@ if (typeof localStorage === 'undefined') {
 
 import { ACTION_KIND, type NostrEvent } from '../lib/events'
 import { useCyberspace } from './useCyberspace'
+import { placeSpawn } from './fixtures/placeSpawn'
 
 const S = () => useCyberspace.getState()
 const hex = (n: number): string => n.toString(16).padStart(64, '0')
@@ -51,12 +52,17 @@ describe('a chain forked across two devices', () => {
   // Every case starts from the bare spawn: a hop left on the chain by the
   // case before it would be one more child at the branch and would decide
   // the next fork.
-  const fresh = {
-    events: [...S().events],
-    prevEventId: S().prevEventId,
-    genesisId: S().genesisId,
-    published: { ...S().published },
-  }
+  let fresh: Pick<ReturnType<typeof S>, 'events' | 'prevEventId' | 'genesisId' | 'published'>
+
+  beforeAll(async () => {
+    await placeSpawn()
+    fresh = {
+      events: [...S().events],
+      prevEventId: S().prevEventId,
+      genesisId: S().genesisId,
+      published: { ...S().published },
+    }
+  })
 
   beforeEach(() => {
     useCyberspace.setState({ ...fresh, events: [...fresh.events], published: { ...fresh.published }, forkNotice: null })

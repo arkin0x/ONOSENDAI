@@ -12,12 +12,14 @@
  */
 
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool'
+import type { AbstractRelay } from 'nostr-tools/abstract-relay'
 import { verifyEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
 import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
+import { classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -165,37 +167,123 @@ export function publish(event: NostrEvent): Promise<PublishResult> {
 }
 
 /**
- * One-shot query, merged across relays, then close.
- *
- * Via subscribeEose rather than querySync because only the former takes an
- * `onauth`: the relay now requires NIP-42 auth for reads, so a query has to be
- * able to answer the challenge and retry, or it comes back empty.
+ * What nostr-tools is told to wait for an EOSE: far longer than any deadline
+ * of ours. Its own EOSE timer calls the same handler a real EOSE does, so if
+ * it could fire inside our deadline a relay that never answered would read
+ * as a relay that answered "nothing" (relayOutcome.ts). With this it never
+ * fires while we are listening, and our own timer decides "no answer".
  */
-async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<NostrEvent[]> {
-  await authAll(relays)
+const NOSTR_TOOLS_EOSE_MS = 10 * 60_000
+
+/** The fields of a nostr-tools Subscription this file touches; the timer is private in its types. */
+interface OpenSub {
+  close(reason?: string): void
+  eoseTimeoutHandle?: ReturnType<typeof setTimeout>
+}
+
+/**
+ * Ask one relay, and say which of the three things happened (relayOutcome.ts).
+ *
+ * Straight on the relay rather than through the pool's subscribe, because the
+ * pool merges every relay into one EOSE and one close, and the whole point is
+ * to know what each relay said. The pool's one kindness is kept: a CLOSED
+ * with auth-required: is answered with NIP-42 auth and asked once more, since
+ * the relay auth-gates reads and a fresh socket's first REQ can beat the
+ * challenge.
+ */
+async function askOne(url: string, filter: Filter, deadline: number): Promise<RelayAnswer> {
+  const remaining = (): number => Math.max(0, deadline - Date.now())
+  let relay: AbstractRelay
+  try {
+    relay = await getPool().ensureRelay(url, { connectionTimeout: Math.max(1, remaining()) })
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err ?? '')
+    return { url, outcome: 'unreachable', reason: reason || 'connection failed', events: [] }
+  }
   return new Promise((resolve) => {
     const events = new Map<string, NostrEvent>()
+    const got = (): NostrEvent[] => [...events.values()]
     let settled = false
-    const done = (): void => {
+    let sub: OpenSub | null = null
+    let authTried = false
+    const finish = (answer: RelayAnswer): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      try { sub.close() } catch { /* already closed */ }
-      resolve([...events.values()])
+      if (sub) {
+        // close() does not clear nostr-tools' own EOSE timer; left running it
+        // would hold this closure for the full ten minutes.
+        clearTimeout(sub.eoseTimeoutHandle)
+        try { sub.close() } catch { /* already closed */ }
+      }
+      resolve(answer)
     }
-    const timer = setTimeout(done, maxWait + 500)
-    const sub = getPool().subscribeEose(relays, filter, {
-      onevent: (e) => events.set(e.id, e),
-      onclose: done,
-      onauth: authSign,
-      maxWait,
-    })
+    const timer = setTimeout(() => finish({ url, outcome: 'unreachable', reason: 'no answer in time', events: got() }), remaining())
+    const open = (): void => {
+      try {
+        sub = relay.subscribe([filter], {
+          onevent: (e) => { events.set(e.id, e as NostrEvent) },
+          oneose: () => finish({ url, outcome: 'answered', events: got() }),
+          onclose: (reason) => {
+            if (settled) return
+            if (/^auth-required:/i.test(reason) && !authTried) {
+              authTried = true
+              relay.auth(authSign).then(
+                () => { if (!settled) open() },
+                (err) => finish({ url, outcome: 'refused', reason: `auth-required: ${err instanceof Error ? err.message : String(err)}`, events: got() }),
+              )
+              return
+            }
+            finish(classifyClose(url, reason, got()))
+          },
+          eoseTimeout: NOSTR_TOOLS_EOSE_MS,
+        }) as unknown as OpenSub
+      } catch (err) {
+        finish({ url, outcome: 'unreachable', reason: err instanceof Error ? err.message : String(err), events: got() })
+      }
+    }
+    open()
   })
+}
+
+/**
+ * One-shot query, each relay asked and answered on its own, then closed.
+ *
+ * Authenticates first, as every read here does: the relay requires NIP-42
+ * auth for reads, and an unauthed REQ is closed before it is answered. The
+ * deadline is ours and is the only timer that ends a wait (see
+ * NOSTR_TOOLS_EOSE_MS).
+ */
+async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
+  const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
+  await authAll(urls)
+  const deadline = Date.now() + maxWait
+  return Promise.all(urls.map((url) => askOne(url, filter, deadline)))
+}
+
+/**
+ * One-shot query, merged across relays. The callers want the events and treat
+ * an empty list as "nothing found", as before; what changed underneath is
+ * only that a relay that never answered is no longer told apart from one that
+ * did by a timer inside nostr-tools, but by our deadline. The events a slow
+ * relay sent before the deadline still count.
+ */
+async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<NostrEvent[]> {
+  return mergeAnswers(await queryRelays(relays, filter, maxWait))
 }
 
 /** Query the configured relays. */
 export function query(filter: Filter): Promise<NostrEvent[]> {
   return collect(relaySet(), filter)
+}
+
+/**
+ * Query the configured relays and keep each relay's answer: answered, refused
+ * or unreachable (relayOutcome.ts). For the reads where "nothing" and "no
+ * answer" lead to different actions.
+ */
+export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
+  return queryRelays(relaySet(), filter, maxWait)
 }
 
 /** How long a general relay that refused a connection is left alone. */
@@ -269,6 +357,22 @@ export function subscribe(
  */
 export function resumeLive(): void {
   live.resumeAll(() => dropRelays(relaySet()))
+  for (const fn of resumeListeners) {
+    try { fn() } catch { /* one listener's failure is not the others' */ }
+  }
+}
+
+const resumeListeners = new Set<() => void>()
+
+/**
+ * Be told whenever the connection is reissued: the network came back, the
+ * tab returned from a real absence, or a probe found the socket dead. Self
+ * sync uses it to ask again whether this identity has a chain, when the last
+ * answer was "could not tell". Returns the unsubscribe.
+ */
+export function onResume(fn: () => void): () => void {
+  resumeListeners.add(fn)
+  return () => { resumeListeners.delete(fn) }
 }
 
 /** How long the tab must have been hidden before its return reissues the feeds. */

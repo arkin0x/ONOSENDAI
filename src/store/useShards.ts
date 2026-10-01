@@ -50,7 +50,7 @@ import { useWorkshop } from './useWorkshop'
 import { useCeremony } from './useCeremony'
 import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
-import type { Position } from '../lib/space'
+import { deployPoint, type Position } from '../lib/space'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 
@@ -483,7 +483,11 @@ export const useShards = create<ShardsState>((set, get) => {
       const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn } = get()
       if (!pending) return
       const cs = cyber()
-      const at: Position = { ...cs.cursor }
+      // The centre of the cursor's cell at the zoom you are building in (or of
+      // the region, for a bag smaller than a cell), where the ghost showed it:
+      // lib/space.ts deployPoint (arkinox, 2026-10-01). At 2^0 that is the
+      // cursor's own coordinate, as it always was.
+      const at: Position = deployPoint(cs.cursor, cs.scaleExp, deployHeight)
       const plane = cs.plane
       const createdAt = Math.floor(Date.now() / 1000)
 

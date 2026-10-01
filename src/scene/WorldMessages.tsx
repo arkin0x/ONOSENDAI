@@ -18,10 +18,11 @@
  * came right at 33, where cursorOffset switches to [0, 0, 0] and the two
  * conventions finally agree (arkinox, 2026-09-16).
  *
- * markerCentre is exactly that policy: the cell where you could stand in it,
- * the point where it is one of half a million. cursorOffset's own comment
- * already says "same policy as markerCentre"; this file simply was not using
- * it.
+ * The lesson holds and the policy has moved on: a hidden item is now drawn
+ * at its true coordinate plus half a gibson at every zoom (itemCentre), so a
+ * scene of many items keeps its layout as you zoom out, and an item focus
+ * (focusItem) frames exactly that place, so the camera and the note still
+ * agree at every zoom (arkinox, 2026-10-01).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -31,7 +32,7 @@ import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
-import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
@@ -130,7 +131,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'message' && w.text && w.plane === anchorPlane)
-      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: markerCentre(w.at, origin, scaleExp, axes) }))
+      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: itemCentre(w.at, origin, scaleExp, axes) }))
       .filter((w) => Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps

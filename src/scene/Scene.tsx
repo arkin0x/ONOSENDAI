@@ -29,6 +29,7 @@ import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { carryOrbit } from '../lib/zoomOrbit'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -480,7 +481,23 @@ function Rig(): JSX.Element {
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
-    if (prevScale.current !== s.scaleExp) smooth.current.set(tx, ty, tz)
+    if (prevScale.current !== s.scaleExp) {
+      // The target can land somewhere new in the rescaled frame: your true
+      // position from CONTINUOUS_SCALE_MIN up, the cursor's rescaled offset
+      // when it is away from you. The camera carries by exactly that jump,
+      // locked or not, so the orbit's distance and angle survive every zoom
+      // (lib/zoomOrbit.ts; arkinox, 2026-10-01). On the first frame there is
+      // no previous framing to keep.
+      if (prevScale.current >= 0) {
+        const [x, y, z] = carryOrbit(
+          [c.object.position.x, c.object.position.y, c.object.position.z],
+          [smooth.current.x, smooth.current.y, smooth.current.z],
+          [tx, ty, tz],
+        )
+        c.object.position.set(x, y, z)
+      }
+      smooth.current.set(tx, ty, tz)
+    }
 
     prevOrigin.current = origin
     prevScale.current = s.scaleExp

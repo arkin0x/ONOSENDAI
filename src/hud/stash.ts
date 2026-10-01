@@ -60,7 +60,7 @@ export function depName(d: MyDeployment): string {
 export function goToDeployment(d: MyDeployment): void {
   useShards.getState().inspect(d.eventId)
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
-  useCyberspace.getState().focusOn({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
+  useCyberspace.getState().focusItem({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
 }
 
 interface StashModals {

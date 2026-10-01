@@ -47,7 +47,7 @@ export function SecretModal(): JSX.Element | null {
 
   const goTo = (): void => {
     close()
-    useCyberspace.getState().focusOn(item.at, item.plane, item.type === 'message' ? name : item.shard?.name ?? 'shard', item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
+    useCyberspace.getState().focusItem(item.at, item.plane, item.type === 'message' ? name : item.shard?.name ?? 'shard', item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
   const watch = (): void => { close(); void spectate(author) }
   // A shard copies into your Stash as a model; a message copies its text.

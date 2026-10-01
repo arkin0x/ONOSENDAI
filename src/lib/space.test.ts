@@ -33,7 +33,7 @@ import {
   viewAxes,
   type Position,
   type ViewAxes, pointCentre,
-  CONTINUOUS_SCALE_MIN, aimCentres, anchorCentre, placeCentre, type AxisDirection } from './space'
+  CONTINUOUS_SCALE_MIN, aimCentres, anchorCentre, deployPoint, itemCentre, placeCentre, type AxisDirection } from './space'
 import { alignedOrigin } from '../store/useCyberspace'
 import { coveringBox } from './covering'
 
@@ -1085,5 +1085,121 @@ describe('the cursor outline fits the grid', () => {
       }
     }
     expect(checked).toBe((MAX_SCALE_EXP + 1) * MOVES.length * 3)
+  })
+})
+
+
+/**
+ * A hidden item is drawn at its true coordinate plus half a gibson at every
+ * zoom (itemCentre), so a scene built from many shards keeps its layout as
+ * you zoom out, instead of each piece re-pegging to a cell centre of its own
+ * (arkinox, 2026-10-01: the vaporwave oasis, the roman columns poking through
+ * their roof at 2^2 and every piece stacked on one point at 2^5).
+ */
+describe('hidden items keep their layout at every zoom', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) { out.push(viewAxes(q)); q = rotateView(q, dirs[i % 4]) }
+    return out
+  })()
+  // A little scene: a column, a roof above it, a floor off centre, gibsons apart.
+  const BASE: Position = { x: (1n << 70n) + 1234567n, y: (1n << 60n) + 89n, z: (1n << 75n) + 4321n }
+  const SCENE: Position[] = [
+    BASE,
+    { x: BASE.x + 4n, y: BASE.y, z: BASE.z },
+    { x: BASE.x + 8n, y: BASE.y + 10n, z: BASE.z + 15n },
+    { x: BASE.x + 8n, y: BASE.y - 1n, z: BASE.z + 15n },
+    { x: BASE.x - 7n, y: BASE.y + 3n, z: BASE.z - 22n },
+  ]
+
+  it('is the cell centre at 2^0, exactly as items were always drawn there', () => {
+    for (const p of SCENE) {
+      for (const ax of VIEWS) {
+        const origin = alignedOrigin(BASE, 0)
+        expect(itemCentre(p, origin, 0, ax)).toEqual(cellCentre(p, origin, 0, ax).map((v) => v + 0))
+      }
+    }
+  })
+
+  it('keeps every pair at its true offset, scaled by 2^-zoom, from 2^0 to 2^84', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const origin = alignedOrigin(BASE, scaleExp)
+      for (const ax of VIEWS) {
+        const drawn = SCENE.map((p) => itemCentre(p, origin, scaleExp, ax))
+        for (let i = 0; i < SCENE.length; i++) {
+          for (let j = 0; j < SCENE.length; j++) {
+            ;[ax.right, ax.up, ax.out].forEach((a, k) => {
+              const want = (Number(SCENE[i][a.axis] - SCENE[j][a.axis]) / 2 ** scaleExp) * a.dir
+              // cellDelta's fixed point, once per item.
+              expect(Math.abs(drawn[i][k] - drawn[j][k] - want), `scaleExp ${scaleExp}`).toBeLessThanOrEqual(2e-4)
+            })
+          }
+        }
+      }
+    }
+  })
+
+  it('is what the cell snap broke: at 2^2 the gap from floor to roof changed', () => {
+    // The roof sits 11 gibsons above the floor: 2.75 cells at 2^2. Snapped to
+    // cell centres the two moved by different amounts and the gap was wrong.
+    const origin = alignedOrigin(BASE, 2)
+    const floor = SCENE[3], roof = SCENE[2]
+    const y = (p: Position, f: typeof cellCentre): number => f(p, origin, 2, axes)[1]
+    expect(y(roof, itemCentre) - y(floor, itemCentre)).toBeCloseTo(11 / 4, 4)
+    expect(y(roof, cellCentre) - y(floor, cellCentre)).not.toBeCloseTo(11 / 4, 2)
+  })
+})
+
+/**
+ * Where a deploy hides its item: the centre of the cursor's cell at the zoom
+ * you build in, or of the region when the bag is smaller than a cell; the
+ * cursor itself at 2^0 (arkinox's option A, 2026-10-01).
+ */
+describe('deployPoint', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const C: Position = { x: (1n << 70n) + 0x123456789n, y: (1n << 50n) + 0x2n, z: 0x1fffn }
+  const inBlock = (p: Position, q: Position, k: number): boolean =>
+    (['x', 'y', 'z'] as const).every((a) => alignTo(p[a], k) === alignTo(q[a], k))
+
+  it('is the cursor itself at 2^0, at any height', () => {
+    for (const h of [0, 1, 8, 40]) expect(deployPoint(C, 0, h)).toEqual(C)
+  })
+
+  it('is the centre of the cursor cell when the bag is at least a cell', () => {
+    for (const s of [1, 2, 5, 13, 33, 60, 84]) {
+      for (const h of [s, s + 1, Math.min(85, s + 20)]) {
+        const p = deployPoint(C, s, h)
+        for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], s) + (1n << BigInt(s - 1)))
+        expect(inBlock(p, C, s)).toBe(true)
+        expect(inBlock(p, C, h)).toBe(true)
+      }
+    }
+  })
+
+  it('is the centre of the region, inside the cursor cell, when the bag is smaller than a cell', () => {
+    for (const s of [3, 9, 40]) {
+      for (const h of [0, 1, 2, s - 1]) {
+        const p = deployPoint(C, s, h)
+        if (h === 0) expect(p).toEqual(C)
+        else for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], h) + (1n << BigInt(h - 1)))
+        // In the region the key comes from, and in the cell the cursor aims at.
+        expect(inBlock(p, C, h)).toBe(true)
+        expect(inBlock(p, C, s)).toBe(true)
+      }
+    }
+  })
+
+  it('lands inside the cursor cube, within half a gibson of its centre', () => {
+    for (let s = 0; s <= MAX_SCALE_EXP; s++) {
+      const origin = alignedOrigin(C, s)
+      const landed = itemCentre(deployPoint(C, s, MAX_SCALE_EXP), origin, s, axes)
+      const cube = aimCentres(C, origin, s, axes).cell
+      for (let i = 0; i < 3; i++) {
+        expect(Math.abs(landed[i] - cube[i])).toBeLessThanOrEqual(0.5 / 2 ** s + 2e-4)
+      }
+    }
   })
 })

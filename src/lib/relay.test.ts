@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // A pool whose first publish fails the way a half-open socket does, and whose
 // second, over fresh sockets, is accepted.
 const calls: { publish: string[][]; closed: string[][] } = { publish: [], closed: [] }
-let answers: Array<'ok' | Error> = []
+let answers: Array<'ok' | Error | 'unreachable'> = []
 
 /**
  * How the one fake relay answers a REQ in the queryEach tests. Its EOSE timer
@@ -34,6 +34,8 @@ vi.mock('nostr-tools/abstract-pool', () => ({
     publish(relays: string[]): Promise<string>[] {
       calls.publish.push(relays)
       const a = answers.shift() ?? 'ok'
+      // nostr-tools resolves, not rejects, when it cannot connect.
+      if (a === 'unreachable') return relays.map(() => Promise.resolve('connection failure: connection failed'))
       return relays.map(() => (a === 'ok' ? Promise.resolve('ok') : Promise.reject(a)))
     }
     close(relays: string[]): void { calls.closed.push(relays) }
@@ -60,6 +62,13 @@ describe('publishMany', () => {
     expect(await publishMany(['wss://one'], event)).toEqual({ ok: false, reason: 'blocked: not welcome' })
     expect(calls.publish).toHaveLength(1)
     expect(calls.closed).toEqual([])
+  })
+
+  it('does not count a relay it could not connect to as accepting the event', async () => {
+    answers = ['unreachable', 'unreachable']
+    expect(await publishMany(['wss://one'], event)).toEqual({ ok: false, reason: 'connection failure: connection failed' })
+    // Not a refusal, so the sockets were dropped and it was tried once more.
+    expect(calls.publish).toHaveLength(2)
   })
 
   it('reports the second failure when fresh sockets do not help either', async () => {

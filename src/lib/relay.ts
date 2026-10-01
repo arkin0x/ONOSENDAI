@@ -136,14 +136,25 @@ export function dropRelays(relays: string[]): void {
   for (const url of relays) authedFor.delete(url)
 }
 
+/** What nostr-tools resolves a publish with when the relay could not be reached. */
+const CONNECTION_FAILURE = 'connection failure'
+
 async function publishOnce(relays: string[], event: NostrEvent): Promise<PublishResult> {
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
   // already be authed before publishing.
   await authAll(relays)
   const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
-  if (results.some((r) => r.status === 'fulfilled')) return { ok: true }
-  const reason = results.map((r) => (r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : '')).find(Boolean)
+  // nostr-tools does not reject when it cannot connect: that relay's promise
+  // RESOLVES with the string "connection failure: ...". Counted as fulfilled,
+  // an event sent while offline was marked published and never sent again,
+  // and a LIVE chain read as on the relay when no relay had it.
+  const failed = (r: PromiseSettledResult<string>): string | null =>
+    r.status === 'rejected'
+      ? String(r.reason?.message ?? r.reason)
+      : String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
+  if (results.some((r) => failed(r) === null)) return { ok: true }
+  const reason = results.map(failed).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }
 }
 

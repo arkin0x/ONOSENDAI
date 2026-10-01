@@ -10,6 +10,11 @@
  * one mechanism and cannot disagree. No per-height ticks: the line is
  * hundreds of thousands of blocks, only the fill and the mark are drawn.
  *
+ * While spectating, the station is the spectated avatar's, measured from the
+ * head of their chain, with SET DESTINATION beside it so you can ride to where
+ * they are; TO BLOCK is hidden, since the rail belongs to your own trip
+ * (arkinox, 2026-10-01).
+ *
  * # beside the rail takes a block number typed in and goes straight to it
  * (arkinox, 2026-09-28): at this length, scrubbing to one exact block is
  * guesswork.
@@ -37,8 +42,16 @@ export function LineScrubber(): JSX.Element {
   const bind = useRepeatable()
   // The typed block number, open while # is pressed.
   const [typing, setTyping] = useState<string | null>(null)
-  const position = useCyberspace((s) => s.position)
-  const plane = useCyberspace((s) => s.plane)
+  const ownPosition = useCyberspace((s) => s.position)
+  const ownPlane = useCyberspace((s) => s.plane)
+  // Spectating: the station is theirs, from the head of their chain.
+  const spectateHead = useCyberspace((s) => {
+    const a = s.spectate?.actions
+    return a && a.length ? a[a.length - 1] : null
+  })
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const position = spectateHead?.position ?? ownPosition
+  const plane = spectateHead?.plane ?? ownPlane
 
   // Your station: the block boarding sets you down at, recomputed as blocks
   // sync in. findStation, not a plain nearest query: §4.2 breaks distance
@@ -167,7 +180,7 @@ export function LineScrubber(): JSX.Element {
 
       {open && ready && (
         <div className="explorer__body">
-          <span className="linescrub__headline">FROM YOUR STATION</span>
+          <span className="linescrub__headline">{spectating ? 'THEIR STATION' : 'FROM YOUR STATION'}</span>
           <div className="linescrub__fromrow">
             <span className="explorer__type">{station ? `BLOCK ${station.height}` : 'NO BLOCKS YET'}</span>
             {station && (
@@ -181,8 +194,20 @@ export function LineScrubber(): JSX.Element {
               {...noCallout}
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewStation() }}
             >VIEW</button>
+            {/* Ride to where the spectated avatar boards: their station as your destination. */}
+            {spectating && station && (
+              <button
+                className={destination === station.height ? 'linescrub__set linescrub__set--attached' : 'linescrub__set'}
+                {...noCallout}
+                onPointerDown={(e) => {
+                  e.preventDefault(); e.stopPropagation()
+                  useHyperspace.getState().setDestination(station.height)
+                }}
+              >{destination === station.height ? 'DESTINATION SET' : 'SET DESTINATION'}</button>
+            )}
           </div>
 
+          {!spectating && (<>
           <hr className="linescrub__hr" />
           <span className="linescrub__headline linescrub__headline--to">TO BLOCK</span>
           <div className="explorer__row">
@@ -281,6 +306,7 @@ export function LineScrubber(): JSX.Element {
             )}
             </div>
           </div>
+          </>)}
         </div>
       )}
     </div>

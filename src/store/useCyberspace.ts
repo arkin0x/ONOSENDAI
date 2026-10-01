@@ -464,8 +464,16 @@ export interface CyberspaceState {
    * `adopted` is how many actions came from another device, which explains an
    * avatar that moved on its own. `dropped` is how many of this device's
    * actions the fork took out.
+   *
+   * Two cases get their own words, because the generic count hides what
+   * happened (arkinox, 2026-10-01). `replaced`: the adopted chain begins with
+   * a newer spawn, so this device's whole chain was superseded (§3.2: a
+   * respawn on another device, or another device answering the held-chain
+   * prompt with "Keep the local chain"). `overturned`: of the dropped
+   * actions, how many this device had already published; another device's
+   * older branch won the fork and took them out for every reader.
    */
-  forkNotice: { adopted: number; dropped: number; at: number } | null
+  forkNotice: { adopted: number; dropped: number; overturned: number; replaced: boolean; at: number } | null
   /**
    * Whether this identity already has a chain on the relays, as last asked
    * (lib/chainHold.ts, lib/selfSync.ts): `checking`, `found`, `none`, or
@@ -2798,8 +2806,26 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // device's own work that the fork took out of the chain; adopted ones are
     // another device's, and are why the avatar just moved on its own.
     const kept = new Set(chainEvents.map((e) => e.id))
-    const dropped = cur.events.filter((e) => !kept.has(e.id)).length
+    const lost = cur.events.filter((e) => !kept.has(e.id))
+    const dropped = lost.length
     const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
+    // A different genesis is a newer spawn taking over, not a fork within
+    // the chain; within the chain, the published ones among the dropped are
+    // moves every reader had already seen and no longer sees.
+    const replaced = cur.events.length > 0 && d.genesisId !== cur.genesisId
+    const overturned = replaced ? 0 : lost.filter((e) => cur.published[e.id] === 'ok').length
+    // A loss stays reported until it is read. The other device's events
+    // arrive one fold at a time, so the fold that overturned your moves is
+    // usually followed at once by one that only brings the rest of its
+    // branch; that one must add to the unread notice, not replace it. A
+    // notice that only explained an adoption is replaced as before.
+    const prior = cur.forkNotice
+    const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
+    const notice = dropped > 0 || adopted > 0
+      ? unreadLoss
+        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, overturned: prior.overturned + overturned, replaced: prior.replaced || replaced, at: Date.now() }
+        : { adopted, dropped, overturned, replaced, at: Date.now() }
+      : null
     set({
       events: d.events,
       genesisId: d.genesisId,
@@ -2816,7 +2842,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // A drop is kept until it is read; an adoption is just an explanation
       // for the movement and fades on its own. A fold that changed nothing
       // says nothing.
-      ...(dropped > 0 || adopted > 0 ? { forkNotice: { adopted, dropped, at: Date.now() } } : {}),
+      ...(notice ? { forkNotice: notice } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
   },

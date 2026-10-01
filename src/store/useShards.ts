@@ -9,6 +9,12 @@
  * per-item tags. Height is the discovery radius (spec §7.3): 0 is a single
  * gibson; higher hides it across a wider aligned cube that costs more to find.
  *
+ * A bag also says three things in public, chosen in the deploy bar: whether
+ * it carries its height (`h`), a sector hint, and a riddle (lib/hidden.ts
+ * BagSettings). They belong to the bag, so deploying into a region that
+ * already holds your bag starts from that bag's settings and every rewrite
+ * carries them forward (arkinox, 2026-10-01).
+ *
  * `mine` is what this identity deployed, placed from this device or found by a
  * scan after another device placed it, kept with each item's signed inner
  * event so a bag can be rebuilt without the relay; `discovered` is what a scan
@@ -28,9 +34,13 @@ import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
+  DEFAULT_BAG_SETTINGS,
   HIDDEN_KIND,
   OBJECT_KIND,
   bagEntries,
+  bagSettingsOf,
+  resolveBagSettings,
+  type BagSettings,
   bagInners,
   bagTemplate,
   entryKey,
@@ -53,6 +63,7 @@ import type { Plane } from 'cyberspace-core'
 import { deployPoint, type Position } from '../lib/space'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
+import { alignedBase, hintFits } from '../lib/hint'
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -79,6 +90,13 @@ export interface MyDeployment {
   relays: string[]
   createdAt: number
   published: boolean
+  /**
+   * The settings of the bag this item is in, as last written from here or
+   * read from the relay: the same for every item in the region. Absent on a
+   * deployment saved before bags had settings, which is DEFAULT_BAG_SETTINGS,
+   * exactly what those bags carried.
+   */
+  bag?: BagSettings
 }
 
 /** Something placed in the world, ready to draw. */
@@ -103,6 +121,31 @@ export interface WorldItem {
 export type DeployPending =
   | { type: 'shard'; shardId: string }
   | { type: 'message'; text: string }
+
+/**
+ * A region as one string: plane, height and aligned base. Two placements are in
+ * the same bag exactly when these agree (spec §7.6: one bag per author, region
+ * and height), and it costs no key to compute, so the deploy bar can ask it of
+ * every cursor move.
+ */
+export function regionOf(at: Position, plane: Plane, height: number): string {
+  return `${plane}:${height}:${alignedBase(at.x, height)}:${alignedBase(at.y, height)}:${alignedBase(at.z, height)}`
+}
+
+/** Your bag in a region, as this device knows it: its settings and how many of your things it holds. */
+export interface OwnBag { region: string; settings: BagSettings; count: number }
+
+/**
+ * Your bag in this region, from `mine`, or null when this device knows of none.
+ * The settings are the newest item's: every rewrite stamps them on every item
+ * in the region, so they agree, and the newest is the latest word if not.
+ */
+export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
+  const items = mine.filter((d) => regionOf(positionOf(d), d.plane, d.height) === region)
+  if (items.length === 0) return null
+  const newest = items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
+  return { region, settings: newest.bag ?? DEFAULT_BAG_SETTINGS, count: items.length }
+}
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */
 export const SCAN_MAX_HEIGHT = 12
@@ -142,6 +185,30 @@ interface ShardsState {
    * wherever it was left.
    */
   deployFollow: boolean
+  /**
+   * The bag settings the deploy bar shows and the deploy writes: `h`, the
+   * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
+   * start at your existing bag's settings when the cursor's region holds one
+   * (seedDeployBag) and at the defaults when it does not.
+   */
+  deployBag: BagSettings
+  /**
+   * The bag the controls were seeded from: its region and the settings it had
+   * then, or null when they start from the defaults. deploy() compares what
+   * you chose with this to tell a change you made from a value you never
+   * touched, so a riddle or hint written from another device since is carried
+   * forward rather than overwritten (resolveBagSettings).
+   */
+  deployBagFrom: OwnBag | null
+  /** Change some of the bag settings. */
+  setDeployBag: (patch: Partial<BagSettings>) => void
+  /**
+   * Start the controls at this bag's settings when the region under the cursor
+   * changes to one that holds your bag, or back at the defaults when it moves
+   * from one that did to one that does not. Moving between regions with no bag
+   * keeps what you set.
+   */
+  seedDeployBag: (bag: OwnBag | null) => void
   deployStatus: DeployStatus
   /** What the deploy is doing right now, for the button: computing, buying, publishing. */
   deployNote: string | null
@@ -190,7 +257,11 @@ interface ShardsState {
   deleteInstance: (eventId: string) => Promise<void>
   /** Send a region's bag to the relays now: what LOCAL deferred. */
   broadcast: (lookupId: string) => Promise<boolean>
-  /** Ask the relay what is hidden in one region you hold the key to, and open it. */
+  /**
+   * Ask the relay what is hidden in one region you hold the key to, and open
+   * it. The region's height comes from the held key or your own deployment
+   * there, because a bag need not carry `h` (spec §8.6).
+   */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
@@ -356,10 +427,10 @@ export const useShards = create<ShardsState>((set, get) => {
     await publishMany(relays, del)
   }
 
-  /** Build and publish the region bag. */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean): Promise<{ event: NostrEvent; published: boolean }> {
+  /** Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base. */
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
-    const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt))
+    const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
@@ -368,17 +439,26 @@ export const useShards = create<ShardsState>((set, get) => {
    * The author's current bag entries for a region: relay (authoritative) +
    * local. Entries, not just events: a reference in the relay's copy must
    * survive the rewrite even when this device never saw it.
+   *
+   * `settings` are the bag's current settings, from the relay's copy when there
+   * is one (another device may have changed its riddle or hint since), else
+   * from this device's own items in the region, else null for a region with no
+   * bag yet. Every rewrite starts from these, so none drops a riddle or hint.
    */
-  async function gatherInners(lookupId: string, key: Uint8Array, live: boolean): Promise<BagEntry[]> {
-    const local = get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)
-    if (!live) return local
+  async function gatherInners(lookupId: string, key: Uint8Array, live: boolean, height: number): Promise<{ entries: BagEntry[]; settings: BagSettings | null }> {
+    const items = get().mine.filter((d) => d.lookupId === lookupId)
+    const local = items.map(entryOf)
+    const localSettings = items.length > 0 ? items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).bag ?? DEFAULT_BAG_SETTINGS : null
+    if (!live) return { entries: local, settings: localSettings }
     try {
       const events = await query({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
       const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
       const relay = newest ? await bagEntries(newest, key) : []
-      return mergeEntries(relay, local)
+      // A relay copy that does not open with this key is not this bag.
+      const settings = newest && relay.length > 0 ? bagSettingsOf(newest, height) : localSettings
+      return { entries: mergeEntries(relay, local), settings }
     } catch {
-      return local
+      return { entries: local, settings: localSettings }
     }
   }
 
@@ -405,7 +485,7 @@ export const useShards = create<ShardsState>((set, get) => {
       own.push({
         eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
-        relays: relaySet(), createdAt: h.createdAt, published: true,
+        relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
       })
     }
     if (own.length === 0) return
@@ -422,6 +502,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deploySpin: 0,
     deployTurn: [0, 0, 0],
     deployFollow: false,
+    deployBag: DEFAULT_BAG_SETTINGS,
+    deployBagFrom: null,
     deployStatus: 'idle',
     deployNote: null,
     deployAsk: null,
@@ -451,10 +533,22 @@ export const useShards = create<ShardsState>((set, get) => {
       deploySpin: 0,
       deployTurn: [0, 0, 0],
       deployFollow: false,
+      // The bag settings start fresh too; the deploy bar seeds them from your
+      // bag in the region under the cursor, if there is one.
+      deployBag: DEFAULT_BAG_SETTINGS,
+      deployBagFrom: null,
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployStatus: 'idle', deployError: null }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
+    setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
+    seedDeployBag: (bag) => {
+      const from = get().deployBagFrom
+      if ((bag?.region ?? null) === (from?.region ?? null)) return
+      // Leaving your bag's region for one with no bag: back to the defaults,
+      // so that bag's riddle never follows the cursor into a new bag.
+      set({ deployBag: bag ? bag.settings : DEFAULT_BAG_SETTINGS, deployBagFrom: bag })
+    },
     // Buryable up to the compute ceiling (past that the region derivation
     // throws); discovery only auto-scans to SCAN_MAX_HEIGHT, which the DeployBar
     // warns about.
@@ -463,7 +557,12 @@ export const useShards = create<ShardsState>((set, get) => {
       // Below the snap's height there is no snap: the control goes away, and
       // so does what it was set to, rather than lying in wait.
       const offered = snapOffered(cyber().plane, height)
-      set({ deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }) })
+      // A hint smaller than the region cannot contain it (spec §7.7): the
+      // sector hint goes off above height 30 the way the snap goes off below
+      // its own height, rather than lying in wait.
+      const bag = get().deployBag
+      const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
+      set({ deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) })
     },
     setDeployUnit: (unit) => set({ deployUnit: clampUnit(unit) }),
     setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
@@ -480,7 +579,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom } = get()
       if (!pending) return
       const cs = cyber()
       // The centre of the cursor's cell at the zoom you are building in (or of
@@ -490,6 +589,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const at: Position = deployPoint(cs.cursor, cs.scaleExp, deployHeight)
       const plane = cs.plane
       const createdAt = Math.floor(Date.now() / 1000)
+      if (deployBag.hint && !hintFits(deployBag.hint, deployHeight)) {
+        set({ deployStatus: 'error', deployError: `A sector hint cannot contain a height ${deployHeight} region: a sector is 2^30 on a side. Turn the hint off or hide lower.` })
+        return
+      }
 
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
       // priced as a hop at that height, and the Cloud compute panel's mode says
@@ -577,10 +680,18 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         let event: NostrEvent
         let published: boolean
+        let settings: BagSettings
         try {
-          const existing = await gatherInners(rk.lookupId, rk.key, live)
-          const allInners = mergeEntries(existing, [ref ?? inner])
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live))
+          const existing = await gatherInners(rk.lookupId, rk.key, live, deployHeight)
+          const allInners = mergeEntries(existing.entries, [ref ?? inner])
+          // What you changed in the deploy bar wins; what you left as it was
+          // takes the bag's current value, which may be newer than what the
+          // bar showed (resolveBagSettings). The controls were seeded from
+          // this region's bag only if `deployBagFrom` names this region.
+          const region = regionOf(at, plane, deployHeight)
+          const base = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
+          settings = resolveBagSettings(deployBag, base, existing.settings, deployHeight)
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }))
         } catch (err) {
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
@@ -604,10 +715,11 @@ export const useShards = create<ShardsState>((set, get) => {
           relays: relaySet(),
           createdAt,
           published,
+          bag: settings,
         }
-        // Every item now in this region's bag shares its new envelope and status.
+        // Every item now in this region's bag shares its new envelope, status and settings.
         const mine = [
-          ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published } : d)),
+          ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
         set({ mine, deployStatus: 'done', pending: null, deployNote: null })
@@ -647,7 +759,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ broadcasting: lookupId, broadcastError: null })
       try {
         const key = hexToBytes(items[0].keyHex)
-        const existing = await gatherInners(lookupId, key, true)
+        const existing = await gatherInners(lookupId, key, true, items[0].height)
         // Objects hidden by reference go out before the bag that names them.
         const me = cyber().identity.pubkey
         for (const d of items) {
@@ -660,14 +772,15 @@ export const useShards = create<ShardsState>((set, get) => {
             return false
           }
         }
-        const allInners = mergeEntries(existing, items.map(entryOf))
-        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true)
+        const allInners = mergeEntries(existing.entries, items.map(entryOf))
+        const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
+        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane })
         if (!published) {
           set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.' })
           return false
         }
         const relays = relaySet()
-        const mine = get().mine.map((d) => (d.lookupId === lookupId ? { ...d, bagId: event.id, published: true, relays } : d))
+        const mine = get().mine.map((d) => (d.lookupId === lookupId ? { ...d, bagId: event.id, published: true, relays, bag: settings } : d))
         set({ mine, broadcasting: null })
         saveMine(mine)
         return true
@@ -686,8 +799,14 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ scanning: true })
       try {
         const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
+        // The region's height, so a bag without `h` reads at its true size: a
+        // held cube's height, or your own deployment's. A box key (one height
+        // per axis) is not a cube and says nothing here; `h` then decides.
+        const held = useSecrets.getState().keys[lookupId]
+        const cube = held && (!held.heights || (held.heights.x === held.heights.y && held.heights.y === held.heights.z)) ? held.height : undefined
+        const height = cube ?? get().mine.find((d) => d.lookupId === lookupId)?.height
         const found: Hidden[] = []
-        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex), resolveReference))
+        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex), resolveReference, undefined, height))
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
@@ -722,21 +841,23 @@ export const useShards = create<ShardsState>((set, get) => {
       // list, and going by the list alone both dropped it from a rewrite and,
       // when it was the only other thing, deleted the whole envelope as if
       // the bag were empty.
-      const gathered = await gatherInners(item.lookupId, key, wasPublic)
+      const gathered = await gatherInners(item.lookupId, key, wasPublic, item.height)
       const gone = entryKey(entryOf(item))
-      const left = gathered.filter((e) => entryKey(e) !== gone)
+      const left = gathered.entries.filter((e) => entryKey(e) !== gone)
       const me = cs.identity.pubkey
 
       let mine: MyDeployment[]
       // Whether the relays now hold a bag that no longer names this item.
       let unnamed = false
       if (left.length > 0) {
-        // Rewrite the region bag without this item; the newer bag replaces it.
-        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic)
+        // Rewrite the region bag without this item; the newer bag replaces it,
+        // with the bag's settings as they stand.
+        const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
+        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane })
         unnamed = published
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
-          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published } : d))
+          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {
@@ -811,7 +932,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const ev of events) {
         const h = BigInt(item.height)
         const p = positionOf(item)
-        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane })
+        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height)
         if (items.some((h) => h.eventId === eventId)) return 'found'
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.

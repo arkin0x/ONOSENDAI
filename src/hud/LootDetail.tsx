@@ -165,7 +165,8 @@ export function LootDetail(): JSX.Element | null {
 
         <dl className="secret__facts lootd__facts">
           <div><dt>Placed</dt><dd title={formatStamp(item.createdAt)}>{formatAgo(item.createdAt)}</dd></div>
-          <div><dt>Region</dt><dd>{regionLabel(item.height)} <span className="lootd__dim">(height {item.height})</span></dd></div>
+          <div><dt>Region</dt><dd>{regionLabel(item.height)}{item.height !== null && <span className="lootd__dim"> (height {item.height})</span>}</dd></div>
+          {item.sector && <div><dt>Sector</dt><dd title="The hider's sector hint (spec §7.7): the bag is somewhere in this cube of 2^30 gibsons on a side">{item.sector}</dd></div>}
           <div><dt>Payload</dt><dd>{formatBytes(item.bytes)}</dd></div>
           <div><dt>Where</dt><dd>{opened.length > 0 ? (opened[0].plane === 0 ? 'known · dataspace' : 'known · ideaspace') : 'hidden'}</dd></div>
         </dl>
@@ -188,9 +189,10 @@ export function LootDetail(): JSX.Element | null {
           </ul>
         ) : (
           <p className="lootd__hidden">
-            This bag carries no hint, so nothing here says where it is. The region size above is how large an area it can be
-            found from, not how far away it is. Only a scan that computes its region key can open it. Hints that narrow the
-            search are the next step.
+            {item.sector
+              ? 'The hider named the sector this bag is in, a cube 2^30 gibsons on a side, but not where in it. Only a scan that computes its region key can open it.'
+              : 'This bag carries no hint, so nothing here says where it is. Only a scan that computes its region key can open it.'}
+            {item.height !== null && ' The region size above is how large an area it can be found from, not how far away it is.'}
           </p>
         )}
 

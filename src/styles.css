@@ -6664,8 +6664,9 @@ kbd {
   animation: chainstatus-in 180ms ease-out;
 }
 
-/* A choice waiting on you is the loudest of the three. */
-.chainstatus--conflict {
+/* A choice waiting on you is the loudest of them. */
+.chainstatus--conflict,
+.chainstatus--diverged {
   color: #fff;
   background: var(--danger);
   border-color: var(--danger);

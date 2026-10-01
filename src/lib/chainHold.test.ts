@@ -110,7 +110,7 @@ describe('the hold, in words', () => {
 })
 
 describe('the chain status under the switch', () => {
-  const base: StatusFacts = { live: true, held: false, conflict: false, waiting: 0, online: true, relayUp: true }
+  const base: StatusFacts = { live: true, held: false, conflict: null, waiting: 0, online: true, relayUp: true }
 
   it('reports nothing when what is waiting can leave, or LOCAL is keeping it here', () => {
     expect(chainStatusOf(base)).toBeNull()
@@ -128,7 +128,10 @@ describe('the chain status under the switch', () => {
   })
 
   it('puts a conflict over a hold, and a hold over either setting', () => {
-    expect(chainStatusOf({ ...base, held: true, conflict: true })).toEqual({ kind: 'conflict' })
+    expect(chainStatusOf({ ...base, held: true, conflict: 'held' })).toEqual({ kind: 'conflict' })
+    // A diverged branch is a choice too, over a queue that cannot drain.
+    expect(chainStatusOf({ ...base, conflict: 'branch', waiting: 3, online: false })).toEqual({ kind: 'diverged' })
+    expect(chainStatusLabel({ kind: 'diverged' }, null)).toBe('BRANCHES DIVERGED · CHOOSE')
     expect(chainStatusOf({ ...base, held: true, waiting: 4, online: false })).toEqual({ kind: 'held' })
     expect(chainStatusOf({ ...base, live: false, held: true })).toEqual({ kind: 'held' })
   })

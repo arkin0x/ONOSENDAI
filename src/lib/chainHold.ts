@@ -111,8 +111,12 @@ export function holdReason(check: SelfCheck | null): string {
 export interface StatusFacts {
   live: boolean
   held: boolean
-  /** A held chain met a relay chain and is waiting for the person's choice. */
-  conflict: boolean
+  /**
+   * A choice is waiting for the person: `held`, a held chain met a relay
+   * chain; `branch`, unpublished moves fork against another device's
+   * published ones (lib/branchConflict.ts).
+   */
+  conflict: 'held' | 'branch' | null
   /** Chain events signed here and not yet on a relay. */
   waiting: number
   /** navigator.onLine. */
@@ -130,6 +134,7 @@ export interface StatusFacts {
  * | Facts | Status |
  * |---|---|
  * | a held chain met a relay chain | conflict |
+ * | unpublished moves fork against another device's published ones | diverged |
  * | the chain is held | held |
  * | LIVE, events waiting, offline | waiting: offline |
  * | LIVE, events waiting, no relay connected | waiting: no relay |
@@ -140,11 +145,13 @@ export interface StatusFacts {
  */
 export type ChainStatus =
   | { kind: 'conflict' }
+  | { kind: 'diverged' }
   | { kind: 'held' }
   | { kind: 'waiting'; count: number; why: 'offline' | 'no-relay' }
 
 export function chainStatusOf(f: StatusFacts): ChainStatus | null {
-  if (f.conflict) return { kind: 'conflict' }
+  if (f.conflict === 'held') return { kind: 'conflict' }
+  if (f.conflict === 'branch') return { kind: 'diverged' }
   if (f.held) return { kind: 'held' }
   if (f.live && f.waiting > 0 && !f.online) return { kind: 'waiting', count: f.waiting, why: 'offline' }
   if (f.live && f.waiting > 0 && !f.relayUp) return { kind: 'waiting', count: f.waiting, why: 'no-relay' }
@@ -155,6 +162,7 @@ export function chainStatusOf(f: StatusFacts): ChainStatus | null {
 export function chainStatusLabel(status: ChainStatus, check: SelfCheck | null): string {
   switch (status.kind) {
     case 'conflict': return 'CHAIN CONFLICT · CHOOSE'
+    case 'diverged': return 'BRANCHES DIVERGED · CHOOSE'
     case 'held': {
       if (!check || check.status === 'checking') return 'HELD · CHECKING'
       if (check.status !== 'unknown') return 'HELD'

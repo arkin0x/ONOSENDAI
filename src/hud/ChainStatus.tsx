@@ -7,7 +7,8 @@
  * carried out, and a few states mean it is not: the chain is HELD on this
  * device because the relays could not confirm whether this identity already
  * has a chain; a held chain met a chain on the relays and is waiting for your
- * choice; or the switch is LIVE but actions are waiting because no relay can
+ * choice; this device's unpublished moves fork against moves another device
+ * of yours already published, and are waiting for your choice; or the switch is LIVE but actions are waiting because no relay can
  * be reached. The switch stays exactly as it is, and this strip slides in
  * directly under it while one of those states holds; with nothing to report
  * it is not drawn at all (arkinox, 2026-10-01). A tap on it opens a modal
@@ -58,7 +59,7 @@ export function useConnectivity(): { online: boolean; relayUp: boolean } {
 export function useChainStatus(): ChainStatus | null {
   const live = useCyberspace((s) => s.live)
   const held = useCyberspace((s) => s.held)
-  const conflict = useCyberspace((s) => s.chainConflict !== null)
+  const conflict = useCyberspace((s) => s.chainConflict?.kind ?? null)
   const events = useCyberspace((s) => s.events)
   const published = useCyberspace((s) => s.published)
   const { online, relayUp } = useConnectivity()
@@ -170,6 +171,24 @@ function ConflictExplanation(): JSX.Element {
   </>)
 }
 
+function DivergedExplanation(): JSX.Element {
+  return (<>
+    <p><b>What this means:</b> this device has moves that are not published yet, and another device signed in as you has published different moves from the same earlier point of the same chain. The chain has forked: two actions name the same action as the one before them. Until you choose which version to keep, nothing from this device is published, no move is taken, and the other device's moves are not adopted here.</p>
+    <p><b>Why:</b> this device was LOCAL or offline while the other device kept moving and publishing. When this device went LIVE, came back online, or received the other device's moves from the relays, it compared them with its own unpublished moves and found that both continue from the same action.</p>
+    <p><b>How a fork is resolved:</b> every reader of a chain follows its newest spawn and then, at each fork, the older of the two next actions by created_at (the time each event says it was signed), with a tie going to the smaller event id. This rule is the same for everyone and is not changed here. It means:</p>
+    <ul>
+      <li>If this device's first move after the fork is older than the other device's, publishing it wins the fork for every reader the moment it lands, and the moves the other device already published stop being part of the chain.</li>
+      <li>If it is newer, publishing it changes nothing anyone sees: it would sit on the relays as a branch that no reader follows.</li>
+    </ul>
+    <p><b>What the client does about it by itself:</b> it stops publishing this chain and suspends automatic adoption of the other device's moves, so the fork rule does not pick a winner in silence. Moves that arrive from the other device while you decide are added to its side of the comparison.</p>
+    <p><b>What you can do:</b> open the choice. It shows both branches from the fork point (how many actions each has, when each started and last moved, and where each ends) and says plainly whether publishing yours would override the other device's published moves.</p>
+    <ul>
+      <li><b>Keep the relay's version:</b> this device's unpublished moves after the fork are discarded and you stand where the other device's moves put you. Region keys those moves found stay in your Secrets.</li>
+      <li><b>Publish mine:</b> this device's moves are kept and published. When that overrides the other device's published moves, you are asked to confirm a second time.</li>
+    </ul>
+  </>)
+}
+
 /** The explanation modal for whatever the strip is showing. Mounted once, in App. */
 export function ChainStatusModal(): JSX.Element | null {
   const open = useChainUi((s) => s.explaining)
@@ -192,6 +211,21 @@ export function ChainStatusModal(): JSX.Element | null {
         cancelLabel="CLOSE"
         danger={false}
         onConfirm={() => { if (!checking) recheckNow() }}
+        onCancel={close}
+      />
+    )
+  }
+  if (status.kind === 'diverged') {
+    return (
+      <ConfirmModal
+        title="Your unpublished moves fork from another device's"
+        cardClassName="chainexplain"
+        scroll
+        body={<DivergedExplanation />}
+        confirmLabel="SHOW THE CHOICE"
+        cancelLabel="CLOSE"
+        danger={false}
+        onConfirm={() => { close(); useChainUi.getState().setPromptAside(false) }}
         onCancel={close}
       />
     )

@@ -19,6 +19,13 @@ vi.mock('./relay', async (importOriginal) => ({
   publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve({ ok: true as const }) },
 }))
 
+// The look at the relays before a backlog finds nothing here: no relay.
+vi.mock('./chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./chains')>()),
+  fetchChainEvents: () => Promise.resolve([]),
+  askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered' as const, events: [] }]),
+}))
+
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
 // line and turns a surprise ReferenceError into a visible assertion failure.
 if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
@@ -69,7 +76,7 @@ describe('the publisher and the release gate', () => {
 
   beforeEach(async () => {
     // Local first: that is what shuts the gate, whatever the last test left.
-    useCyberspace.setState({ live: false, held: false })
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
     await idle()
     sent.length = 0
   })

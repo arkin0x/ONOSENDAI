@@ -177,7 +177,12 @@ export function ChainPanel(): JSX.Element {
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
       {/* The strip under the switch is only drawn with the touch controls; the
           panel says the same for whoever reads it here. */}
-      {status?.kind === 'conflict' ? (
+      {status?.kind === 'diverged' ? (
+        <p className="notice">
+          BRANCHES DIVERGED: another device published moves from the same point as this device's unpublished ones. Nothing publishes until you choose.
+          <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
+        </p>
+      ) : status?.kind === 'conflict' ? (
         <p className="notice">
           CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>

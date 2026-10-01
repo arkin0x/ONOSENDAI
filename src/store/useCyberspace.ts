@@ -77,6 +77,7 @@ import {
   type HeldConflict,
   type SelfCheck,
 } from '../lib/chainHold'
+import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
   buildChain,
   hopTemplate,
@@ -463,8 +464,16 @@ export interface CyberspaceState {
    * `adopted` is how many actions came from another device, which explains an
    * avatar that moved on its own. `dropped` is how many of this device's
    * actions the fork took out.
+   *
+   * Two cases get their own words, because the generic count hides what
+   * happened (arkinox, 2026-10-01). `replaced`: the adopted chain begins with
+   * a newer spawn, so this device's whole chain was superseded (§3.2: a
+   * respawn on another device, or another device answering the held-chain
+   * prompt with "Keep the local chain"). `overturned`: of the dropped
+   * actions, how many this device had already published; another device's
+   * older branch won the fork and took them out for every reader.
    */
-  forkNotice: { adopted: number; dropped: number; at: number } | null
+  forkNotice: { adopted: number; dropped: number; overturned: number; replaced: boolean; at: number } | null
   /**
    * Whether this identity already has a chain on the relays, as last asked
    * (lib/chainHold.ts, lib/selfSync.ts): `checking`, `found`, `none`, or
@@ -482,11 +491,14 @@ export interface CyberspaceState {
    */
   held: boolean
   /**
-   * A held chain met a chain on the relays. Nothing is chosen automatically
-   * and the prompt stays until it is answered (resolveHeldConflict); while it
-   * is up, no move is taken and newest-spawn adoption is suspended.
+   * A choice between two versions of this identity's chain, waiting for the
+   * person. `held`: a held chain met a chain on the relays
+   * (resolveHeldConflict). `branch`: this device's unpublished moves fork
+   * against moves another device already published (resolveBranchConflict,
+   * lib/branchConflict.ts). Nothing is chosen automatically; while either is
+   * pending no move is taken, nothing is published and nothing is adopted.
    */
-  chainConflict: HeldConflict | null
+  chainConflict: HeldConflict | BranchConflict | null
   /** Bumped by a deliberate "publish now" that is not an action (lib/release.ts `release`). */
   publishRequest: number
   /** The self-check's answer for `pubkey`; ignored when the identity has moved on. */
@@ -498,6 +510,14 @@ export interface CyberspaceState {
    * the relay chain for every reader. Region keys stay held either way.
    */
   resolveHeldConflict: (choice: 'relay' | 'local') => void
+  /**
+   * Answer the diverged-branch prompt. `relay` discards this device's
+   * unpublished moves after the fork and takes the relays' version; `mine`
+   * keeps them and lets them publish (now, while LIVE), which wins the fork
+   * for every reader only when they are the older branch (the prompt says
+   * which, and asks twice when they would override published moves).
+   */
+  resolveBranchConflict: (choice: 'relay' | 'mine') => void
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
   spentMsats: number
   /** How many times this identity has respawned; each one began a new chain. */
@@ -1200,6 +1220,13 @@ const FIRST_MOVE_WAIT_MS = 4000
 /** A first move is waiting on the check or the signer: a second press must not sign a second spawn. */
 let firstMoveInFlight = false
 
+/**
+ * Forks answered with "Publish mine", as `forkId:firstRelayChildId`, so the
+ * same fork is not asked about again while its moves wait to go out (a LOCAL
+ * device keeps them until LIVE and an action). Kept for the page's life.
+ */
+const acceptedForks = new Set<string>()
+
 export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   /**
    * The self-check's status for `pubkey` once it is no longer `checking`, or
@@ -1819,7 +1846,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A held chain that met a chain on the relays waits for its answer: a
     // move now would only lengthen one side of a choice not yet made.
     if (get().chainConflict) {
-      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: 'This identity has a chain on the relays as well as this one. Choose which to keep first.' } })
+      const message = get().chainConflict!.kind === 'held'
+        ? 'This identity has a chain on the relays as well as this one. Choose which to keep first.'
+        : 'Another device published moves from the same point as your unpublished ones. Choose which to keep first.'
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message } })
       // A prompt that was set aside comes back: the question is why nothing moved.
       useChainUi.getState().setPromptAside(false)
       return
@@ -2362,7 +2392,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   resolveHeldConflict: (choice) => {
     const { chainConflict: conflict, events: local } = get()
-    if (!conflict) return
+    if (!conflict || conflict.kind !== 'held') return
     if (choice === 'local') {
       // Only offered when it would actually place you (the prompt checks the
       // same thing); a relay chain respawned after this one would still win.
@@ -2404,6 +2434,48 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       chainConflict: null,
       forkNotice: null,
       spentMsats: loadSpent(d.genesisId),
+    })
+    saveChain(d.events, d.published, d.chain, false)
+  },
+
+  resolveBranchConflict: (choice) => {
+    const { chainConflict: conflict, events, published } = get()
+    if (!conflict || conflict.kind !== 'branch') return
+    const div = findDivergence(events, published, conflict.relayEvents)
+    if (!div) { set({ chainConflict: null }); return }
+    if (choice === 'mine') {
+      // Kept, and not asked about again for this fork (in memory: a reload
+      // that finds the same fork unpublished asks once more). While LIVE the
+      // answer is the deliberate act that opens the publish gate; while LOCAL
+      // the moves stay here until LIVE and an action, like any others.
+      acceptedForks.add(`${div.forkId}:${div.relay[0].id}`)
+      set({ chainConflict: null, publishRequest: get().publishRequest + 1 })
+      return
+    }
+    // Keep the relays' version: the shared part, then the relays' branch.
+    // This device's moves after the fork are dropped; region keys they found
+    // stay in Secrets, as with any chain that leaves the store.
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    const { events: next, onRelay } = relayVersion(events, conflict.relayEvents, div)
+    if (next.length === 0) return
+    const okIds = new Set([...onRelay, ...events.filter((e) => published[e.id] === 'ok').map((e) => e.id)])
+    const d = derive({
+      version: 2,
+      events: next,
+      published: next.filter((e) => okIds.has(e.id)).map((e) => e.id),
+      stats: statsFromChain(next, get().chain),
+      held: false,
+    })
+    set({
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      plan: null,
+      proof: IDLE_PROOF,
+      transit: null,
+      chainConflict: null,
+      forkNotice: null,
     })
     saveChain(d.events, d.published, d.chain, false)
   },
@@ -2679,12 +2751,32 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // because folding into the prompt never touches the head, and an event
     // the live subscription delivers during a proof is not delivered twice.
     if (cur.held) {
-      const conflict = foldHeldConflict(cur.chainConflict, mine, cur.events, Date.now())
-      if (conflict !== cur.chainConflict) set({ chainConflict: conflict })
+      const prev = cur.chainConflict?.kind === 'held' ? cur.chainConflict : null
+      const conflict = foldHeldConflict(prev, mine, cur.events, Date.now())
+      if (conflict !== prev) set({ chainConflict: conflict })
+      return
+    }
+    // A diverged-branch choice is pending: what arrives now joins the relays'
+    // side of it, and nothing is folded into the chain until it is answered.
+    if (cur.chainConflict?.kind === 'branch') {
+      const conflict = foldBranchConflict(cur.chainConflict, mine, cur.events, cur.published, Date.now())
+      if (conflict && conflict !== cur.chainConflict) set({ chainConflict: conflict })
       return
     }
     // A local commit owns the head while it computes; a relay echo must not race it.
     if (cur.proof.status === 'computing') return
+    // This device's unpublished moves fork against moves the relays already
+    // hold (another device of yours moved on while this one was LOCAL or
+    // offline). Folding now would let the fork rule pick a winner in silence,
+    // and publishing would make that pick for every reader; neither happens
+    // until the person chooses (lib/branchConflict.ts; arkinox, 2026-10-01).
+    // A fork already answered with "Publish mine" is not asked again.
+    const div = findDivergence(cur.events, cur.published, mine)
+    if (div && !acceptedForks.has(`${div.forkId}:${div.relay[0].id}`)) {
+      set({ chainConflict: { kind: 'branch', forkId: div.forkId, relayEvents: mine, at: Date.now() } })
+      useChainUi.getState().setPromptAside(false)
+      return
+    }
     const seen = new Set(cur.events.map((e) => e.id))
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
     // buildChain is §3.2: the newest spawn wins, then follow the links. So a
@@ -2714,8 +2806,26 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // device's own work that the fork took out of the chain; adopted ones are
     // another device's, and are why the avatar just moved on its own.
     const kept = new Set(chainEvents.map((e) => e.id))
-    const dropped = cur.events.filter((e) => !kept.has(e.id)).length
+    const lost = cur.events.filter((e) => !kept.has(e.id))
+    const dropped = lost.length
     const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
+    // A different genesis is a newer spawn taking over, not a fork within
+    // the chain; within the chain, the published ones among the dropped are
+    // moves every reader had already seen and no longer sees.
+    const replaced = cur.events.length > 0 && d.genesisId !== cur.genesisId
+    const overturned = replaced ? 0 : lost.filter((e) => cur.published[e.id] === 'ok').length
+    // A loss stays reported until it is read. The other device's events
+    // arrive one fold at a time, so the fold that overturned your moves is
+    // usually followed at once by one that only brings the rest of its
+    // branch; that one must add to the unread notice, not replace it. A
+    // notice that only explained an adoption is replaced as before.
+    const prior = cur.forkNotice
+    const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
+    const notice = dropped > 0 || adopted > 0
+      ? unreadLoss
+        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, overturned: prior.overturned + overturned, replaced: prior.replaced || replaced, at: Date.now() }
+        : { adopted, dropped, overturned, replaced, at: Date.now() }
+      : null
     set({
       events: d.events,
       genesisId: d.genesisId,
@@ -2732,7 +2842,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // A drop is kept until it is read; an adoption is just an explanation
       // for the movement and fades on its own. A fold that changed nothing
       // says nothing.
-      ...(dropped > 0 || adopted > 0 ? { forkNotice: { adopted, dropped, at: Date.now() } } : {}),
+      ...(notice ? { forkNotice: notice } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
   },

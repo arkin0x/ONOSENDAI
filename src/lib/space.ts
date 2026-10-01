@@ -111,7 +111,8 @@ export function cellDelta(value: bigint, origin: bigint, scaleExp: number): numb
  * The one definition the cursor, the avatar, the trail, the room boxes and the
  * travel animation all share, so nothing can drift half a cell from anything
  * else. Note it aligns first: a coordinate names a whole cell, and the cell's
- * centre is what gets drawn.
+ * centre is what gets drawn. They reach it through placeCentre, which keeps
+ * the snap below CONTINUOUS_SCALE_MIN and places continuously above it.
  */
 export function cellCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
@@ -161,14 +162,155 @@ export function pointCentre(
  */
 export const OCCUPANCY_SCALE_MAX = 33
 
+/**
+ * Whether markerCentre places continuously at this scale: above
+ * OCCUPANCY_SCALE_MAX it does, at and below it snaps to the cell. Stops and
+ * the transit avatar follow it; hidden items do not (itemCentre).
+ */
+export function markerContinuous(scaleExp: number): boolean {
+  return scaleExp > OCCUPANCY_SCALE_MAX
+}
+
 /** Placement for stop markers: the cell when you could stand there, the
  * point when it is one of half a million. */
 export function markerCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
 ): [number, number, number] {
-  return scaleExp <= OCCUPANCY_SCALE_MAX
-    ? cellCentre(p, origin, scaleExp, axes)
-    : pointCentre(p, origin, scaleExp, axes)
+  return markerContinuous(scaleExp)
+    ? pointCentre(p, origin, scaleExp, axes)
+    : cellCentre(p, origin, scaleExp, axes)
+}
+
+/**
+ * From this scale up, everything that places a position places it where it
+ * really is (pointCentre), not at the centre of its cell (cellCentre).
+ *
+ * Each axis is 2^85 gibsons, so at 2^84 the whole of cyberspace is a block of
+ * two cells by two by two, and anything snapped to its cell lands on one of
+ * eight places: the avatar, its trail and the cursor sat on cell centres and
+ * corners while the shards, coins and messages beside them, which markerCentre
+ * already placed continuously, floated at their true positions. The picture
+ * was quantized and disagreed with itself. Zoomed out this far the question
+ * being asked is where things are relative to the whole coordinate system,
+ * and only the true position answers it, so from 2^80 to 2^84 every layer
+ * places continuously and below 2^80 cells quantize as before (arkinox,
+ * 2026-10-01).
+ *
+ * 2^80 is 32 cells to an axis, so an offset in cells is at most 32 and a
+ * double holds it with room to spare once cellDelta has divided the bigint
+ * difference down.
+ */
+export const CONTINUOUS_SCALE_MIN = 80
+
+/**
+ * Placement for everything that lives on the movement grid: the avatars, the
+ * trail, the cursor and what rides it. Its cell below CONTINUOUS_SCALE_MIN,
+ * its true position from there up.
+ *
+ * One chooser rather than a test in every layer, so no two layers can draw
+ * the same coordinate in different places. In the continuous range it is
+ * pointCentre exactly, which is also what markerCentre answers there, so a
+ * shard and the avatar standing on it agree to the last bit.
+ */
+export function placeCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return scaleExp >= CONTINUOUS_SCALE_MIN
+    ? pointCentre(p, origin, scaleExp, axes)
+    : cellCentre(p, origin, scaleExp, axes)
+}
+
+/**
+ * Where a hidden item (a shard, a message, a coin) is drawn: its true
+ * coordinate plus half a gibson, at every zoom.
+ *
+ * A coordinate names a whole unit gibson, and the half puts the item at that
+ * gibson's centre, which at 2^0 is exactly the cell centre items were always
+ * drawn at. What changed is the zooms above that. Items used to be drawn at
+ * the centre of their cell at the current zoom (markerCentre, the cell at
+ * and below 2^33), so zooming out re-pegged every piece of a scene built
+ * from many shards to a cell centre of its own, each jumping by up to half a
+ * cell and pieces sharing a cell stacking on one point: arkinox's vaporwave
+ * oasis "gets shuffled and doesnt look quite right as the models get
+ * re-pegged to valid cells in the zoom level" (2026-10-01). At its true place
+ * a scene keeps its layout at every zoom, the way a photo does when you step
+ * back from it. Stops keep markerCentre: there the snap is on purpose.
+ */
+export function itemCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  // Adding zero folds the -0 a flipped axis makes of a zero offset.
+  return [axes.right, axes.up, axes.out].map(
+    (a) => cellOffset(p[a.axis], origin[a.axis], scaleExp, a.dir) + 0,
+  ) as [number, number, number]
+}
+
+/**
+ * The coordinate a deploy hides its item at: the centre of the cursor's cell
+ * at the zoom you are building in, so the item lands where the ghost sat,
+ * centred in the cursor cube (arkinox's option A, 2026-10-01).
+ *
+ * The centre of an aligned block of 2^k gibsons is its low corner plus
+ * 2^(k - 1). At k = 0 the block is one gibson and the cursor's own coordinate
+ * is its centre. k is the zoom, unless the bag's height is lower: a region
+ * smaller than a cell must still hold the item, since its key is derived from
+ * the region the item is in, so then the block is the region itself. Either
+ * way the block holds the cursor and sits inside both the cursor's cell and
+ * the cursor's region, so the item stays in the region the deploy cage shows.
+ * A coordinate is a whole gibson, so the item is drawn half a gibson past
+ * the exact centre (itemCentre): a quarter of a cell at 2^1, an eighth at
+ * 2^2, nothing visible above that.
+ */
+export function deployPoint(cursor: Position, scaleExp: number, height: number): Position {
+  const k = Math.max(0, Math.min(scaleExp, height))
+  if (k === 0) return { ...cursor }
+  const half = 1n << BigInt(k - 1)
+  return {
+    x: alignTo(cursor.x, k) + half,
+    y: alignTo(cursor.y, k) + half,
+    z: alignTo(cursor.z, k) + half,
+  }
+}
+
+/**
+ * The cursor's two places: the grid cell it aims at, and the point its
+ * coordinate is.
+ *
+ * An outline drawn as "the cell you are aiming at" is a cell of the
+ * protocol's power-of-two grid, the same grid the covering box, the region
+ * cages and the room walls stand on, so it is always cellCentre. Floated
+ * around the continuous point instead, which is what placeCentre gives from
+ * CONTINUOUS_SCALE_MIN up, it straddled grid lines and drew as a second
+ * outline offset from the covering box by part of a cell, where one box
+ * should fit exactly (arkinox, 2026-10-01). What marks the coordinate itself
+ * (the tether's end, the distance label, the landing ghost, the camera's
+ * target) uses the point, which sits inside that cell. Below the continuous
+ * range the two are the same.
+ */
+export function aimCentres(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): { cell: [number, number, number]; point: [number, number, number] } {
+  return { cell: cellCentre(p, origin, scaleExp, axes), point: placeCentre(p, origin, scaleExp, axes) }
+}
+
+/**
+ * Where the anchor itself is drawn, in the render frame it anchors.
+ *
+ * The render origin is the anchor's aligned cell, so below the continuous
+ * range this is that cell's centre, [0, 0, 0], which is where the avatar has
+ * always stood and the camera has always looked. In the continuous range the
+ * anchor sits at its own sub-cell position inside that cell instead, up to
+ * half a cell from the centre on each axis, and the avatar, the head of its
+ * trail and the camera all have to follow it there or they frame an empty
+ * point beside you.
+ */
+export function anchorCentre(
+  anchor: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  const origin = { x: alignTo(anchor.x, scaleExp), y: alignTo(anchor.y, scaleExp), z: alignTo(anchor.z, scaleExp) }
+  // Adding zero folds -0 onto 0: a flipped axis multiplies the zero delta by
+  // -1, and below the range this must be the literal [0, 0, 0] it replaced.
+  return placeCentre(anchor, origin, scaleExp, axes).map((v) => v + 0) as [number, number, number]
 }
 
 /**
@@ -183,6 +325,15 @@ export function markerCentre(
  * It is the negative of what cellCentre does to a fixed world point, which is
  * the property that makes the two cancel: same helper, same fixed-point
  * division, same per-axis sign, so no rounding can survive the subtraction.
+ *
+ * It holds for continuous placement too. Both origins are aligned, so the
+ * shift is a whole number of cells, and pointCentre moves a fixed point by
+ * that same whole number. The one difference is cellDelta's last digit:
+ * it truncates at a ten-thousandth of a cell toward zero, so a point whose
+ * delta changes sign across the re-anchor can land a ten-thousandth of a
+ * cell from where it was. That is a thousandth of a pixel on a phone, and it
+ * cannot build up: the shift itself is exact, and every placement is
+ * recomputed from its bigints on the frame it is drawn.
  */
 export function originShift(
   prev: Position, next: Position, scaleExp: number, axes: ViewAxes,

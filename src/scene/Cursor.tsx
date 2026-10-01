@@ -35,7 +35,7 @@ import { nextActionFor } from '../store/useOffer'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
-import { cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   alignedOrigin,
   samePosition,
@@ -184,7 +184,11 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     [active, position, target, plane, hopCeil, sidestepCeil, limits, from],
   )
 
-  // Screen-space endpoints, at cell CENTRES.
+  // Screen-space endpoints, at cell CENTRES below the continuous range and at
+  // true positions in it (placeCentre), where the avatar and the trail are.
+  // The cell outline is the exception: it is the grid cell being aimed at,
+  // always (aimCentres), so it fits the covering box and every other grid
+  // box exactly.
   //
   // These used to come from which carries a half-cell bias: it was
   // written when a cell was drawn as a square anchored at its corner. Now the
@@ -194,9 +198,10 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
+    const centre = (p: Position) => placeCentre(p, origin, scaleExp, axes)
     const a = centre(position)
-    const b = centre(target)
+    const aim = aimCentres(target, origin, scaleExp, axes)
+    const b = aim.point
     const action = next?.action ?? null
     // Where this commit lands: the step's end, or the cursor itself when the
     // step is not known (HOSAKA's caps not answered yet) or the move is too
@@ -222,7 +227,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       lastIsCloud: cloud && onCursor,
       ghost: action !== null && action !== 'too-far' && next?.step ? landing : null,
       ghostOnCursor: onCursor,
-      targetCell: b,
+      targetCell: aim.cell,
     }
   }, [position, target, next, scaleExp, axes, anchor])
 
@@ -272,8 +277,8 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   useFrame(() => {
     const s = useCyberspace.getState()
     const live = s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor
-    const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
-    if (outline.current) outline.current.position.set(b[0], b[1], b[2])
+    const { cell, point: b } = aimCentres(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+    if (outline.current) outline.current.position.set(cell[0], cell[1], cell[2])
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
@@ -281,8 +286,14 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     else if (points.lastIsCloud) setLastVertex(cloudLegs, cloudGeometry, b)
   })
 
+  // No lift. The group used to sit 0.04 of a cell out of the screen, a relic
+  // of the flat grid this cursor was first drawn over, where it kept the square
+  // above the plane. In a volume it only put the cube 0.04 of a cell off the
+  // grid it stands on, against the covering box drawn on that same grid, and
+  // it is not needed against z-fighting: everything here draws without a
+  // depth test (arkinox, 2026-10-01: "it should fit exactly").
   return (
-    <group position={[0, 0, 0.04]}>
+    <group>
       {/*
         How far the cursor is from your avatar, riding the cursor itself, and
         shown once it has left the avatar's cell: parked on the avatar the
@@ -299,7 +310,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         opacity={active ? 1 : 0.75}
         follow={() => {
           const s = useCyberspace.getState()
-          return cellCentre(
+          return placeCentre(
             s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor,
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )

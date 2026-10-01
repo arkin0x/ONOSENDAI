@@ -13,7 +13,8 @@
 
 import { buildChain, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { query, subscribe } from './relay'
+import { query, queryEach, subscribe } from './relay'
+import type { RelayAnswer } from './relayOutcome'
 
 /** The actions this client understands, and therefore the only ones it asks for. */
 export const V2_ACTIONS = ['spawn', 'hop', 'sidestep', 'enter-hyperspace', 'hyperjump']
@@ -51,6 +52,18 @@ export function fetchChainEvents(pubkey: string): Promise<NostrEvent[]> {
   return query({ kinds: [KIND], authors: [pubkey], '#A': V2_ACTIONS })
 }
 
+/** How long the own-chain check waits for each relay's real answer. */
+export const CHAIN_CHECK_MS = 6000
+
+/**
+ * The same question, with each relay's answer kept: answered, refused or
+ * unreachable (relayOutcome.ts). The self-check decides from these whether
+ * this identity has a chain, has none, or cannot be told (chainHold.ts).
+ */
+export function askChainEvents(pubkey: string): Promise<RelayAnswer[]> {
+  return queryEach({ kinds: [KIND], authors: [pubkey], '#A': V2_ACTIONS }, CHAIN_CHECK_MS)
+}
+
 /** The same, assembled. */
 export async function fetchChain(pubkey: string): Promise<ActionEvent[]> {
   return buildChain(await fetchChainEvents(pubkey))
@@ -67,8 +80,8 @@ export function watchRecent(since: number, onEvent: (ev: NostrEvent) => void): (
 }
 
 /** New v2 actions from one author, from `since` on. */
-export function watchAuthor(pubkey: string, since: number, onEvent: (ev: NostrEvent) => void): () => void {
-  return subscribe({ kinds: [KIND], authors: [pubkey], '#A': V2_ACTIONS, since }, onEvent)
+export function watchAuthor(pubkey: string, since: number, onEvent: (ev: NostrEvent) => void, onEose?: () => void): () => void {
+  return subscribe({ kinds: [KIND], authors: [pubkey], '#A': V2_ACTIONS, since }, onEvent, onEose)
 }
 
 /** Accepts an npub, an nprofile (its relay hints dropped) or 64-char hex; returns hex, or null when it is none of them. */

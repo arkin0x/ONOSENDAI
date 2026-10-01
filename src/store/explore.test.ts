@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest'
 import { SPAWN, useCyberspace } from './useCyberspace'
+import { placeSpawn } from './fixtures/placeSpawn'
 
 async function land(dx: bigint): Promise<void> {
   const s = useCyberspace.getState()
@@ -22,6 +23,7 @@ async function land(dx: bigint): Promise<void> {
 describe('explore', () => {
   beforeAll(async () => {
     // Three hops: the chain is spawn, +1, +2, +3.
+    await placeSpawn()
     await land(1n); await land(1n); await land(1n)
   })
 

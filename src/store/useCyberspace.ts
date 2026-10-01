@@ -21,7 +21,7 @@ import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
-import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
+import { generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec } from '../lib/keyExport'
 import {
@@ -74,6 +74,15 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { fetchChainEvents } from '../lib/chains'
+import {
+  firstMove,
+  foldHeldConflict,
+  localSupersedes,
+  type CheckVerdict,
+  type HeldConflict,
+  type SelfCheck,
+} from '../lib/chainHold'
+import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
   buildChain,
   hopTemplate,
@@ -140,6 +149,7 @@ import { computeEnterProof } from '../lib/hyperspace/enter'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
+import { useChainUi } from './useChainUi'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -465,8 +475,60 @@ export interface CyberspaceState {
    * `adopted` is how many actions came from another device, which explains an
    * avatar that moved on its own. `dropped` is how many of this device's
    * actions the fork took out.
+   *
+   * Two cases get their own words, because the generic count hides what
+   * happened (arkinox, 2026-10-01). `replaced`: the adopted chain begins with
+   * a newer spawn, so this device's whole chain was superseded (§3.2: a
+   * respawn on another device, or another device answering the held-chain
+   * prompt with "Keep the local chain"). `overturned`: of the dropped
+   * actions, how many this device had already published; another device's
+   * older branch won the fork and took them out for every reader.
    */
-  forkNotice: { adopted: number; dropped: number; at: number } | null
+  forkNotice: { adopted: number; dropped: number; overturned: number; replaced: boolean; at: number } | null
+  /**
+   * Whether this identity already has a chain on the relays, as last asked
+   * (lib/chainHold.ts, lib/selfSync.ts): `checking`, `found`, `none`, or
+   * `unknown` with the cause. Per identity: reset to `checking` on every
+   * switch and asked again on every load and whenever the connection comes
+   * back while the answer is `unknown`.
+   */
+  selfCheck: SelfCheck
+  /**
+   * The chain is HELD: it was started by a first move the relays could not
+   * vouch for, so it stays on this device whatever LIVE says (arkinox,
+   * 2026-10-01). Lifted silently when the relays answer that there is no
+   * other chain; turned into `chainConflict` when they answer with one.
+   * Persisted with the chain. Bags and messages are not affected.
+   */
+  held: boolean
+  /**
+   * A choice between two versions of this identity's chain, waiting for the
+   * person. `held`: a held chain met a chain on the relays
+   * (resolveHeldConflict). `branch`: this device's unpublished moves fork
+   * against moves another device already published (resolveBranchConflict,
+   * lib/branchConflict.ts). Nothing is chosen automatically; while either is
+   * pending no move is taken, nothing is published and nothing is adopted.
+   */
+  chainConflict: HeldConflict | BranchConflict | null
+  /** Bumped by a deliberate "publish now" that is not an action (lib/release.ts `release`). */
+  publishRequest: number
+  /** The self-check's answer for `pubkey`; ignored when the identity has moved on. */
+  applySelfCheck: (pubkey: string, verdict: CheckVerdict | { status: 'checking' }) => void
+  /**
+   * Answer the held-chain prompt. `relay` deletes the local held chain and
+   * places you at the relay chain's head; `local` lifts the hold so the local
+   * chain publishes (now, while LIVE) and, its spawn being newer, supersedes
+   * the relay chain for every reader. Region keys stay held either way.
+   */
+  resolveHeldConflict: (choice: 'relay' | 'local') => void
+  /**
+   * Answer the diverged-branch prompt. `relay` discards this device's
+   * unpublished moves after the fork and takes the relays' version; `mine`
+   * keeps them and lets them publish (now, while LIVE), which wins the fork
+   * for every reader only when they are the older branch (the prompt says
+   * which, and asks twice when they would override published moves).
+   */
+  resolveBranchConflict: (choice: 'relay' | 'mine') => void
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
   spentMsats: number
   /** How many times this identity has respawned; each one began a new chain. */
@@ -789,6 +851,14 @@ interface PersistedChain {
   /** Ids the relay has acknowledged. */
   published: string[]
   stats: ChainStats
+  /**
+   * Held: started before the relays could say whether this identity already
+   * had a chain, so it stays on this device whatever LIVE says until they
+   * answer (lib/chainHold.ts). Stored with the chain so a reload keeps
+   * holding. Absent on every chain saved before holding existed, which were
+   * all ordinary chains.
+   */
+  held?: boolean
 }
 
 function loadOrGenerateKey(): Uint8Array {
@@ -829,12 +899,30 @@ function loadChain(pubkey: string): PersistedChain | null {
       events: data.events,
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
+      held: data.held === true,
     }
   } catch { /* corrupt or missing */ }
   return null
 }
 
-function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats): void {
+/**
+ * The hold goes to disk with the chain. Every save is of the current
+ * identity's chain, so by default it is the store's own `held` at the moment
+ * of the save; the few saves that change it pass it explicitly. A default
+ * rather than a required argument, so that no existing save can quietly
+ * write `false` over a held chain by forgetting it.
+ */
+function heldNow(pubkey: string): boolean {
+  try {
+    const s = useCyberspace.getState()
+    return s.identity.pubkey === pubkey && s.held
+  } catch {
+    // Called before the store exists (it never is today): nothing is held yet.
+    return false
+  }
+}
+
+function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats, held?: boolean): void {
   const pubkey = events[0]?.pubkey
   if (!pubkey) return
   try {
@@ -843,6 +931,7 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
       events,
       published: events.map((e) => e.id).filter((id) => published[id] === 'ok'),
       stats,
+      ...((held ?? heldNow(pubkey)) ? { held: true } : {}),
     }
     localStorage.setItem(chainKeyFor(pubkey), JSON.stringify(data))
   } catch { /* quota exceeded or private mode */ }
@@ -982,15 +1071,6 @@ const pubkeyHex = currentSigner.pubkey
 const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
 const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
-/** A fresh spawn signed synchronously: only possible with a local key, which is
- * the only case module init ever needs one (see pickInitialSigner). */
-function freshSpawnSync(signer: Signer): PersistedChain {
-  if (!signer.secretKey) throw new Error('cannot spawn without a local key at init')
-  const createdAt = Math.floor(Date.now() / 1000)
-  const spawn = finalizeEvent(spawnTemplate(signer.pubkey, createdAt), signer.secretKey) as unknown as NostrEvent
-  return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
-}
-
 /** A fresh spawn signed through whatever signer is active (may be remote). */
 async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<PersistedChain> {
   const now = Math.floor(Date.now() / 1000)
@@ -1021,6 +1101,7 @@ function provisionalChain(pubkey: string): ReturnType<typeof derive> {
     genesisId: '',
     prevEventId: '',
     published: {},
+    held: false,
     chain: EMPTY_STATS,
     position,
     positionHistory: [position],
@@ -1052,6 +1133,7 @@ function derive(saved: PersistedChain): {
   genesisId: string
   prevEventId: string
   published: Record<string, PublishStatus>
+  held: boolean
   chain: ChainStats
   position: Position
   positionHistory: Position[]
@@ -1070,6 +1152,7 @@ function derive(saved: PersistedChain): {
     genesisId: actions[0].id,
     prevEventId: head.id,
     published,
+    held: saved.held === true,
     // Rides are counted from the events, so an adopted chain reads the same
     // as one ridden here; the local measurements stay what was saved.
     chain: { ...saved.stats, ...rideStatsOf(actions) },
@@ -1083,7 +1166,18 @@ function derive(saved: PersistedChain): {
   }
 }
 
-const initial = derive(loadChain(pubkeyHex) ?? freshSpawnSync(currentSigner))
+/**
+ * The page never signs a spawn on load (arkinox, 2026-10-01). A saved chain is
+ * picked up as it was; with none, the identity sits unsigned at its spawn
+ * coordinate exactly as a switch leaves it, and the self-check (selfSync.ts)
+ * asks the relays whether it already has a chain before its first move signs
+ * anything. This used to sign a fresh spawn here, and because an identity
+ * switched in is not saved until it moves, switch-then-reload signed a new
+ * spawn for it: newer than its real chain on the relays, so it replaced that
+ * chain and was published on the next move.
+ */
+const saved = loadChain(pubkeyHex)
+const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
 
 let requestId = 0
 
@@ -1132,7 +1226,44 @@ function scanHeldKey(lookupId: string, keyHex: string): void {
   void import('./useShards').then((m) => m.useShards.getState().rescan(lookupId, keyHex)).catch(() => { /* the relay was asked; a miss is a miss */ })
 }
 
-export const useCyberspace = create<CyberspaceState>((set, get) => {
+/**
+ * How long a provisional identity's first move waits for the self-check to
+ * answer before deciding without it. Short, because someone pressed COMMIT;
+ * a check that has not answered by then holds the new chain rather than
+ * publishing a spawn that may rival a real one (lib/chainHold.ts firstMove).
+ */
+const FIRST_MOVE_WAIT_MS = 4000
+
+/** A first move is waiting on the check or the signer: a second press must not sign a second spawn. */
+let firstMoveInFlight = false
+
+/**
+ * Forks answered with "Publish mine", as `forkId:firstRelayChildId`, so the
+ * same fork is not asked about again while its moves wait to go out (a LOCAL
+ * device keeps them until LIVE and an action). Kept for the page's life.
+ */
+const acceptedForks = new Set<string>()
+
+export const useCyberspace = create<CyberspaceState>((set, get, api) => {
+  /**
+   * The self-check's status for `pubkey` once it is no longer `checking`, or
+   * `checking` when `ms` ran out first. Resolves at once when it has already
+   * answered.
+   */
+  const waitForCheck = (pubkey: string, ms: number): Promise<SelfCheck['status']> => new Promise((resolve) => {
+    const answered = (): SelfCheck['status'] | null => {
+      const c = get().selfCheck
+      return c.pubkey === pubkey && c.status !== 'checking' ? c.status : null
+    }
+    const now = answered()
+    if (now) { resolve(now); return }
+    const timer = setTimeout(() => { unsub(); resolve('checking') }, ms)
+    const unsub = api.subscribe(() => {
+      const st = answered()
+      if (st) { clearTimeout(timer); unsub(); resolve(st) }
+    })
+  })
+
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
    * one spawns where its own bits land (spec §3.1). Either way the scene lets
@@ -1628,8 +1759,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       focus: null,
       transit: null,
       cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: loadBalance(signer.pubkey) },
+      // A new identity, a new question: the old one's answer and its prompt
+      // say nothing about this one (selfSync.ts asks again on the switch).
+      selfCheck: { pubkey: signer.pubkey, status: 'checking' },
+      chainConflict: null,
+      forkNotice: null,
     })
-    if (local) saveChain(base.events, base.published, base.chain)
+    if (local) saveChain(base.events, base.published, base.chain, base.held)
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
     void get().resumeCloudJob()
   }
@@ -1673,6 +1809,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   publishError: null,
   live: loadLive(),
   forkNotice: null,
+  selfCheck: { pubkey: pubkeyHex, status: 'checking' },
+  chainConflict: null,
+  publishRequest: 0,
   signerKind: currentSigner.kind,
   loginError: null,
 
@@ -1721,6 +1860,18 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Looking at history: nothing here is a place you can move from.
     if (!get().atHead()) return
 
+    // A held chain that met a chain on the relays waits for its answer: a
+    // move now would only lengthen one side of a choice not yet made.
+    if (get().chainConflict) {
+      const message = get().chainConflict!.kind === 'held'
+        ? 'This identity has a chain on the relays as well as this one. Choose which to keep first.'
+        : 'Another device published moves from the same point as your unpublished ones. Choose which to keep first.'
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message } })
+      // A prompt that was set aside comes back: the question is why nothing moved.
+      useChainUi.getState().setPromptAside(false)
+      return
+    }
+
     // One look at the relay before signing anything.
     //
     // An action names the one before it, so an action signed from a head
@@ -1733,10 +1884,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // whether it can read. It is bounded and it fails open, because an
     // unreachable relay must never stop someone moving, and a device that is
     // genuinely offline cannot be warned at all.
-    const beforeHead = get().prevEventId
-    if (beforeHead !== null) {
+    //
+    // Only for a chain that exists. A provisional identity's question is a
+    // different one (does it have a chain at all?) and is answered below.
+    if (get().events.length > 0) {
+      const beforeHead = get().prevEventId
       const fresh = await freshHead(get().identity.pubkey)
       if (fresh.length > 0) get().adoptChain(fresh)
+      // On a held chain, a relay chain does not move you: it raises the prompt.
+      if (get().chainConflict) return
       if (get().prevEventId !== beforeHead) {
         set({
           pendingTarget: null,
@@ -1746,23 +1902,59 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       }
     }
 
-    // A provisional identity (logged in, never placed) has no genesis yet. Sign
-    // its spawn now, on this first deliberate move, rather than at login. This
-    // is the only spawn a switched-in identity ever signs.
+    // A provisional identity (logged in or loaded, never placed) has no
+    // genesis yet. Its spawn is signed now, on this first deliberate move, and
+    // never at login or on load: this is the only spawn a switched-in
+    // identity ever signs. Before signing, the self-check gets a short wait
+    // to say whether the identity already has a chain (lib/chainHold.ts
+    // firstMove; arkinox, 2026-10-01):
+    //
+    // | Check | First move |
+    // |---|---|
+    // | found | the relay chain has placed you: nothing is signed, re-aim from its head |
+    // | none | sign the spawn: a normal new chain, published per LIVE |
+    // | unknown, or no answer in time | sign the spawn, and HOLD the chain on this device |
     if (get().events.length === 0) {
-      let spawn: NostrEvent
+      // Nothing lined up is no reason to sign a spawn.
+      if (samePosition(get().position, get().cursor) && get().plane === get().headPlane) return
+      if (firstMoveInFlight) return
+      firstMoveInFlight = true
       try {
-        spawn = await signEvent(spawnTemplate(get().identity.pubkey, Math.floor(Date.now() / 1000)))
-      } catch (err) {
-        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
-        return
-      }
-      // The relay chain may have landed while the signer was thinking; if so it
-      // already placed us and this spawn is redundant.
-      if (get().events.length === 0) {
-        const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS })
+        const pubkey = get().identity.pubkey
+        const adoptedMessage = 'This identity already has a chain on the relays, and you are at its head now. Re-aim from here.'
+        if (get().selfCheck.status === 'checking') {
+          set({ proof: { ...IDLE_PROOF, message: 'Asking the relays whether this identity already has a chain.' } })
+        }
+        const status = await waitForCheck(pubkey, FIRST_MOVE_WAIT_MS)
+        if (get().identity.pubkey !== pubkey) return
+        if (firstMove(status, get().events.length > 0) === 'adopted') {
+          set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+          return
+        }
+        set({ proof: IDLE_PROOF })
+        let spawn: NostrEvent
+        try {
+          spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
+        } catch (err) {
+          set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+          return
+        }
+        if (get().identity.pubkey !== pubkey) return
+        // The relay chain may have landed while the signer was thinking; if so
+        // it already placed us and this spawn is never used.
+        if (get().events.length > 0) {
+          set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+          return
+        }
+        // Decided on the check as it stands now, which the signer's wait may
+        // have settled.
+        const now = get().selfCheck
+        const held = firstMove(now.pubkey === pubkey ? now.status : 'checking', false) === 'spawn-held'
+        const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS, held })
         set({ ...d })
-        saveChain(d.events, d.published, d.chain)
+        saveChain(d.events, d.published, d.chain, held)
+      } finally {
+        firstMoveInFlight = false
       }
     }
 
@@ -2174,8 +2366,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       clearCloudJob()
     }
     if (get().plan) set({ plan: null })
-    const { events } = get()
-    const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
+    const { events, held, selfCheck, identity } = get()
+    // A respawn is deliberate, but it is not a decision about a chain on the
+    // relays nobody has seen yet. A held chain stays held through it; so does
+    // a respawn from the provisional state while the check has not said
+    // "none", for the same reason the first move holds (lib/chainHold.ts).
+    const keepHeld = held || (events.length === 0 && !(selfCheck.pubkey === identity.pubkey && selfCheck.status === 'none'))
+    const fresh = derive({ ...(await freshSpawnAsync(currentSigner, events[events.length - 1])), held: keepHeld })
     set({
       ...fresh,
       cursor: fresh.position,
@@ -2186,7 +2383,118 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       respawns: addRespawn(get().identity.pubkey),
       cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
     })
-    saveChain(fresh.events, fresh.published, fresh.chain)
+    saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
+  },
+
+  applySelfCheck: (pubkey, verdict) => {
+    if (get().identity.pubkey !== pubkey) return
+    const selfCheck: SelfCheck = verdict.status === 'unknown'
+      ? { pubkey, status: 'unknown', cause: verdict.cause }
+      : { pubkey, status: verdict.status }
+    set({ selfCheck })
+    if (verdict.status === 'found') {
+      // A verified or provisional chain adopts it (§3.2, your other device);
+      // a held one raises the prompt instead. adoptChain makes that call.
+      get().adoptChain(verdict.events)
+      return
+    }
+    if (verdict.status === 'none' && get().held && !get().chainConflict) {
+      // The relays answered and there is no other chain: this one is the
+      // identity's. Lifted silently, and from here it publishes as LIVE says.
+      set({ held: false })
+      const { events, published, chain } = get()
+      saveChain(events, published, chain, false)
+    }
+  },
+
+  resolveHeldConflict: (choice) => {
+    const { chainConflict: conflict, events: local } = get()
+    if (!conflict || conflict.kind !== 'held') return
+    if (choice === 'local') {
+      // Only offered when it would actually place you (the prompt checks the
+      // same thing); a relay chain respawned after this one would still win.
+      if (!localSupersedes(local, conflict.relayEvents)) return
+      // The hold lifts and the answer is the deliberate act that opens the
+      // gate, so while LIVE the whole chain goes out now. While LOCAL it
+      // stays here like any other chain until LIVE and an action.
+      set({ held: false, chainConflict: null, publishRequest: get().publishRequest + 1 })
+      const { events, published, chain } = get()
+      saveChain(events, published, chain, false)
+      return
+    }
+    // Keep the relay chain: the held chain is deleted, which is the stored
+    // chain being overwritten by the relay's, and you stand at its head.
+    // Region keys found by the local hops stay in Secrets: a key is
+    // knowledge, not chain state.
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    const order = buildChain(conflict.relayEvents)
+    if (order.length === 0) return
+    const byId = new Map(conflict.relayEvents.map((e) => [e.id, e]))
+    const chainEvents = order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
+    const d = derive({
+      version: 2,
+      events: chainEvents,
+      published: chainEvents.map((e) => e.id),
+      stats: statsFromChain(chainEvents, EMPTY_STATS),
+      held: false,
+    })
+    set({
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      plan: null,
+      proof: IDLE_PROOF,
+      transit: null,
+      spectate: null,
+      focus: null,
+      chainConflict: null,
+      forkNotice: null,
+      spentMsats: loadSpent(d.genesisId),
+    })
+    saveChain(d.events, d.published, d.chain, false)
+  },
+
+  resolveBranchConflict: (choice) => {
+    const { chainConflict: conflict, events, published } = get()
+    if (!conflict || conflict.kind !== 'branch') return
+    const div = findDivergence(events, published, conflict.relayEvents)
+    if (!div) { set({ chainConflict: null }); return }
+    if (choice === 'mine') {
+      // Kept, and not asked about again for this fork (in memory: a reload
+      // that finds the same fork unpublished asks once more). While LIVE the
+      // answer is the deliberate act that opens the publish gate; while LOCAL
+      // the moves stay here until LIVE and an action, like any others.
+      acceptedForks.add(`${div.forkId}:${div.relay[0].id}`)
+      set({ chainConflict: null, publishRequest: get().publishRequest + 1 })
+      return
+    }
+    // Keep the relays' version: the shared part, then the relays' branch.
+    // This device's moves after the fork are dropped; region keys they found
+    // stay in Secrets, as with any chain that leaves the store.
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    const { events: next, onRelay } = relayVersion(events, conflict.relayEvents, div)
+    if (next.length === 0) return
+    const okIds = new Set([...onRelay, ...events.filter((e) => published[e.id] === 'ok').map((e) => e.id)])
+    const d = derive({
+      version: 2,
+      events: next,
+      published: next.filter((e) => okIds.has(e.id)).map((e) => e.id),
+      stats: statsFromChain(next, get().chain),
+      held: false,
+    })
+    set({
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      plan: null,
+      proof: IDLE_PROOF,
+      transit: null,
+      chainConflict: null,
+      forkNotice: null,
+    })
+    saveChain(d.events, d.published, d.chain, false)
   },
 
   explore: (index) => {
@@ -2455,11 +2763,43 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   adoptChain: (incoming) => {
     const cur = get()
-    // A local commit owns the head while it computes; a relay echo must not race it.
-    if (cur.proof.status === 'computing') return
     const me = cur.identity.pubkey
     const mine = incoming.filter((e) => e.pubkey === me)
     if (mine.length === 0) return
+    // A HELD chain never adopts. It was started before the relays could say
+    // whether this identity had a chain, so a chain arriving now is exactly
+    // the one it may rival, and "newest spawn wins" would pick the local one
+    // (signed just now) without asking. The choice goes to the person
+    // instead (arkinox, 2026-10-01). Ahead of the computing guard below,
+    // because folding into the prompt never touches the head, and an event
+    // the live subscription delivers during a proof is not delivered twice.
+    if (cur.held) {
+      const prev = cur.chainConflict?.kind === 'held' ? cur.chainConflict : null
+      const conflict = foldHeldConflict(prev, mine, cur.events, Date.now())
+      if (conflict !== prev) set({ chainConflict: conflict })
+      return
+    }
+    // A diverged-branch choice is pending: what arrives now joins the relays'
+    // side of it, and nothing is folded into the chain until it is answered.
+    if (cur.chainConflict?.kind === 'branch') {
+      const conflict = foldBranchConflict(cur.chainConflict, mine, cur.events, cur.published, Date.now())
+      if (conflict && conflict !== cur.chainConflict) set({ chainConflict: conflict })
+      return
+    }
+    // A local commit owns the head while it computes; a relay echo must not race it.
+    if (cur.proof.status === 'computing') return
+    // This device's unpublished moves fork against moves the relays already
+    // hold (another device of yours moved on while this one was LOCAL or
+    // offline). Folding now would let the fork rule pick a winner in silence,
+    // and publishing would make that pick for every reader; neither happens
+    // until the person chooses (lib/branchConflict.ts; arkinox, 2026-10-01).
+    // A fork already answered with "Publish mine" is not asked again.
+    const div = findDivergence(cur.events, cur.published, mine)
+    if (div && !acceptedForks.has(`${div.forkId}:${div.relay[0].id}`)) {
+      set({ chainConflict: { kind: 'branch', forkId: div.forkId, relayEvents: mine, at: Date.now() } })
+      useChainUi.getState().setPromptAside(false)
+      return
+    }
     const seen = new Set(cur.events.map((e) => e.id))
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
     // buildChain is §3.2: the newest spawn wins, then follow the links. So a
@@ -2489,8 +2829,26 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // device's own work that the fork took out of the chain; adopted ones are
     // another device's, and are why the avatar just moved on its own.
     const kept = new Set(chainEvents.map((e) => e.id))
-    const dropped = cur.events.filter((e) => !kept.has(e.id)).length
+    const lost = cur.events.filter((e) => !kept.has(e.id))
+    const dropped = lost.length
     const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
+    // A different genesis is a newer spawn taking over, not a fork within
+    // the chain; within the chain, the published ones among the dropped are
+    // moves every reader had already seen and no longer sees.
+    const replaced = cur.events.length > 0 && d.genesisId !== cur.genesisId
+    const overturned = replaced ? 0 : lost.filter((e) => cur.published[e.id] === 'ok').length
+    // A loss stays reported until it is read. The other device's events
+    // arrive one fold at a time, so the fold that overturned your moves is
+    // usually followed at once by one that only brings the rest of its
+    // branch; that one must add to the unread notice, not replace it. A
+    // notice that only explained an adoption is replaced as before.
+    const prior = cur.forkNotice
+    const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
+    const notice = dropped > 0 || adopted > 0
+      ? unreadLoss
+        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, overturned: prior.overturned + overturned, replaced: prior.replaced || replaced, at: Date.now() }
+        : { adopted, dropped, overturned, replaced, at: Date.now() }
+      : null
     set({
       events: d.events,
       genesisId: d.genesisId,
@@ -2507,7 +2865,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       // A drop is kept until it is read; an adoption is just an explanation
       // for the movement and fades on its own. A fold that changed nothing
       // says nothing.
-      ...(dropped > 0 || adopted > 0 ? { forkNotice: { adopted, dropped, at: Date.now() } } : {}),
+      ...(notice ? { forkNotice: notice } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
   },

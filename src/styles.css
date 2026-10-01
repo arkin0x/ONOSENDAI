@@ -6695,3 +6695,149 @@ kbd {
   border-radius: 5px;
 }
 .linescrub__goto-note { flex: 1 0 100%; font-size: 9px; color: var(--warn); }
+
+/* ---------- Chain conflict prompt (a held chain met a chain on the relays) ---------- */
+/* A choice, not a destructive confirm: the accent border, and the lead answer
+ * (KEEP THE RELAY CHAIN) placed first even though it is the modal's confirm. */
+.modal__card.chainconflict {
+  width: min(480px, 100%);
+  border-color: rgba(255, 176, 32, 0.55);
+}
+
+.modal__card.chainconflict .modal__confirm {
+  order: -1;
+}
+
+/* Two chains side by side: a label column and one column per chain. The rows
+ * are display: contents so every cell sits on the one grid. Spans throughout,
+ * because it lives inside the modal's paragraph. */
+.chaincmp {
+  display: grid;
+  gap: 4px 10px;
+  margin: 12px 0;
+  padding: 8px;
+  font-size: 11px;
+  border: 1px solid rgba(200, 245, 255, 0.16);
+  border-radius: 6px;
+}
+
+.chaincmp__row {
+  display: contents;
+}
+
+.chaincmp__head {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--fg);
+}
+
+.chaincmp__label {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.chaincmp__cell {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* The chain panel's Published figure, past LIVE and LOCAL: held on this
+ * device, or LIVE with nothing reachable. Amber, because neither is a choice
+ * the person made and neither is working. */
+.relay--held,
+.relay--offline,
+.relay--norelay { color: var(--warn); }
+
+.notice--held {
+  color: var(--warn);
+  background: rgba(255, 176, 32, 0.08);
+  border-left-color: var(--warn);
+}
+
+.notice .tag--tap {
+  margin-left: 8px;
+}
+
+/* ---------- Chain status, under the LIVE/LOCAL switch (hud/ChainStatus.tsx) ---------- */
+/* The switch never changes; this strip slides in directly under it while
+ * there is something to report, and is not drawn otherwise. The commit block
+ * grows a row upward to hold it, so the pad above is lifted by the same
+ * 24px (the row and its gap) to keep its 8px clearance. */
+.touchops--status {
+  grid-template-rows: 40px 26px 20px;
+}
+
+.touchpad {
+  transition: bottom 160ms ease;
+}
+
+.touchpad.is-lifted {
+  bottom: 116px;
+}
+
+.chainstatus {
+  grid-column: 1 / -1;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 9px;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  animation: chainstatus-in 180ms ease-out;
+}
+
+/* A choice waiting on you is the loudest of them. */
+.chainstatus--conflict,
+.chainstatus--diverged {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+@keyframes chainstatus-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The explanation modals: long on purpose, so they scroll inside the card,
+ * and their paragraphs and lists get the spacing a <p> body never needed. */
+.modal__card.chainexplain {
+  width: min(480px, 100%);
+  border-color: rgba(255, 176, 32, 0.55);
+}
+
+.modal__body--scroll {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.chainexplain .modal__body p,
+.chainconflict .modal__body p {
+  margin: 0 0 10px;
+}
+
+.chainexplain .modal__body ul,
+.chainconflict .modal__body ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.chainexplain .modal__body li,
+.chainconflict .modal__body li {
+  margin-bottom: 4px;
+}
+
+.chainexplain .modal__body b,
+.chainconflict .modal__body b {
+  color: var(--fg);
+}

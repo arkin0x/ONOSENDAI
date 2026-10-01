@@ -19,6 +19,13 @@ vi.mock('./relay', async (importOriginal) => ({
   publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve({ ok: true as const }) },
 }))
 
+// The look at the relays before a backlog finds nothing here: no relay.
+vi.mock('./chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./chains')>()),
+  fetchChainEvents: () => Promise.resolve([]),
+  askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered' as const, events: [] }]),
+}))
+
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
 // line and turns a surprise ReferenceError into a visible assertion failure.
 if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
@@ -69,7 +76,7 @@ describe('the publisher and the release gate', () => {
 
   beforeEach(async () => {
     // Local first: that is what shuts the gate, whatever the last test left.
-    useCyberspace.setState({ live: false })
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
     await idle()
     sent.length = 0
   })
@@ -164,5 +171,45 @@ describe('the publisher and the release gate', () => {
     })
     await idle()
     expect(sent).toEqual([])
+  })
+
+  it('sends nothing from a held chain, even with an action taken while Live', async () => {
+    // A held chain was started before the relays could say whether this
+    // identity had one (chainHold.ts): it stays here whatever LIVE says.
+    useCyberspace.setState({ held: true })
+    setChain(['a1'])
+    useCyberspace.setState({ live: true })
+    append('b2')
+    await idle()
+    expect(sent).toEqual([])
+    expect(useCyberspace.getState().published[ev('b2').id]).toBe('queued')
+
+    // The relays answered "none": the hold lifts and the gate the action
+    // opened is still open, so the chain goes out as if never held.
+    useCyberspace.setState({ held: false })
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+
+  it('stays quiet when a hold lifts on a gate nothing opened', async () => {
+    // A reload: the gate starts shut, the chain is held, nothing is acted on.
+    useCyberspace.setState({ held: true })
+    setChain(['a1'])
+    useCyberspace.setState({ live: true })
+    await idle()
+    useCyberspace.setState({ held: false })
+    await idle()
+    expect(sent).toEqual([])
+  })
+
+  it('sends at once on a deliberate publish request (Keep the local chain)', async () => {
+    useCyberspace.setState({ held: true })
+    setChain(['a1', 'b2'])
+    useCyberspace.setState({ live: true })
+    await idle()
+    // resolveHeldConflict('local'): the hold lifts and the answer opens the gate.
+    useCyberspace.setState({ held: false, publishRequest: useCyberspace.getState().publishRequest + 1 })
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('a1').id, ev('b2').id])
   })
 })

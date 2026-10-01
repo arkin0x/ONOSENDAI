@@ -69,12 +69,11 @@ import { DeployRegionBox } from './DeployRegionBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
+import { CAMERA_NEAR, FOV } from './camera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
 
-/** The field of view the Canvas is created with, and what the sphere is framed against. */
-const FOV = 55
 
 /**
  * Where a reframe puts the camera: the usual 26 cells, or far enough out for
@@ -626,7 +625,7 @@ export function Scene(): JSX.Element {
   const covered = useWorkshop((s) => s.open)
   return (
     <Canvas
-      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
+      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
       dpr={[1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.

@@ -16,6 +16,7 @@ import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { useEscape } from '../hooks/useEscape'
 
 const KIND_LABEL: Record<string, string> = {
   local: 'Local key',
@@ -135,6 +136,8 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
   const extension = hasNip07()
   const disabled = busy !== null
   const credentialReady = !!credential.trim() && (!encrypted || !!password)
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', true, close)
 
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label="Change identity" onPointerDown={close}>

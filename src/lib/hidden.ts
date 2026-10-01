@@ -34,6 +34,7 @@ import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
+import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import type { Position } from './space'
 
 /** The location-encrypted envelope (spec §8.6). */
@@ -165,8 +166,18 @@ export interface Hidden {
   author: string
   at: Position
   plane: Plane
-  /** The height hint on the envelope; the discovery radius. */
+  /**
+   * The height of the bag's region, the discovery radius: the height of the
+   * key that opened it when the reader knows it, else the bag's `h` tag, which
+   * is optional (spec §8.6). A bag that omits `h` still has a height.
+   */
   height: number
+  /**
+   * What the bag says in public: its `h`, its hint, its riddle (BagSettings),
+   * shared by every item in it. Absent on the ceremony's preview items, which
+   * came out of no bag.
+   */
+  bag?: BagSettings
   /** When the inner event was made. */
   createdAt: number
   type: HiddenType
@@ -236,6 +247,76 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
 }
 
 /**
+ * Longest riddle a bag carries in its `content` (spec §7.7 "Riddles"). It is
+ * public plaintext that every seeker reads in the LOOT list before finding
+ * anything, so it is a clue rather than a letter: 280 characters, a post's
+ * length, is room for a riddle of a few lines and keeps the list legible. A
+ * longer message belongs inside the bag, where MAX_MESSAGE_LENGTH applies.
+ */
+export const MAX_RIDDLE_LENGTH = 280
+
+/**
+ * What a bag says in public about itself, beyond its lookup id: three choices
+ * the hider makes in the deploy bar (arkinox, 2026-10-01). They belong to the
+ * BAG, not to any one item: a bag is one addressable event per author and
+ * region holding everything hidden there (spec §7.6), so every rewrite of it
+ * carries them forward.
+ *   - `heightTag`: whether the bag carries its `h` tag (spec §8.6, optional),
+ *     which tells seekers what height to compute to.
+ *   - `hint`: the hint box's heights (spec §7.7), or null for no hint. The
+ *     deploy bar offers the sector hint, 30 on every axis; a finer box another
+ *     client wrote is kept as it is.
+ *   - `riddle`: the plaintext the bag's `content` carries for humans (§7.7).
+ */
+export interface BagSettings {
+  heightTag: boolean
+  hint: HintHeights | null
+  riddle: string
+}
+
+/** A bag as this client always wrote one before the choices existed: `h`, no hint, no riddle. */
+export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '' }
+
+function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {
+  return a === null ? b === null : b !== null && a.every((h, i) => h === b[i])
+}
+
+/**
+ * The settings a rewrite of a bag goes out with, field by field: what the
+ * hider changed in the deploy bar (`chosen` differs from `seed`, the values
+ * the controls started at) wins; what they left alone takes the bag's
+ * `current` value, which may be newer than the seed because another device
+ * rewrote the bag since. So a riddle or hint you never touched is carried
+ * forward, never silently dropped, and one you cleared on purpose stays
+ * cleared. `current` is null for a region with no bag yet. A hint that cannot
+ * contain a region of `height` (spec §7.7) is dropped, and the riddle comes
+ * out as the bag will carry it, trimmed and capped.
+ */
+export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, current: BagSettings | null, height: number): BagSettings {
+  const now = current ?? chosen
+  const hint = sameHint(chosen.hint, seed.hint) ? now.hint : chosen.hint
+  return {
+    heightTag: chosen.heightTag !== seed.heightTag ? chosen.heightTag : now.heightTag,
+    hint: hint && hintFits(hint, height) ? hint : null,
+    riddle: (chosen.riddle !== seed.riddle ? chosen.riddle : now.riddle).trim().slice(0, MAX_RIDDLE_LENGTH),
+  }
+}
+
+/**
+ * The settings a published bag carries. `height` is the region height the
+ * reader knows the bag's key belongs to, used to judge a hint when the bag
+ * itself omits `h`; a hint the spec calls malformed is read as absent (§7.7).
+ */
+export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
+  const h = heightHint(ev)
+  const hint = parseHint(ev.tags, h ?? height)
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH) }
+}
+
+/** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */
+export interface BagPlace { at: Position; plane: Plane }
+
+/**
  * Wrap a BAG of signed inner events into one region envelope template.
  *
  * Spec §8.6: the envelope is keyed by `d = lookup_id`, so there is one per
@@ -244,19 +325,28 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
  * accumulates content without a tag per item. The caller signs and publishes.
  * `createdAt` must exceed the previous bag's, so the relay keeps the newer.
  *
+ * `settings` are the bag's public face (BagSettings above). `h` goes out
+ * unless the hider turned it off. A hint needs `place`, a point in the region,
+ * because the hint names the aligned base of its box; it writes the `hint` tag
+ * and its sector tags (lib/hint.ts), and a hint smaller than the region could
+ * not contain it, so one whose heights are below `height` is refused here
+ * rather than published as a claim no reader would accept. The riddle is the
+ * `content`, trimmed and capped at MAX_RIDDLE_LENGTH.
+ *
  * No NIP-70 `-` (protected) tag: it is only accepted from the authenticated
  * author on relays that support it, is refused outright on ones that do not,
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: BagEntry[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND): Promise<EventTemplate> {
-  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(inners))
-  return {
-    kind,
-    created_at: createdAt,
-    content: '',
-    tags: [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2'], ['h', String(height)]],
+export async function bagTemplate(inners: BagEntry[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
+  const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, await encryptForRegion(regionKey, JSON.stringify(inners))], ['version', '2']]
+  if (settings.heightTag) tags.push(['h', String(height)])
+  if (settings.hint) {
+    if (!place) throw new Error('A hint needs the place it points to.')
+    if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
+    tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
+  return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 
 function tag(ev: NostrEvent, name: string): string | undefined {
@@ -271,14 +361,23 @@ export function ciphertextOf(ev: NostrEvent): string | null {
   return enc[2]
 }
 
-export function heightHint(ev: NostrEvent): number {
+/**
+ * The bag's `h` tag, or null when it carries none or a malformed one. `h` is
+ * optional (spec §8.6): a hider may keep the height to themselves (arkinox,
+ * 2026-10-01), and a reader that opened the bag knows the height anyway,
+ * because it is the height of the key it derived (unbag's `height`).
+ */
+export function heightHint(ev: NostrEvent): number | null {
   const h = tag(ev, 'h')
-  const n = h === undefined ? 0 : Number(h)
-  return Number.isInteger(n) && n >= 0 ? n : 0
+  if (h === undefined || !/^(0|[1-9][0-9]*)$/.test(h)) return null
+  return Number(h)
 }
 
+/** What every item of one bag shares: its region's height and its public settings. */
+interface BagFacts { height: number; bag: BagSettings }
+
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden | null {
+function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
   // The inner event must be genuinely signed, and by the same key that wrapped
   // it: an envelope carrying someone else's event is not theirs to place.
   if (!inner || typeof inner.kind !== 'number' || inner.pubkey !== outer.pubkey) return null
@@ -296,7 +395,7 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden
     author: outer.pubkey,
     at: { x, y, z },
     plane,
-    height: heightHint(outer),
+    ...facts,
     createdAt: inner.created_at,
   }
 
@@ -320,8 +419,14 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string): Hidden
  * Empty covers every way it fails to open for you: not an envelope, the wrong
  * region key, or a bag that is not an array. Each item that does not verify is
  * dropped, not the whole bag.
+ *
+ * `height` is the height of the region `regionKey` was derived for, when the
+ * caller knows it, as every scan does. It is the truth about the bag's region
+ * (the key opened it), so it wins over the bag's `h` tag, and it is what keeps
+ * a bag whose hider left `h` off (arkinox, 2026-10-01) from reading as a
+ * single gibson. Without it the `h` tag is used, and 0 when there is none.
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -330,7 +435,9 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   try { entries = JSON.parse(json) } catch { return [] }
   if (!Array.isArray(entries)) return []
   const keyHex = bytesToHex(regionKey)
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as NostrEvent, outer, keyHex)))
+  const regionHeight = height ?? heightHint(outer) ?? 0
+  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as NostrEvent, outer, keyHex, facts)))
   // References are fetched a few at a time, and only so many per bag; an
   // entry that cannot be fetched or opened is a missing entry, dropped like
   // an item that fails to verify.
@@ -340,7 +447,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
     const worker = async (): Promise<void> => {
       while (next < refs.length) {
         const [ref, i] = refs[next++]
-        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, resolve, origin).catch(() => null)
+        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, resolve, facts, origin).catch(() => null)
       }
     }
     await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, refs.length) }, worker))
@@ -356,7 +463,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
  * someone else's object is a placement, attributed to the bag's author, while
  * the content stays that event's own (spec §7.6).
  */
-async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, origin?: RegionOrigin): Promise<Hidden | null> {
+async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, facts: BagFacts, origin?: RegionOrigin): Promise<Hidden | null> {
   // The point is optional (spec §7.6): without one the entry is located no
   // more precisely than the region, and is drawn at the region's base.
   const coordHex = ref[3]
@@ -384,7 +491,7 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     author: outer.pubkey,
     at: { x, y, z },
     plane,
-    height: heightHint(outer),
+    ...facts,
     createdAt: target.created_at,
   }
   if (target.kind === OBJECT_KIND) {

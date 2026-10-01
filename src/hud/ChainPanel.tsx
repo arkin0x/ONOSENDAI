@@ -31,9 +31,11 @@ import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
 import { holdReason } from '../lib/chainHold'
 import { useChainUi } from '../store/useChainUi'
+import { Field, Switch } from './ui/Switch'
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
+  const showTrail = useCyberspace((s) => s.showTrail)
   const spentMsats = useCyberspace((s) => s.spentMsats)
   const prevEventId = useCyberspace((s) => s.prevEventId)
   const genesisId = useCyberspace((s) => s.genesisId)
@@ -96,6 +98,12 @@ export function ChainPanel(): JSX.Element {
           {events.length} ACTION{events.length === 1 ? '' : 'S'}
         </button>
       </header>
+
+      {/* The line through the chain's positions in the scene, on by default.
+          Remembered on this device (arkinox, 2026-10-01). */}
+      <Field id="chain-show-trail" label="Show chain trail" hint="Toggle the red line that shows your movement path history.">
+        <Switch id="chain-show-trail" checked={showTrail} onCheckedChange={(v) => useCyberspace.getState().setShowTrail(v)} />
+      </Field>
 
       <dl className="stats">
         <div>

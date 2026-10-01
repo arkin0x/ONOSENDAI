@@ -365,7 +365,7 @@ function Controls(): JSX.Element {
     ['X', 'cancel proof / recall cursor'],
     ['Shift + W A S D', 'rotate view 90°'],
     ['Tab', 'previous view'],
-    ['Esc', 'reset to top-down map'],
+    ['Esc', 'close: dialog, then menu, then the latest chip'],
     ['C', 'canonical view (facing the black sun)'],
     ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],

@@ -21,6 +21,7 @@ import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
+import { useEscape } from '../hooks/useEscape'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 5
@@ -31,6 +32,8 @@ export function AvatarsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
   const [input, setInput] = useState('')
   const [more, setMore] = useState(false)
+  // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', more, () => setMore(false))
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)

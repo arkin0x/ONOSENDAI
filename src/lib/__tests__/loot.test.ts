@@ -19,10 +19,24 @@ describe('summarizeBag', () => {
     expect(it?.key).toBe(`${pk(1)}:${lookup(1)}`)
   })
 
-  it('treats a missing height as 0 and an empty content as no riddle', () => {
+  it('reads a missing height as not published, and an empty content as no riddle', () => {
     const it = summarizeBag(bag({ h: '' }))
-    expect(it?.height).toBe(0)
+    expect(it?.height).toBeNull()
     expect(it?.riddle).toBe('')
+    expect(regionLabel(null)).toBe('height not published')
+  })
+
+  it('names the sector a well-formed sector hint fixes, and ignores sector tags that disagree with it', () => {
+    // hint-reference.py hint_tags(london, plane 0, (30, 30, 30)).
+    const hint = ['hint', 'c492492492492492492492edf5bee7267451c787d80000000000000000000000', '30', '30', '30']
+    const sector = '18014398541305938-18014398549232983-18014398509410999'
+    expect(summarizeBag(bag({ tags: [['d', lookup(1)], ['encrypted', 'aes-256-gcm', 'Zm9v'], ['version', '2'], ['h', '12'], hint, ['S', '1-2-3']] }))?.sector).toBe(sector)
+    expect(summarizeBag(bag())?.sector).toBeNull()
+  })
+
+  it('treats a hint below the bag height as absent', () => {
+    const hint = ['hint', 'c492492492492492492492edf5bee7267451c787d80000000000000000000000', '30', '30', '30']
+    expect(summarizeBag(bag({ tags: [['d', lookup(1)], ['encrypted', 'aes-256-gcm', 'Zm9v'], ['version', '2'], ['h', '31'], hint] }))?.sector).toBeNull()
   })
 
   it('rejects other kinds, envelopes without ciphertext, and malformed lookup ids', () => {
@@ -43,7 +57,7 @@ describe('payloadBytes', () => {
   })
 })
 
-const row = (key: string, createdAt = 10): LootItem => ({ bagId: key, key, author: 'a'.repeat(64), lookupId: 'b'.repeat(64), height: 8, createdAt, bytes: 10, riddle: '' })
+const row = (key: string, createdAt = 10): LootItem => ({ bagId: key, key, author: 'a'.repeat(64), lookupId: 'b'.repeat(64), height: 8, createdAt, bytes: 10, riddle: '', sector: null })
 
 describe('afterBackfill', () => {
   it('drops what a complete answer left out, and keeps everything when the answer was cut short', () => {

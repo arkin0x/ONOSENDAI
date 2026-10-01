@@ -26,6 +26,7 @@ import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfiles } from '../store/useProfiles'
+import { useEscape } from '../hooks/useEscape'
 
 const SERVER_KEY = 'onosendai:blossom-server'
 /** How long to wait on the general relays for the current kind 0 and server list. */
@@ -182,6 +183,8 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
   const picture = (fields.picture ?? '').trim()
   const banner = (fields.banner ?? '').trim()
   const relayHosts = profileRelays().map((r) => r.replace('wss://', '')).join(', ')
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', true, onClose)
 
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label="Your profile" onPointerDown={onClose}>

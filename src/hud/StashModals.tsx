@@ -11,11 +11,15 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
+import { useEscape } from '../hooks/useEscape'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
 
 function Shell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01). One Shell
+  // serves all three views, so moving between them keeps its place.
+  useEscape('modal', true, onClose)
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onClose}>
       <div className="modal__card login stash-modal" onPointerDown={(e) => e.stopPropagation()}>

@@ -2138,6 +2138,127 @@ kbd {
   }
 }
 
+/*
+ * The bar never covers the centre of the screen, where the ghost shows what is
+ * being hidden: the title and the deploy button are pinned and the rows
+ * between them scroll inside the bar. On a phone, and anywhere this client
+ * lays out for touch, the bar takes at most a quarter of the screen's height
+ * (arkinox's rule, 2026-10-01). On a desktop it stops above the middle. dvh is
+ * the height actually visible, browser bars and all; vh stands in where dvh
+ * is not known.
+ */
+.deploybar {
+  max-height: calc(50vh - 24px);
+  max-height: calc(50dvh - 24px);
+}
+@media (max-width: 1100px) {
+  .deploybar {
+    max-height: 25vh;
+    max-height: 25dvh;
+    padding-bottom: 10px;
+  }
+}
+.deploybar__head,
+.deploybar__foot {
+  flex-shrink: 0;
+}
+.deploybar__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.deploybar__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Room for the scrollbar, and a fade at the bottom edge that says there is
+     more; the padding under the last row keeps it clear of the fade. */
+  padding-right: 4px;
+  margin-right: -4px;
+  padding-bottom: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.35) transparent;
+}
+
+/* The bag's settings: its scope, two switches and the riddle (DeployBar BagControls). */
+.deploybar__bag {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+.deploybar__scope {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--ok);
+}
+.deploybar__bag .ui-field {
+  margin: 8px 0 0;
+}
+/* The label bold, as arkinox wrote it; the hint under it plain. */
+.deploybar__bag .ui-field__label {
+  font-weight: 700;
+}
+.deploybar__bag .ui-field__hint {
+  font-size: 9px;
+}
+.deploybar__bag sup {
+  font-size: 0.78em;
+  line-height: 0;
+  vertical-align: super;
+}
+.deploybar__riddle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.deploybar__riddle .ui-field__text {
+  cursor: default;
+}
+/* The same field as the comments composer and the login inputs. */
+.deploybar__input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font: inherit;
+  /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
+  font-size: 16px;
+}
+@media (min-width: 1101px) {
+  .deploybar__input { font-size: 12px; }
+}
+.deploybar__input:focus {
+  outline: none;
+  border-color: rgba(0, 229, 255, 0.5);
+}
+.deploybar__input::placeholder {
+  color: var(--dim);
+  opacity: 0.7;
+}
+.deploybar__count {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .shards__row--deployed {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -5660,12 +5781,9 @@ kbd {
   color: var(--dim);
 }
 
-.secrets__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
+/* The draw-keys checkbox sits on the summary line, centred with it. */
+.secrets__summary .ui-field { margin: 0; align-items: center; gap: 7px; }
+.secrets__summary .ui-field__label { font-size: 9px; }
 
 .secrets__list {
   list-style: none;
@@ -6840,4 +6958,87 @@ kbd {
 .chainexplain .modal__body b,
 .chainconflict .modal__body b {
   color: var(--fg);
+}
+
+/* ---- Switch, Checkbox and Field (hud/ui): shadcn's anatomy on Radix
+   primitives, in ONOSENDAI's own neon (arkinox, 2026-10-01). ---- */
+
+/* A control and its label on one row; the label flips the control. */
+.ui-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+.ui-field__text { display: flex; flex-direction: column; gap: 3px; cursor: pointer; padding-top: 1px; }
+.ui-field__label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg); }
+.ui-field__hint { font-size: 10px; line-height: 1.45; color: var(--dim); }
+
+/* The switch: a track with a thumb that slides right and lights when on. */
+.ui-switch {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-switch[data-state='checked'] {
+  background: rgba(0, 229, 255, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.35);
+}
+.ui-switch__thumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dim);
+  transform: translateX(2px);
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.ui-switch[data-state='checked'] .ui-switch__thumb {
+  background: var(--accent);
+  transform: translateX(18px);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* The checkbox: a square with the accent check, the same glow when on. */
+.ui-checkbox {
+  all: unset;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: var(--bg);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-checkbox[data-state='checked'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+}
+.ui-checkbox__mark { display: inline-flex; }
+
+/* Keyboard focus shows; a tap does not leave a ring behind. */
+.ui-switch:focus-visible,
+.ui-checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-switch[data-disabled],
+.ui-checkbox[data-disabled] { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .ui-switch, .ui-switch__thumb, .ui-checkbox { transition: none; }
 }

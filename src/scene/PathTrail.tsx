@@ -26,6 +26,9 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const focus = useCyberspace((s) => s.focus)
+  // Off from the Chain panel's switch (arkinox, 2026-10-01); read with the
+  // other hooks so the early return below stays after every one of them.
+  const showTrail = useCyberspace((s) => s.showTrail)
 
   // Whose trail: the spectated avatar's chain, else your own.
   const positionHistory = useMemo(
@@ -95,7 +98,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // last point to the render origin: a red line from your history straight
   // into whatever is being viewed. The avatar hides under a focus; its trail
   // does too.
-  if (!geometry || focus !== null) return null
+  if (!geometry || focus !== null || !showTrail) return null
 
   return (
     <>

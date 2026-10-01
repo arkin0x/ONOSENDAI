@@ -33,6 +33,17 @@ const ROTATE_KEYS: Record<string, RotateDirection> = {
   KeyD: 'right',
 }
 
+/**
+ * Whether the menu covers the scene (a phone with the panels open). The
+ * on-screen pad and scene taps already step aside then; the keys follow
+ * (arkinox, 2026-10-01: "turn off the cyberspace controls while the menu is
+ * open"). Set by App, which knows; Escape still works.
+ */
+let menuCovering = false
+export function setMenuCovering(covering: boolean): void {
+  menuCovering = covering
+}
+
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -41,6 +52,13 @@ export function useKeyboard(): void {
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (menuCovering && event.code !== 'Escape') return
+      // Space and Enter on a focused control press that control. Space is
+      // COMMIT here, a proof and possibly a paid one, so a Space meant for a
+      // focused switch, checkbox or button used to try to move instead
+      // (found adding the trail switch, arkinox 2026-10-01). Other keys keep
+      // their shortcuts with a control focused.
+      if ((event.code === 'Space' || event.key === 'Enter') && (event.target as HTMLElement | null)?.closest?.('button, a[href], select, summary, [role="switch"], [role="checkbox"], [role="button"], [role="menuitem"], [role="tab"]')) return
       if (useWorkshop.getState().open) return
 
       const store = useCyberspace.getState()

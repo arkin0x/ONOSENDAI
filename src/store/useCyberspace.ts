@@ -618,6 +618,9 @@ export interface CyberspaceState {
   /** Whether the regions you hold keys to are drawn in the scene. */
   showSecrets: boolean
   setShowSecrets: (show: boolean) => void
+  /** Whether the chain's trail (the line through its positions) is drawn in the scene. */
+  showTrail: boolean
+  setShowTrail: (show: boolean) => void
   cancel: () => void
   /** Continue a paused route: ask for the pending signature again, or restart the step. */
   resumePlan: () => void
@@ -815,6 +818,12 @@ function chainKeyFor(pubkey: string): string {
 const LIVE_KEY = 'onosendai:live'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
 const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
+
+const SHOW_TRAIL_KEY = 'onosendai:showTrail'
+
+function loadShowTrail(): boolean {
+  try { return localStorage.getItem(SHOW_TRAIL_KEY) !== '0' } catch { return true }
+}
 
 function loadShowSecrets(): boolean {
   try { return localStorage.getItem(SHOW_SECRETS_KEY) !== '0' } catch { return true }
@@ -2062,6 +2071,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set({ showSecrets: show })
   },
 
+  setShowTrail: (show) => {
+    if (show === get().showTrail) return
+    try { localStorage.setItem(SHOW_TRAIL_KEY, show ? '1' : '0') } catch { /* private mode */ }
+    set({ showTrail: show })
+  },
+
   setMoveMode: (mode) => {
     if (mode === get().moveMode) return
     saveMoveMode(mode)
@@ -2963,6 +2978,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   cloudPrefs: loadCloudPrefs(),
   moveMode: loadMoveMode(),
   showSecrets: loadShowSecrets(),
+  showTrail: loadShowTrail(),
 
   approveCloud: () => {
     const { cloud } = get()

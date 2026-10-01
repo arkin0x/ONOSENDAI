@@ -23,6 +23,8 @@ import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
+import { Checkbox } from './ui/Checkbox'
+import { Field } from './ui/Switch'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -97,14 +99,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           <span>{formatBytes(bytes)} on this device</span>
           {list.length > 0 && <button className="secrets__forget-all" onClick={() => setForgetAll(true)}>FORGET ALL</button>}
           <span className="secrets__gap" />
-          <label className="secrets__toggle">
-            <input
-              type="checkbox"
-              checked={showSecrets}
-              onChange={(e) => useCyberspace.getState().setShowSecrets(e.target.checked)}
-            />
-            Draw them in the scene
-          </label>
+          <Field id="secrets-draw" label="Draw them in the scene">
+            <Checkbox id="secrets-draw" checked={showSecrets} onCheckedChange={(v) => useCyberspace.getState().setShowSecrets(v === true)} />
+          </Field>
         </div>
 
         {/* The heights this machine cannot reach for itself. A cube of side

@@ -38,7 +38,7 @@ import { useChatFeed } from './hooks/useChatFeed'
 import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
-import { useKeyboard } from './hooks/useKeyboard'
+import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
@@ -145,6 +145,8 @@ export default function App(): JSX.Element {
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
+  // The keys stand down with the pad while the menu covers the scene.
+  useEffect(() => { setMenuCovering(crowded) }, [crowded])
 
   // While the HOSAKA offer card is up it has the screen to itself: the panels,
   // instruments, compass and pad step aside until the cursor comes back

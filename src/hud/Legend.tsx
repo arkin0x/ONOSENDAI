@@ -42,6 +42,22 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
+    what: 'Solid red line: your movement path, published to the relays',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff0000" strokeWidth="2" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    what: 'Dashed red line: moves made on this device and not published yet (LOCAL, or waiting for a relay)',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#d94848" strokeOpacity="0.85" strokeWidth="2" strokeDasharray="3 2.4" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     what: 'Spawn point mesh: spawn point',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">

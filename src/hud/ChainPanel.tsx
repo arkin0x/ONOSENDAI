@@ -101,7 +101,7 @@ export function ChainPanel(): JSX.Element {
 
       {/* The line through the chain's positions in the scene, on by default.
           Remembered on this device (arkinox, 2026-10-01). */}
-      <Field id="chain-show-trail" label="Show chain trail" hint="The line through every position this chain has stood at, drawn in the scene.">
+      <Field id="chain-show-trail" label="Show chain trail" hint="Toggle the red line that shows your movement path history.">
         <Switch id="chain-show-trail" checked={showTrail} onCheckedChange={(v) => useCyberspace.getState().setShowTrail(v)} />
       </Field>
 

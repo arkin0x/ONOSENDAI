@@ -20,7 +20,9 @@
 import { Vector3 } from 'three'
 
 /**
- * Offset from the avatar's committed cell to where it is currently drawn, in
- * render cells. Zero whenever nothing is in flight.
+ * Offset from the avatar's committed place to where it is currently drawn, in
+ * render cells. Zero whenever nothing is in flight. The committed place is
+ * anchorCentre: the origin's cell centre below the continuous range, the true
+ * sub-cell position in it, so readers add this to that, never to zero.
  */
 export const travelOffset = new Vector3()

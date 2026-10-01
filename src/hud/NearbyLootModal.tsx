@@ -70,7 +70,7 @@ export function NearbyLootModal(): JSX.Element | null {
     rememberNearbyReturn()
     close()
     const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
-    useCyberspace.getState().focusOn(item.at, item.plane, labelOf(item).toUpperCase(), unit)
+    useCyberspace.getState().focusItem(item.at, item.plane, labelOf(item).toUpperCase(), unit)
   }
   return (
     <div className="modal" role="dialog" aria-label="Nearby loot" aria-modal="true" onPointerDown={close}>

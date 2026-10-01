@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
-import { cellCentre, type ViewAxes } from '../lib/space'
+import { anchorCentre, placeCentre, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin } from '../store/useCyberspace'
 
@@ -44,10 +44,12 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     // All three axes. The trail used to map right and up only and pin depth to a
     // constant, so it drew a flat shadow of a 3D path: every out-axis hop
     // collapsed to nothing, and rotating the view changed which axis was being
-    // flattened, so the shape changed with the view. Cell centres, matching the
-    // cursor and the avatar, so a segment ends where its gibson is drawn.
+    // flattened, so the shape changed with the view. placeCentre, matching
+    // the cursor and the avatar, so a segment ends where its gibson is drawn:
+    // cell centres below the continuous range, true positions in it, where a
+    // trail across the whole cube would otherwise fold onto eight corners.
     const centre = (p: typeof anchor): [number, number, number] =>
-      cellCentre(p, origin, scaleExp, axes)
+      placeCentre(p, origin, scaleExp, axes)
 
     for (let i = 0; i < positionHistory.length - 1; i++) {
       const into = i < split ? walked : ahead
@@ -60,7 +62,8 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
       geom.setAttribute('position', new Float32BufferAttribute(v, 3))
       return geom
     }
-    return { walked: make(walked), ahead: make(ahead) }
+    // Where the avatar stands, for the head-riding vertex below.
+    return { walked: make(walked), ahead: make(ahead), head: anchorCentre(anchor, scaleExp, axes) }
   }, [positionHistory, axes, scaleExp, anchor, split])
   // Rebuilt on every hop and re-anchor; the old pair's GL buffers go with it.
   useEffect(() => () => { geometry?.walked?.dispose(); geometry?.ahead?.dispose() }, [geometry])
@@ -68,20 +71,22 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // The newest segment ends on the avatar, which is drawn trailing behind its
   // committed cell for a moment after a commit. Left alone, the trail would
   // reach the destination while you were still visibly travelling to it, so the
-  // line would lead you there. Its final vertex rides the same offset. Only at
-  // the head: in history nothing is travelling.
+  // line would lead you there. Its final vertex rides the same offset, from
+  // the same place the avatar stands. Only at the head: in history nothing is
+  // travelling.
   const lastVertex = useRef<Float32Array | null>(null)
   useFrame(() => {
     if (exploreIndex !== null || spectate || focus !== null) return
     const attr = geometry?.walked?.attributes.position
-    if (!attr) return
+    const head = geometry?.head
+    if (!attr || !head) return
     const arr = attr.array as Float32Array
     const n = arr.length
     if (n < 3) return
     if (lastVertex.current !== arr) lastVertex.current = arr
-    arr[n - 3] = travelOffset.x
-    arr[n - 2] = travelOffset.y
-    arr[n - 1] = travelOffset.z
+    arr[n - 3] = head[0] + travelOffset.x
+    arr[n - 2] = head[1] + travelOffset.y
+    arr[n - 1] = head[2] + travelOffset.z
     attr.needsUpdate = true
   })
 

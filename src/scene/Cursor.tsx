@@ -35,7 +35,7 @@ import { nextActionFor } from '../store/useOffer'
 import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
-import { cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { placeCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   alignedOrigin,
   samePosition,
@@ -184,7 +184,8 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     [active, position, target, plane, hopCeil, sidestepCeil, limits, from],
   )
 
-  // Screen-space endpoints, at cell CENTRES.
+  // Screen-space endpoints, at cell CENTRES below the continuous range and at
+  // true positions in it (placeCentre), where the avatar and the trail are.
   //
   // These used to come from which carries a half-cell bias: it was
   // written when a cell was drawn as a square anchored at its corner. Now the
@@ -194,7 +195,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
+    const centre = (p: Position) => placeCentre(p, origin, scaleExp, axes)
     const a = centre(position)
     const b = centre(target)
     const action = next?.action ?? null
@@ -272,7 +273,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   useFrame(() => {
     const s = useCyberspace.getState()
     const live = s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor
-    const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+    const b = placeCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(b[0], b[1], b[2])
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
@@ -299,7 +300,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         opacity={active ? 1 : 0.75}
         follow={() => {
           const s = useCyberspace.getState()
-          return cellCentre(
+          return placeCentre(
             s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor,
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )

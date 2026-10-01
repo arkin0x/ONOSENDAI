@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from 'react'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { targetColor } from '../lib/targets'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { usePresence } from '../store/usePresence'
@@ -39,7 +39,7 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
     const origin = alignedOrigin(anchor, scaleExp)
     return Object.values(people)
       .filter((p) => p.pubkey !== me && !targets[p.pubkey] && p.plane === anchorPlane)
-      .map((p) => ({ ...p, centre: cellCentre(p.position, origin, scaleExp, axes) }))
+      .map((p) => ({ ...p, centre: placeCentre(p.position, origin, scaleExp, axes) }))
       .filter((p) => Math.hypot(...p.centre) <= REACH)
   }, [people, targets, me, anchor, anchorPlane, scaleExp, axes])
 

@@ -13,12 +13,19 @@
  * trailing behind its committed cell and catches up over a few hundred
  * milliseconds. See travel.ts for why the animation lives here rather than in
  * the coordinate.
+ *
+ * From CONTINUOUS_SCALE_MIN up the origin is no longer where you stand: the
+ * scene places everything at its true position there, you included, so the
+ * avatar stands at its own sub-cell offset inside the origin's cell
+ * (anchorCentre), which is [0, 0, 0] at every finer zoom (arkinox,
+ * 2026-10-01).
  */
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group } from 'three'
 import { facingPair, facingQuaternion, moveDirection } from '../lib/facing'
+import { anchorCentre } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { useCyberspace } from '../store/useCyberspace'
 import { AvatarShape } from './AvatarShape'
@@ -52,11 +59,16 @@ export function Avatar(): JSX.Element | null {
     return dir ? facingQuaternion(dir) : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey, view])
+  // Where you stand in the render frame: the origin below the continuous
+  // range, your true position inside its cell in it.
+  const anchor = useCyberspace((s) => s.anchor)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const at = useMemo(() => anchorCentre(anchor, scaleExp, useCyberspace.getState().axes()), [anchor, scaleExp, view])
 
   useFrame((_, dt) => {
     const g = group.current
     if (!g) return
-    g.position.copy(travelOffset)
+    g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
     // Eases into the new heading over the same beat the travel animation takes.
     if (facing) g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })

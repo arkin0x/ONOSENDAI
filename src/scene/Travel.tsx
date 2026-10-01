@@ -20,7 +20,7 @@
 import { useEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
-import { cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
@@ -61,9 +61,14 @@ export function Travel({ axes }: Props): null {
       return
     }
 
-    // Where the avatar was, expressed against the origin it now uses.
-    const [x, y, z] = cellCentre(old, alignedOrigin(anchor, scaleExp), scaleExp, axes)
-    from.current.set(x, y, z)
+    // Where the avatar was, expressed against the origin it now uses, as an
+    // offset from where it now stands. Below the continuous range it stands
+    // on the origin and the subtraction is of zero; in it the avatar stands
+    // at its sub-cell position (anchorCentre), and travelOffset has to be
+    // measured from there for the hop to end where the avatar is drawn.
+    const [x, y, z] = placeCentre(old, alignedOrigin(anchor, scaleExp), scaleExp, axes)
+    const [sx, sy, sz] = anchorCentre(anchor, scaleExp, axes)
+    from.current.set(x - sx, y - sy, z - sz)
 
     // A hop far enough to leave the drawn world would animate a mesh nobody can
     // see; snap those instead of pretending to fly there.

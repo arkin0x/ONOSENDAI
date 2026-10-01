@@ -26,7 +26,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import { Group } from 'three'
-import { cellCentre, type ViewAxes } from '../lib/space'
+import { CONTINUOUS_SCALE_MIN, placeCentre, type ViewAxes } from '../lib/space'
 import { bearingOf, csDirection, drawPoseAt, frameOf, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -59,7 +59,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // the way the placed shard will be, so what you see is what lands.
   const cursor = useCyberspace((s) => s.cursor)
   const deployHeight = useShards((s) => s.deployHeight)
-  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, unit, scaleExp, axes) : undefined), [shard, cursor, deployHeight, unit, scaleExp, axes])
+  // In the frame the ghost is drawn in: placeCentre puts it on the cursor's
+  // true position from CONTINUOUS_SCALE_MIN up, and the region it seals to
+  // has to be measured from there.
+  const clip = useMemo(() => (shard ? regionBox(cursor, deployHeight, unit, scaleExp, axes, scaleExp >= CONTINUOUS_SCALE_MIN) : undefined), [shard, cursor, deployHeight, unit, scaleExp, axes])
 
   // Standing on the ground at the cursor, if that is what is being deployed.
   const plane = useCyberspace((s) => s.plane)
@@ -79,7 +82,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     const g = group.current
     if (!g) return
     const s = useCyberspace.getState()
-    const b = cellCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+    const b = placeCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     g.position.set(b[0], b[1], b[2])
 
     // FINE ROTATION: the camera owns the spin. The direction from the camera
@@ -96,7 +99,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
 
   const cursorAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    return cellCentre(st.cursor, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
+    return placeCentre(st.cursor, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 
   // A message ghosts as a dim note that follows the cursor.

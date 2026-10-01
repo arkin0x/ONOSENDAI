@@ -34,4 +34,22 @@ describe('the region box in a shard frame', () => {
     expect(box.min[0]).toBeCloseTo(-8.5)
     expect(box.max[0]).toBeCloseTo(7.5)
   })
+
+  it('measures from the shard itself when it is placed continuously', () => {
+    // From 2^80 up the shard's group sits on its true coordinate, not on its
+    // cell's centre, so the region's walls are measured from `at` with no
+    // half cell (arkinox, 2026-10-01). Same shard, same region, zoom 2^80.
+    const at = { x: (5n << 80n) + 40n, y: 64n << 70n, z: 96n }
+    const box = regionBox(at, 4, 0, 80, axes as never, true)
+    // 40 is 8 past its 2^4 corner, so the walls are 8 below and 8 above.
+    expect(box.min[0]).toBeCloseTo(-8)
+    expect(box.max[0]).toBeCloseTo(8)
+    // The out axis flips; z = 96 is a corner, so the region runs from it.
+    expect(box.min[2]).toBeCloseTo(-16)
+    expect(box.max[2]).toBeCloseTo(0)
+    // The cell frame at the same zoom measures from about half a 2^80 cell
+    // away, which would put the walls nowhere near the shard.
+    const cell = regionBox(at, 4, 0, 80, axes as never)
+    expect(box.max[0] - cell.max[0]).toBeGreaterThan(2 ** 78)
+  })
 })

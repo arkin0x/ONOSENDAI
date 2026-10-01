@@ -28,7 +28,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { CONTINUOUS_SCALE_MIN, GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -481,7 +481,24 @@ function Rig(): JSX.Element {
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
-    if (prevScale.current !== s.scaleExp) smooth.current.set(tx, ty, tz)
+    if (prevScale.current !== s.scaleExp) {
+      // From CONTINUOUS_SCALE_MIN up the target is your true position, which
+      // is a different sub-cell offset at every zoom (a different slice of the
+      // coordinate's bits), and crossing into the range moves it off the cell
+      // centre it held below. Left alone the camera would stay where it was
+      // and turn to look at the new target, a small swing on every step. A
+      // locked camera moves with what it frames, so it carries over by the
+      // same amount: the orbit is kept exactly and you stay framed the way you
+      // were. Below the range the target does not move with the zoom unless
+      // the cursor is off the avatar, and that case keeps its old behavior.
+      const prev = prevScale.current
+      if (locked.current && prev >= 0 && (prev >= CONTINUOUS_SCALE_MIN || s.scaleExp >= CONTINUOUS_SCALE_MIN)) {
+        c.object.position.x += tx - smooth.current.x
+        c.object.position.y += ty - smooth.current.y
+        c.object.position.z += tz - smooth.current.z
+      }
+      smooth.current.set(tx, ty, tz)
+    }
 
     prevOrigin.current = origin
     prevScale.current = s.scaleExp

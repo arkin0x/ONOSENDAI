@@ -56,9 +56,11 @@ import {
   MAX_SCALE_EXP,
   OCCUPANCY_SCALE_MAX,
   alignTo,
+  anchorCentre,
   canonicalQuaternion,
   cellDelta,
   clampAxis,
+  placeCentre,
   rotateView,
   stepFor,
   topDownQuaternion,
@@ -2985,18 +2987,19 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
-    // With no cursor to drive (spectating, history, a plain focus) the camera sits on the anchor.
-    if (!get().canDrive()) return [0, 0, 0]
     const axes = viewAxes(view)
-    const origin = alignedOrigin(anchor, scaleExp)
-    // Cell CENTRES, the same convention the cursor cube, the avatar and the path
-    // trail draw with. This used to mix cellOffset on two axes with cellDelta on
-    // the third, so the point field's focus, the camera target and the cursor
-    // cube could sit up to half a cell apart above scaleExp 0: the terrain
-    // magnified around a spot the cursor was not quite on.
-    return [axes.right, axes.up, axes.out].map((a) =>
-      cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
-    ) as [number, number, number]
+    // With no cursor to drive (spectating, history, a plain focus) the camera
+    // sits on the anchor: its cell centre, [0, 0, 0], below the continuous
+    // range, and its true position inside that cell in it, where the avatar
+    // is drawn (anchorCentre).
+    if (!get().canDrive()) return anchorCentre(anchor, scaleExp, axes)
+    // placeCentre, the same placement the cursor cube, the avatar and the
+    // path trail draw with: cell CENTRES below CONTINUOUS_SCALE_MIN, the true
+    // point from there up. This used to mix cellOffset on two axes with
+    // cellDelta on the third, so the point field's focus, the camera target
+    // and the cursor cube could sit up to half a cell apart above scaleExp 0:
+    // the terrain magnified around a spot the cursor was not quite on.
+    return placeCentre(cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   },
   }
 })

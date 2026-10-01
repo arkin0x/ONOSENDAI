@@ -111,7 +111,8 @@ export function cellDelta(value: bigint, origin: bigint, scaleExp: number): numb
  * The one definition the cursor, the avatar, the trail, the room boxes and the
  * travel animation all share, so nothing can drift half a cell from anything
  * else. Note it aligns first: a coordinate names a whole cell, and the cell's
- * centre is what gets drawn.
+ * centre is what gets drawn. They reach it through placeCentre, which keeps
+ * the snap below CONTINUOUS_SCALE_MIN and places continuously above it.
  */
 export function cellCentre(
   p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
@@ -172,6 +173,65 @@ export function markerCentre(
 }
 
 /**
+ * From this scale up, everything that places a position places it where it
+ * really is (pointCentre), not at the centre of its cell (cellCentre).
+ *
+ * Each axis is 2^85 gibsons, so at 2^84 the whole of cyberspace is a block of
+ * two cells by two by two, and anything snapped to its cell lands on one of
+ * eight places: the avatar, its trail and the cursor sat on cell centres and
+ * corners while the shards, coins and messages beside them, which markerCentre
+ * already placed continuously, floated at their true positions. The picture
+ * was quantized and disagreed with itself. Zoomed out this far the question
+ * being asked is where things are relative to the whole coordinate system,
+ * and only the true position answers it, so from 2^80 to 2^84 every layer
+ * places continuously and below 2^80 cells quantize as before (arkinox,
+ * 2026-10-01).
+ *
+ * 2^80 is 32 cells to an axis, so an offset in cells is at most 32 and a
+ * double holds it with room to spare once cellDelta has divided the bigint
+ * difference down.
+ */
+export const CONTINUOUS_SCALE_MIN = 80
+
+/**
+ * Placement for everything that lives on the movement grid: the avatars, the
+ * trail, the cursor and what rides it. Its cell below CONTINUOUS_SCALE_MIN,
+ * its true position from there up.
+ *
+ * One chooser rather than a test in every layer, so no two layers can draw
+ * the same coordinate in different places. In the continuous range it is
+ * pointCentre exactly, which is also what markerCentre answers there, so a
+ * shard and the avatar standing on it agree to the last bit.
+ */
+export function placeCentre(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return scaleExp >= CONTINUOUS_SCALE_MIN
+    ? pointCentre(p, origin, scaleExp, axes)
+    : cellCentre(p, origin, scaleExp, axes)
+}
+
+/**
+ * Where the anchor itself is drawn, in the render frame it anchors.
+ *
+ * The render origin is the anchor's aligned cell, so below the continuous
+ * range this is that cell's centre, [0, 0, 0], which is where the avatar has
+ * always stood and the camera has always looked. In the continuous range the
+ * anchor sits at its own sub-cell position inside that cell instead, up to
+ * half a cell from the centre on each axis, and the avatar, the head of its
+ * trail and the camera all have to follow it there or they frame an empty
+ * point beside you.
+ */
+export function anchorCentre(
+  anchor: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  const origin = { x: alignTo(anchor.x, scaleExp), y: alignTo(anchor.y, scaleExp), z: alignTo(anchor.z, scaleExp) }
+  // Adding zero folds -0 onto 0: a flipped axis multiplies the zero delta by
+  // -1, and below the range this must be the literal [0, 0, 0] it replaced.
+  return placeCentre(anchor, origin, scaleExp, axes).map((v) => v + 0) as [number, number, number]
+}
+
+/**
  * How far every render coordinate moves when the render origin is re-anchored
  * from `prev` to `next`, per screen axis, in cells.
  *
@@ -183,6 +243,15 @@ export function markerCentre(
  * It is the negative of what cellCentre does to a fixed world point, which is
  * the property that makes the two cancel: same helper, same fixed-point
  * division, same per-axis sign, so no rounding can survive the subtraction.
+ *
+ * It holds for continuous placement too. Both origins are aligned, so the
+ * shift is a whole number of cells, and pointCentre moves a fixed point by
+ * that same whole number. The one difference is cellDelta's last digit:
+ * it truncates at a ten-thousandth of a cell toward zero, so a point whose
+ * delta changes sign across the re-anchor can land a ten-thousandth of a
+ * cell from where it was. That is a thousandth of a pixel on a phone, and it
+ * cannot build up: the shift itself is exact, and every placement is
+ * recomputed from its bigints on the frame it is drawn.
  */
 export function originShift(
   prev: Position, next: Position, scaleExp: number, axes: ViewAxes,

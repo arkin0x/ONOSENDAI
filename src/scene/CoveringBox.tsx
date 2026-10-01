@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, DoubleSide, FrontSide, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
-import { GRID_RADIUS, cellCentre, formatOps, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, formatOps, placeCentre, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { ACCENT, DANGER } from '../lib/palette'
@@ -148,7 +148,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       // where you are already looking, so the label is legible at every size.
       // Below it, because the cursor's own scale label hangs off the top right
       // and the two would otherwise print over each other.
-      at: cellCentre(target, origin, scaleExp, axes),
+      at: placeCentre(target, origin, scaleExp, axes),
       // For the breathing walls: which faces to animate, and the extents to
       // size their planes from.
       size: c.size,

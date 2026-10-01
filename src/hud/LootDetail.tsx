@@ -27,6 +27,7 @@ import { useLootView } from '../store/useLootView'
 import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { ProfilePic } from './ProfileBadge'
+import { useEscape } from '../hooks/useEscape'
 
 /** An item of this bag that this client can already see, from a scan or from its own deployments. */
 interface OpenedItem {
@@ -108,6 +109,8 @@ export function LootDetail(): JSX.Element | null {
   // Which item's COPY just fired, for its brief COPIED label. Declared before
   // the early return below: hooks must run in the same order every render.
   const [copied, setCopied] = useState<string | null>(null)
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', item !== null, () => useLootView.getState().select(null))
 
   if (!item) return null
 

@@ -8,6 +8,7 @@
  */
 
 import { useEffect } from 'react'
+import { escapeTop } from './useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
@@ -52,7 +53,18 @@ export function useKeyboard(): void {
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (menuCovering && event.code !== 'Escape') return
+      // Escape closes one thing: the topmost modal, else the menu, else the
+      // most recent chip (useEscape; arkinox, 2026-10-01). It comes before
+      // the menu and workshop checks below because both of those are things
+      // it closes. It no longer resets the view to top down when nothing is
+      // open: that mapping predated the menu and the chips, and was not
+      // useful (arkinox, 2026-10-01). TOP in the view menu still does it.
+      if (event.code === 'Escape') {
+        event.preventDefault()
+        escapeTop()
+        return
+      }
+      if (menuCovering) return
       // Space and Enter on a focused control press that control. Space is
       // COMMIT here, a proof and possibly a paid one, so a Space meant for a
       // focused switch, checkbox or button used to try to move instead
@@ -93,24 +105,11 @@ export function useKeyboard(): void {
 
       // The chat: / unfolds it with the caret in the line. Escape inside the
       // line is handled by the line itself, which is an INPUT and never gets
-      // here; Escape with the dock unfolded but the caret elsewhere folds it.
+      // here; with the caret elsewhere the unfolded dock is a chip on the
+      // Escape stack.
       if (event.code === 'Slash') {
         event.preventDefault()
         useChat.setState({ open: true, unread: 0, focusOnOpen: true })
-        return
-      }
-
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        if (useChat.getState().open) { useChat.getState().setOpen(false); return }
-        // Deploying: back out of it rather than resetting the view.
-        if (useShards.getState().pending) { useShards.getState().cancelDeploy(); return }
-        // Viewing a stop or EARTH: come home before anything else.
-        const hs = useHyperspace.getState()
-        if (hs.scrubHeight !== null || hs.viewOwned) { exitHyperspaceView(); return }
-        // Viewing a hidden thing or a loot item: same rule, come home first.
-        if (store.focus !== null && store.spectate === null) { store.clearFocus(); return }
-        store.resetView()
         return
       }
 

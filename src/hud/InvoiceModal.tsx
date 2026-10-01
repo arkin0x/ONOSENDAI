@@ -18,6 +18,7 @@ import { depositSettled, formatClock, formatWait, satsLabel } from '../lib/cloud
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
+import { useEscape } from '../hooks/useEscape'
 
 /** The quote, waiting for a PAY. */
 export function CloudApproval(): JSX.Element | null {
@@ -103,6 +104,9 @@ export function InvoiceModal(): JSX.Element | null {
   }, [bolt11])
 
   useEffect(() => { setCopied(false) }, [bolt11])
+  // Escape hides it as a tap outside does: the invoice stays good and SHOW
+  // INVOICE brings it back (arkinox, 2026-10-01).
+  useEscape('modal', invoice !== null && bolt11 !== null, () => useCyberspace.getState().setInvoiceOpen(false))
 
   if (!invoice || !bolt11) return null
 

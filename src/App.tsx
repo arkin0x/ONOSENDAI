@@ -39,6 +39,7 @@ import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
+import { useEscape } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
@@ -152,6 +153,14 @@ export default function App(): JSX.Element {
   // instruments, compass and pad step aside until the cursor comes back
   // within reach, NOT NOW, or the menu opens.
   const offerUp = useOfferView(crowded || secretOpen) !== null
+
+  // Escape closes the menu after any modal and before any chip (arkinox,
+  // 2026-10-01: "ESC should exit modals, then exit menu, then close ui
+  // overlay chips"). On a desktop too, where the panels start open beside
+  // the scene: one order everywhere, and the hamburger puts them back. Only
+  // while they are on screen, so the HOSAKA card standing them aside, or
+  // spectating locking them, leaves Escape for what is showing instead.
+  useEscape('menu', showPanels && !offerUp, () => setPanelsOpen(false))
 
   // The anchor backfill runs full tilt while the panels are open (the sync
   // numbers are being watched) and breathes between batches while they are

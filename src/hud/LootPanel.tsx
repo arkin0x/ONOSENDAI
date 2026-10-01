@@ -25,6 +25,7 @@ import { useShards } from '../store/useShards'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
+import { useEscape } from '../hooks/useEscape'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 4
@@ -32,6 +33,8 @@ const SHOWN = 4
 export function LootPanel(): JSX.Element {
   const { items, status } = useLoot()
   const [more, setMore] = useState(false)
+  // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', more, () => setMore(false))
   const me = useCyberspace((s) => s.identity.pubkey)
   const discovered = useShards((s) => s.discovered)
   // What each found bag holds, oldest item first, as glyphs: ◇ a shard, ✎ a message.

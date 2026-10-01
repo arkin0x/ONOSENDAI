@@ -16,6 +16,7 @@ import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 import { formatDistance } from 'sno-core/scale'
+import { useEscape } from '../hooks/useEscape'
 
 function ageLabel(at: number, now: number): string {
   const s = Math.max(0, now - at)
@@ -54,6 +55,8 @@ export function PresenceChip(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const muted = useChat((s) => s.muted)
   const [open, setOpen] = useState(false)
+  // The open list is a chip on the Escape stack (arkinox, 2026-10-01).
+  useEscape('chip', open, () => setOpen(false))
   // Lit for a few seconds after an arrival, then back to plain.
   const [lit, setLit] = useState(false)
   useEffect(() => {

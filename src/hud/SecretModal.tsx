@@ -25,6 +25,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
+import { useEscape } from '../hooks/useEscape'
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -37,6 +38,8 @@ export function SecretModal(): JSX.Element | null {
 
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', item !== null && author !== '', () => useShards.getState().selectSecret(null))
 
   if (!item || !author) return null
 

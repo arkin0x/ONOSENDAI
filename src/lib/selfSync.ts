@@ -23,7 +23,7 @@
  * (relay.ts onResume), or the live subscription below reaching its EOSE.
  */
 
-import { askChainEvents, watchAuthor } from './chains'
+import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
 import { decideSelfCheck } from './chainHold'
 import { onResume } from './relay'
 import { DEFAULT_RELAY } from '../store/useRelays'
@@ -84,6 +84,23 @@ export function recheckNow(): void {
   void check(useCyberspace.getState().identity.pubkey)
 }
 
+/**
+ * Unpublished moves, and a reason to think the relays moved on without
+ * them: the switch just went LIVE, or the connection just came back. Another
+ * device signed in as you may have published from the same point meanwhile.
+ * The relays are asked for the chain and adoptChain compares; a fork against
+ * the unpublished moves raises the diverged-branch prompt before the
+ * publisher sends anything (lib/branchConflict.ts; arkinox, 2026-10-01).
+ */
+export function compareUnpublished(): void {
+  const s = useCyberspace.getState()
+  if (s.held || s.events.length === 0 || s.events.every((e) => s.published[e.id] === 'ok')) return
+  const pubkey = s.identity.pubkey
+  void fetchChainEvents(pubkey)
+    .then((events) => { if (useCyberspace.getState().identity.pubkey === pubkey) useCyberspace.getState().adoptChain(events) })
+    .catch(() => { /* unreachable: the publisher's own look before sending tries again */ })
+}
+
 function resync(pubkey: string): void {
   if (close) { close(); close = null }
   const ifCurrent = (fn: () => void): void => {
@@ -108,9 +125,11 @@ export function startSelfSync(): void {
   resync(useCyberspace.getState().identity.pubkey)
   useCyberspace.subscribe((s, prev) => {
     if (s.identity.pubkey !== prev.identity.pubkey) resync(s.identity.pubkey)
+    else if (s.live && !prev.live) compareUnpublished()
   })
   // Not the window's own 'online' event: watchConnectivity answers that by
   // dropping every socket, and a check started first would be cut off by the
   // drop and read as "unreachable". onResume fires after the drop.
   onResume(recheckIfUnknown)
+  onResume(compareUnpublished)
 }

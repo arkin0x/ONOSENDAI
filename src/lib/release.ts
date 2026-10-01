@@ -103,15 +103,21 @@ export function gateAfter(open: boolean, prev: ChainFacts, next: ChainFacts): bo
  * action taken while LIVE and held still opens it, and the moment the hold is
  * lifted the chain goes out exactly as if it had never been held.
  *
- * | LIVE | gate | held | sends |
- * |---|---|---|---|
- * | no | any | any | no |
- * | yes | shut | any | no |
- * | yes | open | yes | no |
- * | yes | open | no | yes |
+ * A pending choice between two versions of the chain (a held chain that met
+ * a relay chain, or unpublished moves that fork against another device's
+ * published ones) stops it the same way: whichever version the person picks
+ * decides what goes out, so nothing goes out before they pick.
+ *
+ * | LIVE | gate | held | choice pending | sends |
+ * |---|---|---|---|---|
+ * | no | any | any | any | no |
+ * | yes | shut | any | any | no |
+ * | yes | open | yes | any | no |
+ * | yes | open | no | yes | no |
+ * | yes | open | no | no | yes |
  */
-export function maySend(s: { live: boolean; held: boolean }, open: boolean): boolean {
-  return s.live && open && !s.held
+export function maySend(s: { live: boolean; held: boolean; chainConflict?: unknown }, open: boolean): boolean {
+  return s.live && open && !s.held && !s.chainConflict
 }
 
 /**

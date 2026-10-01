@@ -20,6 +20,7 @@ import { fetchRef } from '../lib/parts'
 import { queryAny, relaySet } from '../lib/relay'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
+import { useEscape } from '../hooks/useEscape'
 
 const OBJECT_KIND = 33331
 const WAIT_MS = 5000
@@ -91,6 +92,8 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }
     choose({ ref, name: shard.name, shard })
   }
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', true, onClose)
 
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label="Choose an object to stamp" onPointerDown={onClose}>

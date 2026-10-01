@@ -539,7 +539,9 @@ function Keys(): null {
       if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
-      if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.partSel.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      // Escape is not here: it goes through the Escape stack (useEscape), so
+      // the palette sheet and the confirmations over the bench close before
+      // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { w.selectConnected(); return }
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')

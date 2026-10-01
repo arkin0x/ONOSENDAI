@@ -15,6 +15,7 @@ import { shortAxis } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
 import { useShards } from '../store/useShards'
+import { useEscape } from '../hooks/useEscape'
 
 export function FocusBar(): JSX.Element | null {
   const focus = useCyberspace((s) => s.focus)
@@ -28,6 +29,10 @@ export function FocusBar(): JSX.Element | null {
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   const inspecting = useShards((s) => s.inspecting !== null)
+  const shown = !(focusLabel === null || spectating || viewOwned || inspecting)
+  // Escape is RETURN while this bar stands, a chip on the Escape stack
+  // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
+  useEscape('chip', shown, () => useCyberspace.getState().clearFocus())
   if (focusLabel === null || spectating || viewOwned || inspecting) return null
   return (
     <div className="hyperbar hyperbar--focus" role="status">

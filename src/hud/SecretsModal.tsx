@@ -25,6 +25,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
 import { Checkbox } from './ui/Checkbox'
 import { Field } from './ui/Switch'
+import { useEscape } from '../hooks/useEscape'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -85,6 +86,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     useSecrets.getState().focus(k.lookupId)
     useCyberspace.getState().focusOn({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3))
   }
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', true, onClose)
 
   return createPortal(
     <div className="modal" role="dialog" aria-label="Region keys" aria-modal="true" onPointerDown={onClose}>

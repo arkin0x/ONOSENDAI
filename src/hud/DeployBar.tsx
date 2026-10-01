@@ -37,6 +37,7 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
+import { useEscape } from '../hooks/useEscape'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -69,6 +70,14 @@ export function DeployBar(): JSX.Element | null {
   const experience = useExperience((s) => ratioOf(s.samples))
   const quote = route === 'cloud' ? cloudKeyQuote(height, ladder, experience) : null
   const willAsk = route === 'cloud' && needsAsk(cloudMode, quote?.sats ?? null, autoMaxSats)
+  // Placing is a chip on the Escape stack (arkinox, 2026-10-01). With the
+  // HOSAKA ask up, Escape is its NOT NOW and the placing goes on; otherwise
+  // it is CANCEL, as Escape was before the stack.
+  useEscape('chip', pending !== null, () => {
+    const s = useShards.getState()
+    if (s.deployAsk) s.declineDeploy()
+    else s.cancelDeploy()
+  })
 
   if (!pending) return null
 

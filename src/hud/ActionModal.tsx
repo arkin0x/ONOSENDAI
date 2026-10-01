@@ -19,12 +19,15 @@ import { useSocialUi } from '../store/useSocialUi'
 import { ProfilePic } from './ProfileBadge'
 import { Reactions } from './Reactions'
 import { ActionComments } from './Comments'
+import { useEscape } from '../hooks/useEscape'
 
 export function ActionModal(): JSX.Element | null {
   const action = useSocialUi((s) => s.action)
   const me = useCyberspace((s) => s.identity.pubkey)
   const unpublished = useCyberspace((s) => (action && action.pubkey === me ? s.published[action.id] !== 'ok' : false))
   const profile = useProfile(action?.pubkey ?? null)
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', action !== null, () => useSocialUi.getState().closeAction())
   if (!action) return null
 
   const close = (): void => useSocialUi.getState().closeAction()

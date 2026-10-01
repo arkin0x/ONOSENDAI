@@ -17,9 +17,11 @@ import { useShards } from '../store/useShards'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { drawPoseAt } from '../lib/pose'
-import { TapTarget } from './TapTarget'
+import { TapTarget, farCullDoublings } from './TapTarget'
 
 const REACH = GRID_RADIUS * 8
+/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
+const FAR_CULL = farCullDoublings()
 
 interface Props {
   axes: ViewAxes
@@ -38,6 +40,9 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
+      // Not drawn at all once it cannot show a pixel at any distance; a shard
+      // with placed objects is exempt, since they can be far larger than it.
+      .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
       .map((w) => {
         const shard = w.shard!
         const centre = markerCentre(w.at, origin, scaleExp, axes)

@@ -212,6 +212,27 @@ export function placeCentre(
 }
 
 /**
+ * The cursor's two places: the grid cell it aims at, and the point its
+ * coordinate is.
+ *
+ * An outline drawn as "the cell you are aiming at" is a cell of the
+ * protocol's power-of-two grid, the same grid the covering box, the region
+ * cages and the room walls stand on, so it is always cellCentre. Floated
+ * around the continuous point instead, which is what placeCentre gives from
+ * CONTINUOUS_SCALE_MIN up, it straddled grid lines and drew as a second
+ * outline offset from the covering box by part of a cell, where one box
+ * should fit exactly (arkinox, 2026-10-01). What marks the coordinate itself
+ * (the tether's end, the distance label, the landing ghost, the camera's
+ * target) uses the point, which sits inside that cell. Below the continuous
+ * range the two are the same.
+ */
+export function aimCentres(
+  p: Position, origin: Position, scaleExp: number, axes: ViewAxes,
+): { cell: [number, number, number]; point: [number, number, number] } {
+  return { cell: cellCentre(p, origin, scaleExp, axes), point: placeCentre(p, origin, scaleExp, axes) }
+}
+
+/**
  * Where the anchor itself is drawn, in the render frame it anchors.
  *
  * The render origin is the anchor's aligned cell, so below the continuous

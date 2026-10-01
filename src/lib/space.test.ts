@@ -33,7 +33,7 @@ import {
   viewAxes,
   type Position,
   type ViewAxes, pointCentre,
-  CONTINUOUS_SCALE_MIN, anchorCentre, placeCentre } from './space'
+  CONTINUOUS_SCALE_MIN, aimCentres, anchorCentre, placeCentre, type AxisDirection } from './space'
 import { alignedOrigin } from '../store/useCyberspace'
 import { coveringBox } from './covering'
 
@@ -1002,5 +1002,52 @@ describe('continuous placement from 2^80 up', () => {
         }
       }
     }
+  })
+})
+
+/**
+ * The cursor's outline is the grid cell it aims at, at every zoom; only what
+ * marks the coordinate itself sits at the continuous point. From 2^80 up the
+ * outline used to float around the point and drew as a second box offset
+ * from the covering box by part of a cell (arkinox, 2026-10-01).
+ */
+describe('the cursor outline fits the grid', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+  const onGrid = (v: number): boolean => Math.abs(v + 0.5 - Math.round(v + 0.5)) <= 1e-9
+  const MOVES: Array<[AxisDirection['axis'], number]> = [['x', 1], ['x', 2], ['y', -1], ['z', 1], ['x', -1], ['y', -3], ['z', -2]]
+
+  it('is the grid cell, inside the covering box, with its point inside it, at every zoom', () => {
+    let checked = 0
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const origin = alignedOrigin(HERE, scaleExp)
+      for (const [axis, cells] of MOVES) {
+        const cursor: Position = { ...HERE, [axis]: clampAxis(HERE[axis] + BigInt(cells) * step) }
+        const { cell, point } = aimCentres(cursor, origin, scaleExp, axes)
+        expect(cell).toEqual(cellCentre(cursor, origin, scaleExp, axes))
+        expect(point).toEqual(placeCentre(cursor, origin, scaleExp, axes))
+        if (scaleExp < CONTINUOUS_SCALE_MIN) expect(point).toEqual(cell)
+        const cover = coveringBox(HERE, cursor, origin, scaleExp, axes, 1000)
+        for (let i = 0; i < 3; i++) {
+          // Its faces are grid planes, the covering box's are too, and the
+          // one sits inside the other: they can only meet face to face.
+          const lo = cell[i] - 0.5, hi = cell[i] + 0.5
+          expect(onGrid(lo) && onGrid(hi)).toBe(true)
+          const clo = cover.centre[i] - cover.size[i] / 2, chi = cover.centre[i] + cover.size[i] / 2
+          expect(onGrid(clo) && onGrid(chi)).toBe(true)
+          expect(lo).toBeGreaterThanOrEqual(clo - 1e-9)
+          expect(hi).toBeLessThanOrEqual(chi + 1e-9)
+          expect(point[i]).toBeGreaterThanOrEqual(lo - 1e-9)
+          expect(point[i]).toBeLessThan(hi + 1e-9)
+          checked++
+        }
+      }
+    }
+    expect(checked).toBe((MAX_SCALE_EXP + 1) * MOVES.length * 3)
   })
 })

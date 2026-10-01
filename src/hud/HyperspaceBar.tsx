@@ -15,12 +15,17 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { rideFraction } from '../lib/hyperspace/ridePool'
 import { abortRide, useRideRun } from './HyperspacePanel'
+import { useEscape } from '../hooks/useEscape'
 
 export function HyperspaceBar(): JSX.Element | null {
   const transit = useCyberspace((s) => s.transit)
   const progress = useRideRun((s) => s.progress)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   const focusLabel = useCyberspace((s) => s.focus?.label ?? null)
+  // Viewing a stop, EARTH or your station: Escape is RETURN, a chip on the
+  // Escape stack (arkinox, 2026-10-01). Boarding and riding are chain states,
+  // not views, and Escape never touched them; it still does not.
+  useEscape('chip', viewOwned, exitHyperspaceView)
   if (transit === null && progress === null) {
     // Just looking: the bar is the always-visible way home from VIEW, EARTH,
     // or a scrubbed stop, since the panel column may be folded away.

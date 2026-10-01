@@ -21,6 +21,7 @@ import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
+import { useEscape } from '../hooks/useEscape'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */
 const SHOWN = 200
@@ -82,6 +83,9 @@ export function ChatDock(): JSX.Element {
       useChat.setState({ focusOnOpen: false })
     }
   }, [open])
+  // Unfolded, the dock is a chip on the Escape stack: Escape folds it when the
+  // caret is elsewhere. In the line, the line's own Escape folds it first.
+  useEscape('chip', open, () => useChat.getState().setOpen(false))
 
   if (!open) {
     return (

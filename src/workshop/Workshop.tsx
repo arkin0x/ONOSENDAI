@@ -41,6 +41,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedCount } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
+import { useEscape } from '../hooks/useEscape'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -400,6 +401,19 @@ export function Workshop(): JSX.Element | null {
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
   const stacked = useMemo(() => (shard ? stackedCount(shard) : 0), [shard])
+  // The workshop is a modal over the scene, with arkinox's order inside it
+  // (2026-10-01): its own modals (the palette sheet, the object picker, every
+  // confirmation) open later and so close first; then the open panel, the
+  // bench's menu; then the view pad, its one chip; then what is in hand; and
+  // only then the workshop itself. Esc used to live in the bench's key
+  // handler, which closed the workshop from under an open palette sheet.
+  useEscape('modal', open, () => {
+    const ws = useWorkshop.getState()
+    if (panel !== null) setPanel(null)
+    else if (viewOpen) setViewOpen(false)
+    else if (ws.selection.length || ws.partSel.length || ws.selectedFace !== null || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    else ws.closeWorkshop()
+  })
 
   if (!open) return null
   const w = useWorkshop.getState
@@ -642,7 +656,8 @@ export function Workshop(): JSX.Element | null {
               the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
               the object at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
-              deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc clears then closes.
+              deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
+              clears, then closes the workshop.
             </Explanation>
           </div>
         </div>

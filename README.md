@@ -42,7 +42,7 @@ cd ../cyberspace-cli-js && npm install && npm run build
 | `X` | cancel an in-flight proof, or recall the cursor |
 | `Shift` + `W` `A` `S` `D` | rotate the view 90 degrees |
 | `Tab` | return to the previous view |
-| `Esc` | reset to top-down |
+| `Esc` | close one thing: the topmost dialog, else the menu, else the most recently opened chip |
 | `Q` / `E` | scale the step up / down, logarithmically |
 | `R` / `F` | cursor along the axis into / out of the screen |
 | `C` | canonical view ("facing the black sun") |
@@ -106,7 +106,8 @@ most of every frame. Shards persist in localStorage; COPY and
 PASTE in the shard list carry one through the clipboard in its wire form.
 Keys on the bench: 1 2 3 4 pick tools, Q turns a stamp, WASD / RF or arrows
 nudge, Del deletes, Enter fills, [ ] change the level, Ctrl+Z / Ctrl+Shift+Z
-undo and redo, Esc deselects then closes.
+undo and redo, Esc closes an open panel, then deselects, then closes the
+workshop (a sheet or confirmation over it closes first).
 
 **Comments.** A found shard or message, and each of your own deployments,
 carries a comment section: NIP-22 `kind:1111` events whose root scope is the

@@ -31,6 +31,7 @@ import { useNotifications, POLL_MS } from '../store/useNotifications'
 import { useShards } from '../store/useShards'
 import { useSocialUi } from '../store/useSocialUi'
 import { ProfilePic } from './ProfileBadge'
+import { useEscape } from '../hooks/useEscape'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -199,6 +200,8 @@ export function NotificationsModal(): JSX.Element | null {
     seen.observe(end.current)
     return () => seen.disconnect()
   }, [open, items.length])
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', open, () => useNotifications.getState().setOpen(false))
 
   if (!open) return null
   const close = (): void => useNotifications.getState().setOpen(false)

@@ -41,6 +41,7 @@ import { useActionComments } from '../hooks/useSocial'
 import { countComments } from '../lib/comments'
 import { ACTION_KIND } from '../lib/social'
 import { useSocialUi } from '../store/useSocialUi'
+import { useEscape } from '../hooks/useEscape'
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
@@ -99,6 +100,9 @@ export function ChainExplorer(): JSX.Element {
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
   const [open, setOpen] = useState(false)
+  // The open body is a chip on the Escape stack (arkinox, 2026-10-01). Not
+  // while there are no actions: then nothing but the chip is drawn.
+  useEscape('chip', open && actions.length > 0, () => setOpen(false))
   // Spectating opens it: the chain is the thing you came to look at. What you
   // had it set to is put back when spectation ends.
   const openBefore = useRef<boolean | null>(null)

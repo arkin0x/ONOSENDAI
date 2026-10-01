@@ -22,6 +22,7 @@ import { itemKind, itemTargetOf } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
 import { PublishSwitch } from './PublishSwitch'
+import { useEscape } from '../hooks/useEscape'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -45,12 +46,15 @@ export function DeploymentDetail(): JSX.Element | null {
 
   useEffect(() => { if (inspecting && !dep) useShards.getState().inspect(null) }, [inspecting, dep])
   useEffect(() => { setTest('idle') }, [inspecting])
+  const exit = (): void => { useShards.getState().inspect(null); useCyberspace.getState().clearFocus() }
+  // The record is an overlay chip with EXIT; Escape is EXIT (arkinox,
+  // 2026-10-01). Its DELETE confirmation is a modal and closes first.
+  useEscape('chip', dep !== null, exit)
 
   if (!dep) return null
 
   const isMessage = dep.type === 'message'
   const name = isMessage ? messagePreview(dep.text ?? '', 22) : dep.shard?.name ?? 'shard'
-  const exit = (): void => { useShards.getState().inspect(null); useCyberspace.getState().clearFocus() }
   const runTest = async (): Promise<void> => {
     setTest('testing')
     setTest(await useShards.getState().testDiscovery(dep.eventId))

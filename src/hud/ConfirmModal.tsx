@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscape } from '../hooks/useEscape'
 
 interface Props {
   /** Something to show above the title, such as the HOSAKA banner. */
@@ -36,6 +37,12 @@ interface Props {
 }
 
 export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
+  // Escape is a tap on the backdrop: it answers nothing, so a held-chain
+  // prompt sets itself aside and every other one cancels. Opened over another
+  // modal, this is the more recent one, so it closes first (arkinox,
+  // 2026-10-01). While busy it still takes the press, so the modal under it
+  // does not close, but does nothing: the confirm is already under way.
+  useEscape('modal', true, () => { if (!busy) (onBackdrop ?? onCancel)() })
   // Through a portal: every .panel has a backdrop-filter, which makes it a
   // stacking context, so a fixed modal rendered inside one panel would be
   // painted under the panels that follow it in the column.

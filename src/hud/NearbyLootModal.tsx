@@ -20,6 +20,7 @@ import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { nip19 } from 'nostr-tools'
+import { useEscape } from '../hooks/useEscape'
 
 function safeNpub(pubkey: string): string {
   try { return nip19.npubEncode(pubkey) } catch { return pubkey }
@@ -63,6 +64,8 @@ export function NearbyLootModal(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useNearbyLoot()
   const list = useMemo(() => items, [items])
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
   if (!open) return null
   const close = (): void => useShards.getState().setNearbyOpen(false)
   const view = (item: NearbyItem): void => {

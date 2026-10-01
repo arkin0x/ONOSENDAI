@@ -28,6 +28,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
+import { useEscape } from '../hooks/useEscape'
 
 /** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
 const JUMP = 100
@@ -79,6 +80,10 @@ export function LineScrubber(): JSX.Element {
 
   const ready = sync.status === 'ready' && tipHeight !== null
   const open = scrubHeight !== null
+  // Open, the scrubber is a chip on the Escape stack, closed the way H and
+  // the chip close it (arkinox, 2026-10-01). The # box's own Escape, in the
+  // field, still only closes the box.
+  useEscape('chip', open, exitHyperspaceView)
 
   // The focus side effect lives here rather than in the keyboard hook, so the
   // chip, the rail, the buttons and the H key all pass through one place.

@@ -2236,11 +2236,10 @@ kbd {
   background: rgba(0, 0, 0, 0.35);
   color: var(--fg);
   font: inherit;
-  /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
-  font-size: 16px;
-}
-@media (min-width: 1101px) {
-  .deploybar__input { font-size: 12px; }
+  /* The same size as the client's other text inputs (.login__input), as
+     arkinox asked (2026-10-01); iOS Safari zooms on focus below 16px, as it
+     already does for those. */
+  font-size: 11px;
 }
 .deploybar__input:focus {
   outline: none;
@@ -7042,3 +7041,25 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .ui-switch, .ui-switch__thumb, .ui-checkbox { transition: none; }
 }
+
+/* The action in the title row, beside CANCEL: compact, never wrapping, the
+   title giving way first (arkinox, 2026-10-01). */
+.deploybar__head { gap: 6px; }
+.deploybar__head .deploybar__deploy {
+  flex-shrink: 0;
+  margin-top: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+/* Steppers inside the scrolling bar let the browser pan: a scroll that starts
+   on one stays a scroll (useRepeatable scrollSafe). */
+.deploybar__body .deploybar__btn { touch-action: pan-y; }
+/* The height row's note that the height was chosen to hold the model, and
+   the warning when no region up to the ceiling can. */
+.deploybar__fit { color: var(--ok); }
+.deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
+.deploybar__ask, .deploybar > .notice { flex-shrink: 0; }

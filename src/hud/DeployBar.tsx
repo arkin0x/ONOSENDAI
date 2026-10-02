@@ -58,6 +58,7 @@ import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
+import { fitHeight } from '../lib/deployFit'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -81,7 +82,9 @@ export function DeployBar(): JSX.Element | null {
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
   const hopLimit = useCalibration((s) => s.hopHeight)
-  const bind = useRepeatable()
+  // Scroll-safe: the bar scrolls on a phone, and a scroll that starts on a
+  // stepper must stay a scroll (arkinox, 2026-10-01).
+  const bind = useRepeatable({ scrollSafe: true })
   const bag = useShards((s) => s.deployBag)
   const mine = useShards((s) => s.mine)
   // The region the deploy would land in, as a string, so the bar re-renders
@@ -104,6 +107,20 @@ export function DeployBar(): JSX.Element | null {
   // Placing is a chip on the Escape stack (arkinox, 2026-10-01). With the
   // HOSAKA ask up, Escape is its NOT NOW and the placing goes on; otherwise
   // it is CANCEL, as Escape was before the stack.
+  // The height that holds the whole model (lib/deployFit), applied while the
+  // height is still automatic: a new deploy starts there, and it follows the
+  // cursor, zoom and scale until + or - is pressed (arkinox, 2026-10-01).
+  const heightAuto = useShards((s) => s.deployHeightAuto)
+  const cursor = useCyberspace((s) => s.cursor)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const fitH = useMemo(() => (shard ? fitHeight(shard, unit, cursor, scaleExp, 0, ceiling) : null), [shard, unit, cursor, scaleExp, ceiling])
+  useEffect(() => {
+    if (!heightAuto || !shard) return
+    const want = fitH ?? ceiling
+    if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
+  }, [heightAuto, shard, fitH, ceiling])
+  const fit = { auto: heightAuto && !!shard, height: fitH }
+
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
@@ -119,13 +136,38 @@ export function DeployBar(): JSX.Element | null {
 
   return (
     <div className="deploybar" role="dialog" aria-label={isMessage ? 'Hide message' : 'Deploy shard'}>
+      {/* The title row carries the action, left of CANCEL, so the rest of the
+          bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
+          it takes its own row below, since three buttons do not fit here. */}
       <div className="deploybar__row deploybar__head">
         <span className="deploybar__eye" aria-hidden="true">◇</span>
         <span className="deploybar__title">
           {isMessage ? 'HIDE MESSAGE' : 'DEPLOY'} <strong>{name}</strong>
         </span>
+        {!ask && (
+          <button
+            className="deploybar__deploy"
+            disabled={empty || working}
+            onClick={() => void useShards.getState().deploy()}
+            {...noCallout}
+          >
+            {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+          </button>
+        )}
         <button className="deploybar__cancel" onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
       </div>
+
+      {error && <div className="deploybar__row notice">{error}</div>}
+      {/* The ask takes the button's place: the same green, now the yes, with
+          the price and the wait on it, and a way to stand down beside it. */}
+      {ask && (
+        <div className="deploybar__ask">
+          <button className="deploybar__deploy" onClick={() => useShards.getState().confirmDeploy()} {...noCallout}>
+            {ask.sats !== null ? `${ask.sats} SATS` : 'HIDE VIA HOSAKA'}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
+          </button>
+          <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
+        </div>
+      )}
 
       {/* Everything between the title and the button scrolls inside the bar,
           which a phone caps at a quarter of the screen (styles.css). */}
@@ -137,13 +179,17 @@ export function DeployBar(): JSX.Element | null {
           again and again and a held button would move exactly one step. */}
       <div className="deploybar__row deploybar__row--height">
         <span className="deploybar__label">HIDE AT HEIGHT</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1))} disabled={height <= 0} aria-label="Lower height">−</button>
+        <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= 0} aria-label="Lower height">−</button>
         <span className="deploybar__value">{height}</span>
-        <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1))} disabled={height >= ceiling} aria-label="Higher height">+</button>
+        <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
+          {fit.auto && fit.height !== null && <span className="deploybar__fit"> · fits the whole model</span>}
         </span>
       </div>
+      {fit.auto && fit.height === null && (
+        <div className="deploybar__row deploybar__fitnote">At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</div>
+      )}
 
       {/* How big the thing itself is, for this deployment only. The workshop's
           model keeps its own unit whatever is chosen here. */}
@@ -229,29 +275,6 @@ export function DeployBar(): JSX.Element | null {
       <BagControls height={height} bag={bag} existing={existing?.count ?? 0} />
       </div>
 
-      <div className="deploybar__foot">
-      {error && <div className="deploybar__row notice">{error}</div>}
-
-      {/* The ask takes the button's place: the same green, now the yes, with
-          the price and the wait on it, and a way to stand down beside it. */}
-      {ask ? (
-        <div className="deploybar__ask">
-          <button className="deploybar__deploy" onClick={() => useShards.getState().confirmDeploy()} {...noCallout}>
-            {ask.sats !== null ? `${ask.sats} SATS` : 'HIDE VIA HOSAKA'}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
-          </button>
-          <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
-        </div>
-      ) : (
-        <button
-          className="deploybar__deploy"
-          disabled={empty || working}
-          onClick={() => void useShards.getState().deploy()}
-          {...noCallout}
-        >
-          {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
-        </button>
-      )}
-      </div>
     </div>
   )
 }

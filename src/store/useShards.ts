@@ -156,6 +156,12 @@ interface ShardsState {
   pending: DeployPending | null
   deployHeight: number
   /**
+   * The height follows the model: the smallest region that holds all of it
+   * (lib/deployFit), refitted as the cursor, zoom, scale or turn change, until
+   * the + or - is pressed (arkinox, 2026-10-01).
+   */
+  deployHeightAuto: boolean
+  /**
    * The size this deployment goes out at: one model unit is 2^deployUnit
    * gibsons, exactly as `unit` means on the shard itself. Seeded from the
    * shard's own unit when the deploy starts, so a deploy that never touches
@@ -497,6 +503,7 @@ export const useShards = create<ShardsState>((set, get) => {
   return {
     pending: null,
     deployHeight: 0,
+    deployHeightAuto: false,
     deployUnit: 0,
     deployUp: false,
     deploySpin: 0,
@@ -526,6 +533,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // never carries silently into this one.
     startDeployShard: (shardId) => set({
       pending: { type: 'shard', shardId },
+      deployHeightAuto: true,
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
       // Flat, aimed north, the camera not driving: the last deploy's pose no
       // more carries into this one than its size does.
@@ -540,7 +548,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
     setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom

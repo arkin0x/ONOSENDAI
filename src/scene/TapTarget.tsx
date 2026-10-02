@@ -30,7 +30,7 @@
 
 import { useRef, type RefObject } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
-import { Box3, Mesh, PerspectiveCamera, Vector3, type Object3D } from 'three'
+import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Object3D } from 'three'
 import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
@@ -45,6 +45,17 @@ export const MIN_TARGET_PX = 28
  * does not open nothing at all.
  */
 export const TAP_SLOP_PX = 12
+/**
+ * Past this many pixels across, a shard's box is mostly air around it, so a
+ * tap must land on what it draws: a face, or within PRECISE_SLOP_PX of a point
+ * or line. Smaller shards keep the fingertip box, since their geometry is too
+ * small to hit exactly (arkinox, 2026-10-02: the palm tree's box took every
+ * tap meant for the coin between its fronds).
+ */
+export const PRECISE_ABOVE_PX = 3 * 28
+/** How near a point or line a tap must land, in pixels, when the hit must be exact. */
+export const PRECISE_SLOP_PX = 12
+
 /** Wider than this many screens, a shard is something you are inside, not something to tap. */
 export const MAX_SCREENS = 2
 /**
@@ -124,6 +135,12 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
   const box = useRef(new Box3())
   const centre = useRef(new Vector3())
   const size = useRef(new Vector3())
+  // How wide the shard is on screen this frame, and the world size of a
+  // pixel at its distance: what the tap needs to decide whether it must hit
+  // the geometry itself.
+  const across = useRef(0)
+  const perPxWorld = useRef(0)
+  const precise = useRef(new Raycaster())
 
   useFrame((state) => {
     const m = hit.current
@@ -138,6 +155,9 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
       m.position.set(...(at ?? [0, 0, 0]))
       m.scale.setScalar(px * perPx)
       m.raycast = Mesh.prototype.raycast
+      // A mark (a message or a coin) is a deliberate, fixed-size target, and
+      // wins over a shard's box when a tap passes through both.
+      m.userData.tapPriority = 'mark'
       return
     }
 
@@ -158,11 +178,13 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
     // distance to its centre understates a large box, whose near face is
     // much closer than its middle. A corner behind the camera means the box
     // reaches round the view, which is too big to tap.
-    const across = screenAcross(box.current, cam, state.size.width, state.size.height)
-    if (across === null) { m.raycast = noRaycast; return }
+    const wide = screenAcross(box.current, cam, state.size.width, state.size.height)
+    if (wide === null) { m.raycast = noRaycast; return }
     const viewport = Math.max(state.size.width, state.size.height)
     const perWorld = pxPerUnit(fov, state.size.height, cam.position.distanceTo(centre.current))
-    const span = across > MAX_SCREENS * viewport ? null : targetSpan([size.current.x, size.current.y, size.current.z], perWorld)
+    across.current = wide
+    perPxWorld.current = 1 / perWorld
+    const span = wide > MAX_SCREENS * viewport ? null : targetSpan([size.current.x, size.current.y, size.current.z], perWorld)
     if (!span) { m.raycast = noRaycast; return }
     m.raycast = Mesh.prototype.raycast
     // The box is measured in world space; the target lives in its parent's.
@@ -172,6 +194,22 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
 
   const tap = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP_PX) return
+    if (measure) {
+      // A coin or message under the same tap takes it: leave the event to
+      // travel on to it (not stopping propagation is how R3F does that).
+      if (e.intersections.some((i) => i.object.userData?.tapPriority === 'mark')) return
+      // A large shard is hit only where it draws, so the air inside its box
+      // lets the tap through to whatever is behind.
+      const drawn = measure.current
+      if (drawn && across.current > PRECISE_ABOVE_PX) {
+        const ray = precise.current
+        ray.set(e.ray.origin, e.ray.direction)
+        const slop = PRECISE_SLOP_PX * perPxWorld.current
+        ray.params.Points = { threshold: slop }
+        ray.params.Line = { threshold: slop }
+        if (ray.intersectObject(drawn, true).length === 0) return
+      }
+    }
     e.stopPropagation()
     markSceneTapHandled()
     onTap()

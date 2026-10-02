@@ -1730,6 +1730,13 @@ kbd {
   max-height: calc(100dvh - 28px);
   overflow-y: auto;
 }
+/*
+ * Nothing in the record shrinks to fit: the panel scrolls instead. A flex
+ * child that scrolls on its own may shrink to nothing, and on a phone's
+ * quarter-screen sheet the message did, to one clipped line (arkinox,
+ * 2026-10-02: "cant read the message because its too small").
+ */
+.detail > * { flex-shrink: 0; }
 
 /* Pinned while the rest scrolls, so EXIT is always where the hand left it.
    The negative margins run the head's background out to the card's edges. */
@@ -1961,8 +1968,7 @@ kbd {
   border-left: 2px solid #ffd27d;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 90px;
-  overflow-y: auto;
+  /* No scroll of its own: the panel is the one thing that scrolls. */
 }
 
 .detail__test {

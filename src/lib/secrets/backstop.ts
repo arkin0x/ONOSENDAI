@@ -1,30 +1,32 @@
 /**
- * backstop.ts: a second copy of every bought key, and a note that the
- * localStorage fallback wrote keys, both in localStorage.
+ * backstop.ts: what localStorage keeps beside IndexedDB, and why.
  *
- * A bought key cannot be computed again; losing it loses sats. IndexedDB can
- * fail for a session (a private window, a browser that refuses it, a
- * connection another tab closed), and a key held then would live only in
- * memory or only in the fallback's localStorage list, which the next session
- * on IndexedDB never read: the copy from localStorage runs once. So:
+ * Two records, neither of them the old list (`onosendai:secrets`), which from
+ * this build on is only ever read: by the one-time copy into IndexedDB, and
+ * by db.syncLegacy, which takes in keys a tab still on an older build adds.
  *
- * - Every bought key is also written here, in every mode, always. It leaves
- *   only when you forget it yourself (the ✕ on its row, or FORGET ALL KEYS
- *   after the confirmation that counts the bought keys). Nothing else ever
- *   clears it. A few hundred bytes a key, and there are few.
- * - A session that writes held keys to the localStorage fallback sets
- *   FALLBACK_MARKER. The next session that opens IndexedDB merges in the
- *   fallback's keys it does not have, then clears the marker.
+ * - BOUGHT_KEY: a second copy of every bought key, in every mode, always. A
+ *   bought key cannot be computed again; losing it loses sats. IndexedDB can
+ *   fail for a session, and a key held then would otherwise live only in
+ *   memory. A key leaves only when you forget it yourself (the ✕ on its row,
+ *   or FORGET ALL KEYS after the confirmation that counts the bought keys).
+ *   Nothing else ever clears it. A few hundred bytes a key, and there are few.
+ * - FALLBACK_KEY: what a session without IndexedDB did to the held keys,
+ *   and only that: the keys it held and the keys it forgot. The next session
+ *   that opens IndexedDB applies it and clears it (review of #219, S2). A
+ *   fallback session that does nothing writes nothing, so it can never bring
+ *   back a key forgotten in IndexedDB that it did not hold itself.
  *
- * Every write here reads the current value first, so two tabs adding keys
- * do not undo each other.
+ * Every write here reads the current value first, so two tabs adding keys do
+ * not undo each other, and says whether it landed: localStorage is a few
+ * megabytes shared with the action chain, and a full one refuses.
  */
 
 import type { HeldKey } from '../../store/useSecrets'
-import { parseLegacy } from './db'
+import { describeError, parseLegacy } from './db'
 
 export const BOUGHT_KEY = 'onosendai:secrets:bought'
-export const FALLBACK_MARKER = 'onosendai:secrets:fallbackWrote'
+export const FALLBACK_KEY = 'onosendai:secrets:fallback'
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
@@ -37,32 +39,65 @@ export function readBought(): Record<string, HeldKey> {
 
 /**
  * Add bought keys and drop forgotten ones. Keys that are not bought are
- * ignored, so a caller can pass everything it holds or forgets.
+ * ignored, so a caller can pass everything it holds or forgets. Returns null
+ * when it landed or there was nothing to do, else why it did not.
  */
-export function updateBought(add: HeldKey[], remove: string[] = []): void {
+export function updateBought(add: HeldKey[], remove: string[] = []): string | null {
   const bought = add.filter((k) => k.source === 'cloud')
-  if (bought.length === 0 && remove.length === 0) return
+  if (bought.length === 0 && remove.length === 0) return null
   const s = storage()
-  if (!s) return
+  if (!s) return bought.length > 0 ? 'localStorage is not available here' : null
   try {
     const kept = parseLegacy(s.getItem(BOUGHT_KEY))
     let changed = false
     for (const k of bought) if (!kept[k.lookupId]) { kept[k.lookupId] = k; changed = true }
     for (const id of remove) if (kept[id]) { delete kept[id]; changed = true }
     if (changed) s.setItem(BOUGHT_KEY, JSON.stringify(kept))
-  } catch { /* full or refused: IndexedDB or the fallback list still has it */ }
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
 }
 
-/** Note that the fallback wrote keys IndexedDB may not have. */
-export function markFallbackWrote(): void {
-  try { storage()?.setItem(FALLBACK_MARKER, String(Math.floor(Date.now() / 1000))) } catch { /* refused */ }
+/** What fallback sessions did to the held keys since IndexedDB last loaded. */
+export interface FallbackRecord {
+  held: Record<string, HeldKey>
+  forgotten: string[]
 }
 
-export function fallbackWrote(): boolean {
-  try { return !!storage()?.getItem(FALLBACK_MARKER) } catch { return false }
+export function readFallback(): FallbackRecord {
+  try {
+    const raw = storage()?.getItem(FALLBACK_KEY) ?? null
+    if (!raw) return { held: {}, forgotten: [] }
+    const parsed = JSON.parse(raw) as { held?: unknown; forgotten?: unknown }
+    return {
+      held: parseLegacy(JSON.stringify(parsed.held ?? {})),
+      forgotten: Array.isArray(parsed.forgotten) ? parsed.forgotten.filter((x): x is string => typeof x === 'string') : [],
+    }
+  } catch {
+    return { held: {}, forgotten: [] }
+  }
 }
 
-/** Once IndexedDB has the fallback's keys. */
-export function clearFallbackMarker(): void {
-  try { storage()?.removeItem(FALLBACK_MARKER) } catch { /* refused */ }
+/** Record a fallback session's holds and forgets. Null when it landed, else why not. */
+export function noteFallback(held: HeldKey[], forgotten: string[]): string | null {
+  if (held.length === 0 && forgotten.length === 0) return null
+  const s = storage()
+  if (!s) return 'localStorage is not available here'
+  try {
+    const rec = readFallback()
+    for (const k of held) { rec.held[k.lookupId] = k; rec.forgotten = rec.forgotten.filter((id) => id !== k.lookupId) }
+    for (const id of forgotten) { delete rec.held[id]; if (!rec.forgotten.includes(id)) rec.forgotten.push(id) }
+    s.setItem(FALLBACK_KEY, JSON.stringify(rec))
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
+}
+
+/** Once IndexedDB has applied it. */
+export function clearFallback(): void {
+  // Refused: the record is applied again at the next load. Its holds only
+  // fill gaps; its forgets would take again a key held again since.
+  try { storage()?.removeItem(FALLBACK_KEY) } catch { /* see above */ }
 }

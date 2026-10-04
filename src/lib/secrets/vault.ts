@@ -15,7 +15,7 @@
  */
 
 import {
-  getPlace, getPlaceKeys, openSecretsDb, pagePlaces as pageFromDb, placeKeyPages as keyPagesFromDb,
+  countPlaceKeysAmong, getPlace, getPlaceKeys, openSecretsDb, pagePlaces as pageFromDb, placeKeyPage,
 } from './db'
 import { MemoryPlaces } from './memoryPlaces'
 import type { Place, PlaceCursor, PlaceKey } from './places'
@@ -93,8 +93,26 @@ export function placeKeysOf(ids: string[]): Promise<PlaceKey[]> {
   return backend === 'idb' ? run((d) => getPlaceKeys(d, ids)) : Promise.resolve(memory.keysOf(ids))
 }
 
-/** Every place key, `size` at a time, without holding them all at once. */
+/**
+ * Every place key, `size` at a time, without holding them all at once. Each
+ * page is its own read through `run`, so a connection dropped halfway through
+ * RESCAN ALL is opened again rather than ending the rescan.
+ */
 export async function* placeKeyPages(size: number): AsyncGenerator<PlaceKey[]> {
   if (backend !== 'idb') { yield* memory.keyPages(size); return }
-  yield* keyPagesFromDb(await connection(), size)
+  let after: string | null = null
+  for (;;) {
+    const from: string | null = after
+    const rows: PlaceKey[] = await run((d) => placeKeyPage(d, from, size))
+    if (rows.length === 0) return
+    yield rows
+    if (rows.length < size) return
+    after = rows[rows.length - 1].lookupId
+  }
+}
+
+/** How many of these lookup ids are also place keys. */
+export function placeKeysAmong(ids: string[]): Promise<number> {
+  if (ids.length === 0) return Promise.resolve(0)
+  return backend === 'idb' ? run((d) => countPlaceKeysAmong(d, ids)) : Promise.resolve(memory.keysOf(ids).length)
 }

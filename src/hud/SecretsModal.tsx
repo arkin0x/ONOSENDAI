@@ -29,7 +29,8 @@ import { KeyRound, MapPin } from 'lucide-react'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { formatAgo } from '../lib/time'
 import { axisDistance } from '../lib/nearby'
-import { RESCAN_BATCH, rescanAll, rescanPlace } from '../lib/secrets/rescan'
+import { RESCAN_BATCH, describeSkips, rescanAll, rescanPlace, type Skip } from '../lib/secrets/rescan'
+import { describeError } from '../lib/secrets/db'
 import { pagePlaces } from '../lib/secrets/vault'
 import { useCyberspace } from '../store/useCyberspace'
 import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type SecretsSort, type SecretsStorage } from '../store/useSecrets'
@@ -58,9 +59,16 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
   const [scanning, setScanning] = useState<string | null>(null)
-  // Per SCAN button: how many it opened (or -1 when it failed), and why it failed.
+  // Per SCAN button: how many it opened (or -1 when it failed), and a line
+  // under its row when it failed or could not ask every relay in full.
   const [scanned, setScanned] = useState<Record<string, number>>({})
-  const [scanFailed, setScanFailed] = useState<Record<string, string>>({})
+  const [scanNote, setScanNote] = useState<Record<string, string>>({})
+  // The timers that turn a SCAN button back into SCAN, cleared if the panel closes first.
+  const timers = useRef(new Set<number>())
+  useEffect(() => {
+    const pending = timers.current
+    return () => { for (const t of pending) window.clearTimeout(t) }
+  }, [])
   const [keysShown, setKeysShown] = useState(PAGE)
   const places = usePlacePages(placesVersion, storage.mode)
 
@@ -127,29 +135,36 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
 
   // One SCAN button's answer, shown for a few seconds: a held key's lookup id
   // or a place's id, which never collide (a place id carries its plane). A
-  // failure says what failed under the row and lets the button be pressed again.
-  const scanOne = (id: string, run: () => Promise<number>): void => {
+  // failure, or a relay that did not answer in full, is said under the row,
+  // and the button can be pressed again either way.
+  const scanOne = (id: string, what: string, run: () => Promise<{ found: number; skipped?: Skip[] }>): void => {
     setScanning(id)
-    setScanFailed((prev) => { const next = { ...prev }; delete next[id]; return next })
+    setScanNote((prev) => { const next = { ...prev }; delete next[id]; return next })
     const settle = (n: number): void => {
       setScanning((current) => (current === id ? null : current))
       setScanned((prev) => ({ ...prev, [id]: n }))
-      window.setTimeout(() => setScanned((prev) => { const next = { ...prev }; delete next[id]; return next }), 6000)
+      const t = window.setTimeout(() => {
+        timers.current.delete(t)
+        setScanned((prev) => { const next = { ...prev }; delete next[id]; return next })
+      }, 6000)
+      timers.current.add(t)
     }
-    run().then(settle, (err: unknown) => {
-      setScanFailed((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }))
+    run().then((r) => {
+      if (r.skipped && r.skipped.length > 0) {
+        const text = `Not every relay answered the SCAN of the ${what} above in full, so something there may have been missed: ${describeSkips(r.skipped)}. Press SCAN to ask again.`
+        setScanNote((prev) => ({ ...prev, [id]: text }))
+      }
+      settle(r.found)
+    }, (err: unknown) => {
+      setScanNote((prev) => ({ ...prev, [id]: `SCAN of the ${what} above failed: ${describeError(err)}. Nothing was changed; press SCAN to ask again.` }))
       settle(-1)
     })
   }
   const scanLabel = (id: string): string =>
     scanning === id ? '…' : scanned[id] === undefined ? 'SCAN' : scanned[id] < 0 ? 'FAILED' : scanned[id] > 0 ? `+${scanned[id]}` : 'NONE'
   // Its own line under the row, so the row's buttons stay where they are.
-  const scanError = (id: string, what: string): JSX.Element | null =>
-    scanFailed[id] === undefined ? null : (
-      <li className="secrets__error secrets__row-error">
-        SCAN of the {what} above failed: {scanFailed[id]}. Nothing was changed; press SCAN to ask again.
-      </li>
-    )
+  const scanError = (id: string): JSX.Element | null =>
+    scanNote[id] === undefined ? null : <li className="secrets__error secrets__row-error">{scanNote[id]}</li>
 
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', true, onClose)
@@ -226,6 +241,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 {rescan.held > 0 ? `, and ${rescan.held} place key${rescan.held === 1 ? '' : 's'} now held` : ''}.
               </span>
             )}
+            {rescan && !rescan.running && rescan.error === null && rescan.skipped.length > 0 && (
+              <span className="secrets__error">
+                Incomplete: not every relay answered in full, so something hidden may have been missed. {describeSkips(rescan.skipped)}.
+                What was found is in your Stash; press RESCAN ALL to ask again.
+              </span>
+            )}
             {rescan && rescan.error !== null && (
               <span className="secrets__error">
                 RESCAN ALL stopped: {rescan.error}. Whatever it opened before stopping is in your Stash; press RESCAN ALL to run it again.
@@ -288,7 +309,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                     <button
                       className="secrets__scan"
                       disabled={scanning === k.lookupId}
-                      onClick={() => scanOne(k.lookupId, () => useShards.getState().rescan(k.lookupId, k.keyHex))}
+                      onClick={() => scanOne(k.lookupId, 'region', () => useShards.getState().rescan(k.lookupId, k.keyHex).then((found) => ({ found })))}
                       title="Ask the relay what is hidden in this region now"
                     >{scanLabel(k.lookupId)}</button>
                     <button
@@ -298,7 +319,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                       title="Forget this key. Standing there again computes it back."
                     >✕</button>
                   </li>
-                  {scanError(k.lookupId, 'region')}
+                  {scanError(k.lookupId)}
                   </Fragment>
                 )
               })}
@@ -351,7 +372,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                     <button
                       className="secrets__scan"
                       disabled={scanning === p.id}
-                      onClick={() => scanOne(p.id, () => rescanPlace(p.id))}
+                      onClick={() => scanOne(p.id, 'place', () => rescanPlace(p.id))}
                       title="Ask the relays what is hidden in this place's cubes now"
                     >{scanLabel(p.id)}</button>
                     <button
@@ -361,7 +382,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                       title="Forget this place, and the cube keys no other place shares. Standing there again records it back."
                     >✕</button>
                   </li>
-                  {scanError(p.id, 'place')}
+                  {scanError(p.id)}
                   </Fragment>
                 )
               })}
@@ -417,19 +438,26 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
 function usePlacePages(version: number, mode: SecretsStorage['mode']): { rows: Place[]; more: () => void; error: string | null } {
   const [rows, setRows] = useState<Place[]>([])
   const [error, setError] = useState<string | null>(null)
+  // Every read takes a number; a result whose number is not the latest is dropped.
   const seq = useRef(0)
   const shown = useRef(PAGE)
+  // While the rows are being read again, SHOW MORE waits: its page would be
+  // the one after rows that are about to be replaced.
+  const reloading = useRef(false)
   useEffect(() => {
     if (mode === 'loading') return
     const mine = ++seq.current
+    reloading.current = true
     pagePlaces(null, shown.current).then(
-      (page) => { if (mine === seq.current) { setRows(page); setError(null) } },
-      (err: unknown) => { if (mine === seq.current) setError(err instanceof Error ? err.message : String(err)) },
+      (page) => { if (mine === seq.current) { reloading.current = false; setRows(page); setError(null) } },
+      (err: unknown) => { if (mine === seq.current) { reloading.current = false; setError(describeError(err)) } },
     )
+    // Closing the panel, or a newer read, drops this one's result.
+    return () => { seq.current++ }
   }, [version, mode])
   const more = useCallback(() => {
     const last = rows[rows.length - 1]
-    if (!last) return
+    if (!last || reloading.current) return
     const mine = ++seq.current
     pagePlaces({ at: last.at, id: last.id }, PAGE).then(
       (page) => {
@@ -438,7 +466,7 @@ function usePlacePages(version: number, mode: SecretsStorage['mode']): { rows: P
         setRows([...rows, ...page])
         setError(null)
       },
-      (err: unknown) => { if (mine === seq.current) setError(err instanceof Error ? err.message : String(err)) },
+      (err: unknown) => { if (mine === seq.current) setError(describeError(err)) },
     )
   }, [rows])
   return { rows, more, error }
@@ -457,7 +485,7 @@ function StorageNote({ storage }: { storage: SecretsStorage }): JSX.Element {
   if (storage.mode === 'loading') {
     text = 'Opening this device\'s storage for region keys.'
   } else if (storage.mode === 'local') {
-    text = `Kept in localStorage, not IndexedDB. ${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so it holds ${SECRETS_MAX} keys: every bought key always stays, and past ${SECRETS_MAX} the oldest opened and crossed keys are dropped to make room. Scanned places last only until this page closes.`
+    text = `Kept in localStorage, not IndexedDB. ${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so this list holds ${SECRETS_MAX} keys: every bought key always stays, and past ${SECRETS_MAX} the oldest opened and crossed keys are dropped to make room. The keys you hold or forget on this visit are noted in localStorage and applied to IndexedDB the next time it opens. Scanned places last only until this page closes.`
   } else if (storage.persisted === 'granted') {
     safe = true
     text = 'Protected: the browser agreed to keep this storage (navigator.storage.persist), so it will not clear it to make room. Clearing this site\'s data in the browser\'s settings still removes it.'
@@ -472,6 +500,7 @@ function StorageNote({ storage }: { storage: SecretsStorage }): JSX.Element {
     <span className={`cloud__profile-note secrets__storage ${safe ? 'is-safe' : 'is-risk'}`}>
       {text}
       {storage.error && ` The last save failed (${storage.error}); what is listed here is still held until the page closes.`}
+      {storage.backstopError && ` A bought key could not be copied to the backstop in localStorage (${storage.backstopError}). It is still held here, but a visit where IndexedDB fails would not have it; the copy is tried again with the next bought key and at the next load.`}
     </span>
   )
 }

@@ -5,10 +5,15 @@
  * the same localStorage: memory gone, both stores still there. Two tabs are
  * two copies loaded side by side.
  *
- * The regressions from the review of #219 (2026-10-04) are named for its
- * findings: 1, a key bought while IndexedDB was out was stranded once it came
- * back; 2, FORGET ALL in one tab wiped a key another tab had bought; 3, a
- * write that failed was never tried again.
+ * The regressions from the reviews of #219 (2026-10-04) are named for their
+ * findings. First review: 1, a key bought while IndexedDB was out was
+ * stranded once it came back; 2, FORGET ALL in one tab wiped a key another
+ * tab had bought; 3, a write that failed was never tried again. Second
+ * review: S1, a key bought in a tab still on the build before this database
+ * was never read; S2, a fallback session brought back keys forgotten since;
+ * N1, a database the first build of this left behind; N2, a key forgotten
+ * before the load settled came back; N3, a backstop write that failed said
+ * nothing; N5, a load must never replace a row with an older copy.
  */
 
 import 'fake-indexeddb/auto'
@@ -24,8 +29,8 @@ const mem = new Map<string, string>()
 }
 
 import type { HeldKey, ScanKey } from '../useSecrets'
-import { BOUGHT_KEY, FALLBACK_MARKER } from '../../lib/secrets/backstop'
-import { KEYS_STORE, LEGACY_KEY, SECRETS_DB } from '../../lib/secrets/db'
+import { BOUGHT_KEY, FALLBACK_KEY } from '../../lib/secrets/backstop'
+import { DB_VERSION, KEYS_STORE, LEGACY_KEY, SECRETS_DB, TOTALS_META } from '../../lib/secrets/db'
 
 type Mod = typeof import('../useSecrets')
 type Vault = typeof import('../../lib/secrets/vault')
@@ -42,7 +47,7 @@ async function boot(): Promise<Mod & { vault: Vault }> {
 const key = (id: string, over: Partial<HeldKey> = {}): HeldKey => ({
   lookupId: id.repeat(32), keyHex: 'bb'.repeat(32), height: 8, base: { x: '256', y: '512', z: '768' }, plane: 0, source: 'scan', at: 1_800_000_000, ...over,
 })
-const bought = (id: string): HeldKey => key(id, { source: 'cloud', height: 20 })
+const bought = (id: string, over: Partial<HeldKey> = {}): HeldKey => key(id, { source: 'cloud', height: 20, ...over })
 
 /** The thirteen keys a scan computes at a position, each named by its cube. */
 function scanAt(p: { x: bigint; y: bigint; z: bigint }): ScanKey[] {
@@ -232,15 +237,15 @@ describe('finding 1: a key bought while IndexedDB was out is never stranded', ()
     ;(globalThis as { indexedDB?: unknown }).indexedDB = real
     const third = await boot()
     expect(third.useSecrets.getState().storage.mode).toBe('indexeddb')
-    // The bought key from the backstop, and the earned one because the
-    // fallback session marked that it wrote.
+    // The bought key from the backstop, and the earned one from the record
+    // the fallback session kept of what it held.
     expect(third.useSecrets.getState().keys[bought('cc').lookupId]).toBeTruthy()
     expect(third.useSecrets.getState().keys[key('dd').lookupId]).toBeTruthy()
     await settle()
     expect(await onDisk(bought('cc').lookupId)).toBeTruthy()
     expect(await onDisk(key('dd').lookupId)).toBeTruthy()
-    // The marker is done with; the backstop is never cleared.
-    expect(mem.has(FALLBACK_MARKER)).toBe(false)
+    // That record is done with; the backstop is never cleared.
+    expect(mem.has(FALLBACK_KEY)).toBe(false)
     expect(backstop()).toEqual([bought('cc').lookupId])
   })
 
@@ -343,7 +348,7 @@ describe('finding 3: a failed write is tried again', () => {
   it('after another tab upgrades the database, the write fails visibly and the bought key survives in the backstop', async () => {
     const m = await boot()
     await new Promise<void>((resolve, reject) => {
-      const r = indexedDB.open(SECRETS_DB, 2)
+      const r = indexedDB.open(SECRETS_DB, DB_VERSION + 1)
       r.onsuccess = () => { r.result.close(); resolve() }
       r.onerror = () => reject(r.error)
     })
@@ -357,16 +362,200 @@ describe('finding 3: a failed write is tried again', () => {
   })
 })
 
+/** A database as the first build of this one (3f153a1) left it: version 1, no indexes, no totals. */
+async function firstBuildDatabase(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const r = indexedDB.open(SECRETS_DB, 1)
+    r.onupgradeneeded = () => { for (const [s, k] of [['keys', 'lookupId'], ['places', 'id'], ['placeKeys', 'lookupId'], ['meta', 'key']]) r.result.createObjectStore(s, { keyPath: k }) }
+    r.onsuccess = () => {
+      const tx = r.result.transaction(['keys', 'places', 'placeKeys', 'meta'], 'readwrite')
+      tx.objectStore('keys').put(key('q1'))
+      tx.objectStore('keys').put(bought('q2'))
+      tx.objectStore('places').put({ id: '0:x', position: { x: '1', y: '1', z: '1' }, plane: 0, keys: ['x'], first: 1, at: 1 })
+      tx.objectStore('placeKeys').put({ lookupId: 'x', keyHex: 'cc'.repeat(32), height: 0, base: { x: '1', y: '1', z: '1' } })
+      tx.objectStore('meta').put({ key: 'migratedFromLocalStorage', value: { at: 1, copied: 0 } })
+      tx.oncomplete = () => { r.result.close(); resolve() }
+    }
+  })
+}
+
+/** Every row, measured, to hold the store's totals to. */
+async function measuredOnDisk(): Promise<{ bytes: number; places: number; placeKeys: number; totals: unknown }> {
+  const db = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open(SECRETS_DB); r.onsuccess = () => resolve(r.result) })
+  const all = (store: string): Promise<unknown[]> => new Promise((resolve) => { const q = db.transaction(store).objectStore(store).getAll(); q.onsuccess = () => resolve(q.result) })
+  const [keys, places, placeKeys, meta] = await Promise.all(['keys', 'places', 'placeKeys', 'meta'].map(all))
+  db.close()
+  const bytes = [...keys, ...places, ...placeKeys].reduce((n: number, r) => n + JSON.stringify(r).length, 0)
+  return { bytes, places: places.length, placeKeys: placeKeys.length, totals: (meta as Array<{ key: string; value: unknown }>).find((m) => m.key === TOTALS_META)?.value }
+}
+
+describe('S1: a tab still on the build before this database', () => {
+  it('a key it buys after the migration is taken in at the next load, and copied to the backstop', async () => {
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('a1').lookupId]: key('a1') }))
+    await boot()
+    // The old tab buys a key: its save rewrites the whole list.
+    const list = JSON.parse(mem.get(LEGACY_KEY)!) as Record<string, HeldKey>
+    list[bought('b2').lookupId] = bought('b2')
+    mem.set(LEGACY_KEY, JSON.stringify(list))
+    const next = await boot()
+    expect(next.useSecrets.getState().keys[bought('b2').lookupId]).toBeTruthy()
+    expect(await onDisk(bought('b2').lookupId)).toBeTruthy()
+    expect(backstop()).toContain(bought('b2').lookupId)
+  })
+
+  it('a key forgotten here that the old tab still lists is not brought back when that tab writes', async () => {
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('a1').lookupId]: key('a1') }))
+    const m = await boot()
+    m.useSecrets.getState().forget(key('a1').lookupId)
+    await settle()
+    // The old tab loaded a1 before the forget and writes it back with a new key.
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('a1').lookupId]: key('a1'), [key('c3').lookupId]: key('c3') }))
+    const next = await boot()
+    expect(next.useSecrets.getState().keys[key('c3').lookupId]).toBeTruthy()
+    expect(next.useSecrets.getState().keys[key('a1').lookupId]).toBeUndefined()
+  })
+
+  it('an unchanged list is not merged again', async () => {
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('a1').lookupId]: key('a1') }))
+    const m = await boot()
+    m.useSecrets.getState().forget(key('a1').lookupId)
+    await settle()
+    expect((await boot()).useSecrets.getState().keys).toEqual({})
+  })
+})
+
+describe('S2: a fallback session brings back nothing it did not hold', () => {
+  it('a session without IndexedDB that does nothing writes nothing, and a key forgotten before it stays forgotten', async () => {
+    const real = new IDBFactory()
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = real
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('o1').lookupId]: key('o1') }))
+    const first = await boot()
+    first.useSecrets.getState().hold([bought('c9')])
+    first.useSecrets.getState().forget(key('o1').lookupId)
+    await settle()
+    const before = new Map(mem)
+
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new Error('UnknownError') } }
+    expect((await boot()).useSecrets.getState().storage.mode).toBe('local')
+    // Not one localStorage write without anything held or forgotten.
+    expect(new Map(mem)).toEqual(before)
+
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = real
+    const third = await boot()
+    expect(third.useSecrets.getState().keys[key('o1').lookupId]).toBeUndefined()
+    expect(third.useSecrets.getState().keys[bought('c9').lookupId]).toBeTruthy()
+  })
+
+  it('a key a fallback session forgets is forgotten in IndexedDB at the next load', async () => {
+    const real = new IDBFactory()
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = real
+    const first = await boot()
+    first.useSecrets.getState().hold([key('f1'), key('f2')])
+    await settle()
+    // The fallback session cannot see IndexedDB; the old list stands in, and has f1.
+    mem.set(LEGACY_KEY, JSON.stringify({ [key('f1').lookupId]: key('f1') }))
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new Error('UnknownError') } }
+    const fallback = await boot()
+    fallback.useSecrets.getState().forget(key('f1').lookupId)
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = real
+    const third = await boot()
+    expect(third.useSecrets.getState().keys[key('f1').lookupId]).toBeUndefined()
+    expect(third.useSecrets.getState().keys[key('f2').lookupId]).toBeTruthy()
+    await settle()
+    expect(await onDisk(key('f1').lookupId)).toBeUndefined()
+    expect(mem.has(FALLBACK_KEY)).toBe(false)
+  })
+})
+
+describe('N1: a database the first build of this left', () => {
+  it('gains its indexes, is measured once, and works', async () => {
+    await firstBuildDatabase()
+    const m = await boot()
+    const s = m.useSecrets.getState
+    expect(s().storage.mode).toBe('indexeddb')
+    expect(Object.keys(s().keys)).toHaveLength(2)
+    expect(s().storage).toMatchObject({ places: 1, placeKeys: 1 })
+    expect(await m.vault.pagePlaces(null, 10)).toHaveLength(1)
+    await s().recordPlace(spot(1), 0, scanAt(spot(1)))
+    await s().forgetPlace('0:x')
+    expect(s().storage.error).toBeNull()
+    const disk = await measuredOnDisk()
+    expect(disk.totals).toEqual({ bytes: disk.bytes, places: disk.places, placeKeys: disk.placeKeys })
+    expect(s().storage).toMatchObject({ bytes: disk.bytes, places: disk.places, placeKeys: disk.placeKeys })
+  })
+})
+
+describe('N2: a key forgotten before the load settles', () => {
+  it('stays forgotten, in memory and in IndexedDB', async () => {
+    const m = await boot()
+    m.useSecrets.getState().hold([key('z1')])
+    await settle()
+    vi.resetModules()
+    const next = await import('../useSecrets')
+    const loading = next.useSecrets.getState().load()
+    next.useSecrets.getState().forget(key('z1').lookupId)
+    await loading
+    await settle()
+    expect(next.useSecrets.getState().keys[key('z1').lookupId]).toBeUndefined()
+    expect(await onDisk(key('z1').lookupId)).toBeUndefined()
+  })
+
+  it('a key forgotten and then held again before the load is held', async () => {
+    const m = await boot()
+    m.useSecrets.getState().hold([key('z2')])
+    await settle()
+    vi.resetModules()
+    const next = await import('../useSecrets')
+    next.useSecrets.getState().forget(key('z2').lookupId)
+    next.useSecrets.getState().hold([key('z2')])
+    await next.useSecrets.getState().load()
+    expect(next.useSecrets.getState().keys[key('z2').lookupId]).toBeTruthy()
+  })
+})
+
+describe('N3: a backstop write that fails is said', () => {
+  it('shows in the storage status, and clears once a later copy lands with the missed key in it', async () => {
+    const m = await boot()
+    const setItem = globalThis.localStorage.setItem
+    globalThis.localStorage.setItem = (k: string, v: string) => {
+      if (k === BOUGHT_KEY) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      setItem(k, v)
+    }
+    m.useSecrets.getState().hold([bought('d1')])
+    expect(m.useSecrets.getState().storage.backstopError).toBe('The quota has been exceeded.')
+    globalThis.localStorage.setItem = setItem
+    m.useSecrets.getState().hold([bought('d2')])
+    expect(m.useSecrets.getState().storage.backstopError).toBeNull()
+    expect(backstop().sort()).toEqual([bought('d1').lookupId, bought('d2').lookupId].sort())
+  })
+})
+
+describe('N5: a load never replaces a row with an older copy', () => {
+  it('the backstop, the old list and a fallback record only ever fill gaps', async () => {
+    const m = await boot()
+    m.useSecrets.getState().hold([bought('k1', { at: 2_000_000_000, eventId: 'NEW' })])
+    await settle()
+    const old = bought('k1', { at: 1, eventId: 'OLD' })
+    mem.set(BOUGHT_KEY, JSON.stringify({ [old.lookupId]: old }))
+    mem.set(LEGACY_KEY, JSON.stringify({ [old.lookupId]: old }))
+    mem.set(FALLBACK_KEY, JSON.stringify({ held: { [old.lookupId]: old }, forgotten: [] }))
+    const next = await boot()
+    await settle()
+    expect(next.useSecrets.getState().keys[old.lookupId].eventId).toBe('NEW')
+    expect((await onDisk(old.lookupId))?.eventId).toBe('NEW')
+  })
+})
+
 describe('without IndexedDB', () => {
-  it('falls back to localStorage as before: keys written there, places only in memory', async () => {
+  it('falls back to localStorage: keys written to the fallback record, never the old list; places only in memory', async () => {
     delete (globalThis as { indexedDB?: unknown }).indexedDB
     const m = await boot()
     expect(m.useSecrets.getState().storage.mode).toBe('local')
     expect(m.useSecrets.getState().storage.reason).toMatch(/IndexedDB/)
     m.useSecrets.getState().hold([key('aa')])
     await m.useSecrets.getState().recordPlace(spot(0), 0, scanAt(spot(0)))
-    expect(Object.keys(JSON.parse(mem.get(LEGACY_KEY) ?? '{}'))).toEqual(['aa'.repeat(32)])
-    expect(mem.has(FALLBACK_MARKER)).toBe(true)
+    expect(mem.has(LEGACY_KEY)).toBe(false)
+    expect(Object.keys(JSON.parse(mem.get(FALLBACK_KEY) ?? '{}').held)).toEqual(['aa'.repeat(32)])
     expect((await m.vault.pagePlaces(null, 10))).toHaveLength(1)
     const again = await boot()
     expect(Object.keys(again.useSecrets.getState().keys)).toEqual(['aa'.repeat(32)])

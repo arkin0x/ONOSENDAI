@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAllPaged, getMeta } from '../../idb'
 import { bytesOf } from '../budget'
 import {
-  KEYS_STORE, LEGACY_KEY, MIGRATED_META, PLACES_STORE, PLACE_KEYS_STORE, TOTALS_META, evictPlaces, forgetPlace, forgetPlacesUpTo,
+  KEYS_STORE, LEGACY_KEY, MIGRATED_META, describeError, PLACES_STORE, PLACE_KEYS_STORE, TOTALS_META, evictPlaces, forgetPlace, forgetPlacesUpTo,
   migrateFromLocalStorage, openSecretsDb, pagePlaces, parseLegacy, readTotals, recordPlace, writeKeys, type Totals,
 } from '../db'
 import { placeOf, type ScanKey } from '../places'
@@ -129,6 +129,16 @@ describe('copying the localStorage keys into IndexedDB', () => {
   })
 })
 
+describe('writing held keys', () => {
+  it('never replaces a row already there: another tab may have written it between a load\'s read and its merge', async () => {
+    const db = await openSecretsDb()
+    await writeKeys(db, [key('aa', { source: 'cloud', eventId: 'NEW' })], [])
+    await writeKeys(db, [key('aa', { source: 'cloud', eventId: 'OLD' })], [])
+    expect((await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId))[0].eventId).toBe('NEW')
+    expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+})
+
 describe('the running totals', () => {
   it('match a full count after keys, places, a forget and an eviction', async () => {
     const db = await openSecretsDb()
@@ -220,6 +230,15 @@ describe('opening', () => {
     await expect(openSecretsDb(5)).rejects.toThrow(/in time/)
     await new Promise((r) => setTimeout(r, 60))
     expect(close).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('saying what failed', () => {
+  it('uses the message, and the name when IndexedDB leaves the message empty', () => {
+    expect(describeError(new DOMException('The quota has been exceeded.', 'QuotaExceededError'))).toBe('The quota has been exceeded.')
+    expect(describeError(new DOMException('', 'NotFoundError'))).toBe('NotFoundError')
+    expect(describeError('plain')).toBe('plain')
+    expect(describeError(undefined)).toBe('unknown error')
   })
 })
 

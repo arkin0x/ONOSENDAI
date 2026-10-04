@@ -15,7 +15,8 @@
  *   it, and `byKey` says which places still use a cube key.
  * - placeKeys: the cube keys places refer to (PlaceKey), by lookup id,
  *   stored once however many places share one.
- * - meta: whether the localStorage keys were copied in, and the totals.
+ * - meta: whether the localStorage keys were copied in, what the localStorage
+ *   list looked like when last read (legacy.ts), and the totals.
  *
  * The totals (bytes of every row, and how many places and place keys) are a
  * record in meta that every write rewrites in its own transaction, measuring
@@ -26,14 +27,21 @@
  * Nothing here knows about zustand; useSecrets and vault own the state.
  */
 
+import { sha256 } from '@noble/hashes/sha2.js'
 import { META_STORE, getAllPaged, openDatabase, request } from '../idb'
+import { bytesToHex } from '../events'
 import type { HeldKey } from '../../store/useSecrets'
 import { bytesOf } from './budget'
 import type { Place, PlaceCursor, PlaceKey } from './places'
 import { restood } from './places'
 
 export const SECRETS_DB = 'onosendai:secrets'
-export const DB_VERSION = 1
+/**
+ * 1 was the first build of this database (3f153a1, previews only), which had
+ * no indexes on places and kept no totals; 2 adds both. Upgrading from 1
+ * creates the indexes and drops the totals record so it is measured once.
+ */
+export const DB_VERSION = 2
 export const KEYS_STORE = 'keys'
 export const PLACES_STORE = 'places'
 export const PLACE_KEYS_STORE = 'placeKeys'
@@ -48,6 +56,20 @@ export const LEGACY_KEY = 'onosendai:secrets'
 export const MIGRATED_META = 'migratedFromLocalStorage'
 /** Meta: the running totals. */
 export const TOTALS_META = 'totals'
+/**
+ * Meta: the localStorage list as last read, by fingerprint and by the lookup
+ * ids in it. A tab still running a build from before this database writes
+ * that list and nothing else; a changed fingerprint is how a new build learns
+ * it did, and the ids say which keys are new since.
+ */
+export const LEGACY_META = 'legacyList'
+
+interface LegacySeen { fingerprint: string; ids: string[] }
+
+/** A fingerprint of a localStorage string: sha256, hex. Absent and empty differ. */
+export function fingerprint(raw: string | null): string {
+  return raw === null ? 'absent' : bytesToHex(sha256(new TextEncoder().encode(raw)))
+}
 
 /** How long opening may take before the app gives up on it and falls back. */
 export const OPEN_TIMEOUT_MS = 8000
@@ -69,7 +91,11 @@ export function openSecretsDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBD
     ]],
     [PLACE_KEYS_STORE, 'lookupId'],
     [META_STORE, 'key'],
-  ])
+  ], (tx, oldVersion) => {
+    // A version 1 database has rows but no totals, or totals its build did
+    // not keep: measured again once, at the next load.
+    if (oldVersion > 0 && oldVersion < 2) tx.objectStore(META_STORE).delete(TOTALS_META)
+  })
   // An open can wait forever on a blocked upgrade or a browser that never
   // answers; the app is better off on the fallback than waiting with it. A
   // connection that does arrive after that is closed at once: left open, it
@@ -81,6 +107,18 @@ export function openSecretsDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBD
   })
   opening.then((db) => { if (timedOut) db.close() }, () => { /* the race reports it */ })
   return Promise.race([opening, timeout]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * Why something failed, in words. IndexedDB errors often carry an empty
+ * message (a NotFoundError says nothing else), so the name stands in for it.
+ */
+export function describeError(err: unknown): string {
+  if (err && typeof err === 'object' && ('message' in err || 'name' in err)) {
+    const e = err as { message?: unknown; name?: unknown }
+    return String(e.message || e.name || 'unknown error')
+  }
+  return String(err ?? '') || 'unknown error'
 }
 
 /** Whether a stored value is a key this app can use: the shape the list and the scene read. */
@@ -337,8 +375,7 @@ export async function evictPlaces(db: IDBDatabase, need: number, max: number): P
  * been done.
  */
 export async function migrateFromLocalStorage(db: IDBDatabase, storage: Pick<Storage, 'getItem'> | null): Promise<number | null> {
-  let raw: string | null = null
-  try { raw = storage?.getItem(LEGACY_KEY) ?? null } catch { /* storage refused: nothing to copy */ }
+  const raw = readLegacy(storage)
   const legacy = Object.values(parseLegacy(raw))
   let copied: number | null = null
   await tallied(db, [KEYS_STORE], legacy.some((k) => k.source === 'cloud'), (t) => {
@@ -348,11 +385,55 @@ export async function migrateFromLocalStorage(db: IDBDatabase, storage: Pick<Sto
       const keys = t.store(KEYS_STORE)
       for (const k of legacy) t.req(keys.get(k.lookupId), (was) => { if (!was) { t.put(KEYS_STORE, k); copied!++ } })
       t.req(keys.count(), () => {
-        t.store(META_STORE).put({ key: MIGRATED_META, value: { at: Math.floor(Date.now() / 1000), copied } })
+        const meta = t.store(META_STORE)
+        meta.put({ key: MIGRATED_META, value: { at: Math.floor(Date.now() / 1000), copied } })
+        meta.put({ key: LEGACY_META, value: { fingerprint: fingerprint(raw), ids: legacy.map((k) => k.lookupId) } satisfies LegacySeen })
       })
     })
   })
   return copied
+}
+
+function readLegacy(storage: Pick<Storage, 'getItem'> | null): string | null {
+  try { return storage?.getItem(LEGACY_KEY) ?? null } catch { return null }
+}
+
+/**
+ * Take in the keys a tab on an older build added to the localStorage list
+ * since it was last read (review of #219, S1).
+ *
+ * A tab left open across a deploy keeps running the old build, which keeps
+ * its keys only in that list, rewritten whole on every change. This build
+ * never writes the list, so when its fingerprint differs from the one last
+ * recorded, an old tab wrote it. Only the lookup ids that were not in it last
+ * time are new, and each goes in only where the database has no row: a key
+ * forgotten here that the old tab still lists is not brought back, and a row
+ * here is never replaced by the list's copy. Then the fingerprint and ids are
+ * recorded for next time. Runs after the migration, on every load; resolves
+ * to how many keys it added.
+ */
+export async function syncLegacy(db: IDBDatabase, storage: Pick<Storage, 'getItem'> | null): Promise<number> {
+  const raw = readLegacy(storage)
+  const now = fingerprint(raw)
+  const listed = Object.values(parseLegacy(raw))
+  let added = 0
+  await tallied(db, [KEYS_STORE], listed.some((k) => k.source === 'cloud'), (t) => {
+    const meta = t.store(META_STORE)
+    t.req(meta.get(LEGACY_META), (row: { value?: LegacySeen } | undefined) => {
+      const seen = row?.value
+      if (seen?.fingerprint === now) return
+      // No record (a database from before it was kept): every listed key is
+      // new to it, and still only fills a gap.
+      const before = new Set(seen?.ids ?? [])
+      const keys = t.store(KEYS_STORE)
+      for (const k of listed) {
+        if (before.has(k.lookupId)) continue
+        t.req(keys.get(k.lookupId), (was) => { if (!was) { t.put(KEYS_STORE, k); added++ } })
+      }
+      meta.put({ key: LEGACY_META, value: { fingerprint: now, ids: listed.map((k) => k.lookupId) } satisfies LegacySeen })
+    })
+  })
+  return added
 }
 
 // ---------------------------------------------------------------------------
@@ -430,16 +511,21 @@ export function getPlaceKeys(db: IDBDatabase, ids: string[]): Promise<PlaceKey[]
   })
 }
 
-/** Every place key, `size` at a time in key order, each page its own short read. */
-export async function* placeKeyPages(db: IDBDatabase, size: number): AsyncGenerator<PlaceKey[]> {
-  let after: string | null = null
-  for (;;) {
-    const range = after === null ? null : IDBKeyRange.lowerBound(after, true)
-    const os = db.transaction(PLACE_KEYS_STORE, 'readonly').objectStore(PLACE_KEYS_STORE)
-    const rows = await request(os.getAll(range, size)) as PlaceKey[]
-    if (rows.length === 0) return
-    yield rows
-    if (rows.length < size) return
-    after = rows[rows.length - 1].lookupId
-  }
+/** One page of place keys in key order, `size` of them, starting just past `after`. */
+export async function placeKeyPage(db: IDBDatabase, after: string | null, size: number): Promise<PlaceKey[]> {
+  const range = after === null ? null : IDBKeyRange.lowerBound(after, true)
+  const os = db.transaction(PLACE_KEYS_STORE, 'readonly').objectStore(PLACE_KEYS_STORE)
+  return await request(os.getAll(range, size)) as PlaceKey[]
+}
+
+/** How many of these lookup ids are also place keys, in one read. */
+export function countPlaceKeysAmong(db: IDBDatabase, ids: string[]): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PLACE_KEYS_STORE, 'readonly')
+    const os = tx.objectStore(PLACE_KEYS_STORE)
+    let n = 0
+    for (const id of ids) { const r = os.count(id); r.onsuccess = () => { n += r.result } }
+    tx.oncomplete = () => resolve(n)
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB read failed'))
+  })
 }

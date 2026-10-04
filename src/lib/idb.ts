@@ -31,19 +31,30 @@ export interface IndexSpec { name: string; keyPath: string | string[]; multiEntr
 
 /**
  * Open a database with a fixed set of stores, each [name, keyPath, indexes],
- * creating any that are missing with their indexes. A schema change is a new
- * version and a new store, so the upgrade only ever adds.
+ * creating any store or index that is missing. A schema change is a new
+ * version that adds a store or an index, so the upgrade only ever adds, and
+ * a database an earlier build left gets what it lacks. `onUpgrade` runs last
+ * in the same upgrade, with the version the database had (0 when new), for a
+ * change that is not a store or an index.
  */
-export function openDatabase(name: string, version: number, stores: Array<[string, string, IndexSpec[]?]>): Promise<IDBDatabase> {
+export function openDatabase(
+  name: string,
+  version: number,
+  stores: Array<[string, string, IndexSpec[]?]>,
+  onUpgrade?: (tx: IDBTransaction, oldVersion: number) => void,
+): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(name, version)
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event) => {
       const db = req.result
+      const tx = req.transaction!
       for (const [store, keyPath, indexes = []] of stores) {
-        if (db.objectStoreNames.contains(store)) continue
-        const os = db.createObjectStore(store, { keyPath })
-        for (const ix of indexes) os.createIndex(ix.name, ix.keyPath, { multiEntry: ix.multiEntry ?? false })
+        const os = db.objectStoreNames.contains(store) ? tx.objectStore(store) : db.createObjectStore(store, { keyPath })
+        for (const ix of indexes) {
+          if (!os.indexNames.contains(ix.name)) os.createIndex(ix.name, ix.keyPath, { multiEntry: ix.multiEntry ?? false })
+        }
       }
+      onUpgrade?.(tx, event.oldVersion)
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'))

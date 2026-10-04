@@ -28,9 +28,11 @@
  * byte total, the list pages through them in the database, and RESCAN ALL
  * reads their keys a batch at a time. Where IndexedDB cannot be opened (some
  * private modes, a browser that refuses it), the keys fall back to
- * localStorage as they were kept before, and places last only as long as the
- * page. Every bought key is also copied to a localStorage backstop
- * (lib/secrets/backstop), whichever of these is in use.
+ * localStorage, and places last only as long as the page. Every bought key is
+ * also copied to a localStorage backstop (lib/secrets/backstop), whichever of
+ * these is in use. The old localStorage list is never written again: it is
+ * read once to copy it in, and on each load for keys a tab still running an
+ * older build has added to it since (db.syncLegacy).
  */
 
 import { create } from 'zustand'
@@ -40,10 +42,10 @@ import { useShards } from './useShards'
 import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
 import {
-  LEGACY_KEY, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
-  parseLegacy, readKeys, readTotals, recordPlace as recordPlaceRow, writeKeys, type Totals,
+  LEGACY_KEY, describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
+  parseLegacy, readKeys, readTotals, recordPlace as recordPlaceRow, syncLegacy, writeKeys, type Totals,
 } from '../lib/secrets/db'
-import { clearFallbackMarker, fallbackWrote, markFallbackWrote, readBought, updateBought } from '../lib/secrets/backstop'
+import { clearFallback, noteFallback, readBought, readFallback, updateBought } from '../lib/secrets/backstop'
 import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
 import { placeOf, type ScanKey } from '../lib/secrets/places'
 
@@ -122,6 +124,8 @@ export interface SecretsStorage {
   persisted: 'granted' | 'denied' | 'unasked' | 'unsupported'
   /** The last write that failed, if one did; the rows stay in memory either way. */
   error: string | null
+  /** Why a bought key could not be copied to the localStorage backstop, if one could not. */
+  backstopError: string | null
 }
 
 /** RESCAN ALL, while it runs and after. */
@@ -139,6 +143,11 @@ export interface RescanStatus {
   held: number
   /** Why the run stopped, when it did not finish. */
   error: string | null
+  /**
+   * What was not fully answered, by relay and reason, with how many lookup
+   * ids each covers. Empty when every relay answered every request in full.
+   */
+  skipped: Array<{ relay: string; why: string; ids: number }>
 }
 
 interface SecretsState {
@@ -243,7 +252,7 @@ export function heldList(keys: Record<string, HeldKey>, sort: SecretsSort = 'rec
 
 export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
-  storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null },
+  storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null, backstopError: null },
   placesVersion: 0,
   rescan: null,
   buying: null,
@@ -265,19 +274,24 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     }
     if (added.length === 0) return
     // Before anything else can fail: a bought key is never only in memory.
-    updateBought(added)
+    backstop(added, [])
     setKeys(keys)
     saveKeys(added, [])
   },
 
   forget: (lookupId) => {
     const k = get().keys[lookupId]
-    if (!k) return
+    if (!k) {
+      // Before the load settles the list is empty, so the key is not in it
+      // yet; the forget is kept and applied to what the load reads.
+      if (backendNow() === 'none') { backstop([], [lookupId]); saveKeys([], [lookupId]) }
+      return
+    }
     const keys = { ...get().keys }
     delete keys[lookupId]
     // Forgetting a bought key is asked for by name, on its own row: it leaves
     // the backstop too, or it would come back on the next load.
-    if (k.source === 'cloud') updateBought([], [lookupId])
+    if (k.source === 'cloud') backstop([], [lookupId])
     setKeys(keys)
     saveKeys([], [lookupId])
   },
@@ -287,7 +301,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     if (all.length === 0) return
     // Only what this tab holds, by id: clearing the store would also take a
     // key another tab bought after this one loaded, which nobody confirmed.
-    updateBought([], all.filter((k) => k.source === 'cloud').map((k) => k.lookupId))
+    backstop([], all.filter((k) => k.source === 'cloud').map((k) => k.lookupId))
     setKeys({})
     saveKeys([], all.map((k) => k.lookupId))
   },
@@ -371,7 +385,11 @@ export const useSecrets = create<SecretsState>((set, get) => ({
         let opened: IDBDatabase | null = null
         try {
           opened = await openSecretsDb()
+          // The totals first: a database whose record is missing is measured
+          // before the copy below adds to a record that would start at zero.
+          await readTotals(opened)
           await migrateFromLocalStorage(opened, localStore())
+          await syncLegacy(opened, localStore())
           const stored = await readKeys(opened)
           const totals = await readTotals(opened)
           await adopt(opened, stored, totals)
@@ -379,7 +397,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
           console.warn('[secrets] IndexedDB unavailable, keeping keys in localStorage:', err)
           if (backendNow() !== 'idb') {
             try { opened?.close() } catch { /* already closed */ }
-            fallBackToLocal(`The browser refused IndexedDB (${err instanceof Error ? err.message : String(err)}).`)
+            fallBackToLocal(`The browser refused IndexedDB (${describeError(err)}).`)
           }
         }
       }
@@ -398,6 +416,11 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 let loading: Promise<void> | null = null
 let persistAsked = false
 let evicting = false
+/**
+ * Keys forgotten before the load settled. The list was empty then, so the
+ * forget had nothing to remove; load removes them from what it reads.
+ */
+const forgottenEarly = new Set<string>()
 
 /** Put a new key list in the state: the fallback keeps its old count cap, IndexedDB a byte budget. */
 function setKeys(keys: Record<string, HeldKey>): void {
@@ -406,19 +429,36 @@ function setKeys(keys: Record<string, HeldKey>): void {
   if (backendNow() !== 'idb') memoryTotals()
 }
 
-/** Save a change to the held keys wherever they are kept. Before load, load does it. */
+/**
+ * Save a change to the held keys wherever they are kept. Before load, holds
+ * wait in memory and forgets in `forgottenEarly`; load applies both.
+ */
 function saveKeys(puts: HeldKey[], deletes: string[]): void {
   const backend = backendNow()
   if (backend === 'idb') {
     void persist((db) => writeKeys(db, puts, deletes))
   } else if (backend === 'local') {
+    // Only what this session did, in its own record: the next session that
+    // opens IndexedDB applies it and nothing else from localStorage.
     askToPersist()
-    try {
-      localStorage.setItem(LEGACY_KEY, JSON.stringify(useSecrets.getState().keys))
-      // The next session that opens IndexedDB takes in what was written here.
-      markFallbackWrote()
-    } catch { /* private mode */ }
+    const failed = noteFallback(puts, deletes)
+    if (failed) useSecrets.setState((s) => ({ storage: { ...s.storage, error: `Could not save to localStorage: ${failed}` } }))
+  } else {
+    for (const k of puts) forgottenEarly.delete(k.lookupId)
+    for (const id of deletes) forgottenEarly.add(id)
   }
+}
+
+/**
+ * Keep the backstop in step with bought keys held and forgotten, and say so
+ * in the panel when it cannot be written. Once a write lands again after one
+ * failed, every bought key held is offered again, so the one that missed it
+ * is not left out.
+ */
+function backstop(add: HeldKey[], remove: string[]): void {
+  let failed = updateBought(add, remove)
+  if (!failed && useSecrets.getState().storage.backstopError) failed = updateBought(Object.values(useSecrets.getState().keys))
+  if (failed !== useSecrets.getState().storage.backstopError) useSecrets.setState((s) => ({ storage: { ...s.storage, backstopError: failed } }))
 }
 
 /**
@@ -432,7 +472,7 @@ async function persist(op: (db: IDBDatabase) => Promise<Totals>): Promise<boolea
     applyTotals(await run(op))
     return true
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = describeError(err)
     console.warn('[secrets] write failed:', message)
     useSecrets.setState((s) => ({ storage: { ...s.storage, error: message } }))
     return false
@@ -487,7 +527,7 @@ async function evict(): Promise<void> {
       useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys } }))
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = describeError(err)
     useSecrets.setState((s) => ({ storage: { ...s.storage, error: message } }))
   } finally {
     evicting = false
@@ -500,53 +540,73 @@ function localStore(): Storage | null {
 }
 
 /**
- * IndexedDB is open. Take its keys, and add any it is missing:
- * - keys this session held before the load finished;
- * - bought keys from the backstop, so one bought while IndexedDB was out (or
- *   whose write never landed) is held again;
- * - when a fallback session wrote keys since the last time IndexedDB loaded,
- *   that session's keys from localStorage, then the marker is cleared.
- * Places recorded before the load are moved in. The backstop is never cleared.
+ * IndexedDB is open. Take its keys, and settle what happened elsewhere:
+ * - keys this session held before the load finished fill gaps, and keys it
+ *   forgot then are removed;
+ * - bought keys from the backstop fill gaps, so one bought while IndexedDB
+ *   was out (or whose write never landed) is held again;
+ * - what fallback sessions did since IndexedDB last loaded: their holds fill
+ *   gaps and their forgets are removed, then their record is cleared.
+ * A row already in the database is never replaced by any of these copies.
+ * Every bought key held is offered to the backstop, which is never cleared.
+ * Places recorded before the load are moved in.
  */
 async function adopt(opened: IDBDatabase, stored: HeldKey[], totals: Totals): Promise<void> {
   const keys: Record<string, HeldKey> = {}
   for (const k of stored) keys[k.lookupId] = k
-  const missing: HeldKey[] = []
+  const missing = new Map<string, HeldKey>()
   const take = (k: HeldKey): void => {
     if (keys[k.lookupId]) return
     keys[k.lookupId] = k
-    missing.push(k)
+    missing.set(k.lookupId, k)
   }
-  for (const k of Object.values(useSecrets.getState().keys)) take(k)
+  const early = useSecrets.getState().keys
+  for (const k of Object.values(early)) take(k)
   for (const k of Object.values(readBought())) take(k)
-  const marked = fallbackWrote()
-  if (marked) for (const k of Object.values(parseLegacy(localStore()?.getItem(LEGACY_KEY) ?? null))) take(k)
-  const early = memory.drain()
+  const fallback = readFallback()
+  for (const k of Object.values(fallback.held)) take(k)
+  // A fallback forget is older than anything this session held before load.
+  const forgets = new Set([...fallback.forgotten.filter((id) => !early[id]), ...forgottenEarly])
+  forgottenEarly.clear()
+  for (const id of forgets) { delete keys[id]; missing.delete(id) }
+  const places = memory.drain()
   // In one step, so nothing held from here on can miss both the merge and the database.
   attach(opened)
   useSecrets.setState((s) => ({
     keys,
     storage: { ...s.storage, mode: 'indexeddb', reason: null, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys },
   }))
-  const merged = missing.length === 0 || await persist((db) => writeKeys(db, missing, []))
-  if (merged && marked) clearFallbackMarker()
-  for (const { place, keys: placeKeys } of early) await persist((db) => recordPlaceRow(db, place, placeKeys))
-  if (early.length > 0) placesChanged()
+  backstop(Object.values(keys), [])
+  const settled = (missing.size === 0 && forgets.size === 0) || await persist((db) => writeKeys(db, [...missing.values()], [...forgets]))
+  if (settled && (Object.keys(fallback.held).length > 0 || fallback.forgotten.length > 0)) clearFallback()
+  for (const { place, keys: placeKeys } of places) await persist((db) => recordPlaceRow(db, place, placeKeys))
+  if (places.length > 0) placesChanged()
 }
 
-/** IndexedDB is out: the keys come from and go to localStorage, as before this database. */
+/**
+ * IndexedDB is out for this session. The list shown is the best this browser
+ * has: the old localStorage list (read, never written), with what earlier
+ * fallback sessions held and forgot applied, and the bought keys from the
+ * backstop. Nothing is written until this session holds or forgets a key, and
+ * then only to its own record (saveKeys), so a session that does nothing
+ * cannot bring back a key forgotten in IndexedDB.
+ */
 function fallBackToLocal(reason: string): void {
   fallBack()
+  const early = useSecrets.getState().keys
+  const fallback = readFallback()
   const keys = parseLegacy(localStore()?.getItem(LEGACY_KEY) ?? null)
-  let added = false
-  for (const k of [...Object.values(useSecrets.getState().keys), ...Object.values(readBought())]) {
-    if (keys[k.lookupId]) continue
-    keys[k.lookupId] = k
-    added = true
+  for (const id of fallback.forgotten) delete keys[id]
+  for (const k of [...Object.values(fallback.held), ...Object.values(readBought()), ...Object.values(early)]) {
+    if (!keys[k.lookupId]) keys[k.lookupId] = k
   }
+  const forgets = [...forgottenEarly]
+  forgottenEarly.clear()
+  for (const id of forgets) delete keys[id]
   useSecrets.setState((s) => ({ storage: { ...s.storage, mode: 'local', reason } }))
   setKeys(keys)
-  if (added) saveKeys([], [])
+  // What this session did before the load settled is this session's to record.
+  saveKeys(Object.values(early).filter((k) => keys[k.lookupId]), forgets)
 }
 
 function storageManager(): StorageManager | undefined {

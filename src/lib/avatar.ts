@@ -16,6 +16,7 @@
  */
 
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
+import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
 
@@ -27,8 +28,9 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     kind: AVATAR_KIND,
     created_at: createdAt,
     // No `d`: a replaceable kind has no second key, and writing one would
-    // only invite a reader to filter on it.
-    tags: shard ? [['name', shard.name]] : [],
+    // only invite a reader to filter on it. The client tag is here and not
+    // added at signing because the work is mined over these tags (client.ts).
+    tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
 }

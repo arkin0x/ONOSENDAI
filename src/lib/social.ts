@@ -18,7 +18,8 @@
  */
 
 import type { EventTemplate, NostrEvent } from './events'
-import { CLIENT_TAG, COMMENT_KIND, MAX_COMMENT_LENGTH } from './comments'
+import { COMMENT_KIND, MAX_COMMENT_LENGTH } from './comments'
+import { CLIENT_TAG } from './client'
 
 export const REACTION_KIND = 7
 /** The movement event every chain action is (spec §8.3). */

@@ -17,7 +17,7 @@ describe('avatar events (kind 11333)', () => {
     const t = avatarTemplate(shard, 1700000000)
     expect(t.kind).toBe(AVATAR_KIND)
     // No `d`: replaceable kinds have no second key (spec 8.10).
-    expect(t.tags).toEqual([['name', 'Arches']])
+    expect(t.tags).toEqual([['name', 'Arches'], ['client', 'ONOSENDAI']])
     const back = avatarFromEvent({ ...t, pubkey: 'ab'.repeat(32) })!
     expect(back.name).toBe('Arches')
     expect(back.vertices.map((v) => ticksOf(v).join())).toEqual(shard.vertices.map((v) => ticksOf(v).join()))

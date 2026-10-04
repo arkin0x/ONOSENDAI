@@ -5784,6 +5784,18 @@ kbd {
 .secrets__summary .ui-field { margin: 0; align-items: center; gap: 7px; }
 .secrets__summary .ui-field__label { font-size: 9px; }
 
+/* Everything under the summary scrolls as one: two lists that each scrolled
+   inside the card would put a scroller in a scroller, which eats the drag
+   meant for the other. */
+.secrets__body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .secrets__list {
   list-style: none;
   margin: 0;
@@ -5795,6 +5807,56 @@ kbd {
   flex-direction: column;
   gap: 2px;
 }
+
+/* Inside that body the lists grow with their rows and the body scrolls.
+   Nearby Loot uses the same list on its own, where the list is the scroller. */
+.secrets__body .secrets__list {
+  overflow-y: visible;
+  flex: 0 0 auto;
+}
+
+/* Held keys and scanned places: a heading row, a line on what it is, the rows. */
+.secrets__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.secrets__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* RESCAN ALL: the control, what it asks, and what the last run found. */
+.secrets__rescan {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.secrets__rescan-go { flex: 0 0 auto; }
+
+.secrets__result {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #52e39f;
+}
+
+/* Where the keys are kept: green when the browser agreed to keep them. */
+.secrets__storage.is-safe { color: #52e39f; }
+.secrets__storage.is-risk { color: var(--warn); }
+
+/* The next hundred rows of a long list. */
+.secrets__more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__more .secret__act { flex: 0 0 auto; }
 
 .secrets__row {
   display: flex;

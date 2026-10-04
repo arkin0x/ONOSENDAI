@@ -69,7 +69,7 @@ describe('the deploy writes the bag settings', () => {
   it('defaults: h, no hint, no riddle, as every bag before', async () => {
     await hide('one')
     const bag = lastBag()
-    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'h'])
+    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'h', 'client'])
     expect(bag.tags).toContainEqual(['h', String(HEIGHT)])
     expect(bag.content).toBe('')
   })
@@ -79,8 +79,8 @@ describe('the deploy writes the bag settings', () => {
     const bag = lastBag()
     const dep = useShards.getState().mine[0]
     const at = { x: BigInt(dep.at.x), y: BigInt(dep.at.y), z: BigInt(dep.at.z) }
-    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S'])
-    expect(bag.tags.slice(3)).toEqual(hintTags(at, dep.plane, SECTOR_HINT))
+    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
+    expect(bag.tags.slice(3, -1)).toEqual(hintTags(at, dep.plane, SECTOR_HINT))
     expect(bag.content).toBe('under the black sun')
     expect(dep.bag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'under the black sun' })
   })
@@ -136,7 +136,7 @@ describe('rewrites that are not deploys keep the settings', () => {
     sent.length = 0
     await useShards.getState().deleteInstance(useShards.getState().mine[0].eventId)
     expect(lastBag().content).toBe('stay')
-    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'])
+    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
   })
 
   it('broadcast from LOCAL publishes the settings it was hidden with', async () => {
@@ -145,7 +145,7 @@ describe('rewrites that are not deploys keep the settings', () => {
     expect(sent).toHaveLength(0)
     const dep = useShards.getState().mine[0]
     expect(await useShards.getState().broadcast(dep.lookupId)).toBe(true)
-    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version'])
+    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'client'])
     expect(lastBag().content).toBe('later')
   })
 })

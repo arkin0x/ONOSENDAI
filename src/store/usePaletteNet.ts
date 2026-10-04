@@ -16,6 +16,7 @@ import { hexAt, parsePaletteEvent, type Palette } from 'sno-core/snoPalette'
 import { publishMany, queryAny, relaySet } from '../lib/relay'
 import { useCyberspace } from './useCyberspace'
 import type { PublishedPalette } from './useWorkshop'
+import { CLIENT_TAG } from '../lib/client'
 
 /** Color moments: the kind palettes already travel as on nostr. */
 export const PALETTE_KIND = 3367
@@ -60,7 +61,7 @@ export function paletteTemplate(
       ['layout', 'horizontal'],
       // What a client that cannot render it should say instead (NIP-31).
       ['alt', `Color palette "${name}": ${hexes.length} colors, ${shown}${rest > 0 ? `, and ${rest} more` : ''}`],
-      ['client', 'onosendai'],
+      [...CLIENT_TAG],
       ...(prev ? [['e', prev.id, prev.relays[0] ?? '', 'previous']] : []),
       // Only when it says something `previous` does not: the first edit's
       // previous IS the genesis, and one hop back finds it.

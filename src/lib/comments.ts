@@ -24,13 +24,12 @@
 
 import { HIDDEN_KIND, MESSAGE_KIND, SHARD_KIND, type HiddenType } from './hidden'
 import type { EventTemplate, NostrEvent } from './events'
+import { CLIENT_TAG } from './client'
 import { decryptForRegion, encryptForRegion } from './shardCrypto'
 import type { Position } from './space'
 
 export const COMMENT_KIND = 1111
 export const MAX_COMMENT_LENGTH = 2000
-/** NIP-89 client attribution: the app that wrote the comment. */
-export const CLIENT_TAG: [string, string] = ['client', 'ONOSENDAI']
 /** What every other client shows: an invitation, not the words. */
 export const PLACEHOLDER = 'This comment is hidden at an undisclosed location in cyberspace. Happy hunting: https://onosendai.tech'
 /** FF-1 `encrypted` tag: the scheme (the reference one) and, in place of a key service, the derivation. */

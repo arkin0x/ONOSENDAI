@@ -120,7 +120,7 @@ describe('a palette on nostr', () => {
     expect(t.kind).toBe(PALETTE_KIND)
     expect(t.tags.filter((x) => x[0] === 'c').map((x) => x[1])).toEqual([RED, BLUE])
     expect(t.tags).toContainEqual(['name', 'Two'])
-    expect(t.tags).toContainEqual(['client', 'onosendai'])
+    expect(t.tags).toContainEqual(['client', 'ONOSENDAI'])
     expect(t.content).toBe('')
   })
 

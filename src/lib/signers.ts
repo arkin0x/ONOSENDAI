@@ -17,6 +17,7 @@ import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
 import type { EventTemplate, NostrEvent } from './events'
+import { attributed } from './client'
 import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
@@ -58,7 +59,7 @@ export function localSigner(secretKey: Uint8Array): Signer {
     kind: 'local',
     pubkey,
     secretKey,
-    signEvent: (template) => Promise.resolve(finalizeEvent(template, secretKey) as unknown as NostrEvent),
+    signEvent: (template) => Promise.resolve(finalizeEvent(attributed(template), secretKey) as unknown as NostrEvent),
   }
 }
 
@@ -98,7 +99,7 @@ export async function nip07Signer(): Promise<Signer> {
   return {
     kind: 'nip07',
     pubkey,
-    signEvent: (template) => ext.signEvent(template),
+    signEvent: (template) => ext.signEvent(attributed(template)),
   }
 }
 
@@ -119,7 +120,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
-    signEvent: (template) => bunker.signEvent(template) as unknown as Promise<NostrEvent>,
+    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -173,7 +174,7 @@ function wrapBunkerSigner(
     bunkerUri,
     clientSecretKey,
     nostrConnectSession,
-    signEvent: (template) => bunker.signEvent(template) as unknown as Promise<NostrEvent>,
+    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)

@@ -11,7 +11,7 @@ if (typeof localStorage === 'undefined') {
 }
 
 import { findLcaHeight } from 'cyberspace-core'
-import { SECRETS_MAX, bytesOf, heldList, keyStateForAction, useSecrets, type HeldKey, volumeExponent } from '../useSecrets'
+import { bytesOf, heldList, keyStateForAction, useSecrets, type HeldKey, volumeExponent } from '../useSecrets'
 
 const key = (over: Partial<HeldKey> = {}): HeldKey => ({
   lookupId: 'aa'.repeat(32),
@@ -35,26 +35,13 @@ describe('the keys you hold', () => {
     expect(useSecrets.getState().keys['aa'.repeat(32)].at).toBe(1_800_000_000)
   })
 
-  it('survives a reload', () => {
-    useSecrets.getState().hold([key()])
-    useSecrets.setState({ keys: {} })
-    useSecrets.getState().load()
-    expect(Object.keys(useSecrets.getState().keys)).toHaveLength(1)
-  })
+  // Surviving a reload, and the caps, are in secretsStorage.test.ts: they
+  // need IndexedDB, and a fresh module per page load.
 
   it('forgetting one leaves the rest', () => {
     useSecrets.getState().hold([key(), key({ lookupId: 'cc'.repeat(32), height: 9 })])
     useSecrets.getState().forget('aa'.repeat(32))
     expect(Object.keys(useSecrets.getState().keys)).toEqual(['cc'.repeat(32)])
-  })
-
-  it('keeps the newest when there are too many', () => {
-    const many = Array.from({ length: SECRETS_MAX + 20 }, (_, i) =>
-      key({ lookupId: i.toString(16).padStart(64, '0'), at: 1_800_000_000 + i }))
-    useSecrets.getState().hold(many)
-    const held = heldList(useSecrets.getState().keys)
-    expect(held).toHaveLength(SECRETS_MAX)
-    expect(held[0].at).toBe(1_800_000_000 + SECRETS_MAX + 19)
   })
 
   it('is small on disk', () => {

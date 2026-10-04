@@ -98,6 +98,16 @@ export function useDiscovery(): void {
       for (const [lookupId, keyHex] of keys) current[lookupId] = { keyHex, height: heights.get(lookupId) ?? 0 }
       useSecrets.getState().setCurrent(current)
 
+      // Where you stand, as a scanned place, with these thirteen keys: only at
+      // your own head. A camera view, someone you spectate, your own history
+      // and a hyperspace transit all move the anchor too, and none of them is
+      // somewhere you stood. In the plane you stand in, which at your head can
+      // differ from the one the scene shows after a plane flip.
+      const cs = useCyberspace.getState()
+      if (cs.atHead()) {
+        void useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
+      }
+
       // A superseded scan must not write stale finds.
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
       if (id !== reqId.current) return
@@ -132,9 +142,15 @@ export function useDiscovery(): void {
        *
        * A key is kept when it opened something. That is the one that means
        * anything: it says there is something here and you can read it. The
-       * rest cost milliseconds to compute again the moment you stand there.
+       * rest cost milliseconds to compute again the moment you stand there,
+       * and the place you stood keeps them for RESCAN ALL.
+       *
+       * Wherever the anchor is (arkinox, 2026-10-04): a key that opened
+       * something while you spectate, explore your history or look around is
+       * as real as one found at your head. What it cannot be is a place, and
+       * places are only recorded at your head, above.
        */
-      if (opened.length > 0 && useCyberspace.getState().atHead()) {
+      if (opened.length > 0) {
         const now = Math.floor(Date.now() / 1000)
         useSecrets.getState().hold(opened.map((region) => ({
           lookupId: region,

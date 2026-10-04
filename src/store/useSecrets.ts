@@ -22,22 +22,30 @@
  *
  * Kept in IndexedDB (lib/secrets/db), one row per key and per place, written
  * as each one changes, under a byte budget (lib/secrets/budget) that never
- * drops a bought key. The state here is the whole of it in memory, so every
- * reader keeps reading `keys` as before. Where IndexedDB cannot be opened
- * (some private modes, a browser that refuses it), the keys fall back to
- * localStorage as they were kept before, the 400 newest, and places last only
- * as long as the page.
+ * drops a bought key. The held keys are also all here in memory, because the
+ * list, the scene and the chain read them from here. The places are not: there
+ * can be a hundred thousand of them, so memory has only their counts and the
+ * byte total, the list pages through them in the database, and RESCAN ALL
+ * reads their keys a batch at a time. Where IndexedDB cannot be opened (some
+ * private modes, a browser that refuses it), the keys fall back to
+ * localStorage as they were kept before, and places last only as long as the
+ * page. Every bought key is also copied to a localStorage backstop
+ * (lib/secrets/backstop), whichever of these is in use.
  */
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
-import { writeBatch, type WriteOp } from '../lib/idb'
 import type { Position } from '../lib/space'
-import { SECRETS_BUDGET_BYTES, bytesOf, bytesOfAll, planEviction, trimByCount, type Kept } from '../lib/secrets/budget'
-import { KEYS_STORE, LEGACY_KEY, PLACES_STORE, PLACE_KEYS_STORE, migrateFromLocalStorage, openSecretsDb, parseLegacy, readAll, type Stored } from '../lib/secrets/db'
-import { mergePlace, orphanedBy, placeOf, type Place, type PlaceKey, type ScanKey } from '../lib/secrets/places'
+import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
+import {
+  LEGACY_KEY, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
+  parseLegacy, readKeys, readTotals, recordPlace as recordPlaceRow, writeKeys, type Totals,
+} from '../lib/secrets/db'
+import { clearFallbackMarker, fallbackWrote, markFallbackWrote, readBought, updateBought } from '../lib/secrets/backstop'
+import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
+import { placeOf, type ScanKey } from '../lib/secrets/places'
 
 export { bytesOf } from '../lib/secrets/budget'
 export type { Place, PlaceKey, ScanKey } from '../lib/secrets/places'
@@ -96,8 +104,14 @@ export interface SecretsStorage {
   mode: 'loading' | 'indexeddb' | 'local'
   /** Why IndexedDB is not in use, in a sentence, when it is not. */
   reason: string | null
-  /** What the kept rows take, serialized: a running total, measured whole only at load. */
+  /**
+   * What the kept rows take, serialized. In IndexedDB this is the database's
+   * own running total, which every write updates in its transaction.
+   */
   bytes: number
+  /** How many places, and how many distinct cube keys they refer to. */
+  places: number
+  placeKeys: number
   /** The byte budget held keys and places share. */
   budget: number
   /**
@@ -123,15 +137,18 @@ export interface RescanStatus {
   fresh: number
   /** Place keys that opened something and are held keys now. */
   held: number
+  /** Why the run stopped, when it did not finish. */
+  error: string | null
 }
 
 interface SecretsState {
   keys: Record<string, HeldKey>
-  /** Where you stood at your own head, by place id. Not drawn and not in the key list. */
-  places: Record<string, Place>
-  /** The cube keys places refer to, by lookup id, each stored once. */
-  placeKeys: Record<string, PlaceKey>
   storage: SecretsStorage
+  /**
+   * Bumped whenever this tab changes the places, so a list showing them
+   * reads them again. The places themselves are not held in memory.
+   */
+  placesVersion: number
   rescan: RescanStatus | null
   setRescan: (rescan: RescanStatus | null) => void
   /**
@@ -166,18 +183,25 @@ interface SecretsState {
   hold: (keys: HeldKey[]) => void
   /** Forget one region. The key is gone; standing there again recomputes it. */
   forget: (lookupId: string) => void
-  /** Forget every held key, bought ones included: the panel asks first and says so. */
+  /**
+   * Forget every key this tab holds, bought ones included: the panel asks
+   * first and says how many were bought. A key another tab holds and this one
+   * has not loaded is not touched.
+   */
   forgetAll: () => void
   /**
    * Note where you stand at your own head, with the cube keys the scan had
    * there. The same spot again moves its time; keys other places share are
    * stored once.
    */
-  recordPlace: (position: Position, plane: Plane, scan: ScanKey[]) => void
+  recordPlace: (position: Position, plane: Plane, scan: ScanKey[]) => Promise<void>
   /** Forget one place, and the cube keys no other place refers to. Held keys are untouched. */
-  forgetPlace: (id: string) => void
-  /** Forget every place and every place key. Held keys are untouched. */
-  forgetAllPlaces: () => void
+  forgetPlace: (id: string) => Promise<void>
+  /**
+   * Forget every place stood on up to now, and the cube keys no remaining
+   * place refers to. Held keys are untouched.
+   */
+  forgetAllPlaces: () => Promise<void>
   /**
    * Open the store: IndexedDB, copying the localStorage keys in the first
    * time, else localStorage as before. Runs once; later calls get the same promise.
@@ -219,9 +243,8 @@ export function heldList(keys: Record<string, HeldKey>, sort: SecretsSort = 'rec
 
 export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
-  places: {},
-  placeKeys: {},
-  storage: { mode: 'loading', reason: null, bytes: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null },
+  storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null },
+  placesVersion: 0,
   rescan: null,
   buying: null,
   buyError: null,
@@ -234,16 +257,17 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   hold: (incoming) => {
     if (incoming.length === 0) return
     const keys = { ...get().keys }
-    const ops: WriteOp[] = []
-    let total = get().storage.bytes
+    const added: HeldKey[] = []
     for (const k of incoming) {
       if (keys[k.lookupId]) continue
       keys[k.lookupId] = k
-      ops.push({ store: KEYS_STORE, put: k })
-      total += bytesOf(k)
+      added.push(k)
     }
-    if (ops.length === 0) return
-    commit({ ...kept(), keys }, total, ops)
+    if (added.length === 0) return
+    // Before anything else can fail: a bought key is never only in memory.
+    updateBought(added)
+    setKeys(keys)
+    saveKeys(added, [])
   },
 
   forget: (lookupId) => {
@@ -251,58 +275,48 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     if (!k) return
     const keys = { ...get().keys }
     delete keys[lookupId]
-    commit({ ...kept(), keys }, get().storage.bytes - bytesOf(k), [{ store: KEYS_STORE, delete: lookupId }])
+    // Forgetting a bought key is asked for by name, on its own row: it leaves
+    // the backstop too, or it would come back on the next load.
+    if (k.source === 'cloud') updateBought([], [lookupId])
+    setKeys(keys)
+    saveKeys([], [lookupId])
   },
 
   forgetAll: () => {
-    const freed = bytesOfAll(Object.values(get().keys))
-    commit({ ...kept(), keys: {} }, get().storage.bytes - freed, [{ store: KEYS_STORE, clear: true }])
+    const all = Object.values(get().keys)
+    if (all.length === 0) return
+    // Only what this tab holds, by id: clearing the store would also take a
+    // key another tab bought after this one loaded, which nobody confirmed.
+    updateBought([], all.filter((k) => k.source === 'cloud').map((k) => k.lookupId))
+    setKeys({})
+    saveKeys([], all.map((k) => k.lookupId))
   },
 
-  recordPlace: (position, plane, scan) => {
+  recordPlace: async (position, plane, scan) => {
     const next = placeOf(position, plane, scan, Math.floor(Date.now() / 1000))
     if (!next) return
-    const { places, placeKeys, storage } = get()
-    const { place, newKeys, previous } = mergePlace(places, placeKeys, next)
-    // The same spot in the same second: nothing to say.
-    if (previous && previous.at === place.at) return
-    const ops: WriteOp[] = [{ store: PLACES_STORE, put: place }]
-    let total = storage.bytes + bytesOf(place) - (previous ? bytesOf(previous) : 0)
-    const nextKeys = newKeys.length > 0 ? { ...placeKeys } : placeKeys
-    for (const k of newKeys) {
-      nextKeys[k.lookupId] = k
-      ops.push({ store: PLACE_KEYS_STORE, put: k })
-      total += bytesOf(k)
+    if (backendNow() === 'idb') {
+      // Straight to the database: one transaction of a few reads and writes,
+      // whatever the number of places already kept.
+      await persist((db) => recordPlaceRow(db, next.place, next.keys))
+    } else {
+      memory.record(next.place, next.keys)
+      memoryTotals()
     }
-    commit({ ...kept(), places: { ...places, [place.id]: place }, placeKeys: nextKeys }, total, ops)
+    placesChanged()
   },
 
-  forgetPlace: (id) => {
-    const { places, placeKeys, storage } = get()
-    const place = places[id]
-    if (!place) return
-    const rest = { ...places }
-    delete rest[id]
-    const nextKeys = { ...placeKeys }
-    const ops: WriteOp[] = [{ store: PLACES_STORE, delete: id }]
-    let freed = bytesOf(place)
-    for (const orphan of orphanedBy([place], places)) {
-      const k = nextKeys[orphan]
-      if (!k) continue
-      delete nextKeys[orphan]
-      ops.push({ store: PLACE_KEYS_STORE, delete: orphan })
-      freed += bytesOf(k)
-    }
-    commit({ ...kept(), places: rest, placeKeys: nextKeys }, storage.bytes - freed, ops)
+  forgetPlace: async (id) => {
+    if (backendNow() === 'idb') await persist((db) => forgetPlaceRow(db, id))
+    else { memory.forget(id); memoryTotals() }
+    placesChanged()
   },
 
-  forgetAllPlaces: () => {
-    const { places, placeKeys, storage } = get()
-    const freed = bytesOfAll(Object.values(places)) + bytesOfAll(Object.values(placeKeys))
-    commit({ ...kept(), places: {}, placeKeys: {} }, storage.bytes - freed, [
-      { store: PLACES_STORE, clear: true },
-      { store: PLACE_KEYS_STORE, clear: true },
-    ])
+  forgetAllPlaces: async () => {
+    const now = Math.floor(Date.now() / 1000)
+    if (backendNow() === 'idb') await persist((db) => forgetPlacesUpTo(db, now))
+    else { memory.forgetUpTo(now); memoryTotals() }
+    placesChanged()
   },
 
   setRescan: (rescan) => set({ rescan }),
@@ -353,15 +367,21 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     loading ??= (async () => {
       if (typeof indexedDB === 'undefined') {
         fallBackToLocal('This browser has no IndexedDB here, which private browsing and some embedded browsers turn off.')
-        return
-      }
-      try {
-        const opened = await openSecretsDb()
-        await migrateFromLocalStorage(opened, localStore())
-        adopt(opened, await readAll(opened))
-      } catch (err) {
-        console.warn('[secrets] IndexedDB unavailable, keeping keys in localStorage:', err)
-        fallBackToLocal(`The browser refused IndexedDB (${err instanceof Error ? err.message : String(err)}).`)
+      } else {
+        let opened: IDBDatabase | null = null
+        try {
+          opened = await openSecretsDb()
+          await migrateFromLocalStorage(opened, localStore())
+          const stored = await readKeys(opened)
+          const totals = await readTotals(opened)
+          await adopt(opened, stored, totals)
+        } catch (err) {
+          console.warn('[secrets] IndexedDB unavailable, keeping keys in localStorage:', err)
+          if (backendNow() !== 'idb') {
+            try { opened?.close() } catch { /* already closed */ }
+            fallBackToLocal(`The browser refused IndexedDB (${err instanceof Error ? err.message : String(err)}).`)
+          }
+        }
       }
       void checkPersisted()
     })()
@@ -370,72 +390,107 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 }))
 
 /*
- * Where the rows go.
- *
- * `none` until load settles: a key held before then stays in memory, and the
- * load writes it once it knows where to. `idb` writes each change as its own
- * transaction, fired and not awaited; transactions commit in the order they
- * are created, so a put and a later delete of the same row land in that
- * order. `local` is the old way: the whole key list as one string, and no
- * places at all.
+ * Where the rows go: lib/secrets/vault knows which of IndexedDB, the
+ * localStorage fallback, or nothing yet (before load settles) is in use, and
+ * holds the connection. A key held before load is kept in memory and written
+ * once load knows where; a place recorded then waits in vault's memory store.
  */
-let backend: 'none' | 'idb' | 'local' = 'none'
-let db: IDBDatabase | null = null
 let loading: Promise<void> | null = null
 let persistAsked = false
+let evicting = false
 
-function kept(): Kept {
-  const { keys, places, placeKeys } = useSecrets.getState()
-  return { keys, places, placeKeys }
+/** Put a new key list in the state: the fallback keeps its old count cap, IndexedDB a byte budget. */
+function setKeys(keys: Record<string, HeldKey>): void {
+  const kept = backendNow() === 'local' ? trimByCount(keys, SECRETS_MAX) : keys
+  useSecrets.setState({ keys: kept })
+  if (backendNow() !== 'idb') memoryTotals()
 }
 
-/**
- * Settle a change: drop what no longer fits, put the result in the state, and
- * write the change and the drops together.
- */
-function commit(next: Kept, total: number, ops: WriteOp[]): void {
-  const settled = fit(next, total)
-  useSecrets.setState((s) => ({ ...settled.kept, storage: { ...s.storage, bytes: settled.total } }))
-  write([...ops, ...settled.ops])
-}
-
-/**
- * Bring what is kept within its limit: the byte budget in IndexedDB (and in
- * memory before load, which is where it is headed), the old count in
- * localStorage. Returns the rows left, the new total, and the deletes to write.
- */
-function fit(next: Kept, total: number): { kept: Kept; total: number; ops: WriteOp[] } {
-  if (backend === 'local') {
-    const keys = trimByCount(next.keys, SECRETS_MAX)
-    if (keys === next.keys) return { kept: next, total, ops: [] }
-    let freed = 0
-    for (const [id, k] of Object.entries(next.keys)) if (!keys[id]) freed += bytesOf(k)
-    return { kept: { ...next, keys }, total: total - freed, ops: [] }
+/** Save a change to the held keys wherever they are kept. Before load, load does it. */
+function saveKeys(puts: HeldKey[], deletes: string[]): void {
+  const backend = backendNow()
+  if (backend === 'idb') {
+    void persist((db) => writeKeys(db, puts, deletes))
+  } else if (backend === 'local') {
+    askToPersist()
+    try {
+      localStorage.setItem(LEGACY_KEY, JSON.stringify(useSecrets.getState().keys))
+      // The next session that opens IndexedDB takes in what was written here.
+      markFallbackWrote()
+    } catch { /* private mode */ }
   }
-  const plan = planEviction(next, total, useSecrets.getState().storage.budget)
-  if (plan.places.length + plan.placeKeys.length + plan.keys.length === 0) return { kept: next, total, ops: [] }
-  const keys = { ...next.keys }
-  const places = { ...next.places }
-  const placeKeys = { ...next.placeKeys }
-  const ops: WriteOp[] = []
-  for (const id of plan.places) { delete places[id]; ops.push({ store: PLACES_STORE, delete: id }) }
-  for (const id of plan.placeKeys) { delete placeKeys[id]; ops.push({ store: PLACE_KEYS_STORE, delete: id }) }
-  for (const id of plan.keys) { delete keys[id]; ops.push({ store: KEYS_STORE, delete: id }) }
-  return { kept: { keys, places, placeKeys }, total: total - plan.bytes, ops }
 }
 
-function write(ops: WriteOp[]): void {
-  if (ops.length === 0) return
-  if (backend === 'idb' && db) {
-    askToPersist()
-    writeBatch(db, ops).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err)
-      console.warn('[secrets] write failed:', message)
-      useSecrets.setState((s) => ({ storage: { ...s.storage, error: message } }))
-    })
-  } else if (backend === 'local' && ops.some((op) => op.store === KEYS_STORE)) {
-    askToPersist()
-    try { localStorage.setItem(LEGACY_KEY, JSON.stringify(useSecrets.getState().keys)) } catch { /* private mode */ }
+/**
+ * Run a write against IndexedDB (vault.run reopens and retries once), and
+ * take the totals it left. Resolves to whether it landed; a failure is shown
+ * in the panel rather than thrown.
+ */
+async function persist(op: (db: IDBDatabase) => Promise<Totals>): Promise<boolean> {
+  askToPersist()
+  try {
+    applyTotals(await run(op))
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[secrets] write failed:', message)
+    useSecrets.setState((s) => ({ storage: { ...s.storage, error: message } }))
+    return false
+  }
+}
+
+function applyTotals(t: Totals): void {
+  useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: t.bytes, places: t.places, placeKeys: t.placeKeys, error: null } }))
+  const { bytes, budget } = useSecrets.getState().storage
+  if (bytes > budget) void evict()
+}
+
+/** Outside IndexedDB, the totals are the held keys and the places in memory, both small. */
+function memoryTotals(): void {
+  const places = memory.totals()
+  const keyBytes = bytesOfAll(Object.values(useSecrets.getState().keys))
+  useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: keyBytes + places.bytes, places: places.places, placeKeys: places.placeKeys } }))
+}
+
+function placesChanged(): void {
+  useSecrets.setState((s) => ({ placesVersion: s.placesVersion + 1 }))
+}
+
+/**
+ * Over the budget: evict down to EVICT_TO of it in one pass (budget.ts says
+ * the order). Places a few hundred at a time from the oldest end of their
+ * time index, then opened and crossed keys oldest first, never bought keys.
+ * One pass at a time; a write that lands meanwhile is counted by the next.
+ */
+async function evict(): Promise<void> {
+  if (evicting || backendNow() !== 'idb') return
+  evicting = true
+  try {
+    const target = Math.floor(useSecrets.getState().storage.budget * EVICT_TO)
+    for (;;) {
+      const { bytes, places } = useSecrets.getState().storage
+      const need = bytes - target
+      if (need <= 0) break
+      if (places > 0) {
+        const { totals, removed } = await run((db) => evictPlaces(db, need, EVICT_PLACES_PER_PASS))
+        useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys } }))
+        placesChanged()
+        if (removed > 0) continue
+      }
+      const drop = earnedToEvict(useSecrets.getState().keys, need)
+      // Only bought keys left: they stay, and the total stays over.
+      if (drop.length === 0) break
+      const keys = { ...useSecrets.getState().keys }
+      for (const k of drop) delete keys[k.lookupId]
+      useSecrets.setState({ keys })
+      const totals = await run((db) => writeKeys(db, [], drop.map((k) => k.lookupId)))
+      useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys } }))
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    useSecrets.setState((s) => ({ storage: { ...s.storage, error: message } }))
+  } finally {
+    evicting = false
   }
 }
 
@@ -445,62 +500,53 @@ function localStore(): Storage | null {
 }
 
 /**
- * IndexedDB is open: take what it holds, add what this session held before
- * the load finished, and write those additions. The one place the whole
- * store is measured.
+ * IndexedDB is open. Take its keys, and add any it is missing:
+ * - keys this session held before the load finished;
+ * - bought keys from the backstop, so one bought while IndexedDB was out (or
+ *   whose write never landed) is held again;
+ * - when a fallback session wrote keys since the last time IndexedDB loaded,
+ *   that session's keys from localStorage, then the marker is cleared.
+ * Places recorded before the load are moved in. The backstop is never cleared.
  */
-function adopt(opened: IDBDatabase, stored: Stored): void {
-  const mem = useSecrets.getState()
-  const ops: WriteOp[] = []
+async function adopt(opened: IDBDatabase, stored: HeldKey[], totals: Totals): Promise<void> {
   const keys: Record<string, HeldKey> = {}
-  for (const k of stored.keys) keys[k.lookupId] = k
-  for (const k of Object.values(mem.keys)) {
-    if (keys[k.lookupId]) continue
+  for (const k of stored) keys[k.lookupId] = k
+  const missing: HeldKey[] = []
+  const take = (k: HeldKey): void => {
+    if (keys[k.lookupId]) return
     keys[k.lookupId] = k
-    ops.push({ store: KEYS_STORE, put: k })
+    missing.push(k)
   }
-  const places: Record<string, Place> = {}
-  for (const p of stored.places) places[p.id] = p
-  for (const p of Object.values(mem.places)) {
-    const was = places[p.id]
-    if (was && was.at >= p.at) continue
-    places[p.id] = was ? { ...p, first: Math.min(was.first, p.first) } : p
-    ops.push({ store: PLACES_STORE, put: places[p.id] })
-  }
-  const placeKeys: Record<string, PlaceKey> = {}
-  for (const k of stored.placeKeys) placeKeys[k.lookupId] = k
-  for (const k of Object.values(mem.placeKeys)) {
-    if (placeKeys[k.lookupId]) continue
-    placeKeys[k.lookupId] = k
-    ops.push({ store: PLACE_KEYS_STORE, put: k })
-  }
-  // A newer version of this database opened in another tab waits on every
-  // older connection; this one steps aside instead of blocking it, and later
-  // writes here fail into storage.error rather than hang.
-  opened.onversionchange = () => opened.close()
-  db = opened
-  backend = 'idb'
-  const total = bytesOfAll(Object.values(keys)) + bytesOfAll(Object.values(places)) + bytesOfAll(Object.values(placeKeys))
-  useSecrets.setState((s) => ({ storage: { ...s.storage, mode: 'indexeddb', reason: null } }))
-  commit({ keys, places, placeKeys }, total, ops)
+  for (const k of Object.values(useSecrets.getState().keys)) take(k)
+  for (const k of Object.values(readBought())) take(k)
+  const marked = fallbackWrote()
+  if (marked) for (const k of Object.values(parseLegacy(localStore()?.getItem(LEGACY_KEY) ?? null))) take(k)
+  const early = memory.drain()
+  // In one step, so nothing held from here on can miss both the merge and the database.
+  attach(opened)
+  useSecrets.setState((s) => ({
+    keys,
+    storage: { ...s.storage, mode: 'indexeddb', reason: null, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys },
+  }))
+  const merged = missing.length === 0 || await persist((db) => writeKeys(db, missing, []))
+  if (merged && marked) clearFallbackMarker()
+  for (const { place, keys: placeKeys } of early) await persist((db) => recordPlaceRow(db, place, placeKeys))
+  if (early.length > 0) placesChanged()
 }
 
 /** IndexedDB is out: the keys come from and go to localStorage, as before this database. */
 function fallBackToLocal(reason: string): void {
-  backend = 'local'
-  const mem = useSecrets.getState()
+  fallBack()
   const keys = parseLegacy(localStore()?.getItem(LEGACY_KEY) ?? null)
-  // What this session held before the load settled; writing any of it
-  // rewrites the whole list, which is how localStorage was always written.
-  const ops: WriteOp[] = []
-  for (const k of Object.values(mem.keys)) {
+  let added = false
+  for (const k of [...Object.values(useSecrets.getState().keys), ...Object.values(readBought())]) {
     if (keys[k.lookupId]) continue
     keys[k.lookupId] = k
-    ops.push({ store: KEYS_STORE, put: k })
+    added = true
   }
-  const total = bytesOfAll(Object.values(keys)) + bytesOfAll(Object.values(mem.places)) + bytesOfAll(Object.values(mem.placeKeys))
   useSecrets.setState((s) => ({ storage: { ...s.storage, mode: 'local', reason } }))
-  commit({ keys, places: mem.places, placeKeys: mem.placeKeys }, total, ops)
+  setKeys(keys)
+  if (added) saveKeys([], [])
 }
 
 function storageManager(): StorageManager | undefined {

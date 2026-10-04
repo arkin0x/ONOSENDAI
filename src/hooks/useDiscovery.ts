@@ -105,7 +105,7 @@ export function useDiscovery(): void {
       // differ from the one the scene shows after a plane flip.
       const cs = useCyberspace.getState()
       if (cs.atHead()) {
-        useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
+        void useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
       }
 
       // A superseded scan must not write stale finds.

@@ -19,19 +19,20 @@
  *
  * Both lists draw a hundred rows and a control for the next hundred, since a
  * device can keep thousands of either and a modal that renders them all is
- * slow to open.
+ * slow to open. The places are not in memory at all (there can be a hundred
+ * thousand): this reads them from storage a page at a time, newest first.
  */
 
-import { useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { KeyRound, MapPin } from 'lucide-react'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { formatAgo } from '../lib/time'
 import { axisDistance } from '../lib/nearby'
 import { RESCAN_BATCH, rescanAll, rescanPlace } from '../lib/secrets/rescan'
-import { placeList } from '../lib/secrets/places'
+import { pagePlaces } from '../lib/secrets/vault'
 import { useCyberspace } from '../store/useCyberspace'
-import { SECRETS_MAX, useSecrets, bytesOf, heldList, type HeldKey, type Place, type SecretsSort, type SecretsStorage } from '../store/useSecrets'
+import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type SecretsSort, type SecretsStorage } from '../store/useSecrets'
 import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
@@ -48,9 +49,8 @@ const PAGE = 100
 /** The green of "found here", as everywhere else keys are drawn. */
 export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element {
   const keys = useSecrets((s) => s.keys)
-  const places = useSecrets((s) => s.places)
-  const placeKeys = useSecrets((s) => s.placeKeys)
   const storage = useSecrets((s) => s.storage)
+  const placesVersion = useSecrets((s) => s.placesVersion)
   const rescan = useSecrets((s) => s.rescan)
   const discovered = useShards((s) => s.discovered)
   const showSecrets = useCyberspace((s) => s.showSecrets)
@@ -58,9 +58,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
   const [scanning, setScanning] = useState<string | null>(null)
+  // Per SCAN button: how many it opened (or -1 when it failed), and why it failed.
   const [scanned, setScanned] = useState<Record<string, number>>({})
+  const [scanFailed, setScanFailed] = useState<Record<string, string>>({})
   const [keysShown, setKeysShown] = useState(PAGE)
-  const [placesShown, setPlacesShown] = useState(PAGE)
+  const places = usePlacePages(placesVersion, storage.mode)
 
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -84,16 +86,10 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
 
   const sort = useSecrets((s) => s.sort)
   const list = useMemo(() => heldList(keys, sort), [keys, sort])
-  const placeRows = useMemo(() => placeList(places), [places])
   const bought = useMemo(() => list.filter((k) => k.source === 'cloud').length, [list])
-  // What RESCAN ALL would ask about: each lookup id once, held or place key.
-  const askable = useMemo(() => new Set([...Object.keys(keys), ...Object.keys(placeKeys)]).size, [keys, placeKeys])
-  // IndexedDB keeps a running total; the localStorage fallback is at most
-  // SECRETS_MAX keys, which is cheap to measure as it was before.
-  const bytes = useMemo(
-    () => (storage.mode === 'local' ? list.reduce((n, k) => n + bytesOf(k), 0) : storage.bytes),
-    [storage.mode, storage.bytes, list],
-  )
+  // What RESCAN ALL asks about, at most: a key that is both is asked once.
+  const askable = list.length + storage.placeKeys
+  const requests = Math.ceil(askable / RESCAN_BATCH)
   const now = Math.floor(Date.now() / 1000)
 
   // What each region has actually yielded, so a key that opened something says so.
@@ -121,7 +117,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   }
 
   // A place is one gibson, the spot itself; the zoom stays where it is. The
-  // focus is the place's id so RETURN brings this list back, as it does for a key.
+  // focus is the place's id so RETURN brings this list back, as it does for a
+  // key; the scene dims the other cages only for a focus that is a held key.
   const look = (p: Place): void => {
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(p.id)
@@ -129,17 +126,30 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   }
 
   // One SCAN button's answer, shown for a few seconds: a held key's lookup id
-  // or a place's id, which never collide (a place id carries its plane).
+  // or a place's id, which never collide (a place id carries its plane). A
+  // failure says what failed under the row and lets the button be pressed again.
   const scanOne = (id: string, run: () => Promise<number>): void => {
     setScanning(id)
-    void run().then((n) => {
-      setScanning(null)
+    setScanFailed((prev) => { const next = { ...prev }; delete next[id]; return next })
+    const settle = (n: number): void => {
+      setScanning((current) => (current === id ? null : current))
       setScanned((prev) => ({ ...prev, [id]: n }))
       window.setTimeout(() => setScanned((prev) => { const next = { ...prev }; delete next[id]; return next }), 6000)
+    }
+    run().then(settle, (err: unknown) => {
+      setScanFailed((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }))
+      settle(-1)
     })
   }
   const scanLabel = (id: string): string =>
-    scanning === id ? '…' : scanned[id] !== undefined ? (scanned[id] > 0 ? `+${scanned[id]}` : 'NONE') : 'SCAN'
+    scanning === id ? '…' : scanned[id] === undefined ? 'SCAN' : scanned[id] < 0 ? 'FAILED' : scanned[id] > 0 ? `+${scanned[id]}` : 'NONE'
+  // Its own line under the row, so the row's buttons stay where they are.
+  const scanError = (id: string, what: string): JSX.Element | null =>
+    scanFailed[id] === undefined ? null : (
+      <li className="secrets__error secrets__row-error">
+        SCAN of the {what} above failed: {scanFailed[id]}. Nothing was changed; press SCAN to ask again.
+      </li>
+    )
 
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', true, onClose)
@@ -155,8 +165,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
 
         <div className="secrets__summary">
           <span>{storage.mode === 'indexeddb'
-            ? `${formatBytes(bytes)} of ${formatBytes(storage.budget)} on this device`
-            : storage.mode === 'local' ? `${formatBytes(bytes)} in localStorage` : 'Opening storage…'}</span>
+            ? `${formatBytes(storage.bytes)} of ${formatBytes(storage.budget)} on this device`
+            : storage.mode === 'local' ? `${formatBytes(storage.bytes)} in localStorage and memory` : 'Opening storage…'}</span>
           <span className="secrets__gap" />
           <Field id="secrets-draw" label="Draw them in the scene">
             <Checkbox id="secrets-draw" checked={showSecrets} onCheckedChange={(v) => useCyberspace.getState().setShowSecrets(v === true)} />
@@ -197,21 +207,28 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               <button
                 className="avatars__go secrets__rescan-go"
                 disabled={rescan?.running === true || askable === 0}
-                onClick={() => { void rescanAll().catch(() => { /* the status clears; nothing else to say */ }) }}
+                onClick={() => { void rescanAll().catch(() => { /* the status carries the error */ }) }}
               >{rescan?.running ? `ASKING ${rescan.done}/${rescan.requests}` : 'RESCAN ALL'}</button>
             </div>
             <span className="cloud__profile-note">
-              Asks the relays what is hidden under every key kept here: the held keys below and the
-              cube keys of every scanned place, {askable} lookup ids in all, each asked once
-              and {RESCAN_BATCH} to a request ({Math.ceil(askable / RESCAN_BATCH)} request{Math.ceil(askable / RESCAN_BATCH) === 1 ? '' : 's'}).
+              Asks the relays what is hidden under every key kept here: the {list.length} held
+              key{list.length === 1 ? '' : 's'} below and the {storage.placeKeys} cube key{storage.placeKeys === 1 ? '' : 's'} of
+              the scanned places, each lookup id asked once and {RESCAN_BATCH} to a request (about {requests} request{requests === 1 ? '' : 's'}).
               The automatic scan only asks where you stand, as you arrive, so this is how something
               hidden after you left gets found. What comes back is opened with the key it is filed
-              under, and a place key that opens something becomes a held key.
+              under, and a place key that opens something becomes a held key. A relay returns only so
+              many events to one request, so a request that comes back that full is split and asked
+              again until nothing is cut off.
             </span>
-            {rescan && !rescan.running && (
+            {rescan && !rescan.running && rescan.error === null && (
               <span className="secrets__result">
                 Asked about {rescan.asked} key{rescan.asked === 1 ? '' : 's'}: {rescan.found} item{rescan.found === 1 ? '' : 's'} opened, {rescan.fresh} new to this device
                 {rescan.held > 0 ? `, and ${rescan.held} place key${rescan.held === 1 ? '' : 's'} now held` : ''}.
+              </span>
+            )}
+            {rescan && rescan.error !== null && (
+              <span className="secrets__error">
+                RESCAN ALL stopped: {rescan.error}. Whatever it opened before stopping is in your Stash; press RESCAN ALL to run it again.
               </span>
             )}
           </div>
@@ -227,7 +244,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               The keys this device holds: ones that opened something where a scan ran, the regions
               your hops crossed, and keys bought from HOSAKA. They are drawn in the scene and kept
               until you forget them. If storage passes its budget, opened and crossed keys go,
-              oldest first, only after every scanned place has gone; bought keys never do.
+              oldest first, only after every scanned place has gone; bought keys never do. Every
+              bought key is also copied to a small backstop in localStorage, so a key you paid for
+              survives a visit where IndexedDB failed.
             </span>
 
             {list.length > 1 && (
@@ -250,7 +269,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               {list.slice(0, keysShown).map((k) => {
                 const found = opened.get(k.lookupId) ?? 0
                 return (
-                  <li key={k.lookupId} className="secrets__row">
+                  <Fragment key={k.lookupId}>
+                  <li className="secrets__row">
                     <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                       <span className="secrets__where">
                         <KeyRound size={11} strokeWidth={2.25} aria-hidden />
@@ -278,6 +298,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                       title="Forget this key. Standing there again computes it back."
                     >✕</button>
                   </li>
+                  {scanError(k.lookupId, 'region')}
+                  </Fragment>
                 )
               })}
               {list.length === 0 && (
@@ -292,9 +314,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           <section className="secrets__section" aria-label="Scanned places">
             <div className="secrets__section-head">
               <span className="login__label">Scanned places</span>
-              <span className="tag">{placeRows.length}</span>
+              <span className="tag">{storage.places}</span>
               <span className="secrets__gap" />
-              {placeRows.length > 0 && <button className="secrets__forget-all" onClick={() => setForgetPlaces(true)}>FORGET ALL PLACES</button>}
+              {storage.places > 0 && <button className="secrets__forget-all" onClick={() => setForgetPlaces(true)}>FORGET ALL PLACES</button>}
             </div>
             <span className="cloud__profile-note">
               Every spot you have stood on at the head of your own chain, meaning where your
@@ -309,10 +331,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             </span>
 
             <ul className="secrets__list">
-              {placeRows.slice(0, placesShown).map((p) => {
+              {places.rows.map((p) => {
                 const away = axisDistance({ x: BigInt(p.position.x), y: BigInt(p.position.y), z: BigInt(p.position.z) }, position)
                 return (
-                  <li key={p.id} className="secrets__row">
+                  <Fragment key={p.id}>
+                  <li className="secrets__row">
                     <button className="secrets__go" onClick={() => look(p)} title="Look at this place">
                       <span className="secrets__where">
                         <MapPin size={11} strokeWidth={2.25} aria-hidden />
@@ -333,20 +356,23 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                     >{scanLabel(p.id)}</button>
                     <button
                       className="targets__remove"
-                      onClick={() => useSecrets.getState().forgetPlace(p.id)}
+                      onClick={() => { void useSecrets.getState().forgetPlace(p.id) }}
                       aria-label="Forget this place"
                       title="Forget this place, and the cube keys no other place shares. Standing there again records it back."
                     >✕</button>
                   </li>
+                  {scanError(p.id, 'place')}
+                  </Fragment>
                 )
               })}
-              {placeRows.length === 0 && (
+              {storage.places === 0 && (
                 <li className="avatars__empty">
                   No places yet. Each spot your committed moves leave you on is recorded here as you go.
                 </li>
               )}
             </ul>
-            <ShowMore shown={placesShown} total={placeRows.length} what="places" onMore={() => setPlacesShown((n) => n + PAGE)} />
+            {places.error && <span className="secrets__error">Could not read the places from storage: {places.error}</span>}
+            <ShowMore shown={places.rows.length} total={storage.places} what="places" onMore={places.more} />
           </section>
 
           <Explanation>
@@ -370,16 +396,52 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
       )}
       {forgetPlaces && (
         <ConfirmModal
-          title={`Forget all ${placeRows.length} places?`}
+          title={`Forget all ${storage.places} places?`}
           body="Each place is a spot you stood on and the cube keys the scan had there, kept so RESCAN ALL can look there again. Forgetting them frees that storage and takes nothing else: held keys, bought ones included, stay, and anything already opened stays in your Stash. Standing on a spot again records it again."
           confirmLabel="FORGET ALL PLACES"
-          onConfirm={() => { useSecrets.getState().forgetAllPlaces(); setForgetPlaces(false) }}
+          onConfirm={() => { void useSecrets.getState().forgetAllPlaces(); setForgetPlaces(false) }}
           onCancel={() => setForgetPlaces(false)}
         />
       )}
     </div>,
     document.body,
   )
+}
+
+/**
+ * The scanned places on screen, read from storage a page at a time, newest
+ * first: the first page when the panel opens and again whenever this tab
+ * changes the places (as many rows as were showing), and the next page on
+ * SHOW MORE. A read that a newer one overtakes is dropped.
+ */
+function usePlacePages(version: number, mode: SecretsStorage['mode']): { rows: Place[]; more: () => void; error: string | null } {
+  const [rows, setRows] = useState<Place[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const seq = useRef(0)
+  const shown = useRef(PAGE)
+  useEffect(() => {
+    if (mode === 'loading') return
+    const mine = ++seq.current
+    pagePlaces(null, shown.current).then(
+      (page) => { if (mine === seq.current) { setRows(page); setError(null) } },
+      (err: unknown) => { if (mine === seq.current) setError(err instanceof Error ? err.message : String(err)) },
+    )
+  }, [version, mode])
+  const more = useCallback(() => {
+    const last = rows[rows.length - 1]
+    if (!last) return
+    const mine = ++seq.current
+    pagePlaces({ at: last.at, id: last.id }, PAGE).then(
+      (page) => {
+        if (mine !== seq.current) return
+        shown.current = rows.length + page.length
+        setRows([...rows, ...page])
+        setError(null)
+      },
+      (err: unknown) => { if (mine === seq.current) setError(err instanceof Error ? err.message : String(err)) },
+    )
+  }, [rows])
+  return { rows, more, error }
 }
 
 /**
@@ -395,7 +457,7 @@ function StorageNote({ storage }: { storage: SecretsStorage }): JSX.Element {
   if (storage.mode === 'loading') {
     text = 'Opening this device\'s storage for region keys.'
   } else if (storage.mode === 'local') {
-    text = `Kept in localStorage, not IndexedDB. ${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so only the ${SECRETS_MAX} newest stay (bought keys last), and scanned places last only until this page closes.`
+    text = `Kept in localStorage, not IndexedDB. ${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so it holds ${SECRETS_MAX} keys: every bought key always stays, and past ${SECRETS_MAX} the oldest opened and crossed keys are dropped to make room. Scanned places last only until this page closes.`
   } else if (storage.persisted === 'granted') {
     safe = true
     text = 'Protected: the browser agreed to keep this storage (navigator.storage.persist), so it will not clear it to make room. Clearing this site\'s data in the browser\'s settings still removes it.'

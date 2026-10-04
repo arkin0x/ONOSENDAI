@@ -16,6 +16,10 @@
  *   The higher cubes are the widest (2^12 gibsons on a side), so places near
  *   each other share them, and a place carries only the thirteen lookup ids
  *   that point at its keys.
+ *
+ * The shapes and the rules are here; where they are kept is secrets/db
+ * (IndexedDB, the usual case) or secrets/memoryPlaces (before the database
+ * opens, and for the session when it cannot).
  */
 
 import type { Plane } from 'cyberspace-core'
@@ -39,12 +43,16 @@ export interface Place {
   at: number
 }
 
+/** Where the next page of places starts: just past the last row shown. */
+export interface PlaceCursor { at: number; id: string }
+
 /**
  * A cube key some place refers to, stored once however many places share it.
  *
- * No plane: a region key is computed from the coordinate alone (the worker
- * is never told the plane), so the same cube in either plane has the same
- * key. The places that refer to it carry the plane.
+ * A region key is computed from the coordinate alone (the worker is never
+ * told the plane), so the same cube in either plane has the same key. `plane`
+ * is the plane it was last stood in, which is where RESCAN ALL draws what it
+ * opens and the plane it is held in if it opens something.
  */
 export interface PlaceKey {
   lookupId: string
@@ -52,6 +60,7 @@ export interface PlaceKey {
   height: number
   /** The cube's aligned corner, as decimal strings. */
   base: { x: string; y: string; z: string }
+  plane: Plane
 }
 
 /** The place's id: the 2^0 cube's lookup id, in its plane. */
@@ -81,49 +90,25 @@ export function placeOf(position: Position, plane: Plane, scan: ScanKey[], now: 
       first: now,
       at: now,
     },
-    keys: sorted.map((k) => ({ lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: alignedBase(position, k.height) })),
+    keys: sorted.map((k) => ({ lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: alignedBase(position, k.height), plane })),
   }
 }
 
 /**
- * Fold a place into what is kept: what changes, and which rows to write.
- *
- * Standing on a place already kept moves its time and keeps when you first
- * stood there; its keys are already stored. A new place stores the keys no
- * other place has stored yet, and refers to the rest.
+ * Standing on a place again: the same row with its time moved and its first
+ * time kept. Null when nothing changes (the same spot in the same second).
  */
-export function mergePlace(
-  places: Record<string, Place>,
-  placeKeys: Record<string, PlaceKey>,
-  next: { place: Place; keys: PlaceKey[] },
-): { place: Place; newKeys: PlaceKey[]; previous: Place | null } {
-  const previous = places[next.place.id] ?? null
-  if (previous) return { place: { ...previous, at: Math.max(previous.at, next.place.at) }, newKeys: [], previous }
-  return { place: next.place, newKeys: next.keys.filter((k) => !placeKeys[k.lookupId]), previous: null }
+export function restood(was: Place, now: Place): Place | null {
+  const at = Math.max(was.at, now.at)
+  return at === was.at ? null : { ...was, at }
 }
 
-/** How many kept places refer to each place key. */
-export function placeRefs(places: Record<string, Place>): Map<string, number> {
-  const refs = new Map<string, number>()
-  for (const p of Object.values(places)) {
-    for (const id of p.keys) refs.set(id, (refs.get(id) ?? 0) + 1)
-  }
-  return refs
+/** Newest first, the order the list shows and the time index reads backwards: by time, then by id. */
+export function newestFirst(a: Place, b: Place): number {
+  return b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
 }
 
-/** The place keys no place but these refers to: what goes when these places go. */
-export function orphanedBy(gone: Place[], places: Record<string, Place>): string[] {
-  const leaving = new Set(gone.map((p) => p.id))
-  const candidates = new Set(gone.flatMap((p) => p.keys))
-  for (const p of Object.values(places)) {
-    if (leaving.has(p.id)) continue
-    for (const id of p.keys) candidates.delete(id)
-    if (candidates.size === 0) break
-  }
-  return [...candidates]
-}
-
-/** The places, last stood on first. */
-export function placeList(places: Record<string, Place>): Place[] {
-  return Object.values(places).sort((a, b) => b.at - a.at || (a.id < b.id ? -1 : 1))
+/** Whether a place comes after the cursor in newest-first order, so it belongs on the next page. */
+export function pastCursor(p: Place, after: PlaceCursor | null): boolean {
+  return after === null || p.at < after.at || (p.at === after.at && p.id < after.id)
 }

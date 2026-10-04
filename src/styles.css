@@ -5849,6 +5849,9 @@ kbd {
 .secrets__storage.is-safe { color: #52e39f; }
 .secrets__storage.is-risk { color: var(--warn); }
 
+/* Why a row's SCAN failed, on its own line under the row. */
+.secrets__row-error { padding: 0 4px 4px; list-style: none; }
+
 /* The next hundred rows of a long list. */
 .secrets__more {
   display: flex;

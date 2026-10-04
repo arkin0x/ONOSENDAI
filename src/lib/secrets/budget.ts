@@ -6,100 +6,74 @@
  * count cap treated a bought key and a place as the same size and the same
  * worth; neither is true.
  *
- * When a write takes the total past the budget, rows go in this order until
- * it fits again:
+ * When the total passes the budget, rows go in this order until it is down
+ * to EVICT_TO of the budget, in one pass, so the work is done once per few
+ * megabytes of growth rather than on every write:
  *
  * 1. Scanned places, the one last stood on longest ago first, and with each
  *    place the cube keys no remaining place refers to. A place is a note of
  *    where you stood, and standing there again rebuilds it in milliseconds.
  * 2. Held keys that were opened by a scan or crossed by a hop, oldest first,
- *    the two kinds together. Standing in the region again computes them back.
+ *    the two kinds together. An opened key, and a crossed key whose region is
+ *    no wider than 2^12 gibsons, comes back by standing in that region again,
+ *    because the passive scan computes every cube up to 2^12 where you stand.
+ *    A crossed key wider than that (2^13 to 2^20) comes back only by hopping
+ *    across that region again, which is why every place goes before any key.
  * 3. Never a key bought from HOSAKA. It was paid for in sats, and this machine
  *    cannot compute it back. If bought keys alone pass the budget, they stay
  *    and the total stays over.
  *
- * The caller keeps a running total and passes it in; this measures only the
- * rows it decides to drop, never the whole store.
+ * The total itself is kept by secrets/db, which measures only the rows each
+ * write touches. The places are evicted there, from the oldest end of their
+ * time index; the held keys are chosen here, from memory, where they live.
  */
 
 import type { HeldKey } from '../../store/useSecrets'
-import { placeRefs, type Place, type PlaceKey } from './places'
 
 /** 250 MB, in the same 1024-based megabytes the panel shows. */
 export const SECRETS_BUDGET_BYTES = 250 * 1024 * 1024
+
+/** Once over the budget, evict down to this share of it. */
+export const EVICT_TO = 0.95
+
+/** Places taken per eviction transaction, so one pass never holds the database for long. */
+export const EVICT_PLACES_PER_PASS = 500
 
 /** What one row costs, measured as it is serialized. Every field is ASCII, so characters are bytes. */
 export function bytesOf(row: unknown): number {
   return JSON.stringify(row).length
 }
 
-/** The total of a set of rows, for the one time a total is measured whole: at load. */
+/** The total of a set of rows. */
 export function bytesOfAll(rows: Iterable<unknown>): number {
   let n = 0
   for (const row of rows) n += bytesOf(row)
   return n
 }
 
-export interface Eviction {
-  places: string[]
-  placeKeys: string[]
-  keys: string[]
-  /** The bytes these rows took, to take off the running total. */
-  bytes: number
-}
-
-export interface Kept {
-  keys: Record<string, HeldKey>
-  places: Record<string, Place>
-  placeKeys: Record<string, PlaceKey>
-}
-
-/** Which rows to drop to bring `total` under `budget`, in the order above. Empty when it already fits. */
-export function planEviction(kept: Kept, total: number, budget: number = SECRETS_BUDGET_BYTES): Eviction {
-  const out: Eviction = { places: [], placeKeys: [], keys: [], bytes: 0 }
-  if (total <= budget) return out
-  let over = total - budget
-  const drop = (n: number): void => { out.bytes += n; over -= n }
-
-  // How many places refer to each place key; a key goes when its count does.
-  const refs = placeRefs(kept.places)
-
-  // A key no place refers to is the cheapest thing to lose.
-  for (const k of Object.values(kept.placeKeys)) {
-    if (over <= 0) return out
-    if (refs.has(k.lookupId)) continue
-    out.placeKeys.push(k.lookupId)
-    drop(bytesOf(k))
-  }
-
-  const oldestPlaces = Object.values(kept.places).sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1))
-  for (const p of oldestPlaces) {
-    if (over <= 0) return out
-    out.places.push(p.id)
-    drop(bytesOf(p))
-    for (const id of p.keys) {
-      const n = (refs.get(id) ?? 0) - 1
-      if (n > 0) { refs.set(id, n); continue }
-      refs.delete(id)
-      const k = kept.placeKeys[id]
-      if (k) { out.placeKeys.push(id); drop(bytesOf(k)) }
-    }
-  }
-
-  const oldestEarned = Object.values(kept.keys)
+/**
+ * The opened and crossed keys to drop to free `need` bytes, oldest first.
+ * Never a bought key; fewer than `need` bytes when only bought keys are left.
+ */
+export function earnedToEvict(keys: Record<string, HeldKey>, need: number): HeldKey[] {
+  if (need <= 0) return []
+  const oldest = Object.values(keys)
     .filter((k) => k.source !== 'cloud')
     .sort((a, b) => a.at - b.at || (a.lookupId < b.lookupId ? -1 : 1))
-  for (const k of oldestEarned) {
-    if (over <= 0) return out
-    out.keys.push(k.lookupId)
-    drop(bytesOf(k))
+  const out: HeldKey[] = []
+  let freed = 0
+  for (const k of oldest) {
+    if (freed >= need) break
+    out.push(k)
+    freed += bytesOf(k)
   }
   return out
 }
 
 /**
- * The localStorage fallback's cap, by count as before: the newest `max`, but
- * dropping opened and crossed keys before any bought one, as the budget does.
+ * The localStorage fallback's cap, by count as before this database: the
+ * newest `max`, where only opened and crossed keys are ever dropped. Every
+ * bought key stays, so with more than `max` of them the list holds them all.
  */
 export function trimByCount(keys: Record<string, HeldKey>, max: number): Record<string, HeldKey> {
   const all = Object.values(keys)

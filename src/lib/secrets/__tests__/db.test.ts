@@ -1,17 +1,26 @@
 /**
- * db.test.ts: the one-time copy of the localStorage keys into IndexedDB.
+ * db.test.ts: the IndexedDB side of region keys and places.
  *
- * What has to hold (arkinox, 2026-10-03): every key in localStorage arrives
- * in the database; the localStorage entry is left exactly as it was, since a
- * later release removes it and nothing here deletes; and the copy happens
- * once, marked in a meta record, so a key forgotten later is not copied back.
+ * - The one-time copy of the localStorage keys (arkinox, 2026-10-03): every
+ *   key arrives, the localStorage entry is left exactly as it was, and the
+ *   copy happens once, so a key forgotten later is not copied back.
+ * - The totals every write keeps in its own transaction match a full count.
+ * - Places keep their keys once, and forgetting or evicting a place takes
+ *   only the keys no remaining place uses.
+ * - A connection that opens after the app gave up waiting is closed, not
+ *   leaked (review of #219, finding 1d).
  */
 
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAllPaged, getMeta } from '../../idb'
-import { KEYS_STORE, LEGACY_KEY, MIGRATED_META, migrateFromLocalStorage, openSecretsDb, parseLegacy } from '../db'
+import { bytesOf } from '../budget'
+import {
+  KEYS_STORE, LEGACY_KEY, MIGRATED_META, PLACES_STORE, PLACE_KEYS_STORE, TOTALS_META, evictPlaces, forgetPlace, forgetPlacesUpTo,
+  migrateFromLocalStorage, openSecretsDb, pagePlaces, parseLegacy, readTotals, recordPlace, writeKeys, type Totals,
+} from '../db'
+import { placeOf, type ScanKey } from '../places'
 import type { HeldKey } from '../../../store/useSecrets'
 
 const key = (id: string, over: Partial<HeldKey> = {}): HeldKey => ({
@@ -40,15 +49,38 @@ function storage(initial: Record<string, string>): Storage & { writes: string[] 
   }
 }
 
-async function rows(db: IDBDatabase): Promise<HeldKey[]> {
-  const out: HeldKey[] = []
-  await getAllPaged<HeldKey>(db, KEYS_STORE, 100, (r) => r.lookupId, (r) => { out.push(...r) })
+async function rows<T>(db: IDBDatabase, store: string, keyOf: (r: T) => IDBValidKey): Promise<T[]> {
+  const out: T[] = []
+  await getAllPaged<T>(db, store, 100, keyOf, (r) => { out.push(...r) })
   return out
+}
+
+/** Everything measured from scratch, to hold the running totals to. */
+async function measured(db: IDBDatabase): Promise<Totals> {
+  const keys = await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId)
+  const places = await rows<{ id: string }>(db, PLACES_STORE, (r) => r.id)
+  const placeKeys = await rows<{ lookupId: string }>(db, PLACE_KEYS_STORE, (r) => r.lookupId)
+  const bytes = [...keys, ...places, ...placeKeys].reduce((n, r) => n + bytesOf(r), 0)
+  return { bytes, places: places.length, placeKeys: placeKeys.length }
+}
+
+const totalsOf = async (db: IDBDatabase): Promise<Totals | undefined> => await getMeta(db, TOTALS_META) as Totals | undefined
+
+function scanAt(p: { x: bigint; y: bigint; z: bigint }): ScanKey[] {
+  return Array.from({ length: 13 }, (_, h) => {
+    const b = (v: bigint): bigint => (v >> BigInt(h)) << BigInt(h)
+    return { lookupId: `h${h}:${b(p.x)},${b(p.y)},${b(p.z)}`, keyHex: 'cc'.repeat(32), height: h }
+  })
+}
+const at = (i: number): { x: bigint; y: bigint; z: bigint } => ({ x: (1n << 40n) + BigInt(i), y: 1n << 40n, z: 1n << 40n })
+const stand = (db: IDBDatabase, i: number, now: number): Promise<Totals> => {
+  const p = placeOf(at(i), 0, scanAt(at(i)), now)!
+  return recordPlace(db, p.place, p.keys)
 }
 
 beforeEach(() => {
   // A fresh browser profile for every test: no databases at all.
-  ;(globalThis as { indexedDB: IDBFactory }).indexedDB = new IDBFactory()
+  ;(globalThis as { indexedDB: unknown }).indexedDB = new IDBFactory()
 })
 
 describe('copying the localStorage keys into IndexedDB', () => {
@@ -60,15 +92,16 @@ describe('copying the localStorage keys into IndexedDB', () => {
 
     expect(await migrateFromLocalStorage(db, ls)).toBe(2)
 
-    const copied = await rows(db)
+    const copied = await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId)
     expect(copied.map((k) => k.lookupId).sort()).toEqual(Object.keys(legacy).sort())
     expect(copied.find((k) => k.source === 'cloud')?.height).toBe(20)
     // Untouched: the same string, and not one write or delete against storage.
     expect(ls.getItem(LEGACY_KEY)).toBe(raw)
     expect(ls.writes).toEqual([])
+    expect(await totalsOf(db)).toEqual(await measured(db))
   })
 
-  it('runs once: the second load reads nothing and copies nothing', async () => {
+  it('runs once: the second load copies nothing', async () => {
     const ls = storage({ [LEGACY_KEY]: JSON.stringify({ ['aa'.repeat(32)]: key('aa') }) })
     const db = await openSecretsDb()
     expect(await migrateFromLocalStorage(db, ls)).toBe(1)
@@ -78,17 +111,14 @@ describe('copying the localStorage keys into IndexedDB', () => {
     // is done, and a key forgotten in IndexedDB must not come back from here.
     ls.setItem(LEGACY_KEY, JSON.stringify({ ['aa'.repeat(32)]: key('aa'), ['dd'.repeat(32)]: key('dd') }))
     expect(await migrateFromLocalStorage(db, ls)).toBeNull()
-    expect((await rows(db)).map((k) => k.lookupId)).toEqual(['aa'.repeat(32)])
+    expect((await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId)).map((k) => k.lookupId)).toEqual(['aa'.repeat(32)])
   })
 
   it('keeps a key IndexedDB already holds rather than overwriting it', async () => {
     const db = await openSecretsDb()
-    const tx = db.transaction(KEYS_STORE, 'readwrite')
-    tx.objectStore(KEYS_STORE).put(key('aa', { at: 1_700_000_000 }))
-    await new Promise((r) => { tx.oncomplete = r })
-
+    await writeKeys(db, [key('aa', { at: 1_700_000_000 })], [])
     await migrateFromLocalStorage(db, storage({ [LEGACY_KEY]: JSON.stringify({ ['aa'.repeat(32)]: key('aa', { at: 1_800_000_000 }) }) }))
-    expect((await rows(db))[0].at).toBe(1_700_000_000)
+    expect((await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId))[0].at).toBe(1_700_000_000)
   })
 
   it('marks the copy done when there was nothing to copy, and survives storage that throws', async () => {
@@ -99,7 +129,101 @@ describe('copying the localStorage keys into IndexedDB', () => {
   })
 })
 
-describe('reading the legacy string', () => {
+describe('the running totals', () => {
+  it('match a full count after keys, places, a forget and an eviction', async () => {
+    const db = await openSecretsDb()
+    await writeKeys(db, [key('aa'), key('bb', { source: 'cloud' })], [])
+    for (let i = 0; i < 20; i++) await stand(db, i, 1_000 + i)
+    await stand(db, 3, 2_000)
+    await writeKeys(db, [], ['aa'.repeat(32)])
+    await forgetPlace(db, placeOf(at(7), 0, scanAt(at(7)), 0)!.place.id)
+    await evictPlaces(db, 1, 3)
+    expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+
+  it('are measured once when the record is missing, and then kept', async () => {
+    const db = await openSecretsDb()
+    await stand(db, 0, 1)
+    const tx = db.transaction('meta', 'readwrite')
+    tx.objectStore('meta').delete(TOTALS_META)
+    await new Promise((r) => { tx.oncomplete = r })
+    expect(await readTotals(db)).toEqual(await measured(db))
+    expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+})
+
+describe('places in IndexedDB', () => {
+  it('standing on the same spot again moves its time and adds no rows', async () => {
+    const db = await openSecretsDb()
+    await stand(db, 0, 100)
+    const once = await totalsOf(db)
+    await stand(db, 0, 250)
+    expect(await totalsOf(db)).toMatchObject({ places: 1, placeKeys: once!.placeKeys })
+    expect((await pagePlaces(db, null, 10))[0]).toMatchObject({ first: 100, at: 250 })
+  })
+
+  it('neighbors store the keys they share once', async () => {
+    const db = await openSecretsDb()
+    await stand(db, 0, 100)
+    await stand(db, 1, 200)
+    // at(0).x is a multiple of 2^40 and at(1).x one past it: only the 2^0 cube differs.
+    expect(await totalsOf(db)).toMatchObject({ places: 2, placeKeys: 14 })
+  })
+
+  it('forgetting a place takes only the keys no remaining place uses', async () => {
+    const db = await openSecretsDb()
+    await stand(db, 0, 100)
+    await stand(db, 1, 200)
+    await forgetPlace(db, placeOf(at(0), 0, scanAt(at(0)), 0)!.place.id)
+    const left = await rows<{ lookupId: string }>(db, PLACE_KEYS_STORE, (r) => r.lookupId)
+    expect(left).toHaveLength(13)
+    expect(left.map((k) => k.lookupId)).not.toContain(scanAt(at(0))[0].lookupId)
+  })
+
+  it('pages newest first, each page starting past the last', async () => {
+    const db = await openSecretsDb()
+    for (let i = 0; i < 7; i++) await stand(db, i, 100 + (i % 3))
+    const first = await pagePlaces(db, null, 4)
+    const rest = await pagePlaces(db, { at: first[3].at, id: first[3].id }, 4)
+    const all = [...first, ...rest]
+    expect(all).toHaveLength(7)
+    expect(new Set(all.map((p) => p.id)).size).toBe(7)
+    expect(all.map((p) => p.at)).toEqual([...all.map((p) => p.at)].sort((a, b) => b - a))
+  })
+
+  it('eviction takes the places stood on longest ago, and the keys only they used', async () => {
+    const db = await openSecretsDb()
+    for (let i = 0; i < 6; i++) await stand(db, i * 4, 100 + i)
+    const { removed } = await evictPlaces(db, Number.MAX_SAFE_INTEGER, 2)
+    expect(removed).toBe(2)
+    expect((await pagePlaces(db, null, 10)).map((p) => p.at)).toEqual([105, 104, 103, 102])
+    expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+
+  it('forgetting up to a time leaves what was stood on after it', async () => {
+    const db = await openSecretsDb()
+    await stand(db, 0, 100)
+    await stand(db, 1, 200)
+    await forgetPlacesUpTo(db, 150)
+    expect((await pagePlaces(db, null, 10)).map((p) => p.at)).toEqual([200])
+    expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+})
+
+describe('opening', () => {
+  it('closes a connection that arrives after the app stopped waiting for it', async () => {
+    const close = vi.fn()
+    const req: { result?: unknown; onsuccess?: () => void } = {}
+    ;(globalThis as { indexedDB: unknown }).indexedDB = {
+      open: () => { setTimeout(() => { req.result = { close }; req.onsuccess?.() }, 30); return req },
+    }
+    await expect(openSecretsDb(5)).rejects.toThrow(/in time/)
+    await new Promise((r) => setTimeout(r, 60))
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('reading a localStorage list', () => {
   it('skips rows that are not keys and keeps the rest', () => {
     const raw = JSON.stringify({ ['aa'.repeat(32)]: key('aa'), bad: { keyHex: 1 }, nul: null })
     expect(Object.keys(parseLegacy(raw))).toEqual(['aa'.repeat(32)])

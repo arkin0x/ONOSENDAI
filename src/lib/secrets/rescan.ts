@@ -85,14 +85,19 @@ export function heldEntry(k: HeldKey): RescanEntry {
     : { lookupId: k.lookupId, keyHex: k.keyHex }
 }
 
-/** A place key as an entry, in the plane it was last stood in. */
+/**
+ * A place key as an entry, in the plane it was last stood in. A key the first
+ * build of this database stored has no plane (review of #219, N3); it is read
+ * in dataspace rather than held with no plane at all.
+ */
 export function placeKeyEntry(k: PlaceKey, now: number): RescanEntry {
+  const plane = k.plane ?? 0
   return {
     lookupId: k.lookupId,
     keyHex: k.keyHex,
     height: k.height,
-    origin: originOf(k.base, k.plane),
-    promote: { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: k.base, plane: k.plane, source: 'scan', at: now },
+    origin: originOf(k.base, plane),
+    promote: { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: k.base, plane, source: 'scan', at: now },
   }
 }
 
@@ -199,10 +204,12 @@ export async function askAll(ids: string[], ask: Ask): Promise<Got> {
 
 /**
  * One busy lookup id, paged back in time. `until` includes its own second,
- * so nothing at the boundary is skipped; a page that brings nothing new steps
- * one second further back. A relay that answers with events newer than
- * `until` is ignoring it and cannot be paged; it is reported, as is a region
- * still full after MAX_PAGES pages.
+ * so nothing at the boundary is skipped. A full page that brings nothing new
+ * is a whole page of events from that one second, and there may be more from
+ * it than a relay returns at once; no filter can ask for the rest, so the id
+ * is reported and paging steps one second further back. A relay that answers
+ * with events newer than `until` is ignoring it and cannot be paged; it is
+ * reported, as is a region still full after MAX_PAGES pages.
  */
 async function pageBack(ids: string[], first: RelayAnswer[], ask: Ask): Promise<Got> {
   const seen = new Map(mergeAnswers(first).map((e) => [e.id, e]))
@@ -226,6 +233,7 @@ async function pageBack(ids: string[], first: RelayAnswer[], ask: Ask): Promise<
       for (const e of a.events) if (!seen.has(e.id)) { seen.set(e.id, e); fresh++ }
     }
     full = new Set([...fullRelays(answers)].filter((url) => !ignoring.has(url)))
+    if (fresh === 0) for (const relay of full) skip(relay, `has more events in one second than one request returns, in one region`)
     const next = oldest(answers.filter((a) => full.has(a.url)).flatMap((a) => a.events))
     until = fresh === 0 || next >= until ? Math.min(next, until) - 1 : next
   }

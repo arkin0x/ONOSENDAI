@@ -82,7 +82,31 @@ export interface Totals { bytes: number; places: number; placeKeys: number }
 
 export const NO_TOTALS: Totals = { bytes: 0, places: 0, placeKeys: 0 }
 
-export function openSecretsDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {
+function globalStorage(): Pick<Storage, 'getItem'> | null {
+  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
+}
+
+/**
+ * The old localStorage list, read strictly: null when it cannot be read or
+ * is not a JSON object, so that nothing is recorded from it (review of #219,
+ * N2). Recording an unreadable list as empty made the next readable one look
+ * new from end to end. An absent list is readable, and empty.
+ */
+export function readLegacyList(storage: Pick<Storage, 'getItem'> | null): { raw: string | null; keys: Record<string, HeldKey> } | null {
+  if (!storage) return null
+  let raw: string | null
+  try { raw = storage.getItem(LEGACY_KEY) } catch { return null }
+  if (raw === null) return { raw, keys: {} }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  } catch {
+    return null
+  }
+  return { raw, keys: parseLegacy(raw) }
+}
+
+export function openSecretsDb(timeoutMs: number = OPEN_TIMEOUT_MS, storage: Pick<Storage, 'getItem'> | null = globalStorage()): Promise<IDBDatabase> {
   const opening = openDatabase(SECRETS_DB, DB_VERSION, [
     [KEYS_STORE, 'lookupId'],
     [PLACES_STORE, 'id', [
@@ -92,9 +116,20 @@ export function openSecretsDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBD
     [PLACE_KEYS_STORE, 'lookupId'],
     [META_STORE, 'key'],
   ], (tx, oldVersion) => {
+    if (oldVersion < 1 || oldVersion >= 2) return
+    const meta = tx.objectStore(META_STORE)
     // A version 1 database has rows but no totals, or totals its build did
     // not keep: measured again once, at the next load.
-    if (oldVersion > 0 && oldVersion < 2) tx.objectStore(META_STORE).delete(TOTALS_META)
+    meta.delete(TOTALS_META)
+    // Version 1 copied the old list in and never noted what it held, so the
+    // next sync would take every key in it as new, a key forgotten since
+    // among them (review of #219, N3). The list as it is now is the baseline.
+    const r = meta.get(LEGACY_META)
+    r.onsuccess = () => {
+      if (r.result) return
+      const list = readLegacyList(storage)
+      if (list) meta.put({ key: LEGACY_META, value: { fingerprint: fingerprint(list.raw), ids: Object.keys(list.keys) } satisfies LegacySeen })
+    }
   })
   // An open can wait forever on a blocked upgrade or a browser that never
   // answers; the app is better off on the fallback than waiting with it. A
@@ -375,8 +410,11 @@ export async function evictPlaces(db: IDBDatabase, need: number, max: number): P
  * been done.
  */
 export async function migrateFromLocalStorage(db: IDBDatabase, storage: Pick<Storage, 'getItem'> | null): Promise<number | null> {
-  const raw = readLegacy(storage)
-  const legacy = Object.values(parseLegacy(raw))
+  // Unreadable now: nothing is copied and nothing recorded, so a later load copies it.
+  const list = readLegacyList(storage)
+  if (!list) return null
+  const raw = list.raw
+  const legacy = Object.values(list.keys)
   let copied: number | null = null
   await tallied(db, [KEYS_STORE], legacy.some((k) => k.source === 'cloud'), (t) => {
     t.req(t.store(META_STORE).get(MIGRATED_META), (done) => {
@@ -394,10 +432,6 @@ export async function migrateFromLocalStorage(db: IDBDatabase, storage: Pick<Sto
   return copied
 }
 
-function readLegacy(storage: Pick<Storage, 'getItem'> | null): string | null {
-  try { return storage?.getItem(LEGACY_KEY) ?? null } catch { return null }
-}
-
 /**
  * Take in the keys a tab on an older build added to the localStorage list
  * since it was last read (review of #219, S1).
@@ -409,13 +443,15 @@ function readLegacy(storage: Pick<Storage, 'getItem'> | null): string | null {
  * time are new, and each goes in only where the database has no row: a key
  * forgotten here that the old tab still lists is not brought back, and a row
  * here is never replaced by the list's copy. Then the fingerprint and ids are
- * recorded for next time. Runs after the migration, on every load; resolves
- * to how many keys it added.
+ * recorded for next time. A list that cannot be read, or is not valid JSON,
+ * is skipped and nothing is recorded. Runs after the migration, on every
+ * load; resolves to how many keys it added.
  */
 export async function syncLegacy(db: IDBDatabase, storage: Pick<Storage, 'getItem'> | null): Promise<number> {
-  const raw = readLegacy(storage)
-  const now = fingerprint(raw)
-  const listed = Object.values(parseLegacy(raw))
+  const list = readLegacyList(storage)
+  if (!list) return 0
+  const now = fingerprint(list.raw)
+  const listed = Object.values(list.keys)
   let added = 0
   await tallied(db, [KEYS_STORE], listed.some((k) => k.source === 'cloud'), (t) => {
     const meta = t.store(META_STORE)

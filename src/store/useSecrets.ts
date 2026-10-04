@@ -42,10 +42,10 @@ import { useShards } from './useShards'
 import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
 import {
-  LEGACY_KEY, describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
-  parseLegacy, readKeys, readTotals, recordPlace as recordPlaceRow, syncLegacy, writeKeys, type Totals,
+  describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
+  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, syncLegacy, writeKeys, type Totals,
 } from '../lib/secrets/db'
-import { clearFallback, noteFallback, readBought, readFallback, updateBought } from '../lib/secrets/backstop'
+import { clearForgets, dropApplied, noteFallback, readBought, readFallback, updateBought } from '../lib/secrets/backstop'
 import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
 import { placeOf, type ScanKey } from '../lib/secrets/places'
 
@@ -265,6 +265,13 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 
   hold: (incoming) => {
     if (incoming.length === 0) return
+    // Before anything else can fail: a bought key is never only in memory.
+    // Offered even when already held: buying a key again after another tab
+    // forgot it (which took it out of the backstop) must put it back, or the
+    // next load would apply that forget (review of #219, S1).
+    backstop(incoming, [])
+    // And a forget recorded without IndexedDB no longer applies to them.
+    clearForgets(incoming.map((k) => k.lookupId))
     const keys = { ...get().keys }
     const added: HeldKey[] = []
     for (const k of incoming) {
@@ -273,8 +280,6 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       added.push(k)
     }
     if (added.length === 0) return
-    // Before anything else can fail: a bought key is never only in memory.
-    backstop(added, [])
     setKeys(keys)
     saveKeys(added, [])
   },
@@ -554,6 +559,7 @@ function localStore(): Storage | null {
 async function adopt(opened: IDBDatabase, stored: HeldKey[], totals: Totals): Promise<void> {
   const keys: Record<string, HeldKey> = {}
   for (const k of stored) keys[k.lookupId] = k
+  const byId: Record<string, HeldKey> = { ...keys }
   const missing = new Map<string, HeldKey>()
   const take = (k: HeldKey): void => {
     if (keys[k.lookupId]) return
@@ -562,11 +568,22 @@ async function adopt(opened: IDBDatabase, stored: HeldKey[], totals: Totals): Pr
   }
   const early = useSecrets.getState().keys
   for (const k of Object.values(early)) take(k)
-  for (const k of Object.values(readBought())) take(k)
+  const bought = readBought()
+  for (const k of Object.values(bought)) take(k)
   const fallback = readFallback()
   for (const k of Object.values(fallback.held)) take(k)
-  // A fallback forget is older than anything this session held before load.
-  const forgets = new Set([...fallback.forgotten.filter((id) => !early[id]), ...forgottenEarly])
+  // A fallback forget no longer applies when the key was held again since:
+  // - held by this session before the load, which is later than any forget;
+  // - in the backstop, which every forget of a bought key empties, so it was
+  //   bought again after it (review of #219, S1);
+  // - a row here first held after the forget, as when a hop crosses the
+  //   region again, or this record survived a load whose write failed.
+  const stillApplies = (f: { id: string; at: number }): boolean => {
+    const row = byId[f.id]
+    return !early[f.id] && !bought[f.id] && !(row && row.at >= f.at)
+  }
+  const applied = fallback.forgotten.filter(stillApplies)
+  const forgets = new Set([...applied.map((f) => f.id), ...forgottenEarly])
   forgottenEarly.clear()
   for (const id of forgets) { delete keys[id]; missing.delete(id) }
   const places = memory.drain()
@@ -578,7 +595,10 @@ async function adopt(opened: IDBDatabase, stored: HeldKey[], totals: Totals): Pr
   }))
   backstop(Object.values(keys), [])
   const settled = (missing.size === 0 && forgets.size === 0) || await persist((db) => writeKeys(db, [...missing.values()], [...forgets]))
-  if (settled && (Object.keys(fallback.held).length > 0 || fallback.forgotten.length > 0)) clearFallback()
+  // Only what was read and applied leaves the record: a fallback tab still
+  // open may have added to it meanwhile (review of #219, N1). A forget that
+  // no longer applied is done with too.
+  if (settled && (Object.keys(fallback.held).length > 0 || fallback.forgotten.length > 0)) dropApplied(fallback)
   for (const { place, keys: placeKeys } of places) await persist((db) => recordPlaceRow(db, place, placeKeys))
   if (places.length > 0) placesChanged()
 }
@@ -595,8 +615,8 @@ function fallBackToLocal(reason: string): void {
   fallBack()
   const early = useSecrets.getState().keys
   const fallback = readFallback()
-  const keys = parseLegacy(localStore()?.getItem(LEGACY_KEY) ?? null)
-  for (const id of fallback.forgotten) delete keys[id]
+  const keys = readLegacyList(localStore())?.keys ?? {}
+  for (const f of fallback.forgotten) delete keys[f.id]
   for (const k of [...Object.values(fallback.held), ...Object.values(readBought()), ...Object.values(early)]) {
     if (!keys[k.lookupId]) keys[k.lookupId] = k
   }

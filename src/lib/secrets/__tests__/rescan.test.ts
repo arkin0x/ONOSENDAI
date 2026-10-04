@@ -155,6 +155,13 @@ describe('what is asked about, and in what batches', () => {
     expect(entry.origin).toBeUndefined()
   })
 
+  it('a place key with no plane, as the first build of the database stored them, is read and held in dataspace', async () => {
+    const { plane: _, ...noPlane } = placeKey(7)
+    const [[entry]] = await collect(allBatches({}, pages([noPlane as PlaceKey])))
+    expect(entry.promote?.plane).toBe(0)
+    expect(entry.origin?.plane).toBe(0)
+  })
+
   it('one place: its own keys, in its own plane', () => {
     const place: Place = { id: 'p', position: { x: '9', y: '17', z: '25' }, plane: 0, keys: [lookup(3), lookup(4)], first: 1, at: 1 }
     const entries = placeEntries(place, {}, [placeKey(3, 1), placeKey(4, 1)])
@@ -224,6 +231,13 @@ describe('what a rescan could not finish is said, not dropped', () => {
     expect(relay.calls.length).toBeLessThanOrEqual(3)
     expect(got.skipped.map((s) => s.relay)).toEqual(['wss://stubborn.test'])
     expect(got.skipped[0].why).toMatch(/ignores `until`/)
+  })
+
+  it('a full page of events from one second is reported: the rest of that second cannot be asked for', async () => {
+    for (let i = 0; i < RELAY_CAP + 100; i++) relay.events.push(bag(6, 4_000))
+    const got = await askAll([lookup(6)], ask)
+    expect(got.events).toHaveLength(RELAY_CAP)
+    expect(got.skipped).toEqual([{ relay: 'wss://relay.test', why: 'has more events in one second than one request returns, in one region', ids: 1 }])
   })
 
   it('a region past the page cap is reported, with everything up to it kept', async () => {

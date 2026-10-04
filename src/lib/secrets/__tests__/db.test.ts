@@ -121,11 +121,18 @@ describe('copying the localStorage keys into IndexedDB', () => {
     expect((await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId))[0].at).toBe(1_700_000_000)
   })
 
-  it('marks the copy done when there was nothing to copy, and survives storage that throws', async () => {
+  it('marks the copy done when there was nothing to copy', async () => {
     const db = await openSecretsDb()
-    const throwing = { getItem: () => { throw new Error('SecurityError') } }
-    expect(await migrateFromLocalStorage(db, throwing)).toBe(0)
-    expect(await migrateFromLocalStorage(db, null)).toBeNull()
+    expect(await migrateFromLocalStorage(db, storage({}))).toBe(0)
+    expect(await migrateFromLocalStorage(db, storage({}))).toBeNull()
+  })
+
+  it('records nothing from storage that throws or a list that is not JSON, and copies at the next readable load', async () => {
+    const db = await openSecretsDb()
+    expect(await migrateFromLocalStorage(db, { getItem: () => { throw new Error('SecurityError') } })).toBeNull()
+    expect(await migrateFromLocalStorage(db, storage({ [LEGACY_KEY]: '{not json' }))).toBeNull()
+    expect(await getMeta(db, MIGRATED_META)).toBeUndefined()
+    expect(await migrateFromLocalStorage(db, storage({ [LEGACY_KEY]: JSON.stringify({ ['aa'.repeat(32)]: key('aa') }) }))).toBe(1)
   })
 })
 

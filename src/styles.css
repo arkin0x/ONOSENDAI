@@ -1731,6 +1731,14 @@ kbd {
   overflow-y: auto;
 }
 
+/* The record is a scrolling column. Without this, a column taller than the
+   screen shrinks its children instead of scrolling: the message to a sliver
+   and TEST DISCOVERY to half its height. Each keeps its own height and the
+   record scrolls. */
+.detail > * {
+  flex-shrink: 0;
+}
+
 /* Pinned while the rest scrolls, so EXIT is always where the hand left it.
    The negative margins run the head's background out to the card's edges. */
 .detail__head {
@@ -1993,6 +2001,176 @@ kbd {
   line-height: 1.5;
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+.detail__eye--cashu { color: #f7931a; }
+
+/* ---------- Cashu card ----------
+ *
+ * A hidden message's Cashu token, in the MESSAGE and VIEWING panels: what it
+ * holds and whether it has been taken, never the token's text. Bitcoin
+ * orange, like every other ₿ mark. REDEEMED turns the card's edge, its status
+ * and its sentence red, so "already taken" cannot be missed at a glance.
+ * Buttons are 44px tall for a thumb, and nothing in the card is wider than
+ * the card, so a phone never scrolls sideways.
+ */
+.cashucard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 10px 12px 12px;
+  color: var(--fg);
+  background: rgba(247, 147, 26, 0.08);
+  border-left: 3px solid #f7931a;
+  border-radius: 3px;
+}
+
+/* The VIEWING panel spaces its children with a gap of its own. */
+.detail .cashucard { margin: 0; }
+
+.cashucard--redeemed {
+  background: rgba(255, 59, 107, 0.07);
+  border-left-color: var(--danger);
+}
+
+.cashucard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+}
+
+.cashucard__title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #f7931a;
+}
+
+.cashucard__glyph { font-size: 14px; }
+
+.cashucard__amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.cashucard--redeemed .cashucard__amount { color: var(--dim); }
+
+.cashucard__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.cashucard__status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+
+.cashucard__status--unclaimed { color: #05070d; background: var(--ok); border-color: var(--ok); }
+.cashucard__status--redeemed { color: #05070d; background: var(--danger); border-color: var(--danger); }
+.cashucard__status--pending, .cashucard__status--unreadable { color: var(--warn); }
+.cashucard__status--unknown { color: var(--fg); border-color: var(--dim); }
+.cashucard__status--checking {
+  color: var(--dim);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+.cashucard__line {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.cashucard--redeemed .cashucard__line { color: var(--danger); }
+
+.cashucard__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.cashucard__facts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cashucard__facts dt {
+  flex: 0 0 34px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.cashucard__facts dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cashucard__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cashucard__act {
+  flex: 1 1 140px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #f7931a;
+  text-decoration: none;
+  background: rgba(247, 147, 26, 0.08);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cashucard__act:hover { background: rgba(247, 147, 26, 0.18); }
+
+.cashucard__act.is-on {
+  color: #05070d;
+  background: #f7931a;
+  font-weight: 700;
+}
+
+.cashucard__note {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+/* The card's gap spaces the EXPLAIN pill like everything else in it. */
+.cashucard .explain { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cashucard__status--checking { animation: none; }
 }
 
 /* ---------- Deploy bar ----------

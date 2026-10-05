@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bytesToHex, hexToBytes } from 'cyberspace-core'
-import { cashuLabel, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve, readCashuToken, textWithoutToken } from '../cashu'
+import { cashuLabel, cashuTokensAsWritten, cashuWalletHref, checkCashuState, decodeCashuToken, decodeCbor, findCashuToken, hashToCurve, mintHost, readCashuToken, textWithoutToken } from '../cashu'
 
 const b64url = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
@@ -132,5 +132,63 @@ describe('readCashuToken: a coin is a coin whether or not it can be read', () =>
   it('a plain message is neither', () => {
     expect(readCashuToken('just a note')).toEqual({ raw: null, token: null })
     expect(readCashuToken(undefined)).toEqual({ raw: null, token: null })
+  })
+})
+
+describe('a token behind a cashu: link prefix', () => {
+  it('leaves the prefix out of the words, as part of the link and not of the message', () => {
+    expect(textWithoutToken(`for the drinks cashu:${V4}`)).toBe('for the drinks')
+    expect(textWithoutToken(`cashu://${V4} enjoy`)).toBe('enjoy')
+    expect(textWithoutToken(`cashu:${V4}`)).toBe('')
+  })
+  it('leaves the word cashu alone when no token follows it', () => {
+    expect(textWithoutToken('I like cashu: it is private')).toBe('I like cashu: it is private')
+  })
+})
+
+describe('textWithoutToken keeps the message\'s lines', () => {
+  it('closes up the gap the token leaves but keeps line breaks, as the panels draw them', () => {
+    expect(textWithoutToken(`Line one\nLine two  ${V4}\n\nsigned, me`)).toBe('Line one\nLine two\n\nsigned, me')
+    expect(textWithoutToken(`top\r\n${V4}\r\nbottom`)).toBe('top\n\nbottom')
+  })
+  it('never leaves more than one blank line where the token was', () => {
+    expect(textWithoutToken(`above\n\n${V4}\n\nbelow`)).toBe('above\n\nbelow')
+  })
+})
+
+describe('cashuTokensAsWritten: what COPY TOKEN copies', () => {
+  it('is the bare token, without the cashu: link prefix a wallet would not accept in its paste box', () => {
+    expect(cashuTokensAsWritten(`take it cashu:${V4}`)).toEqual([V4])
+    expect(cashuTokensAsWritten(`cashu://${V4}`)).toEqual([V4])
+    expect(cashuTokensAsWritten(`for the drinks ${V3} thanks`)).toEqual([V3])
+  })
+  it('keeps any = padding the writer pasted, where findCashuToken drops it', () => {
+    const padded = `${V3}==`
+    expect(cashuTokensAsWritten(`here ${padded}`)).toEqual([padded])
+    expect(findCashuToken(`here ${padded}`)).toBe(V3)
+  })
+  it('is every token, in order, since textWithoutToken takes every one out of the words', () => {
+    expect(cashuTokensAsWritten(`one for you ${V3}\nand one for your friend cashu:${V4}`)).toEqual([V3, V4])
+    expect(textWithoutToken(`one for you ${V3}\nand one for your friend cashu:${V4}`)).toBe('one for you\nand one for your friend')
+  })
+  it('is empty for a message without a token', () => {
+    expect(cashuTokensAsWritten('just a note')).toEqual([])
+    expect(cashuTokensAsWritten(undefined)).toEqual([])
+  })
+})
+
+describe('cashuWalletHref', () => {
+  it('is the token behind the cashu: scheme that wallet apps register', () => {
+    expect(cashuWalletHref(V4)).toBe(`cashu:${V4}`)
+  })
+})
+
+describe('mintHost', () => {
+  it('is the host of a mint URL, path dropped and port kept', () => {
+    expect(mintHost('https://mint.minibits.cash/Bitcoin')).toBe('mint.minibits.cash')
+    expect(mintHost('http://localhost:3338')).toBe('localhost:3338')
+  })
+  it('is the text as written when it is not a URL', () => {
+    expect(mintHost('not a url')).toBe('not a url')
   })
 })

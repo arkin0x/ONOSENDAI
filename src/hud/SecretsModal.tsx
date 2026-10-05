@@ -206,11 +206,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                   onClick={() => { void useSecrets.getState().buy(anchor, anchorPlane, buyHeight) }}
                 >{buying ? (buying.status === 'submitting' ? 'ASKING' : 'COMPUTING') : `BUY${price !== null ? ` · ${price} SATS` : ''}`}</button>
               </div>
-              <span className="cloud__profile-note">
-                {buying
-                  ? `HOSAKA is computing the 2^${buying.height} cube around you. It lands in this list when it is done.`
-                  : `Three axis trees at 2^${buyHeight}, which is a hop's work at that height and is priced as one. Paid from your HOSAKA balance.`}
-              </span>
+              {buying
+                ? <span className="cloud__profile-note">HOSAKA is computing the 2^{buying.height} cube around you. It lands in this list when it is done.</span>
+                : <Explanation>Three axis trees at 2^{buyHeight}, which is a hop's work at that height and is priced as one. Paid from your HOSAKA balance.</Explanation>}
               {buyError && <span className="secrets__error">{buyError}</span>}
             </div>
           )}
@@ -225,7 +223,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 onClick={() => { void rescanAll().catch(() => { /* the status carries the error */ }) }}
               >{rescan?.running ? `ASKING ${rescan.done}/${rescan.requests}` : 'RESCAN ALL'}</button>
             </div>
-            <span className="cloud__profile-note">
+            <Explanation>
               Asks the relays what is hidden under every key kept here: the {list.length} held
               key{list.length === 1 ? '' : 's'} below and the {storage.placeKeys} cube key{storage.placeKeys === 1 ? '' : 's'} of
               the scanned places, each lookup id asked once and {RESCAN_BATCH} to a request (about {requests} request{requests === 1 ? '' : 's'}).
@@ -234,7 +232,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               under, and a place key that opens something becomes a held key. A relay returns only so
               many events to one request, so a request that comes back that full is split and asked
               again until nothing is cut off.
-            </span>
+            </Explanation>
             {rescan && !rescan.running && rescan.error === null && (
               <span className="secrets__result">
                 Asked about {rescan.asked} key{rescan.asked === 1 ? '' : 's'}: {rescan.found} item{rescan.found === 1 ? '' : 's'} opened, {rescan.fresh} new to this device
@@ -261,14 +259,14 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               <span className="secrets__gap" />
               {list.length > 0 && <button className="secrets__forget-all" onClick={() => setForgetAll(true)}>FORGET ALL KEYS</button>}
             </div>
-            <span className="cloud__profile-note">
+            <Explanation>
               The keys this device holds: ones that opened something where a scan ran, the regions
               your hops crossed, and keys bought from HOSAKA. They are drawn in the scene and kept
               until you forget them. If storage passes its budget, opened and crossed keys go,
               oldest first, only after every scanned place has gone; bought keys never do. Every
               bought key is also copied to a small backstop in localStorage, so a key you paid for
               survives a visit where IndexedDB failed.
-            </span>
+            </Explanation>
 
             {list.length > 1 && (
               <div className="secrets__sort" role="radiogroup" aria-label="Order">
@@ -339,7 +337,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               <span className="secrets__gap" />
               {storage.places > 0 && <button className="secrets__forget-all" onClick={() => setForgetPlaces(true)}>FORGET ALL PLACES</button>}
             </div>
-            <span className="cloud__profile-note">
+            <Explanation>
               Every spot you have stood on at the head of your own chain, meaning where your
               latest committed move left you, with the keys of the
               {` ${SCAN_MAX_HEIGHT + 1} `}cubes around it (sides of 2^0 to 2^{SCAN_MAX_HEIGHT} gibsons) that the
@@ -349,7 +347,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               standing on the same spot again moves it to the top rather than adding it twice.
               Keys that nearby places share are stored once. If storage passes its budget, places
               are the first to go, the one stood on longest ago first.
-            </span>
+            </Explanation>
 
             <ul className="secrets__list">
               {places.rows.map((p) => {
@@ -473,35 +471,46 @@ function usePlacePages(version: number, mode: SecretsStorage['mode']): { rows: P
 }
 
 /**
- * Where these are kept and how safe that is, in a sentence or two. The first
- * thing in the list rather than behind EXPLAIN: whether the browser may clear
- * your keys is a status, not background. Not pinned above the list, where on
- * a phone it took a third of the card.
+ * Where these are kept and how safe that is. The first thing in the list, and
+ * in view: whether the browser may clear your keys is a status, not
+ * background. Only that status is in view, in one line; why, and what to do
+ * about it, sits behind EXPLAIN (arkinox, 2026-10-05: "These explanations are
+ * too large. Put them into explain pill buttons"). A failed save stays in view.
  */
 function StorageNote({ storage }: { storage: SecretsStorage }): JSX.Element {
   const safari = 'Safari, for one, clears a site\'s storage after 7 days without a visit unless the app is on the home screen.'
-  let text: string
+  const clearable = 'The browser may clear this storage.'
+  let status: string
+  let why: string | null = null
   let safe = false
   if (storage.mode === 'loading') {
-    text = 'Opening this device\'s storage for region keys.'
+    status = 'Opening this device\'s storage for region keys.'
   } else if (storage.mode === 'local') {
-    text = `Kept in localStorage, not IndexedDB. ${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so this list holds ${SECRETS_MAX} keys: every bought key always stays, and past ${SECRETS_MAX} the oldest opened and crossed keys are dropped to make room. The keys you hold or forget on this visit are noted in localStorage and applied to IndexedDB the next time it opens. Scanned places last only until this page closes.`
+    status = `Kept in localStorage, not IndexedDB: at most ${SECRETS_MAX} keys, and scanned places last only until this page closes.`
+    why = `${storage.reason ?? ''} Keys will not be kept beyond this browser's small localStorage, a few megabytes, so this list holds ${SECRETS_MAX} keys: every bought key always stays, and past ${SECRETS_MAX} the oldest opened and crossed keys are dropped to make room. The keys you hold or forget on this visit are noted in localStorage and applied to IndexedDB the next time it opens.`
   } else if (storage.persisted === 'granted') {
     safe = true
-    text = 'Protected: the browser agreed to keep this storage (navigator.storage.persist), so it will not clear it to make room. Clearing this site\'s data in the browser\'s settings still removes it.'
+    status = 'Protected: the browser agreed to keep this storage.'
+    why = 'The browser was asked to keep it (navigator.storage.persist) and agreed, so it will not clear it to make room. Clearing this site\'s data in the browser\'s settings still removes it.'
   } else if (storage.persisted === 'unsupported') {
-    text = `This browser has no navigator.storage.persist, so there is no way to ask it to protect this storage, and it may clear it. ${safari}`
+    status = clearable
+    why = `This browser has no navigator.storage.persist, so there is no way to ask it to protect this storage. ${safari}`
   } else if (storage.persisted === 'denied') {
-    text = `The browser may clear this storage. It was asked to keep it (navigator.storage.persist) and did not agree, which leaves it free to clear this site's storage when space runs low or the site goes unvisited. ${safari}`
+    status = clearable
+    why = `It was asked to keep it (navigator.storage.persist) and did not agree, which leaves it free to clear this site's storage when space runs low or the site goes unvisited. ${safari}`
   } else {
-    text = `The browser may clear this storage. Protection is asked for the first time something is saved on a visit, and until a browser agrees it is free to clear this site's storage. ${safari}`
+    status = clearable
+    why = `Protection is asked for the first time something is saved on a visit, and until a browser agrees it is free to clear this site's storage. ${safari}`
   }
   return (
-    <span className={`cloud__profile-note secrets__storage ${safe ? 'is-safe' : 'is-risk'}`}>
-      {text}
-      {storage.error && ` The last save failed (${storage.error}); what is listed here is still held until the page closes.`}
-      {storage.backstopError && ` A bought key could not be copied to the backstop in localStorage (${storage.backstopError}). It is still held here, but a visit where IndexedDB fails would not have it; the copy is tried again with the next bought key and at the next load.`}
-    </span>
+    <div className="secrets__storage-wrap">
+      <span className={`cloud__profile-note secrets__storage ${safe ? 'is-safe' : 'is-risk'}`}>
+        {status}
+        {storage.error && ` The last save failed (${storage.error}); what is listed here is still held until the page closes.`}
+        {storage.backstopError && ` A bought key could not be copied to the backstop in localStorage (${storage.backstopError}). It is still held here, but a visit where IndexedDB fails would not have it; the copy is tried again with the next bought key and at the next load.`}
+      </span>
+      {why && <Explanation>{why}</Explanation>}
+    </div>
   )
 }
 
@@ -511,9 +520,7 @@ function ShowMore({ shown, total, what, onMore }: { shown: number; total: number
   return (
     <div className="secrets__more">
       <button type="button" className="secret__act" onClick={onMore}>SHOW {Math.min(PAGE, total - shown)} MORE</button>
-      <span className="cloud__profile-note">
-        {total - shown} more {what} not shown. The list draws {PAGE} at a time so a long one stays quick to open and scroll.
-      </span>
+      <span className="cloud__profile-note">{total - shown} more {what} not shown.</span>
     </div>
   )
 }

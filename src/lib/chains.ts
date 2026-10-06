@@ -145,7 +145,9 @@ export function markPartial(answers: RelayAnswer[]): RelayAnswer[] {
  * at once, and the chain is asked again only if a newer spawn turned up.
  * `have` is what the caller already holds, which fills holes without asking:
  * your own chain's events, so a look before a commit asks only for what is
- * newer. Resolves to what was gathered and whether a hole is left.
+ * newer. It never decides which chain is asked for: that is the relays'
+ * newest spawn alone. Resolves to what was gathered and whether a hole is
+ * left.
  */
 async function gatherChain<T>(
   ask: (f: Filter) => Promise<T>,
@@ -160,7 +162,12 @@ async function gatherChain<T>(
   if (knownSpawnId) {
     const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainFilter(pubkey, knownSpawnId))])
     got = combine(spawns, chain)
-    spawnId = newestSpawnId([...have, ...eventsOf(got)])
+    // The relays' newest spawn, from what the relays hold and nothing else.
+    // A chain held on this device has a newer spawn than any on the relays
+    // (it was signed before they could answer), and choosing from it here
+    // would never ask for the relay chain at all: the held-chain prompt
+    // would show that chain as a bare spawn and offer to replace it.
+    spawnId = newestSpawnId(eventsOf(got))
     if (spawnId && spawnId !== knownSpawnId) got = combine(got, await ask(chainFilter(pubkey, spawnId)))
   } else {
     got = await ask(spawnsFilter(pubkey))

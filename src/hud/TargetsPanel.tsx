@@ -136,8 +136,9 @@ export function TargetsPanel(): JSX.Element {
           <li key={t.pubkey} className="targets__row">
             <span className="targets__dot" style={{ background: targetColor(t.pubkey), boxShadow: `0 0 6px ${targetColor(t.pubkey)}` }} />
             <ProfileBadge pubkey={t.pubkey} fallbackName={t.name} />
-            <span className={`targets__status targets__status--${t.status}`} title={t.lastActive ? formatStamp(t.lastActive) : undefined}>
-              {t.status === 'live' && t.lastActive ? formatAgo(t.lastActive, now)
+            <span className={`targets__status targets__status--${t.status}`} title={t.status === 'partial' ? 'The relays are missing part of their chain, so they are placed where it reaches before the gap, which may not be where they are.' : t.lastActive ? formatStamp(t.lastActive) : undefined}>
+              {t.status === 'partial' ? 'PART OF CHAIN'
+                : t.status === 'live' && t.lastActive ? formatAgo(t.lastActive, now)
                 : t.status === 'resolving' ? 'FINDING'
                   : t.status === 'spawn' ? 'AT SPAWN'
                     : 'RELAY?'}

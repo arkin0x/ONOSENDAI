@@ -273,9 +273,15 @@ export function ChainPanel(): JSX.Element {
         starts a new chain at your spawn point, and the game decides what
         leaving without an exit means.
         <br /><br />
-        On the chain explorer's rail, every action is a tick: pink ticks are a
-        game's actions, its entry and exit included, and short grey ticks are
-        skipped or broken actions, which are on the chain but move nobody.
+        On the chain explorer's rail, every action is a tick. A full-height
+        tick is your spawn or one of your moves. A pink tick is one of a game's
+        actions, its entry and exit included; none of them moves you through
+        cyberspace. A short grey tick is an action no verifier counts as a
+        move: a SKIPPED action, which leaves you where you were; a BROKEN action
+        that is out of place or malformed, which also leaves you where you
+        were; or a BROKEN action that starts from somewhere the chain was not,
+        which is drawn where it claims to go even though no verifier accepts
+        it.
       </Explanation>
     </section>
   )

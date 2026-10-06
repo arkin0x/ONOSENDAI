@@ -246,7 +246,12 @@ export interface SpectateState {
   actions: ActionEvent[]
   /** created_at of their newest action; null when the relay has none. */
   lastActive: number | null
-  status: 'loading' | 'live' | 'empty' | 'error'
+  /**
+   * `partial`: the relays hold this chain with a stretch missing (chains.ts
+   * ChainGapError), so it is shown up to the hole, and its head may be later
+   * than what is drawn.
+   */
+  status: 'loading' | 'live' | 'empty' | 'error' | 'partial'
   /** The view you had before spectating, put back when it ends. */
   returnView: Quaternion
 }
@@ -470,7 +475,8 @@ export interface TrackedTarget {
   position: Position
   plane: Plane
   lastActive: number | null
-  status: 'resolving' | 'live' | 'spawn' | 'error'
+  /** `partial`: placed from their chain up to a stretch the relays are missing, which may not be their head. */
+  status: 'resolving' | 'live' | 'spawn' | 'error' | 'partial'
 }
 
 /** Hyperspace transit (DECK-0001 v3): the identity has boarded and not yet arrived. */
@@ -714,7 +720,7 @@ export interface CyberspaceState {
   /** Start following a pubkey: anchors on its spawn coordinate until its chain arrives. */
   beginSpectate: (pubkey: string) => void
   /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
-  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
+  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error' | 'partial') => void
   /** Back to your own head. */
   endSpectate: () => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
@@ -736,7 +742,7 @@ export interface CyberspaceState {
   removeTarget: (pubkey: string) => void
   toggleTarget: (pubkey: string, name?: string | null) => void
   /** A target's chain, fetched or updated: its head becomes the position. */
-  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
+  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error' | 'partial') => void
   /** Fold relay events for THIS identity into the live chain, adopting a newer
    * one from another machine. The self-sync loop and login both feed this. */
   adoptChain: (events: NostrEvent[]) => void
@@ -2363,9 +2369,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   finishProof: async (msg) => {
-    if (msg.type !== 'done' || msg.id !== requestId) return
+    // Read and cleared before anything can return, so a stale proof never
+    // leaves a RESUME's fresh look armed for the next signing.
     const resumed = signingResumed
     signingResumed = false
+    if (msg.type !== 'done' || msg.id !== requestId) return
 
     // The chain as it stands now, not as it stood when the proof started.
     // Relay events held back while it computed are folded first; a proof that
@@ -2376,6 +2384,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
       if (msg.id !== requestId) return
       foldNow(fresh)
+      // The live feed kept delivering while the look was out.
+      foldDeferred()
     }
     // A game entered meanwhile (a hop now would be a base action inside it,
     // spec §8.11.4 rule 3), a choice between two chains waiting, or a head
@@ -2445,6 +2455,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A remote signer can take seconds; a cancel or respawn may have landed
     // while it was thinking. If so this receipt is for a chain that is gone.
     if (msg.id !== requestId) return
+    // The live feed kept delivering while the signer thought. What arrived is
+    // folded now, before the signed event joins the chain: if it moved the
+    // head or entered a game, the signed event is discarded unpublished, as a
+    // proof refused before signing would have been.
+    foldDeferred()
+    const refusedNow = whyNoMove(get().actions())
+    if (refusedNow) { refuseSigning(msg, refusedNow, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (get().prevEventId !== prevEventId) { headMovedUnder(); return }
 
     const now = get()
     const stats: ChainStats = {
@@ -3094,7 +3113,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           position: head?.position ?? spawn.position,
           plane: head?.plane ?? spawn.plane,
           lastActive: head?.createdAt ?? null,
-          status: head ? 'live' : status ?? 'spawn',
+          status: head ? (status === 'partial' ? 'partial' : 'live') : status ?? 'spawn',
         },
       },
     })

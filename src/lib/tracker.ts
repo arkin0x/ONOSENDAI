@@ -8,7 +8,7 @@
  * publisher and the spectator are: subscriptions outlive components.
  */
 
-import { fetchChainEvents, mergeEvents, watchAuthor } from './chains'
+import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import type { NostrEvent } from './events'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -17,11 +17,13 @@ let started = false
 
 async function track(pubkey: string): Promise<void> {
   let events: NostrEvent[] = []
+  // Set when the relays hold the chain with a stretch missing (spectator.ts).
+  let partial = false
   const since = Math.floor(Date.now() / 1000) - 60
   const close = watchAuthor(pubkey, since, (ev) => {
     if (!subs.has(pubkey)) return
     events = mergeEvents(events, [ev])
-    useCyberspace.getState().setTargetChain(pubkey, events)
+    useCyberspace.getState().setTargetChain(pubkey, events, partial ? 'partial' : undefined)
   })
   subs.set(pubkey, close)
   try {
@@ -29,8 +31,15 @@ async function track(pubkey: string): Promise<void> {
     if (!subs.has(pubkey)) return
     events = mergeEvents(fetched, events)
     useCyberspace.getState().setTargetChain(pubkey, events)
-  } catch {
-    if (subs.has(pubkey)) useCyberspace.getState().setTargetChain(pubkey, events, 'error')
+  } catch (err) {
+    if (!subs.has(pubkey)) return
+    if (err instanceof ChainGapError) {
+      partial = true
+      events = mergeEvents(err.events, events)
+      useCyberspace.getState().setTargetChain(pubkey, events, 'partial')
+      return
+    }
+    useCyberspace.getState().setTargetChain(pubkey, events, 'error')
   }
 }
 

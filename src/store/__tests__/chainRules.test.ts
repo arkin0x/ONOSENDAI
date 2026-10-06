@@ -15,9 +15,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** What the relays hold for the fresh look before signing (finishProof); nothing by default. */
 let relayHolds: NostrEvent[] = []
+/** Run while the fresh look is out, as the live feed would deliver meanwhile. */
+let duringLook: (() => void) | null = null
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
-  fetchChainEvents: async () => relayHolds,
+  fetchChainEvents: async () => { duringLook?.(); return relayHolds },
 }))
 
 if (typeof localStorage === 'undefined') {
@@ -82,6 +84,7 @@ beforeEach(async () => {
     }
   }
   relayHolds = []
+  duringLook = null
   useCyberspace.setState({
     ...fresh, events: [...fresh.events], published: { ...fresh.published }, positionHistory: [...fresh.positionHistory],
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,
@@ -279,6 +282,65 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     expect(S().prevEventId).not.toBe(theirs.id)
     useCyberspace.setState({ proof: { ...S().proof, status: 'idle' } })
     expect(S().prevEventId).toBe(theirs.id)
+  })
+
+  it('an event delivered while a remote signer thinks is folded before the signed event joins: it is discarded, not published', async () => {
+    computing()
+    const before = S().prevEventId
+    const theirs = theirHop()
+    const realSign = S().signEvent
+    useCyberspace.setState({ signEvent: async (t) => { S().adoptChain([theirs]); return realSign(t) } })
+    try {
+      await S().applyProofMessage(doneFromHead({ prevEventId: before }))
+    } finally {
+      useCyberspace.setState({ signEvent: realSign })
+    }
+    expect(S().events[S().events.length - 1].id).toBe(theirs.id)
+    expect(S().proof.message).toMatch(/^Your chain moved while this proof waited to be signed/)
+  })
+
+  it('a stale proof resumed and dropped leaves no fresh look armed for the next signing', async () => {
+    const stale = doneFromHead({ id: 999 })
+    const plan = {
+      target: S().position, ceilings: {}, summary: {}, done: 0,
+      step: { kind: 'hop', from: S().position, to: S().position, source: 'local' },
+      status: 'paused', message: null, awaiting: stale, startedAt: 0,
+    } as unknown as MovePlan
+    useCyberspace.setState({ plan })
+    S().resumePlan()
+    await new Promise((r) => setTimeout(r, 0))
+    useCyberspace.setState({ plan: null })
+    // A short local proof takes no look: a game entry the relays hold but the
+    // live feed never delivered is not seen, and the hop is signed.
+    const { enter } = enterGame()
+    relayHolds = [enter]
+    computing()
+    const before = S().prevEventId
+    await S().applyProofMessage(doneFromHead())
+    const last = S().events[S().events.length - 1]
+    expect(tagOf(last, 'A')).toBe('hop')
+    expect(tagOf(last, 'e', 'previous')).toBe(before)
+    expect(S().proof.status).toBe('done')
+  })
+
+  it('an event the live feed delivers while the fresh look is out is folded before signing', async () => {
+    computing()
+    const before = S().prevEventId
+    const { enter } = enterGame()
+    duringLook = () => S().adoptChain([enter])
+    // Folded before signing, so the signer is never asked for a hop that
+    // would only be thrown away (a pointless prompt on a remote signer).
+    const realSign = S().signEvent
+    let asked = 0
+    useCyberspace.setState({ signEvent: async (t) => { asked++; return realSign(t) } })
+    try {
+      await S().applyProofMessage(doneFromHead({ prevEventId: before, elapsedMs: 60_000 }))
+    } finally {
+      useCyberspace.setState({ signEvent: realSign })
+    }
+    expect(asked).toBe(0)
+    expect(S().proof).toMatchObject({ status: 'infeasible', message: GAME_HOLDS_MESSAGE })
+    expect(S().events[S().events.length - 1].id).toBe(enter.id)
   })
 
   it('an unchanged head still signs as before', async () => {

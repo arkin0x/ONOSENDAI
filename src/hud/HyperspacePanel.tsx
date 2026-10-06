@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Earth } from 'lucide-react'
 import { create } from 'zustand'
-import { coordToHex, coordToXyz, xyzToCoord, type Plane } from 'cyberspace-core'
+import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
@@ -114,7 +114,6 @@ export async function startRide(): Promise<void> {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
     return
   }
-  const { position, plane } = useCyberspace.getState()
   // Chained from a stop: the ride starts where the last one ended, and the
   // station set bound is not declared, because no station is computed (§5.2).
   let fromHeight: number
@@ -127,7 +126,12 @@ export async function startRide(): Promise<void> {
     // height, so it only becomes a fact of the trip once the destination is
     // fixed. Recompute it here, with the same function the panel's estimate
     // uses, rather than trusting anything cached from before the choice.
-    const here = xyzToCoord(position.x, position.y, position.z, plane)
+    // The station is the boarding's: computed from the coordinate the chain
+    // says you boarded at (the line state's, the boarding's C), plane bit
+    // included, never from `plane`, the plane lined up for the next move,
+    // which viewing EARTH sets to dataspace. A station computed in the wrong
+    // plane gives the wrong from_height, and the ride is invalid (§4.3).
+    const here = hexToCoord(line.coordHex)
     // DECK-0001 v3 §4.2 (as amended): the station set is bounded by a declared
     // as_of height, not the destination. Declare the tip we synced, so the
     // station is the genuine nearest stop; the bound rides in the event.
@@ -171,7 +175,8 @@ export async function startRide(): Promise<void> {
   markViewedStop(null)
   useCyberspace.getState().focusOn(
     { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n },
-    plane,
+    // The view, not the proof: the camera frames the plane in view.
+    useCyberspace.getState().plane,
     'THE RIDE',
     81,
   )
@@ -214,7 +219,9 @@ export function HyperspacePanel(): JSX.Element {
   const transit = useCyberspace((s) => s.transit)
   const events = useCyberspace((s) => s.events)
   const position = useCyberspace((s) => s.position)
-  const plane = useCyberspace((s) => s.plane)
+  // The plane you stand in, not the one lined up for the next move: the
+  // station estimate must match the boarding, which is built from the head.
+  const plane = useCyberspace((s) => s.headPlane)
   const atHead = useCyberspace((s) => s.atHead())
   // Where the chain head already puts you: boarded (an enter-hyperspace head)
   // or at a stop (a hyperjump head). Neither needs a BOARD.

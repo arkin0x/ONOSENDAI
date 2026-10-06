@@ -23,6 +23,8 @@ import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
+import { cashuLabel, readCashuToken } from '../lib/cashu'
+import { MessageText } from './CashuCard'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -54,7 +56,11 @@ export function DeploymentDetail(): JSX.Element | null {
   if (!dep) return null
 
   const isMessage = dep.type === 'message'
-  const name = isMessage ? messagePreview(dep.text ?? '', 22) : dep.shard?.name ?? 'shard'
+  // A message with a Cashu token is titled by what it holds, as its STASH row
+  // is, never by the first characters of the token.
+  const cashu = isMessage ? readCashuToken(dep.text) : { raw: null, token: null }
+  const coin = cashu.raw !== null
+  const name = coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : isMessage ? messagePreview(dep.text ?? '', 22) : dep.shard?.name ?? 'shard'
   const runTest = async (): Promise<void> => {
     setTest('testing')
     setTest(await useShards.getState().testDiscovery(dep.eventId))
@@ -66,12 +72,12 @@ export function DeploymentDetail(): JSX.Element | null {
   return (
     <div className="detail" role="dialog" aria-label={`Deployment ${name}`}>
       <div className="detail__head">
-        <span className="detail__eye" aria-hidden="true">{isMessage ? '✎' : '◇'}</span>
+        <span className={`detail__eye ${coin ? 'detail__eye--cashu' : ''}`} aria-hidden="true">{coin ? '₿' : isMessage ? '✎' : '◇'}</span>
         <span className="detail__title">VIEWING <strong>{name}</strong></span>
         <button className="detail__exit" onClick={exit}>EXIT</button>
       </div>
 
-      {isMessage && <div className="detail__message">“{dep.text}”</div>}
+      {isMessage && <MessageText text={dep.text ?? ''} words={(t) => <div className="detail__message">“{t}”</div>} />}
 
       <div className="detail__grid">
         <Field label="kind" value={isMessage ? 'message (kind 1)' : dep.ref ? 'shard (kind 33331, by reference)' : 'shard (kind 3330)'} />

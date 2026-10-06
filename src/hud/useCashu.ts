@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { checkCashuState, decodeCashuToken, readCashuToken, type CashuState, type CashuToken } from '../lib/cashu'
+import { checkCashuState, decodeCashuToken, mintHost, readCashuToken, type CashuState, type CashuToken } from '../lib/cashu'
 
 const RECHECK_MS = 60_000
 const cache = new Map<string, { state: CashuState; at: number; pending: Promise<CashuState> | null }>()
@@ -72,10 +72,6 @@ export interface ComposeVerdict {
   tone: 'ok' | 'warn' | 'dim'
 }
 
-function hostOf(mint: string): string {
-  try { return new URL(mint).host } catch { return mint }
-}
-
 /**
  * Whether a composed message may be placed, and what to say under the box.
  *
@@ -93,7 +89,7 @@ export function composeVerdict(settled: boolean, view: CashuView): ComposeVerdic
   if (!view.found) return { ready: true, note: null, tone: 'dim' }
   if (!view.token) return { ready: false, tone: 'warn', note: 'This cashu token will not decode: it is cut short or malformed. Fix it or take it out before placing.' }
   const sats = `${view.token.amount.toLocaleString()} ${view.token.unit}`
-  const host = hostOf(view.token.mint)
+  const host = mintHost(view.token.mint)
   switch (view.state) {
     case 'checking': return { ready: false, tone: 'dim', note: `Asking ${host} about this ${sats} token…` }
     case 'unclaimed': return { ready: true, tone: 'ok', note: `${sats}, unclaimed at ${host}.` }

@@ -26,6 +26,8 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
+import { findCashuToken, textWithoutToken } from '../lib/cashu'
+import { MessageText } from './CashuCard'
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -53,10 +55,15 @@ export function SecretModal(): JSX.Element | null {
     useCyberspace.getState().focusItem(item.at, item.plane, item.type === 'message' ? name : item.shard?.name ?? 'shard', item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
   const watch = (): void => { close(); void spectate(author) }
+  // A message with a Cashu token in it copies only the words around the
+  // token: the token has its own COPY TOKEN on the card, and a message that
+  // is nothing but a token has no words, so it offers no COPY TEXT at all.
+  const coin = item.type === 'message' && findCashuToken(item.text) !== null
+  const words = coin ? textWithoutToken(item.text) : item.text ?? ''
   // A shard copies into your Stash as a model; a message copies its text.
   const copy = (): void => {
     if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
-    else if (item.text) void navigator.clipboard?.writeText(item.text)
+    else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
   }
@@ -72,7 +79,7 @@ export function SecretModal(): JSX.Element | null {
         </div>
 
         {item.type === 'message' ? (
-          <blockquote className="secret__message">{item.text}</blockquote>
+          <MessageText text={item.text ?? ''} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
@@ -112,9 +119,11 @@ export function SecretModal(): JSX.Element | null {
 
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo}>GO TO IT</button>
-          <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
-            {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO STASH' : 'COPY TEXT'}
-          </button>
+          {(!coin || words) && (
+            <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your Stash' : coin ? 'Copy the words around the token' : 'Copy the text'}>
+              {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO STASH' : 'COPY TEXT'}
+            </button>
+          )}
           {!mine && (
             <>
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}>{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>

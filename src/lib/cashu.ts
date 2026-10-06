@@ -27,15 +27,63 @@ export type CashuState = 'unclaimed' | 'redeemed' | 'pending' | 'unknown'
 const TOKEN = /cashu[AB][A-Za-z0-9_\-+/=]{16,}/
 
 /**
+ * A token with the `cashu:` link prefix a writer may have pasted in front of
+ * it (`cashu:cashuB...`, or `cashu://cashuB...`). The prefix is part of the
+ * link, not of the token, so it leaves the text with the token.
+ */
+const TOKEN_WITH_SCHEME = new RegExp(`(?:cashu:(?://)?)?${TOKEN.source}`, 'g')
+
+/**
  * What a message says once its token is taken out.
  *
  * A token can sit anywhere in the text, and usually has words around it: "for
  * the drinks" and then two thousand characters of base64. Those words are the
  * message and the base64 is the money, so they are drawn as different things.
+ * The words keep their line breaks, since the panels draw a message with its
+ * lines as written; only the spaces the token leaves behind are closed up.
  */
 export function textWithoutToken(text: string | null | undefined): string {
   if (!text) return ''
-  return text.replace(new RegExp(TOKEN.source, 'g'), '').replace(/\s+/g, ' ').trim()
+  return text
+    .replace(TOKEN_WITH_SCHEME, '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/**
+ * Every token in a text, in order, exactly as written, for copying: any `=`
+ * padding kept, and without a `cashu:` link prefix in front of it. Every one,
+ * not the first, because textWithoutToken takes them all out of the words:
+ * a second token that got no card of its own would vanish from the panel.
+ *
+ * Wallets paste the bare token (`cashuB...`) into their receive screen; the
+ * `cashu:` prefix belongs to links, so a message that wrote
+ * `cashu:cashuB...` copies as `cashuB...`. The padding stays because this is
+ * what the writer pasted, and some decoders insist on it. findCashuToken
+ * drops the padding, which is right for recognizing a token and wrong for
+ * handing one to a wallet.
+ */
+export function cashuTokensAsWritten(text: string | null | undefined): string[] {
+  if (!text) return []
+  return text.match(new RegExp(TOKEN.source, 'g')) ?? []
+}
+
+/**
+ * A link that opens a token in a Cashu wallet app. Wallets that receive
+ * tokens (Minibits among them) register the `cashu:` URI scheme; with none
+ * installed, the link does nothing or the system says it cannot open it.
+ */
+export function cashuWalletHref(token: string): string {
+  return `cashu:${token}`
+}
+
+/** A mint's host ("mint.example"), or the URL as written when it is not one. */
+export function mintHost(mint: string): string {
+  try { return new URL(mint).host || mint } catch { return mint }
 }
 
 /** The first Cashu token in a text, or null. Found anywhere in it. */

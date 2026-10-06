@@ -233,6 +233,8 @@ describe('cloudProofResponse', () => {
     expect(msg).toEqual({
       type: 'done', id: 7, mode: 'hop', elapsedMs: 5000, proofHash: 'aa'.repeat(32), terrainK: 11,
       lca: { x: 13, y: 0, z: 0 }, totalOps: 0, source: 'cloud', jobId: 'job-1', costMsats: 1234, lookupId: 'cc'.repeat(32),
+      // The head the job was seeded by: the store signs onto no other.
+      prevEventId: base.prevEventId,
     })
   })
 

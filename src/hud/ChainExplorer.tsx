@@ -36,13 +36,13 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound, MessageCircle } from 'lucide-react'
+import { KeyRound, MessageCircle, TriangleAlert } from 'lucide-react'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
-import { actionLabel } from '../lib/events'
+import { actionKind, actionLabel } from '../lib/events'
 import { nip19 } from 'nostr-tools'
 import { ConfirmModal } from './ConfirmModal'
 import { useActionComments } from '../hooks/useSocial'
@@ -293,7 +293,7 @@ export function ChainExplorer(): JSX.Element {
                 const role = actions[i]?.role
                 const kind = i === 0 ? 'explorer__tick--spawn'
                   : role === 'enter' || role === 'virtual' || role === 'exit' ? 'explorer__tick--game'
-                  : role === 'skipped' || role === 'broken' ? 'explorer__tick--quiet' : ''
+                  : role === 'skipped' || role === 'broken' || actions[i]?.breaks !== undefined ? 'explorer__tick--quiet' : ''
                 return <span key={i} className={`explorer__tick ${kind}`} style={{ left: `${t * 100}%` }} />
               })}
               <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
@@ -305,7 +305,7 @@ export function ChainExplorer(): JSX.Element {
           </div>
 
           <div className="explorer__meta">
-            <span className={`explorer__type explorer__type--${action.role === 'base' ? action.type : action.role}`} title={action.name}>{actionLabel(action)}</span>
+            <span className={`explorer__type explorer__type--${actionKind(action)}`} title={action.breaks ?? action.name}>{actionKind(action) === 'broken' && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}{actionLabel(action)}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
             {/* A hop computes the region's Cantor root, which is the key to what
                 is hidden there; a sidestep computes no root at all. */}

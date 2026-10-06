@@ -332,8 +332,12 @@ body {
 /* An action this client does not recognize: on the chain and followed, but
  * it moves nobody, so it reads quieter than every move (spec §8.9). */
 .chainrows__type--skipped { color: var(--dim); font-style: italic; }
-/* Out of place or malformed: where a verifier says the chain stops. */
-.chainrows__type--broken { color: var(--danger); font-style: italic; }
+/* Out of place, malformed, or starting from the wrong place: where a
+ * verifier says the chain stops. Red with a warning glyph and a struck-red
+ * row, so it never reads as a game's pink. */
+.chainrows__type--broken { color: var(--danger); font-style: italic; font-weight: 700; }
+.chainrows__row--broken { background: rgba(255, 59, 107, 0.1); box-shadow: inset 2px 0 0 var(--danger); }
+.chainrows__warn { display: inline-block; vertical-align: -1px; margin-right: 4px; color: var(--danger); }
 
 .chainrows__id {
   font-size: 9px;
@@ -1334,6 +1338,9 @@ kbd {
 
 .avatars__type--spawn { color: var(--ok); }
 .avatars__type--sidestep { color: var(--sidestep); }
+/* Their newest action is a game's entry or exit (spec §8.11). */
+.avatars__type--enter,
+.avatars__type--exit { color: var(--game); }
 
 .avatars__when {
   font-size: 9px;
@@ -7156,6 +7163,10 @@ kbd {
   background: rgba(255, 176, 32, 0.08);
   border-left-color: var(--warn);
 }
+
+/* The chain is broken before its head (ChainPanel): the base notice's red,
+ * with the warning glyph inline. */
+.notice--broken .chainrows__warn { vertical-align: -2px; }
 
 /* A game holds the avatar (store GAME_HOLDS_MESSAGE): not an alarm, a fact. */
 .notice--game {

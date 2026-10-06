@@ -14,10 +14,12 @@ import { describe, it, expect } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import {
+  actionKind,
   actionLabel,
   actionLink,
   buildChain,
   chainHead,
+  firstBreak,
   lookBack,
   openBracket,
   parseAction,
@@ -237,5 +239,59 @@ describe('rules that look back see through skipped actions and brackets (§8.9 r
     expect(lookBack(chain, 3)?.id).toBe(enter.id)
     expect(lookBack(chain, 1)?.id).toBe(spawn.id)
     expect(lookBack(chain, 0)).toBeNull()
+  })
+})
+
+describe('an action that starts where the chain did not stand is broken (§8.9 rule 2, §8.11.5)', () => {
+  it('a hop whose c is not the last C: flagged, still drawn where it says, and named by firstBreak', () => {
+    const stray = hopEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: hexAt(at(7n)), to: at(8n), plane })
+    const chain = buildChain([spawn, hop1, stray])
+    expect(chain[2].role).toBe('base')
+    expect(chain[2].breaks).toMatch(/starts from/)
+    expect(chain[2].position).toEqual(at(8n))
+    expect(firstBreak(chain)).toMatchObject({ index: 2 })
+    expect(actionLabel(chain[2])).toBe('BROKEN · HOP')
+    expect(actionKind(chain[2])).toBe('broken')
+    expect(firstBreak(buildChain([spawn, hop1]))).toBeNull()
+  })
+
+  it('the 2026-10-06 boarding: the plane bit lost between a hop in ideaspace and the enter-hyperspace after it', () => {
+    // The real chain: a hop ending at ...d51b (plane 1), then a boarding
+    // whose c and C are ...d51a (plane 0). Same x, y and z; another place.
+    const p1 = { x: 11n, y: 22n, z: 33n }
+    const hopIdea = hopEvent({ pubkey: pk, createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, c: pk, to: p1, plane: 1 })
+    const dataHex = positionHex(p1, 0)
+    const board = actionEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hopIdea.id, name: 'enter-hyperspace', c: dataHex, C: p1, plane: 0, tags: [['proof', '0'.repeat(64)]] })
+    const chain = buildChain([spawn, hopIdea, board])
+    expect(chain[2].type).toBe('enter-hyperspace')
+    expect(firstBreak(chain)?.index).toBe(2)
+    expect(chain[2].breaks).toContain(dataHex.slice(-6))
+    expect(chain[2].breaks).toContain(positionHex(p1, 1).slice(-6))
+  })
+
+  it('an enter-virtual from somewhere the chain was not is broken, not a teleport into a game (S5)', () => {
+    const enter = enterVirtualEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: hexAt(at(40n)), inGame: inArena(0n), height: 8, game: GAME, plane })
+    const chain = buildChain([spawn, hop1, enter])
+    expect(chain[2].role).toBe('enter')
+    expect(firstBreak(chain)?.index).toBe(2)
+  })
+
+  it('a game move that does not start where the last one left the identity in the game is broken', () => {
+    const enter = enterVirtualEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: P1, inGame: inArena(0n), height: 8, game: GAME, plane })
+    const jump = virtualEvent({ pubkey: pk, createdAt: 1_021, genesisId: spawn.id, previousId: enter.id, name: 'move', c: positionHex(inArena(4n), plane), inGame: inArena(5n), plane })
+    const fine = virtualEvent({ pubkey: pk, createdAt: 1_021, genesisId: spawn.id, previousId: enter.id, name: 'move', c: positionHex(inArena(0n), plane), inGame: inArena(5n), plane })
+    expect(firstBreak(buildChain([spawn, hop1, enter, jump]))?.index).toBe(3)
+    expect(firstBreak(buildChain([spawn, hop1, enter, fine]))).toBeNull()
+  })
+
+  it('a hyperjump after a hop is broken (DECK-0001 §4.3), but not after a boarding seen through a game', () => {
+    const ride = (prev: NostrEvent, c: string): NostrEvent => actionEvent({
+      pubkey: pk, createdAt: 1_040, genesisId: spawn.id, previousId: prev.id, name: 'hyperjump', c, C: at(1n), plane,
+      tags: [['from_height', '1'], ['B', '2'], ['as_of', '2'], ['proof', '0'.repeat(64)], ['mp', '']],
+    })
+    expect(firstBreak(buildChain([spawn, hop1, ride(hop1, P1)]))?.action.type).toBe('hyperjump')
+    const board = actionEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, name: 'enter-hyperspace', c: P1, C: at(1n), plane, tags: [['proof', '0'.repeat(64)]] })
+    const wave = actionEvent({ pubkey: pk, createdAt: 1_030, genesisId: spawn.id, previousId: board.id, name: 'wave' })
+    expect(firstBreak(buildChain([spawn, hop1, board, wave, ride(wave, P1)]))).toBeNull()
   })
 })

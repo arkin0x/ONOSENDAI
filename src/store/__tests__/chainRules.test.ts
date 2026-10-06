@@ -11,7 +11,14 @@
  * chain invalid from that point for every verifier.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/** What the relays hold for the fresh look before signing (finishProof); nothing by default. */
+let relayHolds: NostrEvent[] = []
+vi.mock('../../lib/chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/chains')>()),
+  fetchChainEvents: async () => relayHolds,
+}))
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -25,7 +32,8 @@ if (typeof localStorage === 'undefined') {
 
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure'
 import { positionHex, type NostrEvent } from '../../lib/events'
-import { GAME_HOLDS_MESSAGE, useCyberspace } from '../useCyberspace'
+import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove, type MovePlan } from '../useCyberspace'
+import type { ProofResponse } from '../../workers/proof.worker'
 import { usePresence } from '../usePresence'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { actionEvent, enterVirtualEvent, exitVirtualEvent, virtualEvent } from '../../lib/__tests__/chainFixtures'
@@ -73,6 +81,7 @@ beforeEach(async () => {
       positionHistory: [...S().positionHistory], chain: S().chain,
     }
   }
+  relayHolds = []
   useCyberspace.setState({
     ...fresh, events: [...fresh.events], published: { ...fresh.published }, positionHistory: [...fresh.positionHistory],
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,
@@ -185,5 +194,115 @@ describe('presence places someone inside a game at the entry c', () => {
     const signed = finalizeEvent({ kind: template.kind, created_at: template.created_at, content: '', tags: template.tags }, sk) as NostrEvent
     usePresence.getState().ingest(signed)
     expect(Object.keys(usePresence.getState().people)).toHaveLength(0)
+  })
+})
+
+/** A finished hop proof from the current head to one gibson over, as the worker reports it. */
+function doneFromHead(over: Partial<Extract<ProofResponse, { type: 'done' }>> = {}): Extract<ProofResponse, { type: 'done' }> {
+  return {
+    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), terrainK: 8,
+    lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId, ...over,
+  }
+}
+
+/** Another device's hop from the current head. */
+function theirHop(): NostrEvent {
+  const s = S()
+  return actionEvent({
+    pubkey: s.identity.pubkey, createdAt: s.events[s.events.length - 1].created_at + 1, genesisId: s.genesisId,
+    previousId: s.prevEventId, name: 'hop', c: s.coordHex(), C: { ...s.position, y: s.position.y + 1n }, plane: s.plane,
+    tags: [['proof', '0'.repeat(64)]],
+  })
+}
+
+const computing = (): void => {
+  useCyberspace.setState({ pendingTarget: { ...S().position, x: S().position.x + 1n }, proof: { ...S().proof, status: 'computing' } })
+}
+
+describe('a finished proof is signed only onto the chain it was computed for (review of #224, B1 and S1)', () => {
+  it('B1: RESUME after a declined signature, with a game entered meanwhile, signs nothing', async () => {
+    const msg = doneFromHead()
+    const plan = {
+      target: { ...S().position, x: S().position.x + 5n }, ceilings: {}, summary: {}, done: 0,
+      step: { kind: 'hop', from: S().position, to: { ...S().position, x: S().position.x + 1n }, source: 'local' },
+      status: 'paused', message: 'Signature declined: no', awaiting: msg, startedAt: 0,
+    } as unknown as MovePlan
+    useCyberspace.setState({ plan })
+    const { enter } = enterGame()
+    S().adoptChain([enter])
+    const count = S().events.length
+    S().resumePlan()
+    await vi.waitFor(() => expect(S().plan?.status).toBe('failed'))
+    expect(S().plan?.message).toBe(GAME_HOLDS_MESSAGE)
+    expect(S().events).toHaveLength(count)
+    expect(S().prevEventId).toBe(enter.id)
+  })
+
+  it('S1: a game entry delivered while the proof computes is held, folded before signing, and refuses the hop', async () => {
+    computing()
+    const before = S().prevEventId
+    const { enter } = enterGame()
+    S().adoptChain([enter])
+    // Held back, not dropped: the head does not move under the proof.
+    expect(S().prevEventId).toBe(before)
+    await S().applyProofMessage(doneFromHead({ prevEventId: before }))
+    expect(S().prevEventId).toBe(enter.id)
+    expect(S().proof).toMatchObject({ status: 'infeasible', message: GAME_HOLDS_MESSAGE })
+    expect(S().events[S().events.length - 1].id).toBe(enter.id)
+  })
+
+  it('S1: a long proof looks at the relays before signing, and finds an entry the live feed never delivered', async () => {
+    computing()
+    const { enter } = enterGame()
+    relayHolds = [enter]
+    await S().applyProofMessage(doneFromHead({ elapsedMs: 60_000 }))
+    expect(S().proof).toMatchObject({ status: 'infeasible', message: GAME_HOLDS_MESSAGE })
+    expect(S().events[S().events.length - 1].id).toBe(enter.id)
+  })
+
+  it('a head that moved under the proof is not signed onto: the proof was seeded by the old head', async () => {
+    computing()
+    const before = S().prevEventId
+    const theirs = theirHop()
+    S().adoptChain([theirs])
+    await S().applyProofMessage(doneFromHead({ prevEventId: before }))
+    expect(S().prevEventId).toBe(theirs.id)
+    expect(S().proof.status).toBe('infeasible')
+    expect(S().proof.message).toMatch(/^Your chain moved while this proof waited to be signed/)
+    expect(S().events[S().events.length - 1].id).toBe(theirs.id)
+  })
+
+  it('what arrived while computing is folded when the proof ends any other way', () => {
+    computing()
+    const theirs = theirHop()
+    S().adoptChain([theirs])
+    expect(S().prevEventId).not.toBe(theirs.id)
+    useCyberspace.setState({ proof: { ...S().proof, status: 'idle' } })
+    expect(S().prevEventId).toBe(theirs.id)
+  })
+
+  it('an unchanged head still signs as before', async () => {
+    computing()
+    const before = S().prevEventId
+    await S().applyProofMessage(doneFromHead())
+    const hop = S().events[S().events.length - 1]
+    expect(tagOf(hop, 'e', 'previous')).toBe(before)
+  })
+})
+
+describe('whyNoMove: the one question every move asks', () => {
+  it('a game holds the avatar: refused; a broken chain: allowed while the switch is off', () => {
+    const { enter } = enterGame()
+    expect(whyNoMove(S().actions())).toBeNull()
+    const stray = actionEvent({
+      pubkey: S().identity.pubkey, createdAt: S().events[S().events.length - 1].created_at + 1, genesisId: S().genesisId,
+      previousId: S().prevEventId, name: 'hop', c: positionHex(arena, S().plane), C: arena, plane: S().plane, tags: [['proof', '0'.repeat(64)]],
+    })
+    S().adoptChain([stray])
+    expect(S().actions()[S().actions().length - 1].breaks).toBeDefined()
+    expect(whyNoMove(S().actions())).toBeNull()
+    useCyberspace.setState({ ...fresh, events: [...fresh.events] })
+    S().adoptChain([enter])
+    expect(whyNoMove(S().actions())).toBe(GAME_HOLDS_MESSAGE)
   })
 })

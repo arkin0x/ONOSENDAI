@@ -85,6 +85,7 @@ import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict }
 import {
   buildChain,
   chainHead,
+  firstBreak,
   openBracket,
   hopTemplate,
   positionHex,
@@ -171,7 +172,53 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
  * shows the game in the Proof chain panel.
  */
 export const GAME_HOLDS_MESSAGE =
-  'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. The Proof chain panel shows the game.'
+  'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
+
+/**
+ * THE SWITCH for refusing moves on a broken chain (review of #224, S2).
+ *
+ * A chain with a broken event before its head (events.ts firstBreak) is one
+ * every verifier treats as invalid from that event, so a move signed onto it
+ * is a move no verifier counts. Where an identity with an invalid chain
+ * stands is not settled yet (arkinox is ruling on it), so for now this client
+ * says so in the Proof chain panel and still moves. Set this to true to make
+ * every move (commit, route step, BOARD, RIDE, signing a finished proof)
+ * refuse with BROKEN_CHAIN_MESSAGE instead; whyNoMove is the one place that
+ * reads it.
+ */
+export const REFUSE_MOVES_ON_BROKEN_CHAIN = false
+
+export const BROKEN_CHAIN_MESSAGE =
+  'Your chain is broken before its head: one of its actions breaks a chain rule, and every verifier treats the chain as invalid from that action, so a move added after it is a move nobody counts. ONOSENDAI will not sign one. A respawn starts a new, valid chain at your spawn point. The Proof chain panel names the action and the rule it breaks.'
+
+/**
+ * Why this client will not sign a base action onto `chain` now, in words, or
+ * null when it may. Every way to move asks this one question.
+ */
+export function whyNoMove(chain: ActionEvent[]): string | null {
+  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
+  if (REFUSE_MOVES_ON_BROKEN_CHAIN && firstBreak(chain)) return BROKEN_CHAIN_MESSAGE
+  return null
+}
+
+/** Why a finished proof is not signed while a choice between two chains is waiting. */
+const CHOOSE_FIRST_MESSAGE = 'Another version of your chain arrived while this proof was computing. Choose which to keep first; the proof is kept, and RESUME signs it if your chain is still where it was.'
+
+/**
+ * The message for a proof whose head moved before it was signed: the work is
+ * seeded by the head it started from (spec §5.3), so signed onto any other
+ * head every check of it fails.
+ */
+const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
+
+/**
+ * Proofs that ran this long, were computed by HOSAKA, or waited on a
+ * declined signature get a fresh look at the relays before they are signed:
+ * the world had time to move. A shorter local proof relies on the live
+ * subscription, whose events are held back while it computes and folded in
+ * before signing (adoptChain).
+ */
+const FRESH_LOOK_AFTER_MS = 10_000
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
@@ -1077,11 +1124,15 @@ const HEAD_CHECK_MS = 1500
  * unreachable. Bounded on purpose: this runs in front of every commit, and
  * the answer is only ever used to avoid forking, never to permit moving.
  */
-async function freshHead(pubkey: string, genesisId: string): Promise<NostrEvent[]> {
+async function freshHead(pubkey: string, genesisId: string, have: NostrEvent[]): Promise<NostrEvent[]> {
   try {
     return await Promise.race([
-      // The genesis in hand lets the chain and the spawns be asked at once.
-      fetchChainEvents(pubkey, genesisId || undefined),
+      // The genesis in hand lets the chain and the spawns be asked at once,
+      // and the chain in hand fills every hole older than the relays' newest
+      // page, so this asks for what is newer and pages only when more than a
+      // page of it is new. A chain the relays return with a hole this cannot
+      // fill rejects, and reads as no answer, like a slow relay.
+      fetchChainEvents(pubkey, genesisId || undefined, have),
       new Promise<NostrEvent[]>((resolve) => { setTimeout(() => resolve([]), HEAD_CHECK_MS) }),
     ])
   } catch {
@@ -1204,6 +1255,34 @@ const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
 
 let requestId = 0
 
+/**
+ * Relay events for your own chain that arrived while a proof was computing.
+ * Folding them then would move the head under the proof, so they wait here
+ * and are folded the moment the proof is about to be signed or ends
+ * (foldDeferred). Dropping them, as this used to, lost a game's entry that
+ * arrived during a long HOSAKA job: it is never delivered again, and the
+ * finished hop forked against it.
+ */
+let deferred: NostrEvent[] = []
+/** True while foldDeferred or a signing look folds: adoptChain then folds even mid-proof. */
+let folding = false
+/** Set by RESUME on a kept proof: the signing that follows takes a fresh look first. */
+let signingResumed = false
+
+/** Fold `events` into your chain now, even while a proof is computing. */
+function foldNow(events: NostrEvent[]): void {
+  if (events.length === 0) return
+  folding = true
+  try { useCyberspace.getState().adoptChain(events) } finally { folding = false }
+}
+
+/** Fold whatever arrived while a proof was computing. */
+function foldDeferred(): void {
+  const held = deferred
+  deferred = []
+  foldNow(held)
+}
+
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
 // One collector at a time: the startup call and a just-landed hop can both ask.
@@ -1297,6 +1376,50 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     cloudAbort?.abort()
     cloudAbort = null
     cloudWaker = null
+  }
+
+  /**
+   * A finished proof that will not be signed now. A route stops: it fails
+   * outright when nothing can be signed (a game holds the avatar), and is
+   * paused with the proof kept when a choice may yet make it signable
+   * (`keep`). A single move just says why.
+   */
+  const refuseSigning = (msg: ProofResponse, message: string, keep: boolean): void => {
+    const { plan } = get()
+    set({
+      pendingTarget: null,
+      plan: plan ? { ...plan, status: keep ? 'paused' : 'failed', message, awaiting: keep ? msg : null } : null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message },
+    })
+  }
+
+  /**
+   * The head moved under a finished proof (HEAD_MOVED_MESSAGE). A route
+   * computes its step again from where the chain now stands, at once when
+   * this machine computes it, and on RESUME when HOSAKA would, because that
+   * costs sats again. A single move keeps its aim for the next commit.
+   */
+  const headMovedUnder = (): void => {
+    const { plan, position } = get()
+    if (!plan) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      return
+    }
+    const next = nextStep(position, plan.target, plan.ceilings)
+    if (!next) {
+      set({ plan: null, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Where you stand now is already the end of the route.` } })
+      return
+    }
+    if (next.source === 'cloud') {
+      set({
+        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} The next step is one HOSAKA computes, so RESUME pays for it again from where you stand now.` },
+        pendingTarget: null,
+        proof: IDLE_PROOF,
+      })
+      return
+    }
+    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} This step is being computed again from where you stand now.` } })
+    startPlanStep()
   }
 
   /** The cloud flow ended without a proof. The move does not happen; the message stays until X or the next commit. */
@@ -1895,9 +2018,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
-    // A game holds the avatar: nothing here may be signed (GAME_HOLDS_MESSAGE).
-    if (openBracket(get().actions())) {
-      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE } })
+    // A game holds the avatar, or (behind its switch) the chain is broken:
+    // nothing here may be signed (whyNoMove).
+    const noMove = whyNoMove(get().actions())
+    if (noMove) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove } })
       return
     }
 
@@ -1918,13 +2043,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // different one (does it have a chain at all?) and is answered below.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const fresh = await freshHead(get().identity.pubkey, get().genesisId)
+      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
       if (fresh.length > 0) get().adoptChain(fresh)
       // On a held chain, a relay chain does not move you: it raises the prompt.
       if (get().chainConflict) return
       // The look may have brought a game's entry: a game holds the avatar now.
-      if (openBracket(get().actions())) {
-        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE } })
+      const noMoveNow = whyNoMove(get().actions())
+      if (noMoveNow) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMoveNow } })
         return
       }
       if (get().prevEventId !== beforeHead) {
@@ -2114,6 +2240,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (plan.awaiting) {
       const msg = plan.awaiting
       set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      signingResumed = true
       void get().finishProof(msg)
       return
     }
@@ -2237,6 +2364,26 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   finishProof: async (msg) => {
     if (msg.type !== 'done' || msg.id !== requestId) return
+    const resumed = signingResumed
+    signingResumed = false
+
+    // The chain as it stands now, not as it stood when the proof started.
+    // Relay events held back while it computed are folded first; a proof that
+    // ran long, was paid for, or waited on a declined signature also takes
+    // the same bounded look at the relays a commit takes before computing.
+    foldDeferred()
+    if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) {
+      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
+      if (msg.id !== requestId) return
+      foldNow(fresh)
+    }
+    // A game entered meanwhile (a hop now would be a base action inside it,
+    // spec §8.11.4 rule 3), a choice between two chains waiting, or a head
+    // that moved: none of them is signed onto.
+    const refusal = whyNoMove(get().actions())
+    if (refusal) { refuseSigning(msg, refusal, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
@@ -2686,7 +2833,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (events.length === 0 || !genesisId || !prevEventId) return
     // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
     // The Hyperspace panel withholds BOARD and says why; this is the backstop.
-    if (openBracket(get().actions())) return
+    if (whyNoMove(get().actions())) return
     const head = events[events.length - 1]
     // Where the chain says you stand, plane bit included: the last recognized
     // action's C. Not `position` with `plane`: `plane` is the plane lined up
@@ -2729,8 +2876,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
     if (!head) return
-    // A game holds the avatar (GAME_HOLDS_MESSAGE): a ride is a base action.
-    if (openBracket(parsedChain(events))) throw new Error(GAME_HOLDS_MESSAGE)
+    // A game holds the avatar, or the chain is broken (whyNoMove): a ride is a base action.
+    const noRide = whyNoMove(parsedChain(events))
+    if (noRide) throw new Error(noRide)
     // From a boarding, or chained from the stop the last ride reached (§4.3):
     // either way the head is on the line, and `c` is its coordinate.
     const line = lineStateOf(parsedChain(events))
@@ -2844,8 +2992,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (conflict && conflict !== cur.chainConflict) set({ chainConflict: conflict })
       return
     }
-    // A local commit owns the head while it computes; a relay echo must not race it.
-    if (cur.proof.status === 'computing') return
+    // A local commit owns the head while it computes; a relay echo must not
+    // race it. What arrives is held back, not dropped (foldDeferred).
+    if (cur.proof.status === 'computing' && !folding) {
+      deferred = deferred.concat(mine)
+      return
+    }
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
     // offline). Folding now would let the fork rule pick a winner in silence,
@@ -3477,6 +3629,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the
 // localStorage calls above are wrapped.
+// A proof that ends any way but signing (cancelled, refused, failed) folds
+// what arrived while it computed; signing folds it itself (finishProof).
+useCyberspace.subscribe((s, prev) => {
+  if (prev.proof.status === 'computing' && s.proof.status !== 'computing') foldDeferred()
+})
+
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   // Lets the browser harness read and drive real state instead of inferring it
   // from the HUD, the same way __terrain and __screenAxes work.
@@ -3500,11 +3658,12 @@ function startPlanStep(): void {
   const plan = s.plan
   if (!plan || plan.status !== 'running') return
   // A game's entry arrived between steps: the route stops where it is.
-  if (openBracket(s.actions())) {
+  const noMove = whyNoMove(s.actions())
+  if (noMove) {
     useCyberspace.setState({
-      plan: { ...plan, status: 'failed', message: GAME_HOLDS_MESSAGE, awaiting: null },
+      plan: { ...plan, status: 'failed', message: noMove, awaiting: null },
       pendingTarget: null,
-      proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE },
+      proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
     })
     return
   }

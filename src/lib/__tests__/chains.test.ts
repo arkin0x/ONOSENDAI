@@ -5,15 +5,15 @@
 import { describe, it, expect } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
-import { hopTemplate, positionHex, spawnTemplate, type NostrEvent } from '../events'
+import { chainGap, hopTemplate, positionHex, spawnTemplate, type NostrEvent } from '../events'
 import {
   PLACING_ACTIONS,
   chainFilter,
   combineAnswers,
   latestByPubkey,
   mergeEvents,
+  markPartial,
   newestSpawnId,
-  olderPageUntil,
   parsePubkey,
   spawnsFilter,
 } from '../chains'
@@ -79,25 +79,42 @@ describe('the filters (relay load: v1 kept out both ways)', () => {
   })
 })
 
-describe('paging a long chain', () => {
+describe('where a chain has a hole (chainGap)', () => {
   const step = (prev: NostrEvent, at: number): NostrEvent =>
     hopEvent({ pubkey: pa, createdAt: at, genesisId: spawnA.id, previousId: prev.id, c: pa, to: { x: BigInt(at), y: 0n, z: 0n } })
   const h1 = step(spawnA, 201)
   const h2 = step(h1, 202)
   const h3 = step(h2, 203)
+  const h4 = step(h3, 204)
 
-  it('no gap, no page: a chain whose every link is in hand', () => {
-    expect(olderPageUntil([spawnA, h1, h2, h3], spawnA.id)).toBeNull()
+  it('none when every link is in hand', () => {
+    expect(chainGap([spawnA, h1, h2, h3], spawnA.id)).toBeNull()
   })
 
-  it('a relay that stopped at its limit left the oldest links out: page from the oldest in hand', () => {
-    // The newest two only, as a relay capped at two would answer.
-    expect(olderPageUntil([spawnA, h3, h2], spawnA.id)).toBe(202)
+  it('a relay that stopped at its limit: the hole is at the oldest event it returned', () => {
+    expect(chainGap([spawnA, h4, h3], spawnA.id)).toEqual({ until: 203, missingId: h2.id })
   })
 
-  it('events of another chain do not count as a gap', () => {
+  it('two stretches from two relays: the hole nearest the head, not the oldest event in hand', () => {
+    // One relay held the start, another the newest two: paging from the
+    // oldest event across both (h1) would ask for nothing new.
+    expect(chainGap([spawnA, h1, h4, h3], spawnA.id)).toEqual({ until: 203, missingId: h2.id })
+  })
+
+  it('events of another chain do not count as a hole', () => {
     const other = step(spawnB as NostrEvent, 50)
-    expect(olderPageUntil([spawnA, h1, { ...other, tags: other.tags.map((t) => (t[3] === 'genesis' ? ['e', 'f'.repeat(64), '', 'genesis'] : t)) }], spawnA.id)).toBeNull()
+    expect(chainGap([spawnA, h1, { ...other, tags: other.tags.map((t) => (t[3] === 'genesis' ? ['e', 'f'.repeat(64), '', 'genesis'] : t)) }], spawnA.id)).toBeNull()
+  })
+})
+
+describe('markPartial', () => {
+  it('an answered relay that returned a chain with a hole has not said what the chain is', () => {
+    const out = markPartial([
+      { url: 'wss://a', outcome: 'answered', events: [spawnA] },
+      { url: 'wss://b', outcome: 'refused', reason: 'restricted: no', events: [] },
+    ])
+    expect(out[0]).toMatchObject({ outcome: 'unreachable', reason: 'the relays returned only part of this chain', events: [spawnA] })
+    expect(out[1].outcome).toBe('refused')
   })
 })
 

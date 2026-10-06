@@ -36,8 +36,7 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, useCyberspace } from '../store/useCyberspace'
-import { openBracket } from '../lib/events'
+import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../store/useCyberspace'
 import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 
@@ -102,10 +101,11 @@ export async function startRide(): Promise<void> {
   // used: when the head has moved since (a fork adopted from another device),
   // leaves seeded by it would be published under a different `previous` and
   // every one of them would be wrong.
-  // A game holds the avatar: a ride is a base action, and this client never
-  // signs one inside a bracket (useCyberspace GAME_HOLDS_MESSAGE).
-  if (openBracket(useCyberspace.getState().actions())) {
-    useRideRun.setState({ error: GAME_HOLDS_MESSAGE })
+  // A game holds the avatar, or the chain is broken (useCyberspace
+  // whyNoMove): a ride is a base action, and this client signs none then.
+  const noRide = whyNoMove(useCyberspace.getState().actions())
+  if (noRide) {
+    useRideRun.setState({ error: noRide })
     return
   }
   const line = lineStateOf(useCyberspace.getState().actions())
@@ -236,7 +236,8 @@ export function HyperspacePanel(): JSX.Element {
   const line = useMemo(() => lineStateOf(useCyberspace.getState().actions()), [events])
   // A game holds the avatar: BOARD and RIDE stand down, and say why.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const inGame = useMemo(() => openBracket(useCyberspace.getState().actions()) !== null, [events])
+  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events])
+  const inGame = noMove !== null
   const atStop = line !== null && line.fromHeight !== null
   const onLine = transit !== null || line !== null
   const progress = useRideRun((s) => s.progress)
@@ -437,7 +438,9 @@ export function HyperspacePanel(): JSX.Element {
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
       {inGame && progress === null && (
-        <p className="hyper__why">A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH TO BOARD OR RIDE</p>
+        <p className="hyper__why">{noMove === GAME_HOLDS_MESSAGE
+          ? 'A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE'
+          : 'YOUR CHAIN IS BROKEN BEFORE ITS HEAD: THE PROOF CHAIN PANEL SAYS WHERE'}</p>
       )}
       {!inGame && !onLine && progress === null && (
         !ready ? (

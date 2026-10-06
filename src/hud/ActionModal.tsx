@@ -10,7 +10,7 @@
  */
 
 import { nip19 } from 'nostr-tools'
-import { actionLabel } from '../lib/events'
+import { actionKind, actionLabel } from '../lib/events'
 import { ACTION_KIND } from '../lib/social'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useProfile } from '../hooks/useProfile'
@@ -40,7 +40,7 @@ export function ActionModal(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Action" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className={`explorer__type explorer__type--${action.role === 'base' ? action.type : action.role}`} title={action.name}>{actionLabel(action)}</span>
+          <span className={`explorer__type explorer__type--${actionKind(action)}`} title={action.breaks ?? action.name}>{actionLabel(action)}</span>
           {mine && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>

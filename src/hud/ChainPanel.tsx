@@ -29,7 +29,8 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
-import { actionLabel, openBracket } from '../lib/events'
+import { TriangleAlert } from 'lucide-react'
+import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -63,6 +64,8 @@ export function ChainPanel(): JSX.Element {
   const byId = useMemo(() => new Map(actions.map((a) => [a.id, a])), [actions])
   // A game holds the avatar: its entry, when the chain ends inside a bracket.
   const game = useMemo(() => openBracket(actions), [actions])
+  // The first row a verifier rejects, if any (events.ts firstBreak).
+  const broken = useMemo(() => firstBreak(actions), [actions])
 
   // The newest action is at the bottom, because that is the order the
   // publisher sends in and the order the chain is read in. Keep it in view as
@@ -170,12 +173,17 @@ export function ChainPanel(): JSX.Element {
         {events.map((e, i) => {
           const tag = publishTag(published[e.id])
           const a = byId.get(e.id)
-          const kind = !a ? 'broken' : a.role === 'base' ? a.type : a.role
+          // A row that breaks a rule reads BROKEN whatever its role, with the
+          // warning glyph, so it is never mistaken for a game's pink row.
+          const kind = a ? actionKind(a) : 'broken'
+          const breaks = kind === 'broken'
+          const label = a ? actionLabel(a) : 'UNREADABLE'
           return (
-            <li key={e.id} className="chainrows__row">
+            <li key={e.id} className={`chainrows__row ${breaks ? 'chainrows__row--broken' : ''}`}>
               <span className="chainrows__n">{i}</span>
-              <span className={`chainrows__type chainrows__type--${kind}`} title={a?.name}>
-                {a ? actionLabel(a) : 'UNREADABLE'}
+              <span className={`chainrows__type chainrows__type--${kind}`} title={a?.breaks ?? a?.name}>
+                {breaks && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}
+                {label}
               </span>
               <code className="chainrows__id" title={e.id}>{e.id.slice(0, 8)}…</code>
               <span className={`tag tag--${tag}`} title={PUBLISH_TAG_TITLE[tag]}>{PUBLISH_TAG_LABEL[tag]}</span>
@@ -210,7 +218,7 @@ export function ChainPanel(): JSX.Element {
         // Below the publishing states, which are choices waiting on you; this
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
         <p className="notice notice--game">
-          IN A GAME: this identity entered a game from another client, so a game holds your avatar where it entered. Nothing here moves you until that client publishes an exit.
+          IN A GAME: this identity entered a game from another client, so a game holds your avatar where it entered. Nothing here moves you until that client publishes an exit, or until you respawn, which also leaves the game and is the only way out if that client is gone.
           <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(actions.indexOf(game))}>SHOW THE GAME</button>
         </p>
       ) : held ? (
@@ -219,6 +227,16 @@ export function ChainPanel(): JSX.Element {
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setExplaining(true)}>WHY</button>
         </p>
       ) : null}
+
+      {/* Apart from the states above: a broken row is a fact about the chain
+          itself, and it can stand alongside any of them. */}
+      {broken && (
+        <p className="notice notice--broken">
+          <TriangleAlert size={12} strokeWidth={2.5} aria-hidden className="chainrows__warn" />
+          BROKEN CHAIN AT ROW {broken.index} ({actionLabel(broken.action)}): {broken.action.breaks}. Every verifier treats this chain as invalid from that row, so nothing after it counts, including any move you make now; ONOSENDAI still lets you move on it for the moment. A respawn starts a new, valid chain at your spawn point.
+          <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(broken.index)}>SHOW THE ROW</button>
+        </p>
+      )}
 
       <Explanation>
         To alter your position in cyberspace, you must compute the cantor root for
@@ -245,7 +263,19 @@ export function ChainPanel(): JSX.Element {
         row is an action out of place or malformed, such as a hop signed inside
         a game; a verifier says the chain stops being valid there, and this
         client, which shows chains rather than verifying them, marks it and
-        keeps reading.
+        keeps reading. An action whose starting point (its c) is not where the
+        chain stood is BROKEN too, wherever it is. The first BROKEN row is named
+        in a notice above, with the rule it breaks; a respawn starts a new,
+        valid chain.
+        <br /><br />
+        A game holds your avatar until the client you entered it with publishes
+        an exit. If that client is gone, a respawn also leaves the game: it
+        starts a new chain at your spawn point, and the game decides what
+        leaving without an exit means.
+        <br /><br />
+        On the chain explorer's rail, every action is a tick: pink ticks are a
+        game's actions, its entry and exit included, and short grey ticks are
+        skipped or broken actions, which are on the chain but move nobody.
       </Explanation>
     </section>
   )

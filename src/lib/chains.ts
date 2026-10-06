@@ -29,10 +29,12 @@
  */
 
 import type { Filter } from 'nostr-tools/filter'
-import { RECOGNIZED_ACTIONS, actionLink, buildChain, parseAction, type ActionEvent, type NostrEvent } from './events'
+import { RECOGNIZED_ACTIONS, buildChain, chainGap, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
 import { query, queryEach, subscribe } from './relay'
-import { mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
+
+export { PARTIAL_CHAIN_REASON }
 
 /**
  * The actions that say where an identity is, and therefore the only ones the
@@ -94,29 +96,21 @@ export function newestSpawnId(events: NostrEvent[]): string | null {
   return buildChain(events.filter((e) => parseAction(e)?.type === 'spawn'))[0]?.id ?? null
 }
 
-/**
- * Where to ask for the next older page of a chain, or null when the chain in
- * hand has no gap. A relay returns the newest events first and stops at its
- * own limit, so a chain longer than that limit comes back as its newest
- * stretch, whose oldest event names a `previous` the page does not hold. A
- * gap is the sign to page; the page is everything at or before the oldest
- * event of this chain in hand.
- */
-export function olderPageUntil(events: NostrEvent[], spawnId: string): number | null {
-  const ids = new Set(events.map((e) => e.id))
-  let gap = false
-  let oldest = Infinity
-  for (const ev of events) {
-    const l = actionLink(ev)
-    if (!l || l.genesisId !== spawnId) continue
-    oldest = Math.min(oldest, l.createdAt)
-    if (l.previousId !== spawnId && !ids.has(l.previousId)) gap = true
-  }
-  return gap && Number.isFinite(oldest) ? oldest : null
-}
+/** The most extra questions one chain fetch asks to fill holes (chainGap). */
+export const MAX_CHAIN_PAGES = 60
 
-/** The most older pages one chain fetch asks for. */
-export const MAX_CHAIN_PAGES = 20
+
+/**
+ * A chain fetch that could not fill a hole: some event of the chain is on no
+ * relay asked, or finding it took more than MAX_CHAIN_PAGES questions. A
+ * chain with a hole resolves to its stretch before the hole, which is a
+ * wrong head, so the caller is told so rather than handed that head.
+ */
+export class ChainGapError extends Error {
+  constructor(readonly events: NostrEvent[]) {
+    super(PARTIAL_CHAIN_REASON)
+  }
+}
 
 /**
  * One relay's answers to two questions, as one answer: the events of both,
@@ -136,51 +130,71 @@ export function combineAnswers(first: RelayAnswer[], second: RelayAnswer[]): Rel
   return [...out, ...byUrl.values()]
 }
 
+/** Every answered relay marked as not having said what the chain is (PARTIAL_CHAIN_REASON). */
+export function markPartial(answers: RelayAnswer[]): RelayAnswer[] {
+  return answers.map((a): RelayAnswer => (a.outcome === 'answered' ? { url: a.url, outcome: 'unreachable', reason: PARTIAL_CHAIN_REASON, events: a.events } : a))
+}
+
 /**
  * The fetch every chain read shares, over any way of asking: the spawns,
- * then the newest spawn's chain by genesis, then older pages while the chain
- * in hand has a gap (olderPageUntil). With the genesis already known (your
- * own chain, a chain being followed), the chain and the spawns are asked at
- * once, and the chain is asked again only if a newer spawn turned up.
+ * then the newest spawn's chain by genesis, then, while the chain has a hole
+ * (events.ts chainGap), the page ending at the hole nearest the head, or the
+ * missing event by id when that page brought nothing new (one second holding
+ * more events than a relay returns at once). With the genesis already known
+ * (your own chain, a chain being followed) the chain and the spawns are asked
+ * at once, and the chain is asked again only if a newer spawn turned up.
+ * `have` is what the caller already holds, which fills holes without asking:
+ * your own chain's events, so a look before a commit asks only for what is
+ * newer. Resolves to what was gathered and whether a hole is left.
  */
 async function gatherChain<T>(
   ask: (f: Filter) => Promise<T>,
   eventsOf: (t: T) => NostrEvent[],
   combine: (a: T, b: T) => T,
   pubkey: string,
-  knownSpawnId?: string,
-): Promise<T> {
+  knownSpawnId: string | undefined,
+  have: NostrEvent[],
+): Promise<{ got: T; whole: boolean }> {
   let got: T
   let spawnId: string | null
   if (knownSpawnId) {
     const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainFilter(pubkey, knownSpawnId))])
     got = combine(spawns, chain)
-    spawnId = newestSpawnId(eventsOf(got))
+    spawnId = newestSpawnId([...have, ...eventsOf(got)])
     if (spawnId && spawnId !== knownSpawnId) got = combine(got, await ask(chainFilter(pubkey, spawnId)))
   } else {
     got = await ask(spawnsFilter(pubkey))
     spawnId = newestSpawnId(eventsOf(got))
-    if (!spawnId) return got
+    if (!spawnId) return { got, whole: true }
     got = combine(got, await ask(chainFilter(pubkey, spawnId)))
   }
-  if (!spawnId) return got
-  for (let page = 0; page < MAX_CHAIN_PAGES; page++) {
+  if (!spawnId) return { got, whole: true }
+  const genesis = spawnId
+  const hole = (): ReturnType<typeof chainGap> => chainGap([...have, ...eventsOf(got)], genesis)
+  for (let asked = 0; asked < MAX_CHAIN_PAGES; asked++) {
+    const gap = hole()
+    if (!gap) return { got, whole: true }
     const before = eventsOf(got).length
-    const until = olderPageUntil(eventsOf(got), spawnId)
-    if (until === null) break
-    got = combine(got, await ask(chainFilter(pubkey, spawnId, until)))
+    got = combine(got, await ask(chainFilter(pubkey, genesis, gap.until)))
+    if (eventsOf(got).length > before) continue
+    asked++
+    got = combine(got, await ask({ kinds: [KIND], authors: [pubkey], ids: [gap.missingId] }))
     if (eventsOf(got).length === before) break
   }
-  return got
+  return { got, whole: hole() === null }
 }
 
 /**
  * Everything the relays have for one pubkey's current chain, raw: every
  * spawn it has signed, and every event of the chain the newest one starts.
- * `knownSpawnId` saves a round trip when the caller already holds a chain.
+ * `knownSpawnId` saves a round trip when the caller already holds a chain,
+ * and `have` (its events) lets it ask only for what it does not hold.
+ * Rejects with ChainGapError when a hole could not be filled.
  */
-export function fetchChainEvents(pubkey: string, knownSpawnId?: string): Promise<NostrEvent[]> {
-  return gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId)
+export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<NostrEvent[]> {
+  const { got, whole } = await gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId, have)
+  if (!whole) throw new ChainGapError(got)
+  return got
 }
 
 /** How long the own-chain check waits for each relay's real answer, per question. */
@@ -188,11 +202,16 @@ export const CHAIN_CHECK_MS = 6000
 
 /**
  * The same question, with each relay's answer kept: answered, refused or
- * unreachable (relayOutcome.ts). The self-check decides from these whether
+ * unreachable (relayOutcome.ts), and every answer marked unreachable when the
+ * chain came back with a hole (markPartial). The self-check decides from these whether
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
-export function askChainEvents(pubkey: string, knownSpawnId?: string): Promise<RelayAnswer[]> {
-  return gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId)
+export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
+  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have)
+  // A hole left in the chain is not an answer to "what is this chain": the
+  // self-check reads it as unknown, so a first move holds rather than
+  // continuing from a head that is not the head (chainHold.ts).
+  return whole ? got : markPartial(got)
 }
 
 /** The same, assembled. */

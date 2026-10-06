@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRecentAvatars, type RecentAvatars } from '../hooks/useRecentAvatars'
 import { parsePubkey } from '../lib/chains'
+import { actionKind, actionLabel } from '../lib/events'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { spectate } from '../lib/spectator'
 import { ProfileBadge } from './ProfileBadge'
@@ -54,7 +55,7 @@ export function AvatarsPanel(): JSX.Element {
     return (
       <li key={a.pubkey} className="avatars__row">
         <ProfileBadge pubkey={a.pubkey} />
-        <span className={`avatars__type avatars__type--${a.type}`}>{a.type.toUpperCase()}</span>
+        <span className={`avatars__type avatars__type--${actionKind(a)}`}>{actionLabel(a)}</span>
         <span className="avatars__when" title={formatStamp(a.createdAt)}>{formatAgo(a.createdAt, now)}</span>
         {you ? (
           <span className="avatars__you">YOU</span>

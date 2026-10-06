@@ -55,6 +55,7 @@ import { StopBurst } from './StopBurst'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
+import { GameRegionBox } from './GameRegionBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
@@ -148,6 +149,7 @@ function World(): JSX.Element {
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <GameRegionBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />

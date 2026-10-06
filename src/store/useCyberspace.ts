@@ -49,7 +49,6 @@ import {
   hexToCoord,
   sectorTag,
   sidestepLanding,
-  xyzToCoord,
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
@@ -85,8 +84,9 @@ import {
 import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
   buildChain,
+  chainHead,
+  openBracket,
   hopTemplate,
-  parseAction,
   positionHex,
   sidestepTemplate,
   spawnTemplate,
@@ -160,6 +160,18 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
   if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: buildChain(events) }
   return actionsFor.actions
 }
+
+/**
+ * Why nothing moves while a game holds the avatar. This client never
+ * publishes inside a virtual bracket: every event there belongs to the game,
+ * a hop, sidestep or ride there is invalid and ends the chain for every
+ * verifier (spec §8.11.4 rule 3), and an exit is the game client's to make,
+ * since only the game knows what leaving means to it (§8.11.7). So a chain
+ * with a bracket open at its head refuses every move here, says why, and
+ * shows the game in the Proof chain panel.
+ */
+export const GAME_HOLDS_MESSAGE =
+  'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. The Proof chain panel shows the game.'
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
@@ -773,7 +785,7 @@ export interface CyberspaceState {
   /** Axes as they appear on screen right now, including free orbit. */
   screenAxes: ViewAxes | null
   setScreenAxes: (a: ViewAxes) => void
-  /** The chain head's coordinate, exactly as its event carries it. */
+  /** Where the chain head puts you: the coordinate of the last recognized action, or the one a game holds (events.ts buildChain). */
   coordHex: () => string
   sector: () => string
   /** The chain, parsed. */
@@ -1065,10 +1077,11 @@ const HEAD_CHECK_MS = 1500
  * unreachable. Bounded on purpose: this runs in front of every commit, and
  * the answer is only ever used to avoid forking, never to permit moving.
  */
-async function freshHead(pubkey: string): Promise<NostrEvent[]> {
+async function freshHead(pubkey: string, genesisId: string): Promise<NostrEvent[]> {
   try {
     return await Promise.race([
-      fetchChainEvents(pubkey),
+      // The genesis in hand lets the chain and the spawns be asked at once.
+      fetchChainEvents(pubkey, genesisId || undefined),
       new Promise<NostrEvent[]>((resolve) => { setTimeout(() => resolve([]), HEAD_CHECK_MS) }),
     ])
   } catch {
@@ -1128,10 +1141,11 @@ function provisionalChain(pubkey: string): ReturnType<typeof derive> {
 function statsFromChain(events: NostrEvent[], prev: ChainStats): ChainStats {
   let hops = 0
   let sidesteps = 0
-  for (const e of events) {
-    const a = parseAction(e)
-    if (a?.type === 'hop') hops++
-    else if (a?.type === 'sidestep') sidesteps++
+  // Counted on the resolved chain, so a hop a game client signed inside a
+  // bracket, which moves nobody (spec §8.11.4 rule 3), is not one of yours.
+  for (const a of buildChain(events)) {
+    if (a.type === 'hop') hops++
+    else if (a.type === 'sidestep') sidesteps++
   }
   return { ...prev, hops, sidesteps }
 }
@@ -1881,6 +1895,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
+    // A game holds the avatar: nothing here may be signed (GAME_HOLDS_MESSAGE).
+    if (openBracket(get().actions())) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE } })
+      return
+    }
+
     // One look at the relay before signing anything.
     //
     // An action names the one before it, so an action signed from a head
@@ -1898,10 +1918,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // different one (does it have a chain at all?) and is answered below.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const fresh = await freshHead(get().identity.pubkey)
+      const fresh = await freshHead(get().identity.pubkey, get().genesisId)
       if (fresh.length > 0) get().adoptChain(fresh)
       // On a held chain, a relay chain does not move you: it raises the prompt.
       if (get().chainConflict) return
+      // The look may have brought a game's entry: a game holds the avatar now.
+      if (openBracket(get().actions())) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE } })
+        return
+      }
       if (get().prevEventId !== beforeHead) {
         set({
           pendingTarget: null,
@@ -2218,6 +2243,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
     const newPosition = pendingTarget ?? position
     const head = events[events.length - 1]
+    // `previous` is the chain's actual last event, whatever it is, and `c` is
+    // where the identity stands, which after an action this client does not
+    // recognize is the last recognized action's C, not that event's own
+    // (spec §8.9 rule 2).
+    const standing = chainHead(parsedChain(events))
 
     // The proof covers exactly position -> pendingTarget, and this event is
     // its receipt: the hop the next proof will bind to. Signed before the
@@ -2226,7 +2256,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      prevCoordHex: head.tags.find((t) => t[0] === 'C')?.[1] ?? '',
+      prevCoordHex: standing?.coordHex ?? '',
       to: newPosition,
       plane,
       proofHash: msg.proofHash,
@@ -2649,20 +2679,29 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   boardHyperspace: async () => {
-    const { events, genesisId, prevEventId, position, plane, proof, transit } = get()
+    const { events, genesisId, prevEventId, position, proof, transit } = get()
     if (transit !== null || proof.status === 'computing') return
     if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
     // A provisional identity has no chain to board from; move once first.
     if (events.length === 0 || !genesisId || !prevEventId) return
+    // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
+    // The Hyperspace panel withholds BOARD and says why; this is the backstop.
+    if (openBracket(get().actions())) return
     const head = events[events.length - 1]
-    const coord = xyzToCoord(position.x, position.y, position.z, plane)
-    const proofHash = computeEnterProof(coord, prevEventId)
+    // Where the chain says you stand, plane bit included: the last recognized
+    // action's C. Not `position` with `plane`: `plane` is the plane lined up
+    // for the next move (viewing EARTH lines up dataspace), and a boarding
+    // built from it at a port in ideaspace named the right x, y and z in the
+    // wrong plane, so its c no longer matched the C before it and the chain
+    // was invalid from there (2026-10-06, a published chain on the relay).
+    const here = chainHead(parsedChain(events))?.coordHex
+    if (!here) return
+    const proofHash = computeEnterProof(hexToCoord(here), prevEventId)
     const template = enterHyperspaceTemplate({
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      at: position,
-      plane,
+      coordHex: here,
       proofHash,
     })
     let event: NostrEvent
@@ -2680,7 +2719,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       prevEventId: event.id,
       published,
       positionHistory: [...get().positionHistory, { ...position }],
-      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: positionHex(position, plane) },
+      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: here },
     })
     saveChain(nextEvents, published, get().chain)
   },
@@ -2690,9 +2729,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
     if (!head) return
+    // A game holds the avatar (GAME_HOLDS_MESSAGE): a ride is a base action.
+    if (openBracket(parsedChain(events))) throw new Error(GAME_HOLDS_MESSAGE)
     // From a boarding, or chained from the stop the last ride reached (§4.3):
     // either way the head is on the line, and `c` is its coordinate.
-    const line = lineStateOf(buildChain(events))
+    const line = lineStateOf(parsedChain(events))
     if (!transit && !line) return
     // Every leaf was seeded by the head the ride started from (§5.3). Signed
     // under any other `previous` it would be a ride whose every leaf is wrong,
@@ -2701,7 +2742,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (ride.previousId !== prevEventId) {
       throw new Error('Your chain moved while the ride was computing, and the proof is bound to where it started. Ride again from here.')
     }
-    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit?.enterCoordHex ?? line?.coordHex
+    // Where the identity stands: the last recognized action's C, so a skipped
+    // action between the boarding and the ride does not move `c` (spec §8.9).
+    const prevCoordHex = chainHead(parsedChain(events))?.coordHex ?? transit?.enterCoordHex ?? line?.coordHex
     if (!prevCoordHex) return
     const template = hyperjumpTemplate({
       createdAt: nextCreatedAt(head),
@@ -2817,7 +2860,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     const seen = new Set(cur.events.map((e) => e.id))
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
-    // buildChain is §3.2: the newest spawn wins, then follow the links. So a
+    // buildChain is §8.7.3: the newest spawn wins, then follow the links. So a
     // newer chain from another machine supersedes ours; our own echoed events
     // fold in as a no-op. It returns parsed actions in order; map back to the
     // raw events the store actually holds.
@@ -3335,9 +3378,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   coordHex: () => {
     const { events, position, plane } = get()
-    const head = events[events.length - 1]
+    // Where the chain puts you, which is not always the last event's own C:
+    // after an action this client does not recognize, or inside a game, it
+    // is the position carried or held (events.ts buildChain).
+    const head = chainHead(parsedChain(events))
     // Provisional identity: no head event yet, so read the spawn coordinate.
-    return head ? head.tags.find((t) => t[0] === 'C')?.[1] ?? '' : positionHex(position, plane)
+    return head ? head.coordHex : positionHex(position, plane)
   },
 
   sector: () => {
@@ -3453,6 +3499,15 @@ function startPlanStep(): void {
   const s = useCyberspace.getState()
   const plan = s.plan
   if (!plan || plan.status !== 'running') return
+  // A game's entry arrived between steps: the route stops where it is.
+  if (openBracket(s.actions())) {
+    useCyberspace.setState({
+      plan: { ...plan, status: 'failed', message: GAME_HOLDS_MESSAGE, awaiting: null },
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message: GAME_HOLDS_MESSAGE },
+    })
+    return
+  }
   const id = ++requestId
   if (plan.step.source === 'cloud') {
     void cloudStepStarter?.(plan.step, id)

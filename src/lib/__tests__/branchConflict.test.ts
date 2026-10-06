@@ -52,6 +52,24 @@ describe('finding a fork against unpublished moves', () => {
     expect(d.overrides).toBe(true)
   })
 
+  it('finds a fork made by a game client or an unknown action, not only by a hop (spec §8.9 rule 1)', () => {
+    // A game client on the same identity entered a game from h1 while this
+    // device had an unpublished hop from h1. Its entry is the older child,
+    // so it continues the chain; this device's hop would be dropped.
+    const m1 = hop(0x20, h1.id, 140)
+    const enter: NostrEvent = {
+      id: hex(0x40), pubkey: PK, created_at: 125, kind: ACTION_KIND, content: '', sig: '0'.repeat(128),
+      tags: [['A', 'enter-virtual'], ['e', spawn.id, '', 'genesis'], ['e', h1.id, '', 'previous'], ['c', hex(0xaa + 0x10)], ['C', hex(0xaa + 0x10)], ['S', '0-0-0'], ['p', 'ab'.repeat(32), '', 'game']],
+    }
+    const wave: NostrEvent = { ...enter, id: hex(0x41), tags: [['A', 'wave'], ['e', spawn.id, '', 'genesis'], ['e', h1.id, '', 'previous']] }
+    for (const theirs of [enter, wave]) {
+      const d = findDivergence([...shared, m1], ok(spawn, h1), [theirs])!
+      expect(d.forkId).toBe(h1.id)
+      expect(d.relay.map((a) => a.id)).toEqual([theirs.id])
+      expect(d.overrides).toBe(false)
+    }
+  })
+
   it('says publishing would not override when the local move is the newer one', () => {
     const m1 = hop(0x20, h1.id, 140)
     const r1 = hop(0x30, h1.id, 125)

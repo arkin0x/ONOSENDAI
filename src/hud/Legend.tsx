@@ -58,6 +58,24 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
+    what: 'Pink line: moves inside a game. They are play inside the game, not travel through cyberspace, so your position stays where you entered the game, and the red line holds still there',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff7ad9" strokeWidth="2" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    what: 'Pink box: the region a game is played in, drawn while the avatar is inside that game',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <g fill="none" stroke="#ff7ad9" strokeWidth="1.2" strokeLinejoin="round">
+          <path d="M4 7 L11 7 L11 16 L4 16 Z M4 7 L9 3 L16 3 L11 7 M16 3 L16 12 L11 16" />
+        </g>
+      </svg>
+    ),
+  },
+  {
     what: 'Spawn point mesh: spawn point',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">

@@ -210,7 +210,7 @@ describe('parseAction refuses what the spec refuses', () => {
     expect(parseAction({ ...good, kind: 1 })).toBeNull()
   })
 
-  it('an unknown action', () => {
+  it('an unknown action, on its own: it says nothing about where anyone is (buildChain still follows it, chainRules.test.ts)', () => {
     expect(parseAction({ ...good, tags: [['A', 'teleport'], ...good.tags.slice(1)] })).toBeNull()
   })
 
@@ -237,7 +237,7 @@ describe('parseAction refuses what the spec refuses', () => {
   })
 })
 
-describe('buildChain (§3.2: the newest spawn wins)', () => {
+describe('buildChain (§8.7.3: the newest spawn wins)', () => {
   function link(prev: NostrEvent, genesis: NostrEvent, at: number, dx: bigint): NostrEvent {
     const from = parseAction(prev)!
     return sign(hopTemplate({
@@ -291,7 +291,16 @@ describe('buildChain (§3.2: the newest spawn wins)', () => {
     expect(buildChain([a1, a2])).toEqual([])
   })
 
-  it('drops malformed events without losing the rest', () => {
+  it('drops events of another kind without losing the rest', () => {
     expect(buildChain([spawnB, { ...b1, kind: 1 }]).map((e) => e.id)).toEqual([spawnB.id])
+  })
+
+  it('follows a malformed action instead of stopping at it, and marks it broken (§8.9 rule 1)', () => {
+    // A hop with its proof torn off used to end the chain here, so the head
+    // went stale and the next move forked from before it.
+    const torn = { ...b1, tags: b1.tags.filter((t) => t[0] !== 'proof') }
+    const after = link(b1, spawnB, 220, 1n)
+    const chain = buildChain([spawnB, torn, { ...after, tags: after.tags.map((t) => (t[3] === 'previous' ? ['e', torn.id, '', 'previous'] : t)) }])
+    expect(chain.map((e) => e.role)).toEqual(['base', 'broken', 'base'])
   })
 })

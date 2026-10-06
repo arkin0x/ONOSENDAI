@@ -158,6 +158,15 @@ describe('a held chain against a relay chain', () => {
     expect(summarizeChain([])).toBeNull()
   })
 
+  it('a relay chain ending on an action this client does not recognize: its head, at the last recognized place (spec §8.9 rule 5)', () => {
+    const wave: NostrEvent = { ...relayChain[1], id: hex(12), created_at: 120, tags: [['A', 'wave'], ['C', hex(0xbb)], ['S', '9-9-9'], ['e', relaySpawn.id, '', 'genesis'], ['e', hex(11), '', 'previous']] }
+    const s = summarizeChain([...relayChain, wave])!
+    const before = summarizeChain(relayChain)!
+    expect(s).toMatchObject({ actions: 3, lastActive: 120, headId: hex(12) })
+    expect(s.position).toEqual(before.position)
+    expect(s.sector).toBe(before.sector)
+  })
+
   it('lets the local chain be kept only when its spawn is the newer one', () => {
     expect(localSupersedes(localChain, relayChain)).toBe(true)
     // The relay chain respawned after the local one was started.

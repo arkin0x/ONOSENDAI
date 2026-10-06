@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { latestByPubkey, parsePubkey, V2_ACTIONS } from '../lib/chains'
+import { latestByPubkey, parsePubkey, PLACING_ACTIONS } from '../lib/chains'
 import { fetchContacts, type Contact } from '../lib/contacts'
 import { query } from '../lib/relay'
 import { spectate } from '../lib/spectator'
@@ -110,7 +110,7 @@ export function TargetsPanel(): JSX.Element {
     // cyberspace can sort by real distance. A failure just leaves them alongside
     // the un-spawned, all alphabetical.
     try {
-      const events = await query({ kinds: [3333], authors: list.map((c) => c.pubkey), '#A': V2_ACTIONS })
+      const events = await query({ kinds: [3333], authors: list.map((c) => c.pubkey), '#A': PLACING_ACTIONS })
       if (parsePubkey(who) !== target) return // a newer load has taken over
       const pos: Record<string, Position> = {}
       for (const a of latestByPubkey(events)) pos[a.pubkey] = a.position

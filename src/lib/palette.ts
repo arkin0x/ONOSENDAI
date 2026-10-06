@@ -18,6 +18,14 @@ export const DANGER = '#ff3b6b'
 /** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
 export const SIDESTEP = '#c07dff'
 /**
+ * Play inside a game: the moves a chain makes inside a virtual bracket and
+ * the region the game is played in (spec §8.11.7). Pink, because nothing
+ * that means travel is pink: the trail is red, sidesteps purple, stations
+ * orange. A viewer must never read a game's moves as movement through
+ * cyberspace, so they never share a color with it.
+ */
+export const GAME = '#ff7ad9'
+/**
  * Sector lattice. Its own color rather than WARN, which is amber and means
  * cost: a sector boundary is a fact about where you are, not a warning.
  *

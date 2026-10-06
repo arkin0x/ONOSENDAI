@@ -14,7 +14,9 @@
  * listing your sector and its two neighbors, returns every action landing in
  * the 27 sectors around you. One filter, reissued when you cross a sector.
  *
- * Each author's newest action in the neighborhood is where they are. Someone
+ * Each author's newest action in the neighborhood says where they are: the
+ * position it leaves them at, which for an enter-virtual is where they
+ * entered a game from (spec §8.11). Someone
  * who leaves does not announce it here (their next action lands outside the
  * filter), so people not heard from in a while are confirmed by asking the
  * relay for their newest action and dropped if it is elsewhere.
@@ -25,7 +27,7 @@ import { xyzToSectorId } from 'cyberspace-core'
 import type { Filter } from 'nostr-tools/filter'
 import { ACTION_KIND, parseAction, type NostrEvent, type ActionType } from '../lib/events'
 import type { Plane } from 'cyberspace-core'
-import { V2_ACTIONS } from '../lib/chains'
+import { PLACING_ACTIONS } from '../lib/chains'
 import { query, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
@@ -60,7 +62,7 @@ export function sectorKey(p: Position): string {
 export function neighborhoodFilter(p: Position): Filter {
   const s = xyzToSectorId(p.x, p.y, p.z)
   const around = (v: bigint): string[] => [v - 1n, v, v + 1n].map(String)
-  return { kinds: [ACTION_KIND], '#A': V2_ACTIONS, '#X': around(s.sx), '#Y': around(s.sy), '#Z': around(s.sz) }
+  return { kinds: [ACTION_KIND], '#A': PLACING_ACTIONS, '#X': around(s.sx), '#Y': around(s.sy), '#Z': around(s.sz) }
 }
 
 /** Whether a position's sector is within one of the given sector on every axis. */
@@ -99,6 +101,11 @@ export const usePresence = create<PresenceState>((set, get) => ({
   ingest: (ev, now = Math.floor(Date.now() / 1000)) => {
     const action = parseAction(ev)
     if (!action) return
+    // An enter-virtual's sector tags are where it appears inside the game,
+    // and its position is where the identity entered from, which it keeps
+    // for the whole game (spec §8.11.4 rule 1). A game played here by
+    // someone whose position is elsewhere does not put them here.
+    if (action.declared && !inNeighborhood(action.position, useCyberspace.getState().position)) return
     const me = useCyberspace.getState().identity.pubkey
     if (action.pubkey === me) return
     const have = get().people[action.pubkey]
@@ -171,7 +178,7 @@ async function sweep(): Promise<void> {
   const quiet = Object.values(usePresence.getState().people).filter((p) => now - p.checkedAt >= CONFIRM_AFTER_S)
   for (const person of quiet) {
     try {
-      const newest = (await query({ kinds: [ACTION_KIND], authors: [person.pubkey], '#A': V2_ACTIONS, limit: 1 }))
+      const newest = (await query({ kinds: [ACTION_KIND], authors: [person.pubkey], '#A': PLACING_ACTIONS, limit: 1 }))
         .sort((a, b) => b.created_at - a.created_at)[0]
       const action = newest ? parseAction(newest) : null
       if (!action || !inNeighborhood(action.position, here)) { usePresence.getState().forget(person.pubkey); continue }

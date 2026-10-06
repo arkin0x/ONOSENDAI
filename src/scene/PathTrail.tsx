@@ -11,15 +11,24 @@
  * the last published action exists only here until it goes out (arkinox,
  * 2026-10-01). Publishing is in order, so that is always the chain's tail.
  * A spectated chain came from the relays and is drawn solid throughout.
+ *
+ * A game played on the chain is drawn apart (spec §8.11.7). Inside a virtual
+ * bracket the identity does not move through cyberspace: the red trail holds
+ * still at the place it entered, and the moves inside the game, from the
+ * entry's place in the game through each of the game's actions, are a pink
+ * line of their own (palette GAME). It never joins the red one, because
+ * nothing travelled between the two: the exit puts the identity back where
+ * it entered, without a line.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute, type LineSegments } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
-import { anchorCentre, placeCentre, type ViewAxes } from '../lib/space'
+import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin } from '../store/useCyberspace'
+import { GAME } from '../lib/palette'
 
 /** The unpublished tail's red: the trail's own, a step toward grey. */
 const LOCAL_RED = '#d94848'
@@ -57,6 +66,21 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     if (spectate) return [] as boolean[]
     return useCyberspace.getState().focusChain().map((a) => published[a.id] !== 'ok')
   }, [spectate, events, published])
+  // The game segments: consecutive actions of one bracket, from the entry
+  // through its virtual actions, each at its place inside the game. Indexed
+  // by the action a segment ends on, like the trail's.
+  const gameSegments = useMemo(() => {
+    const chain = useCyberspace.getState().focusChain()
+    const out: Array<{ end: number; from: Position; to: Position }> = []
+    for (let i = 1; i < chain.length; i++) {
+      const a = chain[i - 1]
+      const b = chain[i]
+      if (b.role !== 'virtual' || !a.bracketId || a.bracketId !== b.bracketId) continue
+      if (!a.declared || !b.declared || (a.role !== 'enter' && a.role !== 'virtual')) continue
+      out.push({ end: i, from: a.declared.position, to: b.declared.position })
+    }
+    return out
+  }, [spectate, events])
 
   const geometry = useMemo(() => {
     if (positionHistory.length < 2) return null
@@ -66,6 +90,8 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     const ahead: number[] = []
     const walkedLocal: number[] = []
     const aheadLocal: number[] = []
+    const gameWalked: number[] = []
+    const gameAhead: number[] = []
 
     // All three axes. The trail used to map right and up only and pin depth to a
     // constant, so it drew a flat shadow of a 3D path: every out-axis hop
@@ -83,6 +109,9 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
       const into = i < split ? (isLocal ? walkedLocal : walked) : (isLocal ? aheadLocal : ahead)
       into.push(...centre(positionHistory[i]), ...centre(positionHistory[i + 1]))
     }
+    for (const g of gameSegments) {
+      ;(g.end <= split ? gameWalked : gameAhead).push(...centre(g.from), ...centre(g.to))
+    }
     // The newest segment, which rides the avatar below, is in whichever walked
     // set its action falls in.
     const lastLocal = local[positionHistory.length - 1] === true
@@ -96,12 +125,14 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     // Where the avatar stands, for the head-riding vertex below.
     return {
       walked: make(walked), ahead: make(ahead), walkedLocal: make(walkedLocal), aheadLocal: make(aheadLocal),
+      gameWalked: make(gameWalked), gameAhead: make(gameAhead),
       lastLocal, head: anchorCentre(anchor, scaleExp, axes),
     }
-  }, [positionHistory, axes, scaleExp, anchor, split, local])
+  }, [positionHistory, axes, scaleExp, anchor, split, local, gameSegments])
   // Rebuilt on every hop and re-anchor; the old buffers go with it.
   useEffect(() => () => {
     geometry?.walked?.dispose(); geometry?.ahead?.dispose(); geometry?.walkedLocal?.dispose(); geometry?.aheadLocal?.dispose()
+    geometry?.gameWalked?.dispose(); geometry?.gameAhead?.dispose()
   }, [geometry])
   // Dashes are laid along each line's length, which three measures per
   // vertex; measured when a dashed line mounts and again when its riding
@@ -161,6 +192,17 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
       {geometry.aheadLocal && (
         <lineSegments geometry={geometry.aheadLocal} frustumCulled={false} ref={measureDashes}>
           <lineDashedMaterial color={LOCAL_RED} dashSize={DASH} gapSize={GAP} transparent opacity={0.18} toneMapped={false} />
+        </lineSegments>
+      )}
+      {/* Moves inside a game: never travel, so never red. */}
+      {geometry.gameWalked && (
+        <lineSegments geometry={geometry.gameWalked} frustumCulled={false}>
+          <lineBasicMaterial color={GAME} transparent opacity={0.85} toneMapped={false} />
+        </lineSegments>
+      )}
+      {geometry.gameAhead && (
+        <lineSegments geometry={geometry.gameAhead} frustumCulled={false}>
+          <lineBasicMaterial color={GAME} transparent opacity={0.2} toneMapped={false} />
         </lineSegments>
       )}
     </>

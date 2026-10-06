@@ -13,7 +13,7 @@
  * Everything here is consensus-critical and pure; the worker pool wraps it.
  */
 import { alignedBase, bytesToHex, computeSubtreeCantor, hexToBytes, intToBytesBE, sha256 } from 'cyberspace-core'
-import type { ActionEvent } from '../events'
+import { lookBack, openBracket, type ActionEvent } from '../events'
 import { GRANDFATHERED_V1_HYPERJUMPS } from './grandfathered'
 
 export const K_LINE = 6
@@ -113,6 +113,15 @@ export function computeRideLeaf(previousEventIdHex: string, height: number, bloc
  * head is boarded and the station decides where the ride starts
  * (`fromHeight` null); a hyperjump head is standing at its stop and the next
  * ride starts there. Anything else is off the line.
+ *
+ * "The head" here is the action the rule looks back to, which is not always
+ * the last event (spec §8.9 rule 4, §8.11.4 rule 8): an action this client
+ * does not recognize is passed over, and a closed game bracket stands for
+ * the action before its enter-virtual, so a rider who stepped into a game
+ * at a stop and out again is still at that stop. The next ride's `previous`
+ * is still the actual last event, which seeds its work (§5.3), and its `c`
+ * is where the identity stands. Inside an open bracket nothing is on the
+ * line: a ride there is a base action inside a game (§8.11.4 rule 3).
  */
 export interface LineState {
   /** The head's id: the next ride's `previous`, and what seeds its leaves (§5.3). */
@@ -125,9 +134,11 @@ export interface LineState {
 
 export function lineStateOf(actions: ActionEvent[]): LineState | null {
   const head = actions[actions.length - 1]
-  if (!head) return null
-  if (head.type === 'enter-hyperspace') return { previousId: head.id, coordHex: head.coordHex, fromHeight: null }
-  if (head.type === 'hyperjump' && head.toHeight !== undefined) return { previousId: head.id, coordHex: head.coordHex, fromHeight: head.toHeight }
+  if (!head || openBracket(actions)) return null
+  const standing = lookBack(actions, actions.length)
+  if (!standing) return null
+  if (standing.type === 'enter-hyperspace') return { previousId: head.id, coordHex: head.coordHex, fromHeight: null }
+  if (standing.type === 'hyperjump' && standing.toHeight !== undefined) return { previousId: head.id, coordHex: head.coordHex, fromHeight: standing.toHeight }
   return null
 }
 
@@ -495,7 +506,9 @@ export function timeCalibrationSample(): { elapsedMs: number; pairs: number } {
  * lower height exclusive to the higher inclusive, so a ride's length is the
  * difference). Exact from the events themselves, which is why it is derived
  * from the chain rather than tallied as proofs finish: an adopted chain has
- * the same numbers as one ridden here.
+ * the same numbers as one ridden here. Only rides that stand on the chain
+ * count: buildChain marks a hyperjump a game client signed inside a bracket
+ * as broken (type `other`), since it moves nobody (spec §8.11.4 rule 3).
  */
 export function rideStatsOf(actions: ActionEvent[]): { hyperjumps: number; blocksRidden: number } {
   let hyperjumps = 0

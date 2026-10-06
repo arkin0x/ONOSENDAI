@@ -18,12 +18,18 @@
  * A reader walks the chain forward from the spawn following each event's
  * `previousId`, so an action whose parent is missing is never reached at all.
  * The rows report; the one switch under COMMIT decides.
+ *
+ * Not every row is a move (spec §8.9, §8.11). A game played on this identity
+ * from another client puts its entry, its own moves and its exit on the
+ * chain, drawn pink as GAME rows; an action this client does not recognize
+ * is followed and passed over, drawn quiet as SKIPPED. While a game holds
+ * the avatar nothing here moves it, and the notice under the rows says so.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
 import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
-import { parseAction } from '../lib/events'
+import { actionLabel, openBracket } from '../lib/events'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -50,10 +56,13 @@ export function ChainPanel(): JSX.Element {
   // The same status the strip under the LIVE/LOCAL switch shows (ChainStatus.tsx).
   const status = useChainStatus()
 
-  // Parsed once per chain change: the type is the only thing a row needs from
-  // inside the event, and re-parsing on every publish result would re-read the
-  // whole chain once per send.
-  const kinds = useMemo(() => events.map((e) => parseAction(e)?.type ?? null), [events])
+  // Resolved once per chain change (the store caches it): what each event is
+  // to the chain is the one thing a row needs from inside it, and re-reading
+  // on every publish result would walk the whole chain once per send.
+  const actions = useMemo(() => useCyberspace.getState().actions(), [events])
+  const byId = useMemo(() => new Map(actions.map((a) => [a.id, a])), [actions])
+  // A game holds the avatar: its entry, when the chain ends inside a bracket.
+  const game = useMemo(() => openBracket(actions), [actions])
 
   // The newest action is at the bottom, because that is the order the
   // publisher sends in and the order the chain is read in. Keep it in view as
@@ -160,11 +169,13 @@ export function ChainPanel(): JSX.Element {
       <ol className="chainrows" ref={list}>
         {events.map((e, i) => {
           const tag = publishTag(published[e.id])
+          const a = byId.get(e.id)
+          const kind = !a ? 'broken' : a.role === 'base' ? a.type : a.role
           return (
             <li key={e.id} className="chainrows__row">
               <span className="chainrows__n">{i}</span>
-              <span className={`chainrows__type chainrows__type--${kinds[i] ?? 'unknown'}`}>
-                {(kinds[i] ?? 'unknown').replace('enter-hyperspace', 'enter').toUpperCase()}
+              <span className={`chainrows__type chainrows__type--${kind}`} title={a?.name}>
+                {a ? actionLabel(a) : 'UNREADABLE'}
               </span>
               <code className="chainrows__id" title={e.id}>{e.id.slice(0, 8)}…</code>
               <span className={`tag tag--${tag}`} title={PUBLISH_TAG_TITLE[tag]}>{PUBLISH_TAG_LABEL[tag]}</span>
@@ -195,6 +206,13 @@ export function ChainPanel(): JSX.Element {
           CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
         </p>
+      ) : game ? (
+        // Below the publishing states, which are choices waiting on you; this
+        // one waits on the game's client (store GAME_HOLDS_MESSAGE).
+        <p className="notice notice--game">
+          IN A GAME: this identity entered a game from another client, so a game holds your avatar where it entered. Nothing here moves you until that client publishes an exit.
+          <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(actions.indexOf(game))}>SHOW THE GAME</button>
+        </p>
       ) : held ? (
         <p className="notice notice--held">
           HELD on this device: {holdReason(check)}. Nothing publishes until the relays confirm whether this identity already has a chain.
@@ -208,6 +226,26 @@ export function ChainPanel(): JSX.Element {
         naming the proof that came before it. This forms a personal "hash chain" for
         your identity that mathematically proves a valid history of your actions
         without relying on a central authority to enforce movement rules.
+        <br /><br />
+        Not every row is a move. A pink row is a game. Another client can take
+        this identity into a game by publishing an ENTER GAME action on this
+        same chain; every action after it, shown as GAME and the game's own name
+        for it, belongs to the game, until an EXIT GAME action closes it. None of
+        those actions moves you through cyberspace: your position stays where
+        you entered, and the exit puts you back there. While a game holds your
+        avatar, ONOSENDAI will not sign a hop, a sidestep or a ride, because any
+        of them inside a game would make your whole chain invalid from that
+        point for every verifier. Leave the game in the client you entered it
+        with, and you can move again from where you entered.
+        <br /><br />
+        A grey SKIPPED row is an action this client does not recognize, from an
+        extension it does not implement. The chain is followed through it and
+        it is passed over: it does not move you, and your next move continues
+        after it from where your last recognized action put you. A red BROKEN
+        row is an action out of place or malformed, such as a hop signed inside
+        a game; a verifier says the chain stops being valid there, and this
+        client, which shows chains rather than verifying them, marks it and
+        keeps reading.
       </Explanation>
     </section>
   )

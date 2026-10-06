@@ -23,7 +23,7 @@ import { rememberNearbyReturn, watchNearbyReturn } from '../nearbyReturn'
 import type { ActionEvent } from '../events'
 
 const friend = 'f1'.repeat(32)
-const link = (i: number): ActionEvent => ({ id: String(i).repeat(32).slice(0, 64), pubkey: friend, createdAt: 100 + i, type: 'hop', coordHex: 'c'.repeat(64), position: { x: 1000n + BigInt(i), y: 5n, z: 5n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0' })
+const link = (i: number): ActionEvent => ({ id: String(i).repeat(32).slice(0, 64), pubkey: friend, createdAt: 100 + i, type: 'hop', name: 'hop', role: 'base', coordHex: 'c'.repeat(64), position: { x: 1000n + BigInt(i), y: 5n, z: 5n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0' })
 
 describe('RETURN after VIEW from Nearby Loot', () => {
   let stop: () => void

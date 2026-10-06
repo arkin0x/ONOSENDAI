@@ -22,6 +22,7 @@ import type { SocialTarget } from '../lib/social'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { Explanation } from './Explanation'
 import { ProfilePic } from './ProfileBadge'
 
 function Composer({ placeholder, busy, onPost, onCancel }: { placeholder: string; busy: boolean; onPost: (text: string) => Promise<boolean>; onCancel?: () => void }): JSX.Element {
@@ -99,10 +100,17 @@ function CommentSection({ state, placeholder, note }: { state: CommentsState; pl
       )}
       <Composer placeholder={placeholder} busy={posting} onPost={(t) => post(t)} />
       {error && <p className="comments__error">{error}</p>}
-      <p className="comments__note">
-        {note}
-        {signerKind !== 'local' ? ' Your signer will be asked to sign it.' : ''}
-      </p>
+      {/* Background, not status: folded behind EXPLAIN like every panel's
+          prose (arkinox, 2026-10-06), so the section ends at its buttons. */}
+      <Explanation>
+        <p>{note}</p>
+        <p>
+          Posting signs the comment with your key
+          {signerKind !== 'local'
+            ? ', which means your signer (a browser extension or a remote bunker) will ask you to approve it first.'
+            : ', which this device holds, so it is signed at once.'}
+        </p>
+      </Explanation>
     </section>
   )
 }
@@ -114,7 +122,7 @@ export function Comments({ subject }: { subject: CommentSubject }): JSX.Element 
     <CommentSection
       state={state}
       placeholder={subject.author === me ? 'Add a note under your own' : 'Say something to the author'}
-      note="Comments are sealed to this place, like what they answer: other clients show only that a comment is hiding somewhere in cyberspace. The author is tagged and gets told by their own client."
+      note="A comment here is hidden the same way the thing it answers is hidden. It is published as a NIP-22 comment (kind 1111) whose words are encrypted with this region's key, the key you computed or bought to open what is hidden here. Anyone who has done that work can read it. Everyone else, including every other Nostr client, sees only a placeholder saying that a comment is hiding somewhere in cyberspace. So a comment never gives away where the thing is, and reading it costs the same work as finding the thing itself. The author is tagged with a p tag, so their own client tells them a comment arrived, and they open it with the key they already hold."
     />
   )
 }
@@ -127,7 +135,7 @@ export function ActionComments({ action }: { action: SocialTarget }): JSX.Elemen
     <CommentSection
       state={state}
       placeholder={action.pubkey === me ? 'Add a note under your own move' : 'Say something about this move'}
-      note="Comments on a move are public, like the move itself: anyone reading the chain can read them, and its author is tagged so their client tells them."
+      note="A comment on a move is public, because the move itself is public: every movement event in a chain can be read by anyone, so there is nothing for a comment to hide. It is published as a NIP-22 comment (kind 1111) in plain text, so anyone reading this chain, in any client, can read it. The move's author is tagged with a p tag, so their own client tells them a comment arrived."
     />
   )
 }

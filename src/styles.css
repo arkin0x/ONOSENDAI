@@ -1738,14 +1738,6 @@ kbd {
  */
 .detail > * { flex-shrink: 0; }
 
-/* The record is a scrolling column. Without this, a column taller than the
-   screen shrinks its children instead of scrolling: the message to a sliver
-   and TEST DISCOVERY to half its height. Each keeps its own height and the
-   record scrolls. */
-.detail > * {
-  flex-shrink: 0;
-}
-
 /* Pinned while the rest scrolls, so EXIT is always where the hand left it.
    The negative margins run the head's background out to the card's edges. */
 .detail__head {
@@ -5834,7 +5826,7 @@ kbd {
   font-size: 12px;
 }
 .comments__row { display: flex; justify-content: flex-end; gap: 6px; }
-.comments__empty, .comments__note { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
+.comments__empty { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
 .comments__error { margin: 4px 0 0; font-size: 10px; color: #ff6b6b; }
 
 /* The avatar's price and, while it is mined, the progress: one dim line under the row. */

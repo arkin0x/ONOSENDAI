@@ -58,6 +58,7 @@ import {
 } from '../lib/hidden'
 import { useWorkshop } from './useWorkshop'
 import { useCeremony } from './useCeremony'
+import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
 import { deployPoint, type Position } from '../lib/space'
@@ -258,6 +259,11 @@ interface ShardsState {
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
   confirmDeploy: () => void
   declineDeploy: () => void
+  /**
+   * Drop the lined-up deploy. Not once it is hiding: the key is being
+   * computed and the bag sealed, and it finishes where it was placed, so a
+   * CANCEL then would only pretend (found in review, 2026-10-07).
+   */
   cancelDeploy: () => void
   /** Hide the pending thing at the cursor. `confirmed` is the yes to a HOSAKA ask. */
   deploy: (confirmed?: boolean) => Promise<void>
@@ -583,7 +589,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
     },
-    cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null }),
+    cancelDeploy: () => {
+      if (get().deployStatus === 'working') return
+      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+    },
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
     declineDeploy: () => set({ deployAsk: null }),
 
@@ -738,10 +747,15 @@ export const useShards = create<ShardsState>((set, get) => {
           ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
-        set({ mine, deployStatus: 'done', pending: null, deployNote: null })
+        // Only this deploy is finished. One lined up since (a DEPLOY from the
+        // workshop while this was hiding) is a deploy of its own, and stays.
+        if (get().pending === pending) set({ mine, deployStatus: 'done', pending: null, deployNote: null })
+        else set({ mine })
         saveMine(mine)
       } catch (err) {
-        set({ deployStatus: 'error', deployNote: null, deployError: err instanceof Error ? err.message : String(err) })
+        const reason = err instanceof Error ? err.message : String(err)
+        if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployError: reason })
+        else useToast.getState().show({ label: 'AN EARLIER HIDE FAILED', meta: `${reason} Nothing from it was placed.`, mark: 'build' })
       }
     },
 

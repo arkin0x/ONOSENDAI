@@ -2079,13 +2079,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (fresh.length > 0) get().adoptChain(fresh)
       // On a held chain, a relay chain does not move you: it raises the prompt.
       if (get().chainConflict) return
-      if (lostAim()) return
       // The look may have brought a game's entry: a game holds the avatar now.
       const noMoveNow = whyNoMove(get().actions())
       if (noMoveNow) {
         set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMoveNow } })
         return
       }
+      // Before the aim: adopting another device's move carries the cursor
+      // with it, and that is the reason to give, not "the cursor changed".
       if (get().prevEventId !== beforeHead) {
         set({
           pendingTarget: null,
@@ -2093,6 +2094,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         })
         return
       }
+      if (lostAim()) return
     }
 
     // A provisional identity (logged in or loaded, never placed) has no

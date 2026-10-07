@@ -146,12 +146,13 @@ export function useKeyboard(): void {
       }
 
       // Cancel an in-flight proof, or recall the cursor when idle.
-      // While building, X stops a move still computing from before (that is
-      // stopping a move, not making one) and otherwise brings the build
-      // cursor back to your avatar, the builder's own recall.
+      // While building, X stops a move or a route from before, running,
+      // paused or failed (that is stopping a move, not making one), and
+      // otherwise brings the build cursor back to your avatar, the builder's
+      // own recall.
       if (event.code === 'KeyX') {
         event.preventDefault()
-        if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle') useBuilder.getState().toAvatar()
+        if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
         else store.cancel()
         return
       }

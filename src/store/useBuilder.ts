@@ -105,7 +105,8 @@ export interface BuilderState {
   /**
    * Turn BUILD mode on. From the BUILD control and from DEPLOY alike, the
    * build cursor starts where you are looking when a view is up (a place you
-   * went to see, the Earth pin, a stop), and on your avatar otherwise (R5,
+   * went to see, the Earth pin, a stop), and on your avatar otherwise,
+   * including in a view of the whole cube (EARTH, CYBERSPACE, THE RIDE) (R5,
    * and ruling A, 2026-10-07). Already on, this changes nothing, so a deploy
    * started while building lands where the cursor already is.
    */
@@ -127,6 +128,14 @@ export interface BuilderState {
 /** The free view the build cursor rides is standing: driven, not spectating, not in history. */
 function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return s.focus?.drive === true && s.spectate === null && s.exploreIndex === null
+}
+
+/** The center of all cyberspace, where HyperspacePanel's EARTH, CYBERSPACE and THE RIDE views point. */
+const CUBE_CENTER = 1n << 84n
+
+/** A plain view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it. */
+function wholeCube(f: { position: { x: bigint; y: bigint; z: bigint }; drive?: boolean }): boolean {
+  return !f.drive && f.position.x === CUBE_CENTER && f.position.y === CUBE_CENTER && f.position.z === CUBE_CENTER
 }
 
 /** The build cursor sits on your avatar, in the plane your head shows. */
@@ -167,7 +176,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // place) keeps its cursor; a plain view (a stop, a tapped block, a
     // deployment) starts the cursor on what it frames. With no view up, at
     // your head, it starts on your avatar in the plane your head shows.
-    const looking = cs.focus !== null && cs.spectate === null && cs.exploreIndex === null
+    // EARTH, CYBERSPACE and THE RIDE look at the whole cube from its center:
+    // there is no place in them to build, and the center is Earth's core at
+    // 2^52 and up. They count as no view (found in review, 2026-10-07).
+    const looking = cs.focus !== null && cs.spectate === null && cs.exploreIndex === null && !wholeCube(cs.focus)
     if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
     else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
     set({ active: true, via, leftAvatar: !onAvatar(useCyberspace.getState()) })
@@ -206,13 +218,23 @@ function endUnder(reason: BuildEndReason): void {
   const shards = useShards.getState()
   const pending = shards.pending
   let kept = ''
-  if (pending) {
+  if (pending && shards.deployStatus === 'working') {
+    // Already hiding: the key is being computed for the place it was aimed
+    // at, and it finishes there. Nothing to keep and nothing to cancel, only
+    // to say (found in review, 2026-10-07: it used to say "kept" and publish).
+    kept = pending.type === 'message'
+      ? ' Your message was already being hidden, and it finishes at the place you chose.'
+      : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
+  } else if (pending) {
+    // What was set for this one deploy goes with it; say so plainly.
+    const riddle = shards.deployBag.riddle.trim() !== ''
+    const dropped = ` Its height and bag settings${riddle ? ', including the hint message you wrote,' : ''} were not kept.`
     if (pending.type === 'message') {
       useBuilder.setState({ messageDraft: pending.text })
-      kept = ' Your message is kept: WRITE A MESSAGE in the Stash, or HIDE MESSAGE in build mode, opens it again.'
+      kept = ' Your message is kept: WRITE A MESSAGE in the Stash, or HIDE MESSAGE in build mode, opens it again.' + dropped
     } else {
       const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.`
+      kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped
     }
     // Not back to the Models modal: the view went somewhere on purpose.
     useStash.setState({ returnToModels: false })
@@ -244,7 +266,9 @@ useShards.subscribe((s, prev) => {
   // off turns it on, at the place you are looking or else your avatar, so
   // the deploy lands at the build cursor and never at a cursor lined up for
   // a move.
-  if (s.pending !== null && prev.pending === null && !useBuilder.getState().active) useBuilder.getState().enter('deploy')
+  // A new deploy, not only the first: one lined up while an earlier one is
+  // still hiding after the mode ended starts the mode again too.
+  if (s.pending !== null && s.pending !== prev.pending && !useBuilder.getState().active) useBuilder.getState().enter('deploy')
   // A DEPLOY that never left your avatar was only ever a deploy at your
   // avatar: when it ends, hidden or canceled, so does the mode.
   const b = useBuilder.getState()

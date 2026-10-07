@@ -367,7 +367,7 @@ function Controls(): JSX.Element {
   const rows: Array<[string, string]> = [
     ['W A S D', 'move cursor one step'],
     ['Space', 'commit hop or sidestep (compute proof)'],
-    ['X', 'cancel proof / recall cursor (building: build cursor to your avatar)'],
+    ['X', 'cancel proof / recall cursor (building: stop a move or route from before, else build cursor to your avatar)'],
     ['B', 'build mode in / out: the movement keys and zoom then move the build cursor, never your avatar'],
     ['Shift + W A S D', 'rotate view 90°'],
     ['Tab', 'previous view'],

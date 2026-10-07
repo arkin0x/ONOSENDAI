@@ -57,7 +57,7 @@ function ModelsSource(): JSX.Element {
     return (
       <div className="objpick__empty">
         <p className="login__note">No models yet. Make one in the workshop.</p>
-        <button className="secret__act login__act" onClick={openWorkshopFromPicker}>OPEN WORKSHOP</button>
+        <button className="secret__act login__act objpick__workshop" onClick={openWorkshopFromPicker}>OPEN WORKSHOP</button>
       </div>
     )
   }

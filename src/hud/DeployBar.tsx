@@ -157,7 +157,8 @@ export function DeployBar(): JSX.Element | null {
             {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
-        <button className="deploybar__cancel" onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
+        {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
+        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}

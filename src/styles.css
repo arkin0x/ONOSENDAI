@@ -7529,6 +7529,12 @@ kbd {
   flex-direction: column;
   gap: 8px;
 }
+/* .secret__act grows along its row (flex: 1); in this column that squashed
+   its height, so it keeps the height every other action button has. */
+.objpick__workshop {
+  flex: none;
+  height: 34px;
+}
 /* PLACE OBJECT's sources, drawn once there is more than one (the Shard Feed, lists). */
 .objpick__tabs {
   display: flex;

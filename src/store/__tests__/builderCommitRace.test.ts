@@ -104,6 +104,17 @@ describe('a commit waiting on the look at the relay', () => {
     expect(S().proof.message).toBe(AIM_CHANGED_MESSAGE)
   })
 
+  it('says another device moved you when that is what changed the cursor during the wait', async () => {
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    const p = S().commit()
+    // What adopting another device's newer head writes at your head.
+    const there = { x: S().position.x + 7n, y: S().position.y, z: S().position.z }
+    useCyberspace.setState({ prevEventId: 'another-device-event', position: there, cursor: { ...there }, anchor: { ...there } })
+    await p
+    expect(posted).toEqual([])
+    expect(S().proof.message).toBe('Another device moved you. Re-aim from where you are now.')
+  })
+
   it('still sends the move when nothing changes during the wait', async () => {
     S().moveCursor(moveDirection(S().axes(), 'right'))
     const aimed = { ...S().cursor }

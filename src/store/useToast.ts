@@ -1,6 +1,7 @@
 /**
  * useToast.ts - one chip in the instrument stack for something that just
- * finished elsewhere, the way KEY FOUND announces a find: a cloud job done.
+ * finished elsewhere, the way KEY FOUND announces a find: a cloud job done,
+ * or BUILD mode ended by something other than EXIT (store/useBuilder.ts).
  * One at a time; a new one replaces the last.
  */
 
@@ -10,8 +11,8 @@ export interface Toast {
   id: string
   label: string
   meta: string
-  /** Whose mark stands as the chip's glyph. */
-  mark: 'hosaka'
+  /** Whose mark stands as the chip's glyph: HOSAKA's logo, or the Builder's wrench. */
+  mark: 'hosaka' | 'build'
   at: number
 }
 

@@ -3,9 +3,11 @@
  * cell is, what to place, and the ways out.
  *
  * It stands in the instrument stack where the free view's FocusBar would,
- * since BUILD mode rides that view (store/useBuilder.ts), and it says in so
- * many words that building does not move your avatar, so nobody thinks they
- * teleported (design note §4.2). EXIT leaves the view where it is (R6), like
+ * since BUILD mode rides that view (store/useBuilder.ts). Minimal by
+ * arkinox's ruling (2026-10-07): the wrench and BUILD with EXIT, one line
+ * with the cursor's place, plane and cell size, and the buttons. That
+ * building does not move your avatar (design note §4.2) is said in EXPLAIN,
+ * kept to four short lines that fit a phone. EXIT leaves the view where it is (R6), like
  * the workshop's close; Escape does the same, as a chip on the Escape stack
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
@@ -18,11 +20,12 @@
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import { buildPlane } from '../lib/buildCursor'
+import { buildPlane, moveUnderWay } from '../lib/buildCursor'
 import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
+import { Wrench } from 'lucide-react'
 
 export function BuildBar(): JSX.Element | null {
   const active = useBuilder((s) => s.active)
@@ -32,36 +35,40 @@ export function BuildBar(): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   // On your avatar: the same coordinate in the plane your head shows.
   const onAvatar = useCyberspace((s) => samePosition(s.cursor, s.position) && buildPlane(s) === s.plane)
-  // A move committed before building can still be computing or stepping a
-  // route. It is not the Builder's, and the bar says so rather than let it
-  // look as if building moved you.
-  const moving = useCyberspace((s) => s.proof.status === 'computing' || s.plan !== null)
+  // A move committed before building that is still going: a proof being
+  // computed, or a route stepping. Not a paused or failed route, which is
+  // waiting on you and moves nothing. It is not the Builder's, and the bar
+  // says so, with a STOP, since the pad's STOP is not shown while building.
+  const moving = useCyberspace(moveUnderWay)
   if (!active) return null
+
+  const stop = (): void => {
+    const s = useCyberspace.getState()
+    if (s.plan) s.cancelPlan()
+    else s.cancel()
+  }
 
   return (
     <div className="hyperbar buildbar" role="group" aria-label="Build mode">
       <div className="buildbar__head">
-        <span className="hyperbar__glyph buildbar__glyph" aria-hidden="true">⬚</span>
+        <Wrench className="buildbar__glyph" size={14} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__text">
-          <span className="hyperbar__label">BUILD MODE</span>
+          <span className="hyperbar__label">BUILD</span>
+          {/* Where the build cursor is, in which plane, and the cell a
+              placement lands in, which the zoom sets: one line. */}
           <span className="hyperbar__meta">
-            {[cursor.x, cursor.y, cursor.z].map(shortAxis).join(', ')} · {plane === 0 ? 'DATASPACE' : 'IDEASPACE'}
+            {[cursor.x, cursor.y, cursor.z].map(shortAxis).join(', ')} · {plane === 0 ? 'DATASPACE' : 'IDEASPACE'} · 2^{scaleExp} · {formatCellSize(scaleExp)}
           </span>
         </span>
         <button className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
       </div>
 
-      <div className="buildbar__facts">
-        <span>
-          <strong>CELL 2^{scaleExp}</strong> · {formatCellSize(scaleExp)} on a side. Each step moves the build cursor one cell; + makes the cells bigger, − smaller.
-        </span>
-        <span className="buildbar__still">
-          {onAvatar ? 'The build cursor is on your avatar.' : `Your avatar stays where it is, ${formatDistance(axisDistance(cursor, position))} away.`} Building never moves your avatar and signs no move.
-        </span>
-        {moving && (
-          <span className="buildbar__warn">A move you committed before building is still under way. It moves your avatar when it finishes; building does not.</span>
-        )}
-      </div>
+      {moving && (
+        <div className="buildbar__warn">
+          A move you committed before building is still under way; it moves your avatar when it finishes.
+          <button className="buildbar__stop" onClick={stop} title="Stop that move (X)">STOP</button>
+        </div>
+      )}
 
       <div className="buildbar__acts">
         <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor">◇ PLACE OBJECT</button>
@@ -70,20 +77,12 @@ export function BuildBar(): JSX.Element | null {
       </div>
 
       <Explanation>
-        Build mode places objects and messages at the build cursor, the white
-        cube marked BUILD, instead of at your avatar. The build cursor is a
-        position of its own. The movement controls (the pad, W A S D, and R
-        and F for depth) move it one cell at a time, and the zoom decides how
-        big a cell is: zoom out with + to place very large objects (2^6 and
-        up) or to cross great distances in a few steps, and zoom in with − to
-        place precisely. To build somewhere else entirely, type a coordinate
-        or a place into VIEW in the Position panel and the build cursor jumps
-        there, or zoom far out, move the cursor, and zoom back in. P switches
-        the plane you build in. Nothing you do here moves your avatar or signs
-        a movement, which is why COMMIT and the route are not shown while you
-        build. Hiding something still costs the work of computing its
-        region&apos;s key, wherever you stand. EXIT leaves the view exactly
-        where it is; RETURN TO AVATAR brings the build cursor back to you.
+        <ul className="buildbar__explain">
+          <li>The white cube marked BUILD is the build cursor: what you place lands in its cell.</li>
+          <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the Position panel jumps it anywhere; P switches the plane.</li>
+          <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
+          <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>
+        </ul>
       </Explanation>
     </div>
   )

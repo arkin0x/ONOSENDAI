@@ -82,12 +82,12 @@ export function useKeyboard(): void {
       // and the few that would reach the movement chain are answered here.
       const building = useBuilder.getState().active
 
-      // B: into BUILD mode, or out of it, like the BUILD control. Not while a
-      // deploy is lined up: leaving would cancel it, and that is CANCEL's (or
-      // Escape's) to do, not a letter's.
+      // B: into BUILD mode, or out of it, like the BUILD control. Leaving is
+      // refused while a deploy is lined up (useBuilder `exit`): that is
+      // CANCEL's (or Escape's) to end, not a letter's.
       if (event.code === 'KeyB') {
         event.preventDefault()
-        if (!useShards.getState().pending) useBuilder.getState().toggle()
+        useBuilder.getState().toggle()
         return
       }
 

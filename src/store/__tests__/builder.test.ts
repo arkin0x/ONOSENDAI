@@ -67,10 +67,11 @@ let signed: EventTemplate[] = []
 let realSign: ReturnType<typeof S>['signEvent']
 
 beforeEach(() => {
+  // The deploy first: leaving BUILD mode is refused while one is lined up.
+  useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useBuilder.getState().exit()
   S().clearFocus()
   S().adjustScale(-S().scaleExp)
-  useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useCyberspace.setState({ live: false })
   signed = []
   realSign = S().signEvent
@@ -79,6 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useCyberspace.setState({ signEvent: realSign })
+  useShards.setState({ pending: null, deployStatus: 'idle' })
   useBuilder.getState().exit()
   S().clearFocus()
 })
@@ -106,15 +108,35 @@ describe('entering BUILD mode', () => {
     expect(S().cursor).toEqual(there)
   })
 
-  it('from DEPLOY centers the build cursor on your avatar, even from a view somewhere else', () => {
+  it('from DEPLOY with no view up starts the build cursor on your avatar', () => {
     const shard = benchShard()
-    const there: Position = { x: S().position.x + 5000n, y: S().position.y, z: S().position.z }
-    S().focusOn(there, S().plane, 'there', undefined, true)
+    // A move lined up at your head is not where the deploy goes.
+    S().moveCursor({ axis: 'x', dir: 1 })
     useShards.getState().startDeployShard(shard.id)
     expect(B().active).toBe(true)
     expect(B().via).toBe('deploy')
     expect(S().cursor).toEqual(S().position)
     expect(S().anchor).toEqual(S().position)
+  })
+
+  it('from DEPLOY while viewing a place starts the build cursor at that place (ruling A)', () => {
+    const shard = benchShard()
+    const there: Position = { x: S().position.x + 5000n, y: S().position.y, z: S().position.z }
+    // VIEW from the Position panel, the Earth pin, a recent or starred place.
+    S().focusOn(there, 1, 'there', undefined, true)
+    useShards.getState().startDeployShard(shard.id)
+    expect(B().via).toBe('deploy')
+    expect(buildCursorOf(S())).toEqual({ position: there, plane: 1 })
+  })
+
+  it('from DEPLOY in a plain view (a stop, a tapped block) starts the build cursor on what it frames', () => {
+    const shard = benchShard()
+    const stop: Position = { x: 77n, y: 88n, z: 99n }
+    S().focusOn(stop, 0, 'STOP 12', 20)
+    useShards.getState().startDeployShard(shard.id)
+    expect(S().focus?.drive).toBe(true)
+    expect(buildCursorOf(S())).toEqual({ position: stop, plane: 0 })
+    expect(S().scaleExp).toBe(20)
   })
 
   it('a DEPLOY started while building lands where the build cursor already is', () => {

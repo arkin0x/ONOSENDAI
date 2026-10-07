@@ -17,6 +17,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
+import { Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -28,6 +29,9 @@ export function ShardsPanel(): JSX.Element {
   const scanning = useShards((s) => s.scanning)
   const [composing, setComposing] = useState(false)
   const building = useBuilder((s) => s.active)
+  // EXIT BUILD waits for a lined-up deploy to be hidden or canceled, as B
+  // and the bar's EXIT do (useBuilder `exit`).
+  const deploying = useShards((s) => s.pending !== null)
 
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)
@@ -54,9 +58,10 @@ export function ShardsPanel(): JSX.Element {
           <button
             className={`avatars__go shards__compose-open shards__build ${building ? 'is-on' : ''}`}
             aria-pressed={building}
+            disabled={building && deploying}
             onClick={() => useBuilder.getState().toggle()}
-            title={building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
-          >{building ? 'EXIT BUILD' : '⬚ BUILD'}</button>
+            title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
+          >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
         <span className="shards__note">
           BUILD places objects and messages at a build cursor of its own, anywhere in cyberspace. It starts on your avatar; move it with the controls, zoom out with + to build bigger, or jump it with VIEW in the Position panel. Building never moves your avatar.

@@ -7379,7 +7379,7 @@ kbd {
 .hyperbar.buildbar {
   flex-direction: column;
   align-items: stretch;
-  gap: 7px;
+  gap: 6px;
   width: 340px;
   border-color: rgba(242, 247, 255, 0.55);
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
@@ -7397,8 +7397,9 @@ kbd {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.buildbar .hyperbar__glyph,
+.buildbar__glyph,
 .buildbar .hyperbar__label {
+  flex: none;
   color: var(--build);
 }
 .buildbar .hyperbar__end {
@@ -7409,23 +7410,37 @@ kbd {
 .buildbar .hyperbar__end:hover {
   background: #ffffff;
 }
-.buildbar__facts {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.buildbar__warn {
   line-height: 1.5;
   letter-spacing: 0.06em;
-  color: var(--fg);
-}
-.buildbar__facts strong {
-  color: var(--build);
-  font-weight: 700;
-}
-.buildbar__still {
-  color: var(--ok);
-}
-.buildbar__warn {
   color: var(--warn);
+}
+.buildbar__stop {
+  margin-left: 8px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  cursor: pointer;
+}
+/* The Builder's toast: its own mark and color, not HOSAKA's. */
+.hyperbar--buildtoast {
+  border-color: rgba(242, 247, 255, 0.55);
+  animation: none;
+}
+.hyperbar--buildtoast .hyperbar__label,
+.toast__build {
+  color: var(--build);
+}
+.hyperbar--buildtoast .hyperbar__meta {
+  white-space: normal;
+  max-width: 320px;
 }
 .buildbar__acts {
   display: flex;
@@ -7457,11 +7472,23 @@ kbd {
 .buildbar .explain {
   letter-spacing: 0.04em;
 }
+.buildbar__explain {
+  margin: 0;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 @media (max-width: 1100px) {
   /* Clear of the compass in the top right corner: the instrument stack sits
      above it, so a full-width bar would cover it. */
   .hyperbar.buildbar {
     width: min(340px, calc(100vw - 112px));
+  }
+  /* EXPLAIN never covers a phone: it scrolls inside a third of the screen. */
+  .buildbar .explain__well {
+    max-height: 35vh;
+    overflow-y: auto;
   }
 }
 
@@ -7485,4 +7512,41 @@ kbd {
   font-size: 9px;
   line-height: 1.5;
   color: var(--build);
+}
+
+/* The wrench inside the Stash panel's BUILD control, on the text's line. */
+.shards__build-icon {
+  vertical-align: -1px;
+  margin-right: 2px;
+}
+.toast__build {
+  flex: none;
+}
+
+/* PLACE OBJECT's empty state: the note, then the way to make a model. */
+.objpick__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* PLACE OBJECT's sources, drawn once there is more than one (the Shard Feed, lists). */
+.objpick__tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.objpick__tab {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.objpick__tab.is-on {
+  color: var(--fg);
+  border-color: var(--accent);
 }

@@ -24,9 +24,10 @@
  *   and X are routed here too (useKeyboard), so neither reaches the movement
  *   store while building.
  * - DEPLOY happens in BUILD mode. Any deploy that starts while the mode is off
- *   turns it on, centered on your avatar (the subscription at the bottom), and
- *   the deploy lands at the build cursor (useShards `deploy`). A deploy started
- *   while building leaves the cursor where you put it.
+ *   turns it on (the subscription at the bottom), with the build cursor where
+ *   you are looking if a view is up and on your avatar if not, and the deploy
+ *   lands at the build cursor (useShards `deploy`). A deploy started while
+ *   building leaves the cursor where you put it.
  * - Exiting leaves the view where it is: the free view stays, with its RETURN
  *   (FocusBar) to take you home. The one exception is a build cursor already
  *   on your avatar in your plane, where the view and your head are the same
@@ -39,10 +40,23 @@
  *   steps aside while a deploy is lined up, and the mode does not. A deploy's
  *   bar, opened later, is the more recent chip and closes first; a modal or
  *   the menu closes before either.
+ * - A session that began from DEPLOY and never moved the build cursor off
+ *   your avatar ends with that deploy, hidden or canceled: it was only ever
+ *   a deploy at your avatar, and staying in BUILD mode afterwards left COMMIT
+ *   and the phone's COMMIT and RECALL hidden until EXIT (found in review,
+ *   2026-10-07). Once the cursor has left your avatar, you are building
+ *   somewhere, and the mode stays for the next placement.
+ * - Entering takes the camera back from a hyperspace view (EARTH, a stop, the
+ *   scrubber), the way starting to spectate does, so the gibson field comes
+ *   back and no second bar offers a RETURN that would end the mode.
  * - The mode ends by itself when the view it rides ends some other way
- *   (spectating, history, a plain focus on a deployment, an identity switch),
- *   because the build cursor is gone with it. A deploy still lined up then is
- *   canceled: a deploy happens only at a build cursor.
+ *   (Earth, a stop, a deployment, history, spectating, an identity switch),
+ *   or when your position is replaced under it (a respawn, a ride arriving,
+ *   the relays' version of your chain chosen), which carries the cursor off
+ *   to your new head. A deploy still lined up then cannot stay, since a
+ *   deploy happens only at a build cursor, but the work is not lost: a
+ *   message's text waits in the composer (`messageDraft`), a model is still
+ *   in the workshop, and a toast says what happened and why.
  *
  * Room for the next PRs. Build regions and drafts (PR 2, ruling B2: a cube
  * per room, one bag per region, one region key per region at COMMIT) belong
@@ -56,7 +70,11 @@
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
+import { useHyperspace } from './useHyperspace'
+import { useToast } from './useToast'
+import { useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
+import { buildPlane } from '../lib/buildCursor'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -64,25 +82,46 @@ export type BuildEntry = 'build' | 'deploy'
 /** The label the free view carries while it is the build cursor. */
 export const BUILD_FOCUS_LABEL = 'BUILD'
 
+/** Why BUILD mode ended without EXIT, for the toast that says so. */
+export type BuildEndReason = 'view' | 'moved'
+
 export interface BuilderState {
   /** BUILD mode is on: the free view is the build cursor and placements land there. */
   active: boolean
   /** How this session began; null while the mode is off. */
   via: BuildEntry | null
   /**
-   * Turn BUILD mode on. From the BUILD control the build cursor starts where
-   * you are looking if that is already a free view (you went somewhere to
-   * build there), and on your avatar otherwise. From a DEPLOY it always
-   * starts on your avatar (R5). Already on, this changes nothing, so a deploy
+   * The build cursor has been somewhere other than your avatar (in your
+   * plane) during this session. A session from DEPLOY that never has ends
+   * when its deploy does.
+   */
+  leftAvatar: boolean
+  /**
+   * A message whose deploy was ended under it (the view moved away, or your
+   * position was replaced): the composer starts with it, so nothing written
+   * is lost. Taken, and cleared, by the next composer that opens.
+   */
+  messageDraft: string | null
+  /**
+   * Turn BUILD mode on. From the BUILD control and from DEPLOY alike, the
+   * build cursor starts where you are looking when a view is up (a place you
+   * went to see, the Earth pin, a stop), and on your avatar otherwise (R5,
+   * and ruling A, 2026-10-07). Already on, this changes nothing, so a deploy
    * started while building lands where the cursor already is.
    */
   enter: (via?: BuildEntry) => void
-  /** Leave BUILD mode. The view stays where it is (R6); a pending deploy is canceled. */
+  /**
+   * Leave BUILD mode. The view stays where it is (R6). Refused while a deploy
+   * is lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
+   * do, so the B key, EXIT BUILD and EXIT all agree.
+   */
   exit: () => void
   /** On, or off. The B key and the BUILD control. */
   toggle: () => void
   /** Bring the build cursor, and the view with it, back to your avatar. Still building. */
   toAvatar: () => void
+  /** The composer took the kept message. */
+  takeMessageDraft: () => string | null
 }
 
 /** The free view the build cursor rides is standing: driven, not spectating, not in history. */
@@ -90,27 +129,56 @@ function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return s.focus?.drive === true && s.spectate === null && s.exploreIndex === null
 }
 
+/** The build cursor sits on your avatar, in the plane your head shows. */
+function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  return samePosition(s.cursor, s.position) && buildPlane(s) === s.plane
+}
+
+/** A free view that sits on your avatar shows what your head shows: end it, keeping the zoom. */
+function settleView(): void {
+  const cs = useCyberspace.getState()
+  if (cs.focus?.drive && onAvatar(cs)) cs.clearFocus(true)
+}
+
+const END_REASON: Record<BuildEndReason, string> = {
+  view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment, history, or someone else).',
+  moved: 'Your avatar was moved under it (a respawn, a ride arriving, or the relays\' version of your chain), and the build cursor went with it.',
+}
+
 export const useBuilder = create<BuilderState>((set, get) => ({
   active: false,
   via: null,
+  leftAvatar: false,
+  messageDraft: null,
 
   enter: (via = 'build') => {
     if (get().active) return
+    // The camera back from a hyperspace view first, as spectating does
+    // (useHyperspace.ts): its ownership hides the gibson field and stands a
+    // second bar up whose RETURN would end the mode.
+    const hs = useHyperspace.getState()
+    if (hs.viewOwned || hs.scrubHeight !== null) {
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+    }
     const cs = useCyberspace.getState()
-    // Building from a free view you already drove somewhere keeps that place.
-    // Everything else starts on your avatar, in the plane your head shows.
-    if (via === 'deploy' || !viewStands(cs)) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
-    set({ active: true, via })
+    // Where you are looking is where building starts, from BUILD and from
+    // DEPLOY alike (arkinox, 2026-10-07, ruling A on review finding 3): a
+    // view you drove somewhere (VIEW, the Earth pin, a recent or starred
+    // place) keeps its cursor; a plain view (a stop, a tapped block, a
+    // deployment) starts the cursor on what it frames. With no view up, at
+    // your head, it starts on your avatar in the plane your head shows.
+    const looking = cs.focus !== null && cs.spectate === null && cs.exploreIndex === null
+    if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
+    else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
+    set({ active: true, via, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 
   exit: () => {
-    if (!get().active) return
+    if (!get().active || useShards.getState().pending) return
     // Off first, so the view change below is not read as the view ending
     // under a live build mode.
-    set({ active: false, via: null })
-    if (useShards.getState().pending) useShards.getState().cancelDeploy()
-    const cs = useCyberspace.getState()
-    if (cs.focus?.drive && samePosition(cs.cursor, cs.position) && cs.anchorPlane === cs.plane) cs.clearFocus(true)
+    set({ active: false, via: null, leftAvatar: false })
+    settleView()
   },
 
   toggle: () => { if (get().active) get().exit(); else get().enter('build') },
@@ -120,21 +188,67 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     const cs = useCyberspace.getState()
     cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
   },
+
+  takeMessageDraft: () => {
+    const draft = get().messageDraft
+    if (draft !== null) set({ messageDraft: null })
+    return draft
+  },
 }))
 
-// The view the build cursor rides ended some other way: the mode ends with
-// it, and so does a deploy lined up at that cursor.
-useCyberspace.subscribe((s) => {
-  if (!useBuilder.getState().active || viewStands(s)) return
-  useBuilder.setState({ active: false, via: null })
-  if (useShards.getState().pending) useShards.getState().cancelDeploy()
+/**
+ * BUILD mode ended by something other than EXIT. The deploy lined up at the
+ * build cursor cannot stay, but what went into it is kept, and the toast says
+ * why the mode ended and where the work is.
+ */
+function endUnder(reason: BuildEndReason): void {
+  useBuilder.setState({ active: false, via: null, leftAvatar: false })
+  const shards = useShards.getState()
+  const pending = shards.pending
+  let kept = ''
+  if (pending) {
+    if (pending.type === 'message') {
+      useBuilder.setState({ messageDraft: pending.text })
+      kept = ' Your message is kept: WRITE A MESSAGE in the Stash, or HIDE MESSAGE in build mode, opens it again.'
+    } else {
+      const name = shards.pendingShard()?.name ?? 'the object'
+      kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.`
+    }
+    // Not back to the Models modal: the view went somewhere on purpose.
+    useStash.setState({ returnToModels: false })
+    shards.cancelDeploy()
+  }
+  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: END_REASON[reason] + kept + ' Press BUILD to start again.', mark: 'build' })
+}
+
+useCyberspace.subscribe((s, prev) => {
+  const b = useBuilder.getState()
+  if (!b.active) return
+  // The view the build cursor rides ended some other way.
+  if (!viewStands(s)) { endUnder('view'); return }
+  // Your position replaced under the mode, carrying the cursor to the new
+  // head: a new chain head that also wrote the cursor. Only a respawn, a ride
+  // arriving and a chain chosen from the relays do both. A move committed
+  // before building lands without touching the cursor, and the mode stays.
+  const headChanged = s.prevEventId !== prev.prevEventId || s.genesisId !== prev.genesisId
+  if (headChanged && s.cursor !== prev.cursor) {
+    endUnder('moved')
+    settleView()
+    return
+  }
+  if (!b.leftAvatar && !onAvatar(s)) useBuilder.setState({ leftAvatar: true })
 })
 
-// Every deploy happens in BUILD mode (R5): one that starts with the mode off
-// turns it on, centered on your avatar, so the deploy lands at the build
-// cursor and never at a cursor lined up for a move.
 useShards.subscribe((s, prev) => {
+  // Every deploy happens in BUILD mode (R5): one that starts with the mode
+  // off turns it on, at the place you are looking or else your avatar, so
+  // the deploy lands at the build cursor and never at a cursor lined up for
+  // a move.
   if (s.pending !== null && prev.pending === null && !useBuilder.getState().active) useBuilder.getState().enter('deploy')
+  // A DEPLOY that never left your avatar was only ever a deploy at your
+  // avatar: when it ends, hidden or canceled, so does the mode.
+  const b = useBuilder.getState()
+  if (s.pending === null && prev.pending !== null && b.active && b.via === 'deploy' && !b.leftAvatar) b.exit()
 })
 
 // Escape leaves BUILD mode: on the stack from the moment the mode turns on

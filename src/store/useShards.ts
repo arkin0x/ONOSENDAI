@@ -590,6 +590,11 @@ export const useShards = create<ShardsState>((set, get) => {
     deploy: async (confirmed = false) => {
       const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom } = get()
       if (!pending) return
+      // One hide at a time. Space (or a second tap) while the key is being
+      // computed and the bag sealed used to start a second deploy of the same
+      // thing: two signatures, and the item in the bag twice (found in
+      // review, 2026-10-07).
+      if (get().deployStatus === 'working') return
       const cs = cyber()
       // The center of the build cursor's cell at the zoom you are building in
       // (or of the region, for a bag smaller than a cell), where the ghost

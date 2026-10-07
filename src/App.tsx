@@ -147,6 +147,14 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
+  // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
+  // where VIEW is how the build cursor jumps: none of the flags above change,
+  // so the fold above does not fire again and the menu stayed over the place
+  // just asked for. A driven view's focus is replaced on every VIEW; with the
+  // menu covering the scene nothing else can replace it (the pad and the keys
+  // stand down), so a new one is always a VIEW from the panels.
+  const drivenFocus = useCyberspace((s) => (s.focus?.drive ? s.focus : null))
+  useEffect(() => { if (drivenFocus && isMobile) setPanelsOpen(false) }, [drivenFocus, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
@@ -212,7 +220,10 @@ export default function App(): JSX.Element {
           {/* BUILD mode, where the free view's bar would be: it rides that view. */}
           <BuildBar />
           <ToastChip />
-          <ChainExplorer />
+          {/* Not while building: history is somewhere nothing can be placed,
+              and its steps would end BUILD mode, as [ ] Home End would
+              (they are ignored while building, useKeyboard). */}
+          {!building && <ChainExplorer />}
           <BitReadout />
           {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
           <NotificationsToast />

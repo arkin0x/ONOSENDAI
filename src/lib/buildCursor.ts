@@ -40,3 +40,12 @@ export function buildPlane(s: BuildCursorSource): Plane {
 export function buildCursorOf(s: BuildCursorSource): { position: Position; plane: Plane } {
   return { position: s.cursor, plane: buildPlane(s) }
 }
+
+/**
+ * A move committed before building is still going: a proof being computed,
+ * or a route stepping. Not a paused or failed route, which waits on you and
+ * moves nothing. The BuildBar warns, with a STOP, only for this.
+ */
+export function moveUnderWay(s: { proof: { status: string }; plan: { status: string } | null }): boolean {
+  return s.proof.status === 'computing' || s.plan?.status === 'running'
+}

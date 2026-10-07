@@ -4,6 +4,7 @@
 
 import { boundaryColor, terrainColor } from '../lib/palette'
 import { Explanation } from './Explanation'
+import { Wrench } from 'lucide-react'
 
 const TERRAIN_SAMPLES = [0, 4, 6, 8, 10, 12, 14, 16]
 const HEIGHT_SAMPLES = [5, 20, 40, 60, 80]
@@ -76,14 +77,8 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
-    what: 'White cube marked BUILD: the build cursor, shown in build mode. The next object or message you place lands in this cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
-    glyph: (
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <g fill="none" stroke="#f2f7ff" strokeWidth="1.2" strokeLinejoin="round">
-          <path d="M4 7 L11 7 L11 16 L4 16 Z M4 7 L9 3 L16 3 L11 7 M16 3 L16 12 L11 16" />
-        </g>
-      </svg>
-    ),
+    what: 'Wrench, and a white cube marked BUILD: build mode and its build cursor. The next object or message you place lands in the cube\'s cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
+    glyph: <Wrench size={16} strokeWidth={2} color="#f2f7ff" aria-hidden />,
   },
   {
     what: 'Spawn point mesh: spawn point',

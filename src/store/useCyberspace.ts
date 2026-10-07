@@ -49,7 +49,6 @@ import {
   hexToCoord,
   sectorTag,
   sidestepLanding,
-  xyzToCoord,
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
@@ -2649,20 +2648,29 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   boardHyperspace: async () => {
-    const { events, genesisId, prevEventId, position, plane, proof, transit } = get()
+    const { events, genesisId, prevEventId, position, proof, transit } = get()
     if (transit !== null || proof.status === 'computing') return
     if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
     // A provisional identity has no chain to board from; move once first.
     if (events.length === 0 || !genesisId || !prevEventId) return
     const head = events[events.length - 1]
-    const coord = xyzToCoord(position.x, position.y, position.z, plane)
+    // Where the chain says you stand, plane bit included: the head's own C.
+    // Not `position` with `plane`: `plane` is the plane lined up for the next
+    // move (viewing EARTH lines up dataspace), and a boarding built from it at
+    // a port in ideaspace named the right x, y and z in the wrong plane, so
+    // its c no longer matched the C before it and the chain was invalid from
+    // there (2026-10-06, a published chain on the relay).
+    const here = head.tags.find((t) => t[0] === 'C')?.[1]
+    if (!here) return
+    const coord = hexToCoord(here)
+    const at = coordToXyz(coord)
     const proofHash = computeEnterProof(coord, prevEventId)
     const template = enterHyperspaceTemplate({
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      at: position,
-      plane,
+      at: { x: at.x, y: at.y, z: at.z },
+      plane: at.plane,
       proofHash,
     })
     let event: NostrEvent
@@ -2680,7 +2688,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       prevEventId: event.id,
       published,
       positionHistory: [...get().positionHistory, { ...position }],
-      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: positionHex(position, plane) },
+      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: here },
     })
     saveChain(nextEvents, published, get().chain)
   },

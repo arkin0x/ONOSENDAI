@@ -34,7 +34,7 @@ if (typeof localStorage === 'undefined') {
 
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure'
 import { positionHex, type NostrEvent } from '../../lib/events'
-import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove, type MovePlan } from '../useCyberspace'
+import { BROKEN_CHAIN_MESSAGE, GAME_HOLDS_MESSAGE, REFUSE_MOVES_ON_BROKEN_CHAIN, useCyberspace, whyNoMove, type MovePlan } from '../useCyberspace'
 import type { ProofResponse } from '../../workers/proof.worker'
 import { usePresence } from '../usePresence'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -178,6 +178,7 @@ describe('presence places someone inside a game at the entry c', () => {
     const template = enterVirtualEvent({
       pubkey: '00'.repeat(32), createdAt: 5_000, genesisId: 'aa'.repeat(32), previousId: 'bb'.repeat(32),
       c: nearHex, inGame: { ...S().position, x: S().position.x + 10n }, height: 4, game: GAME, plane: S().plane,
+      C: { ...S().position, x: S().position.x + 10n },
     })
     const signed = finalizeEvent({ kind: template.kind, created_at: template.created_at, content: '', tags: template.tags }, sk) as NostrEvent
     usePresence.getState().ingest(signed)
@@ -193,6 +194,9 @@ describe('presence places someone inside a game at the entry c', () => {
     const template = enterVirtualEvent({
       pubkey: '00'.repeat(32), createdAt: 5_000, genesisId: 'aa'.repeat(32), previousId: 'bb'.repeat(32),
       c: positionHex(far, S().plane), inGame: { ...S().position, x: S().position.x + 10n }, height: 4, game: GAME, plane: S().plane,
+      // An entry from before the 2026-10-07 refinement, whose C named its
+      // place in the game, here, and whose sector tags therefore say here.
+      C: { ...S().position, x: S().position.x + 10n },
     })
     const signed = finalizeEvent({ kind: template.kind, created_at: template.created_at, content: '', tags: template.tags }, sk) as NostrEvent
     usePresence.getState().ingest(signed)
@@ -353,7 +357,7 @@ describe('a finished proof is signed only onto the chain it was computed for (re
 })
 
 describe('whyNoMove: the one question every move asks', () => {
-  it('a game holds the avatar: refused; a broken chain: allowed while the switch is off', () => {
+  it('a game holds the avatar: refused; a broken chain: refused, since the 2026-10-07 ruling', () => {
     const { enter } = enterGame()
     expect(whyNoMove(S().actions())).toBeNull()
     const stray = actionEvent({
@@ -362,7 +366,8 @@ describe('whyNoMove: the one question every move asks', () => {
     })
     S().adoptChain([stray])
     expect(S().actions()[S().actions().length - 1].breaks).toBeDefined()
-    expect(whyNoMove(S().actions())).toBeNull()
+    expect(REFUSE_MOVES_ON_BROKEN_CHAIN).toBe(true)
+    expect(whyNoMove(S().actions())).toBe(BROKEN_CHAIN_MESSAGE)
     useCyberspace.setState({ ...fresh, events: [...fresh.events] })
     S().adoptChain([enter])
     expect(whyNoMove(S().actions())).toBe(GAME_HOLDS_MESSAGE)

@@ -342,6 +342,15 @@ export function ChainExplorer(): JSX.Element {
               <span className="explorer__key">in game </span>{shortHex(action.declared.coordHex, 8, 6)}
             </div>
           )}
+          {/* Not a game's: what the action itself claimed, where that is not
+              where you stand. A skipped action's C, and every action from the
+              first broken one on, where you are frozen at the last valid
+              position (arkinox, 2026-10-07). */}
+          {action.role !== 'enter' && action.role !== 'virtual' && action.declared && (
+            <div className="explorer__detail explorer__detail--claimed" title={action.declared.coordHex}>
+              <span className="explorer__key">claimed </span>{shortHex(action.declared.coordHex, 8, 6)}
+            </div>
+          )}
           {action.game && (
             <div className="explorer__detail explorer__detail--game" title={nip19.npubEncode(action.game.pubkey)}>
               <span className="explorer__key">game </span>{shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)}

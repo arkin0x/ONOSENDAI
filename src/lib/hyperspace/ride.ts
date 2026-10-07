@@ -22,8 +22,22 @@ export const SAMPLES = 32
 /** The height of one re-roll attempt's Cantor tree (§5.5). */
 export const GRIND_HEIGHT = 16
 export const PAD_LEAF = new Uint8Array(32)
-/** The `mn` of a zero-length ride, which has no price (§5.6). */
-export const ZERO_NONCE_HEX = '0'.repeat(16)
+
+/**
+ * Why a ride from `fromHeight` to `toHeight` is refused, or null when it is
+ * not a zero-length ride. A ride always goes to a different block (arkinox,
+ * 2026-10-07, Q1): DECK-0001 §5.6's zero-length ride, the first ride after a
+ * boarding with the station as its destination, is abolished, because
+ * entering hyperspace is how you travel from your station to somewhere else,
+ * never a way to teleport onto the station. `chained` is a ride from the
+ * stop the last ride reached, rather than the first ride from a boarding.
+ */
+export function zeroLengthRideRefusal(fromHeight: number, toHeight: number, chained: boolean): string | null {
+  if (fromHeight !== toHeight) return null
+  return chained
+    ? `You are already at block ${toHeight}, so a ride there would go nowhere. A ride always takes you to a different block than the one it starts from. To come back to block ${toHeight} from here, ride to any other block first, then ride back to block ${toHeight}.`
+    : `Block ${toHeight} is your station, the block this ride would start from, so a ride there would go nowhere. Entering hyperspace lets you travel from your station to a different block; it never moves you onto your station itself. If you want to be at your station, ride to any other block first, then ride back to block ${toHeight}.`
+}
 
 const enc = new TextEncoder()
 export const HYPERSPACE_TERRAIN_DOMAIN = enc.encode('CYBERSPACE_HYPERSPACE_TERRAIN_V1')
@@ -156,8 +170,8 @@ export function rideBlocks(fromHeight: number, toHeight: number): number[] {
  * the height whose stop the transit ghost stands at. Progress counts
  * completed leaves, which can finish out of order; the ghost walks the line
  * in order anyway, because "how far along" is what the count means to a
- * rider. A zero-length ride is already there; done is clamped so a stray
- * count can never walk past the destination.
+ * rider. Done is clamped so a stray count can never walk past the
+ * destination.
  */
 export function rideVisualHeight(fromHeight: number, toHeight: number, done: number, total: number): number {
   if (total <= 0) return toHeight
@@ -335,9 +349,6 @@ export interface RideProof {
   mnHex: string
 }
 
-/** §5.6: a zero-length ride's proof. No price and nothing to sample. */
-export const ZERO_LENGTH_PROOF: Readonly<RideProof> = { rootHex: '0'.repeat(64), mp: '', mnHex: ZERO_NONCE_HEX }
-
 /** The ride's Merkle tree (§5.4): every layer, which the openings are read from, and the root. */
 export interface RideTree {
   layers: Uint8Array[][]
@@ -348,7 +359,7 @@ export interface RideTree {
 
 /** Leaves must be in ascending height order for rideBlocks(from, to), and at least one. */
 export function rideTree(leaves: Uint8Array[]): RideTree {
-  if (leaves.length === 0) throw new Error('a zero-length ride has no tree (§5.6)')
+  if (leaves.length === 0) throw new Error('a ride passes at least one block: there is no zero-length ride (arkinox, 2026-10-07)')
   const layers = merkleLayers(leaves)
   return { layers, root: layers[layers.length - 1][0], n: leaves.length }
 }
@@ -365,7 +376,6 @@ export function rideProofFor(tree: RideTree, nonce: bigint, G: Uint8Array): Ride
  * pool does the same in parallel and resumably (ridePool.ts).
  */
 export function buildRideProof(previousEventIdHex: string, leaves: Uint8Array[]): RideProof {
-  if (leaves.length === 0) return { ...ZERO_LENGTH_PROOF }
   const tree = rideTree(leaves)
   const { nonce, G } = findRideNonce(previousEventIdHex, tree.root, tree.n)
   return rideProofFor(tree, nonce, G)
@@ -421,12 +431,7 @@ export async function verifyRideLevel1(input: RideVerifyInput): Promise<RideVeri
   if (nonce === null) return fail(0, 'malformed mn')
   const blocks = rideBlocks(input.fromHeight, input.toHeight)
   const n = blocks.length
-  if (n === 0) {
-    const zero = ZERO_LENGTH_PROOF
-    return input.rootHex === zero.rootHex && input.mp === zero.mp && input.mn === zero.mnHex
-      ? { ok: true, checked: 0, reason: null, grandfathered: false }
-      : fail(0, 'a zero-length ride carries the zero root, an all-zero mn and no openings')
-  }
+  if (n === 0) return fail(0, 'a zero-length ride, whose destination is the block it starts from, is never valid')
   if (!/^[0-9a-f]{64}$/.test(input.rootHex)) return fail(0, 'malformed root')
   const root = hexToBytes(input.rootHex)
   const G = grindAttempt(input.previousEventIdHex, root, nonce)
@@ -454,7 +459,7 @@ export function expectedRidePairs(n: number): number {
 /**
  * Expected Cantor pairings for the re-roll price of a ride of n blocks: A
  * attempts of one GRIND_HEIGHT tree each (§5.5), about one thirty-second of
- * the ride. A zero-length ride has no price (§5.6).
+ * the ride. Nothing for no blocks, which is no ride at all.
  */
 export function expectedPricePairs(n: number): number {
   return n === 0 ? 0 : attemptsRequired(n) * 2 ** GRIND_HEIGHT

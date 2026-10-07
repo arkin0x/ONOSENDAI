@@ -29,7 +29,7 @@
  */
 
 import type { Filter } from 'nostr-tools/filter'
-import { RECOGNIZED_ACTIONS, buildChain, chainGap, parseAction, type ActionEvent, type NostrEvent } from './events'
+import { RECOGNIZED_ACTIONS, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
 import { query, queryEach, subscribe } from './relay'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
@@ -93,7 +93,9 @@ export function chainFilter(pubkey: string, spawnId: string, until?: number): Fi
 
 /** The id of the spawn the active chain starts from (§8.7.3 rule 1), or null with none. */
 export function newestSpawnId(events: NostrEvent[]): string | null {
-  return buildChain(events.filter((e) => parseAction(e)?.type === 'spawn'))[0]?.id ?? null
+  // Valid or not: an invalid newest spawn still names the chain, which is
+  // dead from it, and an older spawn's chain is never asked for (Q7).
+  return newestSpawn(events)?.id ?? null
 }
 
 /** The most extra questions one chain fetch asks to fill holes (chainGap). */

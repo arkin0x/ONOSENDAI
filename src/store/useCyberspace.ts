@@ -19,7 +19,7 @@ import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
-import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
+import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -147,6 +147,8 @@ import {
 } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
+import { addRecentView } from '../lib/viewAt'
+import { endOfChainLabel } from '../lib/chainBreak'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
@@ -175,29 +177,30 @@ export const GAME_HOLDS_MESSAGE =
   'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
 
 /**
- * THE SWITCH for refusing moves on a broken chain (review of #224, S2).
+ * THE SWITCH for refusing moves on a broken chain (review of #224, S2), on
+ * since arkinox's ruling of 2026-10-07 (Q3): an invalid chain stands at its
+ * last valid position, frozen until a respawn.
  *
- * A chain with a broken event before its head (events.ts firstBreak) is one
- * every verifier treats as invalid from that event, so a move signed onto it
- * is a move no verifier counts. Where an identity with an invalid chain
- * stands is not settled yet (arkinox is ruling on it), so for now this client
- * says so in the Proof chain panel and still moves. Set this to true to make
- * every move (commit, route step, BOARD, RIDE, signing a finished proof)
- * refuse with BROKEN_CHAIN_MESSAGE instead; whyNoMove is the one place that
- * reads it.
+ * A chain with a broken event (events.ts firstBreak) is one every verifier
+ * treats as invalid from that event, so a move signed onto it is a move no
+ * verifier counts. Every move (commit, route step, BOARD, RIDE, signing a
+ * finished proof) refuses with BROKEN_CHAIN_MESSAGE; whyNoMove is the one
+ * place that reads this.
  */
-export const REFUSE_MOVES_ON_BROKEN_CHAIN = false
+export const REFUSE_MOVES_ON_BROKEN_CHAIN = true
 
 export const BROKEN_CHAIN_MESSAGE =
-  'Your chain is broken before its head: one of its actions breaks a chain rule, and every verifier treats the chain as invalid from that action, so a move added after it is a move nobody counts. ONOSENDAI will not sign one. A respawn starts a new, valid chain at your spawn point. The Proof chain panel names the action and the rule it breaks.'
+  'Your chain is broken, so you are frozen where it was last valid. One of its actions breaks a chain rule, and every verifier treats your chain as invalid from that action on: you stand at the last valid position before it, and any move added now is a move nobody would count, so ONOSENDAI will not sign one. To move again, respawn: you start a new, valid chain at your spawn point. The red CHAIN BROKEN notice names the action, says why it broke the chain, and has the RESPAWN button.'
 
 /**
  * Why this client will not sign a base action onto `chain` now, in words, or
- * null when it may. Every way to move asks this one question.
+ * null when it may. Every way to move asks this one question. A broken chain
+ * comes first: nothing on it counts, a game included, and a respawn is the
+ * only way on from either.
  */
 export function whyNoMove(chain: ActionEvent[]): string | null {
-  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
   if (REFUSE_MOVES_ON_BROKEN_CHAIN && firstBreak(chain)) return BROKEN_CHAIN_MESSAGE
+  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
   return null
 }
 
@@ -713,6 +716,14 @@ export interface CyberspaceState {
    * anywhere.
    */
   respawn: () => void
+  /**
+   * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
+   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * and the first eight hex of the last valid event's id (the invalid
+   * spawn's, when no event is valid, Q7), so the place the old chain froze
+   * at is one tap away; then an ordinary respawn.
+   */
+  respawnFromBrokenChain: () => Promise<void>
   /** Anchor the scene on action `index` of the chain; null or past the end is the head. */
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
@@ -2024,7 +2035,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
-    // A game holds the avatar, or (behind its switch) the chain is broken:
+    // A game holds the avatar, or the chain is broken:
     // nothing here may be signed (whyNoMove).
     const noMove = whyNoMove(get().actions())
     if (noMove) {
@@ -2597,6 +2608,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
   },
 
+  respawnFromBrokenChain: async () => {
+    const broken = firstBreak(get().actions())
+    if (broken) {
+      // With no valid event at all (an invalid spawn, Q7), the spawn row
+      // names the entry, and it stands where the identity is frozen: the
+      // spawn coordinate.
+      const at = broken.lastValid ?? broken.action
+      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane })
+    }
+    await get().respawn()
+  },
+
   applySelfCheck: (pubkey, verdict) => {
     if (get().identity.pubkey !== pubkey) return
     const selfCheck: SelfCheck = verdict.status === 'unknown'
@@ -2902,6 +2925,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // either way the head is on the line, and `c` is its coordinate.
     const line = lineStateOf(parsedChain(events))
     if (!transit && !line) return
+    // Never a zero-length ride (arkinox, 2026-10-07): the backstop behind
+    // startRide, which refuses one before any work is done.
+    const zero = zeroLengthRideRefusal(ride.fromHeight, ride.toHeight, line?.fromHeight != null)
+    if (zero) throw new Error(zero)
     // Every leaf was seeded by the head the ride started from (§5.3). Signed
     // under any other `previous` it would be a ride whose every leaf is wrong,
     // so a head that moved while the proof ran (a fork adopted from another

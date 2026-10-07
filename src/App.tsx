@@ -22,6 +22,7 @@ import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/Inv
 import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
+import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -201,6 +202,8 @@ export default function App(): JSX.Element {
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
               last. */}
+          {/* A broken chain first: nothing else moves you until you respawn. */}
+          <BrokenChainChip />
           <LineScrubber />
           <HyperspaceBar />
           <FocusBar />
@@ -257,6 +260,8 @@ export default function App(): JSX.Element {
       <ChainConflictPrompt />
       {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
       <ChainStatusModal />
+      {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
+      <BrokenChainModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

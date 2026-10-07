@@ -7367,3 +7367,94 @@ kbd {
 .deploybar__fit { color: var(--ok); }
 .deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
 .deploybar__ask, .deploybar > .notice { flex-shrink: 0; }
+
+/* ---------- A broken chain (hud/BrokenChain.tsx) ---------- */
+/* arkinox, 2026-10-07: an invalid chain stands frozen at its last valid
+ * position until a respawn. The notice is the loudest thing in the Proof
+ * chain panel, in the danger red, with the apology set apart from the
+ * facts, and RESPAWN as a real button rather than a tag. */
+.brokenchain {
+  margin: 10px 0 0;
+  padding: 10px 10px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: rgba(255, 59, 107, 0.1);
+  border: 1px solid rgba(255, 59, 107, 0.55);
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+}
+.brokenchain__title {
+  margin: 0 0 6px;
+  color: var(--danger);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+.brokenchain__line {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.brokenchain__line b { color: var(--danger); font-weight: 700; }
+.brokenchain__sorry {
+  margin: 8px 0 6px;
+  padding: 7px 8px;
+  color: var(--fg);
+  background: rgba(255, 176, 32, 0.08);
+  border-left: 2px solid var(--warn);
+}
+.brokenchain__sorry b { color: var(--warn); }
+.brokenchain__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.brokenchain__actions .tag--tap { margin-left: 0; }
+.brokenchain__respawn {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  cursor: pointer;
+}
+.brokenchain__respawn:hover { background: #ff5c84; }
+
+/* Inside the modal the notice needs no box of its own: the card is the box. */
+.modal__card.brokenchain__card {
+  width: min(480px, 100%);
+  border-color: rgba(255, 59, 107, 0.6);
+}
+.brokenchain__card .brokenchain {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+.brokenchain__card .modal__body p { margin: 0 0 10px; }
+.brokenchain__card .modal__body ul { margin: 0 0 10px; padding-left: 18px; }
+.brokenchain__card .modal__body li { margin-bottom: 6px; }
+
+/* The chip at the top of the instrument stack: the found chip's pill in red. */
+.hyperbar--broken {
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-color: rgba(255, 59, 107, 0.75);
+  box-shadow: 0 0 16px rgba(255, 59, 107, 0.3);
+}
+.hyperbar--broken .hyperbar__glyph,
+.hyperbar--broken .hyperbar__label { color: var(--danger); }
+.hyperbar--broken .hyperbar__meta { white-space: normal; }
+
+/* What an action claimed, where that is not where you stand (ChainExplorer). */
+.explorer__detail--claimed { color: var(--danger); opacity: 0.8; }
+
+.hyper__whybtn { margin-left: 8px; }

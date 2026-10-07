@@ -9,7 +9,7 @@
  */
 
 import { create } from 'zustand'
-import { useChat } from './useChat'
+import { setHoldFolded, useChat } from './useChat'
 
 interface PadState {
   open: boolean
@@ -35,13 +35,15 @@ export const CHAT_COVERS_PAD = '(max-width: 640px)'
  * puts the controls away, and folding it brings them back only if they were
  * out when it opened, so you return to exactly where you were. Bringing the
  * controls back while the chat is open (the CONTROLS chip, or a tap on the
- * scene) folds the chat. A chat that unfolds on its own because a line
- * arrived counts as opening it. Where they do not overlap, neither touches
- * the other. Returns the unsubscribe.
+ * scene) folds the chat. A line that arrives while the controls are out
+ * does not unfold the chat at all: it chimes and the chip shows the dot
+ * (useChat's holdFolded). Where they do not overlap, neither touches the
+ * other. Returns the unsubscribe.
  */
 export function linkChatAndPad(overlap: () => boolean): () => void {
   // True while the chat is open and the controls were out when it opened.
   let restore = false
+  setHoldFolded(() => overlap() && usePad.getState().open)
   const offChat = useChat.subscribe((s, prev) => {
     if (s.open === prev.open) return
     if (s.open) {
@@ -58,5 +60,5 @@ export function linkChatAndPad(overlap: () => boolean): () => void {
     restore = false
     if (useChat.getState().open && overlap()) useChat.getState().setOpen(false)
   })
-  return () => { offChat(); offPad() }
+  return () => { offChat(); offPad(); setHoldFolded(() => false) }
 }

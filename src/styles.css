@@ -6293,6 +6293,21 @@ kbd {
   padding: 8px 12px;
 }
 
+/* Something was said while the dock stayed folded: a red dot on the chip's
+ * top right corner until the chat is opened (arkinox, 2026-10-07). The ring
+ * in the chip's own dark keeps it a dot over the border, not a blob. */
+.chatdock__dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 6px rgba(255, 59, 107, 0.6);
+  pointer-events: none;
+}
+
 .chatdock__badge {
   min-width: 16px;
   padding: 0 5px;

@@ -96,7 +96,7 @@ export function ChatDock(): JSX.Element {
         title="Chat with whoever is standing here (/)"
       >
         <MessageSquare size={11} strokeWidth={2.25} aria-hidden /> CHAT
-        {unread > 0 && <span className="chatdock__badge">{unread > 99 ? '99+' : unread}</span>}
+        {unread > 0 && <span className="chatdock__dot" aria-hidden="true" />}
       </button>
     )
   }

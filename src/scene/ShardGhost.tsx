@@ -35,7 +35,7 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import { Group } from 'three'
 import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
-import { bearingOf, csDirection, drawPoseAt, frameOf, snapOffered, type V3 } from '../lib/pose'
+import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
@@ -76,8 +76,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
   const standing = up && snapOffered(plane, deployHeight)
+  // In the view frame either way, exactly as WorldShards draws what lands
+  // (pose.ts placedPose): after a compass turn the ghost turns with its place.
   const pose = useMemo(
-    () => (shard && standing ? drawPoseAt(at, spin, axes) : undefined),
+    () => (shard ? placedPose(axes, standing ? { at, spin } : undefined) : undefined),
     [shard, standing, at, spin, axes],
   )
   // The frame the bearing is measured in, where it lands: recomputed only when

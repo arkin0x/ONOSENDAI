@@ -163,6 +163,26 @@ export function drawPoseAt(position: Position, spin: number, axes: ViewAxes): Po
 }
 
 /**
+ * The pose every shard placed in the world is drawn with: standing on the
+ * Earth when `stand` is given, otherwise lying on cyberspace axes as built,
+ * and either way written in the view frame `axes`.
+ *
+ * The second case used to be no pose at all. In the default view that is the
+ * same thing, since viewPose is then the identity, but the compass's view
+ * turns change `axes`, and with no pose a shard's place followed the turn
+ * (itemCentre) while its shape stayed drawn the default way and its clip box
+ * (regionBox) turned with the view. A scene of many shards came apart: each
+ * piece in its new place, still facing the old way, cut at the wrong walls.
+ * arkinox's temple, seen from the side, showed its roof head-on beside a row
+ * of columns seen edge-on (2026-10-07). With the view frame always folded in,
+ * a view turn turns every shape exactly as it turns their places, so the
+ * scene is rigid and only the viewpoint moves.
+ */
+export function placedPose(axes: ViewAxes, stand?: { at: Position; spin: number }): Pose {
+  return stand ? drawPoseAt(stand.at, stand.spin, axes) : viewPose(axes)
+}
+
+/**
  * A direction in render coordinates read back into cyberspace axes: the view
  * frame's own permutation, undone. Each screen direction carries one cyberspace
  * axis with a sign, and a sign is its own inverse, so this is the transpose.

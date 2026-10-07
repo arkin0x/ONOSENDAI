@@ -6394,35 +6394,135 @@ kbd {
   color: #ffd84d;
 }
 
-/* STARRED PLACES under RECENT (StarredPlaces.tsx): RECENT's rows, at a 44px
- * tap height, with when each was starred on the right. */
+/* STARRED PLACES under RECENT (StarredPlaces.tsx): RECENT's own rows, the
+ * same classes at the same size, nothing added to their height (arkinox,
+ * 2026-10-07: "the starred places buttons are too fat"). The time floats to
+ * the right end of the first line; a long name wraps as RECENT's does. */
 .starred__empty {
   margin: 0;
   font-size: 10px;
   line-height: 1.5;
   color: var(--dim);
 }
-.starred__item {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-}
-.starred__label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .starred__when {
-  flex: none;
+  float: right;
   margin-left: 8px;
   font-size: 9px;
   color: var(--dim);
 }
-.starred__forget {
-  width: 44px;
-  min-height: 44px;
+/* The pencil and the check stand in the ×'s box, centered. */
+.starred__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+/* Renaming: the form is no box of its own, so its field and buttons sit in
+ * the row exactly where the place and its marks were. */
+.starred__rename {
+  display: contents;
+}
+.starred__editing {
+  cursor: text;
+  border-color: var(--accent, #00e5ff);
+}
+/* The name's text, editable: no box of its own, so the line is the row's. */
+.starred__input {
+  width: calc(100% - 36px);
+  height: 1.2em;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+}
+
+/* The nickname field over the star, once its flare is over (StarNickname.tsx).
+ * Centered on the star chip, just above it, over the pad. */
+.starname {
+  position: fixed;
+  bottom: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  width: min(320px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 216, 77, 0.55);
+  background: rgba(6, 14, 22, 0.92);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 16px rgba(255, 216, 77, 0.18);
+  animation: starname-in 160ms ease-out both;
+}
+@media (min-width: 1101px) {
+  .starname { left: calc(50% + 10px); }
+}
+.starname__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ffd84d;
+}
+.starname__row {
+  display: flex;
+  gap: 6px;
+}
+.starname__row .avatars__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.starname__skip {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 0 10px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.starname__skip:hover { color: var(--fg); }
+@keyframes starname-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .starname { animation: none; }
+}
+
+/* The card a scene star opens (StarredPlaceCard.tsx): the modal, in the star's yellow. */
+.starcard {
+  border-color: rgba(255, 216, 77, 0.55);
+}
+.starcard .modal__title {
+  color: #ffd84d;
+}
+.starcard__meta {
+  margin: 0 0 6px;
+}
+.starcard__coord {
+  margin: 0 0 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.starcard__rename {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .chatdock {

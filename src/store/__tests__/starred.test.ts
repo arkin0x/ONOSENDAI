@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MAX_STARRED, STARRED_KEY, addPlace, removePlace, type StarSpot, type StarredPlace } from '../../lib/starred'
+import { MAX_STARRED, NICKNAME_MAX, STARRED_KEY, addPlace, placeName, removePlace, type StarSpot, type StarredPlace } from '../../lib/starred'
 
 const mem = new Map<string, string>()
 const working = {
@@ -111,6 +111,66 @@ describe('Starred Places', () => {
     const S = await load()
     expect(() => S.getState().add(spot(9n))).not.toThrow()
     expect(S.getState().places).toHaveLength(1)
+  })
+
+  it('renames a place: trimmed, spaces folded, capped, persisted; empty takes the nickname away', async () => {
+    const S = await load()
+    S.getState().add(spot(4n))
+    S.getState().rename({ input: '4, 2, 3', plane: 0 }, '   the   old\n mill  ')
+    expect(S.getState().places[0].nickname).toBe('the old mill')
+    expect(placeName(S.getState().places[0])).toBe('the old mill')
+    expect((await load()).getState().places[0].nickname).toBe('the old mill')
+    const S2 = await load()
+    S2.getState().rename({ input: '4, 2, 3', plane: 0 }, 'x'.repeat(NICKNAME_MAX + 20))
+    expect(S2.getState().places[0].nickname).toHaveLength(NICKNAME_MAX)
+    S2.getState().rename({ input: '4, 2, 3', plane: 0 }, '   ')
+    expect(S2.getState().places[0].nickname).toBeUndefined()
+    expect(placeName(S2.getState().places[0])).toBe('4, 2, 3')
+  })
+
+  it('drops a stored nickname that is not text', async () => {
+    mem.set(STARRED_KEY, JSON.stringify([{ input: '1, 2, 3', label: 'a', plane: 0, at: 1, nickname: 5 }, { input: '2, 2, 3', label: 'b', plane: 0, at: 1, nickname: 'home' }]))
+    expect((await load()).getState().places.map((p) => p.nickname)).toEqual(['home'])
+  })
+
+  it('says "Added" only when the nickname field closes, under the nickname when one was saved', async () => {
+    const S = await load()
+    const { useToast } = await import('../useToast')
+    useToast.getState().dismiss()
+    S.getState().add(spot(6n))
+    S.getState().beginNaming({ input: '6, 2, 3', plane: 0 })
+    expect(S.getState().naming).toEqual({ input: '6, 2, 3', plane: 0 })
+    expect(useToast.getState().toast).toBeNull()
+    S.getState().finishNaming('  Rooftop ')
+    expect(S.getState().naming).toBeNull()
+    expect(S.getState().places[0].nickname).toBe('Rooftop')
+    expect(useToast.getState().toast).toMatchObject({ label: 'Added to your Starred Places in the Position panel', meta: 'Rooftop', mark: 'star' })
+  })
+
+  it('keeps the place starred under its own label when the nickname is skipped', async () => {
+    const S = await load()
+    const { useToast } = await import('../useToast')
+    S.getState().add(spot(8n, 0, 'PARIS'))
+    S.getState().beginNaming({ input: '8, 2, 3', plane: 0 })
+    S.getState().finishNaming(null)
+    expect(S.getState().places).toHaveLength(1)
+    expect(S.getState().places[0].nickname).toBeUndefined()
+    expect(useToast.getState().toast).toMatchObject({ meta: 'PARIS' })
+    // A second close does nothing: the field is already gone.
+    useToast.getState().dismiss()
+    S.getState().finishNaming('late')
+    expect(useToast.getState().toast).toBeNull()
+    expect(S.getState().places[0].nickname).toBeUndefined()
+  })
+
+  it('closes the field and the card of a place that is removed', async () => {
+    const S = await load()
+    S.getState().add(spot(3n))
+    S.getState().beginNaming({ input: '3, 2, 3', plane: 0 })
+    S.getState().select({ input: '3, 2, 3', plane: 0 })
+    S.getState().remove({ input: '3, 2, 3', plane: 0 })
+    expect(S.getState().naming).toBeNull()
+    expect(S.getState().selected).toBeNull()
   })
 
   it('keeps at most MAX_STARRED, dropping the oldest', () => {

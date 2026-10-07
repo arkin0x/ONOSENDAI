@@ -22,7 +22,7 @@
  */
 
 import type { Plane } from 'cyberspace-core'
-import type { Position } from './space'
+import { itemCentre, type Position, type ViewAxes } from './space'
 import { shortAxis, type RecentView } from './viewAt'
 
 /**
@@ -35,6 +35,71 @@ export interface StarredPlace extends RecentView {
   at: number
   /** The zoom when it was starred; going back restores it. */
   scaleExp?: number
+  /**
+   * The name you gave it, when you gave one: asked for right after the star
+   * lights, changeable later from the pencil on its row or from its star in
+   * the scene. Shown in place of `label` everywhere the place is shown.
+   */
+  nickname?: string
+}
+
+/** The longest nickname kept, in characters: enough for a name, short enough for a row. */
+export const NICKNAME_MAX = 32
+
+/**
+ * A nickname as typed, made fit to keep: the ends trimmed, runs of spaces and
+ * line breaks made one space, cut to NICKNAME_MAX. Empty means no nickname.
+ */
+export function cleanNickname(typed: string): string {
+  return typed.replace(/\s+/g, ' ').trim().slice(0, NICKNAME_MAX).trim()
+}
+
+/** How a place is shown: its nickname when it has one, otherwise the label it was starred under. */
+export function placeName(p: Pick<StarredPlace, 'label' | 'nickname'>): string {
+  return p.nickname && p.nickname.trim() !== '' ? p.nickname : p.label
+}
+
+/**
+ * The words written under a place's star in the scene: its name, unless that
+ * name is only its shortened axes, which say nothing at a glance and would
+ * cover the scene in digits. Those stars stay bare; a tap shows the rest.
+ */
+export function sceneLabel(p: Pick<StarredPlace, 'label' | 'nickname' | 'input'>): string | null {
+  const name = placeName(p)
+  return name === axesLabel(p.input) ? null : name
+}
+
+/** The shortened axes a place reads as when it has no other name, from its "x, y, z" text. */
+export function axesLabel(input: string): string {
+  return input.split(/[\s,]+/).filter(Boolean).map((n) => shortAxis(BigInt(n))).join(', ')
+}
+
+/** The coordinate a place's "x, y, z" text names, or null when the text is not three whole numbers. */
+export function placePosition(input: string): Position | null {
+  const parts = input.split(/[\s,]+/).filter(Boolean)
+  if (parts.length !== 3 || !parts.every((n) => /^\d+$/.test(n))) return null
+  const [x, y, z] = parts.map((n) => BigInt(n))
+  return { x, y, z }
+}
+
+/**
+ * The starred places in view, each with where the scene draws it: only those
+ * in the plane being looked at, placed the way a hidden message is (itemCentre
+ * against the anchor's aligned origin), and culled past `reach` cells exactly
+ * as the messages are.
+ */
+export function placedStars(
+  list: StarredPlace[], origin: Position, plane: Plane, scaleExp: number, axes: ViewAxes, reach: number,
+): Array<{ place: StarredPlace; at: [number, number, number] }> {
+  const out: Array<{ place: StarredPlace; at: [number, number, number] }> = []
+  for (const place of list) {
+    if (place.plane !== plane) continue
+    const pos = placePosition(place.input)
+    if (!pos) continue
+    const at = itemCentre(pos, origin, scaleExp, axes)
+    if (Math.hypot(...at) <= reach) out.push({ place, at })
+  }
+  return out
 }
 
 /** The spot the star chip would star: a coordinate, its plane, and how to show it. */
@@ -132,7 +197,8 @@ function valid(p: unknown): p is StarredPlace {
     typeof r.label === 'string' &&
     (r.plane === 0 || r.plane === 1) &&
     typeof r.at === 'number' &&
-    (r.scaleExp === undefined || typeof r.scaleExp === 'number')
+    (r.scaleExp === undefined || typeof r.scaleExp === 'number') &&
+    (r.nickname === undefined || typeof r.nickname === 'string')
   )
 }
 

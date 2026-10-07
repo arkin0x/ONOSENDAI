@@ -16,6 +16,8 @@ import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
+import { StarNickname } from './hud/StarNickname'
+import { StarredPlaceCard } from './hud/StarredPlaceCard'
 import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
@@ -223,6 +225,8 @@ export default function App(): JSX.Element {
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}
       {!crowded && !offerUp && !deploying && !secretOpen && !spectating && <ChatDock />}
+      {/* The nickname field for a place just starred, over the star (StarNickname.tsx). */}
+      <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}
@@ -246,6 +250,7 @@ export default function App(): JSX.Element {
       <NotificationsModal />
       <LootDetail />
       <NearbyLootModal />
+      <StarredPlaceCard />
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
       {!showPanels && <HosakaPulse />}

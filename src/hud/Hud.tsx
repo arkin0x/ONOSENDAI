@@ -265,9 +265,9 @@ function PositionPanel(): JSX.Element {
           </div>
         )}
         {/* Starred Places, under RECENT: a tap goes there the way a recent
-            place does, under the name it was starred with and at the zoom it
-            was starred at. */}
-        <StarredPlaces onGo={(p, target) => { setViewText(p.input); look(p.input, { ...target, label: p.label, scaleExp: p.scaleExp ?? target.scaleExp }) }} />
+            place does, under its nickname or the name it was starred with,
+            and at the zoom it was starred at. */}
+        <StarredPlaces onGo={(p, target) => { setViewText(p.input); look(p.input, { ...target, scaleExp: p.scaleExp ?? target.scaleExp }) }} />
       </div>
     </section>
   )

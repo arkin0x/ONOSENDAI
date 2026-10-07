@@ -4355,8 +4355,10 @@ kbd {
   /* The chat sits between the hamburger (352px in, 46px wide) and the pad
    * column (332px in from the right, 122px wide), never under either. The
    * chip centres on the scene, which is 10px right of the viewport's centre
-   * with 320px of panels on the left and 300px on the right. */
-  .chatdock {
+   * with 320px of panels on the left and 300px on the right.
+   * `.app` because the base `.chatdock` rule comes later in this file and
+   * its left and right won on source order, so the dock sat under both. */
+  .app .chatdock {
     left: 424px;
     right: 470px;
   }
@@ -6308,7 +6310,10 @@ kbd {
   left: 84px;
   right: 152px;
   margin: 0 auto;
-  width: min(480px, 100%);
+  /* A cap, not a width. A width beat left and right whenever the gap between
+     them was under 480px, and the dock ran under the controls and the menu
+     button (from 641px, and on a desktop up to about 1370px). */
+  max-width: 480px;
   max-height: 33vh;
   z-index: 101;
   display: flex;
@@ -6462,6 +6467,7 @@ kbd {
     right: 10px;
     bottom: 80px;
     width: auto;
+    max-width: none;
     max-height: 38vh;
   }
 }

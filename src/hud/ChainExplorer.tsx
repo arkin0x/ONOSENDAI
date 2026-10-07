@@ -27,15 +27,23 @@
  * COMMENTS (N), with a speech-bubble icon, opens the reactions and public comments on the action
  * under the mark (ActionModal; arkinox, 2026-09-28). The count is asked for
  * once the mark rests, not per step of a scrub.
+ *
+ * A game's bracket is walked like any other stretch of the chain (spec
+ * §8.11): its ticks on the rail are pink, its actions are labelled as the
+ * game's, and the place each one has inside the game is shown apart from
+ * the coord, which stays where the identity entered. An action this client
+ * does not recognize is a short quiet tick, labelled SKIPPED (§8.9).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound, MessageCircle } from 'lucide-react'
+import { KeyRound, MessageCircle, TriangleAlert } from 'lucide-react'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { actionKind, actionLabel } from '../lib/events'
+import { nip19 } from 'nostr-tools'
 import { ConfirmModal } from './ConfirmModal'
 import { useActionComments } from '../hooks/useSocial'
 import { countComments } from '../lib/comments'
@@ -281,9 +289,13 @@ export function ChainExplorer(): JSX.Element {
             >
               <span className="explorer__line" />
               <span className="explorer__walked" style={{ width: `${fraction * 100}%` }} />
-              {ticks.map((t, i) => (
-                <span key={i} className={`explorer__tick ${i === 0 ? 'explorer__tick--spawn' : ''}`} style={{ left: `${t * 100}%` }} />
-              ))}
+              {ticks.map((t, i) => {
+                const role = actions[i]?.role
+                const kind = i === 0 ? 'explorer__tick--spawn'
+                  : role === 'enter' || role === 'virtual' || role === 'exit' ? 'explorer__tick--game'
+                  : role === 'skipped' || role === 'broken' || actions[i]?.breaks !== undefined ? 'explorer__tick--quiet' : ''
+                return <span key={i} className={`explorer__tick ${kind}`} style={{ left: `${t * 100}%` }} />
+              })}
               <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
             </div>
 
@@ -293,7 +305,7 @@ export function ChainExplorer(): JSX.Element {
           </div>
 
           <div className="explorer__meta">
-            <span className={`explorer__type explorer__type--${action.type}`}>{action.type.toUpperCase()}</span>
+            <span className={`explorer__type explorer__type--${actionKind(action)}`} title={action.breaks ?? action.name}>{actionKind(action) === 'broken' && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}{actionLabel(action)}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
             {/* A hop computes the region's Cantor root, which is the key to what
                 is hidden there; a sidestep computes no root at all. */}
@@ -323,6 +335,18 @@ export function ChainExplorer(): JSX.Element {
           <div className="explorer__detail" title={action.sector}>
             <span className="explorer__key">sector </span>{action.sector}
           </div>
+          {/* Inside a game the coord above is where the identity entered from
+              and still is; this is where the action puts it in the game. */}
+          {(action.role === 'enter' || action.role === 'virtual') && action.declared && (
+            <div className="explorer__detail explorer__detail--game" title={action.declared.coordHex}>
+              <span className="explorer__key">in game </span>{shortHex(action.declared.coordHex, 8, 6)}
+            </div>
+          )}
+          {action.game && (
+            <div className="explorer__detail explorer__detail--game" title={nip19.npubEncode(action.game.pubkey)}>
+              <span className="explorer__key">game </span>{shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)}
+            </div>
+          )}
           {action.proofHash && (
             <div className="explorer__detail" title={action.proofHash}>
               <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}

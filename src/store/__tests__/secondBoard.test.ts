@@ -20,9 +20,7 @@ function chainAtStop() {
   const sk = generateSecretKey()
   const pubkey = getPublicKey(sk)
   const spawn = finalizeEvent(spawnTemplate(pubkey, 1_700_000_000), sk)
-  const { x, y, z, plane } = coordToXyz(hexToCoord(pubkey))
-  const at = { x, y, z }
-  const enter = finalizeEvent(enterHyperspaceTemplate({ createdAt: 1_700_000_001, genesisId: spawn.id, previousId: spawn.id, at, plane, proofHash: 'a'.repeat(64) }), sk)
+  const enter = finalizeEvent(enterHyperspaceTemplate({ createdAt: 1_700_000_001, genesisId: spawn.id, previousId: spawn.id, coordHex: pubkey, proofHash: 'a'.repeat(64) }), sk)
   const stopCoord = '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56'
   const jump = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_002, genesisId: spawn.id, previousId: enter.id, prevCoordHex: pubkey, toCoordHex: stopCoord, fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }), sk)
   return { sk, pubkey, events: [spawn, enter, jump] as NostrEvent[], stopCoord }

@@ -63,7 +63,7 @@ async function preflight(): Promise<boolean> {
   const pubkey = useCyberspace.getState().identity.pubkey
   let answered = false
   try {
-    const answers = await askChainEvents(pubkey)
+    const answers = await askChainEvents(pubkey, useCyberspace.getState().genesisId || undefined, useCyberspace.getState().events)
     answered = answers.some((a) => a.outcome === 'answered')
     const events = mergeAnswers(answers)
     const now = useCyberspace.getState()

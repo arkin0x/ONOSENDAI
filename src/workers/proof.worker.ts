@@ -62,6 +62,12 @@ export type ProofResponse =
       totalOps: number
       /** Present on sidesteps only. */
       sidestep?: SidestepTags
+      /**
+       * The chain head the proof's work was seeded by (spec §5.3): the event
+       * the signed action must name as its `previous`. The store refuses to
+       * sign onto any other head.
+       */
+      prevEventId?: string
       /** Where the proof was computed. Absent means this worker (lib/cloud.ts sets 'cloud'). */
       source?: 'local' | 'cloud'
       /** Cloud proofs only: the HOSAKA job, what it cost, and for a hop the region's lookup id (spec 7.2). */
@@ -121,6 +127,7 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
         type: 'done',
         id,
         mode,
+        prevEventId,
         elapsedMs: performance.now() - started,
         proofHash: proof.proofHash,
         terrainK: proof.terrainK,
@@ -177,6 +184,7 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
       type: 'done',
       id,
       mode,
+      prevEventId,
       elapsedMs: performance.now() - started,
       proofHash: proof.proofHash,
       terrainK: proof.terrainK,

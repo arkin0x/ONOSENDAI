@@ -8,7 +8,7 @@
  * and a subscription has to outlive any component.
  */
 
-import { fetchChainEvents, mergeEvents, watchAuthor } from './chains'
+import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import { useCyberspace } from '../store/useCyberspace'
 import type { NostrEvent } from './events'
 
@@ -26,10 +26,13 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
   // the explored link survives the refetch: the ids match and the store keeps it.
   let events: ReturnType<typeof mergeEvents> = mergeEvents([], seed)
   if (events.length > 0) store.setSpectateChain(pubkey, events)
+  // Set when the relays hold the chain with a stretch missing; kept for every
+  // later update, since a new action does not fill an old hole.
+  let partial = false
   const close = watchAuthor(pubkey, since, (ev) => {
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(events, [ev])
-    useCyberspace.getState().setSpectateChain(pubkey, events)
+    useCyberspace.getState().setSpectateChain(pubkey, events, partial ? 'partial' : undefined)
   })
   current = { pubkey, close }
 
@@ -38,8 +41,17 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(fetched, events)
     useCyberspace.getState().setSpectateChain(pubkey, events)
-  } catch {
+  } catch (err) {
     if (current?.pubkey !== pubkey) return
+    // A stretch of the chain is on no relay: show it up to the hole and say
+    // so, because for a viewer the hole may never fill. Your own chain holds
+    // on the same answer instead (chainHold.ts).
+    if (err instanceof ChainGapError) {
+      partial = true
+      events = mergeEvents(err.events, events)
+      useCyberspace.getState().setSpectateChain(pubkey, events, 'partial')
+      return
+    }
     useCyberspace.getState().setSpectateChain(pubkey, events, 'error')
   }
 }

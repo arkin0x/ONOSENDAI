@@ -84,8 +84,10 @@ import {
 import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
   buildChain,
+  chainHead,
+  firstBreak,
+  openBracket,
   hopTemplate,
-  parseAction,
   positionHex,
   sidestepTemplate,
   spawnTemplate,
@@ -160,6 +162,64 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
   return actionsFor.actions
 }
 
+/**
+ * Why nothing moves while a game holds the avatar. This client never
+ * publishes inside a virtual bracket: every event there belongs to the game,
+ * a hop, sidestep or ride there is invalid and ends the chain for every
+ * verifier (spec §8.11.4 rule 3), and an exit is the game client's to make,
+ * since only the game knows what leaving means to it (§8.11.7). So a chain
+ * with a bracket open at its head refuses every move here, says why, and
+ * shows the game in the Proof chain panel.
+ */
+export const GAME_HOLDS_MESSAGE =
+  'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
+
+/**
+ * THE SWITCH for refusing moves on a broken chain (review of #224, S2).
+ *
+ * A chain with a broken event before its head (events.ts firstBreak) is one
+ * every verifier treats as invalid from that event, so a move signed onto it
+ * is a move no verifier counts. Where an identity with an invalid chain
+ * stands is not settled yet (arkinox is ruling on it), so for now this client
+ * says so in the Proof chain panel and still moves. Set this to true to make
+ * every move (commit, route step, BOARD, RIDE, signing a finished proof)
+ * refuse with BROKEN_CHAIN_MESSAGE instead; whyNoMove is the one place that
+ * reads it.
+ */
+export const REFUSE_MOVES_ON_BROKEN_CHAIN = false
+
+export const BROKEN_CHAIN_MESSAGE =
+  'Your chain is broken before its head: one of its actions breaks a chain rule, and every verifier treats the chain as invalid from that action, so a move added after it is a move nobody counts. ONOSENDAI will not sign one. A respawn starts a new, valid chain at your spawn point. The Proof chain panel names the action and the rule it breaks.'
+
+/**
+ * Why this client will not sign a base action onto `chain` now, in words, or
+ * null when it may. Every way to move asks this one question.
+ */
+export function whyNoMove(chain: ActionEvent[]): string | null {
+  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
+  if (REFUSE_MOVES_ON_BROKEN_CHAIN && firstBreak(chain)) return BROKEN_CHAIN_MESSAGE
+  return null
+}
+
+/** Why a finished proof is not signed while a choice between two chains is waiting. */
+const CHOOSE_FIRST_MESSAGE = 'Another version of your chain arrived while this proof was computing. Choose which to keep first; the proof is kept, and RESUME signs it if your chain is still where it was.'
+
+/**
+ * The message for a proof whose head moved before it was signed: the work is
+ * seeded by the head it started from (spec §5.3), so signed onto any other
+ * head every check of it fails.
+ */
+const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
+
+/**
+ * Proofs that ran this long, were computed by HOSAKA, or waited on a
+ * declined signature get a fresh look at the relays before they are signed:
+ * the world had time to move. A shorter local proof relies on the live
+ * subscription, whose events are held back while it computes and folded in
+ * before signing (adoptChain).
+ */
+const FRESH_LOOK_AFTER_MS = 10_000
+
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
 
@@ -186,7 +246,12 @@ export interface SpectateState {
   actions: ActionEvent[]
   /** created_at of their newest action; null when the relay has none. */
   lastActive: number | null
-  status: 'loading' | 'live' | 'empty' | 'error'
+  /**
+   * `partial`: the relays hold this chain with a stretch missing (chains.ts
+   * ChainGapError), so it is shown up to the hole, and its head may be later
+   * than what is drawn.
+   */
+  status: 'loading' | 'live' | 'empty' | 'error' | 'partial'
   /** The view you had before spectating, put back when it ends. */
   returnView: Quaternion
 }
@@ -410,7 +475,8 @@ export interface TrackedTarget {
   position: Position
   plane: Plane
   lastActive: number | null
-  status: 'resolving' | 'live' | 'spawn' | 'error'
+  /** `partial`: placed from their chain up to a stretch the relays are missing, which may not be their head. */
+  status: 'resolving' | 'live' | 'spawn' | 'error' | 'partial'
 }
 
 /** Hyperspace transit (DECK-0001 v3): the identity has boarded and not yet arrived. */
@@ -654,7 +720,7 @@ export interface CyberspaceState {
   /** Start following a pubkey: anchors on its spawn coordinate until its chain arrives. */
   beginSpectate: (pubkey: string) => void
   /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
-  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
+  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error' | 'partial') => void
   /** Back to your own head. */
   endSpectate: () => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
@@ -676,7 +742,7 @@ export interface CyberspaceState {
   removeTarget: (pubkey: string) => void
   toggleTarget: (pubkey: string, name?: string | null) => void
   /** A target's chain, fetched or updated: its head becomes the position. */
-  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
+  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error' | 'partial') => void
   /** Fold relay events for THIS identity into the live chain, adopting a newer
    * one from another machine. The self-sync loop and login both feed this. */
   adoptChain: (events: NostrEvent[]) => void
@@ -772,7 +838,7 @@ export interface CyberspaceState {
   /** Axes as they appear on screen right now, including free orbit. */
   screenAxes: ViewAxes | null
   setScreenAxes: (a: ViewAxes) => void
-  /** The chain head's coordinate, exactly as its event carries it. */
+  /** Where the chain head puts you: the coordinate of the last recognized action, or the one a game holds (events.ts buildChain). */
   coordHex: () => string
   sector: () => string
   /** The chain, parsed. */
@@ -1064,10 +1130,15 @@ const HEAD_CHECK_MS = 1500
  * unreachable. Bounded on purpose: this runs in front of every commit, and
  * the answer is only ever used to avoid forking, never to permit moving.
  */
-async function freshHead(pubkey: string): Promise<NostrEvent[]> {
+async function freshHead(pubkey: string, genesisId: string, have: NostrEvent[]): Promise<NostrEvent[]> {
   try {
     return await Promise.race([
-      fetchChainEvents(pubkey),
+      // The genesis in hand lets the chain and the spawns be asked at once,
+      // and the chain in hand fills every hole older than the relays' newest
+      // page, so this asks for what is newer and pages only when more than a
+      // page of it is new. A chain the relays return with a hole this cannot
+      // fill rejects, and reads as no answer, like a slow relay.
+      fetchChainEvents(pubkey, genesisId || undefined, have),
       new Promise<NostrEvent[]>((resolve) => { setTimeout(() => resolve([]), HEAD_CHECK_MS) }),
     ])
   } catch {
@@ -1127,10 +1198,11 @@ function provisionalChain(pubkey: string): ReturnType<typeof derive> {
 function statsFromChain(events: NostrEvent[], prev: ChainStats): ChainStats {
   let hops = 0
   let sidesteps = 0
-  for (const e of events) {
-    const a = parseAction(e)
-    if (a?.type === 'hop') hops++
-    else if (a?.type === 'sidestep') sidesteps++
+  // Counted on the resolved chain, so a hop a game client signed inside a
+  // bracket, which moves nobody (spec §8.11.4 rule 3), is not one of yours.
+  for (const a of buildChain(events)) {
+    if (a.type === 'hop') hops++
+    else if (a.type === 'sidestep') sidesteps++
   }
   return { ...prev, hops, sidesteps }
 }
@@ -1188,6 +1260,34 @@ const saved = loadChain(pubkeyHex)
 const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
 
 let requestId = 0
+
+/**
+ * Relay events for your own chain that arrived while a proof was computing.
+ * Folding them then would move the head under the proof, so they wait here
+ * and are folded the moment the proof is about to be signed or ends
+ * (foldDeferred). Dropping them, as this used to, lost a game's entry that
+ * arrived during a long HOSAKA job: it is never delivered again, and the
+ * finished hop forked against it.
+ */
+let deferred: NostrEvent[] = []
+/** True while foldDeferred or a signing look folds: adoptChain then folds even mid-proof. */
+let folding = false
+/** Set by RESUME on a kept proof: the signing that follows takes a fresh look first. */
+let signingResumed = false
+
+/** Fold `events` into your chain now, even while a proof is computing. */
+function foldNow(events: NostrEvent[]): void {
+  if (events.length === 0) return
+  folding = true
+  try { useCyberspace.getState().adoptChain(events) } finally { folding = false }
+}
+
+/** Fold whatever arrived while a proof was computing. */
+function foldDeferred(): void {
+  const held = deferred
+  deferred = []
+  foldNow(held)
+}
 
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
@@ -1282,6 +1382,50 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     cloudAbort?.abort()
     cloudAbort = null
     cloudWaker = null
+  }
+
+  /**
+   * A finished proof that will not be signed now. A route stops: it fails
+   * outright when nothing can be signed (a game holds the avatar), and is
+   * paused with the proof kept when a choice may yet make it signable
+   * (`keep`). A single move just says why.
+   */
+  const refuseSigning = (msg: ProofResponse, message: string, keep: boolean): void => {
+    const { plan } = get()
+    set({
+      pendingTarget: null,
+      plan: plan ? { ...plan, status: keep ? 'paused' : 'failed', message, awaiting: keep ? msg : null } : null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message },
+    })
+  }
+
+  /**
+   * The head moved under a finished proof (HEAD_MOVED_MESSAGE). A route
+   * computes its step again from where the chain now stands, at once when
+   * this machine computes it, and on RESUME when HOSAKA would, because that
+   * costs sats again. A single move keeps its aim for the next commit.
+   */
+  const headMovedUnder = (): void => {
+    const { plan, position } = get()
+    if (!plan) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      return
+    }
+    const next = nextStep(position, plan.target, plan.ceilings)
+    if (!next) {
+      set({ plan: null, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Where you stand now is already the end of the route.` } })
+      return
+    }
+    if (next.source === 'cloud') {
+      set({
+        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} The next step is one HOSAKA computes, so RESUME pays for it again from where you stand now.` },
+        pendingTarget: null,
+        proof: IDLE_PROOF,
+      })
+      return
+    }
+    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} This step is being computed again from where you stand now.` } })
+    startPlanStep()
   }
 
   /** The cloud flow ended without a proof. The move does not happen; the message stays until X or the next commit. */
@@ -1880,6 +2024,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
+    // A game holds the avatar, or (behind its switch) the chain is broken:
+    // nothing here may be signed (whyNoMove).
+    const noMove = whyNoMove(get().actions())
+    if (noMove) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove } })
+      return
+    }
+
     // One look at the relay before signing anything.
     //
     // An action names the one before it, so an action signed from a head
@@ -1897,10 +2049,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // different one (does it have a chain at all?) and is answered below.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const fresh = await freshHead(get().identity.pubkey)
+      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
       if (fresh.length > 0) get().adoptChain(fresh)
       // On a held chain, a relay chain does not move you: it raises the prompt.
       if (get().chainConflict) return
+      // The look may have brought a game's entry: a game holds the avatar now.
+      const noMoveNow = whyNoMove(get().actions())
+      if (noMoveNow) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMoveNow } })
+        return
+      }
       if (get().prevEventId !== beforeHead) {
         set({
           pendingTarget: null,
@@ -2088,6 +2246,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (plan.awaiting) {
       const msg = plan.awaiting
       set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      signingResumed = true
       void get().finishProof(msg)
       return
     }
@@ -2210,13 +2369,42 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   finishProof: async (msg) => {
+    // Read and cleared before anything can return, so a stale proof never
+    // leaves a RESUME's fresh look armed for the next signing.
+    const resumed = signingResumed
+    signingResumed = false
     if (msg.type !== 'done' || msg.id !== requestId) return
+
+    // The chain as it stands now, not as it stood when the proof started.
+    // Relay events held back while it computed are folded first; a proof that
+    // ran long, was paid for, or waited on a declined signature also takes
+    // the same bounded look at the relays a commit takes before computing.
+    foldDeferred()
+    if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) {
+      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
+      if (msg.id !== requestId) return
+      foldNow(fresh)
+      // The live feed kept delivering while the look was out.
+      foldDeferred()
+    }
+    // A game entered meanwhile (a hop now would be a base action inside it,
+    // spec §8.11.4 rule 3), a choice between two chains waiting, or a head
+    // that moved: none of them is signed onto.
+    const refusal = whyNoMove(get().actions())
+    if (refusal) { refuseSigning(msg, refusal, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
     const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
     const newPosition = pendingTarget ?? position
     const head = events[events.length - 1]
+    // `previous` is the chain's actual last event, whatever it is, and `c` is
+    // where the identity stands, which after an action this client does not
+    // recognize is the last recognized action's C, not that event's own
+    // (spec §8.9 rule 2).
+    const standing = chainHead(parsedChain(events))
 
     // The proof covers exactly position -> pendingTarget, and this event is
     // its receipt: the hop the next proof will bind to. Signed before the
@@ -2225,7 +2413,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      prevCoordHex: head.tags.find((t) => t[0] === 'C')?.[1] ?? '',
+      prevCoordHex: standing?.coordHex ?? '',
       to: newPosition,
       plane,
       proofHash: msg.proofHash,
@@ -2267,6 +2455,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A remote signer can take seconds; a cancel or respawn may have landed
     // while it was thinking. If so this receipt is for a chain that is gone.
     if (msg.id !== requestId) return
+    // The live feed kept delivering while the signer thought. What arrived is
+    // folded now, before the signed event joins the chain: if it moved the
+    // head or entered a game, the signed event is discarded unpublished, as a
+    // proof refused before signing would have been.
+    foldDeferred()
+    const refusedNow = whyNoMove(get().actions())
+    if (refusedNow) { refuseSigning(msg, refusedNow, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (get().prevEventId !== prevEventId) { headMovedUnder(); return }
 
     const now = get()
     const stats: ChainStats = {
@@ -2653,24 +2850,24 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
     // A provisional identity has no chain to board from; move once first.
     if (events.length === 0 || !genesisId || !prevEventId) return
+    // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
+    // The Hyperspace panel withholds BOARD and says why; this is the backstop.
+    if (whyNoMove(get().actions())) return
     const head = events[events.length - 1]
-    // Where the chain says you stand, plane bit included: the head's own C.
-    // Not `position` with `plane`: `plane` is the plane lined up for the next
-    // move (viewing EARTH lines up dataspace), and a boarding built from it at
-    // a port in ideaspace named the right x, y and z in the wrong plane, so
-    // its c no longer matched the C before it and the chain was invalid from
-    // there (2026-10-06, a published chain on the relay).
-    const here = head.tags.find((t) => t[0] === 'C')?.[1]
+    // Where the chain says you stand, plane bit included: the last recognized
+    // action's C. Not `position` with `plane`: `plane` is the plane lined up
+    // for the next move (viewing EARTH lines up dataspace), and a boarding
+    // built from it at a port in ideaspace named the right x, y and z in the
+    // wrong plane, so its c no longer matched the C before it and the chain
+    // was invalid from there (2026-10-06, a published chain on the relay).
+    const here = chainHead(parsedChain(events))?.coordHex
     if (!here) return
-    const coord = hexToCoord(here)
-    const at = coordToXyz(coord)
-    const proofHash = computeEnterProof(coord, prevEventId)
+    const proofHash = computeEnterProof(hexToCoord(here), prevEventId)
     const template = enterHyperspaceTemplate({
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      at: { x: at.x, y: at.y, z: at.z },
-      plane: at.plane,
+      coordHex: here,
       proofHash,
     })
     let event: NostrEvent
@@ -2698,9 +2895,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
     if (!head) return
+    // A game holds the avatar, or the chain is broken (whyNoMove): a ride is a base action.
+    const noRide = whyNoMove(parsedChain(events))
+    if (noRide) throw new Error(noRide)
     // From a boarding, or chained from the stop the last ride reached (§4.3):
     // either way the head is on the line, and `c` is its coordinate.
-    const line = lineStateOf(buildChain(events))
+    const line = lineStateOf(parsedChain(events))
     if (!transit && !line) return
     // Every leaf was seeded by the head the ride started from (§5.3). Signed
     // under any other `previous` it would be a ride whose every leaf is wrong,
@@ -2709,7 +2909,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (ride.previousId !== prevEventId) {
       throw new Error('Your chain moved while the ride was computing, and the proof is bound to where it started. Ride again from here.')
     }
-    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit?.enterCoordHex ?? line?.coordHex
+    // Where the identity stands: the last recognized action's C, so a skipped
+    // action between the boarding and the ride does not move `c` (spec §8.9).
+    const prevCoordHex = chainHead(parsedChain(events))?.coordHex ?? transit?.enterCoordHex ?? line?.coordHex
     if (!prevCoordHex) return
     const template = hyperjumpTemplate({
       createdAt: nextCreatedAt(head),
@@ -2809,8 +3011,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (conflict && conflict !== cur.chainConflict) set({ chainConflict: conflict })
       return
     }
-    // A local commit owns the head while it computes; a relay echo must not race it.
-    if (cur.proof.status === 'computing') return
+    // A local commit owns the head while it computes; a relay echo must not
+    // race it. What arrives is held back, not dropped (foldDeferred).
+    if (cur.proof.status === 'computing' && !folding) {
+      deferred = deferred.concat(mine)
+      return
+    }
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
     // offline). Folding now would let the fork rule pick a winner in silence,
@@ -2825,7 +3031,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     const seen = new Set(cur.events.map((e) => e.id))
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
-    // buildChain is §3.2: the newest spawn wins, then follow the links. So a
+    // buildChain is §8.7.3: the newest spawn wins, then follow the links. So a
     // newer chain from another machine supersedes ours; our own echoed events
     // fold in as a no-op. It returns parsed actions in order; map back to the
     // raw events the store actually holds.
@@ -2907,7 +3113,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           position: head?.position ?? spawn.position,
           plane: head?.plane ?? spawn.plane,
           lastActive: head?.createdAt ?? null,
-          status: head ? 'live' : status ?? 'spawn',
+          status: head ? (status === 'partial' ? 'partial' : 'live') : status ?? 'spawn',
         },
       },
     })
@@ -3343,9 +3549,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   coordHex: () => {
     const { events, position, plane } = get()
-    const head = events[events.length - 1]
+    // Where the chain puts you, which is not always the last event's own C:
+    // after an action this client does not recognize, or inside a game, it
+    // is the position carried or held (events.ts buildChain).
+    const head = chainHead(parsedChain(events))
     // Provisional identity: no head event yet, so read the spawn coordinate.
-    return head ? head.tags.find((t) => t[0] === 'C')?.[1] ?? '' : positionHex(position, plane)
+    return head ? head.coordHex : positionHex(position, plane)
   },
 
   sector: () => {
@@ -3439,6 +3648,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the
 // localStorage calls above are wrapped.
+// A proof that ends any way but signing (cancelled, refused, failed) folds
+// what arrived while it computed; signing folds it itself (finishProof).
+useCyberspace.subscribe((s, prev) => {
+  if (prev.proof.status === 'computing' && s.proof.status !== 'computing') foldDeferred()
+})
+
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   // Lets the browser harness read and drive real state instead of inferring it
   // from the HUD, the same way __terrain and __screenAxes work.
@@ -3461,6 +3676,16 @@ function startPlanStep(): void {
   const s = useCyberspace.getState()
   const plan = s.plan
   if (!plan || plan.status !== 'running') return
+  // A game's entry arrived between steps: the route stops where it is.
+  const noMove = whyNoMove(s.actions())
+  if (noMove) {
+    useCyberspace.setState({
+      plan: { ...plan, status: 'failed', message: noMove, awaiting: null },
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
+    })
+    return
+  }
   const id = ++requestId
   if (plan.step.source === 'cloud') {
     void cloudStepStarter?.(plan.step, id)

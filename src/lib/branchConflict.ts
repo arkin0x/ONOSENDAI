@@ -23,7 +23,7 @@
  * directly.
  */
 
-import { buildChain, parseAction, type ActionEvent, type NostrEvent } from './events'
+import { actionLink, buildChain, type ActionEvent, type NostrEvent } from './events'
 
 /** Two versions of the chain from one fork point, waiting for a choice. */
 export interface BranchConflict {
@@ -67,7 +67,10 @@ export function continuesOver(a: { createdAt: number; id: string }, b: { created
  * this device has not published. A relay action that extends the local head
  * is not a fork, and a fork between two published actions is not this case
  * (both are on the relays already, and every reader has resolved it).
- * The earliest such fork is the one reported.
+ * The earliest such fork is the one reported. "Relay action" means any
+ * event on the chain, whatever its action is called: a game client's
+ * enter-virtual, or an action this client does not recognize, forks the
+ * chain exactly as a hop does (spec §8.9 rule 1).
  */
 export function findDivergence(
   localEvents: NostrEvent[],
@@ -82,8 +85,8 @@ export function findDivergence(
   let forkIndex = -1
   for (const ev of relayEvents) {
     if (localIds.has(ev.id)) continue
-    const a = parseAction(ev)
-    if (!a || a.type === 'spawn' || a.genesisId !== genesis || !a.previousId) continue
+    const a = actionLink(ev)
+    if (!a || a.genesisId !== genesis) continue
     const at = index.get(a.previousId)
     if (at === undefined || at >= chain.length - 1) continue
     const ours = chain[at + 1]

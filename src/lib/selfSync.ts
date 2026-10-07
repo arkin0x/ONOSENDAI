@@ -26,6 +26,7 @@
 import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
 import { decideSelfCheck } from './chainHold'
 import { onResume } from './relay'
+import type { NostrEvent } from './events'
 import { DEFAULT_RELAY } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -41,6 +42,18 @@ let checking: string | null = null
  * flight has finished, if its answer was still "nobody could say".
  */
 let again = false
+
+/** The genesis of the chain this device holds for `pubkey`, which lets a fetch ask for it at once (chains.ts). */
+function knownGenesis(pubkey: string): string | undefined {
+  const s = useCyberspace.getState()
+  return s.identity.pubkey === pubkey && s.genesisId ? s.genesisId : undefined
+}
+
+/** The events of the chain this device holds for `pubkey`, which fill holes in what the relays return. */
+function knownEvents(pubkey: string): NostrEvent[] {
+  const s = useCyberspace.getState()
+  return s.identity.pubkey === pubkey ? s.events : []
+}
 
 /** navigator.onLine where there is a navigator; a test or a worker is taken as online. */
 function online(): boolean {
@@ -58,7 +71,7 @@ async function check(pubkey: string): Promise<void> {
   again = false
   useCyberspace.getState().applySelfCheck(pubkey, { status: 'checking' })
   try {
-    const answers = await askChainEvents(pubkey)
+    const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
     useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online()))
   } catch {
@@ -96,7 +109,7 @@ export function compareUnpublished(): void {
   const s = useCyberspace.getState()
   if (s.held || s.events.length === 0 || s.events.every((e) => s.published[e.id] === 'ok')) return
   const pubkey = s.identity.pubkey
-  void fetchChainEvents(pubkey)
+  void fetchChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     .then((events) => { if (useCyberspace.getState().identity.pubkey === pubkey) useCyberspace.getState().adoptChain(events) })
     .catch(() => { /* unreachable: the publisher's own look before sending tries again */ })
 }

@@ -547,6 +547,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       type: 'done',
       id,
       mode: 'hop',
+      prevEventId: record.prevEventId,
       elapsedMs,
       proofHash: r.hop_n.public_proof,
       // The region integer never left the cloud; its lookup id did.
@@ -564,6 +565,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     type: 'done',
     id,
     mode: 'sidestep',
+    prevEventId: record.prevEventId,
     elapsedMs,
     proofHash: r.proof_hash,
     terrainK: r.terrain_k,

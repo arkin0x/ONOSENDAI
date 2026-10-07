@@ -8,6 +8,8 @@
   --warn: #ffb020;
   --danger: #ff3b6b;
   --sidestep: #c07dff;
+  /* Play inside a game (lib/palette.ts GAME): never a travel color. */
+  --game: #ff7ad9;
   --ok: #52e39f;
   --panel: rgba(6, 14, 22, 0.82);
   --border: rgba(0, 229, 255, 0.22);
@@ -322,6 +324,20 @@ body {
 
 .chainrows__type--spawn { color: var(--ok); }
 .chainrows__type--sidestep { color: var(--sidestep); }
+/* A game's bracket: the entry, the game's own moves and the exit. Pink, the
+ * color of play inside a game everywhere it is drawn (spec §8.11.7). */
+.chainrows__type--enter,
+.chainrows__type--virtual,
+.chainrows__type--exit { color: var(--game); }
+/* An action this client does not recognize: on the chain and followed, but
+ * it moves nobody, so it reads quieter than every move (spec §8.9). */
+.chainrows__type--skipped { color: var(--dim); font-style: italic; }
+/* Out of place, malformed, or starting from the wrong place: where a
+ * verifier says the chain stops. Red with a warning glyph and a struck-red
+ * row, so it never reads as a game's pink. */
+.chainrows__type--broken { color: var(--danger); font-style: italic; font-weight: 700; }
+.chainrows__row--broken { background: rgba(255, 59, 107, 0.1); box-shadow: inset 2px 0 0 var(--danger); }
+.chainrows__warn { display: inline-block; vertical-align: -1px; margin-right: 4px; color: var(--danger); }
 
 .chainrows__id {
   font-size: 9px;
@@ -902,6 +918,18 @@ body {
   background: var(--fg);
 }
 
+/* An action inside a game's bracket, entry and exit included. */
+.explorer__tick--game {
+  background: var(--game);
+}
+
+/* Skipped or broken: on the chain, but no move. Shorter, so the rail still
+ * reads as the moves with something between them. */
+.explorer__tick--quiet {
+  top: 10px;
+  height: 4px;
+}
+
 .explorer__mark {
   position: absolute;
   top: 6px;
@@ -938,6 +966,22 @@ body {
   color: var(--sidestep);
 }
 
+.explorer__type--enter,
+.explorer__type--virtual,
+.explorer__type--exit {
+  color: var(--game);
+}
+
+.explorer__type--skipped {
+  color: var(--dim);
+  font-style: italic;
+}
+
+.explorer__type--broken {
+  color: var(--danger);
+  font-style: italic;
+}
+
 .explorer__when {
   color: var(--dim);
 }
@@ -966,6 +1010,11 @@ body {
   color: var(--dim);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A place inside a game, apart from the coord the identity holds. */
+.explorer__detail--game {
+  color: var(--game);
 }
 
 .explorer__key {
@@ -1289,6 +1338,9 @@ kbd {
 
 .avatars__type--spawn { color: var(--ok); }
 .avatars__type--sidestep { color: var(--sidestep); }
+/* Their newest action is a game's entry or exit (spec §8.11). */
+.avatars__type--enter,
+.avatars__type--exit { color: var(--game); }
 
 .avatars__when {
   font-size: 9px;
@@ -7110,6 +7162,17 @@ kbd {
   color: var(--warn);
   background: rgba(255, 176, 32, 0.08);
   border-left-color: var(--warn);
+}
+
+/* The chain is broken before its head (ChainPanel): the base notice's red,
+ * with the warning glyph inline. */
+.notice--broken .chainrows__warn { vertical-align: -2px; }
+
+/* A game holds the avatar (store GAME_HOLDS_MESSAGE): not an alarm, a fact. */
+.notice--game {
+  color: var(--game);
+  background: rgba(255, 122, 217, 0.08);
+  border-left-color: var(--game);
 }
 
 .notice .tag--tap {

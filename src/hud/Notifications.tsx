@@ -115,6 +115,9 @@ async function openMove(id: string): Promise<string | null> {
   }
   const raw = cs.events.find((e) => e.id === id) ?? (await fetchById(id))
   const action = raw ? parseAction(raw as Parameters<typeof parseAction>[0]) : null
+  // An event found but not readable on its own: a game's move, or an action
+  // this client does not recognize, needs its chain around it to say what it is.
+  if (!action && raw) return 'That action is not one this client can show on its own: it is a move inside a game, or an action this client does not recognize. Open the chain it is on in the chain explorer to see it in place.'
   if (!action) return 'That move could not be found on any relay.'
   useSocialUi.getState().openAction(action)
   return null

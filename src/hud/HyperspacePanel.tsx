@@ -36,7 +36,7 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { useCyberspace } from '../store/useCyberspace'
+import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../store/useCyberspace'
 import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 
@@ -101,6 +101,13 @@ export async function startRide(): Promise<void> {
   // used: when the head has moved since (a fork adopted from another device),
   // leaves seeded by it would be published under a different `previous` and
   // every one of them would be wrong.
+  // A game holds the avatar, or the chain is broken (useCyberspace
+  // whyNoMove): a ride is a base action, and this client signs none then.
+  const noRide = whyNoMove(useCyberspace.getState().actions())
+  if (noRide) {
+    useRideRun.setState({ error: noRide })
+    return
+  }
   const line = lineStateOf(useCyberspace.getState().actions())
   if (line === null) {
     if (useCyberspace.getState().transit !== null) {
@@ -114,6 +121,7 @@ export async function startRide(): Promise<void> {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
     return
   }
+  const { plane } = useCyberspace.getState()
   // Chained from a stop: the ride starts where the last one ended, and the
   // station set bound is not declared, because no station is computed (§5.2).
   let fromHeight: number
@@ -127,7 +135,7 @@ export async function startRide(): Promise<void> {
     // fixed. Recompute it here, with the same function the panel's estimate
     // uses, rather than trusting anything cached from before the choice.
     // The station is the boarding's: computed from the coordinate the chain
-    // says you boarded at (the line state's, the boarding's C), plane bit
+    // says you boarded at (the line state's, the enter's C), plane bit
     // included, never from `plane`, the plane lined up for the next move,
     // which viewing EARTH sets to dataspace. A station computed in the wrong
     // plane gives the wrong from_height, and the ride is invalid (§4.3).
@@ -175,8 +183,7 @@ export async function startRide(): Promise<void> {
   markViewedStop(null)
   useCyberspace.getState().focusOn(
     { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n },
-    // The view, not the proof: the camera frames the plane in view.
-    useCyberspace.getState().plane,
+    plane,
     'THE RIDE',
     81,
   )
@@ -219,14 +226,18 @@ export function HyperspacePanel(): JSX.Element {
   const transit = useCyberspace((s) => s.transit)
   const events = useCyberspace((s) => s.events)
   const position = useCyberspace((s) => s.position)
-  // The plane you stand in, not the one lined up for the next move: the
-  // station estimate must match the boarding, which is built from the head.
+  // The plane you stand in, not the one lined up for the next move: a
+  // boarding and its station are where the chain head is (boardHyperspace).
   const plane = useCyberspace((s) => s.headPlane)
   const atHead = useCyberspace((s) => s.atHead())
   // Where the chain head already puts you: boarded (an enter-hyperspace head)
   // or at a stop (a hyperjump head). Neither needs a BOARD.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const line = useMemo(() => lineStateOf(useCyberspace.getState().actions()), [events])
+  // A game holds the avatar: BOARD and RIDE stand down, and say why.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events])
+  const inGame = noMove !== null
   const atStop = line !== null && line.fromHeight !== null
   const onLine = transit !== null || line !== null
   const progress = useRideRun((s) => s.progress)
@@ -409,14 +420,14 @@ export function HyperspacePanel(): JSX.Element {
         {!onLine && (
           <button
             className="hyper__btn"
-            disabled={!atHead || !ready || destination === null}
+            disabled={inGame || !atHead || !ready || destination === null}
             onClick={() => void useCyberspace.getState().boardHyperspace()}
           >BOARD</button>
         )}
         {progress === null ? (
           <button
             className="hyper__btn hyper__btn--ride"
-            disabled={!onLine || destination === null || !ready || (transit === null && !atHead)}
+            disabled={inGame || !onLine || destination === null || !ready || (transit === null && !atHead)}
             onClick={() => void startRide()}
           >RIDE</button>
         ) : (
@@ -426,7 +437,12 @@ export function HyperspacePanel(): JSX.Element {
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
-      {!onLine && progress === null && (
+      {inGame && progress === null && (
+        <p className="hyper__why">{noMove === GAME_HOLDS_MESSAGE
+          ? 'A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE'
+          : 'YOUR CHAIN IS BROKEN BEFORE ITS HEAD: THE PROOF CHAIN PANEL SAYS WHERE'}</p>
+      )}
+      {!inGame && !onLine && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
         ) : destination === null ? null : !atHead ? (

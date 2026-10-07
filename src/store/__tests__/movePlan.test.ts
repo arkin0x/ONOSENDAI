@@ -112,7 +112,9 @@ describe('a commit beyond the ceiling', () => {
 
     useCyberspace.setState({ signEvent: realSign })
     useCyberspace.getState().resumePlan()
-    await new Promise((r) => setTimeout(r, 0))
+    // RESUME takes a bounded look at the relays before signing a kept proof
+    // (finishProof), so the step lands a moment later, not on the next tick.
+    await vi.waitFor(() => expect(useCyberspace.getState().position.x).toBe(x0 + 8n), { timeout: 4000 })
     st = useCyberspace.getState()
     expect(st.position.x).toBe(x0 + 8n)
     expect(st.plan).toBeNull()                         // that one step was the whole commit

@@ -435,7 +435,7 @@ describe('calibration sample', () => {
 
 describe('lineStateOf: what the chain head says about the line', () => {
   const action = (over: Partial<ActionEvent>): ActionEvent => ({
-    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', coordHex: 'c'.repeat(64),
+    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', name: 'hop', role: 'base', coordHex: 'c'.repeat(64),
     position: { x: 0n, y: 0n, z: 0n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0',
     ...over,
   })
@@ -458,11 +458,34 @@ describe('lineStateOf: what the chain head says about the line', () => {
   it('a hop after a hyperjump leaves the line', () => {
     expect(lineStateOf([action({ type: 'hyperjump', toHeight: 398 }), action({ type: 'hop' })])).toBeNull()
   })
+
+  // Spec §8.9 rule 4 and §8.11.4 rule 8: the rule looks back through a
+  // skipped action and a closed bracket; the work is still seeded by the
+  // actual last event, which is the next ride's `previous`.
+  const jump = action({ type: 'hyperjump', id: 'j'.repeat(64), coordHex: 'd'.repeat(64), toHeight: 398 })
+  const enter = action({ type: 'enter-virtual', role: 'enter', id: 'v'.repeat(64), bracketId: 'v'.repeat(64), coordHex: 'd'.repeat(64) })
+  const exit = action({ type: 'exit-virtual', role: 'exit', id: 'x'.repeat(64), bracketId: 'v'.repeat(64), coordHex: 'd'.repeat(64) })
+  const skipped = action({ type: 'other', name: 'wave', role: 'skipped', id: 's'.repeat(64), coordHex: 'd'.repeat(64) })
+
+  it('still stands at the stop after an action this client does not recognize', () => {
+    expect(lineStateOf([action({ type: 'enter-hyperspace' }), jump, skipped])).toEqual({ previousId: 's'.repeat(64), coordHex: 'd'.repeat(64), fromHeight: 398 })
+  })
+
+  it('still stands at the stop after a game entered and left there', () => {
+    expect(lineStateOf([action({ type: 'enter-hyperspace' }), jump, enter, exit])).toEqual({ previousId: 'x'.repeat(64), coordHex: 'd'.repeat(64), fromHeight: 398 })
+    expect(lineStateOf([action({ type: 'enter-hyperspace' }), jump, enter, exit, skipped])?.previousId).toBe('s'.repeat(64))
+  })
+
+  it('is off the line while the game is still open: a ride there would be a base action inside a game', () => {
+    const move = action({ type: 'other', name: 'move', role: 'virtual', id: 'm'.repeat(64), bracketId: 'v'.repeat(64) })
+    expect(lineStateOf([action({ type: 'enter-hyperspace' }), jump, enter])).toBeNull()
+    expect(lineStateOf([action({ type: 'enter-hyperspace' }), jump, enter, move])).toBeNull()
+  })
 })
 
 describe('rideStatsOf: what the chain has ridden', () => {
   const act = (over: Partial<ActionEvent>): ActionEvent => ({
-    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', coordHex: 'c'.repeat(64),
+    id: 'e'.repeat(64), pubkey: 'p'.repeat(64), createdAt: 1, type: 'hop', name: 'hop', role: 'base', coordHex: 'c'.repeat(64),
     position: { x: 0n, y: 0n, z: 0n }, plane: 0, prevCoordHex: null, genesisId: null, previousId: null, proofHash: null, sector: '0-0-0',
     ...over,
   })

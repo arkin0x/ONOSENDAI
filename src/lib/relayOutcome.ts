@@ -39,6 +39,13 @@ export type RelayAnswer =
 const REFUSAL_PREFIXES = ['auth-required', 'restricted', 'blocked', 'rate-limited', 'invalid', 'error', 'pow', 'duplicate', 'mute'] as const
 const REFUSAL = new RegExp(`^(${REFUSAL_PREFIXES.join('|')}):`, 'i')
 
+/**
+ * The reason a relay's answer carries when it answered, but the chain it
+ * returned has a hole no further question could fill (chains.ts
+ * markPartial): it did not say what the chain is.
+ */
+export const PARTIAL_CHAIN_REASON = 'the relays returned only part of this chain'
+
 /** True when a close reason is a relay's own refusal rather than a dropped connection. */
 export function isRefusal(reason: string): boolean {
   return REFUSAL.test(reason.trim())

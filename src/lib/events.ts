@@ -28,7 +28,74 @@ import type { Position } from './space'
 /** §8.1: every movement action, spawn included, is this one kind. */
 export const ACTION_KIND = 3333
 
-export type ActionType = 'spawn' | 'hop' | 'sidestep' | 'enter-hyperspace' | 'hyperjump'
+/**
+ * The actions this client recognizes (spec §8.8, §8.9): the base protocol's
+ * three movement actions and two bracket actions, and DECK-0001's two, which
+ * every verifier must implement because a hyperjump moves an identity.
+ * Every way an identity can change its position is in this list, which is
+ * what lets an action outside it be skipped rather than stop the chain.
+ */
+export const RECOGNIZED_ACTIONS = ['spawn', 'hop', 'sidestep', 'enter-hyperspace', 'hyperjump', 'enter-virtual', 'exit-virtual'] as const
+
+export type RecognizedAction = (typeof RECOGNIZED_ACTIONS)[number]
+
+/**
+ * What an action is on the chain. The recognized names, and `other` for
+ * every event on a chain that is not a well-formed recognized action in its
+ * place: an action this client does not recognize (skipped, spec §8.9), a
+ * game's own action inside a bracket (virtual, §8.11.2), or an event that
+ * breaks a rule this client can see (broken). Only buildChain produces
+ * `other`, because only the chain around an event says which of the three
+ * it is; parseAction on its own never returns one.
+ */
+export type ActionType = RecognizedAction | 'other'
+
+/**
+ * The part an event plays in its chain, which buildChain decides by walking
+ * the chain from its spawn (spec §8.9, §8.11):
+ *
+ * | Role | Event | Moves the identity? |
+ * |---|---|---|
+ * | base | spawn, hop, sidestep, enter-hyperspace, hyperjump outside a bracket | to its `C` |
+ * | enter | enter-virtual: a game begins | no: its `c` is held |
+ * | virtual | any other name inside a bracket: the game's own move | no |
+ * | exit | exit-virtual closing the open bracket | back to the held position |
+ * | skipped | a name this client does not recognize, outside a bracket | no: position is carried across |
+ * | broken | a recognized name out of place or malformed: a base action inside a bracket (rule 3), an exit with no bracket or the wrong entry (rule 6), a virtual action outside the region (rule 4) | no |
+ *
+ * A broken event is a point where a verifier says the chain stops being
+ * valid. This client is a viewer and not a verifier (parseAction), so it
+ * keeps following the links past it, the same way it never checked a proof,
+ * and marks the row so nobody reads it as a move.
+ *
+ * One more break is visible without checking any proof: an action whose `c`
+ * is not where the chain stood (spec §8.9 rule 2, §8.11.5). Such an action
+ * keeps its role and still moves the identity where its `C` says, as this
+ * client always drew it, and carries `breaks` like every broken event. Where
+ * an identity with an invalid chain stands is not settled yet (arkinox is
+ * ruling on it), so this is the one place to change if the ruling is that it
+ * stays at the last valid position.
+ */
+export type ChainRole = 'base' | 'enter' | 'virtual' | 'exit' | 'skipped' | 'broken'
+
+/** A place in cyberspace, in the three forms the app passes around. */
+export interface Placed {
+  coordHex: string
+  position: Position
+  plane: Plane
+  /** The `S` tag for this place. */
+  sector: string
+}
+
+/** The aligned cube a game is played in (spec §8.11.1). */
+export interface GameRegion {
+  /** The cube's aligned base, 64 lowercase hex. */
+  coordHex: string
+  /** The cube's height H: each side is 2^H gibsons. */
+  height: number
+  base: Position
+  plane: Plane
+}
 
 /** The shape nostr-tools signs and relays return; named here so nothing in
  * the app has to import it from the library to talk about an event. */
@@ -50,19 +117,52 @@ export interface ActionEvent {
   pubkey: string
   createdAt: number
   type: ActionType
-  /** The `C` tag: where this action put the avatar. */
+  /** The `A` tag as written. The same as `type` for a recognized action; the game's or the extension's own name otherwise. */
+  name: string
+  /** The part this event plays in its chain (ChainRole). parseAction gives the role a recognized action has on its own; buildChain decides it in context. */
+  role: ChainRole
+  /**
+   * Where the identity is in cyberspace once this action stands. For a base
+   * action and an exit that is its `C` tag. For an enter-virtual it is the
+   * `c` tag, the position held for the whole bracket (§8.11.4 rule 1), and
+   * for a virtual, skipped or broken event it is the position carried from
+   * the action before it (§8.9 rules 2 and 5). Never a place inside a game.
+   */
   coordHex: string
   position: Position
   plane: Plane
-  /** The `c` tag; null on a spawn, which comes from nowhere. */
+  /**
+   * Where this event's own `C` tag points, when that is not the identity's
+   * position: the place inside the game for an enter-virtual and a virtual
+   * action, and the declared `C` of a skipped or broken event. Absent for a
+   * base action and an exit, whose `C` is the position, and for an event
+   * with no readable `C`.
+   */
+  declared?: Placed
+  /** The `c` tag; null on a spawn, which comes from nowhere, and on an event that has none. */
   prevCoordHex: string | null
   /** `e` tags with the `genesis` and `previous` markers; null on a spawn. */
   genesisId: string | null
   previousId: string | null
-  /** The `proof` tag; null on a spawn, which carries no work. */
+  /** The `proof` tag; null on a spawn and on any action that carries no work. */
   proofHash: string | null
-  /** The `S` tag, as written. */
+  /** The sector of `coordHex`: the `S` tag when the tag names the position, computed when it names a place in a game. */
   sector: string
+  /** Enter-virtual only: the game, from its one `p` tag marked `game` (§8.11.1). */
+  game?: { pubkey: string; relayHint: string }
+  /** Enter-virtual only: the declared region. */
+  region?: GameRegion
+  /** Exit-virtual only: the `e` tag marked `entry`, the enter-virtual it closes. */
+  entryId?: string
+  /** Set by buildChain on an enter, its virtual actions and its exit: the id of the enter-virtual that opened the bracket. */
+  bracketId?: string
+  /**
+   * Set by buildChain when this event breaks a chain rule this client can
+   * see: the rule, in words. Every broken event has one, and so does an
+   * action whose `c` is not where the chain stood. A verifier treats the
+   * chain as invalid from the first event that has one (firstBreak).
+   */
+  breaks?: string
   /** Hyperjump only (DECK-0001 v3 §5.2): the boarding and destination heights. */
   fromHeight?: number
   toHeight?: number
@@ -79,6 +179,46 @@ export interface ActionEvent {
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
+
+/** The names a bracket may not contain (§8.11.4 rule 3): every base and DECK-0001 action but spawn, which is a respawn wherever it appears. */
+const BASE_INSIDE_BRACKET: ReadonlySet<string> = new Set(['hop', 'sidestep', 'enter-hyperspace', 'hyperjump', 'enter-virtual'])
+
+function isRecognized(name: string): name is RecognizedAction {
+  return (RECOGNIZED_ACTIONS as readonly string[]).includes(name)
+}
+
+/** A 64-hex coordinate as a place, or null when it is not one. */
+function placeOf(coordHex: string | undefined, sector?: string): Placed | null {
+  if (!coordHex || !HEX_64.test(coordHex)) return null
+  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const position = { x, y, z }
+  return { coordHex, position, plane, sector: sector ?? sectorTag(xyzToSectorId(x, y, z)) }
+}
+
+/** Whether a place lies inside a game's region (§8.11.1): same plane, and the same aligned cube on every axis. */
+export function insideRegion(p: { position: Position; plane: Plane }, r: GameRegion): boolean {
+  const h = BigInt(r.height)
+  return p.plane === r.plane &&
+    p.position.x >> h === r.base.x >> h &&
+    p.position.y >> h === r.base.y >> h &&
+    p.position.z >> h === r.base.z >> h
+}
+
+/** The `region` tag (§8.11.1): an aligned base and a canonical height in [0, 85], or null. */
+function regionOf(ev: NostrEvent): GameRegion | null {
+  const t = ev.tags.find((x) => x[0] === 'region')
+  if (!t) return null
+  const [, coordHex, hStr] = t
+  if (!coordHex || !HEX_64.test(coordHex)) return null
+  if (hStr === undefined || !/^(0|[1-9][0-9]*)$/.test(hStr)) return null
+  const height = Number.parseInt(hStr, 10)
+  if (height > 85) return null
+  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const h = BigInt(height)
+  const low = (1n << h) - 1n
+  if ((x & low) !== 0n || (y & low) !== 0n || (z & low) !== 0n) return null
+  return { coordHex, height, base: { x, y, z }, plane }
+}
 
 /** §10: per-axis sector tags plus the combined one, all base-10, no padding. */
 export function sectorTags(p: Position): string[][] {
@@ -176,16 +316,23 @@ export interface EnterHyperspaceInput {
   createdAt: number
   genesisId: string
   previousId: string
-  /** Where the identity is standing; an enter does not move it (§3.3). */
-  at: Position
-  plane: Plane
-  /** The §3.2 entry proof hash. */
+  /**
+   * Where the identity is standing, exactly as the chain says it: the `C` of
+   * the last recognized action (buildChain). An enter does not move (§3.3),
+   * so this is both its `c` and its `C`. Taken as the hex itself, never
+   * rebuilt from a position and a plane: the plane a client has lined up for
+   * its next move can differ from the plane it stands in, and a boarding
+   * rebuilt from that plane named a coordinate the chain never reached.
+   */
+  coordHex: string
+  /** The §3.2 entry proof hash, computed over this same coordinate. */
   proofHash: string
 }
 
 /** DECK-0001 v3 §3.1: board the line from wherever you stand. c equals C. */
 export function enterHyperspaceTemplate(i: EnterHyperspaceInput): EventTemplate {
-  const here = positionHex(i.at, i.plane)
+  const here = i.coordHex
+  const at = coordToXyz(hexToCoord(here))
   return {
     kind: ACTION_KIND,
     created_at: i.createdAt,
@@ -197,7 +344,7 @@ export function enterHyperspaceTemplate(i: EnterHyperspaceInput): EventTemplate 
       ['c', here],
       ['C', here],
       ['proof', i.proofHash],
-      ...sectorTags(i.at),
+      ...sectorTags({ x: at.x, y: at.y, z: at.z }),
     ],
   }
 }
@@ -270,25 +417,20 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
 }
 
 /**
- * Read a kind:3333 event, or refuse it.
+ * Read a kind:3333 event as a recognized action, or refuse it.
  *
  * Strict about shape and silent about everything else: a malformed event is
  * dropped rather than thrown, because relays return whatever they were given
  * and one bad event must not take down a chain. Proofs are not checked here;
- * that is a verifier's job, and this client is a viewer.
+ * that is a verifier's job, and this client is a viewer. An action this
+ * client does not recognize is refused here too, because on its own it says
+ * nothing about where anyone is (spec §8.9); buildChain still follows the
+ * links through it (actionLink).
  */
 export function parseAction(ev: NostrEvent): ActionEvent | null {
   if (ev.kind !== ACTION_KIND) return null
   const type = tag(ev, 'A')
-  if (
-    type !== 'spawn' &&
-    type !== 'hop' &&
-    type !== 'sidestep' &&
-    type !== 'enter-hyperspace' &&
-    type !== 'hyperjump'
-  ) {
-    return null
-  }
+  if (type === undefined || !isRecognized(type)) return null
   const coordHex = tag(ev, 'C')
   if (!coordHex || !HEX_64.test(coordHex)) return null
   const sector = tag(ev, 'S')
@@ -299,6 +441,8 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     id: ev.id,
     pubkey: ev.pubkey,
     createdAt: ev.created_at,
+    name: type,
+    role: 'base' as ChainRole,
     coordHex,
     position: { x, y, z },
     plane,
@@ -314,10 +458,43 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   const prevCoordHex = tag(ev, 'c')
   const genesisId = marked(ev, 'genesis')
   const previousId = marked(ev, 'previous')
-  const proofHash = tag(ev, 'proof')
   if (!prevCoordHex || !HEX_64.test(prevCoordHex)) return null
   if (!genesisId || !HEX_64.test(genesisId)) return null
   if (!previousId || !HEX_64.test(previousId)) return null
+  const links = { prevCoordHex, genesisId, previousId }
+
+  if (type === 'enter-virtual') {
+    // §8.11.1: exactly one `p` tag marked `game`, holding a 32-byte lowercase
+    // hex pubkey; the region declared in the clear, aligned, with the entry
+    // point inside it. The identity's position is the `c` tag, held for the
+    // whole bracket; the `C` tag is where it appears inside the game.
+    const games = ev.tags.filter((t) => t[0] === 'p' && t[3] === 'game')
+    if (games.length !== 1 || !HEX_64.test(games[0][1] ?? '')) return null
+    const region = regionOf(ev)
+    if (!region) return null
+    const inGame = placeOf(coordHex, sector)!
+    if (!insideRegion(inGame, region)) return null
+    const held = placeOf(prevCoordHex)!
+    return {
+      ...base,
+      ...held,
+      type,
+      role: 'enter',
+      declared: inGame,
+      ...links,
+      proofHash: null,
+      game: { pubkey: games[0][1], relayHint: games[0][2] ?? '' },
+      region,
+    }
+  }
+  if (type === 'exit-virtual') {
+    // §8.11.3: the entry it closes; its `C` is the position restored.
+    const entryId = marked(ev, 'entry')
+    if (!entryId || !HEX_64.test(entryId)) return null
+    return { ...base, type, role: 'exit', ...links, proofHash: null, entryId }
+  }
+
+  const proofHash = tag(ev, 'proof')
   if (!proofHash || !HEX_64.test(proofHash)) return null
   // The re-roll nonce: optional here, because events from before the price
   // carry none and stand if exempt, but never malformed.
@@ -342,9 +519,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     return {
       ...base,
       type,
-      prevCoordHex,
-      genesisId,
-      previousId,
+      ...links,
       proofHash,
       fromHeight: Number.parseInt(fromStr, 10),
       toHeight: Number.parseInt(toStr, 10),
@@ -353,8 +528,36 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
       ...(mn !== undefined ? { mn } : {}),
     }
   }
-  if (type === 'sidestep' && mn !== undefined) return { ...base, type, prevCoordHex, genesisId, previousId, proofHash, mn }
-  return { ...base, type, prevCoordHex, genesisId, previousId, proofHash }
+  if (type === 'sidestep' && mn !== undefined) return { ...base, type, ...links, proofHash, mn }
+  return { ...base, type, ...links, proofHash }
+}
+
+/** The links of any kind:3333 event that can sit on a chain, whatever its action. */
+export interface ActionLink {
+  id: string
+  pubkey: string
+  createdAt: number
+  /** The `A` tag as written. */
+  name: string
+  genesisId: string
+  previousId: string
+}
+
+/**
+ * The links of an event, recognized or not: what buildChain needs to follow
+ * a chain through an action it cannot read (spec §8.9 rule 1). Null for
+ * another kind, a spawn (which names no previous event, wherever it is
+ * published), an event with no `A` tag, and one without both `e` links.
+ */
+export function actionLink(ev: NostrEvent): ActionLink | null {
+  if (ev.kind !== ACTION_KIND) return null
+  const name = tag(ev, 'A')
+  if (!name || name === 'spawn') return null
+  const genesisId = marked(ev, 'genesis')
+  const previousId = marked(ev, 'previous')
+  if (!genesisId || !HEX_64.test(genesisId)) return null
+  if (!previousId || !HEX_64.test(previousId)) return null
+  return { id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, name, genesisId, previousId }
 }
 
 /** Newest first, ties broken by id, the NIP-01 ordering. */
@@ -366,46 +569,252 @@ function newer(a: { createdAt: number; id: string }, b: { createdAt: number; id:
 /**
  * Reassemble one pubkey's active chain from whatever the relay handed back.
  *
- * §3.2: the newest spawn wins, and everything that does not descend from it is
- * history. From that spawn the chain is followed forward through `previous`
- * links; a fork (two events naming the same predecessor, which a valid chain
- * never has) takes the older branch, so a later attempt to rewrite cannot
- * displace what was there first. Events whose `genesis` names another spawn
- * are ignored even if their `previous` link would fit.
+ * Spec §8.7.3: the newest spawn wins, and only events whose genesis names it
+ * can be part of the chain; events that name another spawn are history, even
+ * if their `previous` link would fit. From that spawn the chain is followed
+ * forward through `previous` links, and at a fork (two events naming the
+ * same predecessor) the older branch continues, a tie going to the smaller
+ * id, so a later attempt to rewrite cannot displace what was there first.
+ *
+ * The links are followed through every event, recognized or not (§8.9 rule
+ * 1): an action this client does not recognize is skipped, never a place
+ * where the chain stops, and a game's actions inside a bracket are followed
+ * like any other (§8.11). What each event means for the identity's position
+ * is decided on the way (ChainRole): every entry's `coordHex`, `position`
+ * and `plane` are where the identity is in cyberspace once it stands, so the
+ * last entry's are the identity's position whatever the chain ends on (§8.9
+ * rule 5, §8.11.4 rule 7), and the last entry's id is what the next action
+ * names as its `previous`.
  *
  * Returns the spawn alone when nothing follows it, and nothing when there is
  * no spawn at all: a hop without a genesis is not a position.
  */
 export function buildChain(events: NostrEvent[]): ActionEvent[] {
-  const parsed = events.map(parseAction).filter((e): e is ActionEvent => e !== null)
-  const spawns = parsed.filter((e) => e.type === 'spawn').sort(newer)
-  const spawn = spawns[0]
+  // Only the spawns are read here; every other event is read once, in place.
+  const spawn = events
+    .filter((e) => tag(e, 'A') === 'spawn')
+    .map(parseAction)
+    .filter((e): e is ActionEvent => e !== null && e.type === 'spawn')
+    .sort(newer)[0]
   if (!spawn) return []
 
-  const byPrev = new Map<string, ActionEvent[]>()
-  for (const e of parsed) {
-    if (e.type === 'spawn' || e.genesisId !== spawn.id || !e.previousId) continue
-    const list = byPrev.get(e.previousId) ?? []
-    list.push(e)
-    byPrev.set(e.previousId, list)
+  const byPrev = new Map<string, Array<{ link: ActionLink; ev: NostrEvent }>>()
+  for (const ev of events) {
+    const link = actionLink(ev)
+    if (!link || link.genesisId !== spawn.id) continue
+    const list = byPrev.get(link.previousId) ?? []
+    list.push({ link, ev })
+    byPrev.set(link.previousId, list)
   }
 
-  const chain = [spawn]
+  const chain: ActionEvent[] = [spawn]
   const seen = new Set([spawn.id])
-  let head = spawn
+  let head: ActionEvent = spawn
+  /** The enter-virtual of the bracket open at the head, if one is. */
+  let open: ActionEvent | null = null
+  /** Inside a bracket: the C of its last enter or virtual action, where the next game action starts from. */
+  let inGame: string | null = null
   for (;;) {
     const next = (byPrev.get(head.id) ?? [])
-      .filter((e) => !seen.has(e.id))
-      .sort((a, b) => -newer(a, b))[0]
+      .filter((c) => !seen.has(c.link.id))
+      .sort((a, b) => -newer(a.link, b.link))[0]
     if (!next) break
-    chain.push(next)
-    seen.add(next.id)
-    head = next
+    let entry = placeInChain(next.ev, next.link, head, open, inGame)
+    // DECK-0001 §4.3, read through games and skipped actions (§8.9 rule 4,
+    // §8.11.4 rule 8): a ride follows a boarding or another ride.
+    if (entry.type === 'hyperjump' && !entry.breaks) {
+      const stood = lookBack(chain, chain.length)
+      if (stood?.type !== 'enter-hyperspace' && stood?.type !== 'hyperjump') {
+        entry = { ...entry, breaks: 'a hyperjump whose action before it is neither an enter-hyperspace nor a hyperjump (DECK-0001 §4.3)' }
+      }
+    }
+    if (entry.role === 'enter') { open = entry; inGame = entry.declared?.coordHex ?? null }
+    else if (entry.role === 'virtual') inGame = entry.declared?.coordHex ?? inGame
+    else if (entry.role === 'exit') { open = null; inGame = null }
+    chain.push(entry)
+    seen.add(entry.id)
+    head = entry
   }
   return chain
 }
 
-/** Where a chain currently puts its avatar. */
+/** The last six hex digits of a coordinate, where a plane bit or a small move shows. */
+const tail = (hex: string): string => `…${hex.slice(-6)}`
+
+/** The words for an action that starts somewhere other than where the chain stood. */
+function startsElsewhere(c: string | null, stood: string): string {
+  return `it starts from ${c ? tail(c) : 'nowhere'}, but the action before it left the chain at ${tail(stood)}: an action's c must be where the chain stood (spec §8.9, §8.11.5)`
+}
+
+/**
+ * One event's entry in the chain, given the entry before it, the bracket
+ * open at that point, and the place inside the game the last game action
+ * left: §8.9 for an action outside a bracket, §8.11.4 inside.
+ */
+function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, open: ActionEvent | null, inGame: string | null): ActionEvent {
+  const parsed = parseAction(ev)
+  const carried: Placed = { coordHex: before.coordHex, position: before.position, plane: before.plane, sector: before.sector }
+  const declared = placeOf(tag(ev, 'C'), tag(ev, 'S'))
+  const prev = tag(ev, 'c')
+  const prevCoordHex = prev && HEX_64.test(prev) ? prev : null
+  const unread = (role: ChainRole, breaks?: string, bracketId?: string): ActionEvent => ({
+    id: link.id,
+    pubkey: link.pubkey,
+    createdAt: link.createdAt,
+    type: 'other',
+    name: link.name,
+    role,
+    ...carried,
+    ...(declared ? { declared } : {}),
+    prevCoordHex,
+    genesisId: link.genesisId,
+    previousId: link.previousId,
+    proofHash: null,
+    ...(bracketId ? { bracketId } : {}),
+    ...(breaks ? { breaks } : {}),
+  })
+  /** A recognized action as parsed, flagged when its c is not where the chain stood. */
+  const checked = (a: ActionEvent, stood: string | null): ActionEvent =>
+    stood !== null && a.prevCoordHex !== stood ? { ...a, breaks: startsElsewhere(a.prevCoordHex, stood) } : a
+
+  if (open) {
+    // Inside a bracket (§8.11.4). An exit closes it only when it names this
+    // bracket's entry (rule 6) and puts the identity back where it entered
+    // (rule 2); a base action is invalid here (rule 3); every other name is
+    // the game's own move, which must stay in the box (rule 4) and never
+    // moves the identity (rule 1). A broken exit leaves the bracket open.
+    // Each game action, the exit included, starts where the last one left
+    // the identity inside the game (§8.11.5 steps 2 and 3).
+    if (link.name === 'exit-virtual') {
+      if (parsed?.type === 'exit-virtual' && parsed.entryId === open.id && parsed.coordHex === open.coordHex) {
+        return checked({ ...parsed, role: 'exit', bracketId: open.id }, inGame)
+      }
+      return unread('broken', parsed?.type === 'exit-virtual'
+        ? 'an exit that does not close this game, or does not return the identity to where it entered the game (spec §8.11.4 rules 2 and 6)'
+        : 'an exit missing a tag the chain rules read, or with one malformed', open.id)
+    }
+    if (BASE_INSIDE_BRACKET.has(link.name)) {
+      return unread('broken', `a ${link.name} inside a game, where only the game's own actions may stand (spec §8.11.4 rule 3)`, open.id)
+    }
+    if (!declared || !insideRegion(declared, open.region!)) {
+      return unread('broken', "a game action outside the game's declared region (spec §8.11.4 rule 4)", open.id)
+    }
+    const move = unread('virtual', undefined, open.id)
+    return inGame !== null && prevCoordHex !== inGame ? { ...move, breaks: startsElsewhere(prevCoordHex, inGame) } : move
+  }
+  if (parsed && parsed.type === 'enter-virtual') return checked({ ...parsed, bracketId: parsed.id }, before.coordHex)
+  if (parsed && parsed.type === 'exit-virtual') return unread('broken', 'an exit with no game open (spec §8.11.4 rule 6)')
+  if (parsed) return checked(parsed, before.coordHex)
+  // A recognized name that would not parse is a malformed action, not one
+  // this client does not know; a name it does not recognize is skipped and
+  // the position carried across it (§8.9 rules 2 and 5).
+  return isRecognized(link.name)
+    ? unread('broken', `a ${link.name} missing a tag the chain rules read, or with one malformed`)
+    : unread('skipped')
+}
+
+/**
+ * The first event of `chain` that breaks a rule this client can see, and
+ * where it is: a verifier treats the chain as invalid from there. Null when
+ * the chain shows no such event.
+ */
+export function firstBreak(chain: ActionEvent[]): { index: number; action: ActionEvent } | null {
+  const index = chain.findIndex((a) => a.breaks !== undefined)
+  return index < 0 ? null : { index, action: chain[index] }
+}
+
+/**
+ * The hole nearest the head in the chain a spawn starts, as far as `events`
+ * hold it: of the events naming that spawn as their genesis, the newest one
+ * whose `previous` is neither the spawn nor in hand. Null when every link is
+ * in hand. A relay returns the newest events first and stops at its own
+ * limit, and two relays can each hold a different stretch, so a hole is
+ * where the next page has to start: at that event's second (`until`,
+ * inclusive), or, when that second alone holds more than a page, by asking
+ * for the missing event itself (`missingId`).
+ */
+export function chainGap(events: NostrEvent[], spawnId: string): { until: number; missingId: string } | null {
+  const ids = new Set(events.map((e) => e.id))
+  let gap: ActionLink | null = null
+  for (const ev of events) {
+    const l = actionLink(ev)
+    if (!l || l.genesisId !== spawnId || l.previousId === spawnId || ids.has(l.previousId)) continue
+    if (!gap || l.createdAt > gap.createdAt || (l.createdAt === gap.createdAt && l.id > gap.id)) gap = l
+  }
+  return gap ? { until: gap.createdAt, missingId: gap.previousId } : null
+}
+
+/** Where a chain currently puts its avatar, and what the next action names as its `previous`. */
 export function chainHead(chain: ActionEvent[]): ActionEvent | null {
   return chain.length ? chain[chain.length - 1] : null
+}
+
+/**
+ * The enter-virtual of the bracket open at the end of `chain` (up to and
+ * including index `at` when given), or null when the identity is not inside
+ * a game there. A chain may end inside a bracket (§8.11.4 rule 7).
+ */
+export function openBracket(chain: ActionEvent[], at = chain.length - 1): ActionEvent | null {
+  const a = chain[at]
+  if (!a || (a.role !== 'enter' && a.role !== 'virtual' && !(a.role === 'broken' && a.bracketId))) return null
+  return chain.find((e) => e.id === a.bracketId && e.role === 'enter') ?? null
+}
+
+/**
+ * The action that rules looking back from index `at` see (spec §8.9 rule 4,
+ * §8.11.4 rule 8): the nearest recognized action before it, with skipped
+ * and broken events passed over and a closed bracket standing for the
+ * action before its enter-virtual. Inside an open bracket it is that
+ * bracket's enter-virtual. Null when nothing stands before it.
+ *
+ * Only for rules about which action came before. Work is still seeded by
+ * the actual previous event, which is always `chain[at - 1]`.
+ */
+export function lookBack(chain: ActionEvent[], at: number): ActionEvent | null {
+  let j = Math.min(at, chain.length) - 1
+  while (j >= 0) {
+    const a = chain[j]
+    if (a.role === 'skipped' || (a.role === 'broken' && !a.bracketId)) { j--; continue }
+    if (a.role === 'exit' || a.role === 'virtual' || a.role === 'broken') {
+      const enter = chain.findIndex((e) => e.id === a.bracketId)
+      if (enter < 0) return null
+      if (a.role === 'exit') { j = enter - 1; continue }
+      return chain[enter]
+    }
+    return a
+  }
+  return null
+}
+
+/**
+ * The one word a row's styling keys on: the action for a base action, the
+ * role otherwise, and `broken` for anything that breaks a rule.
+ */
+export function actionKind(a: Pick<ActionEvent, 'type' | 'role' | 'breaks'>): string {
+  if (a.breaks !== undefined || a.role === 'broken') return 'broken'
+  return a.role === 'base' ? a.type : a.role
+}
+
+/** The longest stretch of a name chosen by someone else that a label shows. */
+const NAME_SHOWN = 20
+
+/**
+ * Short words for an action's row: the action for a recognized one, and what
+ * it is to this client otherwise, with the name it was given. A game or an
+ * extension chooses its own names, so they are shown cut to NAME_SHOWN; the
+ * row's title carries the whole name.
+ */
+export function actionLabel(a: Pick<ActionEvent, 'type' | 'name' | 'role' | 'breaks'>): string {
+  const name = a.name.length > NAME_SHOWN ? `${a.name.slice(0, NAME_SHOWN)}…` : a.name
+  // An action that keeps its role but breaks a rule (its c is not where the
+  // chain stood) still says what it is, after the word that matters.
+  if (a.breaks !== undefined && a.role !== 'broken') return `BROKEN · ${actionLabel({ ...a, breaks: undefined })}`
+  switch (a.role) {
+    case 'enter': return 'ENTER GAME'
+    case 'exit': return 'EXIT GAME'
+    case 'virtual': return `GAME · ${name.toUpperCase()}`
+    case 'skipped': return `SKIPPED · ${name.toUpperCase()}`
+    case 'broken': return `BROKEN · ${name.toUpperCase()}`
+    default: return a.type === 'enter-hyperspace' ? 'ENTER' : a.type.toUpperCase()
+  }
 }

@@ -1,5 +1,6 @@
 /**
- * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals.
+ * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals, and the
+ * Builder's Hide a Message composer.
  * State in hud/stash.ts; mounted once at the app root.
  */
 
@@ -12,6 +13,7 @@ import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
+import { MessageCompose } from './MessageCompose'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -76,7 +78,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag } = useStash()
+  const { models, bags, bag, message } = useStash()
   const mine = useShards((s) => s.mine)
   const shards = useWorkshop((s) => s.shards)
   const close = useStash.getState().close
@@ -106,6 +108,14 @@ export function StashModals(): JSX.Element | null {
             {all.map((b) => <BagRow key={b.lookupId} bag={b} onOpen={() => useStash.getState().openBag(b.lookupId)} />)}
           </ul>
         )}
+      </Shell>
+    )
+  }
+  if (message) {
+    return (
+      <Shell title="Hide a message" onClose={close}>
+        <p className="login__note">Write the message, then aim it: it lands at the build cursor, and the bar that comes next sets how far away someone can be and still find it. Building does not move your avatar.</p>
+        <MessageCompose onDone={close} />
       </Shell>
     )
   }

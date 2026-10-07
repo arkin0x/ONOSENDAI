@@ -11,13 +11,12 @@
  */
 
 import { useState } from 'react'
-import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
-import { useSettled } from './useSettled'
-import { MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
+import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
+import { MessageCompose } from './MessageCompose'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -28,27 +27,13 @@ export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
   const scanning = useShards((s) => s.scanning)
   const [composing, setComposing] = useState(false)
-  const [message, setMessage] = useState('')
-  // The token is read, and its mint asked, only once the text has held
-  // still for SETTLE_MS: not on every keystroke through a token thousands
-  // of characters long. Until then PLACE MESSAGE waits.
-  const settled = useSettled(message, SETTLE_MS) === message
-  const cashu = useCashu(settled ? message : null)
-  const verdict = composeVerdict(settled, cashu)
+  const building = useBuilder((s) => s.active)
 
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)
   const broadcastError = useShards((s) => s.broadcastError)
   const localCount = mine.filter((d) => !d.published).length
   const bags = bagsOf(mine)
-
-  const placeMessage = (): void => {
-    const t = message.trim()
-    if (!t) return
-    useShards.getState().startDeployMessage(t)
-    setComposing(false)
-    setMessage('')
-  }
 
   return (
     <section className="panel panel--shards">
@@ -62,9 +47,20 @@ export function ShardsPanel(): JSX.Element {
           box inside a scrolling panel, and the panel could not be scrolled
           past it. What the stash is for is what is hidden. */}
       <div className="shards__section">
-        <div>
+        <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
+          {/* BUILD mode, beside the workshop it is the other half of: the
+              workshop makes objects, the Builder places them (useBuilder). */}
+          <button
+            className={`avatars__go shards__compose-open shards__build ${building ? 'is-on' : ''}`}
+            aria-pressed={building}
+            onClick={() => useBuilder.getState().toggle()}
+            title={building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
+          >{building ? 'EXIT BUILD' : '⬚ BUILD'}</button>
         </div>
+        <span className="shards__note">
+          BUILD places objects and messages at a build cursor of its own, anywhere in cyberspace. It starts on your avatar; move it with the controls, zoom out with + to build bigger, or jump it with VIEW in the Position panel. Building never moves your avatar.
+        </span>
       </div>
 
       <div className="shards__section">
@@ -77,21 +73,7 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <span className="legend__label">Place a hidden message</span>
         {composing ? (
-          <div className="shards__compose">
-            <textarea
-              className="shards__textarea"
-              value={message}
-              onChange={(e) => setMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
-              placeholder="A message left in cyberspace, readable only from where you place it…"
-              rows={3}
-              autoFocus
-            />
-            {verdict.note && <span className={`shards__compose-note shards__compose-note--${verdict.tone}`} role="status">{verdict.note}</span>}
-            <div className="shards__actions">
-              <button className="avatars__go" onClick={() => { setComposing(false); setMessage('') }}>CANCEL</button>
-              <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={placeMessage}>PLACE MESSAGE ▸</button>
-            </div>
-          </div>
+          <MessageCompose onDone={() => setComposing(false)} />
         ) : (
           <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}>✎ WRITE A MESSAGE</button>
         )}

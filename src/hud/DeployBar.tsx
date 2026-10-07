@@ -1,9 +1,10 @@
 /**
  * DeployBar.tsx — placing a shard in the world.
  *
- * While this is up you are aiming, not moving: the movement cursor picks the
- * spot (WASD, the pad, all of it), the shard ghosts there, and DEPLOY hides it
- * at the cursor. The one real choice is the height, which is the discovery
+ * While this is up you are aiming, not moving: a deploy happens in BUILD mode
+ * (store/useBuilder.ts), so the build cursor picks the spot (WASD, the pad,
+ * the zoom, the Position panel, all of it), the shard ghosts there, and
+ * DEPLOY hides it at the build cursor. Nothing here moves your avatar. The one real choice is the height, which is the discovery
  * radius (spec §7.3): height 0 is a single gibson, so only someone standing on
  * that exact point finds it; each step up doubles the aligned cube it hides in
  * and the work it costs to find. The bar spells the radius out in real units
@@ -52,6 +53,7 @@ import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
+import { buildPlane } from '../lib/buildCursor'
 import { Field, Switch } from './ui/Switch'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
@@ -74,7 +76,8 @@ export function DeployBar(): JSX.Element | null {
   const autoMaxSats = useCyberspace((s) => s.cloudPrefs.autoMaxSats)
   const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
   const ladder = useCyberspace((s) => s.cloud.provider?.pricing?.hop)
-  const plane = useCyberspace((s) => s.plane)
+  // The plane the build cursor is in: the build view's (lib/buildCursor.ts).
+  const plane = useCyberspace(buildPlane)
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
   const turn = useShards((s) => s.deployTurn)
@@ -89,7 +92,7 @@ export function DeployBar(): JSX.Element | null {
   const mine = useShards((s) => s.mine)
   // The region the deploy would land in, as a string, so the bar re-renders
   // when the cursor crosses into another region and not on every step.
-  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, s.scaleExp, height), s.plane, height))
+  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, s.scaleExp, height), buildPlane(s), height))
   const existing = useMemo(() => ownBagIn(mine, region), [mine, region])
   // Hooks stay above the early return below. The controls take this region's
   // bag settings when the cursor's region changes (seedDeployBag decides).
@@ -249,7 +252,7 @@ export function DeployBar(): JSX.Element | null {
       )}
 
       <div className="deploybar__row deploybar__hint">
-        Aim with the movement controls; the ghost is where it lands.
+        Aim with the build cursor: the movement controls move it, and zooming out with + makes every step and the cell it lands in bigger. The ghost is where it lands. Building does not move your avatar.
         {!isMessage && snapOffered(plane, height) && up && ' Stands the shard on the ground here, bottom to Earth. SPIN is the compass bearing its +Z faces.'}
         {height === 0
           ? ' At height 0 only someone on this exact point can find it.'

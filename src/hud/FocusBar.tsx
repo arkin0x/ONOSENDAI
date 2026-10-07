@@ -16,6 +16,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
 import { useShards } from '../store/useShards'
 import { useEscape } from '../hooks/useEscape'
+import { useBuilder } from '../store/useBuilder'
 
 export function FocusBar(): JSX.Element | null {
   const focus = useCyberspace((s) => s.focus)
@@ -29,11 +30,14 @@ export function FocusBar(): JSX.Element | null {
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   const inspecting = useShards((s) => s.inspecting !== null)
-  const shown = !(focusLabel === null || spectating || viewOwned || inspecting)
+  // BUILD mode rides the free view and has its own bar (BuildBar), with its
+  // own EXIT and RETURN TO AVATAR; this one comes back when the mode ends.
+  const building = useBuilder((s) => s.active)
+  const shown = !(focusLabel === null || spectating || viewOwned || inspecting || building)
   // Escape is RETURN while this bar stands, a chip on the Escape stack
   // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
   useEscape('chip', shown, () => useCyberspace.getState().clearFocus())
-  if (focusLabel === null || spectating || viewOwned || inspecting) return null
+  if (!shown) return null
   return (
     <div className="hyperbar hyperbar--focus" role="status">
       <span className="hyperbar__glyph" aria-hidden="true">◈</span>
@@ -41,7 +45,9 @@ export function FocusBar(): JSX.Element | null {
         <span className="hyperbar__label">VIEWING</span>
         <span className="hyperbar__meta">{focusLabel}</span>
       </span>
-      <button className="hyperbar__end" onClick={() => useCyberspace.getState().clearFocus()}>RETURN</button>
+      {/* A free view (VIEW, or what BUILD mode leaves behind when you exit)
+          says where RETURN goes, since the pad drives it like your head. */}
+      <button className="hyperbar__end" onClick={() => useCyberspace.getState().clearFocus()} title="Back to your avatar (Esc)">{focus?.drive ? 'RETURN TO AVATAR' : 'RETURN'}</button>
     </div>
   )
 }

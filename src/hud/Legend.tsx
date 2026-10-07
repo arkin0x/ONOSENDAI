@@ -76,6 +76,16 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
+    what: 'White cube marked BUILD: the build cursor, shown in build mode. The next object or message you place lands in this cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <g fill="none" stroke="#f2f7ff" strokeWidth="1.2" strokeLinejoin="round">
+          <path d="M4 7 L11 7 L11 16 L4 16 Z M4 7 L9 3 L16 3 L11 7 M16 3 L16 12 L11 16" />
+        </g>
+      </svg>
+    ),
+  },
+  {
     what: 'Spawn point mesh: spawn point',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">

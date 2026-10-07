@@ -728,8 +728,13 @@ export interface CyberspaceState {
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
-  /** Stop looking; the scene returns to your avatar. */
-  clearFocus: () => void
+  /**
+   * Stop looking; the scene returns to your avatar. With `keepScale` the zoom
+   * stays where it is instead of going back to the one the look began at:
+   * the Builder ends a view that already sits on your avatar this way, so
+   * leaving build mode changes nothing on screen (useBuilder `exit`).
+   */
+  clearFocus: (keepScale?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
   transit: TransitState | null
   /** §3: sign and queue an enter-hyperspace event from the current position. */
@@ -2826,7 +2831,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (focus) set({ focus: { ...focus, item: true } })
   },
 
-  clearFocus: () => {
+  clearFocus: (keepScale = false) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus } = get()
@@ -2839,7 +2844,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // A cursor that went out with the view comes home with it.
       ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
-      scaleExp: focusReturnScale ?? scaleExp,
+      scaleExp: keepScale ? scaleExp : focusReturnScale ?? scaleExp,
       focusReturnScale: null,
     })
   },

@@ -10,6 +10,7 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
+import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { ActionModal } from './hud/ActionModal'
 import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
@@ -56,6 +57,7 @@ import { setSyncPriority } from './lib/hyperspace/anchors'
 /** How long after the panels open the anchor sync goes full tilt. */
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
+import { useBuilder } from './store/useBuilder'
 
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
@@ -141,7 +143,10 @@ export default function App(): JSX.Element {
   // spectating ends the spectation, and the panels hidden behind it would
   // come straight back over the thing just asked for.
   const viewing = useCyberspace((s) => s.focus !== null)
-  useEffect(() => { if ((driving || stationView || viewingSecret || viewing) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, isMobile])
+  // BUILD from the Stash panel, even from a view already driven: the scene is
+  // where building happens, so on a phone the panels fold away.
+  const building = useBuilder((s) => s.active)
+  useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
@@ -204,6 +209,8 @@ export default function App(): JSX.Element {
           <LineScrubber />
           <HyperspaceBar />
           <FocusBar />
+          {/* BUILD mode, where the free view's bar would be: it rides that view. */}
+          <BuildBar />
           <ToastChip />
           <ChainExplorer />
           <BitReadout />

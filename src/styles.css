@@ -7367,3 +7367,122 @@ kbd {
 .deploybar__fit { color: var(--ok); }
 .deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
 .deploybar__ask, .deploybar > .notice { flex-shrink: 0; }
+
+/* ---------- BUILD mode (hud/BuildBar.tsx, store/useBuilder.ts) ----------
+ * The free view's bar, grown to hold what the Builder needs: where the build
+ * cursor is, the cell size the zoom gives it, the plain statement that
+ * building does not move you, and what to place. White, the build cursor's
+ * color (lib/palette.ts BUILD), so it reads as neither a move nor a ride. */
+:root {
+  --build: #f2f7ff;
+}
+.hyperbar.buildbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  width: 340px;
+  border-color: rgba(242, 247, 255, 0.55);
+  box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
+}
+.buildbar__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.buildbar__head .hyperbar__text {
+  flex: 1;
+}
+/* Three full axis values and a plane do not fit one line beside EXIT. */
+.buildbar .hyperbar__meta {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.buildbar .hyperbar__glyph,
+.buildbar .hyperbar__label {
+  color: var(--build);
+}
+.buildbar .hyperbar__end {
+  color: #05070d;
+  background: var(--build);
+  border-color: var(--build);
+}
+.buildbar .hyperbar__end:hover {
+  background: #ffffff;
+}
+.buildbar__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+}
+.buildbar__facts strong {
+  color: var(--build);
+  font-weight: 700;
+}
+.buildbar__still {
+  color: var(--ok);
+}
+.buildbar__warn {
+  color: var(--warn);
+}
+.buildbar__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.buildbar__act {
+  flex: 1 1 auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--build);
+  background: transparent;
+  border: 1px solid rgba(242, 247, 255, 0.45);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.buildbar__act:hover:not(:disabled) {
+  background: rgba(242, 247, 255, 0.1);
+}
+.buildbar__act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.buildbar .explain {
+  letter-spacing: 0.04em;
+}
+@media (max-width: 1100px) {
+  /* Clear of the compass in the top right corner: the instrument stack sits
+     above it, so a full-width bar would cover it. */
+  .hyperbar.buildbar {
+    width: min(340px, calc(100vw - 112px));
+  }
+}
+
+/* WORKSHOP and BUILD side by side in the Stash panel. */
+.shards__modes {
+  display: flex;
+  gap: 6px;
+}
+.shards__modes .shards__compose-open {
+  flex: 1;
+}
+.shards__build.is-on {
+  color: #05070d;
+  background: var(--build);
+  border-color: var(--build);
+}
+
+/* The Position panel's line while BUILD mode is on. */
+.viewat__build {
+  margin: 4px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--build);
+}

@@ -32,7 +32,8 @@ import {
 import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
-import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
+import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
+import { useBuilder } from '../store/useBuilder'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
@@ -157,6 +158,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // Looking at a focus the cursor cannot be used, so its size label would
   // just hang in the middle of the view.
   const focused = useCyberspace((s) => s.focus !== null)
+  // BUILD mode rides the free view: the same cube, white and labeled, as
+  // the build cursor (store/useBuilder.ts).
+  const building = useBuilder((s) => s.active)
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
@@ -338,11 +342,25 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         </>
       )}
       {/* The free view's own marker: the yellow cube on the cell you are
-          looking at, which the pad moves with the view. */}
+          looking at, which the pad moves with the view. In BUILD mode it is
+          the build cursor: white, and labeled with the cell size it places
+          at, which is the zoom. */}
       {!home && atHead && !active && (
         <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
-          <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.85} depthTest={false} />
+          <lineBasicMaterial color={building ? BUILD : WARN} toneMapped={false} transparent opacity={building ? 0.95 : 0.85} depthTest={false} />
         </lineSegments>
+      )}
+      {building && atHead && (
+        <WorldLabel
+          text={`BUILD · 2^${scaleExp}`}
+          color={BUILD}
+          offset={[1.5, 0.7, 0]}
+          opacity={0.9}
+          follow={() => {
+            const s = useCyberspace.getState()
+            return placeCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+          }}
+        />
       )}
     </group>
   )

@@ -6302,6 +6302,129 @@ kbd {
   background: var(--accent, #00e5ff);
 }
 
+/* ---------- The star: CHAT's chip, off your avatar (StarChip.tsx) ----------
+ * The same chip in the same place, a star where the word was. Drawn at CHAT's
+ * 29px so it stays level with CONTROLS, but it takes a tap across 45px each
+ * way through the ::after below. Accent while empty (a live control, so not
+ * the dim a folded chip gets under aria-pressed=false); yellow once starred. */
+.chip.starchip,
+.chip.starchip[aria-pressed='false'] {
+  color: var(--accent, #00e5ff);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.starchip::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.chip.starchip.is-starred {
+  color: #ffd84d;
+  border-color: rgba(255, 216, 77, 0.6);
+  box-shadow: 0 0 10px rgba(255, 216, 77, 0.22);
+}
+.starchip__glyph {
+  flex: none;
+  display: block;
+}
+/* Starring it: half a second of neon. The glyph glitches in from cyan to
+ * yellow, a ring pulses out from it, and a scanline sweeps the chip. */
+.starchip__glyph.is-lit {
+  animation: starchip-lit 520ms ease-out both;
+}
+.starchip__flare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.starchip__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  border: 1px solid #ffd84d;
+  box-shadow: 0 0 8px #ffd84d, inset 0 0 6px rgba(255, 216, 77, 0.6);
+  opacity: 0;
+  animation: starchip-ring 520ms ease-out both;
+}
+.starchip__scan {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.starchip__scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -45%;
+  height: 45%;
+  background: linear-gradient(to bottom, transparent, rgba(0, 229, 255, 0.5) 45%, rgba(255, 216, 77, 0.85) 52%, transparent);
+  animation: starchip-scan 420ms linear both;
+}
+@keyframes starchip-lit {
+  0% { transform: scale(0.6); opacity: 0.2; color: #00e5ff; }
+  16% { transform: scale(1.15) translateX(-1.5px); opacity: 1; color: #00e5ff; }
+  28% { transform: scale(1.15) translateX(1.5px); opacity: 0.35; }
+  40% { transform: scale(1.35); opacity: 1; filter: drop-shadow(0 0 6px #ffd84d); }
+  100% { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 3px rgba(255, 216, 77, 0.7)); }
+}
+@keyframes starchip-ring {
+  0% { transform: scale(0.4); opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes starchip-scan {
+  from { top: -45%; }
+  to { top: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .starchip__glyph.is-lit,
+  .starchip__ring,
+  .starchip__scan::before { animation: none; }
+  .starchip__flare { display: none; }
+}
+/* The toast's mark when a place was starred: the star, filled, in yellow. */
+.hyperbar__mark--star {
+  width: 18px;
+  height: 18px;
+  color: #ffd84d;
+}
+
+/* STARRED PLACES under RECENT (StarredPlaces.tsx): RECENT's rows, at a 44px
+ * tap height, with when each was starred on the right. */
+.starred__empty {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.starred__item {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+.starred__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.starred__when {
+  flex: none;
+  margin-left: 8px;
+  font-size: 9px;
+  color: var(--dim);
+}
+.starred__forget {
+  width: 44px;
+  min-height: 44px;
+}
+
 .chatdock {
   position: fixed;
   bottom: 14px;

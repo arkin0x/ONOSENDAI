@@ -31,6 +31,7 @@ import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
+import { StarredPlaces } from './StarredPlaces'
 import { jobInProgress } from '../lib/cloud'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
@@ -263,6 +264,10 @@ function PositionPanel(): JSX.Element {
             )}
           </div>
         )}
+        {/* Starred Places, under RECENT: a tap goes there the way a recent
+            place does, under the name it was starred with and at the zoom it
+            was starred at. */}
+        <StarredPlaces onGo={(p, target) => { setViewText(p.input); look(p.input, { ...target, label: p.label, scaleExp: p.scaleExp ?? target.scaleExp }) }} />
       </div>
     </section>
   )

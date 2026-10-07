@@ -10,6 +10,12 @@
  * `/` unfolds it and puts the caret in the line; Escape folds it. A line that
  * arrives from someone else unfolds it on its own, so a room that starts
  * talking is heard.
+ *
+ * Folded, while the spot at the center of the screen is not your avatar (the
+ * cursor moved off it, or the view is elsewhere), the chip is a star instead
+ * (StarChip.tsx): you cannot speak from there, and that is where you would
+ * want to mark a place. Back on your avatar, CHAT returns. Unfolded, the dock
+ * stays as it is either way.
  */
 
 import { Fragment, useEffect, useMemo, useRef } from 'react'
@@ -22,6 +28,8 @@ import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
 import { useEscape } from '../hooks/useEscape'
+import { bottomChip } from '../lib/starred'
+import { StarChip } from './StarChip'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */
 const SHOWN = 200
@@ -61,6 +69,7 @@ export function ChatDock(): JSX.Element {
   const sendError = useChat((s) => s.sendError)
   const current = useSecrets((s) => s.current)
   const atHead = useCyberspace((s) => s.atHead())
+  const chip = useCyberspace((s) => bottomChip(s))
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
   const now = Math.floor(Date.now() / 1000)
@@ -87,6 +96,7 @@ export function ChatDock(): JSX.Element {
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
 
+  if (!open && chip === 'star') return <StarChip />
   if (!open) {
     return (
       <button

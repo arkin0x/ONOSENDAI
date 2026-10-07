@@ -723,7 +723,7 @@ export interface CyberspaceState {
    * spawn's, when no event is valid, Q7), so the place the old chain froze
    * at is one tap away; then an ordinary respawn.
    */
-  respawnFromBrokenChain: () => Promise<void>
+  respawnFromBrokenChain: (forPubkey?: string) => Promise<void>
   /** Anchor the scene on action `index` of the chain; null or past the end is the head. */
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
@@ -977,7 +977,7 @@ function loadChain(pubkey: string): PersistedChain | null {
     // Must reassemble to exactly what was stored, from our own key. Anything
     // else is a chain that cannot be continued, and pretending otherwise would
     // sign hops onto a history the relay will reject.
-    const chain = buildChain(data.events)
+    const chain = buildChain(data.events, pubkey)
     if (chain.length !== data.events.length || chain[0].pubkey !== pubkey) return null
     return {
       version: 2,
@@ -1906,6 +1906,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // extension never makes it sign anything just to log in.
     const local = loadChain(signer.pubkey)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
+    // A broken-chain notice or respawn confirm left open was about the old
+    // identity's chain; it must never respawn the new one.
+    useChainUi.getState().setBrokenView(null)
     set({
       identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
       signerKind: signer.kind,
@@ -2608,14 +2611,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
   },
 
-  respawnFromBrokenChain: async () => {
+  respawnFromBrokenChain: async (forPubkey) => {
+    // Confirmed for one identity: never carried out for another.
+    if (forPubkey !== undefined && forPubkey !== get().identity.pubkey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
     const broken = firstBreak(get().actions())
     if (broken) {
       // With no valid event at all (an invalid spawn, Q7), the spawn row
       // names the entry, and it stands where the identity is frozen: the
       // spawn coordinate.
       const at = broken.lastValid ?? broken.action
-      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane })
+      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
     }
     await get().respawn()
   },
@@ -2779,7 +2784,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setSpectateChain: (pubkey, events, status) => {
     const prev = get().spectate
     if (!prev || prev.pubkey !== pubkey) return
-    const actions = buildChain(events)
+    const actions = buildChain(events, pubkey)
     const head = actions[actions.length - 1]
     // A chain that grew under an explorer parked in its history leaves the
     // explorer where it was; one that was replaced (a respawn) snaps to head.
@@ -3062,7 +3067,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // newer chain from another machine supersedes ours; our own echoed events
     // fold in as a no-op. It returns parsed actions in order; map back to the
     // raw events the store actually holds.
-    const order = buildChain(merged)
+    const order = buildChain(merged, me)
     if (order.length === 0) return
     const head = order[order.length - 1]
     if (head.id === cur.prevEventId && order.length === cur.events.length) return
@@ -3130,7 +3135,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { targets } = get()
     const t = targets[pubkey]
     if (!t) return
-    const head = buildChain(events)[buildChain(events).length - 1]
+    const targetChain = buildChain(events, pubkey)
+    const head = targetChain[targetChain.length - 1]
     const spawn = spawnOf(pubkey)
     set({
       targets: {

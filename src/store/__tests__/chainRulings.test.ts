@@ -34,6 +34,8 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { positionHex, sectorTags, spawnTemplate, type NostrEvent } from '../../lib/events'
 import { RECENT_VIEWS_KEY, type RecentView } from '../../lib/viewAt'
 import { BROKEN_CHAIN_MESSAGE, useCyberspace, whyNoMove } from '../useCyberspace'
+import { confirmRespawn } from '../../hud/BrokenChain'
+import { derezzNow } from '../../hud/DerezzPanel'
 import { checkChain, usePresence } from '../usePresence'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { actionEvent, hopEvent } from '../../lib/__tests__/chainFixtures'
@@ -131,7 +133,7 @@ describe('Q3: your broken chain stands at its last valid position, and nothing m
       useCyberspace.setState({ respawn: realRespawn })
     }
     expect(seenAtRespawn).not.toBeNull()
-    expect(seenAtRespawn![0]).toEqual({ input: lastValid.coordHex, label: `End of Chain ${lastValid.id.slice(0, 8)}`, plane: S().plane })
+    expect(seenAtRespawn![0]).toEqual({ input: lastValid.coordHex, label: `End of Chain ${lastValid.id.slice(0, 8)}`, plane: S().plane, pinned: true })
   })
 
   it('then respawns for real: a new chain at the spawn point, and the entry stays', async () => {
@@ -145,6 +147,38 @@ describe('Q3: your broken chain stands at its last valid position, and nothing m
     expect(recent()[0].label).toBe(`End of Chain ${lastValid.id.slice(0, 8)}`)
     // The test chain is put back for whatever runs next.
     fresh = undefined as unknown as typeof fresh
+  })
+})
+
+describe('review of #227: a failed respawn says so, and DEREZZ on a broken chain leaves End of Chain too', () => {
+  it('a respawn that fails is reported, not closed silently, and End of Chain stays in Recent', async () => {
+    const { stray, lastValid } = breakIt()
+    S().adoptChain([stray])
+    const realRespawn = S().respawn
+    useCyberspace.setState({ respawn: async () => { throw new Error('the signer declined') } })
+    let failure: string | null = null
+    try {
+      failure = await confirmRespawn(S().identity.pubkey, lastValid.id)
+    } finally {
+      useCyberspace.setState({ respawn: realRespawn })
+    }
+    expect(failure).toBe(`Respawn failed: the signer declined. Nothing was signed, and your chain is as it was. End of Chain ${lastValid.id.slice(0, 8)} stays in RECENT in the Position panel. You can try again.`)
+    expect(recent()[0]).toMatchObject({ label: `End of Chain ${lastValid.id.slice(0, 8)}`, pinned: true })
+    expect(whyNoMove(S().actions())).toBe(BROKEN_CHAIN_MESSAGE)
+  })
+
+  it('DEREZZ NOW on a broken chain goes through the broken-chain respawn, so End of Chain is added first', async () => {
+    const { stray, lastValid } = breakIt()
+    S().adoptChain([stray])
+    const realRespawn = S().respawn
+    let seen: RecentView[] | null = null
+    useCyberspace.setState({ respawn: async () => { seen = recent() } })
+    try {
+      expect(await derezzNow()).toBeNull()
+    } finally {
+      useCyberspace.setState({ respawn: realRespawn })
+    }
+    expect(seen![0]).toMatchObject({ input: lastValid.coordHex, label: `End of Chain ${lastValid.id.slice(0, 8)}` })
   })
 })
 

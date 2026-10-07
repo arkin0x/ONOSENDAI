@@ -13,7 +13,7 @@
  * Everything here is consensus-critical and pure; the worker pool wraps it.
  */
 import { alignedBase, bytesToHex, computeSubtreeCantor, hexToBytes, intToBytesBE, sha256 } from 'cyberspace-core'
-import { lookBack, openBracket, type ActionEvent } from '../events'
+import { firstBreak, lookBack, openBracket, type ActionEvent } from '../events'
 import { GRANDFATHERED_V1_HYPERJUMPS } from './grandfathered'
 
 export const K_LINE = 6
@@ -148,7 +148,10 @@ export interface LineState {
 
 export function lineStateOf(actions: ActionEvent[]): LineState | null {
   const head = actions[actions.length - 1]
-  if (!head || openBracket(actions)) return null
+  // A broken chain is frozen at its last valid position (arkinox,
+  // 2026-10-07): not boarded and not at any stop, whatever its last event
+  // claims, a broken ride included.
+  if (!head || openBracket(actions) || firstBreak(actions)) return null
   const standing = lookBack(actions, actions.length)
   if (!standing) return null
   if (standing.type === 'enter-hyperspace') return { previousId: head.id, coordHex: head.coordHex, fromHeight: null }

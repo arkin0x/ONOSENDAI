@@ -30,7 +30,8 @@ import { describe, it, expect } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import {
-  CHAIN_RULES_REVISION,
+  BRACKET_RULES,
+  RULINGS_2026_10_07,
   buildChain,
   chainHead,
   firstBreak,
@@ -76,7 +77,7 @@ describe('Q1: no zero-length rides, ever', () => {
     const chain = buildChain([spawn, hop1, board, ride])
     expect(chain[3].type).toBe('hyperjump')
     expect(chain[3].breaks).toMatch(/zero-length ride/)
-    expect(chain[3].breakSince).toBe(CHAIN_RULES_REVISION)
+    expect(chain[3].breakSince).toEqual(RULINGS_2026_10_07)
     expect(firstBreak(chain)?.index).toBe(3)
   })
 
@@ -125,7 +126,7 @@ describe('Q2: a virtual bracket is opaque to the base protocol', () => {
     const exit = exitVirtualEvent({ pubkey: pk, createdAt: 1_022, genesisId: spawn.id, previousId: enter.id, entryId: enter.id, restore: at(9n), plane })
     const chain = buildChain([spawn, hop1, enter, exit])
     expect(chain[3].role).toBe('broken')
-    expect(chain[3].breakSince).toBe(CHAIN_RULES_REVISION)
+    expect(chain[3].breakSince).toEqual(BRACKET_RULES)
   })
 
   it('an enter-virtual whose C is not its c is BROKEN, flagged as a spec-change rule, and moves nobody', () => {
@@ -133,7 +134,7 @@ describe('Q2: a virtual bracket is opaque to the base protocol', () => {
     const chain = buildChain([spawn, hop1, moving])
     expect(chain[2].role).toBe('enter')
     expect(chain[2].breaks).toMatch(/does not move you/)
-    expect(chain[2].breakSince).toBe(CHAIN_RULES_REVISION)
+    expect(chain[2].breakSince).toEqual(RULINGS_2026_10_07)
     expect(chainHead(chain)?.position).toEqual(at(1n))
   })
 
@@ -141,7 +142,7 @@ describe('Q2: a virtual bracket is opaque to the base protocol', () => {
     const elsewhere = enterVirtualEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: hexAt(at(40n)), inGame: inArena(0n), height: 8, game: GAME, plane })
     const chain = buildChain([spawn, hop1, elsewhere])
     expect(chain[2].breaks).toMatch(/starts from/)
-    expect(chain[2].breakSince).toBe(CHAIN_RULES_REVISION)
+    expect(chain[2].breakSince).toEqual(BRACKET_RULES)
     // Frozen at P1, not at the place it entered from.
     expect(chainHead(chain)?.position).toEqual(at(1n))
   })
@@ -174,7 +175,7 @@ describe('Q3: an invalid chain stands at its last valid position, frozen until r
     it('a rule a spec change introduced: the zero-length ride and the enter-virtual refinement', () => {
       const [board, ride] = boardAndRide(9, 9)
       const zero = buildChain([spawn, hop1, board, ride])[3]
-      expect(breakCause(zero)).toEqual({ kind: 'spec-change', revision: CHAIN_RULES_REVISION })
+      expect(breakCause(zero)).toEqual({ kind: 'spec-change', rule: RULINGS_2026_10_07 })
       expect(apologyFor(zero)).toMatch(/sorry/i)
       expect(apologyFor(zero)).toMatch(/valid under the chain rules when it was signed/)
       const moving = enterVirtualEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: P1, C: inArena(0n), inGame: inArena(0n), height: 8, game: GAME, plane })
@@ -204,7 +205,7 @@ describe('Q3: an invalid chain stands at its last valid position, frozen until r
     })
 
     it('a known bug comes before a spec change when both are marked', () => {
-      expect(breakCause({ breakBug: 'plane-bit', breakSince: CHAIN_RULES_REVISION })?.kind).toBe('onosendai-bug')
+      expect(breakCause({ breakBug: 'plane-bit', breakSince: RULINGS_2026_10_07, createdAt: 1_000 })?.kind).toBe('onosendai-bug')
     })
   })
 })
@@ -239,7 +240,7 @@ describe('Q7: an invalid newest spawn wins, dead, with no fallback to an older s
     const after = hopEvent({ pubkey: pk, createdAt: 2_010, genesisId: bareSpawn.id, previousId: bareSpawn.id, c: pk, to: at(3n), plane })
     const chain = buildChain([spawn, hop1, bareSpawn, after])
     expect(chain.map((a) => a.id)).toEqual([bareSpawn.id, after.id])
-    expect(chain[0].breaks).toMatch(/missing a tag/)
+    expect(chain[0].breaks).toMatch(/missing its C tag/)
     expect(chainHead(chain)?.position).toEqual(at(0n))
     expect(firstBreak(chain)?.index).toBe(0)
   })

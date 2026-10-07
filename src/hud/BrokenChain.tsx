@@ -24,10 +24,10 @@
  * chip, by RESPAWN in the panel, and by WHY wherever a move was refused.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { actionLabel, firstBreak, type ActionEvent } from '../lib/events'
-import { apologyFor, breakCause, endOfChainLabel } from '../lib/chainBreak'
+import { apologyFor, apologyHeading, breakCause, endOfChainLabel } from '../lib/chainBreak'
 import { useCyberspace } from '../store/useCyberspace'
 import { useChainUi } from '../store/useChainUi'
 import { ConfirmModal } from './ConfirmModal'
@@ -76,7 +76,7 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
       </p>
       {apology && (
         <p className={`brokenchain__sorry brokenchain__sorry--${cause?.kind ?? 'none'}`}>
-          <b>{cause?.kind === 'onosendai-bug' ? 'ONOSENDAI caused this.' : 'The rules changed after this was signed.'}</b> {apology}
+          <b>{cause ? apologyHeading(cause) : ''}</b> {apology}
         </p>
       )}
       {actions && <div className="brokenchain__actions">{actions}</div>}
@@ -103,12 +103,16 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
         longer places you. Before it respawns, ONOSENDAI adds{' '}
         {endOfChainLabel((lastValid ?? action).id)} to RECENT in the Position panel, at the
         place this chain froze, so you can look at it again and travel back.
+        It is marked KEPT and stays in RECENT until you remove it.
         <br /><br />
         When a break is not your doing, ONOSENDAI says so. If the rule it
-        breaks was added by a later revision of the chain rules, your chain
-        was valid when you made it, and the notice apologizes for the change.
-        If a bug in ONOSENDAI signed the action wrong, the notice says that
-        ONOSENDAI caused it.
+        breaks, or the check it fails, took effect after the action was
+        signed, your chain was valid when you made it, and the notice says on
+        which day and by what the rules changed, and apologizes. If a bug in
+        ONOSENDAI signed the action wrong before the bug was fixed, the notice
+        says that ONOSENDAI caused it. An action signed after the rule took
+        effect, or after the fix shipped, gets the reason without an apology,
+        because the rule was already there to follow.
       </Explanation>
     </div>
   )
@@ -146,17 +150,43 @@ function RespawnWarning({ lastValid }: { lastValid: ActionEvent }): JSX.Element 
         <li><b>The old chain stays on the relays as history.</b> All {events} of its actions remain there, but from now on it no longer places you anywhere, for anyone.</li>
         <li><b>The travel on the old chain is lost.</b> You do not keep the position it reached; getting back there means traveling there again on the new chain.</li>
         <li><b>Your region keys and your items are kept.</b> A region key is knowledge, not chain state, and nothing you hold is stored on the chain.</li>
-        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, at your last valid position, so you can view that place again and find your way back.</li>
+        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, at your last valid position, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
       </ul>
     </>
   )
+}
+
+/** What a failed respawn says: the reason, that nothing changed, and that End of Chain is kept. */
+export function respawnFailed(err: unknown, lastValidId: string): string {
+  const reason = err instanceof Error ? err.message : String(err)
+  return `Respawn failed: ${reason}. Nothing was signed, and your chain is as it was. ${endOfChainLabel(lastValidId)} stays in RECENT in the Position panel. You can try again.`
+}
+
+/**
+ * Carry out a respawn confirmed for `pubkey`'s broken chain. Resolves to
+ * null when it is done, or to what to tell the person when it failed: the
+ * modal then stays open and says so, and the End of Chain entry it added
+ * first stays in RECENT (review of #227). Never rejects.
+ */
+export async function confirmRespawn(pubkey: string, endOfChainId: string): Promise<string | null> {
+  try {
+    await useCyberspace.getState().respawnFromBrokenChain(pubkey)
+    return null
+  } catch (err) {
+    return respawnFailed(err, endOfChainId)
+  }
 }
 
 /** The notice in a modal, then the respawn's confirm step. Mounted once, in App. */
 export function BrokenChainModal(): JSX.Element | null {
   const view = useChainUi((s) => s.brokenView)
   const broken = useBrokenChain()
+  const pubkey = useCyberspace((s) => s.identity.pubkey)
   const [busy, setBusy] = useState(false)
+  // A respawn that did not happen says so and keeps the modal open; the End
+  // of Chain entry it added first stays in RECENT.
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => { setFailed(null) }, [view, pubkey])
   if (!view || !broken) return null
   const close = (): void => useChainUi.getState().setBrokenView(null)
   if (view === 'notice') {
@@ -182,14 +212,24 @@ export function BrokenChainModal(): JSX.Element | null {
       cardClassName="brokenchain__card"
       scroll
       busy={busy}
-      body={<RespawnWarning lastValid={broken.lastValid ?? broken.action} />}
+      body={(
+        <>
+          <RespawnWarning lastValid={broken.lastValid ?? broken.action} />
+          {failed && <p className="notice" role="alert">{failed}</p>}
+        </>
+      )}
       cancelLabel="GO BACK"
-      confirmLabel="RESPAWN NOW"
+      confirmLabel={failed ? 'TRY AGAIN' : 'RESPAWN NOW'}
       onCancel={() => useChainUi.getState().setBrokenView('notice')}
       onBackdrop={close}
       onConfirm={() => {
         setBusy(true)
-        void useCyberspace.getState().respawnFromBrokenChain().finally(() => { setBusy(false); close() })
+        setFailed(null)
+        void confirmRespawn(pubkey, (broken.lastValid ?? broken.action).id).then((failure) => {
+          setBusy(false)
+          if (failure) setFailed(failure)
+          else close()
+        })
       }}
     />
   )

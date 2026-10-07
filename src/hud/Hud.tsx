@@ -8,7 +8,7 @@ import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
 import { onEarthSurface } from '../lib/hyperspace/interest'
-import { canonicalViewAt, forgetView, parseViewAt, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -118,12 +118,8 @@ function IdentityPanel(): JSX.Element {
 }
 
 const RECENT_KEY = RECENT_VIEWS_KEY
-function loadRecent(): RecentView[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1)).slice(0, 3) : []
-  } catch { return [] }
-}
+// Every pinned place (an End of Chain) and three others (viewAt readRecentViews).
+const loadRecent = readRecentViews
 function saveRecent(list: RecentView[]): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
 }
@@ -253,7 +249,7 @@ function PositionPanel(): JSX.Element {
               <ul className="viewat__list">
                 {recent.map((r) => (
                   <li key={`${r.plane}:${r.input}`}>
-                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, { ...target, label: r.label }) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}</button>
+                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, { ...target, label: r.label }) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}{r.pinned && <span className="viewat__kept" title="Kept in RECENT until you remove it with the × beside it, however many places you look at after it">KEPT</span>}</button>
                     {/* The shard list's delete, in the same place and the same
                         shape: the mark on the right of the row it removes. No
                         confirmation, unlike a shard, because a place is one

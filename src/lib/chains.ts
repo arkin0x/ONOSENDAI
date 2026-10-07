@@ -92,10 +92,11 @@ export function chainFilter(pubkey: string, spawnId: string, until?: number): Fi
 }
 
 /** The id of the spawn the active chain starts from (§8.7.3 rule 1), or null with none. */
-export function newestSpawnId(events: NostrEvent[]): string | null {
+export function newestSpawnId(events: NostrEvent[], pubkey?: string): string | null {
   // Valid or not: an invalid newest spawn still names the chain, which is
-  // dead from it, and an older spawn's chain is never asked for (Q7).
-  return newestSpawn(events)?.id ?? null
+  // dead from it, and an older spawn's chain is never asked for (Q7). Only
+  // the identity's own spawns count.
+  return newestSpawn(events, pubkey)?.id ?? null
 }
 
 /** The most extra questions one chain fetch asks to fill holes (chainGap). */
@@ -152,28 +153,38 @@ export function markPartial(answers: RelayAnswer[]): RelayAnswer[] {
  * left.
  */
 async function gatherChain<T>(
-  ask: (f: Filter) => Promise<T>,
+  askAny: (f: Filter) => Promise<T>,
   eventsOf: (t: T) => NostrEvent[],
   combine: (a: T, b: T) => T,
   pubkey: string,
   knownSpawnId: string | undefined,
   have: NostrEvent[],
+  byAuthor: (t: T, pubkey: string) => T,
+  since?: number,
 ): Promise<{ got: T; whole: boolean }> {
+  // Whatever a relay sends back, only the identity's own events are kept:
+  // the filter asks for that author, but a relay that ignores it must not be
+  // able to put another key's events, a newer spawn above all, into this
+  // chain (review of #227).
+  const ask = async (f: Filter): Promise<T> => byAuthor(await askAny(f), pubkey)
   let got: T
   let spawnId: string | null
   if (knownSpawnId) {
-    const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainFilter(pubkey, knownSpawnId))])
+    // With the chain mostly in hand (`have`), only what is newer is asked
+    // for; a hole left below it is filled by the loop further down.
+    const chainAsk = since !== undefined ? { ...chainFilter(pubkey, knownSpawnId), since } : chainFilter(pubkey, knownSpawnId)
+    const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
     got = combine(spawns, chain)
     // The relays' newest spawn, from what the relays hold and nothing else.
     // A chain held on this device has a newer spawn than any on the relays
     // (it was signed before they could answer), and choosing from it here
     // would never ask for the relay chain at all: the held-chain prompt
     // would show that chain as a bare spawn and offer to replace it.
-    spawnId = newestSpawnId(eventsOf(got))
+    spawnId = newestSpawnId(eventsOf(got), pubkey)
     if (spawnId && spawnId !== knownSpawnId) got = combine(got, await ask(chainFilter(pubkey, spawnId)))
   } else {
     got = await ask(spawnsFilter(pubkey))
-    spawnId = newestSpawnId(eventsOf(got))
+    spawnId = newestSpawnId(eventsOf(got), pubkey)
     if (!spawnId) return { got, whole: true }
     got = combine(got, await ask(chainFilter(pubkey, spawnId)))
   }
@@ -197,11 +208,14 @@ async function gatherChain<T>(
  * Everything the relays have for one pubkey's current chain, raw: every
  * spawn it has signed, and every event of the chain the newest one starts.
  * `knownSpawnId` saves a round trip when the caller already holds a chain,
- * and `have` (its events) lets it ask only for what it does not hold.
+ * and `have` (its events) lets it ask only for what it does not hold; with
+ * `since` as well, the chain is asked only for events from that second on,
+ * and anything missing below them is filled from `have` or asked for by the
+ * hole loop. Only events `pubkey` signed are returned.
  * Rejects with ChainGapError when a hole could not be filled.
  */
-export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId, have)
+export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
+  const { got, whole } = await gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
   if (!whole) throw new ChainGapError(got)
   return got
 }
@@ -216,7 +230,8 @@ export const CHAIN_CHECK_MS = 6000
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
 export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
-  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have)
+  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+    (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
   // A hole left in the chain is not an answer to "what is this chain": the
   // self-check reads it as unknown, so a first move holds rather than
   // continuing from a head that is not the head (chainHold.ts).
@@ -225,7 +240,12 @@ export async function askChainEvents(pubkey: string, knownSpawnId?: string, have
 
 /** The same, assembled. */
 export async function fetchChain(pubkey: string): Promise<ActionEvent[]> {
-  return buildChain(await fetchChainEvents(pubkey))
+  return buildChain(await fetchChainEvents(pubkey), pubkey)
+}
+
+/** Only the events `pubkey` signed. */
+export function ownEvents(events: NostrEvent[], pubkey: string): NostrEvent[] {
+  return events.every((e) => e.pubkey === pubkey) ? events : events.filter((e) => e.pubkey === pubkey)
 }
 
 /** The newest placing actions on the relay, any author. */

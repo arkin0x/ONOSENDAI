@@ -156,10 +156,14 @@ function RespawnWarning({ lastValid }: { lastValid: ActionEvent }): JSX.Element 
   )
 }
 
-/** What a failed respawn says: the reason, that nothing changed, and that End of Chain is kept. */
-export function respawnFailed(err: unknown, lastValidId: string): string {
+/**
+ * What a failed respawn says: the reason, that nothing changed, and, on a
+ * broken chain, that the End of Chain entry added first is kept.
+ */
+export function respawnFailed(err: unknown, lastValidId?: string): string {
   const reason = err instanceof Error ? err.message : String(err)
-  return `Respawn failed: ${reason}. Nothing was signed, and your chain is as it was. ${endOfChainLabel(lastValidId)} stays in RECENT in the Position panel. You can try again.`
+  const kept = lastValidId ? ` ${endOfChainLabel(lastValidId)} stays in RECENT in the Position panel.` : ''
+  return `Respawn failed: ${reason}. Nothing was signed, and your chain is as it was.${kept} You can try again.`
 }
 
 /**

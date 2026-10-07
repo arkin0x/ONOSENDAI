@@ -21,31 +21,79 @@
  *   has since moved past (or respawned past) is never applied (usePresence
  *   checks `actionId`), and a read whose chain does not hold the action at
  *   all says nothing.
+ *
+ * And from its final review:
+ *
+ * - Both caches hold the NEIGHBORS_KEPT people seen most recently; the
+ *   least recently seen is let go first, and presence drops a person's
+ *   chain when it forgets them.
+ * - A later read asks from SINCE_MARGIN_S before the newest event held, so
+ *   an event of an older second that arrives late (a fork, a relay that was
+ *   behind) is still asked for, the overlap deduplicated by id; an event
+ *   dated in the future (beyond FUTURE_SKEW_S) never sets that point, so
+ *   one bad clock cannot stop every later read from seeing anything.
+ * - One placement rule: a person stands where their chain puts the action
+ *   they show, which is its own place on a valid stretch and the frozen
+ *   place from the first break on (`stand`), and is off the neighborhood
+ *   when that place is.
  */
 
 import { fetchChainEvents, mergeEvents } from './chains'
-import { actionLink, buildChain, chainHead, firstBreak, newestSpawn, type ActionEvent, type NostrEvent, type Placed } from './events'
+import { actionLink, buildChain, firstBreak, newestSpawn, type ActionEvent, type NostrEvent, type Placed } from './events'
 
 export interface ChainVerdict {
   /** The newest action the chain was read at. */
   actionId: string
   /** The spawn the chain starts from. */
   spawnId: string
-  /** Where the identity stands: the chain's last valid position when it is broken, its head's position otherwise. */
+  /** Where the chain puts that action: its own place on a valid stretch, the chain's last valid position from the first break on. */
   stand: Placed
-  /** The chain is broken, and `stand` is where it froze. */
+  /** The action is at or after the chain's first break, and `stand` is where it froze. */
   frozen: boolean
 }
 
-/** Each person's chain events, as far as they have been read. */
+/** How many people's chains and verdicts are kept: the most recently seen. */
+export const NEIGHBORS_KEPT = 200
+/** How far before the newest event held a later read asks from, so a late older-second event is still found. */
+export const SINCE_MARGIN_S = 10 * 60
+/** How far ahead of this clock an event may be dated and still set where a later read asks from. */
+export const FUTURE_SKEW_S = 5 * 60
+
+/** Each person's chain events, as far as they have been read, least recently seen first. */
 const held = new Map<string, NostrEvent[]>()
-/** Each person's last verdict. */
+/** Each person's last verdict, least recently seen first. */
 const verdicts = new Map<string, ChainVerdict>()
 
-/** The verdict for `pubkey` at exactly this newest action, or null when the chain has not been read there. */
+/** Put `value` at the most recent end of `map` and let the least recently seen go past the cap. */
+function keep<V>(map: Map<string, V>, pubkey: string, value: V): void {
+  map.delete(pubkey)
+  map.set(pubkey, value)
+  while (map.size > NEIGHBORS_KEPT) map.delete(map.keys().next().value as string)
+}
+
+/** The verdict for `pubkey` at exactly this newest action, or null when the chain has not been read there. Seeing it counts as seeing them. */
 export function cachedVerdict(pubkey: string, actionId: string): ChainVerdict | null {
   const v = verdicts.get(pubkey)
-  return v && v.actionId === actionId ? v : null
+  if (!v || v.actionId !== actionId) return null
+  keep(verdicts, pubkey, v)
+  const events = held.get(pubkey)
+  if (events) keep(held, pubkey, events)
+  return v
+}
+
+/**
+ * The second a later read of `events` asks from: SINCE_MARGIN_S before the
+ * newest one dated no later than now plus FUTURE_SKEW_S, or undefined when
+ * there is none. A loop rather than Math.max over a spread, which overflows
+ * the stack on a long chain.
+ */
+export function sinceFor(events: NostrEvent[], now: number = Math.floor(Date.now() / 1000)): number | undefined {
+  let newest: number | undefined
+  for (const e of events) {
+    if (e.created_at > now + FUTURE_SKEW_S) continue
+    if (newest === undefined || e.created_at > newest) newest = e.created_at
+  }
+  return newest === undefined ? undefined : Math.max(0, newest - SINCE_MARGIN_S)
 }
 
 /** The events of `spawnId`'s chain in `events`: the spawn and everything naming it as genesis. */
@@ -62,25 +110,26 @@ function chainOf(events: NostrEvent[], spawnId: string): NostrEvent[] {
 export async function readChain(pubkey: string, actionId: string): Promise<ChainVerdict | null> {
   const have = held.get(pubkey) ?? []
   const spawnId = newestSpawn(have, pubkey)?.id
-  const mine = spawnId ? chainOf(have, spawnId) : []
-  const since = mine.length > 0 ? Math.max(...mine.map((e) => e.created_at)) : undefined
+  const since = spawnId ? sinceFor(chainOf(have, spawnId)) : undefined
   const got = await fetchChainEvents(pubkey, spawnId, have, since)
   let events = mergeEvents(have, got)
   const now = newestSpawn(events, pubkey)
   // A new newest spawn: the old chain is history, and what is kept is the
   // new one's, read whole by the fetch above.
   if (now && now.id !== spawnId) events = [...chainOf(events, now.id), ...events.filter((e) => e.id !== now.id && actionLink(e) === null)]
-  held.set(pubkey, events)
+  keep(held, pubkey, events)
   const chain = buildChain(events, pubkey)
-  if (!chain.some((a) => a.id === actionId)) return null
-  const head = chainHead(chain)!
+  const at = chain.findIndex((a) => a.id === actionId)
+  if (at < 0) return null
+  const shown = chain[at]
+  const broken = firstBreak(chain)
   const v: ChainVerdict = {
     actionId,
     spawnId: chain[0].id,
-    stand: { coordHex: head.coordHex, position: head.position, plane: head.plane, sector: head.sector },
-    frozen: firstBreak(chain) !== null,
+    stand: { coordHex: shown.coordHex, position: shown.position, plane: shown.plane, sector: shown.sector },
+    frozen: broken !== null && at >= broken.index,
   }
-  verdicts.set(pubkey, v)
+  keep(verdicts, pubkey, v)
   return v
 }
 
@@ -91,7 +140,17 @@ export async function readChain(pubkey: string, actionId: string): Promise<Chain
  */
 export function standingOf(a: ActionEvent): ActionEvent {
   const v = cachedVerdict(a.pubkey, a.id)
-  return v?.frozen ? { ...a, ...v.stand } : a
+  return v ? { ...a, ...v.stand } : a
+}
+
+/** Let one person's chain events go (presence forgot them); their verdict stays, so meeting them again is instant. */
+export function forgetNeighborEvents(pubkey: string): void {
+  held.delete(pubkey)
+}
+
+/** For tests: how many people's chains and verdicts are kept. */
+export function neighborCacheSizes(): { held: number; verdicts: number } {
+  return { held: held.size, verdicts: verdicts.size }
 }
 
 /** Forget every chain and verdict (tests, and presence stopping). */

@@ -15,20 +15,25 @@
 import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { firstBreak } from '../lib/events'
-import { confirmRespawn } from './BrokenChain'
+import { confirmRespawn, respawnFailed } from './BrokenChain'
 import { Explanation } from './Explanation'
 
 /**
  * DEREZZ NOW: a respawn. On a broken chain it is the broken-chain notice's
  * respawn (BrokenChain confirmRespawn), so the End of Chain entry goes into
- * RECENT first (review of #227). Resolves to what to say if it failed.
+ * RECENT first (review of #227). Either way it waits for the respawn and
+ * resolves to what to say if it failed, null when it did not.
  */
 export async function derezzNow(): Promise<string | null> {
   const s = useCyberspace.getState()
   const broken = firstBreak(s.actions())
   if (broken) return confirmRespawn(s.identity.pubkey, (broken.lastValid ?? broken.action).id)
-  s.respawn()
-  return null
+  try {
+    await s.respawn()
+    return null
+  } catch (err) {
+    return respawnFailed(err)
+  }
 }
 
 export function DerezzPanel(): JSX.Element {

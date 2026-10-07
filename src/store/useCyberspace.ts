@@ -715,7 +715,8 @@ export interface CyberspaceState {
    * because the old chain's events still exist on relays but no longer lead
    * anywhere.
    */
-  respawn: () => void
+  /** Rejects when the signature is refused, or when the identity changed while it was asked for. */
+  respawn: () => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
    * valid position goes into the Position panel's RECENT as "End of Chain"
@@ -2592,12 +2593,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (get().plan) set({ plan: null })
     const { events, held, selfCheck, identity } = get()
+    const signer = currentSigner
     // A respawn is deliberate, but it is not a decision about a chain on the
     // relays nobody has seen yet. A held chain stays held through it; so does
     // a respawn from the provisional state while the check has not said
     // "none", for the same reason the first move holds (lib/chainHold.ts).
     const keepHeld = held || (events.length === 0 && !(selfCheck.pubkey === identity.pubkey && selfCheck.status === 'none'))
-    const fresh = derive({ ...(await freshSpawnAsync(currentSigner, events[events.length - 1])), held: keepHeld })
+    const signed = await freshSpawnAsync(signer, events[events.length - 1])
+    // A remote signer can wait minutes for an approval on a phone. If the
+    // identity changed meanwhile, this spawn is the old identity's: nothing
+    // of it may land in the store, which now holds someone else (final
+    // review of #227).
+    if (get().identity.pubkey !== identity.pubkey || currentSigner !== signer) {
+      throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
+    }
+    const fresh = derive({ ...signed, held: keepHeld })
     set({
       ...fresh,
       cursor: fresh.position,

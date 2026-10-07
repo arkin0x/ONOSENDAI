@@ -39,7 +39,7 @@ import type { Filter } from 'nostr-tools/filter'
 import { ACTION_KIND, parseAction, type NostrEvent, type ActionType, type ActionEvent } from '../lib/events'
 import type { Plane } from 'cyberspace-core'
 import { PLACING_ACTIONS } from '../lib/chains'
-import { cachedVerdict, forgetNeighborChains, readChain, type ChainVerdict } from '../lib/neighborChains'
+import { cachedVerdict, forgetNeighborChains, forgetNeighborEvents, readChain, type ChainVerdict } from '../lib/neighborChains'
 import { query, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
@@ -130,7 +130,12 @@ export const usePresence = create<PresenceState>((set, get) => ({
     const have = get().people[action.pubkey]
     if (have && have.lastActive >= action.createdAt) return
     const at = standing(action, have)
-    if (at.frozen && !inNeighborhood(at.position, useCyberspace.getState().position)) {
+    // One rule for where anyone stands (lib/neighborChains.ts): where their
+    // chain puts the action they show, and not here when that is not in the
+    // neighborhood. An action placed by itself came through the
+    // neighborhood's own filter; a place from a chain read or a freeze is
+    // checked here, as applyVerdict and the sweep check theirs.
+    if ((at.known || at.frozen) && !inNeighborhood(at.position, useCyberspace.getState().position)) {
       if (have) get().forget(action.pubkey)
       return
     }
@@ -154,6 +159,7 @@ export const usePresence = create<PresenceState>((set, get) => ({
     const people = { ...get().people }
     delete people[pubkey]
     set({ people })
+    forgetNeighborEvents(pubkey)
   },
 
   others: () => {
@@ -174,7 +180,7 @@ let sweepHandle: ReturnType<typeof setInterval> | null = null
  */
 function standing(action: ActionEvent, have: Person | undefined): { position: Position; plane: Plane; frozen: boolean; known: boolean } {
   const v = cachedVerdict(action.pubkey, action.id)
-  if (v) return v.frozen ? { position: v.stand.position, plane: v.stand.plane, frozen: true, known: true } : { position: action.position, plane: action.plane, frozen: false, known: true }
+  if (v) return { position: v.stand.position, plane: v.stand.plane, frozen: v.frozen, known: true }
   if (have?.frozen && action.type !== 'spawn') return { position: have.position, plane: have.plane, frozen: true, known: false }
   return { position: action.position, plane: action.plane, frozen: false, known: false }
 }
@@ -214,14 +220,15 @@ export async function drainChainChecks(): Promise<void> {
 
 /**
  * Place someone by what their chain said, if it is still about the action
- * they show: where it froze when it is broken (and off the neighborhood if
- * that is not here), and unfrozen at its head when it is valid. A read for an
- * action they have since moved past, or respawned past, is dropped.
+ * they show: where their chain puts that action (frozen or not), and off the
+ * neighborhood when that is not here, the same rule ingest and the sweep
+ * use. A read for an action they have since moved past, or respawned past,
+ * is dropped.
  */
 function applyVerdict(pubkey: string, v: ChainVerdict): void {
   const person = usePresence.getState().people[pubkey]
   if (!person || person.actionId !== v.actionId) return
-  if (v.frozen && !inNeighborhood(v.stand.position, useCyberspace.getState().position)) { usePresence.getState().forget(pubkey); return }
+  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { usePresence.getState().forget(pubkey); return }
   usePresence.setState((s) => ({ people: { ...s.people, [pubkey]: { ...s.people[pubkey], position: v.stand.position, plane: v.stand.plane, frozen: v.frozen } } }))
 }
 

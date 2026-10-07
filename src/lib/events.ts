@@ -24,6 +24,7 @@ import {
   type Plane,
 } from 'cyberspace-core'
 import type { Position } from './space'
+import { CLIENT_NAME } from './client'
 
 /** §8.1: every movement action, spawn included, is this one kind. */
 export const ACTION_KIND = 3333
@@ -80,6 +81,13 @@ export const SECTOR_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'valid
  * signed after that is not this bug.
  */
 export const PLANE_BIT_FIX_AT = Date.parse('2026-10-07T02:18:58Z') / 1000
+
+/**
+ * Until when a plane-bit boarding is apologized for as ONOSENDAI's: a day
+ * past the fix, because a tab opened before the deploy keeps running the old
+ * bundle until it is reloaded (final review of #227).
+ */
+export const PLANE_BIT_APOLOGY_UNTIL = PLANE_BIT_FIX_AT + 24 * 60 * 60
 
 /**
  * The actions this client recognizes (spec §8.8, §8.9): the base protocol's
@@ -237,12 +245,15 @@ export interface ActionEvent {
    */
   breakSince?: RuleChange
   /**
-   * Set with `breaks` when the break is a known ONOSENDAI bug rather than
-   * anything the identity did: `plane-bit` is a boarding whose `c` differs
-   * from where the chain stood only in the plane bit, which ONOSENDAI signed
-   * until PR #225 fixed it.
+   * Set with `breaks` when the break may be ONOSENDAI's doing rather than
+   * anything the identity did. `plane-bit`: a boarding whose `c` differs from
+   * where the chain stood only in the plane bit, which ONOSENDAI signed until
+   * PR #225 fixed it. `zero-length-offered`: a zero-length ride carrying
+   * ONOSENDAI's client tag, which ONOSENDAI offered until the 2026-10-07
+   * ruling reached it. lib/chainBreak.ts decides which of them is owed an
+   * apology, by when each was signed.
    */
-  breakBug?: 'plane-bit'
+  breakBug?: 'plane-bit' | 'zero-length-offered'
   /** Hyperjump only (DECK-0001 v3 §5.2): the boarding and destination heights. */
   fromHeight?: number
   toHeight?: number
@@ -955,7 +966,8 @@ function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, ope
       return { ...parsed, breaks: startsElsewhere(parsed.type === 'enter-hyperspace' ? 'boarding' : parsed.type, parsed.prevCoordHex, before.coordHex), ...(bug ? { breakBug: 'plane-bit' as const } : {}) }
     }
     if (parsed.type === 'hyperjump' && parsed.fromHeight === parsed.toHeight) {
-      return { ...parsed, breaks: `a zero-length ride: it rides from block ${parsed.fromHeight} to block ${parsed.toHeight}, the same block, so it goes nowhere. A ride must always go to a different block than the one it starts from (DECK-0001 §5.6, per the 2026-10-07 ruling, spec errata pending)`, ...RULED_2026_10_07 }
+      const offered = tag(ev, 'client') === CLIENT_NAME ? { breakBug: 'zero-length-offered' as const } : {}
+      return { ...parsed, breaks: `a zero-length ride: it rides from block ${parsed.fromHeight} to block ${parsed.toHeight}, the same block, so it goes nowhere. A ride must always go to a different block than the one it starts from (DECK-0001 §5.6, per the 2026-10-07 ruling, spec errata pending)`, ...RULED_2026_10_07, ...offered }
     }
     return withSectorCheck(ev, parsed, parsed.type === 'enter-hyperspace' ? 'boarding' : parsed.type)
   }

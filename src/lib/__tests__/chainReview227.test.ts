@@ -25,6 +25,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import {
   BRACKET_RULES,
+  PLANE_BIT_APOLOGY_UNTIL,
   PLANE_BIT_FIX_AT,
   RULINGS_2026_10_07,
   buildChain,
@@ -36,6 +37,7 @@ import {
   type NostrEvent,
 } from '../events'
 import { apologyFor, breakCause } from '../chainBreak'
+import { SINCE_MARGIN_S, sinceFor } from '../neighborChains'
 import { fetchChainEvents } from '../chains'
 import { lineStateOf } from '../hyperspace/ride'
 import { rememberView, type RecentView } from '../viewAt'
@@ -52,12 +54,12 @@ const hexAt = (p: Position): string => positionHex(p, plane)
 const P1 = hexAt(at(1n))
 const hop1 = hopEvent({ pubkey: pk, createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(1n), plane })
 
-/** A boarding at P1 and a zero-length ride after it, signed at `when`. */
-function zeroRide(when: number): NostrEvent[] {
+/** A boarding at P1 and a zero-length ride after it, signed at `when`, the ride with `extra` tags. */
+function zeroRide(when: number, extra: string[][] = []): NostrEvent[] {
   const board = actionEvent({ pubkey: pk, createdAt: when - 10, genesisId: spawn.id, previousId: hop1.id, name: 'enter-hyperspace', c: P1, C: at(1n), plane, tags: [['proof', '0'.repeat(64)]] })
   const ride = actionEvent({
     pubkey: pk, createdAt: when, genesisId: spawn.id, previousId: board.id, name: 'hyperjump', c: P1, C: at(1n), plane,
-    tags: [['from_height', '9'], ['B', '9'], ['as_of', '9'], ['proof', '0'.repeat(64)], ['mp', ''], ['mn', '0'.repeat(16)]],
+    tags: [['from_height', '9'], ['B', '9'], ['as_of', '9'], ['proof', '0'.repeat(64)], ['mp', ''], ['mn', '0'.repeat(16)], ...extra],
   })
   return [board, ride]
 }
@@ -88,14 +90,16 @@ describe('item 4: the apology is true, and says which ruling and when', () => {
     expect(apologyFor(buildChain([spawn, hop1, late])[2])).toBeNull()
   })
 
-  it('the plane-bit apology only for boardings signed before PR #225 shipped', () => {
+  it('the plane-bit apology only for boardings signed before PR #225 shipped, plus a day', () => {
     const p1 = { x: 11n, y: 22n, z: 33n }
     const hopIdea = hopEvent({ pubkey: pk, createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, c: pk, to: p1, plane: 1 })
     const board = (when: number): NostrEvent => actionEvent({ pubkey: pk, createdAt: when, genesisId: spawn.id, previousId: hopIdea.id, name: 'enter-hyperspace', c: positionHex(p1, 0), C: p1, plane: 0, tags: [['proof', '0'.repeat(64)]] })
     const before = buildChain([spawn, hopIdea, board(PLANE_BIT_FIX_AT - 60)])[2]
     expect(before.breakBug).toBe('plane-bit')
     expect(apologyFor(before)).toMatch(/ONOSENDAI caused this/)
-    const after = buildChain([spawn, hopIdea, board(PLANE_BIT_FIX_AT + 60)])[2]
+    // A day's margin past the fix, for tabs still running the old bundle.
+    expect(apologyFor(buildChain([spawn, hopIdea, board(PLANE_BIT_FIX_AT + 3_600)])[2])).toMatch(/ONOSENDAI caused this/)
+    const after = buildChain([spawn, hopIdea, board(PLANE_BIT_APOLOGY_UNTIL + 60)])[2]
     expect(after.breakBug).toBe('plane-bit')
     expect(apologyFor(after)).toBeNull()
   })
@@ -169,5 +173,34 @@ describe('nits from the review', () => {
     expect(list.find((r) => r.input === P1)?.pinned).toBe(true)
     list = rememberView(list, { input: P1, label: 'End of Chain abcd1234', plane: 0 })
     expect(list[0]).toMatchObject({ input: P1, pinned: true })
+  })
+})
+
+describe('final review: zero-length rides ONOSENDAI offered, and where a later read starts', () => {
+  const ONOSENDAI = [['client', 'ONOSENDAI']]
+  const after = RULINGS_2026_10_07.effectiveAt + 3_600
+
+  it("a zero-length ride with ONOSENDAI's client tag, signed after the ruling: ONOSENDAI offered it, and says so", () => {
+    const a = buildChain([spawn, hop1, ...zeroRide(after, ONOSENDAI)])[3]
+    expect(a.breakBug).toBe('zero-length-offered')
+    expect(breakCause(a)).toEqual({ kind: 'onosendai-bug', bug: 'zero-length-offered' })
+    expect(apologyFor(a)).toMatch(/ONOSENDAI caused this, not you\. Zero-length rides stopped being valid with arkinox's ruling of 2026-10-07, but the ONOSENDAI you rode with had not been updated yet/)
+  })
+
+  it('signed before the ruling it is the rules that changed, client tag or not; after it, without the tag, no apology', () => {
+    expect(breakCause(buildChain([spawn, hop1, ...zeroRide(1_500, ONOSENDAI)])[3])?.kind).toBe('spec-change')
+    expect(apologyFor(buildChain([spawn, hop1, ...zeroRide(after, [['client', 'another-client']])])[3])).toBeNull()
+  })
+
+  it('a later read starts ten minutes before the newest event held, and never at a future-dated one', () => {
+    const now = 2_000_000_000
+    const ev = (t: number): NostrEvent => ({ ...hop1, id: String(t), created_at: t })
+    expect(sinceFor([ev(now - 100), ev(now - 5_000)], now)).toBe(now - 100 - SINCE_MARGIN_S)
+    // An event dated a day ahead does not move it.
+    expect(sinceFor([ev(now - 100), ev(now + 86_400)], now)).toBe(now - 100 - SINCE_MARGIN_S)
+    expect(sinceFor([ev(now + 86_400)], now)).toBeUndefined()
+    // A chain far longer than a spread into Math.max can take.
+    const long = Array.from({ length: 300_000 }, (_, i) => ({ created_at: i } as NostrEvent))
+    expect(sinceFor(long, 1_000_000)).toBe(299_999 - SINCE_MARGIN_S)
   })
 })

@@ -10,27 +10,31 @@
  * |---|---|---|
  * | spec change | the rule broken took effect after the event was signed (events.ts `breakSince`, a RuleChange with its effective time) | the action was valid when signed; the rule took effect on that day, by spec PR #44 or by arkinox's ruling |
  * | added validation | the same, for a check the rules gained on what was already there (sector tags, Q9) | the rules gained additional validation after it was signed |
- * | ONOSENDAI bug | a known bug signed the event, and it was signed before the fix shipped (events.ts `breakBug`; the plane-bit boarding, fixed in PR #225 at PLANE_BIT_FIX_AT) | ONOSENDAI caused it |
+ * | ONOSENDAI bug, plane bit | a plane-bit boarding signed before PR #225 shipped, plus a day for tabs still running the old bundle (PLANE_BIT_APOLOGY_UNTIL) | ONOSENDAI caused it |
+ * | ONOSENDAI offered it | a zero-length ride carrying ONOSENDAI's client tag, signed after the 2026-10-07 ruling: ONOSENDAI kept offering them until this change deployed | ONOSENDAI caused it, offering a ride it had not been updated to refuse |
  *
- * An event signed after the rule took effect, or after the fix shipped, gets
- * the reason and no apology: the rule was there to be followed. A bug takes
- * precedence over a spec change: if ONOSENDAI signed it wrong, that is the
- * reason, whatever the rules say. Pure; the words are here so the notice,
- * the modal and the tests read the same ones.
+ * An event signed after the rule took effect, by anyone but ONOSENDAI's own
+ * old build, gets the reason and no apology: the rule was there to be
+ * followed. The plane-bit bug comes first: if ONOSENDAI signed it wrong,
+ * that is the reason, whatever the rules say. A zero-length ride signed
+ * before the ruling is owed the spec-change apology, which is the truer one;
+ * after it, the ONOSENDAI one. Pure; the words are here so the notice, the
+ * modal and the tests read the same ones.
  */
 
-import { PLANE_BIT_FIX_AT, type ActionEvent, type RuleChange } from './events'
+import { PLANE_BIT_APOLOGY_UNTIL, type ActionEvent, type RuleChange } from './events'
 
 export type BreakCause =
   | { kind: 'spec-change'; rule: RuleChange }
-  | { kind: 'onosendai-bug'; bug: 'plane-bit' }
+  | { kind: 'onosendai-bug'; bug: 'plane-bit' | 'zero-length-offered' }
 
 type Broken = Pick<ActionEvent, 'breakSince' | 'breakBug' | 'createdAt'>
 
 /** Why a break is not the person's doing, or null when nothing says it is not. */
 export function breakCause(a: Broken): BreakCause | null {
-  if (a.breakBug === 'plane-bit' && a.createdAt < PLANE_BIT_FIX_AT) return { kind: 'onosendai-bug', bug: a.breakBug }
+  if (a.breakBug === 'plane-bit' && a.createdAt < PLANE_BIT_APOLOGY_UNTIL) return { kind: 'onosendai-bug', bug: 'plane-bit' }
   if (a.breakSince && a.createdAt < a.breakSince.effectiveAt) return { kind: 'spec-change', rule: a.breakSince }
+  if (a.breakBug === 'zero-length-offered') return { kind: 'onosendai-bug', bug: 'zero-length-offered' }
   return null
 }
 
@@ -53,6 +57,9 @@ export function apologyHeading(cause: BreakCause): string {
 export function apologyFor(a: Broken): string | null {
   const cause = breakCause(a)
   if (!cause) return null
+  if (cause.kind === 'onosendai-bug' && cause.bug === 'zero-length-offered') {
+    return 'We are sorry: ONOSENDAI caused this, not you. Zero-length rides stopped being valid with arkinox\'s ruling of 2026-10-07, but the ONOSENDAI you rode with had not been updated yet, so it still offered this ride and signed it for you. Every verifier now rejects it, and a signed chain cannot be repaired after the fact, so the only way forward is a respawn. ONOSENDAI no longer offers a ride to the block it starts from.'
+  }
   if (cause.kind === 'onosendai-bug') {
     return 'We are sorry: ONOSENDAI caused this, not you. Until PR #225 fixed it on 2026-10-07, ONOSENDAI built the coordinate of a boarding from the plane lined up for your next move instead of the plane you were standing in, so this boarding names the right x, y and z in the other plane, a place your chain never reached. Every verifier rejects it, and a signed chain cannot be repaired after the fact, so the only way forward is a respawn. The bug is fixed, and it will not happen again.'
   }

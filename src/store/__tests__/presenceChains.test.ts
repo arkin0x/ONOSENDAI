@@ -48,7 +48,7 @@ if (typeof localStorage === 'undefined') {
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { parseAction, positionHex, spawnTemplate, type NostrEvent } from '../../lib/events'
-import { forgetNeighborChains, heldChain, standingOf } from '../../lib/neighborChains'
+import { NEIGHBORS_KEPT, SINCE_MARGIN_S, forgetNeighborChains, heldChain, neighborCacheSizes, readChain, standingOf } from '../../lib/neighborChains'
 import { useCyberspace } from '../useCyberspace'
 import { checkChain, drainChainChecks, pendingChainChecks, stopPresence, sweep, usePresence } from '../usePresence'
 import { hopEvent } from '../../lib/__tests__/chainFixtures'
@@ -69,7 +69,7 @@ function neighbor() {
   // A respawn, and a valid hop on the new chain.
   const spawn2 = finalizeEvent(spawnTemplate(pk, 2_000), sk) as NostrEvent
   const hopB = sign(hopEvent({ pubkey: pk, createdAt: 2_010, genesisId: spawn2.id, previousId: spawn2.id, c: pk, to: at(3n), plane: home.plane }))
-  return { pk, home: { x: home.x, y: home.y, z: home.z }, at, spawn, hop1, stray, later, spawn2, hopB }
+  return { pk, home: { x: home.x, y: home.y, z: home.z }, at, hex, sign, plane: home.plane, spawn, hop1, stray, later, spawn2, hopB }
 }
 
 const person = (pk: string) => usePresence.getState().people[pk]
@@ -150,13 +150,13 @@ describe('item 2: a neighbor known to be broken is frozen at once when met again
 })
 
 describe("item 3: a neighbor's chain is kept and only what is newer is asked for", () => {
-  it('the second read names the spawn, hands over what is held and asks from the newest second held', async () => {
+  it('the second read names the spawn, hands over what is held and asks from a margin before the newest second held', async () => {
     const n = await frozenNeighbor()
     expect(fetches[0]).toEqual({ pubkey: n.pk, knownSpawnId: undefined, have: 0, since: undefined })
     onRelays.set(n.pk, [n.spawn, n.hop1, n.stray, n.later])
     usePresence.getState().ingest(n.later)
     await drainChainChecks()
-    expect(fetches[1]).toEqual({ pubkey: n.pk, knownSpawnId: n.spawn.id, have: 3, since: n.stray.created_at })
+    expect(fetches[1]).toEqual({ pubkey: n.pk, knownSpawnId: n.spawn.id, have: 3, since: n.stray.created_at - SINCE_MARGIN_S })
   })
 
   it('a new newest spawn reads the new chain and lets the old one go', async () => {
@@ -195,3 +195,42 @@ async function frozenNeighborFrom(n: ReturnType<typeof neighbor>): Promise<void>
   usePresence.getState().ingest(n.stray)
   await drainChainChecks()
 }
+
+describe('final review: the caches shrink, and one placement rule', () => {
+  it('keeps the most recently seen people only, and lets a forgotten person\'s chain go', async () => {
+    const first = neighbor()
+    onRelays.set(first.pk, [first.spawn, first.hop1])
+    await readChain(first.pk, first.hop1.id)
+    for (let i = 0; i < NEIGHBORS_KEPT; i++) {
+      const pk = `${i.toString(16).padStart(8, '0')}`.padEnd(64, 'a')
+      onRelays.set(pk, [])
+      await readChain(pk, 'f'.repeat(64))
+    }
+    expect(neighborCacheSizes().held).toBeLessThanOrEqual(NEIGHBORS_KEPT)
+    expect(heldChain(first.pk)).toEqual([])
+    const n = neighbor()
+    useCyberspace.setState({ position: n.home })
+    onRelays.set(n.pk, [n.spawn, n.hop1])
+    usePresence.getState().ingest(n.hop1)
+    await checkChain(n.pk)
+    expect(heldChain(n.pk).length).toBeGreaterThan(0)
+    usePresence.getState().forget(n.pk)
+    expect(heldChain(n.pk)).toEqual([])
+  })
+
+  it("a valid read places someone where their chain puts the action they show, not at a newer head, and off the neighborhood when that is elsewhere", async () => {
+    const n = neighbor()
+    useCyberspace.setState({ position: n.home })
+    // Their newest action seen here is hop1; the relay already holds a valid hop after it, far away.
+    const far = { x: n.home.x ^ (1n << 80n), y: n.home.y, z: n.home.z }
+    const hopFar = n.sign(hopEvent({ pubkey: n.pk, createdAt: 1_015, genesisId: n.spawn.id, previousId: n.hop1.id, c: n.hex(n.at(1n)), to: far, plane: n.plane }))
+    onRelays.set(n.pk, [n.spawn, n.hop1, hopFar])
+    usePresence.getState().ingest(n.hop1)
+    await checkChain(n.pk)
+    expect(person(n.pk)).toMatchObject({ frozen: false, position: n.at(1n) })
+    // Showing hopFar, the same read rule puts them far away: not here.
+    usePresence.getState().ingest(hopFar)
+    await checkChain(n.pk)
+    expect(person(n.pk)).toBeUndefined()
+  })
+})

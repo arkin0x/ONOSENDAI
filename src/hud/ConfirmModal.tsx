@@ -15,7 +15,11 @@ interface Props {
   body: ReactNode
   /** A large figure between the title and the body, such as a price. */
   figure?: ReactNode
-  /** The confirm is in progress: locked, with a spinner. */
+  /**
+   * The confirm is in progress: locked, with a spinner, and neither a tap on
+   * the backdrop nor Escape closes it, so what it is waiting for (a
+   * signature on a phone, say) cannot be left running behind a closed modal.
+   */
   busy?: boolean
   confirmLabel: string
   danger?: boolean
@@ -47,7 +51,7 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
   // stacking context, so a fixed modal rendered inside one panel would be
   // painted under the panels that follow it in the column.
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={onBackdrop ?? onCancel}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={() => { if (!busy) (onBackdrop ?? onCancel)() }}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
         <h2 className="modal__title">{title}</h2>

@@ -6302,6 +6302,16 @@ kbd {
   border-bottom: 1px solid var(--border);
 }
 
+/* The scene layer switches, last in the panel: two chips in one row. */
+.proof__layers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 /* A rule before the benchmark, which is a different subject from the controls. */
 .proof__rule {
   height: 0;

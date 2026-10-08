@@ -209,7 +209,8 @@ export function Rooms({ axes }: Props): JSX.Element {
   useEffect(() => () => { for (const l of levels) l.geometry.dispose() }, [levels])
 
   return (
-    <group>
+    // Named so the browser harness can tell the boxes are mounted.
+    <group name="rooms">
       {levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>

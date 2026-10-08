@@ -73,6 +73,7 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
+import { checkSignatures } from '../lib/sigCheck'
 import {
   firstMove,
   foldHeldConflict,
@@ -994,7 +995,36 @@ function authentic(e: NostrEvent): boolean {
   return true
 }
 
-function loadChain(pubkey: string): PersistedChain | null {
+/** The memo key of an event's signature check. */
+const sigKey = (e: NostrEvent): string => `${e.id}:${e.sig}`
+
+/**
+ * The stretch of `events` that still reassembles once every event
+ * `isAuthentic` refuses is discarded (spec §8.2, §8.7.3, Q4): one whose id or
+ * signature does not verify never existed, a branch through it is cut off,
+ * and the chain continues from the event before it. A forked chain is kept
+ * whole: it is dead at the spawn coordinate, and both branches stay so the
+ * notice can name them (2026-10-08 ruling). Null when nothing reassembles
+ * exactly, from this key: a chain that cannot be continued, and pretending
+ * otherwise would sign hops onto a history the relay will reject.
+ */
+function authenticStretch(pubkey: string, events: NostrEvent[], isAuthentic: (e: NostrEvent) => boolean): NostrEvent[] | null {
+  const kept = events.filter((e) => e && e.pubkey === pubkey && isAuthentic(e))
+  const resolved = buildChain(kept, pubkey)
+  const onChain = new Set(resolved.map((a) => a.id))
+  const forked = resolved[0]?.fork !== undefined
+  const out = forked || kept.length === events.length ? kept : kept.filter((e) => onChain.has(e.id))
+  if (resolved.length === 0 || (!forked && resolved.length !== out.length) || resolved[0].pubkey !== pubkey) return null
+  return out
+}
+
+/**
+ * This identity's saved chain. With `later`, its signatures are not checked
+ * here: the chain is returned as stored, so it can be drawn at once, with
+ * the events whose signatures this session has not checked yet in
+ * `unchecked`, for startSignatureCheck to check off the main thread.
+ */
+function loadChain(pubkey: string, later = false): (PersistedChain & { unchecked: NostrEvent[] }) | null {
   try {
     let raw = localStorage.getItem(chainKeyFor(pubkey))
     if (!raw) {
@@ -1008,24 +1038,14 @@ function loadChain(pubkey: string): PersistedChain | null {
     if (!raw) return null
     const data = JSON.parse(raw) as Partial<PersistedChain>
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
-    // Only authentic events, even from our own storage (spec §8.2, §8.7.3,
-    // Q4): one whose id or signature does not verify never existed. A
-    // branch through it is cut off, and the chain continues from the event
-    // before it, so what is kept is the stretch that still reassembles.
-    const kept = data.events.filter((e) => e && e.pubkey === pubkey && authentic(e))
-    const resolved = buildChain(kept, pubkey)
-    const onChain = new Set(resolved.map((a) => a.id))
-    // A forked chain is kept whole: it is dead at the spawn coordinate, and
-    // both branches stay so the notice can name them (2026-10-08 ruling).
-    const forked = resolved[0]?.fork !== undefined
-    const events = forked || kept.length === data.events.length ? kept : kept.filter((e) => onChain.has(e.id))
-    // Must reassemble to exactly what was kept, from our own key. Anything
-    // else is a chain that cannot be continued, and pretending otherwise would
-    // sign hops onto a history the relay will reject.
-    if (resolved.length === 0 || (!forked && resolved.length !== events.length) || resolved[0].pubkey !== pubkey) return null
+    // Only authentic events, even from our own storage (authenticStretch);
+    // with `later`, as stored, and checked off the main thread.
+    const events = authenticStretch(pubkey, data.events, later ? () => true : authentic)
+    if (!events) return null
     return {
       version: 2,
       events,
+      unchecked: later ? events.filter((e) => !verifiedSigs.has(sigKey(e))) : [],
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
       held: data.held === true,
@@ -1127,7 +1147,7 @@ function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
   // A stored extension/bunker identity whose chain we already hold: reconnect
   // lazily, keeping its pubkey so the chain loads now.
-  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey)) {
+  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey, true)) {
     return deferredReconnect(pref, (s) => { currentSigner = s })
   }
   if (pref?.nsec) { try { return signerFromNsec(pref.nsec) } catch { /* corrupt */ } }
@@ -1250,24 +1270,109 @@ function foldOtherTabs(pubkey: string): void {
  * relay, or a chain the relay returned with a hole. A spawn needs none of
  * this, since nothing can follow a spawn signed a moment ago.
  */
-async function confirmHead(retrying: () => void): Promise<boolean> {
+async function confirmHead(retrying: () => void): Promise<string | null> {
   const pubkey = useCyberspace.getState().identity.pubkey
+  // The saved chain's signatures are checked first: nothing is signed onto
+  // a chain until every event of it is known to be authentic.
+  const cut = await signaturesChecked(pubkey)
+  if (cut) return cut
   foldOtherTabs(pubkey)
   const s = useCyberspace.getState()
-  if (headConfirmed && headConfirmed.pubkey === pubkey && headConfirmed.head === s.prevEventId && Date.now() - headConfirmed.at < HEAD_CONFIRMED_FOR_MS) return true
+  if (headConfirmed && headConfirmed.pubkey === pubkey && headConfirmed.head === s.prevEventId && Date.now() - headConfirmed.at < HEAD_CONFIRMED_FOR_MS) return null
   for (let i = 0; i < HEAD_CONFIRM_TRIES; i++) {
     if (i > 0) retrying()
     const now = useCyberspace.getState()
-    if (now.identity.pubkey !== pubkey) return false
+    if (now.identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     const got = await confirmChainEvents(pubkey, now.genesisId || undefined, now.events).catch(() => null)
-    if (useCyberspace.getState().identity.pubkey !== pubkey) return false
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
       foldNow(got)
       markHeadConfirmed(pubkey, useCyberspace.getState().prevEventId)
-      return true
+      return null
     }
   }
-  return false
+  return HEAD_UNCONFIRMED_MESSAGE
+}
+
+/** Said while a chain action waits for the saved chain's signatures to be checked. */
+export const SIG_CHECK_MESSAGE = 'Checking the signatures of your saved chain.'
+
+/** A performance mark, for measuring boot; nothing where there is no performance API. */
+function mark(name: string): void {
+  try { performance.mark(name) } catch { /* no performance API */ }
+}
+
+/**
+ * The background signature check of a saved chain, while it runs: whose
+ * chain, and the words to refuse a waiting action with if it cut the chain
+ * (null when every signature verified).
+ */
+let sigCheck: { pubkey: string; done: Promise<string | null> } | null = null
+
+/**
+ * Check a saved chain's signatures off the main thread (lib/sigCheck.ts),
+ * after it has been drawn unchecked (loadChain with `later`). Every
+ * signature that verifies joins the memo; at the first one that does not,
+ * the chain is cut there as loadChain would have cut it (cutInauthentic).
+ * Chain actions wait for it (signaturesChecked).
+ */
+function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
+  if (unchecked.length === 0) {
+    sigCheck = null
+    mark('onosendai:chain-verified')
+    return
+  }
+  const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
+  entry.done = checkSignatures(unchecked).then((bad) => {
+    const badKeys = new Set(unchecked.filter((e) => bad.has(e.id)).map(sigKey))
+    for (const e of unchecked) if (!badKeys.has(sigKey(e))) verifiedSigs.add(sigKey(e))
+    if (sigCheck === entry) sigCheck = null
+    mark('onosendai:chain-verified')
+    return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
+  })
+  sigCheck = entry
+}
+
+/**
+ * Wait for the background check of `pubkey`'s saved chain, saying so while
+ * it runs. Resolves to the words a chain action is refused with when the
+ * check cut the chain under it, and null otherwise.
+ */
+async function signaturesChecked(pubkey: string): Promise<string | null> {
+  const check = sigCheck
+  if (!check || check.pubkey !== pubkey) return null
+  useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: SIG_CHECK_MESSAGE } })
+  const cut = await check.done
+  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: null } })
+  return cut
+}
+
+/**
+ * Cut the chain in hand at the events whose signatures failed (`badKeys`),
+ * as loadChain cuts a stored chain (authenticStretch): they never existed,
+ * and the chain continues from the event before the first of them. Redraws,
+ * saves, and says so in the proof notice. Returns those words, or null when
+ * nothing in hand was affected (another identity by now, or already gone).
+ */
+function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey) return null
+  const n = s.events.filter((e) => badKeys.has(sigKey(e))).length
+  if (n === 0) return null
+  const events = authenticStretch(pubkey, s.events, (e) => !badKeys.has(sigKey(e)))
+  if (!events) {
+    // The spawn itself failed: nothing of the chain stands, and the identity
+    // is back at its spawn coordinate, unsigned, as with nothing saved.
+    const words = 'The spawn of your saved chain failed its signature check, so the chain was set aside. You stand at your spawn coordinate.'
+    const base = provisionalChain(pubkey)
+    useCyberspace.setState({ ...base, cursor: base.position, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
+    return words
+  }
+  const words = `${n === 1 ? 'One saved action' : `${n} saved actions`} failed the signature check and ${n === 1 ? 'was' : 'were'} set aside. Your chain continues from the action before ${n === 1 ? 'it' : 'them'}.`
+  const d = derive({ version: 2, events, published: events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held })
+  useCyberspace.setState({ ...d, cursor: d.position, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
+  saveChain(d.events, d.published, d.chain, s.held)
+  return words
 }
 
 const pubkeyHex = currentSigner.pubkey
@@ -1385,8 +1490,11 @@ function derive(saved: PersistedChain): {
  * spawn for it: newer than its real chain on the relays, so it replaced that
  * chain and was published on the next move.
  */
-const saved = loadChain(pubkeyHex)
+// Drawn at once, unchecked: the signatures are checked in the background
+// (startSignatureCheck, below the store), and every chain action waits.
+const saved = loadChain(pubkeyHex, true)
 const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
+mark('onosendai:chain-loaded')
 
 let requestId = 0
 
@@ -2016,7 +2124,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // and from the relay a moment later (self-sync), and a brand-new one sits at
     // its spawn coordinate until its first move. So switching to a bunker or an
     // extension never makes it sign anything just to log in.
-    const local = loadChain(signer.pubkey)
+    // Drawn at once, its signatures checked in the background (below).
+    const local = loadChain(signer.pubkey, true)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
     // A broken-chain notice or respawn confirm left open was about the old
     // identity's chain; it must never respawn the new one.
@@ -2044,6 +2153,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       forkNotice: null,
     })
     if (local) saveChain(base.events, base.published, base.chain, base.held)
+    startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
     void get().resumeCloudJob()
   }
@@ -2189,9 +2299,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // different one (does it have a chain at all?) and is answered below.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
-      if (!confirmed) {
-        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: HEAD_UNCONFIRMED_MESSAGE } })
+      const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      if (refusal) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } })
         return
       }
       // On a held chain, a relay chain does not move you: it raises the prompt.
@@ -2536,9 +2646,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // confirmation is still fresh for this head (HEAD_CONFIRMED_FOR_MS). A
     // resumed, paid or long proof always asks.
     if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) headConfirmed = null
-    const confirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
+    const unconfirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
     if (msg.id !== requestId) return
-    if (!confirmed) { refuseSigning(msg, HEAD_UNCONFIRMED_MESSAGE, true); return }
+    if (unconfirmed) { refuseSigning(msg, unconfirmed, true); return }
     // The live feed kept delivering while the look was out.
     foldDeferred()
     // A game entered meanwhile (a hop now would be a base action inside it,
@@ -3042,8 +3152,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // The Hyperspace panel withholds BOARD and says why; this is the backstop.
     if (whyNoMove(get().actions())) return
     // The head is confirmed before the boarding is signed (confirmHead).
-    const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
-    if (!confirmed) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: HEAD_UNCONFIRMED_MESSAGE } }); return }
+    const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } }); return }
     if (get().prevEventId !== prevEventId) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: 'Another device moved you. Board again from where you are now.' } }); return }
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     const head = events[events.length - 1]
@@ -3093,9 +3203,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // The head is confirmed before the ride is signed (confirmHead). The
     // ride's proof is bound to the head it started from, so a head that the
     // confirmation moved is refused below like any other.
-    const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
-    if (!confirmed) throw new Error(HEAD_UNCONFIRMED_MESSAGE)
+    if (refusal) throw new Error(refusal)
     const { events, genesisId, prevEventId, transit } = get()
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
@@ -3868,6 +3978,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
   }
 })
+
+// The saved chain loaded at boot is drawn already; its signatures are
+// checked now, off the main thread.
+startSignatureCheck(pubkeyHex, saved?.unchecked ?? [])
 
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the

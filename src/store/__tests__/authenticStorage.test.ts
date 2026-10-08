@@ -62,13 +62,13 @@ const hop2 = hop(2, hop1)
 const hop3 = hop(3, hop2)
 
 /** Store a chain for this identity, then load the store fresh, as a page load does. */
-async function loadWith(events: NostrEvent[]): Promise<ReturnType<typeof import('../useCyberspace')['useCyberspace']['getState']>> {
+async function loadWith(events: NostrEvent[]): Promise<typeof import('../useCyberspace')['useCyberspace']['getState']> {
   storage.clear()
   storage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
   storage.setItem(`onosendai:chain:${pk}`, JSON.stringify({ version: 2, events, published: events.map((e) => e.id), stats: {} }))
   vi.resetModules()
   const { useCyberspace } = await import('../useCyberspace')
-  return useCyberspace.getState()
+  return useCyberspace.getState
 }
 
 describe('a stored chain takes only authentic events (§8.7.3)', () => {
@@ -76,15 +76,16 @@ describe('a stored chain takes only authentic events (§8.7.3)', () => {
 
   it('a chain whose every event verifies loads whole', async () => {
     const S = await loadWith([spawn, hop1, hop2, hop3])
-    expect(S.identity.pubkey).toBe(pk)
-    expect(S.events.map((e) => e.id)).toEqual([spawn.id, hop1.id, hop2.id, hop3.id])
-    expect(S.prevEventId).toBe(hop3.id)
+    expect(S().identity.pubkey).toBe(pk)
+    expect(S().events.map((e) => e.id)).toEqual([spawn.id, hop1.id, hop2.id, hop3.id])
+    expect(S().prevEventId).toBe(hop3.id)
   })
 
   it('an event whose signature does not verify never existed: the chain ends before it, and continues from there', async () => {
     const forged = { ...hop2, sig: hop2.sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) }
     const S = await loadWith([spawn, hop1, forged, hop3])
-    expect(S.events.map((e) => e.id)).toEqual([spawn.id, hop1.id])
-    expect(S.prevEventId).toBe(hop1.id)
+    // Drawn as stored, then cut once the background check finds it.
+    await vi.waitFor(() => expect(S().events.map((e) => e.id)).toEqual([spawn.id, hop1.id]))
+    expect(S().prevEventId).toBe(hop1.id)
   })
 })

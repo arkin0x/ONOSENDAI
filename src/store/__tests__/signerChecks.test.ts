@@ -131,15 +131,19 @@ async function boot(): Promise<typeof import('../useCyberspace')['useCyberspace'
 describe('a stored chain is checked once a session (review of #236, item 2)', () => {
   beforeEach(() => { ext.spoil = false })
 
-  it('a boot checks each stored signature once, though the chain is read twice', async () => {
+  it('a boot checks each stored signature once, though the chain is read twice, and none of them before the chain is drawn', async () => {
     const S = await boot()
     expect(S().identity.pubkey).toBe(pk)
     expect(S().events).toHaveLength(stored.length)
+    expect(mine()).toBe(0)
+    await vi.waitFor(() => expect(mine()).toBe(stored.length))
+    await new Promise((resolve) => setTimeout(resolve, 20))
     expect(mine()).toBe(stored.length)
   })
 
   it('switching back to the same identity reads the chain again and checks no signature again', async () => {
     const S = await boot()
+    await vi.waitFor(() => expect(mine()).toBe(stored.length))
     checked.pubkeys = []
     await S().useExtension()
     expect(S().loginError).toBeNull()

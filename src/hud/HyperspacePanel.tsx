@@ -21,7 +21,7 @@ import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cybe
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
-import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks } from '../lib/hyperspace/ride'
+import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
@@ -39,6 +39,7 @@ function formatDuration(ms: number): string {
 import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../store/useCyberspace'
 import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
+import { useChainUi } from '../store/useChainUi'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -156,9 +157,15 @@ export async function startRide(): Promise<void> {
     fromHeight = station.stop.height
     asOf = tip
   }
+  // Never a zero-length ride (arkinox, 2026-10-07): a destination that is
+  // the block the ride starts from is refused here, with what to do instead.
+  const zero = zeroLengthRideRefusal(fromHeight, destination, line.fromHeight !== null)
+  if (zero) {
+    useRideRun.setState({ error: zero, progress: null })
+    return
+  }
   // Every passed block's hash seeds its leaf work (§5.3); a gap means the
-  // sync has not covered that stretch of the line yet. A zero-length ride
-  // (station is the destination) passes nothing and is valid (§5.6).
+  // sync has not covered that stretch of the line yet.
   const blocks: Array<{ height: number; blockHash: string }> = []
   for (const height of rideBlocks(fromHeight, destination)) {
     const blockHash = getStopByHeight(height)?.blockHash
@@ -282,6 +289,10 @@ export function HyperspacePanel(): JSX.Element {
     if (station === null) return null
     return { from: station.stop.height, fromLabel: 'Station', length: rideBlocks(station.stop.height, destination).length }
   }, [destination, position, plane, indexVersion, line])
+
+  // A destination that is where the ride would start: refused before RIDE
+  // is pressed, with the way to get there (ride elsewhere and back).
+  const zeroRide = estimate && destination !== null ? zeroLengthRideRefusal(estimate.from, destination, atStop) : null
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
   // DRAWING while the stop field is still chipping its rebuild out across
@@ -427,7 +438,7 @@ export function HyperspacePanel(): JSX.Element {
         {progress === null ? (
           <button
             className="hyper__btn hyper__btn--ride"
-            disabled={inGame || !onLine || destination === null || !ready || (transit === null && !atHead)}
+            disabled={inGame || !onLine || destination === null || zeroRide !== null || !ready || (transit === null && !atHead)}
             onClick={() => void startRide()}
           >RIDE</button>
         ) : (
@@ -437,11 +448,15 @@ export function HyperspacePanel(): JSX.Element {
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
-      {inGame && progress === null && (
-        <p className="hyper__why">{noMove === GAME_HOLDS_MESSAGE
-          ? 'A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE'
-          : 'YOUR CHAIN IS BROKEN BEFORE ITS HEAD: THE PROOF CHAIN PANEL SAYS WHERE'}</p>
-      )}
+      {inGame && progress === null && (noMove === GAME_HOLDS_MESSAGE
+        ? <p className="hyper__why">A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE</p>
+        : (
+          <p className="hyper__why">
+            YOUR CHAIN IS BROKEN: NOTHING MOVES UNTIL YOU RESPAWN
+            <button className="tag tag--tap hyper__whybtn" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY</button>
+          </p>
+        ))}
+      {!inGame && zeroRide && progress === null && <p className="notice">{zeroRide}</p>}
       {!inGame && !onLine && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>

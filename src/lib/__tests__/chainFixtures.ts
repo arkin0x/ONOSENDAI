@@ -10,7 +10,7 @@
 
 import { ACTION_KIND, positionHex, sectorTags, type NostrEvent } from '../events'
 import type { Position } from '../space'
-import type { Plane } from 'cyberspace-core'
+import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 
 let counter = 0
 /** A fresh 64-hex id, distinct from every other one in the file that asks. */
@@ -61,7 +61,12 @@ export function regionAround(p: Position, height: number): Position {
   return { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }
 }
 
-/** An enter-virtual (§8.11.1): held at `c`, appearing at `inGame`, in the region of `height` around it. */
+/**
+ * An enter-virtual (§8.11.1 as refined 2026-10-07): held at `c`, with its `C`
+ * equal to its `c` because entering does not move you, in the region of
+ * `height` around `inGame`, the game's place, which only sizes the region
+ * here. `C` overrides the `C` tag, for an entry that names somewhere else.
+ */
 export function enterVirtualEvent(i: Common & {
   c: string
   inGame: Position
@@ -70,14 +75,16 @@ export function enterVirtualEvent(i: Common & {
   plane?: Plane
   regionBase?: Position
   pTags?: string[][]
+  C?: Position
 }): NostrEvent {
   const plane = i.plane ?? 0
   const base = i.regionBase ?? regionAround(i.inGame, i.height)
+  const held = coordToXyz(hexToCoord(i.c))
   return actionEvent({
     ...i,
     name: 'enter-virtual',
-    C: i.inGame,
-    plane,
+    C: i.C ?? { x: held.x, y: held.y, z: held.z },
+    plane: i.C ? plane : held.plane,
     tags: [
       ['region', positionHex(base, plane), String(i.height)],
       ...(i.pTags ?? [['p', i.game, '', 'game']]),
@@ -85,12 +92,12 @@ export function enterVirtualEvent(i: Common & {
   })
 }
 
-/** A game's own move inside a bracket (§8.11.2). */
-export function virtualEvent(i: Common & { name: string; c: string; inGame: Position; plane?: Plane }): NostrEvent {
+/** A game's own move inside a bracket (§8.11.2), with a c and a C, or without either when they are left out. */
+export function virtualEvent(i: Common & { name: string; c?: string; inGame?: Position; plane?: Plane }): NostrEvent {
   return actionEvent({ ...i, C: i.inGame })
 }
 
-/** An exit-virtual (§8.11.3): from the last place in the game, back to `restore`. */
-export function exitVirtualEvent(i: Common & { entryId: string; c: string; restore: Position; plane?: Plane }): NostrEvent {
+/** An exit-virtual (§8.11.3): back to `restore`, from `c`, which nothing checks and may be left out. */
+export function exitVirtualEvent(i: Common & { entryId: string; c?: string; restore: Position; plane?: Plane }): NostrEvent {
   return actionEvent({ ...i, name: 'exit-virtual', C: i.restore, tags: [['e', i.entryId, '', 'entry']] })
 }

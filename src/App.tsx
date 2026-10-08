@@ -17,12 +17,15 @@ import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
+import { StarNickname } from './hud/StarNickname'
+import { StarredPlaceCard } from './hud/StarredPlaceCard'
 import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
+import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -58,6 +61,7 @@ import { setSyncPriority } from './lib/hyperspace/anchors'
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
 import { useBuilder } from './store/useBuilder'
+import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
@@ -187,7 +191,10 @@ export default function App(): JSX.Element {
     return () => window.clearTimeout(t)
   }, [showPanels])
 
-  const [padOpen, setPadOpen] = useState(true)
+  const padOpen = usePad((s) => s.open)
+  // On a phone the open chat dock runs through the controls' column, so the
+  // two take turns there: whichever was opened last wins (usePad).
+  useEffect(() => linkChatAndPad(() => window.matchMedia(CHAT_COVERS_PAD).matches), [])
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
   // The pad no longer depends on being at your own head. Off-head it empties
   // its movement cells and keeps its scale ones (TouchControls), because scale
@@ -197,12 +204,10 @@ export default function App(): JSX.Element {
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
-    setViewMenuOpen((menu) => {
-      if (menu) return false
-      setPadOpen((open) => !open)
-      return false
-    })
-  }, [])
+    if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // With the chat open over the controls, this folds the chat (usePad).
+    tapScene()
+  }, [viewMenuOpen])
   useCanvasTap(onSceneTap, !crowded)
 
   return (
@@ -214,6 +219,9 @@ export default function App(): JSX.Element {
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
               last. */}
+          {/* A broken chain first: nothing else moves you until you respawn.
+              It stays in BUILD mode too; building is not moving. */}
+          <BrokenChainChip />
           {/* BUILD mode keeps the stack to what building needs (arkinox,
               2026-10-08): the hyperspace chip and XOR BITS step aside and
               come back on exit. */}
@@ -244,6 +252,8 @@ export default function App(): JSX.Element {
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}
       {!crowded && !offerUp && !deploying && !secretOpen && !spectating && <ChatDock />}
+      {/* The nickname field for a place just starred, over the star (StarNickname.tsx). */}
+      <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       {showPad && !offerUp && <TouchControls />}
       {showPad && !offerUp && <RouteOverlay />}
@@ -253,7 +263,7 @@ export default function App(): JSX.Element {
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); usePad.getState().setOpen(true) }}
           aria-label="Show controls"
         >CONTROLS</button>
       )}
@@ -267,6 +277,7 @@ export default function App(): JSX.Element {
       <NotificationsModal />
       <LootDetail />
       <NearbyLootModal />
+      <StarredPlaceCard />
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
       {!showPanels && <HosakaPulse />}
@@ -278,6 +289,8 @@ export default function App(): JSX.Element {
       <ChainConflictPrompt />
       {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
       <ChainStatusModal />
+      {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
+      <BrokenChainModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

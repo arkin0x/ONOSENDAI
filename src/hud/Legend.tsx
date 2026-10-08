@@ -24,6 +24,15 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
   { what: 'Red dodecahedron: your avatar', glyph: ball('#ff2323') },
   { what: "White dodecahedron: another identity's avatar", glyph: ball('#ffffff') },
   {
+    what: 'Small glowing yellow star: one of your Starred Places (POSITION panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="8.5" fill="rgba(255, 216, 77, 0.16)" />
+        <path d="M10 2.5 L11.9 7.6 L17.1 7.7 L13 11 L14.4 16.3 L10 13.2 L5.6 16.3 L7 11 L2.9 7.7 L8.1 7.6 Z" fill="#ffd84d" stroke="#fff3c0" strokeWidth="0.6" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     what: 'Yellow rotating cube: hyperjump station',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -59,7 +68,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
-    what: 'Pink line: moves inside a game. They are play inside the game, not travel through cyberspace, so your position stays where you entered the game, and the red line holds still there',
+    what: "Pink line: moves inside a game, joining each of the game's actions that names a place in the game (one that names none is passed over). They are play inside the game, not travel through cyberspace, so your position stays exactly where you entered the game, and the red line holds still there",
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff7ad9" strokeWidth="2" strokeLinejoin="round" />

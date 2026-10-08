@@ -67,7 +67,7 @@ interface ChatState {
   lines: ChatLine[]
   /** Whether the dock is unfolded. Folded by default; a message unfolds it. */
   open: boolean
-  /** Lines that arrived while the dock was folded. */
+  /** Lines that arrived while the dock was folded; the chip's dot while above 0. */
   unread: number
   muted: boolean
   draft: string
@@ -108,6 +108,14 @@ export function mergeLines(have: ChatLine[], add: ChatLine[]): ChatLine[] {
   if (fresh.length === 0) return have
   return [...have, ...fresh].sort((a, b) => a.at - b.at).slice(-CHAT_MAX)
 }
+
+/**
+ * True while an arriving line must not unfold the dock: on a phone with the
+ * controls out, unfolding would put them away (arkinox, 2026-10-07). Set by
+ * linkChatAndPad in usePad.ts, which owns the controls; false otherwise.
+ */
+let holdFolded: () => boolean = () => false
+export function setHoldFolded(hold: () => boolean): void { holdFolded = hold }
 
 export const useChat = create<ChatState>((set, get) => ({
   lines: loadLines(),
@@ -177,8 +185,11 @@ export const useChat = create<ChatState>((set, get) => ({
     saveLines(lines)
     const theirs = lines.length - before.length
     const fromOthers = add.some((l) => !l.mine)
-    // Someone spoke: the dock unfolds and, unless it is muted, chimes.
-    set({ lines, open: fromOthers ? true : get().open, unread: get().open || fromOthers ? 0 : get().unread + theirs })
+    // Someone spoke: the dock unfolds and, unless it is muted, chimes. Not
+    // over the controls on a phone (holdFolded): there it stays folded, the
+    // line counts as unread, and the chip carries the dot until it is opened.
+    const unfold = fromOthers && (get().open || !holdFolded())
+    set({ lines, open: unfold ? true : get().open, unread: get().open || unfold ? 0 : get().unread + theirs })
     if (fromOthers && !get().muted) chime()
   },
 

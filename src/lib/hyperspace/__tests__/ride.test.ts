@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../../events'
 import { bytesToHex, hexToBytes, sha256 } from 'cyberspace-core'
-import { CALIBRATION_KS, K_LINE, SAMPLES, ZERO_NONCE_HEX, attemptsRequired, be32, be64, buildRideProof, calibrationHashes, computeRideLeaf, decodeNonce, decodeOpenings, encodeNonce, encodeOpenings, exactRidePairs, expectedPricePairs, grindAttempt, inclusionPath, isGrandfatheredV1Hyperjump, lineTerrainK, meetsPrice, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf } from '../ride'
+import { CALIBRATION_KS, K_LINE, SAMPLES, attemptsRequired, be32, be64, buildRideProof, calibrationHashes, computeRideLeaf, decodeNonce, decodeOpenings, encodeNonce, encodeOpenings, exactRidePairs, expectedPricePairs, grindAttempt, inclusionPath, isGrandfatheredV1Hyperjump, lineTerrainK, meetsPrice, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../ride'
 import { GRANDFATHERED_V1_HYPERJUMPS, GRANDFATHERED_V1_HYPERJUMPS_SOURCE } from '../grandfathered'
 
 const PREV = 'ab'.repeat(32)
@@ -149,17 +149,28 @@ describe('full ride round trip (prover and verifier agree)', () => {
     expect(result.ok).toBe(false)
   })
 
-  it('a zero-length ride carries the zero root, an all-zero mn and nothing else', async () => {
-    const proof = buildRideProof(PREV, [])
-    expect(proof).toEqual({ rootHex: '0'.repeat(64), mp: '', mnHex: ZERO_NONCE_HEX })
+  it('there is no zero-length ride: none is built, and none verifies (arkinox, 2026-10-07, Q1)', async () => {
+    // The old §5.6 proof: the zero root, an all-zero mn and no openings.
+    expect(() => buildRideProof(PREV, [])).toThrow(/at least one block/)
     const verify = (rootHex: string, mn: string | null) => verifyRideLevel1({
       previousEventIdHex: PREV, fromHeight: 7, toHeight: 7, rootHex, mp: '', mn, blockHashFor: (h) => fakeHash(h),
     })
-    expect((await verify(proof.rootHex, proof.mnHex)).ok).toBe(true)
-    expect((await verify('ab'.repeat(32), proof.mnHex)).ok).toBe(false)
-    expect((await verify(proof.rootHex, '0000000000000001')).ok).toBe(false)
-    // Without an mn it is an old-format ride, and this one is not listed.
-    expect((await verify(proof.rootHex, null)).ok).toBe(false)
+    const old = await verify('0'.repeat(64), '0'.repeat(16))
+    expect(old.ok).toBe(false)
+    expect(old.reason).toMatch(/zero-length/)
+    expect((await verify('ab'.repeat(32), '0'.repeat(16))).ok).toBe(false)
+    expect((await verify('0'.repeat(64), null)).ok).toBe(false)
+  })
+
+  it('refuses a ride whose destination is where it starts, and says how to get there (Q1)', () => {
+    expect(zeroLengthRideRefusal(7, 8, false)).toBeNull()
+    expect(zeroLengthRideRefusal(8, 7, true)).toBeNull()
+    const first = zeroLengthRideRefusal(7, 7, false)!
+    expect(first).toMatch(/station/)
+    expect(first).toMatch(/ride to any other block first, then ride back to block 7/)
+    const chained = zeroLengthRideRefusal(9, 9, true)!
+    expect(chained).toMatch(/already at block 9/)
+    expect(chained).toMatch(/then ride back to block 9/)
   })
 })
 
@@ -240,7 +251,7 @@ describe('ride openings version 2: golden vectors', () => {
   })
 
   it('the mn tag is 16 lowercase hex, big-endian', () => {
-    expect(encodeNonce(0n)).toBe(ZERO_NONCE_HEX)
+    expect(encodeNonce(0n)).toBe('0'.repeat(16))
     expect(encodeNonce(0x1234n)).toBe('0000000000001234')
     expect(encodeNonce((1n << 64n) - 1n)).toBe('ffffffffffffffff')
     expect(() => encodeNonce(1n << 64n)).toThrow()
@@ -279,7 +290,7 @@ describe('rides from before the re-roll price (§5.8)', () => {
   })
 
   it('a listed id that carries an mn is checked like any other ride', async () => {
-    expect((await verifyRideLevel1({ ...input, eventId: listed, mn: ZERO_NONCE_HEX, blockHashFor: fakeHash })).ok).toBe(false)
+    expect((await verifyRideLevel1({ ...input, eventId: listed, mn: '0'.repeat(16), blockHashFor: fakeHash })).ok).toBe(false)
   })
 
   it('embeds the 16 ids of decks/grandfathered-v1-hyperjumps.txt with their source commit', () => {

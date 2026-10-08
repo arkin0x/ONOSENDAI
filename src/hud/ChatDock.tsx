@@ -10,6 +10,13 @@
  * `/` unfolds it and puts the caret in the line; Escape folds it. A line that
  * arrives from someone else unfolds it on its own, so a room that starts
  * talking is heard.
+ *
+ * Folded, while the spot at the center of the screen is not your avatar (the
+ * cursor moved off it, or the view is elsewhere), the chip is a star instead
+ * (StarChip.tsx): you cannot speak from there, and that is where you would
+ * want to mark a place. Back on your avatar, CHAT returns. In BUILD mode CHAT
+ * stays, since the Builder owns that moment. Unfolded, the dock stays as it
+ * is either way.
  */
 
 import { Fragment, useEffect, useMemo, useRef } from 'react'
@@ -18,10 +25,14 @@ import { useChat, sendKey, type ChatLine } from '../store/useChat'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
 import { ProfilePic } from './ProfileBadge'
+import { pressGuard } from './pressGuard'
 import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
 import { useEscape } from '../hooks/useEscape'
+import { bottomChip } from '../lib/starred'
+import { StarChip } from './StarChip'
+import { useBuilder } from '../store/useBuilder'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */
 const SHOWN = 200
@@ -61,8 +72,15 @@ export function ChatDock(): JSX.Element {
   const sendError = useChat((s) => s.sendError)
   const current = useSecrets((s) => s.current)
   const atHead = useCyberspace((s) => s.atHead())
+  const chip = useCyberspace((s) => bottomChip(s))
+  // BUILD mode is off your avatar by design, but the star is not what that
+  // spot is for while building: the Builder's overlay and its PLACE buttons
+  // own the moment, so the plain CHAT chip stays instead (useBuilder).
+  const building = useBuilder((s) => s.active)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
+  // The chip takes only a click whose press began on it (pressGuard.ts).
+  const chipPress = useMemo(() => pressGuard(), [])
   const now = Math.floor(Date.now() / 1000)
 
   // The region a line would go to right now: its size is the room's name.
@@ -87,16 +105,18 @@ export function ChatDock(): JSX.Element {
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
 
+  if (!open && chip === 'star' && !building) return <StarChip />
   if (!open) {
     return (
       <button
         className="chip chatdock__chip"
-        onClick={() => useChat.setState({ open: true, unread: 0, focusOnOpen: false })}
+        onPointerDown={(e) => chipPress.press(e.timeStamp)}
+        onClick={(e) => { if (chipPress.real(e.detail, e.timeStamp)) useChat.setState({ open: true, unread: 0, focusOnOpen: false }) }}
         aria-label={unread > 0 ? `Open chat, ${unread} new` : 'Open chat'}
         title="Chat with whoever is standing here (/)"
       >
         <MessageSquare size={11} strokeWidth={2.25} aria-hidden /> CHAT
-        {unread > 0 && <span className="chatdock__badge">{unread > 99 ? '99+' : unread}</span>}
+        {unread > 0 && <span className="chatdock__dot" aria-hidden="true" />}
       </button>
     )
   }

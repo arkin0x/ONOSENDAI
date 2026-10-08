@@ -124,11 +124,10 @@ describe('assembly order', () => {
 })
 
 describe('computeRideProof (sequential fallback under node)', () => {
-  it('empty job resolves immediately to the zero-length proof', async () => {
+  it('an empty job is refused: there is no zero-length ride (arkinox, 2026-10-07, Q1)', async () => {
     const seen: RideProgress[] = []
-    const proof = await computeRideProof({ previousEventIdHex: PREV, blocks: [] }, (p) => seen.push(p))
-    expect(proof).toEqual({ rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) })
-    expect(seen[seen.length - 1]).toEqual({ done: 0, total: 0, etaMs: null, price: null })
+    await expect(computeRideProof({ previousEventIdHex: PREV, blocks: [] }, (p) => seen.push(p))).rejects.toThrow(/zero-length/)
+    expect(seen).toEqual([])
   })
 
   it('a 4-block job runs end to end and Level-1-verifies', async () => {

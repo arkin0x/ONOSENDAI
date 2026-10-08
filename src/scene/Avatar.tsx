@@ -23,8 +23,8 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Group } from 'three'
-import { facingPair, facingQuaternion, moveDirection } from '../lib/facing'
+import { Group, type Quaternion } from 'three'
+import { avatarTurn, facingPair } from '../lib/facing'
 import { anchorCentre } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { useCyberspace } from '../store/useCyberspace'
@@ -50,15 +50,19 @@ export function Avatar(): JSX.Element | null {
     const a = pair[0].position, b = pair[1].position
     return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
   })
+  // The turn its group carries: the facing in world terms with the view frame
+  // composed on, so a compass turn turns the avatar with the world, upside
+  // down included (lib/facing.ts avatarTurn). With no move yet it still turns
+  // with the view, lying on cyberspace axes as built.
   const facing = useMemo(() => {
-    if (!moveKey) return null
     const s = useCyberspace.getState()
-    const pair = facingPair(s.focusChain(), s.exploreIndex)
-    if (!pair) return null
-    const dir = moveDirection(pair[0].position, pair[1].position, s.axes())
-    return dir ? facingQuaternion(dir) : null
+    const pair = moveKey ? facingPair(s.focusChain(), s.exploreIndex) : null
+    return avatarTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey, view])
+  // The view the group was last snapped to. A view turn snaps, as the rest of
+  // the world does; only a new heading within one view eases in.
+  const turnedFor = useRef<Quaternion | null>(null)
   // Where you stand in the render frame: the origin below the continuous
   // range, your true position inside its cell in it.
   const anchor = useCyberspace((s) => s.anchor)
@@ -69,8 +73,13 @@ export function Avatar(): JSX.Element | null {
     const g = group.current
     if (!g) return
     g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    if (turnedFor.current !== view) {
+      g.quaternion.copy(facing)
+      turnedFor.current = view
+      return
+    }
     // Eases into the new heading over the same beat the travel animation takes.
-    if (facing) g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
+    g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
   if (focus) return null

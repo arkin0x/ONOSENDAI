@@ -48,7 +48,7 @@ import { useEffect, useMemo } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { SCAN_MAX_HEIGHT, ownBagIn, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, isProtected, ownBagIn, regionOf, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
@@ -85,6 +85,8 @@ export function DeployBar(): JSX.Element | null {
   // From the Shard Feed: a copy by default, LIVE LINK by reference (ruling B1).
   const fromFeed = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object)
   const link = useShards((s) => s.deployLink)
+  // Protected by its author (NIP-70): only they may republish it, so no LIVE LINK.
+  const guarded = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object && isProtected(s.pending.object))
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
   const hopLimit = useCalibration((s) => s.hopHeight)
@@ -208,6 +210,8 @@ export function DeployBar(): JSX.Element | null {
           <button
             className={`deploybar__toggle ${link ? 'is-on' : ''}`}
             aria-pressed={link}
+            disabled={guarded}
+            title={guarded ? LINK_PROTECTED : undefined}
             onClick={() => useShards.getState().setDeployLink(!useShards.getState().deployLink)}
             {...noCallout}
           >{link ? 'ON' : 'OFF'}</button>

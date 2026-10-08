@@ -91,6 +91,18 @@ export function entryKey(e: BagEntry): string {
 }
 
 /**
+ * The identity of a LIVE LINK: a reference to a public object (one with no
+ * `encrypted` tag, yours or another author's), whose author's edits change
+ * its event id. The bag and the entry, `<lookup id>/<entry key>`: the same
+ * object at the same point in two bags (two heights, or two hiders) is two
+ * items, and one deleted leaves the other (verification review of #233).
+ * The deploy and the scan both key it this way.
+ */
+export function linkKey(lookupId: string, ref: Reference): string {
+  return `${lookupId}/${entryKey(ref)}`
+}
+
+/**
  * The most references one bag may make this client fetch, and how many at
  * once. Opening a bag is cheap; each reference is a relay query, so a bag
  * stuffed with them must not turn one find into a flood.
@@ -151,9 +163,7 @@ export function messagePreview(text: string, max = 32): string {
 export interface Hidden {
   /**
    * The item's stable identity: its inner event id. For a LIVE LINK (a
-   * reference to another author's object) it is the bag entry instead,
-   * `entryKey`: the address and the point. The author's edits change the
-   * event id, and one object placed twice is two items (review of #233).
+   * reference to a public object) it is `linkKey`: the bag and the entry.
    */
   eventId: string
   /**
@@ -498,9 +508,10 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
 
   const { x, y, z, plane } = coordHex ? coordToXyz(hexToCoord(coordHex)) : { ...origin!.at, plane: origin!.plane }
   const base = {
-    // Another author's object (a LIVE LINK) is keyed by the bag entry, which
-    // their edits do not change and which tells two placements of it apart.
-    eventId: target.pubkey !== outer.pubkey ? entryKey(ref) : target.id,
+    // A public object (a LIVE LINK, yours or another author's) is keyed by
+    // the bag and the entry, which its author's edits do not change; a
+    // sealed object of this place keeps its id, as shipped.
+    eventId: enc ? target.id : linkKey(tag(outer, 'd') ?? '', ref),
     inner: target,
     keyHex,
     ref,

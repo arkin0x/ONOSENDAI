@@ -144,7 +144,8 @@ describe('comments on an item hidden by reference', () => {
     const address = `33331:${objectAuthor}:statue`
     const subject = {
       author, lookupId: 'c'.repeat(64), itemId: `a:${address}@` + 'e'.repeat(64), type: 'shard' as const,
-      target: itemTargetOf({ kind: 33331, pubkey: objectAuthor, id: 'f'.repeat(64) }, ['a', address, '', 'e'.repeat(64)]),
+      // A public object: no `encrypted` tag.
+      target: itemTargetOf({ kind: 33331, pubkey: objectAuthor, id: 'f'.repeat(64), tags: [['d', 'statue']] }, ['a', address, '', 'e'.repeat(64)]),
       at: { x: 1n, y: 2n, z: 3n }, height: 4,
     }
     const parent = itemParent(subject)

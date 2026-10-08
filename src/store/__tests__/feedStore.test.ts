@@ -49,16 +49,17 @@ describe('the Shard Feed store', () => {
     expect(new Set(relays).size).toBe(relays.length)
   })
 
-  it('shows what the relays return, and never asks any relay with a tag filter (strfry allows at most three)', async () => {
+  it('shows what the relays return; pages carry no tag filter and deletion reads one each (strfry allows at most three)', async () => {
     useFeed.getState().start()
     await vi.waitFor(() => expect(useFeed.getState().objects.map((o) => o.shard.name)).toEqual(['Lamp']))
     await vi.waitFor(() => expect(useFeed.getState().loading).toBe(false))
     const filters = Object.values(asked).flat()
     expect(filters.length).toBeGreaterThan(0)
-    for (const f of filters) {
-      expect(Object.keys(f).filter((k) => k.startsWith('#'))).toEqual([])
-      expect(f.kinds).toEqual([33331])
-    }
+    const pages = filters.filter((f) => (f.kinds as number[]).includes(33331))
+    const deletions = filters.filter((f) => (f.kinds as number[]).includes(5))
+    expect(pages.length).toBeGreaterThan(0)
+    for (const f of pages) expect(Object.keys(f).filter((k) => k.startsWith('#'))).toEqual([])
+    for (const f of deletions) expect(Object.keys(f).filter((k) => k.startsWith('#')).length).toBe(1)
     // An unreachable relay is not asked at all.
     expect(asked['wss://nos.lol']).toBeUndefined()
   })

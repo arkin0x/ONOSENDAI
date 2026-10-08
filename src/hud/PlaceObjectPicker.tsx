@@ -62,7 +62,7 @@ export function PlaceObjectPicker(): JSX.Element {
             <ul className="objpick__explain">
               <li>A pick goes out as a copy: it stays exactly as you placed it.</li>
               <li>The copy credits its author.</li>
-              <li>LIVE LINK on the deploy bar places it by reference instead, and follows the author&apos;s edits.</li>
+              <li>LIVE LINK instead follows the author&apos;s edits.</li>
             </ul>
           </Explanation>
         </>

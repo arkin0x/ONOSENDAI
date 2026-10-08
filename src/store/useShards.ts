@@ -44,6 +44,7 @@ import {
   bagInners,
   bagTemplate,
   entryKey,
+  linkKey,
   objectTemplate,
   referenceTo,
   wantsReference,
@@ -57,7 +58,7 @@ import {
   type HiddenType,
 } from '../lib/hidden'
 import { creditOf, useWorkshop } from './useWorkshop'
-import type { Credit, FeedObject } from 'sno-core/feed'
+import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -118,6 +119,46 @@ export interface WorldItem {
   lookupId?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
+}
+
+/** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
+export const LINK_PROTECTED = 'Protected by its author: it can only be placed as a copy.'
+/** Why a LIVE LINK was not hidden: its author deleted it (NIP-09). */
+export const LINK_DELETED = 'Its author deleted this object.'
+
+/** An event its author protected (NIP-70, the `-` tag): only they may republish it. */
+export function isProtected(o: { event: { tags: string[][] } }): boolean {
+  return o.event.tags.some((t) => t[0] === '-')
+}
+
+/** Whether the object's author deleted it, as the relays you use answer (NIP-09; one tag filter per read). */
+async function authorDeleted(o: { pubkey: string; address: string; id: string; createdAt: number }): Promise<boolean> {
+  try {
+    const found = (await Promise.all(deletionFilters([o]).map((f) => query({ ...f })))).flat()
+    return isDeleted(o, found)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Put a signed event on your relays, each on its own, and answer with the
+ * first that took it, as soon as one does: a silent relay is not waited on.
+ * Null when none takes it.
+ */
+function republish(event: NostrEvent): Promise<string | null> {
+  const urls = relaySet()
+  if (urls.length === 0) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    let left = urls.length
+    let done = false
+    for (const url of urls) {
+      void publishMany([url], event).then((r) => r.ok, () => false).then((ok) => {
+        left -= 1
+        if (ok && !done) { done = true; resolve(url) } else if (left === 0 && !done) resolve(null)
+      })
+    }
+  })
 }
 
 /** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
@@ -635,6 +676,9 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployLink: (link) => {
       const object = get().pending?.type === 'shard' ? (get().pending as { object?: FeedObject }).object : undefined
       if (!object) return
+      // Protected by its author (NIP-70): only they may republish it, which a
+      // LIVE LINK must do, so it goes out only as a copy.
+      if (link && isProtected(object)) return
       set(link
         ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployAsk: null }
         : { deployLink: false })
@@ -766,15 +810,14 @@ export const useShards = create<ShardsState>((set, get) => {
           // reference nobody can follow (review of #233). While LOCAL the bag
           // goes nowhere yet, and BROADCAST puts the object out with it.
           inner = object.event as NostrEvent
-          const mine = relaySet()
-          let hint = mine[0] ?? ''
+          if (isProtected(object)) throw new Error(LINK_PROTECTED)
+          let hint = relaySet()[0] ?? ''
           if (live) {
-            // Each relay on its own, so the hint names one that took it.
-            const event = inner
-            const took = await Promise.all(mine.map(async (url) => ((await publishMany([url], event)).ok ? url : null)))
-            const first = took.find((u): u is string => u !== null)
-            if (!first) throw new Error(LINK_REFUSED)
-            hint = first
+            // Never republish what its author deleted (NIP-09).
+            if (await authorDeleted(object)) throw new Error(LINK_DELETED)
+            const took = await republish(inner)
+            if (!took) throw new Error(LINK_REFUSED)
+            hint = took
           }
           ref = referenceTo(inner, at, plane, hint)
         } else if (pending.type === 'shard' && shard && wantsReference(shard)) {
@@ -811,8 +854,8 @@ export const useShards = create<ShardsState>((set, get) => {
         }
 
         const item: MyDeployment = {
-          // A LIVE LINK is keyed by its bag entry (hidden.ts Hidden.eventId).
-          eventId: link && ref ? entryKey(ref) : inner.id,
+          // A LIVE LINK is keyed by its bag and entry (hidden.ts linkKey), as the scan keys it.
+          eventId: link && ref ? linkKey(rk.lookupId, ref) : inner.id,
           inner,
           ref,
           bagId: event.id,
@@ -880,17 +923,33 @@ export const useShards = create<ShardsState>((set, get) => {
         // Objects hidden by reference go out before the bag that names them,
         // and so do the authors' objects a LIVE LINK names: a finder looks
         // them up on the relays the bag goes to.
+        const me = cyber().identity.pubkey
+        const hinted = new Map<string, Reference>()
         for (const d of items) {
           if (!d.ref) continue
+          const foreign = d.inner.pubkey !== me
+          if (foreign && (isProtected({ event: d.inner }) || await authorDeleted({ pubkey: d.inner.pubkey, address: d.ref[1], id: d.inner.id, createdAt: d.inner.created_at }))) {
+            set({ broadcasting: null, broadcastError: isProtected({ event: d.inner }) ? LINK_PROTECTED : LINK_DELETED })
+            return false
+          }
           // A bag naming an object no relay holds would be a permanent hole
           // for everyone, carried forward by every later rewrite. Stop here.
-          const sent = await publishMany(relaySet(), d.inner)
-          if (!sent.ok) {
+          const took = await republish(d.inner)
+          if (!took) {
             set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.' })
             return false
           }
+          // A LIVE LINK hidden while LOCAL named your first relay; now it names one that took the object.
+          if (d.ref[0] === 'a' && d.ref[2] !== took) hinted.set(d.eventId, [d.ref[0], d.ref[1], took, ...d.ref.slice(3)] as Reference)
         }
-        const allInners = mergeEntries(existing.entries, items.map(entryOf))
+        if (hinted.size > 0) {
+          const mine = get().mine.map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
+          set({ mine }); saveMine(mine)
+        }
+        const fresh = items.map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
+        // The re-hinted entries replace the bag's older ones for the same placement.
+        const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
+        const allInners = mergeEntries(keep, fresh.map(entryOf))
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
         const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane })
         if (!published) {

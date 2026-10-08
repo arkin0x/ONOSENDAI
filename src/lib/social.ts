@@ -37,6 +37,8 @@ export interface SocialTarget {
   id: string
   pubkey: string
   kind: number
+  /** An addressable target's address: reactions name it too (NIP-25), so they count across its author's edits. */
+  address?: string
 }
 
 /** A reaction's content as it should be drawn: `+` is a like, `-` a dislike (NIP-25). */
@@ -55,6 +57,7 @@ export function reactionTemplate(target: SocialTarget, content: string, createdA
     content,
     tags: [
       ['e', target.id, '', target.pubkey],
+      ...(target.address ? [['a', target.address, '']] : []),
       ...tagged.map((p) => ['p', p]),
       ['k', String(target.kind)],
       [...CLIENT_TAG],
@@ -98,6 +101,8 @@ export interface Reaction {
   image?: string
   /** The event reacted to: the last `e` tag, per NIP-25. */
   targetId: string
+  /** The addressable event reacted to, from its `a` tag, when given. */
+  targetAddress?: string
   /** The reacted event's kind, from `k`, when given. */
   targetKind: number | null
 }
@@ -112,7 +117,8 @@ export function parseReaction(ev: NostrEvent): Reaction | null {
   const k = Number(ev.tags.find((t) => t[0] === 'k')?.[1])
   const code = /^:([\w-]+):$/.exec(content)?.[1]
   const image = code ? ev.tags.find((t) => t[0] === 'emoji' && t[1] === code)?.[2] : undefined
-  return { id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, content, image, targetId: target, targetKind: Number.isFinite(k) ? k : null }
+  const address = ev.tags.find((t) => t[0] === 'a' && t[1])?.[1]
+  return { id: ev.id, pubkey: ev.pubkey, createdAt: ev.created_at, content, image, targetId: target, ...(address ? { targetAddress: address } : {}), targetKind: Number.isFinite(k) ? k : null }
 }
 
 /** One row of the reaction list: an emoji and who reacted with it. */
@@ -130,9 +136,10 @@ export interface ReactionGroup {
  * which came first. Deleted reactions are left out; a person reacting twice
  * with the same emoji counts once.
  */
-export function groupReactions(events: NostrEvent[], targetId: string, deleted: ReadonlySet<string> = new Set()): ReactionGroup[] {
+export function groupReactions(events: NostrEvent[], targetId: string, deleted: ReadonlySet<string> = new Set(), targetAddress?: string): ReactionGroup[] {
   const rows = new Map<string, ReactionGroup & { first: number }>()
-  const sorted = events.map(parseReaction).filter((r): r is Reaction => !!r && r.targetId === targetId && !deleted.has(r.id))
+  // By id, or by address for an addressable target, so a reaction to any version counts.
+  const sorted = events.map(parseReaction).filter((r): r is Reaction => !!r && (r.targetId === targetId || (!!targetAddress && r.targetAddress === targetAddress)) && !deleted.has(r.id))
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const r of sorted) {
     const row: ReactionGroup & { first: number } = rows.get(r.content) ?? { content: r.content, image: r.image, pubkeys: [], ids: new Map<string, string>(), first: r.createdAt }

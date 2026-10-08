@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
@@ -126,7 +127,18 @@ function saveRecent(list: RecentView[]): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
 }
 
-function PositionPanel(): JSX.Element {
+/**
+ * What is typed into the Position panel's VIEW field, kept outside the panel:
+ * BUILD mode moves the panel to the top of the menu and back (Hud below),
+ * which mounts it afresh, and a coordinate half typed when DEPLOY turned
+ * BUILD on was lost with it (review of #235).
+ */
+export const useViewDraft = create<{ text: string; setText: (text: string) => void }>((set) => ({
+  text: '',
+  setText: (text) => set({ text }),
+}))
+
+export function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
   // Decimals go to the plane on show: yours at your head, the view's in a view.
@@ -134,7 +146,8 @@ function PositionPanel(): JSX.Element {
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
-  const [viewText, setViewText] = useState('')
+  const viewText = useViewDraft((s) => s.text)
+  const setViewText = useViewDraft((s) => s.setText)
   const [viewBad, setViewBad] = useState(false)
   const [recent, setRecent] = useState<RecentView[]>(() => loadRecent())
   const [recentOpen, setRecentOpen] = useState(false)

@@ -36,10 +36,12 @@ vi.mock('../../lib/relay', () => ({
 // The spectated chain comes from here instead of a relay; the live watch is
 // a no-op. mergeEvents and the rest stay real.
 const relayChain: { events: NostrEvent[] } = { events: [] }
+// Every watch opened, by pubkey, with its close, so a test can see it closed.
+const watches: Array<{ pubkey: string; close: ReturnType<typeof vi.fn> }> = []
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: vi.fn(async () => relayChain.events),
-  watchAuthor: vi.fn(() => () => {}),
+  watchAuthor: vi.fn((pubkey: string) => { const close = vi.fn(); watches.push({ pubkey, close }); return close }),
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -52,7 +54,7 @@ import { useWorkshop } from '../useWorkshop'
 import { useToast } from '../useToast'
 import { stepChain, useBuilder, walkChain } from '../useBuilder'
 import { spectate, stopSpectating } from '../../lib/spectator'
-import { buildCursorOf, buildPlane } from '../../lib/buildCursor'
+import { avatarInBuild, buildCursorOf, buildPlane, cubeAt } from '../../lib/buildCursor'
 import { deployPoint } from '../../lib/space'
 import { placeSpawn } from '../fixtures/placeSpawn'
 
@@ -312,6 +314,88 @@ describe('spectating in BUILD mode', () => {
   })
 })
 
+describe('review of #235', () => {
+  it('SHOULD-FIX 1: RETURN TO AVATAR drops the mark, and your own avatar always stands at your true head', () => {
+    B().enter('build')
+    walkChain(1)
+    expect(B().scrub).toBe(1)
+    // While the mark is on a past action of your own chain, your avatar is
+    // still drawn where you stand: only the build cursor went there.
+    expect(avatarInBuild(S(), B().scrub)).toEqual({ position: S().position, plane: S().headPlane })
+    B().toAvatar()
+    expect(B().scrub).toBeNull()
+    expect(S().cursor).toEqual(S().position)
+    expect(B().active).toBe(true)
+  })
+
+  it('SHOULD-FIX 1: a spectated avatar stands at the aimed action, or their head', async () => {
+    B().enter('build')
+    await spectate(pk)
+    const theirs = S().focusChain()
+    walkChain(1)
+    expect(avatarInBuild(S(), B().scrub)?.position).toEqual(theirs[1].position)
+    walkChain(null)
+    expect(avatarInBuild(S(), B().scrub)?.position).toEqual(theirs[3].position)
+  })
+
+  it('NIT 3: their chain replaced under the mark (a respawn) drops the mark, so their avatar shows at the new head', async () => {
+    B().enter('build')
+    await spectate(pk)
+    walkChain(2)
+    expect(B().scrub).toBe(2)
+    const respawned = finalizeEvent(spawnTemplate(pk, 200), sk)
+    S().setSpectateChain(pk, [spawnEv, h1, h2, h3, respawned])
+    expect(S().focusChain().map((a) => a.id)).toEqual([respawned.id])
+    expect(B().scrub).toBeNull()
+    expect(avatarInBuild(S(), B().scrub)?.position).toEqual(S().focusChain()[0].position)
+  })
+
+  it('NIT 4: switching spectations in BUILD keeps the camera you had before the first one', async () => {
+    const original = S().view.clone()
+    B().enter('build')
+    await spectate(pk)
+    S().rotate('left')
+    expect(S().view.equals(original)).toBe(false)
+    await spectate(getPublicKey(generateSecretKey()))
+    B().exit()
+    stopSpectating()
+    expect(S().view.equals(original)).toBe(true)
+  })
+
+  it('NIT 5: choosing the relays\' version of your chain ends the mode as your avatar moved, not as the view moving', () => {
+    B().enter('build')
+    const dest = { x: S().position.x + 7n, y: S().position.y, z: S().position.z }
+    // What resolveHeldConflict('relay') writes: a new chain, and no view.
+    useCyberspace.setState({ prevEventId: 'relay-head', genesisId: 'relay-genesis', position: dest, cursor: { ...dest }, anchor: { ...dest }, spectate: null, focus: null })
+    expect(B().active).toBe(false)
+    expect(useToast.getState().toast?.meta).toMatch(/Your avatar was moved under it/)
+  })
+
+  it('PRE-EXISTING (a): in BUILD the cube is the build cursor, not a pending move\'s target', () => {
+    B().enter('build')
+    S().moveCursor({ axis: 'x', dir: 1 })
+    const pending = { ...S().position, y: S().position.y + 9n }
+    useCyberspace.setState({ pendingTarget: pending })
+    try {
+      expect(cubeAt(S(), B().active)).toEqual(S().cursor)
+      // At your head the cube still shows a computing move's target.
+      expect(cubeAt({ ...S(), canDrive: () => true }, false)).toEqual(pending)
+    } finally {
+      useCyberspace.setState({ pendingTarget: null })
+    }
+  })
+
+  it('PRE-EXISTING (b): a view that replaces a spectation closes the relay watch', async () => {
+    await spectate(pk)
+    const watch = watches.filter((w) => w.pubkey === pk).at(-1)!
+    expect(watch.close).not.toHaveBeenCalled()
+    S().focusOn({ ...S().position }, 0, 'a shard')
+    expect(S().spectate).toBeNull()
+    expect(watch.close).toHaveBeenCalledTimes(1)
+  })
+
+})
+
 describe('the auto-exits that protect correctness still end BUILD mode while spectating', () => {
   it('a ride arriving (a new head that also writes the cursor)', async () => {
     B().enter('build')
@@ -341,11 +425,13 @@ describe('the auto-exits that protect correctness still end BUILD mode while spe
     expect(B().active).toBe(false)
   })
 
-  it('an identity switch', async () => {
+  // Last in the file: it replaces the identity the rest of it builds on.
+  it('an identity switch, with its own reason in the toast (review of #235, NIT 5)', async () => {
     B().enter('build')
     await spectate(pk)
     await S().useNewKey()
     expect(B().active).toBe(false)
     expect(S().spectate).toBeNull()
+    expect(useToast.getState().toast?.meta).toMatch(/You switched identity/)
   })
 })

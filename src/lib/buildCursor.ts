@@ -49,3 +49,49 @@ export function buildCursorOf(s: BuildCursorSource): { position: Position; plane
 export function moveUnderWay(s: { proof: { status: string }; plan: { status: string } | null }): boolean {
   return s.proof.status === 'computing' || s.plan?.status === 'running'
 }
+
+/** The slice of the cyberspace store `avatarInBuild` reads. */
+export interface AvatarSource {
+  position: Position
+  headPlane: Plane
+  spectate: object | null
+  focusChain: () => ReadonlyArray<{ position: Position; plane: Plane }>
+}
+
+/**
+ * Where the avatar of the chain on show stands in BUILD mode, where the scene
+ * rides the build cursor rather than an avatar.
+ *
+ * Your own avatar stands at your true head, always: the CHAIN chip's mark on
+ * your own chain only aims the build cursor and splits the trail, because an
+ * avatar drawn at a past action, beside a bar saying how far away your avatar
+ * is, looks exactly like building moved you (review of #235). A spectated
+ * avatar stands at the action the mark is on, or its head, as history shows
+ * it outside the mode; null while their chain has not arrived.
+ */
+export function avatarInBuild(s: AvatarSource, scrub: number | null): { position: Position; plane: Plane } | null {
+  if (!s.spectate) return { position: s.position, plane: s.headPlane }
+  const chain = s.focusChain()
+  return chain[scrub === null ? chain.length - 1 : Math.min(scrub, chain.length - 1)] ?? null
+}
+
+/** The slice of the cyberspace store `cubeAt` reads. */
+export interface CubeSource {
+  cursor: Position
+  anchor: Position
+  pendingTarget: Position | null
+  canDrive: () => boolean
+}
+
+/**
+ * Where the cursor cube is drawn. Where you can drive, the cell lined up for
+ * the next move: a commit's pending target while it computes, else the
+ * cursor. In BUILD mode the cube is the build cursor, so always the cursor:
+ * a move committed before building, still computing, used to keep the white
+ * cube on that move's target while the ghost and the deploy followed the
+ * cursor (review of #235). Off your head, with nothing to drive, the anchor.
+ */
+export function cubeAt(s: CubeSource, building: boolean): Position {
+  if (!s.canDrive()) return s.anchor
+  return building ? s.cursor : (s.pendingTarget ?? s.cursor)
+}

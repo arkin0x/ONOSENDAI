@@ -22,9 +22,10 @@
  *
  * BUILD mode is the other exception (arkinox, 2026-10-08). The scene there
  * stands on the build cursor, not on an avatar, and the avatar of the chain
- * on show, yours or the one being spectated, is drawn where it stands at the
- * action the CHAIN chip last aimed at (the head when none), at its true
- * place relative to the build cursor's field, so you can build near it.
+ * on show is drawn at its true place relative to the build cursor's field,
+ * so you can build near it: yours at your true head, always, and a
+ * spectated one at the action the CHAIN chip last aimed at, or its head
+ * (lib/buildCursor.ts avatarInBuild).
  */
 
 import { useMemo, useRef } from 'react'
@@ -35,6 +36,7 @@ import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/sp
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
+import { avatarInBuild } from '../lib/buildCursor'
 import { AvatarShape } from './AvatarShape'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
@@ -51,21 +53,15 @@ export function Avatar(): JSX.Element | null {
   const building = useBuilder((s) => s.active)
   const scrub = useBuilder((s) => s.scrub)
   const placed = building && focus?.drive === true
-  const shownPosition = useCyberspace((s): Position | null => {
-    if (!placed) return null
-    const chain = s.focusChain()
-    if (s.spectate) return chain[scrub ?? chain.length - 1]?.position ?? null
-    return scrub === null ? s.position : (chain[scrub]?.position ?? s.position)
-  })
-  const shownPlane = useCyberspace((s): number | null => {
-    if (!placed) return null
-    const chain = s.focusChain()
-    if (s.spectate) return chain[scrub ?? chain.length - 1]?.plane ?? null
-    return scrub === null ? s.headPlane : (chain[scrub]?.plane ?? s.headPlane)
-  })
+  // Your own avatar at your true head; a spectated one at the aimed action
+  // (lib/buildCursor.ts avatarInBuild).
+  const shownPosition = useCyberspace((s): Position | null => (placed ? avatarInBuild(s, scrub)?.position ?? null : null))
+  const shownPlane = useCyberspace((s): number | null => (placed ? avatarInBuild(s, scrub)?.plane ?? null : null))
+  const spectating = useCyberspace((s) => s.spectate !== null)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  // The facing pair's index: the explored action, or in BUILD mode the aimed one.
-  const facingIndex = placed ? scrub : null
+  // The facing pair's index: the explored action, or in BUILD mode the aimed
+  // one of a spectated chain. Your own avatar stands at your head there.
+  const facingIndex = placed && spectating ? scrub : null
   // Whose shape: yours, or the spectated avatar's, whose marker this is then.
   const pubkey = useCyberspace((s) => s.focusPubkey())
   // The last move on the chain drawn, as a key so a re-render costs nothing

@@ -107,7 +107,7 @@ export type BuildEntry = 'build' | 'deploy'
 export const BUILD_FOCUS_LABEL = 'BUILD'
 
 /** Why BUILD mode ended without EXIT, for the toast that says so. */
-export type BuildEndReason = 'view' | 'moved'
+export type BuildEndReason = 'view' | 'moved' | 'identity'
 
 export interface BuilderState {
   /** BUILD mode is on: the free view is the build cursor and placements land there. */
@@ -204,6 +204,7 @@ function settleView(scrub: number | null): void {
 const END_REASON: Record<BuildEndReason, string> = {
   view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment).',
   moved: 'Your avatar was moved under it (a respawn, a ride arriving, or the relays\' version of your chain), and the build cursor went with it.',
+  identity: 'You switched identity; the build cursor belonged to the one you left.',
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -283,6 +284,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   toAvatar: () => {
     if (!get().active) return
     const cs = useCyberspace.getState()
+    // The mark goes with it: back at your avatar, the CHAIN chip and the
+    // trail are at your head again, not at the action last aimed at (review
+    // of #235: the chip read 2/4 and the trail split at 2 after RETURN).
+    set({ scrub: null })
     // While spectating, aimed rather than re-focused, which would end the
     // spectation: you are still watching them.
     if (cs.spectate) cs.aimView(cs.position, cs.plane)
@@ -334,11 +339,11 @@ function endUnder(reason: BuildEndReason): void {
 useCyberspace.subscribe((s, prev) => {
   const b = useBuilder.getState()
   if (!b.active) return
-  // The view the build cursor rides ended some other way.
-  if (!viewStands(s)) { endUnder('view'); return }
-  // Another chain on show (a spectation begun, switched or ended): the mark
-  // was an index into the old one. The cursor stays where it was aimed.
-  if (s.spectate?.pubkey !== prev.spectate?.pubkey && b.scrub !== null) useBuilder.setState({ scrub: null })
+  // Why the mode ends is asked in order, most particular first, since an
+  // identity switch and a chain chosen from the relays also clear the view:
+  // reading them as the view moving away gave the wrong reason (review of
+  // #235). Another identity first: everything about the old one is gone.
+  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder('identity'); settleView(null); return }
   // Your position replaced under the mode, carrying the cursor to the new
   // head: a new chain head that also wrote the cursor. Only a respawn, a ride
   // arriving and a chain chosen from the relays do both. A move committed
@@ -348,6 +353,19 @@ useCyberspace.subscribe((s, prev) => {
     endUnder('moved')
     settleView(null)
     return
+  }
+  // The view the build cursor rides ended some other way.
+  if (!viewStands(s)) { endUnder('view'); return }
+  // The mark is an index into the chain on show; it stands only while that
+  // index is still the same action. Another chain on show (a spectation
+  // begun, switched or ended), or the same avatar's chain replaced (they
+  // respawned), drops it, as history's `keep` does outside the mode
+  // (setSpectateChain). The cursor stays where it was aimed.
+  if (b.scrub !== null) {
+    const same = s.spectate?.pubkey === prev.spectate?.pubkey
+      && (s.spectate === null || s.spectate.actions === prev.spectate?.actions
+        || s.spectate.actions[b.scrub]?.id === prev.spectate?.actions[b.scrub]?.id)
+    if (!same) useBuilder.setState({ scrub: null })
   }
   if (!b.leftAvatar && !onAvatar(s)) useBuilder.setState({ leftAvatar: true })
 })

@@ -56,7 +56,24 @@ import { countComments } from '../lib/comments'
 import { ACTION_KIND } from '../lib/social'
 import { useSocialUi } from '../store/useSocialUi'
 import { useEscape } from '../hooks/useEscape'
+import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
+
+// Spectating opens the chain explorer: the chain is the thing you came to
+// look at. What you had it set to is put back when the spectation ends, and
+// switching from one avatar to another keeps the first setting.
+let openBefore: boolean | null = null
+useCyberspace.subscribe((s, prev) => {
+  if ((s.spectate === null) === (prev.spectate === null)) return
+  const ui = useChainUi.getState()
+  if (s.spectate) {
+    openBefore = ui.explorerOpen
+    ui.setExplorerOpen(true)
+  } else if (openBefore !== null) {
+    ui.setExplorerOpen(openBefore)
+    openBefore = null
+  }
+})
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
@@ -118,23 +135,19 @@ export function ChainExplorer(): JSX.Element {
 
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
-  const [open, setOpen] = useState(false)
+  // In useChainUi, so the Chain panel's ACTIONS tag can open it too.
+  const open = useChainUi((s) => s.explorerOpen)
+  const setOpen = (next: boolean | ((was: boolean) => boolean)): void => {
+    const ui = useChainUi.getState()
+    ui.setExplorerOpen(typeof next === 'function' ? next(ui.explorerOpen) : next)
+  }
   // The open body is a chip on the Escape stack (arkinox, 2026-10-01). Not
   // while there are no actions: then nothing but the chip is drawn.
   useEscape('chip', open && actions.length > 0, () => setOpen(false))
-  // Spectating opens it: the chain is the thing you came to look at. What you
-  // had it set to is put back when spectation ends.
-  const openBefore = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (spectate) {
-      if (openBefore.current === null) { openBefore.current = open; setOpen(true) }
-    } else if (openBefore.current !== null) {
-      setOpen(openBefore.current)
-      openBefore.current = null
-    }
-    // `open` is read once, at the moment spectation starts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spectate !== null])
+  // Spectating opens it, and what you had it set to comes back when the
+  // spectation ends: kept at module scope (below the imports), so a remount
+  // of the instrument stack (a deploy, the phone's menu) neither forgets nor
+  // repeats it.
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {

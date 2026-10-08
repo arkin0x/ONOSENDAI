@@ -34,7 +34,7 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
-import { walkChain } from '../store/useBuilder'
+import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
@@ -53,6 +53,9 @@ export function ChainPanel(): JSX.Element {
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  // BUILD mode: the ACTIONS tag opens and closes the explorer instead of stepping.
+  const building = useBuilder((s) => s.active)
+  const explorerOpen = useChainUi((s) => s.explorerOpen)
   const respawns = useCyberspace((s) => s.respawns)
   const held = useCyberspace((s) => s.held)
   const check = useCyberspace((s) => s.selfCheck)
@@ -103,10 +106,16 @@ export function ChainPanel(): JSX.Element {
         <h2>Proof chain</h2>
         {/* The whole chain, spawn included, not this session's proofs; a tap
             opens the chain explorer at the head, a second tap puts it away. */}
+        {/* In BUILD mode a step along the chain aims the build cursor, so the
+            tag only opens and closes the explorer there (review of #235: it
+            sent the build cursor back to your avatar). */}
         <button
           className="tag tag--tap"
-          onClick={() => walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
-          aria-pressed={exploreIndex !== null}
+          onClick={() => {
+            if (useBuilder.getState().active) useChainUi.getState().setExplorerOpen(!explorerOpen)
+            else walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
+          }}
+          aria-pressed={building ? explorerOpen : exploreIndex !== null}
           title="Open the chain explorer"
         >
           {events.length} ACTION{events.length === 1 ? '' : 'S'}

@@ -7827,6 +7827,7 @@ kbd {
 /* WORKSHOP and BUILD side by side in the Stash panel. */
 .shards__modes {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .shards__modes .shards__compose-open {
@@ -7987,3 +7988,158 @@ kbd {
   border: 1px solid rgba(255, 59, 107, 0.55);
   border-radius: 3px;
 }
+
+/* ---------- The Shard Feed (hud/FeedList.tsx, store/useFeed.ts) ----------
+ * Everyone's published objects: a picture, the name, who made it, and the
+ * buttons. Tight: one line each, the prose behind EXPLAIN. */
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.feed__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 55vh;
+  max-height: 55dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.feed__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid rgba(0, 229, 255, 0.16);
+}
+.feed__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: none;
+}
+button.feed__pick { cursor: pointer; }
+button.feed__pick:hover .feed__name { color: var(--accent); }
+.feed__thumb {
+  flex: none;
+  width: 80px;
+  height: 80px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.feed__thumb img {
+  width: 80px;
+  height: 80px;
+  display: block;
+}
+.feed__thumb-wait {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: feed-spin 0.9s linear infinite;
+}
+@keyframes feed-spin { to { transform: rotate(360deg); } }
+.feed__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.feed__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__by {
+  font-size: 10px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.feed__acts {
+  display: flex;
+  gap: 6px;
+}
+.feed__act {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  border-radius: 6px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.feed__act:hover { background: rgba(0, 229, 255, 0.14); }
+.feed__end {
+  padding: 8px 4px;
+  font-size: 10px;
+  color: var(--dim);
+  text-align: center;
+  min-height: 12px;
+}
+.feed__refresh {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.feed__refresh:disabled { opacity: 0.4; cursor: default; }
+/* The one hidden canvas that draws every picture: off screen, never in the way. */
+.thumbstage {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 160px;
+  height: 160px;
+  pointer-events: none;
+}
+/* PLACE OBJECT's empty state: FEED and OPEN WORKSHOP side by side. */
+.objpick__emptyacts {
+  display: flex;
+  gap: 6px;
+}
+.objpick__emptyacts .objpick__workshop { flex: 1; }

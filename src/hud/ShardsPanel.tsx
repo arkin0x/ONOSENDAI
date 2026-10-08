@@ -17,7 +17,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Wrench } from 'lucide-react'
+import { Rss, Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -53,6 +53,10 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
+          {/* Everyone's published objects, beside the workshop where yours are made (the Shard Feed). */}
+          <button className="avatars__go shards__compose-open shards__feed" onClick={() => useStash.getState().openFeed()} title="Browse everyone's published objects: place one, or remix it as your own">
+            <Rss className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> SHARD FEED
+          </button>
           {/* BUILD mode, beside the workshop it is the other half of: the
               workshop makes objects, the Builder places them (useBuilder). */}
           <button

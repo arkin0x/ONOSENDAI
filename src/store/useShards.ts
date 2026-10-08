@@ -56,7 +56,8 @@ import {
   type Hidden,
   type HiddenType,
 } from '../lib/hidden'
-import { useWorkshop } from './useWorkshop'
+import { creditOf, useWorkshop } from './useWorkshop'
+import type { Credit, FeedObject } from 'sno-core/feed'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -121,7 +122,12 @@ export interface WorldItem {
 
 /** What a deploy is placing, before it lands. */
 export type DeployPending =
-  | { type: 'shard'; shardId: string }
+  /**
+   * One of your models (`shardId`), or an object from the Shard Feed
+   * (`object`, with `shardId` its address). From the feed it goes out as a
+   * credited copy, or with LIVE LINK by reference to the author's object.
+   */
+  | { type: 'shard'; shardId: string; object?: FeedObject }
   | { type: 'message'; text: string }
 
 /**
@@ -194,6 +200,13 @@ interface ShardsState {
    */
   deployFollow: boolean
   /**
+   * LIVE LINK, for an object from the Shard Feed: place it by reference to
+   * the author's object (an `a` entry, spec §7.6), so it follows their edits,
+   * instead of a copy that stays exactly as placed (ruling B1: copy by
+   * default). Size, turns and the snap are the author's then, not this deploy's.
+   */
+  deployLink: boolean
+  /**
    * The bag settings the deploy bar shows and the deploy writes: `h`, the
    * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
    * start at your existing bag's settings when the cursor's region holds one
@@ -254,6 +267,9 @@ interface ShardsState {
   setDeploySpin: (spin: number) => void
   /** Hand the spin to the camera, or take it back. */
   setDeployFollow: (follow: boolean) => void
+  setDeployLink: (link: boolean) => void
+  /** Line up an object from the Shard Feed at the build cursor, as a copy. */
+  startDeployObject: (object: FeedObject) => void
   /** The highest height the deploy bar offers: this machine's, or HOSAKA's when cloud compute is on. */
   deployCeiling: () => number
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
@@ -516,6 +532,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deploySpin: 0,
     deployTurn: [0, 0, 0],
     deployFollow: false,
+    deployLink: false,
     deployBag: DEFAULT_BAG_SETTINGS,
     deployBagFrom: null,
     deployStatus: 'idle',
@@ -540,6 +557,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // never carries silently into this one.
     startDeployShard: (shardId) => set({
       pending: { type: 'shard', shardId },
+      deployLink: false,
       deployHeightAuto: true,
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
       // Flat, aimed north, the camera not driving: the last deploy's pose no
@@ -555,7 +573,22 @@ export const useShards = create<ShardsState>((set, get) => {
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
+    startDeployObject: (object) => set({
+      pending: { type: 'shard', shardId: object.address, object },
+      // A copy, as B1 rules; LIVE LINK is the deploy bar's choice.
+      deployLink: false,
+      deployHeightAuto: true,
+      deployUnit: object.shard.unit,
+      deployUp: false,
+      deploySpin: 0,
+      deployTurn: [0, 0, 0],
+      deployFollow: false,
+      deployBag: DEFAULT_BAG_SETTINGS,
+      deployBagFrom: null,
+      deployStatus: 'idle',
+      deployError: null,
+    }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
     setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
@@ -583,6 +616,15 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
     setDeploySpin: (spin) => set({ deploySpin: wrapSpin(spin) }),
     setDeployFollow: (follow) => set({ deployFollow: follow }),
+    // Linked, it is the author's object as they publish it: their size, no
+    // turns, no snap. Back to a copy, the bar's own controls apply again.
+    setDeployLink: (link) => {
+      const object = get().pending?.type === 'shard' ? (get().pending as { object?: FeedObject }).object : undefined
+      if (!object) return
+      set(link
+        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployAsk: null }
+        : { deployLink: false })
+    },
     turnDeploy: (axis) => { const t = [...get().deployTurn] as Turns; t[axis] = (t[axis] + 1) % 4; set({ deployTurn: t }) },
     resetDeployTurn: () => set({ deployTurn: [0, 0, 0] }),
     deployCeiling: () => {
@@ -597,7 +639,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom, deployLink } = get()
       if (!pending) return
       // One hide at a time. Space (or a second tap) while the key is being
       // computed and the bag sealed used to start a second deploy of the same
@@ -639,8 +681,12 @@ export const useShards = create<ShardsState>((set, get) => {
       let shard: ShardModel | undefined
       let text: string | undefined
       let innerTemplate
+      // From the Shard Feed: the author's object, by reference (LIVE LINK) or
+      // as a copy that credits it (DECK-0003 §3.2; ruling B1).
+      const object = pending.type === 'shard' ? pending.object : undefined
+      const link = !!object && deployLink
       if (pending.type === 'shard') {
-        const model = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+        const model = object ? object.shard : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
         // An object of parts alone is an object (DECK-0003 §1.9 rule 13).
         if (!model || (model.vertices.length === 0 && (model.parts?.length ?? 0) === 0)) return
         // The deploy carries its own size. A unit the deploy bar changed makes
@@ -654,7 +700,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // The TURN row turns this copy by quarter turns (lib/turn.ts); the
         // workshop's model is never touched.
         const turned = turnShard(model, deployTurn)
-        shard = turned === model && model.unit === deployUnit && model.up === up && model.spin === spin
+        // Linked, it is drawn from the author's event as they publish it:
+        // nothing of this deploy's size or pose can travel with a reference.
+        shard = link || (turned === model && model.unit === deployUnit && model.up === up && model.spin === spin)
           ? model
           : { ...turned, unit: deployUnit, up, spin }
         // The same round trip every reader makes, before the seal: an item the
@@ -665,7 +713,10 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployStatus: 'error', deployError: refusal })
           return
         }
-        innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
+        // A copy names what it copies: a feed object its author's address, a
+        // remixed model the original it was remixed from (sno-core creditTags).
+        const credit: Credit | undefined = object ? { address: object.address, relay: object.seen?.[0] } : creditOf(model)
+        innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
       } else {
         text = pending.text.trim()
         if (!text) return
@@ -692,7 +743,12 @@ export const useShards = create<ShardsState>((set, get) => {
         // published bag never names something the relay does not have.
         let inner: NostrEvent
         let ref: Reference | undefined
-        if (pending.type === 'shard' && shard && wantsReference(shard)) {
+        if (link && object) {
+          // LIVE LINK: the bag names the author's own object, signed by them;
+          // nothing new is signed or published for the item.
+          inner = object.event as NostrEvent
+          ref = referenceTo(inner, at, plane, object.seen?.[0] ?? relaySet()[0] ?? '')
+        } else if (pending.type === 'shard' && shard && wantsReference(shard)) {
           inner = await cs.signEvent(await objectTemplate(shard, rk.key, placementId(), createdAt))
           if (live) {
             const sent = await publishMany(relaySet(), inner)
@@ -720,7 +776,8 @@ export const useShards = create<ShardsState>((set, get) => {
         } catch (err) {
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
-          if (ref && live) await retractObject(inner).catch(() => undefined)
+          // Only an object this deploy published; never the author's, for a LIVE LINK.
+          if (ref && live && !link) await retractObject(inner).catch(() => undefined)
           throw err
         }
 
@@ -974,7 +1031,7 @@ export const useShards = create<ShardsState>((set, get) => {
     pendingShard: () => {
       const { pending } = get()
       if (pending?.type !== 'shard') return null
-      return useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
+      return pending.object?.shard ?? useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
     },
 
     worldItems: () => {

@@ -33,6 +33,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import type { Position } from './space'
@@ -209,12 +210,14 @@ export function shardRefusal(shard: ShardModel): string | null {
 }
 
 /** The inner shard event template (kind 3330), signed by the author. */
-export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number): EventTemplate {
+export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number, credit?: Credit): EventTemplate {
   return {
     kind: SHARD_KIND,
     created_at: createdAt,
     content: JSON.stringify(toPayload(shard)),
-    tags: [['C', positionHex(at, plane)]],
+    // A copy of someone else's object credits it (sno-core creditTags). The
+    // item is sealed in the bag, so the credit is as private as the item.
+    tags: [['C', positionHex(at, plane)], ...(credit ? creditTags(credit) : [])],
   }
 }
 
@@ -475,9 +478,17 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     const [kind, pubkey, ...rest] = ref[1].split(':')
     if (String(target.kind) !== kind || target.pubkey !== pubkey || tag(target, 'd') !== rest.join(':')) return null
   }
+  // Sealed to this place (DECK-0003 §3.4), or another author's public object
+  // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
+  // payload is its content as published.
   const enc = target.tags.find((t) => t[0] === 'encrypted')
-  if (!enc || enc[1] !== ALGO || !enc[2]) return null
-  const plain = await decryptForRegion(regionKey, enc[2])
+  let plain: string | null
+  if (enc) {
+    if (enc[1] !== ALGO || !enc[2]) return null
+    plain = await decryptForRegion(regionKey, enc[2])
+  } else {
+    plain = target.kind === OBJECT_KIND ? target.content : null
+  }
   if (plain === null) return null
 
   const { x, y, z, plane } = coordHex ? coordToXyz(hexToCoord(coordHex)) : { ...origin!.at, plane: origin!.plane }

@@ -17,6 +17,7 @@ import type { MyDeployment } from '../store/useShards'
 import { useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
 import { messagePreview } from '../lib/hidden'
+import type { FeedObject } from 'sno-core/feed'
 
 export interface Bag {
   lookupId: string
@@ -70,6 +71,8 @@ interface StashModals {
   bag: string | null
   /** The Builder's HIDE MESSAGE composer. */
   message: boolean
+  /** The SHARD FEED window: everyone's published objects, outside the Builder. */
+  feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
   returnToModels: boolean
   openModels: () => void
@@ -77,9 +80,13 @@ interface StashModals {
   openBag: (lookupId: string) => void
   /** Write a message to hide at the build cursor. */
   openMessage: () => void
+  /** Browse the Shard Feed. */
+  openFeed: () => void
   close: () => void
   /** Start deploying a model from the Models modal. */
   deployModel: (id: string) => void
+  /** Line up an object from the Shard Feed at the build cursor, as a copy. */
+  deployObject: (object: FeedObject) => void
 }
 
 export const useStash = create<StashModals>((set) => ({
@@ -87,15 +94,21 @@ export const useStash = create<StashModals>((set) => ({
   bags: false,
   bag: null,
   message: false,
+  feed: false,
   returnToModels: false,
-  openModels: () => set({ models: true, bags: false, bag: null, message: false }),
-  openBags: () => set({ bags: true, models: false, bag: null, message: false }),
-  openBag: (lookupId) => set({ bag: lookupId, models: false, message: false }),
-  openMessage: () => set({ message: true, models: false, bags: false, bag: null }),
-  close: () => set({ models: false, bags: false, bag: null, message: false }),
+  openModels: () => set({ models: true, bags: false, bag: null, message: false, feed: false }),
+  openBags: () => set({ bags: true, models: false, bag: null, message: false, feed: false }),
+  openBag: (lookupId) => set({ bag: lookupId, models: false, message: false, feed: false }),
+  openMessage: () => set({ message: true, models: false, bags: false, bag: null, feed: false }),
+  openFeed: () => set({ feed: true, models: false, bags: false, bag: null, message: false }),
+  close: () => set({ models: false, bags: false, bag: null, message: false, feed: false }),
   deployModel: (id) => {
     set({ models: false, returnToModels: true })
     useShards.getState().startDeployShard(id)
+  },
+  deployObject: (object) => {
+    set({ models: false, returnToModels: true })
+    useShards.getState().startDeployObject(object)
   },
 }))
 

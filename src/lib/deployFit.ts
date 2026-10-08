@@ -10,7 +10,8 @@
  * that radius covers the model in every orientation, so a quarter turn or
  * standing it on Earth can never push it out of the region. The deploy point
  * depends on the height (space.ts deployPoint centres it in the cursor's cell
- * at that height), so each height is tried in turn.
+ * at that height, and in the build STEP's cell), so each height is tried in
+ * turn.
  *
  * Placed objects (parts) are counted at their anchor points only: their own
  * geometry is another event, not at hand here.
@@ -57,10 +58,10 @@ export function fitsAt(p: Position, r: bigint, h: number): boolean {
  * The smallest height from `min` to `max` at which the whole model fits in the
  * region around where it would be hidden; `null` when none does.
  */
-export function fitHeight(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number, cursor: Position, scaleExp: number, min: number, max: number): number | null {
+export function fitHeight(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number, cursor: Position, step: number, min: number, max: number): number | null {
   const r = reachGibsons(shard, unit)
   for (let h = Math.max(0, min); h <= max; h++) {
-    if (fitsAt(deployPoint(cursor, scaleExp, h), r, h)) return h
+    if (fitsAt(deployPoint(cursor, step, h), r, h)) return h
   }
   return null
 }

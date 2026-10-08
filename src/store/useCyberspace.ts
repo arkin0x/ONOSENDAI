@@ -149,6 +149,7 @@ import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary }
 import { computeEnterProof } from '../lib/hyperspace/enter'
 import { addRecentView } from '../lib/viewAt'
 import { endOfChainLabel } from '../lib/chainBreak'
+import { buildStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
@@ -614,6 +615,16 @@ export interface CyberspaceState {
   /** The plane the chain head is actually in. */
   headPlane: Plane
   scaleExp: number
+  /**
+   * The build STEP: how far each move steps the build cursor while a deploy is
+   * lined up, and the cell the placement snaps to, as an exponent finer than
+   * the zoom (arkinox, 2026-10-08). Null is the zoom itself, which is where
+   * every deploy starts, so nothing changes until STEP is touched. Read it
+   * through buildStepOf (lib/buildCursor.ts), which keeps it at or under the
+   * zoom; zooming in to it or below puts it back on the zoom. Cleared when the
+   * deploy ends (useShards).
+   */
+  buildStep: number | null
   /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
   viewHistory: Quaternion[]
@@ -682,6 +693,8 @@ export interface CyberspaceState {
   anchorPlane: Plane
 
   moveCursor: (dir: AxisDirection) => void
+  /** Set the build STEP; at or above the zoom it goes back to following the zoom (null). */
+  setBuildStep: (step: number | null) => void
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
   /** Whether COMMIT runs one step of the route or all of them in order. */
@@ -1975,6 +1988,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   spentMsats: loadSpent(initial.genesisId),
   respawns: loadRespawns(pubkeyHex),
   scaleExp: 0,
+  buildStep: null,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
   // is defined against it, so it is what a first look should agree with; the
@@ -1992,9 +2006,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   loginError: null,
 
   moveCursor: (dir) => {
-    const { cursor, scaleExp } = get()
+    const { cursor } = get()
     if (!get().canDrive()) return
-    const step = stepFor(scaleExp) * BigInt(dir.dir)
+    // One cell of the zoom, or one build STEP while a deploy is lined up.
+    const step = stepFor(buildStepOf(get())) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
     next[dir.axis] = clampAxis(cursor[dir.axis] + step)
@@ -2003,6 +2018,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (next[dir.axis] === cursor[dir.axis]) return
     set({ cursor: next })
     rideView(next)
+  },
+
+  setBuildStep: (step) => {
+    const next = step === null || step >= get().scaleExp ? null : Math.max(0, Math.round(step))
+    if (next !== get().buildStep) set({ buildStep: next })
   },
 
   setCursorAtCell: (row, col) => {
@@ -2336,7 +2356,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   adjustScale: (delta) => {
     const next = Math.max(0, Math.min(MAX_SCALE_EXP, get().scaleExp + delta))
     if (next === get().scaleExp) return
-    set({ scaleExp: next })
+    // The build STEP never exceeds the zoom: zooming in to it or past it puts
+    // it back on the zoom, and it follows from there.
+    const step = get().buildStep
+    set(step !== null && step >= next ? { scaleExp: next, buildStep: null } : { scaleExp: next })
   },
 
   rotate: (dir) => {

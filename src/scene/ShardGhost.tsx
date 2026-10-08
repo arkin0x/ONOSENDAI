@@ -15,8 +15,9 @@
  * (lib/pose.ts).
  *
  * The position follows the same rule. A deploy hides the item at
- * deployPoint, the centre of the cursor's cell at the zoom you build in (or
- * of the region, when the bag is smaller than a cell), and WorldShards and
+ * deployPoint, the centre of the cursor's cell at the zoom you build in, or
+ * at the finer build STEP when one is set (or of the region, when the bag is
+ * smaller than that cell), and WorldShards and
  * WorldMessages draw a hidden item at its true place (itemCentre). The ghost
  * is drawn at itemCentre of that same deployPoint and sealed by the one
  * regionBox both use, so it is exactly what lands, centred in the cursor
@@ -35,7 +36,7 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import { Group } from 'three'
 import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
-import { buildPlane } from '../lib/buildCursor'
+import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -69,7 +70,9 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // is what lands.
   const cursor = useCyberspace((s) => s.cursor)
   const deployHeight = useShards((s) => s.deployHeight)
-  const at = useMemo(() => deployPoint(cursor, scaleExp, deployHeight), [cursor, scaleExp, deployHeight])
+  // The cell it snaps to is the build STEP's, the zoom's unless a finer one is set.
+  const step = useCyberspace(buildStepOf)
+  const at = useMemo(() => deployPoint(cursor, step, deployHeight), [cursor, step, deployHeight])
   const clip = useMemo(() => (shard ? regionBox(at, deployHeight, unit, axes) : undefined), [shard, at, deployHeight, unit, axes])
 
   // Standing on the ground where it lands, if that is what is being deployed.
@@ -92,7 +95,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // from the stores each frame like the cursor cube, not from a React commit.
   const landingAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    const p = deployPoint(st.cursor, st.scaleExp, useShards.getState().deployHeight)
+    const p = deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
     return itemCentre(p, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 

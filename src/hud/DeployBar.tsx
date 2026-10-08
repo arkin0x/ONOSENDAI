@@ -53,7 +53,8 @@ import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
-import { buildPlane } from '../lib/buildCursor'
+import { buildPlane, buildStepOf } from '../lib/buildCursor'
+import { stepBuild } from '../store/buildStep'
 import { Field, Switch } from './ui/Switch'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
@@ -92,7 +93,7 @@ export function DeployBar(): JSX.Element | null {
   const mine = useShards((s) => s.mine)
   // The region the deploy would land in, as a string, so the bar re-renders
   // when the cursor crosses into another region and not on every step.
-  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, s.scaleExp, height), buildPlane(s), height))
+  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, buildStepOf(s), height), buildPlane(s), height))
   const existing = useMemo(() => ownBagIn(mine, region), [mine, region])
   // Hooks stay above the early return below. The controls take this region's
   // bag settings when the cursor's region changes (seedDeployBag decides).
@@ -116,7 +117,10 @@ export function DeployBar(): JSX.Element | null {
   const heightAuto = useShards((s) => s.deployHeightAuto)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const fitH = useMemo(() => (shard ? fitHeight(shard, unit, cursor, scaleExp, 0, ceiling) : null), [shard, unit, cursor, scaleExp, ceiling])
+  // The build STEP: how far a move steps and the cell the placement snaps to
+  // (store/buildStep.ts), the zoom until it is lowered.
+  const step = useCyberspace(buildStepOf)
+  const fitH = useMemo(() => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : null), [shard, unit, cursor, step, ceiling])
   useEffect(() => {
     if (!heightAuto || !shard) return
     const want = fitH ?? ceiling
@@ -176,6 +180,17 @@ export function DeployBar(): JSX.Element | null {
       {/* Everything between the title and the button scrolls inside the bar,
           which a phone caps at a quarter of the screen (styles.css). */}
       <div className="deploybar__body">
+
+      {/* STEP: finer placement than the zoom, with the camera left where it
+          is (arkinox, 2026-10-08). The small white box in the cube is the
+          cell it snaps to. Comma and period on a keyboard. */}
+      <div className="deploybar__row deploybar__row--step">
+        <span className="deploybar__label">STEP</span>
+        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
+        <span className="deploybar__value">2^{step}</span>
+        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
+        <span className="deploybar__radius">{formatCellSize(step)}</span>
+      </div>
 
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while

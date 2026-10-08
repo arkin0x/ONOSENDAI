@@ -35,7 +35,7 @@ import { clock, describeDuration, expectedTries, minedIn, serializeEvent, triesP
 import { minerCount } from '../lib/avatarWorker'
 import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
-import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
@@ -160,6 +160,8 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
   useEffect(() => { if (clip === null) setAsking(false) }, [clip])
   if (inHand === 0 && clip === null && verts === 0) return null
   const held = clip ? [clip.points.length ? `${clip.points.length} point${clip.points.length === 1 ? '' : 's'}` : '', clip.parts.length ? `${clip.parts.length} object${clip.parts.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ') : ''
+  // Read at tap time, as Bench reads it for OBJECT: a paste never makes this shard place itself.
+  const self = (): string | undefined => ownAddress(useCyberspace.getState().identity.pubkey, w().currentId)
   return (
     <div className="benchclip" role="group" aria-label="Clipboard">
       {verts > 0 && (
@@ -203,8 +205,8 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
           {/* Anywhere else puts the question away and pastes nothing. */}
           <div className="benchpaste__away" onPointerDown={() => setAsking(false)} />
           <div className="benchpaste" role="menu" aria-label="Where to paste">
-            <button className="workshop__btn" role="menuitem" title="Back on the exact points they were taken from" onClick={() => { setAsking(false); w().pasteClip('exact') }}>PASTE</button>
-            <button className="workshop__btn" role="menuitem" title="Resting on the plane you are working on, keeping its shape" onClick={() => { setAsking(false); w().pasteClip('floor') }}>PASTE FLOOR</button>
+            <button className="workshop__btn" role="menuitem" title="Back on the exact points they were taken from" onClick={() => { setAsking(false); w().pasteClip('exact', self()) }}>PASTE</button>
+            <button className="workshop__btn" role="menuitem" title="Resting on the plane you are working on, keeping its shape" onClick={() => { setAsking(false); w().pasteClip('floor', self()) }}>PASTE FLOOR</button>
             <button className="workshop__btn workshop__btn--danger" role="menuitem" title={`Let the ${held} go; PASTE goes with them`} onClick={() => { setAsking(false); w().clearClip() }}>CLEAR CLIPBOARD</button>
           </div>
         </>
@@ -444,14 +446,18 @@ export function Workshop(): JSX.Element | null {
    * did nothing and said nothing. The check is explicit now, and the avatar's
    * COPY goes through here too, where it used to reach for
    * navigator.clipboard with no guard and throw.
+   *
+   * It fills the bench's own clipboard first, so the PASTE beside the tools
+   * puts the whole shard down in any shard (arkinox, 2026-10-08), and that
+   * works even where the system clipboard does not.
    */
   const copyShard = (s: ShardModel, ok: string): void => {
-    if (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
+    if (!w().copyShard(s)) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
     const clip = navigator.clipboard
-    if (!clip) { say('The clipboard is not available here.'); return }
+    if (!clip) return
     void clip.writeText(JSON.stringify(toPayload(s))).then(
       () => say(ok),
-      () => say('The clipboard refused that.'),
+      () => say(`Copied "${s.name}" for PASTE here. The system clipboard refused it.`),
     )
   }
 

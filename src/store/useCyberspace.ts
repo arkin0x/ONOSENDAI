@@ -21,7 +21,7 @@ import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
-import { generateSecretKey } from 'nostr-tools/pure'
+import { generateSecretKey, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec } from '../lib/keyExport'
 import {
@@ -984,14 +984,20 @@ function loadChain(pubkey: string): PersistedChain | null {
     if (!raw) return null
     const data = JSON.parse(raw) as Partial<PersistedChain>
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
-    // Must reassemble to exactly what was stored, from our own key. Anything
+    // Only authentic events, even from our own storage (spec §8.2, §8.7.3,
+    // Q4): one whose id or signature does not verify never existed. A
+    // branch through it is cut off, and the chain continues from the event
+    // before it, so what is kept is the stretch that still reassembles.
+    const authentic = data.events.filter((e) => e && e.pubkey === pubkey && verifyEvent(e as unknown as VerifiedEvent))
+    const resolved = buildChain(authentic, pubkey)
+    const events = authentic.length === data.events.length ? authentic : authentic.filter((e) => resolved.some((a) => a.id === e.id))
+    // Must reassemble to exactly what was kept, from our own key. Anything
     // else is a chain that cannot be continued, and pretending otherwise would
     // sign hops onto a history the relay will reject.
-    const chain = buildChain(data.events, pubkey)
-    if (chain.length !== data.events.length || chain[0].pubkey !== pubkey) return null
+    if (resolved.length === 0 || resolved.length !== events.length || resolved[0].pubkey !== pubkey) return null
     return {
       version: 2,
-      events: data.events,
+      events,
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
       held: data.held === true,
@@ -1113,8 +1119,9 @@ async function signEvent(template: EventTemplate, patienceMs?: number): Promise<
   const signer = currentSigner
   if (signer.kind === 'local') return signer.signEvent(template)
   pendingSigns++
+  let signed: NostrEvent
   try {
-    return await signWithin(signer, template, patienceMs)
+    signed = await signWithin(signer, template, patienceMs)
   } catch (err) {
     // A timeout, or a publish that gave up ("All promises were rejected"):
     // either way the signer's sockets are presumed dead. Drop them and ask
@@ -1122,10 +1129,16 @@ async function signEvent(template: EventTemplate, patienceMs?: number): Promise<
     if (!signer.reconnect) throw err
     const fresh = await signer.reconnect()
     if (currentSigner === signer) currentSigner = fresh
-    return await signWithin(fresh, template, patienceMs)
+    signed = await signWithin(fresh, template, patienceMs)
   } finally {
     pendingSigns--
   }
+  // A remote signer's answer is checked before anything holds it (spec
+  // §8.2, §8.7.3, Q4): an event whose id or signature does not verify is
+  // not authentic, so it never goes onto a chain, here or on a relay. The
+  // local signer computes both itself; an extension or bunker is trusted to.
+  if (!verifyEvent(signed as unknown as VerifiedEvent)) throw new Error('The signer returned an event whose signature does not verify, so it was not used.')
+  return signed
 }
 
 /**

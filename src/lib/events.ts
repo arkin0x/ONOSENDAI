@@ -30,12 +30,16 @@ import { CLIENT_NAME } from './client'
 export const ACTION_KIND = 3333
 
 /**
- * The chain rules this client implements (spec §8.12), with arkinox's
- * rulings of 2026-10-07 folded in: no zero-length ride, a virtual bracket
- * opaque to the base protocol, and sector tags that must agree with the
- * coordinate. A rule this revision introduced is marked on the break
- * (`breakSince`), because a chain made before the rule took effect was valid
- * when it was made, and the person whose chain it is deserves to be told so.
+ * The chain rules this client implements (spec §8.12), as the spec states
+ * them at commit 912f3d7 (spec PR #46, merged 2026-10-08), which wrote
+ * arkinox's rulings of 2026-10-07 and his clarifications of 2026-10-08 into
+ * this revision: no zero-length ride, a virtual bracket opaque to the base
+ * protocol, exactly one A tag on every event, and sector tags that must
+ * agree with the coordinate, each carried exactly once. Every spec section
+ * cited in this file is numbered as of that commit. A rule this revision
+ * introduced is marked on the break (`breakSince`), because a chain made
+ * before the rule took effect was valid when it was made, and the person
+ * whose chain it is deserves to be told so.
  */
 export const CHAIN_RULES_REVISION = '2026-09-28-virtual-brackets'
 
@@ -49,8 +53,13 @@ export interface RuleChange {
   revision: string
   /** The day it took effect, as the notice says it: the spec merge or arkinox's ruling. */
   since: string
-  /** How it took effect: spec PR #44 merging, or arkinox's ruling of that day (spec errata pending). */
-  by: 'spec-44' | 'ruling'
+  /**
+   * How it took effect. `spec-44`: spec PR #44 merging. `ruling`: arkinox's
+   * ruling of that day, in effect from the ruling, and written into the spec
+   * by PR #46 on 2026-10-08. `spec-46`: spec PR #46 merging, for the
+   * clarifications arkinox gave on 2026-10-08 while it was open.
+   */
+  by: 'spec-44' | 'ruling' | 'spec-46'
   /** Unix seconds when it took effect. */
   effectiveAt: number
   /** `rule`: a new chain rule. `validation`: a check the rules gained on what was already there. */
@@ -63,17 +72,33 @@ export const BRACKET_RULES: RuleChange = {
 }
 
 /**
- * arkinox's rulings of 2026-10-07: no zero-length ride (Q1) and an
- * enter-virtual that does not move (Q2). In effect from the start of that day
- * in arkinox's time zone (00:00 at UTC-5), so nothing signed on the day the
- * rule was made is told it was valid when signed.
+ * arkinox's rulings of 2026-10-07: no zero-length ride (Q1, DECK-0001 §5.6)
+ * and an enter-virtual that does not move (Q2, spec §8.11.1). They took
+ * effect when he made them, from the start of that day in his time zone
+ * (00:00 at UTC-5), so nothing signed on the day a rule was made is told it
+ * was valid when signed. Spec PR #46 wrote them into the spec the next day
+ * without moving that date: the spec's own revision table says they were
+ * folded in on 2026-10-07 (spec §8.12).
  */
 export const RULINGS_2026_10_07: RuleChange = {
   revision: CHAIN_RULES_REVISION, since: '2026-10-07', by: 'ruling', effectiveAt: Date.parse('2026-10-07T05:00:00Z') / 1000, kind: 'rule',
 }
 
-/** Sector tags must be present and agree with the coordinate (arkinox, 2026-10-07, Q9): validation the rules gained. */
+/** Sector tags must be present and agree with the coordinate (Q9, spec §10): validation the rules gained by the 2026-10-07 ruling. */
 export const SECTOR_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'validation' }
+
+/** Exactly one A tag on every event of a chain (Q5, spec §8.8): validation the rules gained by the 2026-10-07 ruling. */
+export const ONE_A_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'validation' }
+
+/**
+ * Each sector tag exactly once (spec §10): one of arkinox's clarifications of
+ * 2026-10-08, which took effect when spec PR #46 merged at
+ * 2026-10-08T04:04:00Z. Before that nothing said a second copy of a sector
+ * tag broke anything, so an event signed earlier is owed the apology.
+ */
+export const DUPLICATE_SECTOR_RULE: RuleChange = {
+  revision: CHAIN_RULES_REVISION, since: '2026-10-08', by: 'spec-46', effectiveAt: Date.parse('2026-10-08T04:04:00Z') / 1000, kind: 'validation',
+}
 
 /**
  * When ONOSENDAI stopped signing the plane-bit boarding: PR #225 merged,
@@ -122,7 +147,7 @@ export type ActionType = RecognizedAction | 'other'
  * | virtual | any other name inside a bracket: the game's own move | no |
  * | exit | exit-virtual closing the open bracket | back to the held position |
  * | skipped | a name this client does not recognize, outside a bracket | no: position is carried across |
- * | broken | a recognized name out of place or malformed: a base action inside a bracket (rule 3), an exit with no bracket or the wrong entry (rule 6) | no |
+ * | broken | a recognized name out of place or malformed: a base action inside a bracket (rule 3), an exit with no bracket or the wrong entry (rule 6); or any event with no `A` tag (§8.8) | no |
  *
  * A broken event is a point where a verifier says the chain stops being
  * valid. This client is a viewer and not a verifier (parseAction), so it
@@ -140,8 +165,10 @@ export type ActionType = RecognizedAction | 'other'
  * keeps its role and carries `breaks` like every broken event: an action
  * whose `c` is not where the chain stood (spec §8.9 rule 2, §8.11.5), an
  * enter-virtual whose `C` is not its own `c` (entering does not move you),
- * and a zero-length ride, whose destination block is the block it started
- * from (abolished, arkinox 2026-10-07, Q1).
+ * a zero-length ride, whose destination block is the block it started
+ * from (abolished, arkinox 2026-10-07, Q1), an event with two or more `A`
+ * tags (§8.8), wherever it stands, and a base action whose sector tags are
+ * missing, doubled or wrong (§10).
  *
  * An invalid chain stands at its last valid position (arkinox, 2026-10-07,
  * Q3): from the first event that breaks a rule on, every entry's position is
@@ -271,8 +298,16 @@ export interface ActionEvent {
 
 const HEX_64 = /^[0-9a-f]{64}$/
 
-/** The names a bracket may not contain (§8.11.4 rule 3): every base and DECK-0001 action but spawn, which is a respawn wherever it appears. */
-const BASE_INSIDE_BRACKET: ReadonlySet<string> = new Set(['hop', 'sidestep', 'enter-hyperspace', 'hyperjump', 'enter-virtual'])
+/**
+ * The names a bracket may not contain (spec §8.11.4 rule 3): every action of
+ * the base protocol and of a mandatory DECK that this client implements
+ * (Q8: rule 3 names a category, not a list), which at this revision are
+ * hop, sidestep, enter-hyperspace, hyperjump and enter-virtual. Spawn is
+ * left out because it is a respawn wherever it appears, and exit-virtual
+ * because it closes the bracket (rule 6). Drawn from RECOGNIZED_ACTIONS, so
+ * a mandatory DECK added there is reserved inside games at once.
+ */
+const BASE_INSIDE_BRACKET: ReadonlySet<string> = new Set(RECOGNIZED_ACTIONS.filter((n) => n !== 'spawn' && n !== 'exit-virtual'))
 
 function isRecognized(name: string): name is RecognizedAction {
   return (RECOGNIZED_ACTIONS as readonly string[]).includes(name)
@@ -504,8 +539,37 @@ export function hexToBytes(hex: string): Uint8Array {
   return out
 }
 
+/** The first tag of that name's value. A rule that needs a tag exactly once also asks tagCount. */
 function tag(ev: NostrEvent, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
+}
+
+/** How many tags of that name an event carries. */
+function tagCount(ev: NostrEvent, name: string): number {
+  let n = 0
+  for (const t of ev.tags) if (t[0] === name) n++
+  return n
+}
+
+/** Whether an event carries `["A", "spawn"]`, which makes it a spawn (spec §8.7.3 rule 1), whatever else it carries. */
+function carriesSpawn(ev: NostrEvent): boolean {
+  return ev.tags.some((t) => t[0] === 'A' && t[1] === 'spawn')
+}
+
+/** "two", "three": how many, in words, up to five. */
+const countWord = (n: number): string => ['no', 'one', 'two', 'three', 'four', 'five'][n] ?? String(n)
+
+/**
+ * Why an event breaks the one-A-tag rule, or null when it carries exactly one
+ * (Q5, spec §8.8). Asked of every event on a chain: base actions, skipped
+ * actions (§8.9), and every event inside a bracket (§8.11.4 rule 4).
+ */
+function aTagsWrong(ev: NostrEvent): string | null {
+  const names = ev.tags.filter((t) => t[0] === 'A').map((t) => t[1] ?? '')
+  if (names.length === 1) return null
+  if (names.length === 0) return 'an event on your chain with no A tag, so it names no action at all. Every event on a chain has to carry exactly one A tag, the name of what it does (spec §8.8)'
+  const said = names.map((n) => (n.length > 20 ? `${n.slice(0, 20)}…` : n)).join(', ')
+  return `an event carrying ${countWord(names.length)} A tags (${said}). Every event on a chain has to carry exactly one A tag, even when the copies agree, so that every reader agrees on what it does (spec §8.8)`
 }
 
 function marked(ev: NostrEvent, marker: string): string | undefined {
@@ -643,7 +707,7 @@ export interface ActionLink {
   id: string
   pubkey: string
   createdAt: number
-  /** The `A` tag as written. */
+  /** The `A` tag as written: the first when there are several, and empty when there is none (both break the chain, §8.8). */
   name: string
   genesisId: string
   previousId: string
@@ -653,12 +717,18 @@ export interface ActionLink {
  * The links of an event, recognized or not: what buildChain needs to follow
  * a chain through an action it cannot read (spec §8.9 rule 1). Null for
  * another kind, a spawn (which names no previous event, wherever it is
- * published), an event with no `A` tag, and one without both `e` links.
+ * published), and one without both `e` links.
+ *
+ * An event with no `A` tag, or with several, still has its links read:
+ * resolution chooses the chain by links, `created_at` and ids alone, before
+ * any tag is checked (spec §8.7.3, Validity and position), so such an event
+ * can continue a chain or win a fork, and it is then where the chain stops
+ * being valid (§8.8), not a gap the chain quietly ends at.
  */
 export function actionLink(ev: NostrEvent): ActionLink | null {
   if (ev.kind !== ACTION_KIND) return null
-  const name = tag(ev, 'A')
-  if (!name || name === 'spawn') return null
+  if (carriesSpawn(ev)) return null
+  const name = tag(ev, 'A') ?? ''
   const genesisId = marked(ev, 'genesis')
   const previousId = marked(ev, 'previous')
   if (!genesisId || !HEX_64.test(genesisId)) return null
@@ -674,8 +744,9 @@ function newer(a: { createdAt: number; id: string }, b: { createdAt: number; id:
 
 /**
  * The newest spawn among `events` (§8.7.3 rule 1), valid or not: every
- * kind:3333 event whose `A` tag says spawn, newest first, ties to the
- * larger id (NIP-01). An invalid newest spawn still wins, and there is no
+ * kind:3333 event carrying `["A", "spawn"]`, even beside another `A` tag
+ * (which then makes it invalid, §8.8), newest first, ties to the larger id
+ * (NIP-01). An invalid newest spawn still wins, and there is no
  * fallback to an older one (arkinox, 2026-10-07, Q7): its chain is dead from
  * the spawn, and buildChain says so rather than quietly reading an older
  * chain the identity has already left. `pubkey`, when given, is whose
@@ -684,7 +755,7 @@ function newer(a: { createdAt: number; id: string }, b: { createdAt: number; id:
 export function newestSpawn(events: NostrEvent[], pubkey?: string): NostrEvent | null {
   let best: NostrEvent | null = null
   for (const e of events) {
-    if (e.kind !== ACTION_KIND || tag(e, 'A') !== 'spawn') continue
+    if (e.kind !== ACTION_KIND || !carriesSpawn(e)) continue
     // Only the identity's own: a relay that hands back another key's newer
     // spawn, however validly signed, does not get to end this chain.
     if (pubkey !== undefined && e.pubkey !== pubkey) continue
@@ -704,16 +775,21 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
   if (!ev) return null
   const parsed = parseAction(ev)
   const home = placeOf(ev.pubkey)
-  if (parsed && parsed.type === 'spawn') {
+  const aWrong = aTagsWrong(ev)
+  if (parsed && parsed.type === 'spawn' && !aWrong) {
     const sectors = sectorTagsWrong(ev, 'spawn', parsed.position)
     if (!sectors || !home) return parsed
-    return { ...parsed, ...home, type: 'other', role: 'broken', breaks: sectors, breakSince: SECTOR_TAG_RULE }
+    return { ...parsed, ...home, type: 'other', role: 'broken', breaks: sectors.breaks, breakSince: sectors.since }
   }
   if (!home) return null
   const C = tag(ev, 'C')
   const claimed = placeOf(C, tag(ev, 'S'))
   let breaks: string
-  if (claimed && C !== ev.pubkey) {
+  let since: RuleChange | undefined
+  if (aWrong) {
+    breaks = aWrong
+    since = ONE_A_TAG_RULE
+  } else if (claimed && C !== ev.pubkey) {
     const [said, own] = shownApart(C!, ev.pubkey)
     breaks = `a spawn whose C (${said}) is not the coordinate your public key decodes to (${own}). A spawn always places you at your own key's coordinate, never anywhere else (spec §8.3)`
   } else {
@@ -733,6 +809,7 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
     previousId: null,
     proofHash: null,
     breaks,
+    ...(since ? { breakSince: since } : {}),
   }
 }
 
@@ -765,6 +842,16 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
  * Only events by the spawn's own author are followed: a chain is one key's,
  * and an event another key signed is never part of it, whatever it names.
  * `pubkey`, when given, is whose chain to build.
+ *
+ * Every event handed in must already be authentic, a valid NIP-01 id and
+ * signature (spec §8.2, §8.7.3, Q4), because resolution never checks one:
+ * a forged event handed in would take part. The inauthentic ones are
+ * discarded where events come in, so here they never existed, and a branch
+ * through one simply ends at the event before it, which is the head:
+ * relay events by the pool on receipt (relay.ts), a stored chain when it is
+ * loaded, and a remote signer's answer when it comes back (both in
+ * store/useCyberspace.ts). Test fixtures carry no real signatures, which is
+ * why the check is not made here.
  *
  * Returns the spawn alone when nothing follows it, and nothing when there is
  * no spawn at all: a hop without a genesis is not a position.
@@ -859,23 +946,30 @@ function startsElsewhere(name: string, c: string | null, stood: string): string 
 const tailOf = (hex: string): string => `…${hex.slice(-8)}`
 
 /**
- * Why an event's sector tags break the rules, or null when they do not
- * (arkinox, 2026-10-07, Q9): X, Y, Z and S (spec §10) are required on every
- * recognized base action and must be exactly what sectorTags computes from
- * the place its C names, the real position P for an entry into a game and
- * an exit from one. Never asked of a game's own actions or of an action
- * this client does not recognize.
+ * Why an event's sector tags break the rules, and since when, or null when
+ * they do not (spec §10, §8.3 to §8.5, §8.11.1, §8.11.3, DECK-0001 §1.3):
+ * X, Y, Z and S are required on every recognized base action (Q9, ruled
+ * 2026-10-07), each exactly once (clarified 2026-10-08), and must be exactly
+ * what sectorTags computes from the place its C names, the real position P
+ * for an entry into a game and an exit from one. Never asked of a game's own
+ * actions (§8.11.4 rule 4) or of an action this client does not recognize
+ * (§8.9).
  */
-function sectorTagsWrong(ev: NostrEvent, name: string, at: Position): string | null {
+function sectorTagsWrong(ev: NostrEvent, name: string, at: Position): { breaks: string; since: RuleChange } | null {
   const want = sectorTags(at)
   const missing = want.filter(([k]) => tag(ev, k) === undefined).map(([k]) => k)
   if (missing.length > 0) {
-    return `${an(name)} without its sector tag${missing.length === 1 ? '' : 's'} ${missing.join(', ')}. Every move has to carry its X, Y, Z and S sector tags, so that relays can find it by where it is (spec §10, required per the 2026-10-07 ruling, spec errata pending)`
+    return { since: SECTOR_TAG_RULE, breaks: `${an(name)} without its sector tag${missing.length === 1 ? '' : 's'} ${missing.join(', ')}. Every move has to carry its X, Y, Z and S sector tags, so that relays can find it by where it is (spec §10, per the 2026-10-07 ruling)` }
+  }
+  const doubled = want.map(([k]) => [k, tagCount(ev, k)] as const).filter(([, n]) => n > 1)
+  if (doubled.length > 0) {
+    const said = doubled.map(([k, n]) => `${countWord(n)} ${k} tags`).join(' and ')
+    return { since: DUPLICATE_SECTOR_RULE, breaks: `${an(name)} carrying ${said}. Each sector tag has to appear exactly once, like the A tag, so that a relay asked for a sector finds the move there and nowhere else (spec §10, as clarified on 2026-10-08)` }
   }
   const wrong = want.filter(([k, v]) => tag(ev, k) !== v)
   if (wrong.length === 0) return null
   const said = wrong.map(([k, v]) => `${k} says ${tag(ev, k)} where its coordinate is in ${v}`).join('; ')
-  return `${an(name)} whose sector tags do not agree with its own coordinate: ${said}. A sector tag has to name the sector the action's C is in, so that relays can find it by where it is (spec §10, required per the 2026-10-07 ruling, spec errata pending)`
+  return { since: SECTOR_TAG_RULE, breaks: `${an(name)} whose sector tags do not agree with its own coordinate: ${said}. A sector tag has to name the sector the action's C is in, so that relays can find it by where it is (spec §10, per the 2026-10-07 ruling)` }
 }
 
 /** Whether two coordinates name the same x, y and z in different planes. */
@@ -889,18 +983,35 @@ function planeBitOnly(a: string, b: string): boolean {
 const BRACKET_RULE = { breakSince: BRACKET_RULES }
 const RULED_2026_10_07 = { breakSince: RULINGS_2026_10_07 }
 
-/** A recognized action as placed, broken instead when its sector tags are wrong (Q9). */
+/** A recognized action as placed, broken instead when its sector tags are missing, doubled or wrong (§10). */
 function withSectorCheck(ev: NostrEvent, a: ActionEvent, name: string): ActionEvent {
   const at = placeOf(tag(ev, 'C'))
   const wrong = at ? sectorTagsWrong(ev, name, at.position) : null
-  return wrong ? { ...a, breaks: wrong, breakSince: SECTOR_TAG_RULE } : a
+  return wrong ? { ...a, breaks: wrong.breaks, breakSince: wrong.since } : a
 }
 
 /**
  * One event's entry in the chain, given the entry before it and the bracket
  * open at that point: §8.9 for an action outside a bracket, §8.11.4 inside.
+ *
+ * The one-A-tag rule (§8.8) comes first, because it holds for every event
+ * wherever it stands: a base action, a skipped action (§8.9), a game's own
+ * move or an exit inside a bracket (§8.11.4 rule 4, §8.11.5). An event with
+ * no A tag names no action, and is broken. One with several is read by its
+ * first, so its row still says what it was trying to be and a bracket it
+ * opens still opens, and is broken for carrying the others: the reason a
+ * reader is told is the A tags, before anything else the event got wrong.
  */
 function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, open: ActionEvent | null): ActionEvent {
+  const aWrong = aTagsWrong(ev)
+  const placed = placeByName(ev, link, before, open)
+  if (!aWrong) return placed
+  const { breakBug: _bug, ...rest } = placed
+  return { ...rest, role: placed.role === 'skipped' || link.name === '' ? 'broken' : placed.role, breaks: aWrong, breakSince: ONE_A_TAG_RULE }
+}
+
+/** placeInChain for an event read by its (first) A tag. */
+function placeByName(ev: NostrEvent, link: ActionLink, before: ActionEvent, open: ActionEvent | null): ActionEvent {
   const parsed = parseAction(ev)
   const carried: Placed = { coordHex: before.coordHex, position: before.position, plane: before.plane, sector: before.sector }
   const declared = placeOf(tag(ev, 'C'), tag(ev, 'S'))
@@ -952,7 +1063,7 @@ function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, ope
     if (parsed.prevCoordHex !== before.coordHex) return { ...entry, breaks: startsElsewhere('entry into a game', parsed.prevCoordHex, before.coordHex), ...BRACKET_RULE }
     if (parsed.declared) {
       const [C, c] = shownApart(parsed.declared.coordHex, parsed.coordHex)
-      return { ...entry, breaks: `an entry into a game whose C (${C}) is not its own c (${c}). Entering a game does not move you: you stay exactly where you were, and where you start inside the game is the game's own business, carried in a tag of its own (spec §8.11.1, per the 2026-10-07 ruling, spec errata pending)`, ...RULED_2026_10_07 }
+      return { ...entry, breaks: `an entry into a game whose C (${C}) is not its own c (${c}). Entering a game does not move you: you stay exactly where you were, and where you start inside the game is the game's own business, carried in a tag of its own (spec §8.11.1, per the 2026-10-07 ruling)`, ...RULED_2026_10_07 }
     }
     return withSectorCheck(ev, entry, 'entry into a game')
   }
@@ -967,7 +1078,7 @@ function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, ope
     }
     if (parsed.type === 'hyperjump' && parsed.fromHeight === parsed.toHeight) {
       const offered = tag(ev, 'client') === CLIENT_NAME ? { breakBug: 'zero-length-offered' as const } : {}
-      return { ...parsed, breaks: `a zero-length ride: it rides from block ${parsed.fromHeight} to block ${parsed.toHeight}, the same block, so it goes nowhere. A ride must always go to a different block than the one it starts from (DECK-0001 §5.6, per the 2026-10-07 ruling, spec errata pending)`, ...RULED_2026_10_07, ...offered }
+      return { ...parsed, breaks: `a zero-length ride: it rides from block ${parsed.fromHeight} to block ${parsed.toHeight}, the same block, so it goes nowhere. A ride must always go to a different block than the one it starts from (DECK-0001 §5.6, per the 2026-10-07 ruling)`, ...RULED_2026_10_07, ...offered }
     }
     return withSectorCheck(ev, parsed, parsed.type === 'enter-hyperspace' ? 'boarding' : parsed.type)
   }
@@ -1084,7 +1195,8 @@ export function actionLabel(a: Pick<ActionEvent, 'type' | 'name' | 'role' | 'bre
     case 'exit': return 'EXIT GAME'
     case 'virtual': return `GAME · ${name.toUpperCase()}`
     case 'skipped': return `SKIPPED · ${name.toUpperCase()}`
-    case 'broken': return `BROKEN · ${name.toUpperCase()}`
+    // An event with no A tag has no name to show (§8.8).
+    case 'broken': return name ? `BROKEN · ${name.toUpperCase()}` : 'BROKEN'
     default: return a.type === 'enter-hyperspace' ? 'ENTER' : a.type.toUpperCase()
   }
 }

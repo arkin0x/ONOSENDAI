@@ -65,13 +65,13 @@ function zeroRide(when: number, extra: string[][] = []): NostrEvent[] {
 }
 
 describe('item 4: the apology is true, and says which ruling and when', () => {
-  it('a 2026-10-07 rule: apologized for before it took effect, naming the ruling and the pending errata', () => {
+  it('a 2026-10-07 rule: apologized for before it took effect, naming the ruling and the spec PR that wrote it down', () => {
     const a = buildChain([spawn, hop1, ...zeroRide(1_500)])[3]
     expect(a.breakSince).toEqual(RULINGS_2026_10_07)
-    expect(a.breaks).toMatch(/per the 2026-10-07 ruling, spec errata pending/)
+    expect(a.breaks).toMatch(/\(DECK-0001 §5\.6, per the 2026-10-07 ruling\)$/)
     const sorry = apologyFor(a)!
     expect(sorry).toMatch(/valid under the chain rules when it was signed/)
-    expect(sorry).toMatch(/took effect on 2026-10-07, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets \(the spec errata is pending\)/)
+    expect(sorry).toMatch(/took effect on 2026-10-07, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets and written into the spec by PR #46 on 2026-10-08/)
   })
 
   it('the same break signed after the rule took effect: the reason, and no apology', () => {

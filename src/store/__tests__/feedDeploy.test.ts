@@ -84,6 +84,9 @@ describe('a copy (the default)', () => {
     expect(dep.inner.kind).toBe(SHARD_KIND)
     expect(dep.inner.pubkey).toBe(useCyberspace.getState().identity.pubkey)
     expect(readCredit(dep.inner.tags)).toEqual({ address: o.address, relay: 'wss://feed.relay' })
+    // Sealed in a bag: the q only, no p (ruled 2026-10-08: a notification
+    // there would point at a hidden placement).
+    expect(dep.inner.tags.some((t) => t[0] === 'p')).toBe(false)
     expect(JSON.parse(dep.inner.content).name).toBe('Chair')
   })
 
@@ -139,7 +142,9 @@ describe('REMIX', () => {
     expect(creditOf(model)).toEqual({ address: o.address })
     useShards.getState().startDeployShard(id)
     await useShards.getState().deploy()
-    expect(readCredit(useShards.getState().mine[0].inner.tags)?.address).toBe(o.address)
+    const inner = useShards.getState().mine[0].inner
+    expect(readCredit(inner.tags)?.address).toBe(o.address)
+    expect(inner.tags.some((t) => t[0] === 'p')).toBe(false)
   })
 
   it('your own model carries no credit', async () => {

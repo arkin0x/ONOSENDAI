@@ -819,9 +819,10 @@ export interface CyberspaceState {
    * Confirm this device holds the live head now (confirmHead), for an action
    * that will take long to prepare before it is signed, such as a ride's
    * proof: refused before the work, not after it. Resolves to the words to
-   * refuse with, or null when confirmed.
+   * refuse with, null when confirmed, or STALE_CONFIRMATION when a respawn or
+   * an identity switch landed meanwhile (nothing to say then).
    */
-  confirmHeadNow: () => Promise<string | null>
+  confirmHeadNow: () => Promise<string | null | typeof STALE_CONFIRMATION>
   /** Forget the boarding locally; the next hop cancels it on the wire (§3.3). */
   cancelTransit: () => void
   addTarget: (pubkey: string, name?: string | null) => void
@@ -1344,33 +1345,56 @@ function foldOtherTabs(pubkey: string): void {
  * Confirm this device holds the identity's live head before a chain action
  * is signed (arkinox's ruling of 2026-10-08, normative in the spec): a
  * client that signs from a stale head forks the chain, and a fork ends it.
- * Another tab's saves and the canonical relay's answer are folded in first;
- * the caller then compares the head with the one it meant to extend. True
- * when confirmed. False when the canonical relay did not truly answer, after
- * HEAD_CONFIRM_TRIES asks (`retrying` runs before each ask after the first),
- * and the move is then refused rather than signed blind: offline, a slow
- * relay, or a chain the relay returned with a hole. A spawn needs none of
- * this, since nothing can follow a spawn signed a moment ago.
+ * Another tab's saves and the relays' answers are folded in first; the
+ * caller then compares the head with the one it meant to extend. Null when
+ * confirmed: the canonical relay answered, and every relay that holds this
+ * chain answered or 2.5 s passed since the requests went out; or, the
+ * canonical relay silent, another configured relay answered holding the
+ * newest event already on the relays (chains.ts confirmChainEvents, option
+ * B and the ruling on the slow-relay grace). The refusal's words when
+ * nothing counted after HEAD_CONFIRM_TRIES asks (`retrying` runs before each
+ * ask after the first), and the move is then refused rather than signed
+ * blind: offline, slow relays, or a chain returned with a hole.
+ * STALE_CONFIRMATION when a respawn or an identity switch landed meanwhile.
+ * A spawn needs none of this, since nothing can follow a spawn signed a
+ * moment ago.
  */
-async function confirmHead(retrying: () => void): Promise<string | null> {
+/**
+ * What confirmHead returns when a respawn or an identity switch landed while
+ * it waited: the action it was confirming belongs to a chain that is gone,
+ * and its caller ends without a word. It writes nothing to the panel, which
+ * belongs to whatever the new chain is doing now, and it never lifts the one
+ * proof at a time guard of a proof that started since (verification of
+ * #236, finding 5).
+ */
+export const STALE_CONFIRMATION: unique symbol = Symbol('stale confirmation')
+
+/** Bumped by a respawn and an identity switch: an older value marks a waiter from a chain that is gone. */
+let chainEpoch = 0
+
+async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
+  const epoch = chainEpoch
   // The saved chain's signatures are checked first: nothing is signed onto
   // a chain until every event of it is known to be authentic.
   const cut = await signaturesChecked(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
   if (cut) return cut
   foldOtherTabs(pubkey)
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".
   for (let i = 0; i < HEAD_CONFIRM_TRIES; i++) {
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
     if (i > 0) retrying()
     const now = useCyberspace.getState()
     if (now.identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     // Only what is new since the newest event the relays already hold, and
     // on the second ask over a fresh socket: a silent or unauthenticated one
     // is replaced, not asked again (review of #236).
-    const since = newestOnRelays(now.events, now.published)
-    const got = await confirmChainEvents(pubkey, now.genesisId || undefined, now.events, { since, reconnect: i > 0 }).catch(() => null)
+    const anchor = newestEventOnRelays(now.events, now.published)
+    const got = await confirmChainEvents(pubkey, now.genesisId || undefined, now.events, { since: anchor?.created_at, anchorId: anchor?.id, reconnect: i > 0 }).catch(() => null)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
     if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
       foldNow(got)
@@ -1389,8 +1413,18 @@ async function confirmHead(retrying: () => void): Promise<string | null> {
  * still found.
  */
 export function newestOnRelays(events: NostrEvent[], published: Record<string, PublishStatus>): number | undefined {
-  let newest: number | undefined
-  for (const e of events) if (published[e.id] === 'ok' && (newest === undefined || e.created_at > newest)) newest = e.created_at
+  return newestEventOnRelays(events, published)?.created_at
+}
+
+/**
+ * The newest event of `events` the relays already hold, itself: what a
+ * confirmation asks from (its created_at) and what an answer must hold to
+ * show the relay really holds this chain (its id; chains.ts
+ * confirmChainEvents `anchorId`).
+ */
+export function newestEventOnRelays(events: NostrEvent[], published: Record<string, PublishStatus>): NostrEvent | undefined {
+  let newest: NostrEvent | undefined
+  for (const e of events) if (published[e.id] === 'ok' && (newest === undefined || e.created_at > newest.created_at)) newest = e
   return newest
 }
 
@@ -2256,6 +2290,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   cloudStepStarter = startCloudStep
 
   const switchTo = async (signer: Signer): Promise<void> => {
+    // Whatever was waiting to sign as the old identity ends without a word.
+    chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.
     stopCloud()
     requestId++
@@ -2457,6 +2493,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
       const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      if (refusal === STALE_CONFIRMATION) return
       if (refusal) {
         set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } })
         return
@@ -2802,7 +2839,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // (arkinox, 2026-10-08): a silent feed is no proof that nothing moved,
     // since a half-open socket is silent too.
     const unconfirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
-    if (msg.id !== requestId) return
+    if (unconfirmed === STALE_CONFIRMATION || msg.id !== requestId) return
     if (unconfirmed) { refuseSigning(msg, unconfirmed, true); return }
     // The live feed kept delivering while the look was out.
     foldDeferred()
@@ -3025,8 +3062,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     const fresh = derive({ ...signed, held: keepHeld })
     // The old chain's signature check is about a chain that is gone: nothing
-    // waits on it any more (review of #242).
+    // waits on it any more (review of #242), and whatever was waiting on it,
+    // or on a look at the relays, ends without a word (STALE_CONFIRMATION).
     sigCheck = null
+    chainEpoch++
     set({
       ...fresh,
       // A choice between two versions of the old chain is about a chain
@@ -3364,6 +3403,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (whyNoMove(get().actions())) return
     // The head is confirmed before the boarding is signed (confirmHead).
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return
     if (refusal) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } }); return }
     if (get().prevEventId !== prevEventId) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: headMovedWords(get().events, 'Board again from where you are now.') } }); return }
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
@@ -3411,6 +3451,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   confirmHeadNow: async () => {
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return refusal
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     return refusal
   },
@@ -3421,6 +3462,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // ride's proof is bound to the head it started from, so a head that the
     // confirmation moved is refused below like any other.
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return
     if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     if (refusal) throw new Error(refusal)
     const { events, genesisId, prevEventId, transit } = get()

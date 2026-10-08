@@ -29,11 +29,12 @@
  */
 
 import type { Filter } from 'nostr-tools/filter'
-import { RECOGNIZED_ACTIONS, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
+import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { chainHolders, noteHoldersFrom } from './chainHolders'
 
 export { PARTIAL_CHAIN_REASON }
 
@@ -233,6 +234,9 @@ export const CHAIN_CHECK_MS = 6000
 export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
   const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
     (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
+  // Every relay that sent back one of the chain's events holds it, and a
+  // move's confirmation waits for it from now on (chainHolders.ts).
+  noteHoldersFrom(pubkey, got)
   // A hole left in the chain is not an answer to "what is this chain": the
   // self-check reads it as unknown, so a first move holds rather than
   // continuing from a head that is not the head (chainHold.ts).
@@ -241,9 +245,6 @@ export async function askChainEvents(pubkey: string, knownSpawnId?: string, have
 
 /** How long confirming a head waits for the relays, per question. */
 export const HEAD_CONFIRM_MS = 2500
-
-/** How long the other relays are given after the canonical relay answered. */
-export const HEAD_CONFIRM_GRACE_MS = 400
 
 /**
  * Your own chain from the canonical relay and every configured relay, asked
@@ -255,14 +256,37 @@ export const HEAD_CONFIRM_GRACE_MS = 400
  *
  * | Canonical relay | Other configured relays | Result |
  * |---|---|---|
- * | answered | any | the events (pass, unless they move the head) |
- * | no answer by the deadline | at least one answered | the events (degraded pass) |
- * | no answer | none answered | null (refuse) |
+ * | answered | every chain-holding relay answered, or HEAD_CONFIRM_MS passed since the requests went out | the events (pass, unless they move the head) |
+ * | no answer by the deadline | at least one answered holding `anchorId` | the events (degraded pass) |
+ * | no answer | none answered holding `anchorId`, none sent a newer move | null (refuse) |
+ * | any | one sent a newer move | the events, which the caller adopts and refuses on |
  *
- * The others are given HEAD_CONFIRM_GRACE_MS after the canonical relay
- * answers, so a slow or dead relay of the player's does not slow every
- * move; with the canonical relay silent they are waited for up to the
- * deadline. A chain the relays return with a hole is no answer.
+ * A relay other than the canonical one counts toward a degraded pass only
+ * when its answer holds `anchorId`, the event `since` was taken from, which
+ * every relay that really holds this chain returns (verification of #236,
+ * finding 1). A write-only relay, one that answers a reader it has not
+ * authenticated with nothing, or one that never stored this chain answers
+ * EOSE with nothing; counting that as "nothing newer" passed moves on an
+ * answer that could never have seen one. With no anchor (nothing of the
+ * chain is on the relays yet) any answer counts, as before.
+ *
+ * Once the canonical relay has answered, every relay that holds this
+ * identity's chain (chainHolders.ts: it took one of its events, or sent one
+ * back, now or in an earlier session) is waited for until it answers or
+ * HEAD_CONFIRM_MS (2.5 s) has passed since the question's requests went
+ * out, and no other relay is (arkinox's ruling of 2026-10-08 on the
+ * slow-relay grace). A relay of the player's that holds the chain is where
+ * another device of theirs publishes, so its newer move is found whenever
+ * its round trip fits in those 2.5 s; one that never held the chain is
+ * still asked, and a newer move it sends in time still counts, but it never
+ * slows a move. A chain-holding relay still silent after 2.5 s does not
+ * stop the pass, since the canonical relay answered: a dead one costs a
+ * move at most that. With the canonical
+ * relay silent, every relay is waited for on its own timers, as before. The
+ * relays whose answers held the chain's events are noted as holding it,
+ * those that answered after the confirmation settled too, so a relay this
+ * device had not yet seen holding the chain is waited for from the next
+ * move on. A chain the relays return with a hole is no answer.
  *
  * `since` asks the chain only for events from that second on (inclusive):
  * the caller passes the created_at of the newest event the relays already
@@ -272,33 +296,68 @@ export const HEAD_CONFIRM_GRACE_MS = 400
  * device's move from that point on carries a created_at at or after it.
  * `reconnect` drops these relays' sockets first, so a socket gone silent, or
  * one whose auth a signer refused, is replaced rather than asked again
- * (relay.ts dropRelays, as publishing does).
+ * (relay.ts dropRelays, as publishing does). A socket whose AUTH is still
+ * waiting on the signer is kept: dropping it threw the AUTH away and asked
+ * the signer a second time, and the second try rides on the first AUTH
+ * instead (verification of #236, finding 4).
  */
 export async function confirmChainEvents(
   pubkey: string,
   knownSpawnId: string | undefined,
   have: NostrEvent[],
-  opts: { since?: number; reconnect?: boolean; maxWait?: number } = {},
+  opts: { since?: number; anchorId?: string; reconnect?: boolean; maxWait?: number } = {},
 ): Promise<NostrEvent[] | null> {
   const canonical = normalizeURL(CYBERSPACE_RELAY)
   const relays = [...new Set([canonical, ...relaySet().map((r) => normalizeURL(r))])]
+  const holders = chainHolders(pubkey)
+  const waitFor = relays.filter((url) => holders.has(url))
   const maxWait = opts.maxWait ?? HEAD_CONFIRM_MS
-  if (opts.reconnect) dropRelays(relays)
-  const ask = async (): Promise<NostrEvent[] | null> => {
-    const { got, whole } = await gatherChain((f) => queryEachSettled(relays, f, maxWait, canonical, HEAD_CONFIRM_GRACE_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
-      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
-    if (!whole || !got.some((a) => a.outcome === 'answered')) return null
-    return mergeAnswers(got)
+  if (opts.reconnect) dropRelays(relays.filter((url) => !authPending(url)))
+  // One deadline over the whole attempt, armed when the first REQ is
+  // actually written rather than when this was called: a main thread busy
+  // for seconds in between (a long chain just loaded) used to spend it all
+  // before anything had been asked (verification of #236, finding 6). If
+  // nothing can be sent at all, a longer backstop still ends the wait. When
+  // it passes, every question still out settles with the answers it has.
+  const deadline = new AbortController()
+  let timer: ReturnType<typeof setTimeout> = setTimeout(() => deadline.abort(), maxWait * 4)
+  let armed = false
+  const sent = (): void => {
+    if (armed) return
+    armed = true
+    clearTimeout(timer)
+    timer = setTimeout(() => deadline.abort(), maxWait * 2 + 100)
   }
-  // One deadline over the whole attempt, connecting and authenticating
-  // included, so a move never waits on the relays longer than this.
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), maxWait * 2) })
+  const ask = async (): Promise<NostrEvent[] | null> => {
+    const { got, whole } = await gatherChain((f) => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) }), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
+    noteHoldersFrom(pubkey, got)
+    if (!whole) return null
+    const merged = mergeAnswers(got)
+    if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
+    const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
+    if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged
+    // No answer counts, but a newer move any relay sent still refuses the
+    // move: handed back, the caller adopts it and the head moves.
+    return extendsChain(merged, have) ? merged : null
+  }
   try {
-    return await Promise.race([ask().catch(() => null), late])
+    return await ask().catch(() => null)
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** Whether `events` hold a move past `have`: an action naming one of its events as previous, or a newer spawn. */
+function extendsChain(events: NostrEvent[], have: NostrEvent[]): boolean {
+  const ids = new Set(have.map((e) => e.id))
+  const spawnAt = newestSpawn(have)?.created_at ?? -Infinity
+  return events.some((e) => {
+    if (ids.has(e.id)) return false
+    const link = actionLink(e)
+    if (link) return ids.has(link.previousId)
+    return e.tags.some((t) => t[0] === 'A' && t[1] === 'spawn') && e.created_at > spawnAt
+  })
 }
 
 /** The same, assembled. */

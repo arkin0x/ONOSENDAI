@@ -37,8 +37,31 @@ let pool: AbstractSimplePool | null = null
  * (our hidden content carries the `-` tag): only the authenticated author may
  * write them.
  */
+/**
+ * Relays whose NIP-42 AUTH is waiting on the signer right now (normalized
+ * URL to how many are). A remote signer can take seconds over that, and a
+ * socket dropped meanwhile throws the AUTH away: the next socket brings a
+ * new challenge and a second prompt (verification of #236, finding 4).
+ */
+const authSigning = new Map<string, number>()
+
+/** Whether an AUTH for this relay is waiting on the signer. */
+export function authPending(url: string): boolean {
+  return authSigning.has(normalizeURL(url))
+}
+
+/** Every NIP-42 AUTH this client sends is signed here, so authPending knows what is in flight. */
 function authSign(template: EventTemplate): Promise<VerifiedEvent> {
-  return useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
+  const relayTag = template.tags.find((t) => t[0] === 'relay')?.[1]
+  const key = relayTag ? normalizeURL(relayTag) : null
+  if (key) authSigning.set(key, (authSigning.get(key) ?? 0) + 1)
+  const signed = useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
+  return signed.finally(() => {
+    if (!key) return
+    const left = (authSigning.get(key) ?? 1) - 1
+    if (left > 0) authSigning.set(key, left)
+    else authSigning.delete(key)
+  })
 }
 
 export function getPool(): AbstractSimplePool {
@@ -194,6 +217,16 @@ interface OpenSub {
   eoseTimeoutHandle?: ReturnType<typeof setTimeout>
 }
 
+/** How askOne times a question; without any, the answer is due by its deadline. */
+interface AskOptions {
+  /** The answer is due this long after the REQ is written, not by the deadline (verification of #236, finding 6). */
+  answerMs?: number
+  /** Called once the REQ is written. */
+  onSent?: () => void
+  /** Ends the question at once, as no answer in time, with whatever events came. */
+  stop?: AbortSignal
+}
+
 /**
  * Ask one relay, and say which of the three things happened (relayOutcome.ts).
  *
@@ -204,25 +237,34 @@ interface OpenSub {
  * the relay auth-gates reads and a fresh socket's first REQ can beat the
  * challenge.
  */
-async function askOne(url: string, filter: Filter, deadline: number): Promise<RelayAnswer> {
+async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
+  const { answerMs, onSent, stop } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
+  const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
+  if (stop?.aborted) return late()
   let relay: AbstractRelay
   try {
-    relay = await getPool().ensureRelay(url, { connectionTimeout: Math.max(1, remaining()) })
+    // With `answerMs` (a question timed from its REQ), a connect never gets
+    // less than a second, however late a busy main thread let it start.
+    relay = await getPool().ensureRelay(url, { connectionTimeout: Math.max(answerMs === undefined ? 1 : 1_000, remaining()) })
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err ?? '')
     return { url, outcome: 'unreachable', reason: reason || 'connection failed', events: [] }
   }
+  if (stop?.aborted) return late()
   return new Promise((resolve) => {
     const events = new Map<string, NostrEvent>()
     const got = (): NostrEvent[] => [...events.values()]
     let settled = false
     let sub: OpenSub | null = null
     let authTried = false
+    const onStop = (): void => finish(late(got()))
+    stop?.addEventListener('abort', onStop, { once: true })
     const finish = (answer: RelayAnswer): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      stop?.removeEventListener('abort', onStop)
       if (sub) {
         // close() does not clear nostr-tools' own EOSE timer; left running it
         // would hold this closure for the full ten minutes.
@@ -231,7 +273,14 @@ async function askOne(url: string, filter: Filter, deadline: number): Promise<Re
       }
       resolve(answer)
     }
-    const timer = setTimeout(() => finish({ url, outcome: 'unreachable', reason: 'no answer in time', events: got() }), remaining())
+    // How long the relay has to answer. With `answerMs` it counts from the
+    // moment the REQ is written, not from when the question was asked: a
+    // main thread busy for seconds after a long chain loads (the tab drawing
+    // it, the signatures checked) used to spend the whole budget before the
+    // request had even gone out (verification of #236, finding 6).
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const arm = (ms: number): void => { clearTimeout(timer); timer = setTimeout(() => finish(late(got())), ms) }
+    if (answerMs === undefined) arm(remaining())
     const open = (): void => {
       try {
         sub = relay.subscribe([filter], {
@@ -251,6 +300,8 @@ async function askOne(url: string, filter: Filter, deadline: number): Promise<Re
           },
           eoseTimeout: NOSTR_TOOLS_EOSE_MS,
         }) as unknown as OpenSub
+        if (answerMs !== undefined && timer === undefined) arm(answerMs)
+        onSent?.()
       } catch (err) {
         finish({ url, outcome: 'unreachable', reason: err instanceof Error ? err.message : String(err), events: got() })
       }
@@ -372,38 +423,80 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
 
 /**
  * Ask several relays at once, each on its own (its own connection, its own
- * auth, its own deadline), and settle without waiting on the slow ones: when
- * every relay has answered, or `graceMs` after `primary` answered, or at the
- * deadline, whichever comes first. A relay that has not answered by then
- * reads as unreachable ("no answer in time"). One dead or hung relay used to
- * hold every question until it gave up; here it only fails to count.
+ * auth, its own deadline), and settle as soon as the answers that matter are
+ * in: when `primary` has answered and every relay of `waitFor` has answered
+ * or given up, or `maxWait` after this question's first REQ went out with
+ * `primary` answered, or when every relay has answered, or at `stop`,
+ * whichever comes first. So once `primary` has answered, a relay of
+ * `waitFor` costs at most `maxWait` from when the requests went out, however
+ * slow its connection. The others are asked, and what they sent by then
+ * counts, but nothing waits for them. A relay that has not answered by the
+ * time this settles reads as unreachable ("no answer in time"). The others'
+ * questions are left to end on their own timers, and an answer that comes
+ * after is handed to `onLate`, so what it holds is not lost on the next
+ * question; the questions of `waitFor` are closed.
+ *
+ * With `primary` not answering, every relay is waited for on its own timers,
+ * as before: then nobody knows yet which answer will count. Without `stop`,
+ * an outer backstop still ends the wait.
  */
-export function queryEachSettled(relays: string[], filter: Filter, maxWait: number, primary: string, graceMs: number): Promise<RelayAnswer[]> {
+export function queryEachSettled(
+  relays: string[],
+  filter: Filter,
+  maxWait: number,
+  primary: string,
+  waitFor: string[],
+  opts: { onSent?: () => void; stop?: AbortSignal; onLate?: (answer: RelayAnswer) => void } = {},
+): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const main = normalizeURL(primary)
+  const held = new Set(waitFor.map((r) => normalizeURL(r)).filter((url) => urls.includes(url) && url !== main))
+  const unanswered = (url: string): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events: [] })
+  if (opts.stop?.aborted) return Promise.resolve(urls.map(unanswered))
+  // `maxWait` to connect and authenticate, then `maxWait` from the moment
+  // the REQ goes out (askOne answerMs).
   const deadline = Date.now() + maxWait
   const answers = new Map<string, RelayAnswer>()
+  // Closes the questions of `waitFor` still open once this has settled.
+  const done = new AbortController()
+  let primaryAnswered = false
+  // When this question's first REQ went out: the relays of `waitFor` are
+  // waited for until `maxWait` after it, once `primary` has answered.
+  let firstSent: number | undefined
+  const onSent = (): void => { firstSent ??= Date.now(); opts.onSent?.() }
+  let cap: ReturnType<typeof setTimeout> | undefined
   return new Promise((resolve) => {
     let settled = false
-    let grace: ReturnType<typeof setTimeout> | undefined
     const settle = (): void => {
       if (settled) return
       settled = true
       clearTimeout(backstop)
-      clearTimeout(grace)
-      resolve(urls.map((url) => answers.get(url) ?? { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }))
+      clearTimeout(cap)
+      opts.stop?.removeEventListener('abort', settle)
+      done.abort()
+      resolve(urls.map((url) => answers.get(url) ?? unanswered(url)))
     }
-    const backstop = setTimeout(settle, maxWait + 50)
+    opts.stop?.addEventListener('abort', settle, { once: true })
+    // Only an outer bound: every relay ends on its own timers (its connect,
+    // then its answer, timed from its REQ), and a busy main thread before the
+    // REQ must not spend this.
+    const backstop = setTimeout(settle, 4 * maxWait + 50)
+    const enough = (): boolean => answers.size === urls.length || (primaryAnswered && [...held].every((url) => answers.has(url)))
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
+      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal } : { answerMs: maxWait, onSent }
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
-        .then(() => askOne(url, filter, deadline))
+        .then(() => askOne(url, filter, deadline, ask))
         .then((answer) => {
+          if (settled) { opts.onLate?.(answer); return }
           answers.set(url, answer)
-          if (answers.size === urls.length) settle()
-          else if (url === main && answer.outcome === 'answered' && grace === undefined) grace = setTimeout(settle, graceMs)
+          if (url === main && answer.outcome === 'answered') {
+            primaryAnswered = true
+            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
+          }
+          if (enough()) settle()
         })
     }
   })

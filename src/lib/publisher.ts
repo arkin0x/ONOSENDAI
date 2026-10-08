@@ -58,7 +58,7 @@ let lastFailed = false
  * confirmChainEvents, arkinox's ruling of 2026-10-08, option B): the
  * canonical relay and every configured relay are asked together, and it
  * counts when the canonical relay answered (every relay that holds this
- * chain then waited for up to the deadline), or, the canonical relay
+ * chain then waited for up to 2.5 s), or, the canonical relay
  * silent, when another relay answered holding the newest event already on
  * the relays. A look nobody answered proves nothing, and a send retried a moment
  * later would go out into a fork nobody checked for. So with no answer

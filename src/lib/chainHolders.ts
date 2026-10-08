@@ -2,8 +2,9 @@
  * chainHolders.ts - the relays that hold this identity's chain.
  *
  * Confirming a head before a signature waits for every relay that holds the
- * chain, up to the confirmation's deadline, and for no other (arkinox's
- * ruling of 2026-10-08 on the slow-relay grace). A relay holds the chain once
+ * chain, for up to 2.5 s from when its requests go out (chains.ts
+ * HEAD_CONFIRM_MS), and for no other (arkinox's ruling of 2026-10-08 on the
+ * slow-relay grace). A relay holds the chain once
  * it has taken one of this identity's chain events (OK true on a publish) or
  * sent one back in a fetch, in this session or an earlier one. The canonical
  * relay always does.
@@ -12,7 +13,7 @@
  * actions still owed to the canonical relay, so a reload still knows which
  * relays another device of this identity has been publishing to. A relay is
  * never dropped from the set: one that stops answering costs a move at most
- * the confirmation's deadline, until the player takes it out of the relay
+ * those 2.5 s, until the player takes it out of the relay
  * list (only the configured relays are asked, so only they are waited for).
  */
 

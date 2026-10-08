@@ -10,8 +10,8 @@
  * move from another device, but answers in a second, cut off 400 ms after
  * the canonical relay answered, so the move is signed from a stale head and
  * forks the chain; a slow relay that never held the chain slowing every
- * move; and a chain-holding relay gone dead holding a move forever, or
- * refusing it.
+ * move; and a chain-holding relay gone dead holding a move for longer than
+ * the 2.5 s per question, or refusing it.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from 'vitest'
 /** Each relay's behavior, by normalized URL: when it answers, what it holds, or that it never answers or cannot be reached. */
 const net = vi.hoisted(() => ({
   relays: [] as string[],
-  behavior: new Map<string, { eoseMs?: number; events?: unknown[]; hung?: boolean; down?: boolean }>(),
+  behavior: new Map<string, { eoseMs?: number; events?: unknown[]; hung?: boolean; down?: boolean; connectMs?: number }>(),
 }))
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
@@ -54,6 +54,8 @@ vi.mock('nostr-tools/abstract-pool', async () => {
     relays = new Map<string, FakeRelay>()
     async ensureRelay(url: string): Promise<FakeRelay> {
       if (net.behavior.get(url)?.down) throw new Error('connection refused')
+      const connectMs = net.behavior.get(url)?.connectMs
+      if (connectMs && !this.relays.has(url)) await new Promise((r) => setTimeout(r, connectMs))
       if (!this.relays.has(url)) this.relays.set(url, new FakeRelay(url))
       return this.relays.get(url) as FakeRelay
     }
@@ -117,18 +119,33 @@ describe('waiting for the relays that hold the chain (ruling of 2026-10-08 on th
     expect(ms).toBeLessThan(300)
   })
 
-  it('a chain-holding relay gone dead (connected, never answering) delays a pass to the deadline at most', async () => {
+  it('a chain-holding relay gone dead (connected, never answering) delays a pass by the per-question wait at most, from when the requests went out', async () => {
     const c = chainFor('c3')
     const H = normalizeURL('ws://mine-hung.test')
     net.relays = [C, H]
     noteChainHolders(c.pk, [H])
     net.behavior.set(C, { eoseMs: 20, events: [c.spawn, c.hop1] })
     net.behavior.set(H, { hung: true })
-    // maxWait 300: the overall deadline is 2 x 300 + 100 = 700 ms from the first REQ.
-    const { got, ms } = await confirm(c, 300)
+    // maxWait 600 stands in for the 2.5 s: waited for until 600 ms after the
+    // REQs went out, not 400 ms after the canonical relay answered (the old
+    // grace), and not the overall 2 x 600 + 100 ms.
+    const { got, ms } = await confirm(c, 600)
     expect(got).not.toBeNull()
-    expect(ms).toBeGreaterThanOrEqual(650)
-    expect(ms).toBeLessThan(1_000)
+    expect(ms).toBeGreaterThanOrEqual(570)
+    expect(ms).toBeLessThan(800)
+  })
+
+  it('a chain-holding relay slow to connect, then silent, is still waited for only until the per-question wait after the first REQ', async () => {
+    const c = chainFor('c7')
+    const H = normalizeURL('ws://mine-cold.test')
+    net.relays = [C, H]
+    noteChainHolders(c.pk, [H])
+    net.behavior.set(C, { eoseMs: 20, events: [c.spawn, c.hop1] })
+    // Its own REQ goes out 400 ms late; its own timer would run to about 1,000 ms.
+    net.behavior.set(H, { hung: true, connectMs: 400 })
+    const { got, ms } = await confirm(c, 600)
+    expect(got).not.toBeNull()
+    expect(ms).toBeLessThan(800)
   })
 
   it('a chain-holding relay that refuses the connection costs nothing', async () => {

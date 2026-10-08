@@ -225,8 +225,6 @@ interface AskOptions {
   onSent?: () => void
   /** Ends the question at once, as no answer in time, with whatever events came. */
   stop?: AbortSignal
-  /** Asked when the answer timer runs out: true keeps waiting, until the relay answers or `stop`. */
-  keepWaiting?: () => boolean
 }
 
 /**
@@ -240,7 +238,7 @@ interface AskOptions {
  * challenge.
  */
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop, keepWaiting } = opts
+  const { answerMs, onSent, stop } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
   if (stop?.aborted) return late()
@@ -280,13 +278,8 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
     // main thread busy for seconds after a long chain loads (the tab drawing
     // it, the signatures checked) used to spend the whole budget before the
     // request had even gone out (verification of #236, finding 6).
-    // With `keepWaiting`, a timer that runs out while it says so lifts
-    // instead: the relay is then waited for until it answers or `stop`.
     let timer: ReturnType<typeof setTimeout> | undefined
-    const arm = (ms: number): void => {
-      clearTimeout(timer)
-      timer = setTimeout(() => { if (!keepWaiting?.()) finish(late(got())) }, ms)
-    }
+    const arm = (ms: number): void => { clearTimeout(timer); timer = setTimeout(() => finish(late(got())), ms) }
     if (answerMs === undefined) arm(remaining())
     const open = (): void => {
       try {
@@ -432,15 +425,16 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
  * Ask several relays at once, each on its own (its own connection, its own
  * auth, its own deadline), and settle as soon as the answers that matter are
  * in: when `primary` has answered and every relay of `waitFor` has answered
- * or given up, or when every relay has, or at `stop`, whichever comes first.
- * A relay in `waitFor` is not cut off by its own timer once `primary` has
- * answered: it is waited for until it answers or `stop` (the caller's
- * deadline). The others are asked, and what they sent by then counts, but
- * nothing waits for them. A relay that has not answered by the time this
- * settles reads as unreachable ("no answer in time"). Its question is left
- * to end on its own timer, and an answer that comes after is handed to
- * `onLate`, so what it holds is not lost on the next question; the relays
- * of `waitFor`, the only ones that can be waiting with no timer, are closed.
+ * or given up, or `maxWait` after this question's first REQ went out with
+ * `primary` answered, or when every relay has answered, or at `stop`,
+ * whichever comes first. So once `primary` has answered, a relay of
+ * `waitFor` costs at most `maxWait` from when the requests went out, however
+ * slow its connection. The others are asked, and what they sent by then
+ * counts, but nothing waits for them. A relay that has not answered by the
+ * time this settles reads as unreachable ("no answer in time"). The others'
+ * questions are left to end on their own timers, and an answer that comes
+ * after is handed to `onLate`, so what it holds is not lost on the next
+ * question; the questions of `waitFor` are closed.
  *
  * With `primary` not answering, every relay is waited for on its own timers,
  * as before: then nobody knows yet which answer will count. Without `stop`,
@@ -466,12 +460,18 @@ export function queryEachSettled(
   // Closes the questions of `waitFor` still open once this has settled.
   const done = new AbortController()
   let primaryAnswered = false
+  // When this question's first REQ went out: the relays of `waitFor` are
+  // waited for until `maxWait` after it, once `primary` has answered.
+  let firstSent: number | undefined
+  const onSent = (): void => { firstSent ??= Date.now(); opts.onSent?.() }
+  let cap: ReturnType<typeof setTimeout> | undefined
   return new Promise((resolve) => {
     let settled = false
     const settle = (): void => {
       if (settled) return
       settled = true
       clearTimeout(backstop)
+      clearTimeout(cap)
       opts.stop?.removeEventListener('abort', settle)
       done.abort()
       resolve(urls.map((url) => answers.get(url) ?? unanswered(url)))
@@ -484,9 +484,7 @@ export function queryEachSettled(
     const enough = (): boolean => answers.size === urls.length || (primaryAnswered && [...held].every((url) => answers.has(url)))
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
-      const ask: AskOptions = held.has(url)
-        ? { answerMs: maxWait, onSent: opts.onSent, stop: done.signal, keepWaiting: () => primaryAnswered }
-        : { answerMs: maxWait, onSent: opts.onSent }
+      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal } : { answerMs: maxWait, onSent }
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
@@ -494,7 +492,10 @@ export function queryEachSettled(
         .then((answer) => {
           if (settled) { opts.onLate?.(answer); return }
           answers.set(url, answer)
-          if (url === main && answer.outcome === 'answered') primaryAnswered = true
+          if (url === main && answer.outcome === 'answered') {
+            primaryAnswered = true
+            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
+          }
           if (enough()) settle()
         })
     }

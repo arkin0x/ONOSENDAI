@@ -256,7 +256,7 @@ export const HEAD_CONFIRM_MS = 2500
  *
  * | Canonical relay | Other configured relays | Result |
  * |---|---|---|
- * | answered | every chain-holding relay answered or the deadline passed | the events (pass, unless they move the head) |
+ * | answered | every chain-holding relay answered, or HEAD_CONFIRM_MS passed since the requests went out | the events (pass, unless they move the head) |
  * | no answer by the deadline | at least one answered holding `anchorId` | the events (degraded pass) |
  * | no answer | none answered holding `anchorId`, none sent a newer move | null (refuse) |
  * | any | one sent a newer move | the events, which the caller adopts and refuses on |
@@ -272,14 +272,16 @@ export const HEAD_CONFIRM_MS = 2500
  *
  * Once the canonical relay has answered, every relay that holds this
  * identity's chain (chainHolders.ts: it took one of its events, or sent one
- * back, now or in an earlier session) is waited for until it answers or the
- * overall deadline passes, and no other relay is (arkinox's ruling of
- * 2026-10-08 on the slow-relay grace). A relay of the player's that holds
- * the chain is where another device of theirs publishes, so its newer move
- * is found however slow its round trip; one that never held the chain is
+ * back, now or in an earlier session) is waited for until it answers or
+ * HEAD_CONFIRM_MS (2.5 s) has passed since the question's requests went
+ * out, and no other relay is (arkinox's ruling of 2026-10-08 on the
+ * slow-relay grace). A relay of the player's that holds the chain is where
+ * another device of theirs publishes, so its newer move is found whenever
+ * its round trip fits in those 2.5 s; one that never held the chain is
  * still asked, and a newer move it sends in time still counts, but it never
- * slows a move. A chain-holding relay still silent at the deadline does not
- * stop the pass, since the canonical relay answered. With the canonical
+ * slows a move. A chain-holding relay still silent after 2.5 s does not
+ * stop the pass, since the canonical relay answered: a dead one costs a
+ * move at most that. With the canonical
  * relay silent, every relay is waited for on its own timers, as before. The
  * relays whose answers held the chain's events are noted as holding it,
  * those that answered after the confirmation settled too, so a relay this

@@ -18,6 +18,7 @@ import { useChat } from '../store/useChat'
 import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
+import { stepBuild } from '../store/buildStep'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -177,6 +178,15 @@ export function useKeyboard(): void {
         const hs = useHyperspace.getState()
         if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
         else exitHyperspaceView()
+        return
+      }
+
+      // The build STEP while a deploy is lined up (store/buildStep.ts): comma
+      // is finer, period coarser, the < and > on the same keys.
+      if (event.code === 'Comma' || event.code === 'Period') {
+        if (!useShards.getState().pending) return
+        event.preventDefault()
+        stepBuild(event.code === 'Comma' ? -1 : 1)
         return
       }
 

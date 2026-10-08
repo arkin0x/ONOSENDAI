@@ -98,7 +98,7 @@ import { useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
-import { buildPlane } from '../lib/buildCursor'
+import { buildPlane, placedCursor } from '../lib/buildCursor'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -181,7 +181,7 @@ function wholeCube(f: { position: { x: bigint; y: bigint; z: bigint }; drive?: b
 
 /** The build cursor sits on your avatar, in the plane your head shows. */
 function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
-  return samePosition(s.cursor, s.position) && buildPlane(s) === s.plane
+  return samePosition(placedCursor(s), s.position) && buildPlane(s) === s.plane
 }
 
 /**

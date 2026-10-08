@@ -53,14 +53,16 @@ import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
-import { buildPlane } from '../lib/buildCursor'
+import { buildPlane, buildStepOf } from '../lib/buildCursor'
+import { stepBuild } from '../store/buildStep'
+import { useBuilder } from '../store/useBuilder'
 import { Field, Switch } from './ui/Switch'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
-import { fitHeight } from '../lib/deployFit'
+import { fitCause, fitHeight } from '../lib/deployFit'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -92,7 +94,7 @@ export function DeployBar(): JSX.Element | null {
   const mine = useShards((s) => s.mine)
   // The region the deploy would land in, as a string, so the bar re-renders
   // when the cursor crosses into another region and not on every step.
-  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, s.scaleExp, height), buildPlane(s), height))
+  const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, buildStepOf(s), height), buildPlane(s), height))
   const existing = useMemo(() => ownBagIn(mine, region), [mine, region])
   // Hooks stay above the early return below. The controls take this region's
   // bag settings when the cursor's region changes (seedDeployBag decides).
@@ -116,13 +118,20 @@ export function DeployBar(): JSX.Element | null {
   const heightAuto = useShards((s) => s.deployHeightAuto)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const fitH = useMemo(() => (shard ? fitHeight(shard, unit, cursor, scaleExp, 0, ceiling) : null), [shard, unit, cursor, scaleExp, ceiling])
+  // The build STEP: how far a move steps and the cell the placement snaps to
+  // (store/buildStep.ts), the zoom until it is lowered.
+  const step = useCyberspace(buildStepOf)
+  const fitH = useMemo(() => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : null), [shard, unit, cursor, step, ceiling])
   useEffect(() => {
     if (!heightAuto || !shard) return
     const want = fitH ?? ceiling
     if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
   }, [heightAuto, shard, fitH, ceiling])
-  const fit = { auto: heightAuto && !!shard, height: fitH }
+  const fit = { auto: heightAuto && !!shard, height: fitH, cause: shard ? fitCause(shard, unit, fitH, ceiling) : 'size' }
+  // STEP changes only the build cursor: in BUILD mode, its view drivable, not
+  // at your head, and not while hiding (store/buildStep.ts stepOpen).
+  const building = useBuilder((s) => s.active)
+  const drivable = useCyberspace((s) => s.canDrive() && !s.atHead())
 
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
@@ -136,6 +145,7 @@ export function DeployBar(): JSX.Element | null {
   const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
   const empty = isMessage ? pending.text.trim().length === 0 : !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   const working = status === 'working'
+  const stepOpen = building && drivable && !working
   // This machine's time is the button's tooltip, not a row (arkinox,
   // 2026-10-08: trim the deploy bar); HOSAKA's time and price stay a row.
   const localEst = route !== 'local' ? undefined : height === 0 ? 'No key work at height 0' : localSeconds === null ? 'Computed on this machine; the benchmark has not run yet' : `Computed on this machine, ${waitLabel(localSeconds)}`
@@ -181,6 +191,17 @@ export function DeployBar(): JSX.Element | null {
           which a phone caps at a quarter of the screen (styles.css). */}
       <div className="deploybar__body">
 
+      {/* STEP: finer placement than the zoom, with the camera left where it
+          is (arkinox, 2026-10-08). The small white box in the cube is the
+          cell it snaps to. Comma and period on a keyboard. */}
+      <div className="deploybar__row deploybar__row--step">
+        <span className="deploybar__label">STEP</span>
+        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={!stepOpen || step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
+        <span className="deploybar__value">2^{step}</span>
+        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
+        <span className="deploybar__radius">{formatCellSize(step)}</span>
+      </div>
+
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while
           the button is held, so a captured `height` would set the same number
@@ -190,12 +211,15 @@ export function DeployBar(): JSX.Element | null {
         <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= 0} aria-label="Lower height">−</button>
         <span className="deploybar__value">{height}</span>
         <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
-        <span className="deploybar__radius">
+        {/* Why an automatic height rose is a tooltip only (arkinox, 2026-10-08). */}
+        <span className="deploybar__radius" title={fit.auto && fit.height !== null && fit.cause === 'edge' ? 'Raised because it sits across a region edge; move it to hide lower' : undefined}>
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
         </span>
       </div>
       {fit.auto && fit.height === null && (
-        <div className="deploybar__row deploybar__fitnote">At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</div>
+        <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
+          ? 'Sits across a region edge; move it to fit.'
+          : <>At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</>}</div>
       )}
 
       {/* How big the thing itself is, for this deployment only. The workshop's

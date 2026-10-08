@@ -62,7 +62,7 @@ import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
 import { deployPoint, type Position } from '../lib/space'
-import { buildCursorOf, buildPlane } from '../lib/buildCursor'
+import { buildCursorOf, buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
@@ -611,8 +611,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // is the cursor's own coordinate, as it always was. A deploy happens in
       // BUILD mode (useBuilder), so the cursor is the build cursor and the
       // plane is the one the build view shows (lib/buildCursor.ts).
+      // The cell is the build STEP's when one finer than the zoom is set
+      // (lib/buildCursor.ts buildStepOf, arkinox 2026-10-08).
       const { position: cursor, plane } = buildCursorOf(cs)
-      const at: Position = deployPoint(cursor, cs.scaleExp, deployHeight)
+      const at: Position = deployPoint(cursor, buildStepOf(cs), deployHeight)
       const createdAt = Math.floor(Date.now() / 1000)
       if (deployBag.hint && !hintFits(deployBag.hint, deployHeight)) {
         set({ deployStatus: 'error', deployError: `A sector hint cannot contain a height ${deployHeight} region: a sector is 2^30 on a side. Turn the hint off or hide lower.` })
@@ -994,6 +996,13 @@ export const useShards = create<ShardsState>((set, get) => {
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,
   }
+})
+
+// The build STEP belongs to one deploy: when it ends, hidden or canceled, or
+// another is lined up in its place, the step goes back to the zoom.
+useShards.subscribe((s, prev) => {
+  const cs = useCyberspace.getState()
+  if (s.pending !== prev.pending && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

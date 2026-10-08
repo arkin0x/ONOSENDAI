@@ -306,6 +306,68 @@ export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT
   return queryRelays(relays, filter, maxWait)
 }
 
+/**
+ * Open one relay for a read that asks each relay on its own (sno-core/feed
+ * `readEach`, the Shard Feed). False when it cannot be reached. Unlike
+ * `queryRelays`, nothing waits on any other relay: one hung socket used to
+ * hold every relay's question until it gave up (snocrash #22). The reader
+ * bounds the wait (`connectMs`).
+ */
+export async function connectRelay(url: string): Promise<boolean> {
+  try { await getPool().ensureRelay(url); return true } catch { return false }
+}
+
+/**
+ * Answer an open relay's auth challenge for such a read, on the reader's own
+ * auth allowance (`authMs`), not the connect's: an extension or a bunker may
+ * be a person approving it, and the cyberspace relay gates reads.
+ */
+export function authForRead(url: string): Promise<void> {
+  return authRelay(url)
+}
+
+/**
+ * Subscribe to one relay for a feed read (sno-core/feed `Subscribe`). Events
+ * are handed over as they land; EOSE and a close are reported as they come.
+ * A CLOSED with auth-required: is answered with NIP-42 auth and asked once
+ * more, as `askOne` does. nostr-tools' own EOSE timer is pushed far past any
+ * deadline of ours (NOSTR_TOOLS_EOSE_MS), so "finished" always means the relay
+ * said so.
+ */
+export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (ev: NostrEvent) => void; oneose: () => void; onclose: (reason?: string) => void }): { close: () => void } {
+  let closed = false
+  let sub: OpenSub | null = null
+  let authTried = false
+  const open = (relay: AbstractRelay): void => {
+    if (closed) return
+    sub = relay.subscribe([filter], {
+      onevent: (e) => { if (!closed) handlers.onevent(e as NostrEvent) },
+      oneose: () => { if (!closed) handlers.oneose() },
+      onclose: (reason) => {
+        if (closed) return
+        if (/^auth-required:/i.test(reason) && !authTried) {
+          authTried = true
+          relay.auth(authSign).then(() => open(relay), () => handlers.onclose(reason))
+          return
+        }
+        handlers.onclose(reason)
+      },
+      eoseTimeout: NOSTR_TOOLS_EOSE_MS,
+    }) as unknown as OpenSub
+  }
+  getPool().ensureRelay(url).then(open, () => { if (!closed) handlers.onclose('unreachable') })
+  return {
+    close: () => {
+      if (closed) return
+      closed = true
+      if (sub) {
+        clearTimeout(sub.eoseTimeoutHandle)
+        try { sub.close() } catch { /* already closed */ }
+      }
+    },
+  }
+}
+
 /** How long a general relay that refused a connection is left alone. */
 const DEAD_MS = 5 * 60_000
 const deadUntil = new Map<string, number>()

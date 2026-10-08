@@ -1,0 +1,160 @@
+/**
+ * hudBuildOrder.test.ts - in BUILD mode the Position panel is the first
+ * panel in the menu (arkinox, 2026-10-08: "Position panel gets promoted to
+ * top/first panel while active"), on a phone and a desktop alike, and it
+ * goes back to its own place when the mode ends.
+ *
+ * The left column comes first on both: side by side on a desktop, stacked
+ * above the right column on a phone (styles.css, max-width 1100px). So
+ * "first" is the first panel of the left column, right under the brand.
+ */
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { renderToString } from 'react-dom/server'
+
+if (typeof localStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
+vi.mock('../../lib/relay', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/relay')>()),
+  publishMany: vi.fn(async () => ({ ok: true })),
+  query: vi.fn(async () => []),
+  relaySet: () => ['wss://relay.test'],
+}))
+
+// A server render reads a zustand store's server snapshot, which is its
+// initial state. Here every store's hook reads the live state instead, so a
+// render shows what the store holds now; everything else about the stores
+// is the real thing.
+vi.mock('zustand', async (importOriginal) => {
+  const real = await importOriginal<typeof import('zustand')>()
+  const live = (init: Parameters<typeof real.create>[0]) => {
+    const hook = real.create(init)
+    return Object.assign((sel: (s: unknown) => unknown = (x) => x) => sel(hook.getState()), hook)
+  }
+  return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
+})
+
+import { Hud, PositionPanel, useViewDraft } from '../Hud'
+import { ChainPanel } from '../ChainPanel'
+import { useChainUi } from '../../store/useChainUi'
+import { useBuilder } from '../../store/useBuilder'
+import { useCyberspace } from '../../store/useCyberspace'
+
+/** The names of the components in each column, in order, as Hud lays them out. */
+function columns(): { left: string[]; right: string[] } {
+  let tree: ReactElement | null = null
+  // Hud's hooks need a render to run in; its returned tree is what is read.
+  renderToString(createElement(() => { tree = Hud({}); return null }))
+  const names = (col: ReactNode): string[] => {
+    const kids = (col as ReactElement<{ children: ReactNode[] }>).props.children
+    return (Array.isArray(kids) ? kids : [kids])
+      .filter((k): k is ReactElement => isValidElement(k) && typeof k.type === 'function')
+      .map((k) => (k.type as { name: string }).name)
+  }
+  const [left, right] = (tree! as ReactElement<{ children: ReactNode[] }>).props.children
+  return { left: names(left), right: names(right) }
+}
+
+afterEach(() => {
+  useBuilder.getState().exit()
+  useCyberspace.getState().clearFocus()
+})
+
+describe('the Position panel in BUILD mode', () => {
+  it('is in its own place, in the right column, while the mode is off', () => {
+    const { left, right } = columns()
+    expect(left).not.toContain('PositionPanel')
+    expect(right).toContain('PositionPanel')
+  })
+
+  it('is the first panel, under the brand, while the mode is on, and only there', () => {
+    useBuilder.getState().enter('build')
+    const { left, right } = columns()
+    expect(left.slice(0, 2)).toEqual(['Brand', 'PositionPanel'])
+    expect(right).not.toContain('PositionPanel')
+  })
+
+  it('outranks a move under way, which otherwise leads the menu', () => {
+    useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
+    try {
+      expect(columns().left.slice(0, 2)).toEqual(['Brand', 'ProofPanel'])
+      useBuilder.getState().enter('build')
+      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'PositionPanel', 'ProofPanel'])
+    } finally {
+      useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
+    }
+  })
+
+  it('goes back to its own place on exit', () => {
+    useBuilder.getState().enter('build')
+    useBuilder.getState().exit()
+    const { left, right } = columns()
+    expect(left).not.toContain('PositionPanel')
+    expect(right).toContain('PositionPanel')
+  })
+})
+
+/** Find the first element in a tree whose props pass the test. */
+function findIn(node: ReactNode, test: (props: Record<string, unknown>) => boolean): ReactElement<Record<string, unknown>> | null {
+  if (Array.isArray(node)) {
+    for (const n of node) { const hit = findIn(n, test); if (hit) return hit }
+    return null
+  }
+  if (!isValidElement(node)) return null
+  const props = node.props as Record<string, unknown>
+  if (test(props)) return node as ReactElement<Record<string, unknown>>
+  return findIn(props.children as ReactNode, test)
+}
+
+/** The Chain panel's ACTIONS tag, as the panel renders it now. */
+function actionsTag(): ReactElement<{ onClick: () => void; 'aria-pressed': boolean }> {
+  let tree: ReactNode = null
+  renderToString(createElement(() => { tree = ChainPanel(); return null }))
+  const tag = findIn(tree, (p) => p.className === 'tag tag--tap' && 'aria-pressed' in p)
+  if (!tag) throw new Error('no ACTIONS tag')
+  return tag as unknown as ReactElement<{ onClick: () => void; 'aria-pressed': boolean }>
+}
+
+describe('review of #235, SHOULD-FIX 2: the Chain panel ACTIONS tag in BUILD mode', () => {
+  afterEach(() => useChainUi.getState().setExplorerOpen(false))
+
+  it('opens and closes the explorer, and leaves the build cursor where it is', () => {
+    useBuilder.getState().enter('build')
+    useCyberspace.getState().moveCursor({ axis: 'x', dir: 1 })
+    const aim = { ...useCyberspace.getState().cursor }
+    expect(actionsTag().props['aria-pressed']).toBe(false)
+    actionsTag().props.onClick()
+    expect(useChainUi.getState().explorerOpen).toBe(true)
+    expect(actionsTag().props['aria-pressed']).toBe(true)
+    expect(useCyberspace.getState().cursor).toEqual(aim)
+    expect(useBuilder.getState().scrub).toBeNull()
+    actionsTag().props.onClick()
+    expect(useChainUi.getState().explorerOpen).toBe(false)
+    expect(useCyberspace.getState().cursor).toEqual(aim)
+  })
+})
+
+describe('review of #235, NIT 6: the Position panel keeps a half-typed VIEW across BUILD', () => {
+  afterEach(() => useViewDraft.getState().setText(''))
+
+  it('the text typed survives the panel moving to the top and back', () => {
+    useViewDraft.getState().setText('12, 34')
+    const typed = (): boolean => renderToString(createElement(PositionPanel)).includes('value="12, 34"')
+    expect(typed()).toBe(true)
+    // DEPLOY turning BUILD on moves the panel, which mounts it afresh.
+    useBuilder.getState().enter('deploy')
+    expect(columns().left).toContain('PositionPanel')
+    expect(typed()).toBe(true)
+    useBuilder.getState().exit()
+    expect(typed()).toBe(true)
+  })
+})

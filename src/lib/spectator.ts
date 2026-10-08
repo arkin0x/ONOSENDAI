@@ -10,14 +10,22 @@
 
 import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import type { NostrEvent } from './events'
 
 let current: { pubkey: string; close: () => void } | null = null
 
 export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise<void> {
-  stopSpectating()
+  // From one avatar to the next, only the old watch closes: the spectation
+  // itself is replaced by beginSpectate, which carries the first one's
+  // return view over. Ending it here first dropped that view in BUILD mode,
+  // where ending a spectation puts no angle back, so the camera came home
+  // to the angle of the switch (review of #235).
+  closeWatch()
   const store = useCyberspace.getState()
-  store.beginSpectate(pubkey)
+  // In BUILD mode the build cursor's view stays up and is aimed at them, so
+  // the mode carries on beside the spectation (store/useBuilder.ts).
+  store.beginSpectate(pubkey, useBuilder.getState().active)
 
   // Anything published while the fetch is in flight is caught by the watch,
   // which starts from a minute ago so nothing falls between the two.
@@ -56,8 +64,20 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
   }
 }
 
-export function stopSpectating(): void {
+function closeWatch(): void {
   current?.close()
   current = null
+}
+
+export function stopSpectating(): void {
+  closeWatch()
   if (useCyberspace.getState().spectate) useCyberspace.getState().endSpectate()
 }
+
+// However a spectation ends (END SPECTATION, a view that replaces it, an
+// identity switch), the relay watch on that pubkey goes with it. focusOn
+// clears the spectation in the store and could not reach the socket here,
+// so the subscription used to stay open (review of #235).
+useCyberspace.subscribe((s) => {
+  if (current && s.spectate?.pubkey !== current.pubkey) closeWatch()
+})

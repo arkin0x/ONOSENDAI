@@ -29,6 +29,7 @@ import { TriangleAlert } from 'lucide-react'
 import { actionLabel, firstBreak, type ActionEvent } from '../lib/events'
 import { apologyFor, apologyHeading, breakCause, endOfChainLabel } from '../lib/chainBreak'
 import { useCyberspace } from '../store/useCyberspace'
+import { walkChain } from '../store/useBuilder'
 import { useChainUi } from '../store/useChainUi'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
@@ -208,7 +209,7 @@ export function BrokenChainModal(): JSX.Element | null {
         scroll
         danger={false}
         body={<BrokenChainNotice broken={broken} actions={(
-          <button className="tag tag--tap" onClick={() => { close(); useCyberspace.getState().explore(broken.index) }}>SHOW THE ROW</button>
+          <button className="tag tag--tap" onClick={() => { close(); walkChain(broken.index) }}>SHOW THE ROW</button>
         )} />}
         cancelLabel="CLOSE"
         confirmLabel="RESPAWN"

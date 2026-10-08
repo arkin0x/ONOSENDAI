@@ -252,7 +252,9 @@ export function itemCentre(
  *
  * The centre of an aligned block of 2^k gibsons is its low corner plus
  * 2^(k - 1). At k = 0 the block is one gibson and the cursor's own coordinate
- * is its centre. k is the zoom, unless the bag's height is lower: a region
+ * is its centre. k is the build STEP, which is the zoom unless a finer STEP
+ * is set while the deploy is lined up (lib/buildCursor.ts buildStepOf,
+ * arkinox 2026-10-08), unless the bag's height is lower: a region
  * smaller than a cell must still hold the item, since its key is derived from
  * the region the item is in, so then the block is the region itself. Either
  * way the block holds the cursor and sits inside both the cursor's cell and
@@ -261,8 +263,8 @@ export function itemCentre(
  * the exact centre (itemCentre): a quarter of a cell at 2^1, an eighth at
  * 2^2, nothing visible above that.
  */
-export function deployPoint(cursor: Position, scaleExp: number, height: number): Position {
-  const k = Math.max(0, Math.min(scaleExp, height))
+export function deployPoint(cursor: Position, step: number, height: number): Position {
+  const k = Math.max(0, Math.min(step, height))
   if (k === 0) return { ...cursor }
   const half = 1n << BigInt(k - 1)
   return {

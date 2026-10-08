@@ -33,14 +33,26 @@ import { useStarred } from '../store/useStarred'
 import { WorldLabel } from './WorldLabel'
 import { TapTarget } from './TapTarget'
 
-/** The reach the hidden messages are drawn to, in cells. */
-const REACH = GRID_RADIUS * 8
+/** The reach the hidden messages are drawn to, in cells. The pin reads it
+ * to know whether a star stands under it (EarthPin.tsx starNamesPin). */
+export const STAR_REACH = GRID_RADIUS * 8
 /** The star's yellow: the chip's, lit. */
 export const STAR_YELLOW = '#ffd84d'
 /** How wide the star stands, in CSS pixels: small, under the coin's 51. */
 const STAR_PX = 20
 /** The glow behind it, as a multiple of the star. */
 const GLOW = 2.6
+/**
+ * How opaque the glow is. It draws additively and outside tone mapping, so
+ * the scene's bloom picks it up too, and at 0.55 still (0.4 to 0.65 breathing)
+ * it swamped the star's points and the label under it: "Can you back it off
+ * 50%?" (arkinox, 2026-10-08). Each is half of what it was. Still, under
+ * prefers-reduced-motion, it holds at GLOW_REST; otherwise it breathes from
+ * GLOW_BASE to GLOW_BASE + GLOW_SWING.
+ */
+export const GLOW_REST = 0.275
+export const GLOW_BASE = 0.2
+export const GLOW_SWING = 0.125
 /** A fingertip over the mark, as for a coin. */
 const TAP_PX = 44
 
@@ -121,7 +133,7 @@ function StarMark({ at, phase, still }: { at: [number, number, number]; phase: n
     const halo = glow.current
     if (halo) {
       const m = halo.material as MeshBasicMaterial
-      m.opacity = still ? 0.55 : 0.4 + 0.25 * (0.5 + 0.5 * Math.sin(t * 1.6 + phase * 1.7))
+      m.opacity = still ? GLOW_REST : GLOW_BASE + GLOW_SWING * (0.5 + 0.5 * Math.sin(t * 1.6 + phase * 1.7))
       halo.rotation.z = still ? 0 : 0.12 * Math.sin(t * 0.9 + phase)
     }
   })
@@ -132,7 +144,7 @@ function StarMark({ at, phase, still }: { at: [number, number, number]; phase: n
         {geo.glow && (
           <mesh ref={glow} scale={GLOW} renderOrder={1}>
             <planeGeometry args={[1, 1]} />
-            <meshBasicMaterial map={geo.glow} transparent opacity={0.5} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
+            <meshBasicMaterial map={geo.glow} transparent opacity={GLOW_REST} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
           </mesh>
         )}
         <mesh geometry={geo.fill} renderOrder={2}>
@@ -154,7 +166,7 @@ export function StarredMarks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const still = useReducedMotion()
 
   const placed = useMemo(
-    () => placedStars(places, alignedOrigin(anchor, scaleExp), anchorPlane, scaleExp, axes, REACH),
+    () => placedStars(places, alignedOrigin(anchor, scaleExp), anchorPlane, scaleExp, axes, STAR_REACH),
     [places, anchor, anchorPlane, scaleExp, axes],
   )
 

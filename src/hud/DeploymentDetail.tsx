@@ -115,10 +115,14 @@ export function DeploymentDetail(): JSX.Element | null {
         </p>
       )}
 
-      <Reactions
-        target={{ id: dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type) }}
-        alsoTell={[me]}
-      />
+      {/* A LIVE LINK (a public object, yours or another author's) is reacted to as that object
+          alone, telling its author and not naming you or the bag (isForeignItem). */}
+      {itemTargetOf(dep.inner, dep.ref)?.public
+        ? <Reactions target={{ id: dep.inner.id, pubkey: dep.inner.pubkey, kind: dep.inner.kind, address: itemTargetOf(dep.inner, dep.ref)?.address }} />
+        : <Reactions
+            target={{ id: dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type) }}
+            alsoTell={[me]}
+          />}
 
       <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
 

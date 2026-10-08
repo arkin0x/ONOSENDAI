@@ -14,6 +14,11 @@ import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
+import { FeedList } from './FeedList'
+import { Explanation } from './Explanation'
+import { GitFork, Wrench } from 'lucide-react'
+import type { FeedObject } from 'sno-core/feed'
+import { useWorkshop } from '../store/useWorkshop'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -77,8 +82,32 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
   )
 }
 
+/** The size of the icons on the feed's buttons, matched to their 8px capitals. */
+const ICON = 12
+
+/**
+ * USE IN BUILDER and REMIX on a feed tile. ADD TO LIST arrives with SNO
+ * lists (PR 4); a disabled button until then would only be noise.
+ */
+function FeedActions({ object }: { object: FeedObject }): JSX.Element {
+  // BUILD starts where you are looking (ruling A), the object lined up as a
+  // copy; a cancel comes back to this window.
+  const use = (): void => useStash.getState().useFromFeed(object)
+  const remix = (): void => {
+    const id = useWorkshop.getState().importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
+    useStash.getState().close()
+    useWorkshop.getState().openWorkshop(id)
+  }
+  return (
+    <>
+      <button className="feed__act" onClick={use} title="Place it at the build cursor, as a copy that credits its author"><Wrench size={ICON} strokeWidth={2.25} aria-hidden />USE IN BUILDER</button>
+      <button className="feed__act" onClick={remix} title="Copy it into your workshop as your own, still credited"><GitFork size={ICON} strokeWidth={2.25} aria-hidden />REMIX</button>
+    </>
+  )
+}
+
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag, message } = useStash()
+  const { models, bags, bag, message, feed } = useStash()
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
@@ -107,6 +136,16 @@ export function StashModals(): JSX.Element | null {
             {all.map((b) => <BagRow key={b.lookupId} bag={b} onOpen={() => useStash.getState().openBag(b.lookupId)} />)}
           </ul>
         )}
+      </Shell>
+    )
+  }
+  if (feed) {
+    return (
+      <Shell title="Shard Feed" onClose={close}>
+        <FeedList actions={(o) => <FeedActions object={o} />} />
+        <Explanation>
+          Everyone&apos;s published objects, newest first. USE IN BUILDER puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited.
+        </Explanation>
       </Shell>
     )
   }

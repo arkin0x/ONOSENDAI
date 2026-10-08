@@ -17,7 +17,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Wrench } from 'lucide-react'
+import { Rss, Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -53,6 +53,10 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
+          {/* Everyone's published objects, beside the workshop where yours are made (the Shard Feed). */}
+          <button className="avatars__go shards__compose-open shards__feed" onClick={() => useStash.getState().openFeed()} title="Browse everyone's published objects: place one, or remix it as your own">
+            <Rss className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> SHARD FEED
+          </button>
           {/* BUILD mode, beside the workshop it is the other half of: the
               workshop makes objects, the Builder places them (useBuilder). */}
           <button
@@ -63,9 +67,6 @@ export function ShardsPanel(): JSX.Element {
             title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
           >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
-        <span className="shards__note">
-          BUILD places objects and messages at a build cursor of its own, anywhere in cyberspace. It starts where you are looking, or on your avatar when you are not viewing a place; move it with the controls, zoom out with + to build bigger, or jump it with VIEW in the Position panel. Building never moves your avatar.
-        </span>
       </div>
 
       <div className="shards__section">

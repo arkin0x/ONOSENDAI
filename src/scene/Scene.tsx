@@ -35,6 +35,7 @@ import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
+import { useLayers } from '../store/useLayers'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
@@ -68,6 +69,7 @@ import { WorldMessages } from './WorldMessages'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
@@ -122,7 +124,13 @@ function World(): JSX.Element {
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
   const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
-  const volume = useTerrainVolume(win, axes, hyperView)
+  // The two layers the Movement Proof panel can turn off (store/useLayers).
+  // The dots switched off suspend exactly as a hyperspace view does: no scans,
+  // no terrain runs queued, no per-frame uniforms. Only drawing changes.
+  const dotsOn = useLayers((s) => s.dots)
+  const boxesOn = useLayers((s) => s.boxes)
+  const dotsIdle = hyperView || !dotsOn
+  const volume = useTerrainVolume(win, axes, dotsIdle)
   const targets = useTargets()
 
   return (
@@ -132,8 +140,8 @@ function World(): JSX.Element {
       <TargetProjector axes={axes} targets={targets} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      {!hyperView && <ShaderPointField volume={volume} win={win} />}
-      <Rooms axes={axes} />
+      {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+      {boxesOn && <Rooms axes={axes} />}
       <SectorBox axes={axes} />
       <Earth axes={axes} />
       <CyberspaceLattice axes={axes} />
@@ -159,6 +167,7 @@ function World(): JSX.Element {
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />
       <Cursor axes={axes} />

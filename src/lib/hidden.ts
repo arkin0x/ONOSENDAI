@@ -33,6 +33,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import type { Position } from './space'
@@ -87,6 +88,18 @@ export function isReference(x: unknown): x is Reference {
  */
 export function entryKey(e: BagEntry): string {
   return isReference(e) ? `${e[0]}:${e[1]}@${e[3] ?? ''}` : e.id
+}
+
+/**
+ * The identity of a LIVE LINK: a reference to a public object (one with no
+ * `encrypted` tag, yours or another author's), whose author's edits change
+ * its event id. The bag and the entry, `<lookup id>/<entry key>`: the same
+ * object at the same point in two bags (two heights, or two hiders) is two
+ * items, and one deleted leaves the other (verification review of #233).
+ * The deploy and the scan both key it this way.
+ */
+export function linkKey(lookupId: string, ref: Reference): string {
+  return `${lookupId}/${entryKey(ref)}`
 }
 
 /**
@@ -148,7 +161,10 @@ export function messagePreview(text: string, max = 32): string {
 
 /** What a decoded hidden thing carries, ready to render. */
 export interface Hidden {
-  /** The item's stable identity: its inner event id. */
+  /**
+   * The item's stable identity: its inner event id. For a LIVE LINK (a
+   * reference to a public object) it is `linkKey`: the bag and the entry.
+   */
   eventId: string
   /**
    * The signed inner event itself, verified, and the region key that opened
@@ -209,12 +225,14 @@ export function shardRefusal(shard: ShardModel): string | null {
 }
 
 /** The inner shard event template (kind 3330), signed by the author. */
-export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number): EventTemplate {
+export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number, credit?: Credit): EventTemplate {
   return {
     kind: SHARD_KIND,
     created_at: createdAt,
     content: JSON.stringify(toPayload(shard)),
-    tags: [['C', positionHex(at, plane)]],
+    // A copy of someone else's object credits it (sno-core creditTags). The
+    // item is sealed in the bag, so the credit is as private as the item.
+    tags: [['C', positionHex(at, plane)], ...(credit ? creditTags(credit) : [])],
   }
 }
 
@@ -475,14 +493,25 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     const [kind, pubkey, ...rest] = ref[1].split(':')
     if (String(target.kind) !== kind || target.pubkey !== pubkey || tag(target, 'd') !== rest.join(':')) return null
   }
+  // Sealed to this place (DECK-0003 §3.4), or another author's public object
+  // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
+  // payload is its content as published.
   const enc = target.tags.find((t) => t[0] === 'encrypted')
-  if (!enc || enc[1] !== ALGO || !enc[2]) return null
-  const plain = await decryptForRegion(regionKey, enc[2])
+  let plain: string | null
+  if (enc) {
+    if (enc[1] !== ALGO || !enc[2]) return null
+    plain = await decryptForRegion(regionKey, enc[2])
+  } else {
+    plain = target.kind === OBJECT_KIND ? target.content : null
+  }
   if (plain === null) return null
 
   const { x, y, z, plane } = coordHex ? coordToXyz(hexToCoord(coordHex)) : { ...origin!.at, plane: origin!.plane }
   const base = {
-    eventId: target.id,
+    // A public object (a LIVE LINK, yours or another author's) is keyed by
+    // the bag and the entry, which its author's edits do not change; a
+    // sealed object of this place keeps its id, as shipped.
+    eventId: enc ? target.id : linkKey(tag(outer, 'd') ?? '', ref),
     inner: target,
     keyHex,
     ref,

@@ -19,16 +19,28 @@
  * avatar stands at its own sub-cell offset inside the origin's cell
  * (anchorCentre), which is [0, 0, 0] at every finer zoom (arkinox,
  * 2026-10-01).
+ *
+ * BUILD mode is the other exception (arkinox, 2026-10-08). The scene there
+ * stands on the build cursor, not on an avatar, and the avatar of the chain
+ * on show is drawn at its true place relative to the build cursor's field,
+ * so you can build near it: yours at your true head, always, and a
+ * spectated one at the action the CHAIN chip last aimed at, or its head
+ * (lib/buildCursor.ts avatarInBuild).
  */
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Group, type Quaternion } from 'three'
 import { avatarTurn, facingPair } from '../lib/facing'
-import { anchorCentre } from '../lib/space'
+import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
 import { travelOffset } from '../lib/travel'
-import { useCyberspace } from '../store/useCyberspace'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
+import { avatarInBuild } from '../lib/buildCursor'
 import { AvatarShape } from './AvatarShape'
+
+/** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
+const REACH = GRID_RADIUS * 8
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -36,6 +48,20 @@ export function Avatar(): JSX.Element | null {
   // marker there would say you are standing on it. Spectating keeps the marker,
   // where it stands in for the avatar being watched.
   const focus = useCyberspace((s) => s.focus)
+  // BUILD mode: the scene rides the build cursor, and the avatar stands at
+  // the aimed action of the chain on show, or its head.
+  const building = useBuilder((s) => s.active)
+  const scrub = useBuilder((s) => s.scrub)
+  const placed = building && focus?.drive === true
+  // Your own avatar at your true head; a spectated one at the aimed action
+  // (lib/buildCursor.ts avatarInBuild).
+  const shownPosition = useCyberspace((s): Position | null => (placed ? avatarInBuild(s, scrub)?.position ?? null : null))
+  const shownPlane = useCyberspace((s): number | null => (placed ? avatarInBuild(s, scrub)?.plane ?? null : null))
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const anchorPlane = useCyberspace((s) => s.anchorPlane)
+  // The facing pair's index: the explored action, or in BUILD mode the aimed
+  // one of a spectated chain. Your own avatar stands at your head there.
+  const facingIndex = placed && spectating ? scrub : null
   // Whose shape: yours, or the spectated avatar's, whose marker this is then.
   const pubkey = useCyberspace((s) => s.focusPubkey())
   // The last move on the chain drawn, as a key so a re-render costs nothing
@@ -45,7 +71,7 @@ export function Avatar(): JSX.Element | null {
   // show, which while scrubbing the chain is the link before the explored one
   // and this one, not the head's last move (lib/facing.ts facingPair).
   const moveKey = useCyberspace((s) => {
-    const pair = facingPair(s.focusChain(), s.exploreIndex)
+    const pair = facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex)
     if (!pair) return null
     const a = pair[0].position, b = pair[1].position
     return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
@@ -56,7 +82,7 @@ export function Avatar(): JSX.Element | null {
   // with the view, lying on cyberspace axes as built.
   const facing = useMemo(() => {
     const s = useCyberspace.getState()
-    const pair = moveKey ? facingPair(s.focusChain(), s.exploreIndex) : null
+    const pair = moveKey ? facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex) : null
     return avatarTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey, view])
@@ -67,7 +93,12 @@ export function Avatar(): JSX.Element | null {
   // range, your true position inside its cell in it.
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const at = useMemo(() => anchorCentre(anchor, scaleExp, useCyberspace.getState().axes()), [anchor, scaleExp, view])
+  const at = useMemo(() => {
+    const axes = useCyberspace.getState().axes()
+    return shownPosition === null
+      ? anchorCentre(anchor, scaleExp, axes)
+      : placeCentre(shownPosition, alignedOrigin(anchor, scaleExp), scaleExp, axes)
+  }, [anchor, scaleExp, view, shownPosition])
 
   useFrame((_, dt) => {
     const g = group.current
@@ -82,7 +113,10 @@ export function Avatar(): JSX.Element | null {
     g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
-  if (focus) return null
+  if (focus && !placed) return null
+  // In BUILD mode: not in another plane than the one you build in, and not
+  // beyond the field, where it would be a speck a universe away.
+  if (placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH)) return null
 
   return (
     <group ref={group} position={[0, 0, 0]}>

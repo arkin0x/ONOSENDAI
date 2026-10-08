@@ -10,7 +10,8 @@
  * that radius covers the model in every orientation, so a quarter turn or
  * standing it on Earth can never push it out of the region. The deploy point
  * depends on the height (space.ts deployPoint centres it in the cursor's cell
- * at that height), so each height is tried in turn.
+ * at that height, and in the build STEP's cell), so each height is tried in
+ * turn.
  *
  * Placed objects (parts) are counted at their anchor points only: their own
  * geometry is another event, not at hand here.
@@ -54,13 +55,40 @@ export function fitsAt(p: Position, r: bigint, h: number): boolean {
 }
 
 /**
+ * The height the model's size alone asks for: the smallest whose region holds
+ * it with the model at the region's center, the best place there is. A
+ * centered sphere of radius r fits a 2^h cube when r < 2^(h - 1); at height 0
+ * only a point does. Wherever it really sits, fitHeight is at least this.
+ */
+export function sizeHeight(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number): number {
+  const r = reachGibsons(shard, unit)
+  if (r === 0n) return 0
+  let h = 1
+  while ((1n << BigInt(h - 1)) <= r) h++
+  return h
+}
+
+/**
+ * Why the fitted height is what it is: 'size' when the model's size sets it
+ * (or no region up to the ceiling is big enough), 'edge' when its place does:
+ * it sits across the edge of a region big enough for it, so the next one up
+ * is needed, or none fits at all, next to coordinate 0 say. A model about
+ * 2^10 across one gibson past a 2^30 boundary needs height 31, and saying it
+ * is too large would blame the wrong thing (found in review, 2026-10-08).
+ */
+export function fitCause(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number, fitted: number | null, max: number): 'size' | 'edge' {
+  const needs = sizeHeight(shard, unit)
+  return fitted === null ? (needs <= max ? 'edge' : 'size') : (fitted > needs ? 'edge' : 'size')
+}
+
+/**
  * The smallest height from `min` to `max` at which the whole model fits in the
  * region around where it would be hidden; `null` when none does.
  */
-export function fitHeight(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number, cursor: Position, scaleExp: number, min: number, max: number): number | null {
+export function fitHeight(shard: Pick<ShardModel, 'vertices' | 'parts'>, unit: number, cursor: Position, step: number, min: number, max: number): number | null {
   const r = reachGibsons(shard, unit)
   for (let h = Math.max(0, min); h <= max; h++) {
-    if (fitsAt(deployPoint(cursor, scaleExp, h), r, h)) return h
+    if (fitsAt(deployPoint(cursor, step, h), r, h)) return h
   }
   return null
 }

@@ -108,10 +108,15 @@ export function SecretModal(): JSX.Element | null {
 
         {/* Reactions carry no words, only the item's id, so they need no seal
             (arkinox, 2026-09-28): the item's author and the hider are told. */}
-        <Reactions
-          target={{ id: item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type) }}
-          alsoTell={[author]}
-        />
+        {/* A LIVE LINK (a public object, yours or another author's) is reacted to as that
+            object alone: its author is told, the hider and the bag are not
+            named (isForeignItem). */}
+        {item.target?.id && item.target.public
+          ? <Reactions target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />
+          : <Reactions
+              target={{ id: item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type) }}
+              alsoTell={[author]}
+            />}
 
         {item.author && item.lookupId && (
           <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />

@@ -63,9 +63,6 @@ export function ShardsPanel(): JSX.Element {
             title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
           >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
-        <span className="shards__note">
-          BUILD places objects and messages at a build cursor of its own, anywhere in cyberspace. It starts where you are looking, or on your avatar when you are not viewing a place; move it with the controls, zoom out with + to build bigger, or jump it with VIEW in the Position panel. Building never moves your avatar.
-        </span>
       </div>
 
       <div className="shards__section">

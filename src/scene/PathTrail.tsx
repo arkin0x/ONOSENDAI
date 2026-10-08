@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute, type LineSegments } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin } from '../store/useCyberspace'
@@ -55,6 +56,12 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const focus = useCyberspace((s) => s.focus)
+  // BUILD mode stands the scene on the build cursor, and the chain on show
+  // is drawn there in place, split at the action the CHAIN chip aimed at
+  // (arkinox, 2026-10-08), the way history splits it at the explored one.
+  const building = useBuilder((s) => s.active)
+  const scrub = useBuilder((s) => s.scrub)
+  const placed = building && focus?.drive === true
   // Off from the Chain panel's switch (arkinox, 2026-10-01); read with the
   // other hooks so the early return below stays after every one of them.
   const showTrail = useCyberspace((s) => s.showTrail)
@@ -66,7 +73,7 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     () => (spectate ? spectate.actions.map((a) => a.position) : ownHistory),
     [spectate, ownHistory],
   )
-  const split = exploreIndex ?? positionHistory.length - 1
+  const split = (placed ? scrub : exploreIndex) ?? positionHistory.length - 1
   // Which positions are only on this device: your own chain's actions whose
   // events have not been published. The chain is parsed once per change by
   // the store; positionHistory is its positions in the same order.
@@ -178,7 +185,9 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
   // last point to the render origin: a red line from your history straight
   // into whatever is being viewed. The avatar hides under a focus; its trail
   // does too.
-  if (!geometry || focus !== null || !showTrail) return null
+  // BUILD mode's view is the exception: it frames the chain at its true
+  // place, and the riding vertex above stands down under any focus.
+  if (!geometry || (focus !== null && !placed) || !showTrail) return null
 
   return (
     <>

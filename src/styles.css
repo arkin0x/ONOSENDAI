@@ -2419,8 +2419,13 @@ kbd {
   border-top: 1px solid rgba(0, 229, 255, 0.12);
 }
 .deploybar__scope {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
   font-size: 9px;
   line-height: 1.5;
+  letter-spacing: 0.08em;
   color: var(--ok);
 }
 .deploybar__bag .ui-field {
@@ -7685,7 +7690,6 @@ kbd {
 .deploybar__body .deploybar__btn { touch-action: pan-y; }
 /* The height row's note that the height was chosen to hold the model, and
    the warning when no region up to the ceiling can. */
-.deploybar__fit { color: var(--ok); }
 .deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
 .deploybar__ask, .deploybar > .notice { flex-shrink: 0; }
 
@@ -7836,14 +7840,6 @@ kbd {
   color: #05070d;
   background: var(--build);
   border-color: var(--build);
-}
-
-/* The Position panel's line while BUILD mode is on. */
-.viewat__build {
-  margin: 4px 0 0;
-  font-size: 9px;
-  line-height: 1.5;
-  color: var(--build);
 }
 
 /* The wrench inside the Stash panel's BUILD control, on the text's line. */

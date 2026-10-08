@@ -27,6 +27,7 @@ import { goToDeployment } from './stash'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { walkChain } from '../store/useBuilder'
 import { useNotifications, POLL_MS } from '../store/useNotifications'
 import { useShards } from '../store/useShards'
 import { useSocialUi } from '../store/useSocialUi'
@@ -109,7 +110,7 @@ async function openMove(id: string): Promise<string | null> {
   const chain = cs.focusChain()
   const i = chain.findIndex((a) => a.id === id)
   if (i >= 0) {
-    cs.explore(i === chain.length - 1 ? null : i)
+    walkChain(i === chain.length - 1 ? null : i)
     useSocialUi.getState().openAction(chain[i])
     return null
   }

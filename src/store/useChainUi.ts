@@ -24,6 +24,13 @@ interface ChainUiState {
    * confirm step; null when closed.
    */
   brokenView: 'notice' | 'confirm' | null
+  /**
+   * The chain explorer's body is open under the CHAIN chip. Here rather than
+   * in the explorer so the Chain panel's ACTIONS tag can open and close it in
+   * BUILD mode, where a step along the chain would aim the build cursor.
+   */
+  explorerOpen: boolean
+  setExplorerOpen: (open: boolean) => void
   setExplaining: (open: boolean) => void
   setPromptAside: (aside: boolean) => void
   setBrokenView: (view: 'notice' | 'confirm' | null) => void
@@ -33,6 +40,8 @@ export const useChainUi = create<ChainUiState>((set) => ({
   explaining: false,
   promptAside: false,
   brokenView: null,
+  explorerOpen: false,
+  setExplorerOpen: (explorerOpen) => set({ explorerOpen }),
   setExplaining: (explaining) => set({ explaining }),
   setPromptAside: (promptAside) => set({ promptAside }),
   setBrokenView: (brokenView) => set({ brokenView }),

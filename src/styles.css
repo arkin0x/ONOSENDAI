@@ -3732,12 +3732,27 @@ kbd {
 
 /* ---------- Mobile hamburger menu ---------- */
 
+/* Where the two bottom corners' controls stand, as numbers the rest of the
+ * HUD can build on. The route overlay fits itself between the menu button and
+ * the control cluster from these, so moving either one moves the overlay's
+ * edge with it instead of leaving a hard-coded guess behind. The desktop
+ * values are set in "Controls on desktop" below. */
+:root {
+  --menu-left: 12px;
+  --menu-bottom: 12px;
+  --menu-size: 56px;
+  --controls-right: 14px;
+  /* The pad's three 38px columns and two 4px gaps; the commit block below it
+     is set to the same width. */
+  --controls-width: 122px;
+}
+
 .hamburger-menu {
   position: fixed;
-  bottom: 12px;
-  left: 12px;
-  width: 56px;
-  height: 56px;
+  bottom: var(--menu-bottom);
+  left: var(--menu-left);
+  width: var(--menu-size);
+  height: var(--menu-size);
   border-radius: 50%;
   background: rgba(6, 14, 22, 0.85);
   border: 1px solid var(--border);
@@ -3843,7 +3858,7 @@ kbd {
 .touchpad,
 .touchops {
   position: fixed;
-  right: 14px;
+  right: var(--controls-right);
   /* Above the instrument stack (102) and the spectate bar (101). Those grow
      downward while viewing and spectating, which is exactly when the pad is
      the only way to change scale, and a readout briefly overlapped is a
@@ -3949,6 +3964,11 @@ kbd {
 }
 .touchpad__key--zoomin { grid-area: zoomin; }
 
+/* The same dark plate as every other key, with its cyan tint laid over that
+ * plate rather than standing on its own. A bare 8% cyan let the scene through,
+ * and with a bright shard behind the pad the readout vanished (arkinox,
+ * 2026-10-07). The tint stays, so the hub still reads as the readout and not
+ * as one more arrow; the hover and press tints sit on the same plate. */
 .touchpad__hub {
   grid-area: hub;
   display: flex;
@@ -3958,33 +3978,51 @@ kbd {
   letter-spacing: 0.04em;
   color: var(--accent, #00e5ff);
   border-radius: 9px;
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.22);
+  background-color: rgba(6, 14, 22, 0.72);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.08), rgba(0, 229, 255, 0.08));
+  border: 1px solid var(--border, #1d3547);
+  backdrop-filter: blur(6px);
   cursor: pointer;
 }
 
 /* The hub is clickable (it resets to 2^0), so it answers the pointer the way
- * its neighbours do; before this it read as a passive readout. */
+ * its neighbors do; before this it read as a passive readout. */
 .touchpad__hub:hover {
-  background: rgba(0, 229, 255, 0.16);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.16), rgba(0, 229, 255, 0.16));
 }
 
 .touchpad__hub:active {
-  background: rgba(0, 229, 255, 0.3);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.3), rgba(0, 229, 255, 0.3));
   border-color: var(--accent, #00e5ff);
 }
 
-/* ---------- Route overlay: the lined-up route, live, above the pad ----------
+/* ---------- Route overlay: the lined-up route, live, over the menu button ----------
  *
- * The pad's top edge is at 92 + 122 px; the overlay hangs 12 px above it and
- * grows leftward from the pad's right edge. Taps pass through. */
+ * It used to hang over the pad, and covered the cube and Earth keys at its
+ * top. It lives in the lower left now (arkinox, 2026-10-07): its left edge on
+ * the menu button's, its bottom a gap above that button, and its right edge a
+ * gap short of the control cluster, all from the shared corner numbers in
+ * :root, so it can never reach a control at any width. On a phone it fills
+ * that whole span; on a desktop the span is wide, so it stops at a reading
+ * width and stays on the left.
+ *
+ * It grows upward from its bottom edge with the number of steps, to 35% of
+ * the screen's height, and past that the list scrolls with no visible bar.
+ * Beneath the chat (101) and the instrument stack (102): both are things you
+ * act on, this is only read, so when the chat is unfolded over it the chat
+ * wins. Taps pass through it until the list overflows (RouteOverlay.tsx). */
 .routeov {
+  --routeov-gap: 10px;
   position: fixed;
-  right: 14px;
-  bottom: 226px;
-  z-index: 103;
-  width: 282px;
-  max-height: 38vh;
+  left: var(--menu-left);
+  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap));
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  z-index: 100;
+  max-width: 360px;
+  max-height: 35vh;
+  max-height: 35dvh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 6px 8px 7px;
   border-radius: 9px;
@@ -3998,25 +4036,70 @@ kbd {
 }
 .routeov--cloud { border-color: rgba(47, 129, 247, 0.6); }
 .routeov--blocked { border-color: rgba(255, 59, 107, 0.6); }
+/* Only while the list overflows: then a finger, a wheel or a click lands on
+ * the overlay so it can scroll, instead of passing to the scene. */
+.routeov--scroll { pointer-events: auto; }
+/* The HOSAKA mark breathes in the same spot over the menu button while a job
+ * computes (HosakaPulse.tsx, the menu button's width at the logo's 308:334
+ * aspect). While it is mounted the overlay stands a gap above it. */
+.app:has(.hosaka-pulse) .routeov {
+  bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* The summary drops under ROUTE rather than being cut off when the overlay is
+ * phone narrow, and is cut off only past the full width. */
 .routeov__head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 2px 8px;
+  flex: 0 0 auto;
 }
 .routeov__title { color: var(--dim); }
-.routeov__sum { color: var(--accent); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.routeov__sum { color: var(--accent); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; margin-left: auto; }
 .routeov--cloud .routeov__sum { color: #6fa8ff; }
 .routeov--blocked .routeov__sum { color: #ff3b6b; }
+/* The list is the part that scrolls, so ROUTE and the summary stay in view.
+ * No visible bar, the HUD's rule everywhere (see "Invisible scrollbars"). */
 .route--overlay {
   margin-top: 0.3rem;
   font-size: 0.62rem;
   letter-spacing: 0.04em;
+  flex: 0 1 auto;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.route--overlay::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.route--overlay:focus { outline: none; }
+.route--overlay:focus-visible { outline: 1px solid rgba(0, 229, 255, 0.5); outline-offset: 1px; }
 .route--overlay .route__step {
   grid-template-columns: 1.1rem 6.4rem 2.6rem 1fr;
   gap: 0.3rem;
   padding: 0.06rem 0.2rem;
   white-space: nowrap;
+}
+.route--overlay .route__state { overflow: hidden; text-overflow: ellipsis; }
+/* Columns as wide as their widest entry, shared by every row through a
+ * subgrid, so the narrow phone span still fits SIDESTEP and "this machine"
+ * side by side. The fixed columns above stay as the fallback. The gap row's
+ * "N more" runs across the columns after the index. */
+@supports (grid-template-columns: subgrid) {
+  /* Two classes: the generic .route rule further down the file sets gap with
+     one, and would otherwise win. */
+  .routeov .route--overlay {
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    column-gap: 0.45rem;
+  }
+  .route--overlay .route__step {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    column-gap: normal;
+  }
+  .route--overlay .route__step--gap .route__kind { grid-column: 2 / -1; }
 }
 
 /* COMMIT is the only control here that spends anything, so it is the only one
@@ -4028,7 +4111,7 @@ kbd {
   grid-template-columns: 56px 62px;
   grid-template-rows: 40px 26px;
   gap: 4px;
-  width: 122px;
+  width: var(--controls-width);
 }
 
 /* Local / Live, under RECALL and COMMIT. A two-way switch, so the state that
@@ -4316,10 +4399,15 @@ kbd {
  * underneath them.
  */
 @media (min-width: 1101px) {
-  .touchpad,
-  .touchops,
-  .touchhint,
-  .routeov {
+  /* The pad, the commit block and the route overlay all read these. */
+  :root {
+    --controls-right: 332px;
+    --menu-left: 352px;
+    --menu-bottom: 14px;
+    --menu-size: 46px;
+  }
+
+  .touchhint {
     right: 332px;
   }
 
@@ -4332,12 +4420,6 @@ kbd {
     left: 352px;
   }
 
-  .hamburger-menu {
-    left: 352px;
-    bottom: 14px;
-    width: 46px;
-    height: 46px;
-  }
 
   /* The compass is top-right on every width now (the chat took the bottom
    * centre). Flush right on a desktop is underneath the 300px panel column,

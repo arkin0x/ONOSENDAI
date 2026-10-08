@@ -298,16 +298,23 @@ export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayA
 }
 
 /**
- * Open one relay and answer its auth challenge, for a read that asks each
- * relay on its own (sno-core/feed `readEach`, the Shard Feed). False when it
- * cannot be reached. Unlike `queryRelays`, nothing waits on any other relay:
- * one hung socket used to hold every relay's question until it gave up
- * (snocrash #22). The caller bounds the wait.
+ * Open one relay for a read that asks each relay on its own (sno-core/feed
+ * `readEach`, the Shard Feed). False when it cannot be reached. Unlike
+ * `queryRelays`, nothing waits on any other relay: one hung socket used to
+ * hold every relay's question until it gave up (snocrash #22). The reader
+ * bounds the wait (`connectMs`).
  */
-export async function prepareRelay(url: string): Promise<boolean> {
-  try { await getPool().ensureRelay(url) } catch { return false }
-  await authRelay(url)
-  return true
+export async function connectRelay(url: string): Promise<boolean> {
+  try { await getPool().ensureRelay(url); return true } catch { return false }
+}
+
+/**
+ * Answer an open relay's auth challenge for such a read, on the reader's own
+ * auth allowance (`authMs`), not the connect's: an extension or a bunker may
+ * be a person approving it, and the cyberspace relay gates reads.
+ */
+export function authForRead(url: string): Promise<void> {
+  return authRelay(url)
 }
 
 /**

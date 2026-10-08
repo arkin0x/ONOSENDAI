@@ -21,7 +21,8 @@ const PK = 'ab'.repeat(32)
 const payload = (name: string): string => JSON.stringify({ v: 2, name, unit: 0, extent: 8, mode: 'points', vertices: [[1, 0, 0]], colors: [229], faces: [] })
 vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://mine.test'],
-  prepareRelay: vi.fn(async (url: string) => url !== 'wss://nos.lol'),
+  connectRelay: vi.fn(async (url: string) => url !== 'wss://nos.lol'),
+  authForRead: vi.fn(async () => {}),
   subscribeOne: vi.fn((url: string, filter: Record<string, unknown>, h: { onevent: (e: unknown) => void; oneose: () => void }) => {
     ;(asked[url] ??= []).push(filter)
     setTimeout(() => {

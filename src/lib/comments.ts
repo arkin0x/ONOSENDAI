@@ -70,12 +70,26 @@ export interface ItemTarget {
   kind: number
   pubkey: string
   address?: string
+  /** The referenced event's id, as last fetched. */
+  id?: string
 }
 
 /** The target of an item hidden by reference: its referenced event, addressed when the reference is an `a` tag. */
-export function itemTargetOf(inner: { kind: number; pubkey: string } | undefined, ref: string[] | undefined): ItemTarget | undefined {
+export function itemTargetOf(inner: { kind: number; pubkey: string; id?: string } | undefined, ref: string[] | undefined): ItemTarget | undefined {
   if (!inner || !ref) return undefined
-  return { kind: inner.kind, pubkey: inner.pubkey, address: ref[0] === 'a' ? ref[1] : undefined }
+  return { kind: inner.kind, pubkey: inner.pubkey, address: ref[0] === 'a' ? ref[1] : undefined, id: inner.id }
+}
+
+/**
+ * An item that is another author's object, placed by reference (a LIVE LINK
+ * from the Shard Feed). Anything public said about it must not name that
+ * object: a comment pairing the bag with the object's id, address and author
+ * tells everyone which public object is hidden in that bag (review of #233).
+ * Its comments answer the bag instead, and its reactions answer the object
+ * alone, without the bag.
+ */
+export function isForeignItem(subject: Pick<CommentSubject, 'author' | 'target'>): boolean {
+  return !!subject.target && subject.target.pubkey !== subject.author
 }
 
 export interface Comment {
@@ -98,8 +112,9 @@ export function itemKind(type: HiddenType): number {
   return type === 'shard' ? SHARD_KIND : MESSAGE_KIND
 }
 
-/** The item as a parent: a top-level comment answers the item. */
+/** The item as a parent: a top-level comment answers the item, or for a LIVE LINK the bag only. */
 export function itemParent(subject: CommentSubject): CommentParent {
+  if (isForeignItem(subject)) return { id: '', kind: HIDDEN_KIND, pubkey: subject.author, address: bagAddress(subject) }
   const t = subject.target
   return { id: subject.itemId, kind: t?.kind ?? itemKind(subject.type), pubkey: t?.pubkey ?? subject.author, address: t?.address }
 }
@@ -124,7 +139,8 @@ export function commentTemplate(subject: Pick<CommentSubject, 'author' | 'lookup
       ['A', bagAddress(subject)],
       ['K', String(HIDDEN_KIND)],
       ['P', subject.author],
-      ['e', parent.id, '', parent.pubkey],
+      // A parent named by address alone (the bag, for a LIVE LINK) has no `e`.
+      ...(parent.id ? [['e', parent.id, '', parent.pubkey]] : []),
       ...(parent.address ? [['a', parent.address, '']] : []),
       ['k', String(parent.kind)],
       ['p', parent.pubkey],
@@ -170,7 +186,8 @@ function firstTag(ev: NostrEvent, name: string): string[] | undefined {
 export function parseComment(ev: NostrEvent): Parsed | null {
   if (ev.kind !== COMMENT_KIND) return null
   const root = firstTag(ev, 'A')?.[1] ?? firstTag(ev, 'E')?.[1]
-  const parent = firstTag(ev, 'e')?.[1]
+  // The parent's id, or its address when it is named by address alone.
+  const parent = firstTag(ev, 'e')?.[1] ?? firstTag(ev, 'a')?.[1]
   const parentKind = Number(firstTag(ev, 'k')?.[1])
   if (!root || !parent || !Number.isFinite(parentKind)) return null
   const enc = firstTag(ev, 'encrypted')
@@ -203,6 +220,8 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
   // An item hidden by an `a` reference keeps its address when its author
   // edits it, while its event id changes; a comment made on any version
   // names that address, so it stays under the item across edits.
+  // A LIVE LINK's comments answer the bag (isForeignItem).
+  if (isForeignItem(subject)) return threadUnder(events, bagAddress(subject), '', bagAddress(subject), opened)
   return threadUnder(events, bagAddress(subject), subject.itemId, subject.target?.address, opened)
 }
 
@@ -224,7 +243,7 @@ export function threadUnder(events: NostrEvent[], root: string, itemId: string, 
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && (c.parentId === itemId || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

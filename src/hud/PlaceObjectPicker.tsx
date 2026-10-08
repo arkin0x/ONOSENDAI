@@ -22,6 +22,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { useStash } from './stash'
 import { FeedList } from './FeedList'
+import { Explanation } from './Explanation'
 
 /** Where objects to place come from. */
 export type SourceId = 'mine' | 'feed'
@@ -44,7 +45,8 @@ export function openWorkshopFromPicker(): void {
 }
 
 export function PlaceObjectPicker(): JSX.Element {
-  const [source, setSource] = useState<SourceId>(() => defaultSource(useWorkshop.getState().shards))
+  // The tab last picked from, so a cancelled deploy comes back to it; else MINE, or FEED with no models.
+  const [source, setSource] = useState<SourceId>(() => useStash.getState().pickTab ?? defaultSource(useWorkshop.getState().shards))
   return (
     <>
       <div className="objpick__tabs" role="tablist">
@@ -53,7 +55,18 @@ export function PlaceObjectPicker(): JSX.Element {
         ))}
       </div>
       {source === 'mine' && <ModelsSource toFeed={() => setSource('feed')} />}
-      {source === 'feed' && <FeedList onPick={(o) => useStash.getState().deployObject(o)} />}
+      {source === 'feed' && (
+        <>
+          <FeedList onPick={(o) => useStash.getState().deployObject(o)} />
+          <Explanation>
+            <ul className="objpick__explain">
+              <li>A pick goes out as a copy: it stays exactly as you placed it.</li>
+              <li>The copy credits its author.</li>
+              <li>LIVE LINK on the deploy bar places it by reference instead, and follows the author&apos;s edits.</li>
+            </ul>
+          </Explanation>
+        </>
+      )}
     </>
   )
 }

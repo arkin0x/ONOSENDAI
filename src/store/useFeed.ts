@@ -16,7 +16,7 @@
 
 import { create } from 'zustand'
 import { FEED_RELAYS, createFeed, type Feed, type FeedObject } from 'sno-core/feed'
-import { prepareRelay, relaySet, subscribeOne } from '../lib/relay'
+import { authForRead, connectRelay, relaySet, subscribeOne } from '../lib/relay'
 
 export interface FeedStore {
   objects: FeedObject[]
@@ -53,7 +53,8 @@ export const useFeed = create<FeedStore>((set, get) => ({
       relays: feedRelays(),
       // A FeedFilter is a nostr Filter with no tag keys, which is the point.
       subscribe: (url, filter, handlers) => subscribeOne(url, { ...filter }, handlers),
-      read: { prepare: prepareRelay },
+      // The connect bounded on its own, the auth on its own allowance.
+      read: { connect: connectRelay, auth: authForRead },
       onChange: (s) => set({ objects: s.objects, loading: s.loading, exhausted: s.exhausted }),
     })
     void feed.more()

@@ -237,7 +237,7 @@ function endUnder(reason: BuildEndReason): void {
       kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped
     }
     // Not back to the Models modal: the view went somewhere on purpose.
-    useStash.setState({ returnToModels: false })
+    useStash.setState({ returnToModels: false, returnToFeed: false })
     shards.cancelDeploy()
   }
   useToast.getState().show({ label: 'BUILD MODE ENDED', meta: END_REASON[reason] + kept + ' Press BUILD to start again.', mark: 'build' })

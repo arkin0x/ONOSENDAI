@@ -120,6 +120,9 @@ export interface WorldItem {
   target?: ItemTarget
 }
 
+/** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
+export const LINK_REFUSED = "LIVE LINK needs the author's object on one of your relays, and none took it. Place it as a copy instead."
+
 /** What a deploy is placing, before it lands. */
 export type DeployPending =
   /**
@@ -508,6 +511,15 @@ export const useShards = create<ShardsState>((set, get) => {
     const { mine, deleted } = get()
     const have = new Set(mine.map((d) => d.eventId))
     const own: MyDeployment[] = []
+    // A LIVE LINK whose author published a newer version: the same row, its
+    // stored copy refreshed, never a second row (review of #233).
+    let refreshed = false
+    const updated = mine.map((d) => {
+      const h = items.find((x) => x.eventId === d.eventId && x.inner && d.ref && x.inner.id !== d.inner.id && x.inner.created_at > d.inner.created_at)
+      if (!h || !h.inner) return d
+      refreshed = true
+      return { ...d, inner: h.inner, shard: h.shard ?? d.shard }
+    })
     for (const h of items) {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
@@ -517,8 +529,8 @@ export const useShards = create<ShardsState>((set, get) => {
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
       })
     }
-    if (own.length === 0) return
-    const next = [...mine, ...own]
+    if (own.length === 0 && !refreshed) return
+    const next = [...updated, ...own]
     set({ mine: next })
     saveMine(next)
   }
@@ -579,8 +591,10 @@ export const useShards = create<ShardsState>((set, get) => {
       deployLink: false,
       deployHeightAuto: true,
       deployUnit: object.shard.unit,
-      deployUp: false,
-      deploySpin: 0,
+      // The pose its author published goes with the copy (DECK-0003 §1.7);
+      // the height decides whether the snap is offered (setDeployHeight).
+      deployUp: object.shard.up ?? false,
+      deploySpin: object.shard.spin ?? 0,
       deployTurn: [0, 0, 0],
       deployFollow: false,
       deployBag: DEFAULT_BAG_SETTINGS,
@@ -745,9 +759,24 @@ export const useShards = create<ShardsState>((set, get) => {
         let ref: Reference | undefined
         if (link && object) {
           // LIVE LINK: the bag names the author's own object, signed by them;
-          // nothing new is signed or published for the item.
+          // nothing new is signed for the item. A finder looks it up on their
+          // own relays, so it must be on a relay the bag goes to: the author's
+          // signed event is put on yours first, and the hint names one of
+          // them. If none takes it, LIVE LINK is refused rather than hiding a
+          // reference nobody can follow (review of #233). While LOCAL the bag
+          // goes nowhere yet, and BROADCAST puts the object out with it.
           inner = object.event as NostrEvent
-          ref = referenceTo(inner, at, plane, object.seen?.[0] ?? relaySet()[0] ?? '')
+          const mine = relaySet()
+          let hint = mine[0] ?? ''
+          if (live) {
+            // Each relay on its own, so the hint names one that took it.
+            const event = inner
+            const took = await Promise.all(mine.map(async (url) => ((await publishMany([url], event)).ok ? url : null)))
+            const first = took.find((u): u is string => u !== null)
+            if (!first) throw new Error(LINK_REFUSED)
+            hint = first
+          }
+          ref = referenceTo(inner, at, plane, hint)
         } else if (pending.type === 'shard' && shard && wantsReference(shard)) {
           inner = await cs.signEvent(await objectTemplate(shard, rk.key, placementId(), createdAt))
           if (live) {
@@ -782,7 +811,8 @@ export const useShards = create<ShardsState>((set, get) => {
         }
 
         const item: MyDeployment = {
-          eventId: inner.id,
+          // A LIVE LINK is keyed by its bag entry (hidden.ts Hidden.eventId).
+          eventId: link && ref ? entryKey(ref) : inner.id,
           inner,
           ref,
           bagId: event.id,
@@ -847,10 +877,11 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         const key = hexToBytes(items[0].keyHex)
         const existing = await gatherInners(lookupId, key, true, items[0].height)
-        // Objects hidden by reference go out before the bag that names them.
-        const me = cyber().identity.pubkey
+        // Objects hidden by reference go out before the bag that names them,
+        // and so do the authors' objects a LIVE LINK names: a finder looks
+        // them up on the relays the bag goes to.
         for (const d of items) {
-          if (!d.ref || d.inner.pubkey !== me) continue
+          if (!d.ref) continue
           // A bag naming an object no relay holds would be a permanent hole
           // for everyone, carried forward by every later rewrite. Stop here.
           const sent = await publishMany(relaySet(), d.inner)
@@ -995,7 +1026,14 @@ export const useShards = create<ShardsState>((set, get) => {
       const { deleted } = get()
       const discovered = { ...get().discovered }
       let changed = false
-      for (const h of items) if (!discovered[h.eventId] && !deleted[h.eventId]) { discovered[h.eventId] = h; changed = true }
+      for (const h of items) {
+        if (deleted[h.eventId]) continue
+        const held = discovered[h.eventId]
+        // New, or a LIVE LINK whose author published a newer version: the
+        // same find, refreshed, and no second ceremony (review of #233).
+        const newer = !!held && !!h.inner && !!held.inner && h.inner.id !== held.inner.id && h.inner.created_at > held.inner.created_at
+        if (!held || newer) { discovered[h.eventId] = h; changed = true }
+      }
       if (changed) set({ discovered })
       remember(items.map((h) => h.eventId))
       claimOwn(items)

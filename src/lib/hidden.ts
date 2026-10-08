@@ -149,7 +149,12 @@ export function messagePreview(text: string, max = 32): string {
 
 /** What a decoded hidden thing carries, ready to render. */
 export interface Hidden {
-  /** The item's stable identity: its inner event id. */
+  /**
+   * The item's stable identity: its inner event id. For a LIVE LINK (a
+   * reference to another author's object) it is the bag entry instead,
+   * `entryKey`: the address and the point. The author's edits change the
+   * event id, and one object placed twice is two items (review of #233).
+   */
   eventId: string
   /**
    * The signed inner event itself, verified, and the region key that opened
@@ -493,7 +498,9 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
 
   const { x, y, z, plane } = coordHex ? coordToXyz(hexToCoord(coordHex)) : { ...origin!.at, plane: origin!.plane }
   const base = {
-    eventId: target.id,
+    // Another author's object (a LIVE LINK) is keyed by the bag entry, which
+    // their edits do not change and which tells two placements of it apart.
+    eventId: target.pubkey !== outer.pubkey ? entryKey(ref) : target.id,
     inner: target,
     keyHex,
     ref,

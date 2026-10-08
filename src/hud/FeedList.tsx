@@ -10,7 +10,7 @@
  * ThumbStage mounted here.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { nip19 } from 'nostr-tools'
 import { RefreshCw } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
@@ -20,8 +20,12 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { ThumbStage } from '../scene/ThumbStage'
 
-/** A tile's picture, asked for once the tile is near the screen. */
-function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
+/**
+ * A tile's picture, asked for once the tile is within 200 px of the list's
+ * visible part. The list scrolls inside its own box, so that box is the
+ * observer's root; against the page's viewport the margin did nothing.
+ */
+function FeedThumb({ object, root }: { object: FeedObject; root: HTMLElement | null }): JSX.Element {
   const url = useThumbs((s) => s.urls[object.id])
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -30,10 +34,10 @@ function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
     if (!el || typeof IntersectionObserver === 'undefined') { useThumbs.getState().request(object.id, object.shard); return }
     const seen = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) { useThumbs.getState().request(object.id, object.shard); seen.disconnect() }
-    }, { rootMargin: '200px' })
+    }, { root, rootMargin: '200px' })
     seen.observe(el)
     return () => seen.disconnect()
-  }, [url, object.id, object.shard])
+  }, [url, object.id, object.shard, root])
   return (
     <div className="feed__thumb" ref={box}>
       {url ? <img src={url} alt="" width={80} height={80} /> : <span className="feed__thumb-wait" aria-hidden="true" />}
@@ -47,11 +51,11 @@ function Author({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{profileLabel(profile, nip19.npubEncode(pubkey))}</>
 }
 
-function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+function Tile({ object, onPick, actions, root }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; root: HTMLElement | null }): JSX.Element {
   const s = object.shard
   const body = (
     <>
-      <FeedThumb object={object} />
+      <FeedThumb object={object} root={root} />
       <span className="feed__text">
         <span className="feed__name">{s.name}</span>
         <span className="feed__by"><Author pubkey={object.pubkey} /></span>
@@ -74,28 +78,33 @@ export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void
   const loading = useFeed((s) => s.loading)
   const exhausted = useFeed((s) => s.exhausted)
   const end = useRef<HTMLLIElement>(null)
+  // The list's own scroll box: the root every observer here measures against.
+  const [list, setList] = useState<HTMLUListElement | null>(null)
 
   // The first page on first sight; the feed is kept after that (useFeed).
   useEffect(() => { useFeed.getState().start() }, [])
 
-  // The next page when the end of the list comes into view.
+  // The next page when the end of the list comes into view. Re-armed when a
+  // page finishes as well as when the count changes: a page that brought
+  // nothing new (every newest event sealed, say) left the end in view with
+  // no change to observe, and the list stalled (review of #233).
   useEffect(() => {
     const el = end.current
-    if (!el || typeof IntersectionObserver === 'undefined') return
+    if (!el || !list || loading || exhausted || typeof IntersectionObserver === 'undefined') return
     const watch = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) useFeed.getState().more()
-    }, { rootMargin: '120px' })
+    }, { root: list, rootMargin: '120px' })
     watch.observe(el)
     return () => watch.disconnect()
-  }, [objects.length])
+  }, [objects.length, loading, exhausted, list])
 
   return (
     <div className="feed">
       <ThumbStage />
-      <ul className="feed__list">
-        {objects.map((o) => <Tile key={o.address} object={o} onPick={onPick} actions={actions} />)}
+      <ul className="feed__list" ref={setList}>
+        {objects.map((o) => <Tile key={o.address} object={o} onPick={onPick} actions={actions} root={list} />)}
         <li className="feed__end" ref={end}>
-          {loading
+          {loading || (objects.length === 0 && !exhausted)
             ? 'Reading the relays…'
             : objects.length === 0
               ? 'No published objects found on these relays yet.'

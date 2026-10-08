@@ -36,6 +36,7 @@ import { useShards } from '../useShards'
 import { useWorkshop, creditOf } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { HIDDEN_KIND, OBJECT_KIND, SHARD_KIND, unbag } from '../../lib/hidden'
+import { useStash } from '../../hud/stash'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 
 /** Someone else's published object, signed by them, as the feed reads it. */
@@ -114,10 +115,13 @@ describe('LIVE LINK', () => {
     expect(useShards.getState().deployTurn).toEqual([0, 0, 0])
     await useShards.getState().deploy()
     const dep = useShards.getState().mine[0]
-    expect(dep.ref?.slice(0, 3)).toEqual(['a', o.address, 'wss://feed.relay'])
+    // The hint is a relay of yours, where the author's object was put first
+    // (B1, review of #233): finders look references up on their own relays.
+    expect(dep.ref?.slice(0, 3)).toEqual(['a', o.address, 'wss://relay.test'])
     expect(dep.inner.id).toBe(o.id)
-    // Only the bag went out: no object of ours, no item.
-    expect(sent.map((e) => e.kind)).toEqual([HIDDEN_KIND])
+    // The author's own signed object, then the bag: no object of ours, no item.
+    expect(sent.map((e) => e.kind)).toEqual([OBJECT_KIND, HIDDEN_KIND])
+    expect(sent[0].id).toBe(o.id)
   })
 
   it('opens for a reader: the bag names the public object and it draws', async () => {
@@ -153,5 +157,26 @@ describe('REMIX', () => {
     useShards.getState().startDeployShard(id)
     await useShards.getState().deploy()
     expect(readCredit(useShards.getState().mine[0].inner.tags)).toBeNull()
+  })
+})
+
+describe('cancelling a deploy picked from the feed', () => {
+  it('from PLACE OBJECT\'s FEED: back to PLACE OBJECT, on the FEED tab', () => {
+    useStash.getState().openModels()
+    useStash.getState().deployObject(published('Bench'))
+    expect(useStash.getState().models).toBe(false)
+    useShards.getState().cancelDeploy()
+    expect(useStash.getState().models).toBe(true)
+    expect(useStash.getState().pickTab).toBe('feed')
+    useStash.getState().close()
+  })
+
+  it('from the SHARD FEED window (USE IN BUILDER): back to the window', () => {
+    useStash.getState().openFeed()
+    useStash.getState().useFromFeed(published('Bench'))
+    expect(useStash.getState().feed).toBe(false)
+    useShards.getState().cancelDeploy()
+    expect(useStash.getState().feed).toBe(true)
+    useStash.getState().close()
   })
 })

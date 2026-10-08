@@ -90,11 +90,9 @@ const ICON = 12
  * lists (PR 4); a disabled button until then would only be noise.
  */
 function FeedActions({ object }: { object: FeedObject }): JSX.Element {
-  const use = (): void => {
-    useStash.getState().close()
-    // BUILD starts where you are looking (ruling A), the object lined up as a copy.
-    useShards.getState().startDeployObject(object)
-  }
+  // BUILD starts where you are looking (ruling A), the object lined up as a
+  // copy; a cancel comes back to this window.
+  const use = (): void => useStash.getState().useFromFeed(object)
   const remix = (): void => {
     const id = useWorkshop.getState().importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
     useStash.getState().close()

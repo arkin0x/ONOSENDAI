@@ -8143,3 +8143,11 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   gap: 6px;
 }
 .objpick__emptyacts .objpick__workshop { flex: 1; }
+/* PLACE OBJECT's FEED EXPLAIN: three short lines. */
+.objpick__explain {
+  margin: 0;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}

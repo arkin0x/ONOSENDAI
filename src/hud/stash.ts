@@ -75,6 +75,12 @@ interface StashModals {
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
   returnToModels: boolean
+  /** A deploy was started from the SHARD FEED window (USE IN BUILDER): cancelling it reopens the window. */
+  returnToFeed: boolean
+  /** The PLACE OBJECT tab last picked from, so a cancelled deploy comes back to it. */
+  pickTab: 'mine' | 'feed' | null
+  /** USE IN BUILDER from the SHARD FEED window: the object lined up, the window back on a cancel. */
+  useFromFeed: (object: FeedObject) => void
   openModels: () => void
   openBags: () => void
   openBag: (lookupId: string) => void
@@ -96,6 +102,8 @@ export const useStash = create<StashModals>((set) => ({
   message: false,
   feed: false,
   returnToModels: false,
+  returnToFeed: false,
+  pickTab: null,
   openModels: () => set({ models: true, bags: false, bag: null, message: false, feed: false }),
   openBags: () => set({ bags: true, models: false, bag: null, message: false, feed: false }),
   openBag: (lookupId) => set({ bag: lookupId, models: false, message: false, feed: false }),
@@ -103,11 +111,15 @@ export const useStash = create<StashModals>((set) => ({
   openFeed: () => set({ feed: true, models: false, bags: false, bag: null, message: false }),
   close: () => set({ models: false, bags: false, bag: null, message: false, feed: false }),
   deployModel: (id) => {
-    set({ models: false, returnToModels: true })
+    set({ models: false, returnToModels: true, pickTab: 'mine' })
     useShards.getState().startDeployShard(id)
   },
   deployObject: (object) => {
-    set({ models: false, returnToModels: true })
+    set({ models: false, returnToModels: true, pickTab: 'feed' })
+    useShards.getState().startDeployObject(object)
+  },
+  useFromFeed: (object) => {
+    set({ feed: false, returnToFeed: true })
     useShards.getState().startDeployObject(object)
   },
 }))
@@ -116,7 +128,8 @@ export const useStash = create<StashModals>((set) => ({
 // modal, returns to it; one that places, or any other ending, forgets.
 useShards.subscribe((s, prev) => {
   if (prev.pending === null || s.pending !== null) return
-  const { returnToModels } = useStash.getState()
+  const { returnToModels, returnToFeed } = useStash.getState()
+  if (returnToFeed) { useStash.setState({ returnToFeed: false, feed: s.deployStatus !== 'done' }); return }
   if (!returnToModels) return
   useStash.setState({ returnToModels: false, models: s.deployStatus !== 'done' })
 })

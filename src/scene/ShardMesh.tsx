@@ -36,7 +36,7 @@ import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Par
 import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
 import { ACCENT, WARN } from '../lib/palette'
-import type { Pose } from '../lib/pose'
+import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from 'sno-core/orient'
 import { faceEdges } from 'sno-core/outline'
@@ -82,11 +82,12 @@ interface Props {
    */
   clip?: Box
   /**
-   * The shard standing on the Earth where it is hidden, in the view frame
-   * (lib/pose.ts drawPoseAt): the turn applied to every vertex before the
-   * render mapping, so the bottom faces the ground and +Z faces its spin.
-   * Absent for a shard lying on cyberspace axes as it was built, which is
-   * every shard hidden before the pose existed and every one in cyberspace.
+   * The turn applied to every vertex before the render mapping (lib/pose.ts
+   * placedPose). In the world it is always given, because it carries the
+   * view frame: a shard standing on the Earth where it is hidden, bottom to
+   * the ground and +Z to its spin, or one lying on cyberspace axes as it was
+   * built, and either way turned to the compass's view. Absent on the bench
+   * and for avatars, which are drawn in the render mapping as it is.
    */
   pose?: Pose
   /**
@@ -324,19 +325,6 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
 const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
 
 /**
- * A pose, which turns ticks before the render mapping, as the same turn in
- * render space: the flip on Z, the turn, the flip back. Placements are placed
- * in render space, and a part stands on the Earth with its parent (§1.10: it
- * loses its own `up` and `spin` to the parent's placement).
- */
-function poseMatrix(pose: Pose): Matrix4 {
-  const f = [1, 1, -1]
-  // applyPose: out[j] = sum_i v[i] * pose[i * 3 + j], so the column-vector matrix is M[j][i] = pose[i * 3 + j].
-  const m = (j: number, i: number): number => f[j] * pose[i * 3 + j] * f[i]
-  return new Matrix4().set(m(0, 0), m(0, 1), m(0, 2), 0, m(1, 0), m(1, 1), m(1, 2), 0, m(2, 0), m(2, 1), m(2, 2), 0, 0, 0, 0, 1)
-}
-
-/**
  * Each placed object where its placement stands, or a placeholder there: a
  * wireframe cube one unit on a side in the accent, for anything not fetched,
  * not valid, too deep, a loop, or scaled out of range (§1.10). Nothing is
@@ -358,7 +346,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
   const list: Array<{ part: Part; r: Resolved | undefined }> = nested
     ? nested.map((p) => ({ part: p.part, r: p }))
     : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
-  const turn = useMemo(() => (pose ? poseMatrix(pose) : null), [pose])
+  const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
   if (list.length === 0) return null
   const drawn = list.map(({ part, r }, i) => {
     if (!r) return null

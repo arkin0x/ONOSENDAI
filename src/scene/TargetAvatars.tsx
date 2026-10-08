@@ -12,6 +12,7 @@ import { useMemo } from 'react'
 import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { AvatarShape } from './AvatarShape'
+import { avatarTurn } from '../lib/facing'
 import { WorldLabel } from './WorldLabel'
 
 /** Same cull as Earth and the spawn marker. */
@@ -49,13 +50,19 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets, anchor, anchorPlane, scaleExp, axes, focus])
 
+  // Turned with the view like every shard and your own avatar, so a compass
+  // turn that puts the world upside down puts them upside down with it.
+  const turn = useMemo(() => avatarTurn(axes, null), [axes])
+
   if (near.length === 0) return null
 
   return (
     <>
       {near.map((t) => (
         <group key={t.id} position={t.centre}>
-          <AvatarShape pubkey={t.id} color={t.color} />
+          <group quaternion={turn}>
+            <AvatarShape pubkey={t.id} color={t.color} />
+          </group>
           <WorldLabel text={t.label} color={t.color} at={[0, 0.9, 0]} align="center" px={11} opacity={0.9} />
         </group>
       ))}

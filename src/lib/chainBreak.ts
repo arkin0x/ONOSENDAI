@@ -9,7 +9,7 @@
  * | Cause | When it is owed | What it says |
  * |---|---|---|
  * | spec change | the rule broken took effect after the event was signed (events.ts `breakSince`, a RuleChange with its effective time) | the action was valid when signed; the rule took effect on that day, by spec PR #44, by arkinox's ruling (since written into the spec by PR #46), or by PR #46 merging |
- * | added validation | the same, for a check the rules gained on what was already there (sector tags, Q9; one A tag, Q5; each sector tag once, 2026-10-08) | the rules gained additional validation after it was signed |
+ * | added validation | the same, for a check the rules gained on what was already there (sector tags, Q9; one A tag, Q5; each sector tag once, spec PR #46) | the rules gained additional validation after it was signed |
  * | ONOSENDAI bug, plane bit | a plane-bit boarding signed before PR #225 shipped, plus a day for tabs still running the old bundle (PLANE_BIT_APOLOGY_UNTIL) | ONOSENDAI caused it |
  * | ONOSENDAI offered it | a zero-length ride carrying ONOSENDAI's client tag, signed after the 2026-10-07 ruling: ONOSENDAI kept offering them until this change deployed | ONOSENDAI caused it, offering a ride it had not been updated to refuse |
  *
@@ -41,8 +41,8 @@ export function breakCause(a: Broken): BreakCause | null {
 /** How a rule came to be, in words: "on 2026-10-07, by arkinox's ruling of that day ...". */
 function cameAbout(rule: RuleChange): string {
   if (rule.by === 'spec-44') return `on ${rule.since}, when spec PR #44 brought virtual brackets into chain rules revision ${rule.revision}`
-  if (rule.by === 'spec-46') return `on ${rule.since}, when spec PR #46 wrote arkinox's clarifications of that day into chain rules revision ${rule.revision}`
-  return `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision} and written into the spec by PR #46 on 2026-10-08`
+  if (rule.by === 'spec-46') return `on ${rule.since}, when spec PR #46 merged with arkinox's clarifications in it, into chain rules revision ${rule.revision}`
+  return `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision} and written into the spec by PR #46 later that day`
 }
 
 /** The one-line heading over an apology. */

@@ -21,7 +21,7 @@ import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
-import { generateSecretKey, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
+import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec } from '../lib/keyExport'
 import {
@@ -970,6 +970,31 @@ function loadOrGenerateKey(): Uint8Array {
   return fresh
 }
 
+/**
+ * Signatures already checked this session, as `id:sig`. A Schnorr check
+ * costs about 2 ms on the main thread, and the same chain is read from
+ * storage more than once in a session (at boot by the signer pick and again
+ * by the store, and again on every switch back to an identity), so each
+ * signature is checked once. Memory only, never written to storage: a flag
+ * on disk would be exactly as trustworthy as the disk.
+ */
+const verifiedSigs = new Set<string>()
+
+/**
+ * Whether an event is authentic (spec §8.2, §8.7.3, Q4): its id is the hash
+ * of its contents and its sig a valid signature of that id. The hash is
+ * recomputed every time, which is cheap, so an event whose contents changed
+ * under a remembered id and sig is still caught; only the Schnorr check is
+ * skipped for an id and sig already checked.
+ */
+function authentic(e: NostrEvent): boolean {
+  const key = `${e.id}:${e.sig}`
+  if (verifiedSigs.has(key)) return getEventHash(e) === e.id
+  if (!verifyEvent(e as unknown as VerifiedEvent)) return false
+  verifiedSigs.add(key)
+  return true
+}
+
 function loadChain(pubkey: string): PersistedChain | null {
   try {
     let raw = localStorage.getItem(chainKeyFor(pubkey))
@@ -988,9 +1013,10 @@ function loadChain(pubkey: string): PersistedChain | null {
     // Q4): one whose id or signature does not verify never existed. A
     // branch through it is cut off, and the chain continues from the event
     // before it, so what is kept is the stretch that still reassembles.
-    const authentic = data.events.filter((e) => e && e.pubkey === pubkey && verifyEvent(e as unknown as VerifiedEvent))
-    const resolved = buildChain(authentic, pubkey)
-    const events = authentic.length === data.events.length ? authentic : authentic.filter((e) => resolved.some((a) => a.id === e.id))
+    const kept = data.events.filter((e) => e && e.pubkey === pubkey && authentic(e))
+    const resolved = buildChain(kept, pubkey)
+    const onChain = new Set(resolved.map((a) => a.id))
+    const events = kept.length === data.events.length ? kept : kept.filter((e) => onChain.has(e.id))
     // Must reassemble to exactly what was kept, from our own key. Anything
     // else is a chain that cannot be continued, and pretending otherwise would
     // sign hops onto a history the relay will reject.
@@ -1115,9 +1141,14 @@ function pickInitialSigner(): Signer {
 /** Remote signatures in flight: while one waits, a wake must not drop the sockets its answer arrives on. */
 let pendingSigns = 0
 
-async function signEvent(template: EventTemplate, patienceMs?: number): Promise<NostrEvent> {
-  const signer = currentSigner
-  if (signer.kind === 'local') return signer.signEvent(template)
+async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
+  if (signer.kind === 'local') {
+    // The local key computes the id and the signature itself, so its events
+    // are authentic by construction, and are remembered as checked.
+    const own = await signer.signEvent(template)
+    verifiedSigs.add(`${own.id}:${own.sig}`)
+    return own
+  }
   pendingSigns++
   let signed: NostrEvent
   try {
@@ -1137,7 +1168,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number): Promise<
   // §8.2, §8.7.3, Q4): an event whose id or signature does not verify is
   // not authentic, so it never goes onto a chain, here or on a relay. The
   // local signer computes both itself; an extension or bunker is trusted to.
-  if (!verifyEvent(signed as unknown as VerifiedEvent)) throw new Error('The signer returned an event whose signature does not verify, so it was not used.')
+  if (!authentic(signed)) throw new Error('the signer returned an event whose signature does not verify, so it was not used')
   return signed
 }
 
@@ -1184,11 +1215,16 @@ const pubkeyHex = currentSigner.pubkey
 const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
 const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
-/** A fresh spawn signed through whatever signer is active (may be remote). */
+/**
+ * A fresh spawn signed through whatever signer is active (may be remote),
+ * by way of signEvent, so a remote signer's answer is checked like every
+ * other: a spawn whose signature does not verify is refused here, never
+ * shown or saved, and never silently dropped by loadChain on the next load.
+ */
 async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<PersistedChain> {
   const now = Math.floor(Date.now() / 1000)
   const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
-  const spawn = await signer.signEvent(spawnTemplate(signer.pubkey, createdAt))
+  const spawn = await signEvent(spawnTemplate(signer.pubkey, createdAt), undefined, signer)
   return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
 }
 
@@ -2646,12 +2682,24 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // a respawn from the provisional state while the check has not said
     // "none", for the same reason the first move holds (lib/chainHold.ts).
     const keepHeld = held || (events.length === 0 && !(selfCheck.pubkey === identity.pubkey && selfCheck.status === 'none'))
-    const signed = await freshSpawnAsync(signer, events[events.length - 1])
+    let signed: PersistedChain
+    try {
+      signed = await freshSpawnAsync(signer, events[events.length - 1])
+    } catch (err) {
+      // Refused, timed out, or answered with a signature that does not
+      // verify: nothing is respawned, and it says so where a hop's refusal
+      // is said, as well as to whoever asked for the respawn.
+      const reason = err instanceof Error ? err.message : String(err)
+      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${reason}` } })
+      throw new Error(`signing failed: ${reason}`)
+    }
     // A remote signer can wait minutes for an approval on a phone. If the
     // identity changed meanwhile, this spawn is the old identity's: nothing
     // of it may land in the store, which now holds someone else (final
-    // review of #227).
-    if (get().identity.pubkey !== identity.pubkey || currentSigner !== signer) {
+    // review of #227). Compared by key, because signEvent may have rebuilt a
+    // dead remote signer's channel and swapped in the rebuilt one for the
+    // same identity.
+    if (get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
       throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
     }
     const fresh = derive({ ...signed, held: keepHeld })
@@ -2960,7 +3008,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
-    } catch {
+    } catch (err) {
+      // The signer refused, or answered with a signature that does not
+      // verify: no boarding, said where a hop's refusal is said. Unless the
+      // chain moved on meanwhile, when this refusal is about nothing current.
+      if (get().prevEventId !== prevEventId) return
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
       return
     }
     // The chain may have advanced while a remote signer thought about it.
@@ -3020,8 +3073,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
-    } catch {
-      return
+    } catch (err) {
+      // The signer refused, or answered with a signature that does not
+      // verify: no ride. Thrown with the words a hop's refusal uses, so the
+      // Hyperspace panel shows it where the ride ran and keeps the
+      // destination, instead of clearing it as if the ride had gone.
+      throw new Error(`Signing failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     if (get().prevEventId !== prevEventId) return
     const dest = coordToXyz(hexToCoord(ride.toCoordHex))
@@ -3082,6 +3139,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const me = cur.identity.pubkey
     const mine = incoming.filter((e) => e.pubkey === me)
     if (mine.length === 0) return
+    // The relay pool checked these signatures on receipt (relay.ts); remember
+    // them, so the chain they are saved into is not checked again when it is
+    // read back this session.
+    for (const e of mine) if ((e as unknown as VerifiedEvent)[verifiedSymbol] === true) verifiedSigs.add(`${e.id}:${e.sig}`)
     // A HELD chain never adopts. It was started before the relays could say
     // whether this identity had a chain, so a chain arriving now is exactly
     // the one it may rival, and "newest spawn wins" would pick the local one

@@ -71,7 +71,7 @@ describe('item 4: the apology is true, and says which ruling and when', () => {
     expect(a.breaks).toMatch(/\(DECK-0001 §5\.6, per the 2026-10-07 ruling\)$/)
     const sorry = apologyFor(a)!
     expect(sorry).toMatch(/valid under the chain rules when it was signed/)
-    expect(sorry).toMatch(/took effect on 2026-10-07, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets and written into the spec by PR #46 on 2026-10-08/)
+    expect(sorry).toMatch(/took effect on 2026-10-07, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets and written into the spec by PR #46 later that day/)
   })
 
   it('the same break signed after the rule took effect: the reason, and no apology', () => {

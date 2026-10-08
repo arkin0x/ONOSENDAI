@@ -1,7 +1,8 @@
 /**
  * chainSpec46.test.ts - the chain rules as spec PR #46 (commit 912f3d7,
- * merged 2026-10-08) wrote them down: arkinox's rulings of 2026-10-07 and his
- * clarifications of 2026-10-08.
+ * merged 2026-10-08T04:04:00Z, 23:04 on 2026-10-07 at UTC-5) wrote them
+ * down: arkinox's rulings of 2026-10-07 and the clarifications he gave while
+ * it was open.
  *
  * What would go wrong silently: an event carrying two X tags, or two S tags,
  * reading as valid because only the first copy was ever looked at, so a
@@ -58,12 +59,12 @@ const valueOf = (ev: NostrEvent, name: string): string => ev.tags.find((t) => t[
 const spawn = spawnAt(1_000)
 const hop1 = hopEvent({ pubkey: pk, createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(1n), plane })
 
-describe('each sector tag exactly once (spec §10, clarified 2026-10-08)', () => {
+describe('each sector tag exactly once (spec §10, clarified by spec PR #46)', () => {
   it('a hop carrying a second X tag is broken, even when both copies say the same', () => {
     const hop = plus(hop1, [['X', valueOf(hop1, 'X')]])
     const chain = buildChain([spawn, hop])
     expect(chain[1].breaks).toMatch(/^a hop carrying two X tags\. Each sector tag has to appear exactly once/)
-    expect(chain[1].breaks).toMatch(/\(spec §10, as clarified on 2026-10-08\)$/)
+    expect(chain[1].breaks).toMatch(/\(spec §10, as clarified by spec PR #46\)$/)
     expect(chain[1].breakSince).toEqual(DUPLICATE_SECTOR_RULE)
     expect(firstBreak(chain)?.index).toBe(1)
     // Frozen at the last valid position: the spawn, not the hop's C.
@@ -91,9 +92,16 @@ describe('each sector tag exactly once (spec §10, clarified 2026-10-08)', () =>
     expect(chain[0].coordHex).toBe(pk)
   })
 
+  it("names its day in arkinox's time zone, as every other rule does: #46 merged at 23:04 on 2026-10-07 at UTC-5", () => {
+    expect(DUPLICATE_SECTOR_RULE.effectiveAt).toBe(Date.parse('2026-10-08T04:04:00Z') / 1000)
+    const atUtcMinus5 = new Date((DUPLICATE_SECTOR_RULE.effectiveAt - 5 * 3600) * 1000).toISOString().slice(0, 10)
+    expect(DUPLICATE_SECTOR_RULE.since).toBe(atUtcMinus5)
+    expect(DUPLICATE_SECTOR_RULE.since).toBe('2026-10-07')
+  })
+
   it('is apologized for when signed before spec PR #46 merged, and not after', () => {
     const before = buildChain([spawn, plus(hop1, [['X', valueOf(hop1, 'X')]])])[1]
-    expect(apologyFor(before)).toMatch(/gained additional validation on 2026-10-08, when spec PR #46 wrote arkinox's clarifications of that day into chain rules revision 2026-09-28-virtual-brackets/)
+    expect(apologyFor(before)).toMatch(/gained additional validation on 2026-10-07, when spec PR #46 merged with arkinox's clarifications in it, into chain rules revision 2026-09-28-virtual-brackets/)
     const t = DUPLICATE_SECTOR_RULE.effectiveAt + 60
     const lateSpawn = spawnAt(t)
     const lateHop = hopEvent({ pubkey: pk, createdAt: t + 10, genesisId: lateSpawn.id, previousId: lateSpawn.id, c: pk, to: at(1n), plane })

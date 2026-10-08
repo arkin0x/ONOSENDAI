@@ -31,9 +31,10 @@ export const ACTION_KIND = 3333
 
 /**
  * The chain rules this client implements (spec §8.12), as the spec states
- * them at commit 912f3d7 (spec PR #46, merged 2026-10-08), which wrote
- * arkinox's rulings of 2026-10-07 and his clarifications of 2026-10-08 into
- * this revision: no zero-length ride, a virtual bracket opaque to the base
+ * them at commit 912f3d7 (spec PR #46, merged 2026-10-08T04:04:00Z, which is
+ * 23:04 on 2026-10-07 at UTC-5, the time zone this file names days in), which
+ * wrote arkinox's rulings of 2026-10-07 and the clarifications he gave while
+ * it was open into this revision: no zero-length ride, a virtual bracket opaque to the base
  * protocol, exactly one A tag on every event, and sector tags that must
  * agree with the coordinate, each carried exactly once. Every spec section
  * cited in this file is numbered as of that commit. A rule this revision
@@ -56,8 +57,9 @@ export interface RuleChange {
   /**
    * How it took effect. `spec-44`: spec PR #44 merging. `ruling`: arkinox's
    * ruling of that day, in effect from the ruling, and written into the spec
-   * by PR #46 on 2026-10-08. `spec-46`: spec PR #46 merging, for the
-   * clarifications arkinox gave on 2026-10-08 while it was open.
+   * by PR #46 late that day. `spec-46`: spec PR #46 merging, for the
+   * clarifications arkinox gave while it was open (the evening of
+   * 2026-10-07 at UTC-5; the spec dates them 2026-10-08, in UTC).
    */
   by: 'spec-44' | 'ruling' | 'spec-46'
   /** Unix seconds when it took effect. */
@@ -76,7 +78,7 @@ export const BRACKET_RULES: RuleChange = {
  * and an enter-virtual that does not move (Q2, spec §8.11.1). They took
  * effect when he made them, from the start of that day in his time zone
  * (00:00 at UTC-5), so nothing signed on the day a rule was made is told it
- * was valid when signed. Spec PR #46 wrote them into the spec the next day
+ * was valid when signed. Spec PR #46 wrote them into the spec late that day
  * without moving that date: the spec's own revision table says they were
  * folded in on 2026-10-07 (spec §8.12).
  */
@@ -91,13 +93,16 @@ export const SECTOR_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'valid
 export const ONE_A_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'validation' }
 
 /**
- * Each sector tag exactly once (spec §10): one of arkinox's clarifications of
- * 2026-10-08, which took effect when spec PR #46 merged at
+ * Each sector tag exactly once (spec §10): one of the clarifications arkinox
+ * gave while spec PR #46 was open, which took effect when it merged at
  * 2026-10-08T04:04:00Z. Before that nothing said a second copy of a sector
- * tag broke anything, so an event signed earlier is owed the apology.
+ * tag broke anything, so an event signed earlier is owed the apology. The
+ * day is named in arkinox's time zone, as RULINGS_2026_10_07 names its day:
+ * at UTC-5 the merge was 23:04 on 2026-10-07. (The spec's revision table
+ * calls it 2026-10-08, the UTC date.)
  */
 export const DUPLICATE_SECTOR_RULE: RuleChange = {
-  revision: CHAIN_RULES_REVISION, since: '2026-10-08', by: 'spec-46', effectiveAt: Date.parse('2026-10-08T04:04:00Z') / 1000, kind: 'validation',
+  revision: CHAIN_RULES_REVISION, since: '2026-10-07', by: 'spec-46', effectiveAt: Date.parse('2026-10-08T04:04:00Z') / 1000, kind: 'validation',
 }
 
 /**
@@ -949,7 +954,7 @@ const tailOf = (hex: string): string => `…${hex.slice(-8)}`
  * Why an event's sector tags break the rules, and since when, or null when
  * they do not (spec §10, §8.3 to §8.5, §8.11.1, §8.11.3, DECK-0001 §1.3):
  * X, Y, Z and S are required on every recognized base action (Q9, ruled
- * 2026-10-07), each exactly once (clarified 2026-10-08), and must be exactly
+ * 2026-10-07), each exactly once (clarified by spec PR #46), and must be exactly
  * what sectorTags computes from the place its C names, the real position P
  * for an entry into a game and an exit from one. Never asked of a game's own
  * actions (§8.11.4 rule 4) or of an action this client does not recognize
@@ -964,7 +969,7 @@ function sectorTagsWrong(ev: NostrEvent, name: string, at: Position): { breaks: 
   const doubled = want.map(([k]) => [k, tagCount(ev, k)] as const).filter(([, n]) => n > 1)
   if (doubled.length > 0) {
     const said = doubled.map(([k, n]) => `${countWord(n)} ${k} tags`).join(' and ')
-    return { since: DUPLICATE_SECTOR_RULE, breaks: `${an(name)} carrying ${said}. Each sector tag has to appear exactly once, like the A tag, so that a relay asked for a sector finds the move there and nowhere else (spec §10, as clarified on 2026-10-08)` }
+    return { since: DUPLICATE_SECTOR_RULE, breaks: `${an(name)} carrying ${said}. Each sector tag has to appear exactly once, like the A tag, so that a relay asked for a sector finds the move there and nowhere else (spec §10, as clarified by spec PR #46)` }
   }
   const wrong = want.filter(([k, v]) => tag(ev, k) !== v)
   if (wrong.length === 0) return null

@@ -52,7 +52,7 @@ import { flipFace, flipSurface, windAdded, windOutward } from 'sno-core/winding'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { weld } from '../lib/weld'
-import type { Credit } from 'sno-core/feed'
+import { withCredit, type Credit } from 'sno-core/feed'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
 export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
@@ -433,23 +433,8 @@ export interface WorkshopState {
   current: () => ShardModel | null
 }
 
-/**
- * A model made from someone else's object (REMIX) remembers it: kept on the
- * stored model beside the format's fields, never in the payload, and written
- * as the credit tag on every copy deployed from it (sno-core creditTags). The
- * stored list keeps it through every edit, since edits spread the model.
- */
-type Credited = ShardModel & { credit?: Credit }
-
-/** The model with its credit. */
-export function withCredit(model: ShardModel, credit: Credit): ShardModel {
-  return { ...model, credit } as Credited
-}
-
-/** Whose object a model was made from, or undefined for your own. */
-export function creditOf(model: ShardModel): Credit | undefined {
-  return (model as Credited).credit
-}
+/** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */
+export { creditOf } from 'sno-core/feed'
 
 function load(): ShardModel[] {
   try {

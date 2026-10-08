@@ -49,7 +49,7 @@ import { useCalibration } from '../../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
 import { parseAction } from '../../lib/events'
-import { HosakaError, idempotencyKeyFor, moveBody, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
+import { HosakaError, idempotencyKeyFor, moveIdentity, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
 import { useCyberspace } from '../useCyberspace'
@@ -296,7 +296,7 @@ describe('cloud routes', () => {
     // Everything but the signal, which is each attempt's own.
     const asked = (c: unknown[]): unknown[] => [c[0], c[1], c[2], c[4]]
     expect(asked(second)).toEqual(asked(first))
-    const keyOf = (c: unknown[]): string => idempotencyKeyFor('hop', moveBody(c[0] as never, c[1] as never, c[2] as string, c[4] as never))
+    const keyOf = (c: unknown[]): string => idempotencyKeyFor('hop', moveIdentity(c[0] as never, c[1] as never, c[2] as string))
     expect(keyOf(second)).toBe(keyOf(first))
     // The retry was handed the job the lost attempt made, and the move landed once.
     expect(S().position).toEqual(to)
@@ -324,6 +324,28 @@ describe('cloud routes', () => {
     await vi.waitFor(() => { expect(S().cloud.status).toBe('idle') })
     expect(S().plan).toBeNull()
     expect(fake.waitForJob).not.toHaveBeenCalled()
+  })
+
+  it('a step whose cube setting changed after the move was sent follows the job already running, and says so', async () => {
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    // lib/hosaka.ts followed the 409 to the job already running for this move.
+    fake.submitHop.mockResolvedValue({ ...funded(), idempotent_replay: true, followed_existing: true })
+    const done = deferred<HosakaJob>()
+    fake.waitForJob.mockReturnValue(done.promise)
+
+    await S().commit()
+    await vi.waitFor(() => { expect(fake.waitForJob).toHaveBeenCalled() })
+    expect(useToast.getState().toast?.label).toBe('SAME MOVE ALREADY ON HOSAKA')
+    expect(useToast.getState().toast?.meta).toContain('nothing is charged twice')
+    expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
+
+    done.resolve(completed(hopResult(from, to, S().plane, head)))
+    await idle()
+    expect(S().position).toEqual(to)
+    expect(fake.submitHop).toHaveBeenCalledTimes(1)
   })
 
   it('respawn starts the spent tally over for the new chain', async () => {

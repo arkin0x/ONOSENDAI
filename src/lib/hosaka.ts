@@ -269,6 +269,13 @@ export interface HosakaJob {
   idempotent_replay?: boolean
   /** The failed job this one replaced under the same key. */
   replaces_job_id?: string
+  /**
+   * Set by this client, not the server: the submit was answered 409 because
+   * its key already holds a job made with other options (a cube setting
+   * changed since), and this is that job, followed instead of paying for a
+   * second one. The caller tells the player their new choice did not apply.
+   */
+  followed_existing?: boolean
 }
 
 export interface HosakaBalance {
@@ -404,6 +411,17 @@ export function moveBody(v1: HosakaCoord, v2: HosakaCoord, previousEventId: stri
   return { v1, v2, previous_event_id: previousEventId, ...(wants?.destinationKeys ? { destination_keys: true } : {}) }
 }
 
+/**
+ * What a hop or sidestep is, for its idempotency key: the move and the chain
+ * head, without the cubes flag. The same move with and without destination
+ * keys is one proof, so it is one key, exactly as hosaka-api's own derived
+ * key leaves the flag out. The server then answers a changed flag with 409
+ * and the job already running, which submitPriced follows: one charge.
+ */
+export function moveIdentity(v1: HosakaCoord, v2: HosakaCoord, previousEventId: string): Record<string, unknown> {
+  return moveBody(v1, v2, previousEventId)
+}
+
 /** The body of a region key submit, before its key is added. */
 export function regionKeyBody(at: { x: bigint; y: bigint; z: bigint }, height: number): Record<string, unknown> {
   return { x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), height }
@@ -422,11 +440,12 @@ export function regionKeyIdentity(at: { x: bigint; y: bigint; z: bigint }, heigh
 }
 
 /**
- * The idempotency key of one logical job: a hash of the action and exactly
- * what is submitted. The same move from the same chain head, with the same
- * options, is always the same key, so it survives a reload, a failed route
- * committed again, and any number of retries, and needs nothing persisted. A
- * different move, head, plane, option, cube or height is a different key.
+ * The idempotency key of one logical job: a hash of the action and what the
+ * job is (moveIdentity for a move, regionKeyIdentity for a region key). The
+ * same move from the same chain head is always the same key, so it survives a
+ * reload, a failed route committed again, and any number of retries, and
+ * needs nothing persisted. A different move, head, plane, cube or height is a
+ * different key; a hop's cube setting is not part of it.
  * When the head moves the key changes with it, which is right: a proof bound
  * to the old head is worthless. A provider that honors keys scopes them to the
  * signing pubkey, and lets a key whose job failed start a new one.
@@ -664,10 +683,35 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
    */
   const submitPriced = async (action: HosakaAction, body: Record<string, unknown>, signal?: AbortSignal, identity?: Record<string, unknown>): Promise<HosakaJob> => {
     const key = idempotencyKeyFor(action, identity ?? body)
+    /**
+     * The job a 409 names: its key already holds a job made from a different
+     * request (the cube setting changed since it was sent). Followed, never
+     * replaced: /start reports where it stands and its payment state (it
+     * starts it from the balance if it was waiting and can be, or shows its
+     * invoice), and charges nothing for a job already running; the poll
+     * token comes from the 409. Null when the 409 does not name the job.
+     */
+    const followExisting = async (err: HosakaError): Promise<HosakaJob | null> => {
+      const d = err.detail !== null && typeof err.detail === 'object' ? (err.detail as Record<string, unknown>) : null
+      const id = typeof d?.existing_job_id === 'string' ? d.existing_job_id : null
+      const token = typeof d?.existing_poll_token === 'string' ? d.existing_poll_token : null
+      if (!id || !token) return null
+      const job = await request<HosakaJob>(`/api/v1/jobs/${id}/start`, { method: 'POST', auth: true, signal })
+      return { ...job, id, poll_token: token, idempotent_replay: true, followed_existing: true }
+    }
     const once = async (): Promise<HosakaJob> => {
-      const job = await request<HosakaJob>(`/api/v1/${action}`, { method: 'POST', auth: true, body: { ...body, idempotency_key: key }, signal })
-      lastAnswerEchoed = job !== null && typeof job === 'object' && job.idempotency_key === key
-      return job
+      try {
+        const job = await request<HosakaJob>(`/api/v1/${action}`, { method: 'POST', auth: true, body: { ...body, idempotency_key: key }, signal })
+        lastAnswerEchoed = job !== null && typeof job === 'object' && job.idempotency_key === key
+        return job
+      } catch (err) {
+        if (err instanceof HosakaError && err.status === 409 && err.code === 'idempotency_key_reused') {
+          lastAnswerEchoed = true // only a server that keeps keys answers this
+          const followed = await followExisting(err)
+          if (followed) return followed
+        }
+        throw err
+      }
     }
     let lost: HosakaError
     try {
@@ -695,7 +739,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
   }
 
   const submit = (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal, wants?: HopWants): Promise<HosakaJob> =>
-    submitPriced(action, moveBody(v1, v2, previousEventId, wants), signal)
+    submitPriced(action, moveBody(v1, v2, previousEventId, wants), signal, moveIdentity(v1, v2, previousEventId))
 
   const claimDeposit = (depositId: string, signal?: AbortSignal): Promise<HosakaDeposit> =>
     request<HosakaDeposit>(`/api/v1/deposit/${depositId}/claim`, { method: 'POST', auth: true, signal })

@@ -21,6 +21,7 @@ import {
   idempotencyKeyFor,
   jsonWithBigints,
   moveBody,
+  moveIdentity,
   regionKeyBody,
   regionKeyIdentity,
   type HosakaDeposit,
@@ -437,9 +438,11 @@ describe('idempotency keys', () => {
       idempotencyKeyFor('hop', moveBody(V1, V2, 'cd'.repeat(32))),
       idempotencyKeyFor('hop', moveBody(V1, { ...V2, x: V2.x + 1n }, PREV)),
       idempotencyKeyFor('hop', moveBody(V1, { ...V2, plane: 1 }, PREV)),
-      idempotencyKeyFor('hop', moveBody(V1, V2, PREV, { destinationKeys: true })),
     ]
     expect(new Set([hop, ...others]).size).toBe(others.length + 1)
+    // The cube setting is not part of what a move is: one proof, one key, as
+    // the server's own derived key has it.
+    expect(moveIdentity(V1, V2, PREV)).toEqual(moveBody(V1, V2, PREV))
 
     // A region key is its cube: two points inside one 2^13 cube are one key,
     // the cube next door or another height is another.
@@ -603,5 +606,74 @@ describe('idempotency keys', () => {
     await vi.waitFor(() => { expect(posts).toBe(1 + NO_WAIT.length + 1) })
     abort.abort()
     expect((await rejection(pending)).code).toBe('aborted')
+  })
+})
+
+describe('a changed cube setting is the same job', () => {
+  /** A HOSAKA with keys: one job per key; the same key with other options is 409 naming that job. */
+  function keyedServer(existing: Partial<HosakaJob> = {}) {
+    const byKey = new Map<string, { fp: string; job: HosakaJob }>()
+    let made = 0
+    let starts = 0
+    const { fetch, calls } = scripted({
+      'POST /api/v1/hop': (call) => {
+        const { idempotency_key: key, ...rest } = JSON.parse(call.body!) as Record<string, unknown> & { idempotency_key: string }
+        const fp = JSON.stringify(rest)
+        const held = byKey.get(key)
+        if (held && held.fp !== fp) {
+          return { status: 409, body: { detail: { error: 'idempotency_key_reused', existing_job_id: held.job.id, existing_poll_token: held.job.poll_token, hint: 'other options' } } }
+        }
+        if (held) return { status: 200, body: { ...held.job, idempotency_key: key, idempotent_replay: true } }
+        made++
+        const job: HosakaJob = { id: `job-${made}`, status: 'computing', cost_msats: 1000, poll_token: `tok-${made}`, result: null, error: null, payment_required: false, ...existing }
+        byKey.set(key, { fp, job })
+        return { status: 201, body: { ...job, idempotency_key: key } }
+      },
+      'POST /api/v1/jobs/job-1/start': () => {
+        starts++
+        const job = [...byKey.values()][0].job
+        return { body: { id: job.id, status: job.status, cost_msats: job.cost_msats, result: null, error: null, ...(job.status === 'pending' ? { payment_required: true, deposit: job.deposit } : { payment_required: false, balance_debited: true }) } }
+      },
+    })
+    return { fetch, calls, get made() { return made }, get starts() { return starts } }
+  }
+
+  it('the cubes asked for after the move was sent: the same key, the job already running is followed, one charge', async () => {
+    const server = keyedServer()
+    const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch })
+    const plain = await c.submitHop(V1, V2, PREV)
+    const cubes = await c.submitHop(V1, V2, PREV, undefined, { destinationKeys: true })
+
+    const hops = server.calls.filter((x) => x.url.endsWith('/api/v1/hop'))
+    expect(JSON.parse(hops[1].body!).idempotency_key).toBe(JSON.parse(hops[0].body!).idempotency_key)
+    expect(JSON.parse(hops[1].body!).destination_keys).toBe(true) // the request still says what was wanted
+    expect(server.made).toBe(1)
+    expect(server.starts).toBe(1)
+    expect(cubes.id).toBe(plain.id)
+    expect(cubes.poll_token).toBe(plain.poll_token)
+    expect(cubes.followed_existing).toBe(true)
+    expect(cubes.status).toBe('computing')
+  })
+
+  it('a followed job still waiting for payment comes back with its own invoice, not a new job', async () => {
+    const deposit: HosakaDeposit = { deposit_id: 'd1', status: 'pending', amount_msats: 1000, bolt11: 'lnbc-one', payment_hash: 'h', created_at: 1, expires_at: 3601, settled_at: null, settled_msats: null, preimage: null }
+    const server = keyedServer({ status: 'pending', payment_required: true, deposit })
+    const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch })
+    await c.submitHop(V1, V2, PREV, undefined, { destinationKeys: true })
+    const followed = await c.submitHop(V1, V2, PREV)
+    expect(followed.followed_existing).toBe(true)
+    expect(followed.payment_required).toBe(true)
+    expect(followed.deposit?.bolt11).toBe('lnbc-one')
+    expect(server.made).toBe(1)
+  })
+
+  it('a 409 that does not name the job is reported as it was, never retried into a new job', async () => {
+    const { fetch, calls } = scripted({
+      'POST /api/v1/hop': () => ({ status: 409, body: { detail: { error: 'idempotency_key_reused', hint: 'other options' } } }),
+    })
+    const c = createHosaka({ apiUrl: API, sign, fetch })
+    const err = await rejection(c.submitHop(V1, V2, PREV))
+    expect(err.status).toBe(409)
+    expect(calls).toHaveLength(1)
   })
 })

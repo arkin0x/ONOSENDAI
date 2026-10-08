@@ -2095,6 +2095,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         : await client.submitSidestep(v1, v2, prevEventId, abort.signal)
       const after = job.new_balance_msats ?? job.current_balance_msats
       if (typeof after === 'number') get().noteBalance(after)
+      if (job.followed_existing) {
+        // The same move was already on HOSAKA with the other cube setting:
+        // that job is followed rather than paid for twice (lib/hosaka.ts).
+        useToast.getState().show({
+          label: 'SAME MOVE ALREADY ON HOSAKA',
+          meta: 'Following the job already running, so nothing is charged twice. Your new cube setting applies from your next move.',
+          mark: 'hosaka',
+        })
+      }
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
       routeFail(describeCloudError(err))

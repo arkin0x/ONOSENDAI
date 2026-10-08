@@ -1001,7 +1001,8 @@ export const useShards = create<ShardsState>((set, get) => {
 // The build STEP belongs to one deploy: when it ends, hidden or canceled, or
 // another is lined up in its place, the step goes back to the zoom.
 useShards.subscribe((s, prev) => {
-  if (s.pending !== prev.pending && useCyberspace.getState().buildStep !== null) useCyberspace.getState().setBuildStep(null)
+  const cs = useCyberspace.getState()
+  if (s.pending !== prev.pending && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

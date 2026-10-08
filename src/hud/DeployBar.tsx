@@ -55,13 +55,14 @@ import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } f
 import { deployPoint } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { stepBuild } from '../store/buildStep'
+import { useBuilder } from '../store/useBuilder'
 import { Field, Switch } from './ui/Switch'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
-import { fitHeight } from '../lib/deployFit'
+import { fitCause, fitHeight } from '../lib/deployFit'
 
 export function DeployBar(): JSX.Element | null {
   const pending = useShards((s) => s.pending)
@@ -126,7 +127,11 @@ export function DeployBar(): JSX.Element | null {
     const want = fitH ?? ceiling
     if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
   }, [heightAuto, shard, fitH, ceiling])
-  const fit = { auto: heightAuto && !!shard, height: fitH }
+  const fit = { auto: heightAuto && !!shard, height: fitH, cause: shard ? fitCause(shard, unit, fitH, ceiling) : 'size' }
+  // STEP changes only the build cursor: in BUILD mode, its view drivable, not
+  // at your head, and not while hiding (store/buildStep.ts stepOpen).
+  const building = useBuilder((s) => s.active)
+  const drivable = useCyberspace((s) => s.canDrive() && !s.atHead())
 
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
@@ -140,6 +145,7 @@ export function DeployBar(): JSX.Element | null {
   const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
   const empty = isMessage ? pending.text.trim().length === 0 : !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   const working = status === 'working'
+  const stepOpen = building && drivable && !working
 
   return (
     <div className="deploybar" role="dialog" aria-label={isMessage ? 'Hide message' : 'Deploy shard'}>
@@ -186,9 +192,9 @@ export function DeployBar(): JSX.Element | null {
           cell it snaps to. Comma and period on a keyboard. */}
       <div className="deploybar__row deploybar__row--step">
         <span className="deploybar__label">STEP</span>
-        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
+        <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={!stepOpen || step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
         <span className="deploybar__value">2^{step}</span>
-        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
+        <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
         <span className="deploybar__radius">{formatCellSize(step)}</span>
       </div>
 
@@ -203,11 +209,13 @@ export function DeployBar(): JSX.Element | null {
         <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
-          {fit.auto && fit.height !== null && <span className="deploybar__fit"> · fits the whole model</span>}
+          {fit.auto && fit.height !== null && <span className="deploybar__fit" title={fit.cause === 'edge' ? 'Raised because it sits across a region edge; move it to hide lower' : undefined}> · fits the whole model</span>}
         </span>
       </div>
       {fit.auto && fit.height === null && (
-        <div className="deploybar__row deploybar__fitnote">At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</div>
+        <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
+          ? 'Sits across a region edge; move it to fit.'
+          : <>At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</>}</div>
       )}
 
       {/* How big the thing itself is, for this deployment only. The workshop's

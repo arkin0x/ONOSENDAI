@@ -621,10 +621,19 @@ export interface CyberspaceState {
    * the zoom (arkinox, 2026-10-08). Null is the zoom itself, which is where
    * every deploy starts, so nothing changes until STEP is touched. Read it
    * through buildStepOf (lib/buildCursor.ts), which keeps it at or under the
-   * zoom; zooming in to it or below puts it back on the zoom. Cleared when the
-   * deploy ends (useShards).
+   * zoom; zooming in to it or below puts it back on the zoom, by any path
+   * (the subscription at the bottom). Cleared when the deploy ends (useShards)
+   * and when BUILD mode does (store/buildStep.ts).
    */
   buildStep: number | null
+  /**
+   * Where lowering STEP last re-centered the build cursor (`at`), and where
+   * you had put it before that (`from`): store/buildStep.ts. While the cursor
+   * still sits at `at`, nothing but STEP has moved it, so it counts as being
+   * at `from` (lib/buildCursor.ts placedCursor), and it goes back there when
+   * STEP returns to following the zoom. Null while STEP has not re-centered.
+   */
+  buildSettle: { at: Position; from: Position } | null
   /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
   viewHistory: Quaternion[]
@@ -693,7 +702,11 @@ export interface CyberspaceState {
   anchorPlane: Plane
 
   moveCursor: (dir: AxisDirection) => void
-  /** Set the build STEP; at or above the zoom it goes back to following the zoom (null). */
+  /**
+   * Set the build STEP; at or above the zoom it goes back to following the
+   * zoom (null), which also undoes STEP's re-centering if nothing has moved
+   * the cursor since.
+   */
   setBuildStep: (step: number | null) => void
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
@@ -1989,6 +2002,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   respawns: loadRespawns(pubkeyHex),
   scaleExp: 0,
   buildStep: null,
+  buildSettle: null,
   // Facing the black sun, the section 11.3 canonical orientation, the same
   // one the SUN button restores. The spec's left/right/above/below language
   // is defined against it, so it is what a first look should agree with; the
@@ -2006,10 +2020,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   loginError: null,
 
   moveCursor: (dir) => {
-    const { cursor } = get()
+    const { cursor, scaleExp } = get()
     if (!get().canDrive()) return
-    // One cell of the zoom, or one build STEP while a deploy is lined up.
-    const step = stepFor(buildStepOf(get())) * BigInt(dir.dir)
+    // One cell of the zoom, or one build STEP while a deploy is lined up in
+    // BUILD mode. Never a STEP at your head, where the cursor is a move's.
+    const step = stepFor(get().atHead() ? scaleExp : buildStepOf(get())) * BigInt(dir.dir)
 
     const next: Position = { ...cursor }
     next[dir.axis] = clampAxis(cursor[dir.axis] + step)
@@ -2022,7 +2037,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   setBuildStep: (step) => {
     const next = step === null || step >= get().scaleExp ? null : Math.max(0, Math.round(step))
-    if (next !== get().buildStep) set({ buildStep: next })
+    if (next !== null) { if (next !== get().buildStep) set({ buildStep: next }); return }
+    const { buildStep, buildSettle, cursor } = get()
+    if (buildStep === null && buildSettle === null) return
+    // Back on the zoom, the snap is the cube's center wherever the cursor is
+    // in it, so STEP's re-centering is undone if nothing has moved it since.
+    const back = buildSettle && samePosition(cursor, buildSettle.at) ? { cursor: { ...buildSettle.from } } : {}
+    set({ buildStep: null, buildSettle: null, ...back })
   },
 
   setCursorAtCell: (row, col) => {
@@ -2356,10 +2377,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   adjustScale: (delta) => {
     const next = Math.max(0, Math.min(MAX_SCALE_EXP, get().scaleExp + delta))
     if (next === get().scaleExp) return
-    // The build STEP never exceeds the zoom: zooming in to it or past it puts
-    // it back on the zoom, and it follows from there.
-    const step = get().buildStep
-    set(step !== null && step >= next ? { scaleExp: next, buildStep: null } : { scaleExp: next })
+    set({ scaleExp: next })
   },
 
   rotate: (dir) => {
@@ -3745,6 +3763,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     return placeCentre(cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   },
   }
+})
+
+// The build STEP never exceeds the zoom. Zooming in to it or past it, by any
+// path (the pad and the keys, a focus, a hyperspace view), puts it back on
+// the zoom, so it cannot come back when the zoom is restored.
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp < prev.scaleExp && s.buildStep !== null && s.buildStep >= s.scaleExp) s.setBuildStep(null)
 })
 
 // DEV is also true under vitest, which runs in node, and importing this module

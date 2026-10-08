@@ -192,6 +192,97 @@ describe('STEP', () => {
     expect(positionOf(D().mine[0])).toEqual(want)
   })
 
+  // Review of #237, 2026-10-08: STEP moved the movement cursor after BUILD
+  // ended mid-hide, and Space then hopped there.
+  it('does nothing while hiding, and nothing once BUILD mode has ended, even with the bar still up', () => {
+    lineUp(15, 20)
+    stepTo(12)
+    const aim = { ...S().cursor }
+    useShards.setState({ deployStatus: 'working' })
+    stepBuild(-1)
+    stepBuild(1)
+    expect(buildStepOf(S())).toBe(12)
+    expect(S().cursor).toEqual(aim)
+
+    // The view moves away (a tap on Earth, a stop, a deployment): BUILD ends,
+    // the hide goes on, and STEP goes with the mode.
+    S().clearFocus()
+    expect(useBuilder.getState().active).toBe(false)
+    expect(D().pending).not.toBeNull()
+    expect(S().buildStep).toBeNull()
+    const head = { ...S().cursor }
+    stepBuild(-1)
+    useShards.setState({ deployStatus: 'idle' })
+    stepBuild(-1)
+    expect(S().cursor).toEqual(head)
+    expect(S().buildStep).toBeNull()
+    // At your head a move is one cell of the zoom, never a STEP.
+    useCyberspace.setState({ buildStep: 3 })
+    const x = S().cursor.x
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(S().cursor.x - x).toBe(1n << 15n)
+  })
+
+  it('touching STEP on your avatar is not leaving it: CANCEL still ends BUILD mode, on your avatar', () => {
+    useCyberspace.setState({ scaleExp: 15 })
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 20 })
+    expect(useBuilder.getState().via).toBe('deploy')
+    stepBuild(-1)
+    expect(S().cursor).not.toEqual(S().position)
+    stepBuild(1)
+    expect(useBuilder.getState().leftAvatar).toBe(false)
+    D().cancelDeploy()
+    expect(useBuilder.getState().active).toBe(false)
+    expect(S().cursor).toEqual(S().position)
+
+    // Lowered and left lowered, the same.
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 20 })
+    stepTo(4)
+    expect(S().cursor).not.toEqual(S().position)
+    expect(useBuilder.getState().leftAvatar).toBe(false)
+    D().cancelDeploy()
+    expect(useBuilder.getState().active).toBe(false)
+    expect(S().cursor).toEqual(S().position)
+
+    // A move after STEP is leaving it, and the mode stays.
+    D().startDeployShard(benchShard().id)
+    useShards.setState({ deployHeight: 20 })
+    stepTo(4)
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(useBuilder.getState().leftAvatar).toBe(true)
+    D().cancelDeploy()
+    expect(useBuilder.getState().active).toBe(true)
+  })
+
+  it('the box never lands in the other half of the cube after STEP went back to the zoom', () => {
+    lineUp(15, 20)
+    stepTo(14)
+    stepTo(15)
+    S().adjustScale(3)
+    stepTo(17)
+    // Re-centered on the 2^18 cube's center, not left where 2^15 put it.
+    expect(S().cursor).toEqual(deployPoint(SPOT, 18, 20))
+
+    // Lowered, canceled, and deployed again at another zoom: the same.
+    D().cancelDeploy()
+    expect(S().cursor).toEqual(SPOT)
+    useBuilder.getState().toAvatar()
+    lineUp(12, 20)
+    stepTo(11)
+    expect(S().cursor).toEqual(deployPoint(SPOT, 12, 20))
+  })
+
+  it('a zoom changed without the pad or keys (a focus, a hyperspace view) still brings STEP down for good', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    useCyberspace.setState({ scaleExp: 8 })
+    expect(S().buildStep).toBeNull()
+    useCyberspace.setState({ scaleExp: 15 })
+    expect(buildStepOf(S())).toBe(15)
+  })
+
   it('snaps a message the same way', () => {
     useCyberspace.setState({ scaleExp: 12 })
     D().startDeployMessage('under the floor')

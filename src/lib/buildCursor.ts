@@ -54,6 +54,18 @@ export function buildStepOf(s: { scaleExp: number; buildStep: number | null }): 
 }
 
 /**
+ * The build cursor as you placed it. Lowering STEP re-centers the cursor on
+ * where the placement already is (store/buildStep.ts), which is not a move
+ * of yours: while the cursor still sits where STEP put it, it counts as
+ * where it was, so touching STEP on your avatar is still being on your
+ * avatar, and a DEPLOY from there still ends BUILD mode when it ends.
+ */
+export function placedCursor(s: { cursor: Position; buildSettle: { at: Position; from: Position } | null }): Position {
+  const t = s.buildSettle
+  return t && t.at.x === s.cursor.x && t.at.y === s.cursor.y && t.at.z === s.cursor.z ? t.from : s.cursor
+}
+
+/**
  * A move committed before building is still going: a proof being computed,
  * or a route stepping. Not a paused or failed route, which waits on you and
  * moves nothing. The BuildBar warns, with a STOP, only for this.

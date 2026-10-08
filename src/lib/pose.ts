@@ -33,6 +33,7 @@
  */
 
 import type { Plane } from 'cyberspace-core'
+import { Matrix4 } from 'three'
 import { applyPose, wrapSpin, type Pose, type V3 } from 'sno-core/pose'
 import type { Position, ViewAxes } from './space'
 import { axesToLatLon } from './hyperspace/landfall'
@@ -199,4 +200,19 @@ export function csDirection(axes: ViewAxes, render: V3): V3 {
 export function frameDeterminant(frame: Frame): number {
   const [a, b, c] = frame.east, [d, e, f] = frame.up, [g, h, i] = frame.north
   return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+}
+
+/**
+ * A pose, which turns ticks before the render mapping, as the same turn in
+ * render space: the flip on Z, the turn, the flip back. Placements are placed
+ * in render space, and a part stands on the Earth with its parent (§1.10: it
+ * loses its own `up` and `spin` to the parent's placement). Avatars are
+ * turned by it too (facing.ts avatarTurn), since they are drawn in the render
+ * mapping and turned as a group rather than through their vertices.
+ */
+export function renderPose(pose: Pose): Matrix4 {
+  const f = [1, 1, -1]
+  // applyPose: out[j] = sum_i v[i] * pose[i * 3 + j], so the column-vector matrix is M[j][i] = pose[i * 3 + j].
+  const m = (j: number, i: number): number => f[j] * pose[i * 3 + j] * f[i]
+  return new Matrix4().set(m(0, 0), m(0, 1), m(0, 2), 0, m(1, 0), m(1, 1), m(1, 2), 0, m(2, 0), m(2, 1), m(2, 2), 0, 0, 0, 0, 1)
 }

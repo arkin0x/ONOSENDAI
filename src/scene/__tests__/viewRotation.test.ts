@@ -8,7 +8,9 @@
  *
  * This draws an asymmetric scene the way the world draws it (placeShard for
  * the place, the scale, the clip box and the pose; flatten for the vertices;
- * renderPose and partMatrix for placed objects) in every one of the 24 views
+ * renderPose and partMatrix for placed objects; placeCentre and avatarTurn
+ * for avatars, one facing its last move and one that has not moved) in
+ * every one of the 24 views
  * the compass can reach, and reads every drawn point back out of the view
  * frame. A rigid scene reads back the same in every view: no point drifts,
  * nothing mirrors or shears, and the same points survive the clip.
@@ -18,11 +20,11 @@ import { describe, expect, it } from 'vitest'
 import { Matrix4, Quaternion, Vector3 } from 'three'
 import { flatten, type Part, type ShardModel } from 'sno-core/shards'
 import { partMatrix } from 'sno-core/parts'
-import { alignTo, canonicalQuaternion, rotateView, viewAxes, type Position, type RotateDirection, type ViewAxes } from '../../lib/space'
-import { csDirection, type V3 } from '../../lib/pose'
+import { alignTo, canonicalQuaternion, placeCentre, rotateView, viewAxes, type Position, type RotateDirection, type ViewAxes } from '../../lib/space'
+import { csDirection, renderPose, type V3 } from '../../lib/pose'
+import { avatarTurn } from '../../lib/facing'
 import { gpsToDataspaceXyz } from '../../lib/hyperspace/landfall'
 import { placeShard } from '../WorldShards'
-import { renderPose } from '../ShardMesh'
 
 const WHITE: [number, number, number] = [1, 1, 1]
 
@@ -57,6 +59,19 @@ const SCENE = [
   { key: 'tetra', at: at(9n, -4n, 5n), height: 12, plane: 0 as const, shard: TETRA },
   { key: 'standing', at: at(-6n, 2n, 7n), height: 12, plane: 0 as const, shard: { ...ELL, id: 'standing', up: true, spin: 135 } },
   { key: 'assembly', at: at(-2n, 7n, -9n), height: 12, plane: 0 as const, shard: ASSEMBLY },
+]
+
+/**
+ * Avatars, drawn as AvatarShape draws them: the avatar's shard in the plain
+ * render mapping, scaled, inside a group turned by avatarTurn. One faces the
+ * diagonal hop that brought it here, as you and a spectated avatar do (arkinox,
+ * 2026-10-08: "the avatar im spectating is always screen-up oriented even if
+ * the world is rotated upside down"); one has no move, as presence and
+ * targets have none.
+ */
+const AVATARS = [
+  { key: 'avatar-moving', at: at(4n, -1n, 3n), move: [at(3n, -1n, 1n), at(4n, -1n, 3n)] as const, k: 0.7 },
+  { key: 'avatar-still', at: at(-5n, 3n, -2n), move: null, k: 0.5 },
 ]
 
 /** Every view the compass's four turns reach from the canonical one: all 24. */
@@ -103,6 +118,18 @@ function draw(anchor: Position, scaleExp: number, axes: ViewAxes): Map<string, D
       }
     }
     out.set(item.key, pts)
+  }
+  for (const a of AVATARS) {
+    const m = new Matrix4().makeTranslation(...placeCentre(a.at, origin, scaleExp, axes))
+      .multiply(new Matrix4().makeRotationFromQuaternion(avatarTurn(axes, a.move)))
+      .multiply(new Matrix4().makeScale(a.k, a.k, a.k))
+    const v = flatten(ELL).positions
+    const pts: Drawn[] = []
+    for (let i = 0; i < v.length; i += 3) {
+      const p = new Vector3(v[i], v[i + 1], v[i + 2]).applyMatrix4(m)
+      pts.push({ point: [p.x, p.y, p.z], inside: true })
+    }
+    out.set(a.key, pts)
   }
   return out
 }

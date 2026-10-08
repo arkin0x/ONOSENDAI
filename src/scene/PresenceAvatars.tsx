@@ -15,6 +15,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { usePresence } from '../store/usePresence'
 import { useProfile } from '../hooks/useProfile'
 import { AvatarShape } from './AvatarShape'
+import { avatarTurn } from '../lib/facing'
 import { WorldLabel } from './WorldLabel'
 
 const REACH = GRID_RADIUS * 8
@@ -43,13 +44,19 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
       .filter((p) => Math.hypot(...p.centre) <= REACH)
   }, [people, targets, me, anchor, anchorPlane, scaleExp, axes])
 
+  // Turned with the view like every shard and your own avatar, so a compass
+  // turn that puts the world upside down puts them upside down with it.
+  const turn = useMemo(() => avatarTurn(axes, null), [axes])
+
   if (near.length === 0) return null
 
   return (
     <>
       {near.map((p) => (
         <group key={p.pubkey} position={p.centre}>
-          <AvatarShape pubkey={p.pubkey} color={targetColor(p.pubkey)} />
+          <group quaternion={turn}>
+            <AvatarShape pubkey={p.pubkey} color={targetColor(p.pubkey)} />
+          </group>
           <PersonLabel pubkey={p.pubkey} color={targetColor(p.pubkey)} />
         </group>
       ))}

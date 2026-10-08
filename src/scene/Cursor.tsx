@@ -34,6 +34,7 @@ import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
 import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
 import { useBuilder } from '../store/useBuilder'
+import { cubeAt } from '../lib/buildCursor'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
@@ -164,7 +165,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
-  const target = atHead ? (pendingTarget ?? cursor) : anchor
+  // In BUILD mode the cube is the build cursor, never a pending move's target
+  // (lib/buildCursor.ts cubeAt).
+  const target = cubeAt({ cursor, anchor, pendingTarget, canDrive: () => atHead }, building)
   // A plan, and its legs, only from your own head: in a free view the avatar
   // is astronomically far from the anchor and a leg to it would be nonsense.
   const active = home && !samePosition(position, target)
@@ -280,7 +283,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const ghost = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
-    const live = s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor
+    const live = cubeAt(s, useBuilder.getState().active)
     const { cell, point: b } = aimCentres(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
     if (outline.current) outline.current.position.set(cell[0], cell[1], cell[2])
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
@@ -315,7 +318,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         follow={() => {
           const s = useCyberspace.getState()
           return placeCentre(
-            s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor,
+            cubeAt(s, useBuilder.getState().active),
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}

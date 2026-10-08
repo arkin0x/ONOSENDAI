@@ -7,7 +7,7 @@
  * arkinox's ruling (2026-10-07): the wrench and BUILD with EXIT, one line
  * with the cursor's place, plane and cell size, and the buttons. That
  * building does not move your avatar (design note §4.2) is said in EXPLAIN,
- * kept to four short lines that fit a phone. EXIT leaves the view where it is (R6), like
+ * kept to short lines under a cap that fits a phone. EXIT leaves the view where it is (R6), like
  * the workshop's close; Escape does the same, as a chip on the Escape stack
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
@@ -83,6 +83,7 @@ export function BuildBar(): JSX.Element | null {
         <ul className="buildbar__explain">
           <li>The white cube marked BUILD is the build cursor: what you place lands in its cell.</li>
           <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the Position panel jumps it anywhere; P switches the plane.</li>
+          <li>CHAIN aims it too: each step along a chain, yours or a spectated avatar's ([ ] Home End), puts it on that action. Spectating keeps build mode on.</li>
           <li>When you place something, its ghost shows where it lands and the green box is the region someone must compute to find it; the height you hide it at sets that box.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
           <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>

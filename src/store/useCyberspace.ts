@@ -733,12 +733,33 @@ export interface CyberspaceState {
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
   exploreStep: (delta: number) => void
-  /** Start following a pubkey: anchors on its spawn coordinate until its chain arrives. */
-  beginSpectate: (pubkey: string) => void
+  /**
+   * Start following a pubkey: anchors on its spawn coordinate until its chain
+   * arrives. With `keepView` and a driven view standing (BUILD mode,
+   * store/useBuilder.ts), the view stays and is aimed at them instead: the
+   * build cursor goes to their spawn, then to their head when the chain
+   * arrives, and the pad keeps driving it.
+   */
+  beginSpectate: (pubkey: string, keepView?: boolean) => void
   /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
   setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error' | 'partial') => void
-  /** Back to your own head. */
+  /** Back to your own head; with a driven view standing (BUILD mode), the view stays where it is. */
   endSpectate: () => void
+  /**
+   * Aim the driven view (the free view, and BUILD mode's build cursor) at a
+   * place, in its plane, keeping a spectation: the cursor goes there and the
+   * view follows it as it follows the pad, re-anchoring only when the place
+   * is out of the field's reach. Nothing else changes: not your head, your
+   * chain, or the plane lined up at it. Does nothing without a driven view.
+   */
+  aimView: (position: Position, plane: Plane) => void
+  /**
+   * Turn what is on screen into a driven view: a spectated avatar or an
+   * action of history becomes a free view at that place, the spectation kept
+   * and history left. BUILD mode entered from there starts its build cursor
+   * on what you were looking at.
+   */
+  driveHere: (label: string) => void
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
   /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
@@ -2368,8 +2389,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setPlane: (plane) => {
     // A plane flip mid-proof would desync the in-flight terrain K.
     if (get().proof.status === 'computing') return
-    // Someone else's plane is theirs; the terrain follows their chain.
-    if (get().spectate) return
+    const focus = get().focus
+    // Someone else's plane is theirs; the terrain follows their chain. A
+    // driven view kept through a spectation (BUILD mode) is yours, and its
+    // plane is the one you build in.
+    if (get().spectate && !focus?.drive) return
     if (get().plane === plane && get().anchorPlane === plane) return
     // The view follows the lined-up plane the way it follows the cursor: at
     // your own head, or in a focus view such as EARTH, the scene switches
@@ -2378,7 +2402,6 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // plane, because each action there records the plane it was in.
     // In a free view the flip is the view's alone: the plane you have lined
     // up at your head is untouched, and RETURN puts the scene back in it.
-    const focus = get().focus
     if (focus?.drive && get().exploreIndex === null) { set({ anchorPlane: plane, focus: { ...focus, plane } }); return }
     const next: Partial<CyberspaceState> = { plane, proof: IDLE_PROOF }
     if (get().exploreIndex === null) next.anchorPlane = plane
@@ -2803,9 +2826,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     get().explore(Math.min(last, Math.max(0, from + delta)))
   },
 
-  beginSpectate: (pubkey) => {
+  beginSpectate: (pubkey, keepView = false) => {
     const spawn = spawnOf(pubkey)
     const { view, viewHistory, spectate } = get()
+    // BUILD mode (arkinox, 2026-10-08): spectating does not end it. The
+    // driven view is the build cursor, so it stays, and is aimed at them, at
+    // their spawn until the chain arrives (setSpectateChain). The angle you
+    // were building from is kept, and nothing is put back at the end.
+    if (keepView && get().focus?.drive) {
+      set({
+        spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading', returnView: spectate?.returnView ?? view.clone() },
+        exploreIndex: null,
+      })
+      get().aimView(spawn.position, spawn.plane)
+      return
+    }
     // The view you arrive with is the black sun orientation (section 11.3),
     // the same the C key gives, at the standard distance the rig frames from:
     // a stranger's neighborhood seen from whatever angle you had orbited to
@@ -2837,6 +2872,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       && actions[get().exploreIndex!]?.id === prev.actions[get().exploreIndex!]?.id
     const at = keep ? actions[get().exploreIndex!] : head
     const spawn = spawnOf(pubkey)
+    // Under a driven view (BUILD mode) the scene stays on the build cursor,
+    // which the chain does not move, with one exception: the first chain to
+    // arrive takes the cursor from their spawn to their head, unless you
+    // already moved it. After that their new actions move their avatar, not
+    // your cursor.
+    if (get().focus?.drive) {
+      set({
+        spectate: { ...prev, events, actions, lastActive: head?.createdAt ?? null, status: status ?? (head ? 'live' : 'empty') },
+        exploreIndex: null,
+      })
+      const s = get()
+      if (prev.actions.length === 0 && head && samePosition(s.cursor, spawn.position) && s.anchorPlane === spawn.plane) s.aimView(head.position, head.plane)
+      return
+    }
     set({
       spectate: {
         ...prev,
@@ -2855,7 +2904,28 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Back to your own head, in the plane you have lined up there, looking
     // the way you were looking before.
     const { position, plane, spectate } = get()
+    // Under a driven view (BUILD mode) the view, its cursor and its angle
+    // stay where they are: ending spectation is not leaving the build.
+    if (get().focus?.drive) { set({ spectate: null, exploreIndex: null }); return }
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane, ...(spectate ? { view: spectate.returnView } : {}) })
+  },
+
+  aimView: (position, plane) => {
+    const focus = get().focus
+    if (!focus?.drive) return
+    const next = { ...position }
+    set({ cursor: next, ...(plane !== get().anchorPlane ? { anchorPlane: plane, focus: { ...focus, plane } } : {}) })
+    rideView(next)
+  },
+
+  driveHere: (label) => {
+    const { anchor, anchorPlane, focus, scaleExp, focusReturnScale } = get()
+    set({
+      focus: { position: { ...anchor }, plane: anchorPlane, label, drive: true },
+      cursor: { ...anchor },
+      exploreIndex: null,
+      focusReturnScale: focus === null ? scaleExp : focusReturnScale,
+    })
   },
 
   pin: null,
@@ -2903,13 +2973,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   clearFocus: (keepScale = false) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
-    const { position, plane, focusReturnScale, scaleExp, focus } = get()
+    const { position, plane, focusReturnScale, scaleExp, focus, spectate } = get()
+    // A driven view kept through a spectation (BUILD mode) that ends while
+    // the spectation stands goes back to watching them, on their head.
+    const watched = spectate ? (spectate.actions[spectate.actions.length - 1] ?? spawnOf(spectate.pubkey)) : null
     set({
       focus: null,
       // RETURN ends the look, and the pin was the look's subject.
       pin: null,
-      anchor: position,
-      anchorPlane: plane,
+      anchor: watched ? { ...watched.position } : position,
+      anchorPlane: watched ? watched.plane : plane,
       // A cursor that went out with the view comes home with it.
       ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
@@ -3643,7 +3716,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   actions: () => parsedChain(get().events),
 
-  canDrive: () => get().atHead() || (get().focus?.drive === true && get().spectate === null && get().exploreIndex === null),
+  // A driven view drives while spectating too: the two stand together only in
+  // BUILD mode (beginSpectate `keepView`), where the pad moves the build
+  // cursor near the avatar being watched. Never your head: that is atHead.
+  canDrive: () => get().atHead() || (get().focus?.drive === true && get().exploreIndex === null),
   atHead: () =>
     get().exploreIndex === null &&
     get().spectate === null &&

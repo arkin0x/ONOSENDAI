@@ -13,7 +13,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
-import { useBuilder } from '../store/useBuilder'
+import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { useChat } from '../store/useChat'
 import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
@@ -100,22 +100,21 @@ export function useKeyboard(): void {
       // The chain explorer: one action back or forward, held keys repeat
       // through the keyboard's own repeat; Home and End are the spawn and the
       // head. These work wherever the scene is anchored, head included.
-      // Not while building: history is somewhere you cannot place anything,
-      // and walking it would end BUILD mode on a stray key.
-      if (building && (event.code === 'BracketLeft' || event.code === 'BracketRight' || event.code === 'Home' || event.code === 'End')) return
+      // While building they aim the build cursor at the action instead of
+      // going into history, as the CHAIN chip does (useBuilder walkChain).
       if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
         event.preventDefault()
-        store.exploreStep(event.code === 'BracketLeft' ? -1 : 1)
+        stepChain(event.code === 'BracketLeft' ? -1 : 1)
         return
       }
       if (event.code === 'Home') {
         event.preventDefault()
-        store.explore(0)
+        walkChain(0)
         return
       }
       if (event.code === 'End') {
         event.preventDefault()
-        store.explore(null)
+        walkChain(null)
         return
       }
 

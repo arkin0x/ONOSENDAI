@@ -252,13 +252,9 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
-      <div className="deploybar__row deploybar__hint">
-        Aim with the build cursor: the movement controls move it, and zooming out with + makes every step and the cell it lands in bigger. The ghost is where it lands. Building does not move your avatar.
-        {!isMessage && snapOffered(plane, height) && up && ' Stands the shard on the ground here, bottom to Earth. SPIN is the compass bearing its +Z faces.'}
-        {height === 0
-          ? ' At height 0 only someone on this exact point can find it.'
-          : ` Anyone who computes this ${formatCellSize(height)} region can find and open it.`}
-      </div>
+      {/* No paragraph here (arkinox, 2026-10-08: "these controls need to be
+          tight"): how aiming works is in the Builder's EXPLAIN, and how far
+          away it can be found is on the height row itself. */}
 
       {height > SCAN_MAX_HEIGHT && (
         <div className="deploybar__row deploybar__warn">

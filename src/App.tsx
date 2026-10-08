@@ -214,7 +214,10 @@ export default function App(): JSX.Element {
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
               last. */}
-          <LineScrubber />
+          {/* BUILD mode keeps the stack to what building needs (arkinox,
+              2026-10-08): the hyperspace chip and XOR BITS step aside and
+              come back on exit. */}
+          {!building && <LineScrubber />}
           <HyperspaceBar />
           <FocusBar />
           {/* BUILD mode, where the free view's bar would be: it rides that view. */}
@@ -224,7 +227,7 @@ export default function App(): JSX.Element {
               and its steps would end BUILD mode, as [ ] Home End would
               (they are ignored while building, useKeyboard). */}
           {!building && <ChainExplorer />}
-          <BitReadout />
+          {!building && <BitReadout />}
           {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
           <NotificationsToast />
           {/* Under XOR BITS, spaced as the rest are: what was just found, what

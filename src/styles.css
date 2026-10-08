@@ -2238,8 +2238,8 @@ kbd {
   width: min(360px, calc(100vw - 28px));
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px 12px;
+  gap: 8px;
+  padding: 14px 14px 14px;
   border-radius: 10px;
   color: var(--fg);
   background: rgba(6, 14, 22, 0.9);
@@ -2325,13 +2325,6 @@ kbd {
   letter-spacing: 0.06em;
 }
 
-.deploybar__hint {
-  display: block;
-  font-size: 9px;
-  line-height: 1.5;
-  color: var(--dim);
-}
-
 .deploybar__warn {
   display: block;
   font-size: 9px;
@@ -2380,10 +2373,12 @@ kbd {
   max-height: calc(50dvh - 24px);
 }
 @media (max-width: 1100px) {
+  /* A little taller than the quarter it was (arkinox, 2026-10-08: "maybe
+     make the box a little taller"), still well clear of the centre. */
   .deploybar {
-    max-height: 25vh;
-    max-height: 25dvh;
-    padding-bottom: 10px;
+    max-height: 30vh;
+    max-height: 30dvh;
+    padding-bottom: 12px;
   }
 }
 .deploybar__head,
@@ -7461,6 +7456,16 @@ kbd {
   border: 1px solid rgba(242, 247, 255, 0.45);
   cursor: pointer;
   white-space: nowrap;
+}
+/* One icon size on all three, at the text's cap height and a hair over. */
+.buildbar__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.buildbar__icon {
+  flex: none;
 }
 .buildbar__act:hover:not(:disabled) {
   background: rgba(242, 247, 255, 0.1);

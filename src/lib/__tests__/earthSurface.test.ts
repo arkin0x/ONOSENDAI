@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { axesToLatLon } from '../hyperspace/landfall'
 import {
   csMetresToLatLon,
+  EARTH_OCCLUDER_MIN_SCALE,
+  earthOccluderOn,
   earthRadiusCells,
   formatLatLonDeg,
   graticuleStep,
@@ -98,6 +100,28 @@ describe('surfaceDetailOpacity', () => {
     expect(surfaceDetailOpacity(31)).toBeCloseTo(1 / 2, 5)
     expect(surfaceDetailOpacity(30)).toBe(0)
     expect(surfaceDetailOpacity(0)).toBe(0)
+  })
+})
+
+describe('earthOccluderOn', () => {
+  // arkinox, 2026-10-08: the solid black ground showed from 2^31, where it
+  // hid everything under the surface from above and everything at all from
+  // below. It belongs only where the planet curves enough to have a far side.
+  it('is off below 2^40, all the way down to where the surface stops drawing', () => {
+    expect(EARTH_OCCLUDER_MIN_SCALE).toBe(40)
+    for (let s = 0; s < 40; s++) expect(earthOccluderOn(s)).toBe(false)
+  })
+
+  it('is on from 2^40 up, through the patch regime and into the globe', () => {
+    for (let s = 40; s <= 85; s++) expect(earthOccluderOn(s)).toBe(true)
+  })
+
+  it('leaves the graticule and coast drawing in the band it no longer covers', () => {
+    // 2^31 to 2^39: the lines stay, only the depth-only body goes.
+    for (let s = 31; s < 40; s++) {
+      expect(surfaceDetailOpacity(s)).toBeGreaterThan(0)
+      expect(earthOccluderOn(s)).toBe(false)
+    }
   })
 })
 

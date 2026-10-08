@@ -59,8 +59,16 @@ export function shortAxis(n: bigint): string {
   return short(n.toString())
 }
 
-/** A remembered place: what was typed, canonically, and how it is shown. */
-export interface RecentView { input: string; label: string; plane: Plane }
+/**
+ * A remembered place: what was typed, canonically, and how it is shown.
+ * `pinned` keeps it in the list until it is removed by hand: the End of
+ * Chain a respawn leaves is pinned, so three later lookups cannot push the
+ * way back to a frozen chain out of the list.
+ */
+export interface RecentView { input: string; label: string; plane: Plane; pinned?: boolean }
+
+/** How many places the list keeps, pinned ones aside. */
+export const RECENT_VIEWS_KEPT = 3
 
 /** The same place typed two ways is one entry: decimals become "x, y, z", a coordinate its lowercase hex. */
 export function canonicalViewAt(text: string): string {
@@ -69,9 +77,28 @@ export function canonicalViewAt(text: string): string {
   return t.split(/[\s,]+/).filter(Boolean).join(', ')
 }
 
-/** The list with `entry` at the front, its earlier copy gone, three at most. */
+/**
+ * The list with `entry` at the front and its earlier copy gone: every pinned
+ * place, and three unpinned ones at most. A place already pinned stays
+ * pinned when it is looked at again.
+ */
 export function rememberView(list: RecentView[], entry: RecentView): RecentView[] {
-  return [entry, ...list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)].slice(0, 3)
+  const same = (r: RecentView): boolean => r.input === entry.input && r.plane === entry.plane
+  const front = list.find(same)?.pinned ? { ...entry, pinned: true } : entry
+  let unpinned = 0
+  return [front, ...list.filter((r) => !same(r))].filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
+}
+
+/** The stored list, as the Position panel shows it: every pinned place and three others at most; empty when storage cannot be read. */
+export function readRecentViews(): RecentView[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_VIEWS_KEY) ?? '[]') as unknown
+    if (!Array.isArray(v)) return []
+    let unpinned = 0
+    return v
+      .filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1))
+      .filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
+  } catch { return [] }
 }
 
 /**
@@ -82,4 +109,25 @@ export function rememberView(list: RecentView[], entry: RecentView): RecentView[
  */
 export function forgetView(list: RecentView[], entry: Pick<RecentView, 'input' | 'plane'>): RecentView[] {
   return list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)
+}
+
+/** Where the Position panel keeps its recent places on this device. */
+export const RECENT_VIEWS_KEY = 'onosendai:view-recent'
+
+/** Sent on window when a place is added to the recent list from outside the Position panel, which reloads it. */
+export const RECENT_VIEWS_EVENT = 'onosendai:view-recent'
+
+/**
+ * Put a place at the front of the Position panel's recent list from
+ * anywhere: the stored list, through rememberView like a typed place, and an
+ * event so a panel already on screen shows it. The respawn from a broken
+ * chain leaves its End of Chain entry here (arkinox, 2026-10-07, Q3), so the
+ * place the old chain froze at is one tap away. Storage that cannot be read
+ * or written leaves the list as it was.
+ */
+export function addRecentView(entry: RecentView): RecentView[] {
+  const next = rememberView(readRecentViews(), entry)
+  try { localStorage.setItem(RECENT_VIEWS_KEY, JSON.stringify(next)) } catch { /* private mode */ }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(RECENT_VIEWS_EVENT))
+  return next
 }

@@ -27,6 +27,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { coordToXyz, hexToCoord, terrainK } from 'cyberspace-core'
 import { buildChain, spawnTemplate, type NostrEvent } from '../../lib/events'
 import { verifyEnterProof } from '../../lib/hyperspace/enter'
+import { nip19 } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
 
 /** A key whose spawn is in ideaspace (plane 1), with terrain cheap enough to prove on in a test. */
@@ -43,9 +44,12 @@ const tag = (ev: NostrEvent, name: string): string | undefined => ev.tags.find((
 
 describe('boarding from ideaspace with dataspace lined up', () => {
   let pubkey = ''
-  beforeEach(() => {
+  beforeEach(async () => {
     const key = ideaspaceKey()
     pubkey = key.pubkey
+    // Signed by the identity whose chain it is: a chain only ever follows its
+    // own author's events (review of #227).
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(key.sk))
     const spawn = finalizeEvent(spawnTemplate(pubkey, 1_700_000_000), key.sk) as NostrEvent
     const { x, y, z } = coordToXyz(hexToCoord(pubkey))
     useCyberspace.setState({

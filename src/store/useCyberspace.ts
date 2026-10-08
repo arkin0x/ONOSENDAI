@@ -19,7 +19,7 @@ import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
-import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
+import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { Quaternion } from 'three'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -147,6 +147,8 @@ import {
 } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
+import { addRecentView } from '../lib/viewAt'
+import { endOfChainLabel } from '../lib/chainBreak'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
@@ -175,29 +177,30 @@ export const GAME_HOLDS_MESSAGE =
   'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
 
 /**
- * THE SWITCH for refusing moves on a broken chain (review of #224, S2).
+ * THE SWITCH for refusing moves on a broken chain (review of #224, S2), on
+ * since arkinox's ruling of 2026-10-07 (Q3): an invalid chain stands at its
+ * last valid position, frozen until a respawn.
  *
- * A chain with a broken event before its head (events.ts firstBreak) is one
- * every verifier treats as invalid from that event, so a move signed onto it
- * is a move no verifier counts. Where an identity with an invalid chain
- * stands is not settled yet (arkinox is ruling on it), so for now this client
- * says so in the Proof chain panel and still moves. Set this to true to make
- * every move (commit, route step, BOARD, RIDE, signing a finished proof)
- * refuse with BROKEN_CHAIN_MESSAGE instead; whyNoMove is the one place that
- * reads it.
+ * A chain with a broken event (events.ts firstBreak) is one every verifier
+ * treats as invalid from that event, so a move signed onto it is a move no
+ * verifier counts. Every move (commit, route step, BOARD, RIDE, signing a
+ * finished proof) refuses with BROKEN_CHAIN_MESSAGE; whyNoMove is the one
+ * place that reads this.
  */
-export const REFUSE_MOVES_ON_BROKEN_CHAIN = false
+export const REFUSE_MOVES_ON_BROKEN_CHAIN = true
 
 export const BROKEN_CHAIN_MESSAGE =
-  'Your chain is broken before its head: one of its actions breaks a chain rule, and every verifier treats the chain as invalid from that action, so a move added after it is a move nobody counts. ONOSENDAI will not sign one. A respawn starts a new, valid chain at your spawn point. The Proof chain panel names the action and the rule it breaks.'
+  'Your chain is broken, so you are frozen where it was last valid. One of its actions breaks a chain rule, and every verifier treats your chain as invalid from that action on: you stand at the last valid position before it, and any move added now is a move nobody would count, so ONOSENDAI will not sign one. To move again, respawn: you start a new, valid chain at your spawn point. The red CHAIN BROKEN notice names the action, says why it broke the chain, and has the RESPAWN button.'
 
 /**
  * Why this client will not sign a base action onto `chain` now, in words, or
- * null when it may. Every way to move asks this one question.
+ * null when it may. Every way to move asks this one question. A broken chain
+ * comes first: nothing on it counts, a game included, and a respawn is the
+ * only way on from either.
  */
 export function whyNoMove(chain: ActionEvent[]): string | null {
-  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
   if (REFUSE_MOVES_ON_BROKEN_CHAIN && firstBreak(chain)) return BROKEN_CHAIN_MESSAGE
+  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
   return null
 }
 
@@ -712,7 +715,16 @@ export interface CyberspaceState {
    * because the old chain's events still exist on relays but no longer lead
    * anywhere.
    */
-  respawn: () => void
+  /** Rejects when the signature is refused, or when the identity changed while it was asked for. */
+  respawn: () => Promise<void>
+  /**
+   * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
+   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * and the first eight hex of the last valid event's id (the invalid
+   * spawn's, when no event is valid, Q7), so the place the old chain froze
+   * at is one tap away; then an ordinary respawn.
+   */
+  respawnFromBrokenChain: (forPubkey?: string) => Promise<void>
   /** Anchor the scene on action `index` of the chain; null or past the end is the head. */
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
@@ -966,7 +978,7 @@ function loadChain(pubkey: string): PersistedChain | null {
     // Must reassemble to exactly what was stored, from our own key. Anything
     // else is a chain that cannot be continued, and pretending otherwise would
     // sign hops onto a history the relay will reject.
-    const chain = buildChain(data.events)
+    const chain = buildChain(data.events, pubkey)
     if (chain.length !== data.events.length || chain[0].pubkey !== pubkey) return null
     return {
       version: 2,
@@ -1895,6 +1907,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // extension never makes it sign anything just to log in.
     const local = loadChain(signer.pubkey)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
+    // A broken-chain notice or respawn confirm left open was about the old
+    // identity's chain; it must never respawn the new one.
+    useChainUi.getState().setBrokenView(null)
     set({
       identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
       signerKind: signer.kind,
@@ -2024,7 +2039,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
-    // A game holds the avatar, or (behind its switch) the chain is broken:
+    // A game holds the avatar, or the chain is broken:
     // nothing here may be signed (whyNoMove).
     const noMove = whyNoMove(get().actions())
     if (noMove) {
@@ -2578,12 +2593,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (get().plan) set({ plan: null })
     const { events, held, selfCheck, identity } = get()
+    const signer = currentSigner
     // A respawn is deliberate, but it is not a decision about a chain on the
     // relays nobody has seen yet. A held chain stays held through it; so does
     // a respawn from the provisional state while the check has not said
     // "none", for the same reason the first move holds (lib/chainHold.ts).
     const keepHeld = held || (events.length === 0 && !(selfCheck.pubkey === identity.pubkey && selfCheck.status === 'none'))
-    const fresh = derive({ ...(await freshSpawnAsync(currentSigner, events[events.length - 1])), held: keepHeld })
+    const signed = await freshSpawnAsync(signer, events[events.length - 1])
+    // A remote signer can wait minutes for an approval on a phone. If the
+    // identity changed meanwhile, this spawn is the old identity's: nothing
+    // of it may land in the store, which now holds someone else (final
+    // review of #227).
+    if (get().identity.pubkey !== identity.pubkey || currentSigner !== signer) {
+      throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
+    }
+    const fresh = derive({ ...signed, held: keepHeld })
     set({
       ...fresh,
       cursor: fresh.position,
@@ -2595,6 +2619,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
     })
     saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
+  },
+
+  respawnFromBrokenChain: async (forPubkey) => {
+    // Confirmed for one identity: never carried out for another.
+    if (forPubkey !== undefined && forPubkey !== get().identity.pubkey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
+    const broken = firstBreak(get().actions())
+    if (broken) {
+      // With no valid event at all (an invalid spawn, Q7), the spawn row
+      // names the entry, and it stands where the identity is frozen: the
+      // spawn coordinate.
+      const at = broken.lastValid ?? broken.action
+      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
+    }
+    await get().respawn()
   },
 
   applySelfCheck: (pubkey, verdict) => {
@@ -2756,7 +2794,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setSpectateChain: (pubkey, events, status) => {
     const prev = get().spectate
     if (!prev || prev.pubkey !== pubkey) return
-    const actions = buildChain(events)
+    const actions = buildChain(events, pubkey)
     const head = actions[actions.length - 1]
     // A chain that grew under an explorer parked in its history leaves the
     // explorer where it was; one that was replaced (a respawn) snaps to head.
@@ -2902,6 +2940,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // either way the head is on the line, and `c` is its coordinate.
     const line = lineStateOf(parsedChain(events))
     if (!transit && !line) return
+    // Never a zero-length ride (arkinox, 2026-10-07): the backstop behind
+    // startRide, which refuses one before any work is done.
+    const zero = zeroLengthRideRefusal(ride.fromHeight, ride.toHeight, line?.fromHeight != null)
+    if (zero) throw new Error(zero)
     // Every leaf was seeded by the head the ride started from (§5.3). Signed
     // under any other `previous` it would be a ride whose every leaf is wrong,
     // so a head that moved while the proof ran (a fork adopted from another
@@ -3035,7 +3077,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // newer chain from another machine supersedes ours; our own echoed events
     // fold in as a no-op. It returns parsed actions in order; map back to the
     // raw events the store actually holds.
-    const order = buildChain(merged)
+    const order = buildChain(merged, me)
     if (order.length === 0) return
     const head = order[order.length - 1]
     if (head.id === cur.prevEventId && order.length === cur.events.length) return
@@ -3103,7 +3145,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { targets } = get()
     const t = targets[pubkey]
     if (!t) return
-    const head = buildChain(events)[buildChain(events).length - 1]
+    const targetChain = buildChain(events, pubkey)
+    const head = targetChain[targetChain.length - 1]
     const spawn = spawnOf(pubkey)
     set({
       targets: {

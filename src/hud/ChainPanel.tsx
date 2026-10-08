@@ -31,6 +31,7 @@ import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
 import { TriangleAlert } from 'lucide-react'
 import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
+import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -229,13 +230,15 @@ export function ChainPanel(): JSX.Element {
       ) : null}
 
       {/* Apart from the states above: a broken row is a fact about the chain
-          itself, and it can stand alongside any of them. */}
+          itself, and it can stand alongside any of them. You stand frozen at
+          the last valid position until you respawn (arkinox, 2026-10-07). */}
       {broken && (
-        <p className="notice notice--broken">
-          <TriangleAlert size={12} strokeWidth={2.5} aria-hidden className="chainrows__warn" />
-          BROKEN CHAIN AT ROW {broken.index} ({actionLabel(broken.action)}): {broken.action.breaks}. Every verifier treats this chain as invalid from that row, so nothing after it counts, including any move you make now; ONOSENDAI still lets you move on it for the moment. A respawn starts a new, valid chain at your spawn point.
-          <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(broken.index)}>SHOW THE ROW</button>
-        </p>
+        <BrokenChainNotice broken={broken} actions={(
+          <>
+            <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(broken.index)}>SHOW THE ROW</button>
+            <button className="brokenchain__respawn" onClick={() => useChainUi.getState().setBrokenView('confirm')}>RESPAWN</button>
+          </>
+        )} />
       )}
 
       <Explanation>
@@ -256,17 +259,25 @@ export function ChainPanel(): JSX.Element {
         point for every verifier. Leave the game in the client you entered it
         with, and you can move again from where you entered.
         <br /><br />
+        Inside a game only two things are checked by the chain rules: that
+        the game's actions link one to the next, and that none of them is a
+        move through cyberspace (a hop, a sidestep, a boarding or a ride). Where
+        a game action says you are inside the game is the game's own business:
+        it may name any place, or none, and nothing here marks it for that.
+        Entering a game must start where you stood and must not move you, and
+        the exit must put you back exactly where you entered.
+        <br /><br />
         A grey SKIPPED row is an action this client does not recognize, from an
         extension it does not implement. The chain is followed through it and
         it is passed over: it does not move you, and your next move continues
         after it from where your last recognized action put you. A red BROKEN
-        row is an action out of place or malformed, such as a hop signed inside
-        a game; a verifier says the chain stops being valid there, and this
-        client, which shows chains rather than verifying them, marks it and
-        keeps reading. An action whose starting point (its c) is not where the
-        chain stood is BROKEN too, wherever it is. The first BROKEN row is named
-        in a notice above, with the rule it breaks; a respawn starts a new,
-        valid chain.
+        row is an action that breaks a chain rule: out of place or malformed,
+        such as a hop signed inside a game; starting somewhere other than where
+        the chain stood; or a ride whose destination is the block it starts
+        from. A verifier says the chain stops being valid at the first one, and
+        from there on you stand frozen at your last valid position until you
+        respawn: the red notice above names the row, says why, apologizes when
+        the break is not your doing, and has RESPAWN.
         <br /><br />
         A game holds your avatar until the client you entered it with publishes
         an exit. If that client is gone, a respawn also leaves the game: it
@@ -277,11 +288,10 @@ export function ChainPanel(): JSX.Element {
         tick is your spawn or one of your moves. A pink tick is one of a game's
         actions, its entry and exit included; none of them moves you through
         cyberspace. A short grey tick is an action no verifier counts as a
-        move: a SKIPPED action, which leaves you where you were; a BROKEN action
-        that is out of place or malformed, which also leaves you where you
-        were; or a BROKEN action that starts from somewhere the chain was not,
-        which is drawn where it claims to go even though no verifier accepts
-        it.
+        move: a SKIPPED action, which leaves you where you were, or a BROKEN
+        action. From the first BROKEN action on, every tick stands at your last
+        valid position, wherever the actions claim to go; the explorer shows
+        what each one claimed on a line of its own.
       </Explanation>
     </section>
   )

@@ -20,14 +20,26 @@
  * who leaves does not announce it here (their next action lands outside the
  * filter), so people not heard from in a while are confirmed by asking the
  * relay for their newest action and dropped if it is elsewhere.
+ *
+ * A newest action says where someone is only if their chain is valid up to
+ * it. An invalid chain stands at its last valid position, frozen until a
+ * respawn (arkinox, 2026-10-07), so each person's chain is read after each
+ * newest action, one person at a time, through lib/neighborChains.ts, which
+ * keeps each chain and asks only for what is newer. Someone whose chain is
+ * broken is placed where it froze, or dropped if that is not here. Until a
+ * read comes back, the newest action places them, except that someone known
+ * to be frozen stays where they froze unless the new action is a spawn. A
+ * read is applied only while it is still about the action the person shows
+ * (`actionId`), so a slow read never overrides a newer action or a respawn.
  */
 
 import { create } from 'zustand'
 import { xyzToSectorId } from 'cyberspace-core'
 import type { Filter } from 'nostr-tools/filter'
-import { ACTION_KIND, parseAction, type NostrEvent, type ActionType } from '../lib/events'
+import { ACTION_KIND, parseAction, type NostrEvent, type ActionType, type ActionEvent } from '../lib/events'
 import type { Plane } from 'cyberspace-core'
 import { PLACING_ACTIONS } from '../lib/chains'
+import { cachedVerdict, forgetNeighborChains, forgetNeighborEvents, readChain, type ChainVerdict } from '../lib/neighborChains'
 import { query, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
@@ -43,6 +55,13 @@ export interface Person {
   type: ActionType
   /** When the relay last confirmed this is still their newest action. */
   checkedAt: number
+  /** The id of that newest action: what a chain read must still be about to be applied. */
+  actionId: string
+  /**
+   * Their chain is broken: `position` is its last valid position, where they
+   * stand until they respawn, whatever their newer actions say (checkChain).
+   */
+  frozen?: boolean
 }
 
 /** Newest actions fetched when a neighborhood is entered. */
@@ -123,17 +142,28 @@ export const usePresence = create<PresenceState>((set, get) => ({
     if (action.pubkey === me) return
     const have = get().people[action.pubkey]
     if (have && have.lastActive >= action.createdAt) return
+    const at = standing(action, have)
+    // One rule for where anyone stands (lib/neighborChains.ts): where their
+    // chain puts the action they show, and not here when that is not in the
+    // neighborhood. An action placed by itself came through the
+    // neighborhood's own filter; a place from a chain read or a freeze is
+    // checked here, as applyVerdict and the sweep check theirs.
+    if ((at.known || at.frozen) && !inNeighborhood(at.position, useCyberspace.getState().position)) {
+      if (have) get().forget(action.pubkey)
+      return
+    }
     // Someone new, after the backfill: an arrival. During the backfill every
     // person is new and none of them just arrived. Your targets are not
     // arrivals either; you already know where they are.
     const arrived = !have && !get().loading && !useCyberspace.getState().targets[action.pubkey]
     set({
       people: { ...get().people, [action.pubkey]: {
-        pubkey: action.pubkey, position: action.position, plane: action.plane,
-        lastActive: action.createdAt, type: action.type, checkedAt: now,
+        pubkey: action.pubkey, position: at.position, plane: at.plane,
+        lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id, frozen: at.frozen,
       } },
       ...(arrived ? { arrivals: get().arrivals + 1, lastArrivalAt: Date.now() } : {}),
     })
+    if (!at.known) queueChainCheck(action.pubkey, action.id)
     // The chat's mute is the one switch for sounds about other people.
     if (arrived && !useChat.getState().muted) chime()
   },
@@ -142,6 +172,7 @@ export const usePresence = create<PresenceState>((set, get) => ({
     const people = { ...get().people }
     delete people[pubkey]
     set({ people })
+    forgetNeighborEvents(pubkey)
   },
 
   others: () => {
@@ -153,6 +184,74 @@ export const usePresence = create<PresenceState>((set, get) => ({
 let stopLive: (() => void) | null = null
 let started = false
 let sweepHandle: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Where someone stands on their newest action, before or without a chain
+ * read: the cached verdict for that action if there is one (`known`); else,
+ * for someone known to be frozen, still where they froze unless the action
+ * is a spawn, which starts a new chain; else where the action says.
+ */
+function standing(action: ActionEvent, have: Person | undefined): { position: Position; plane: Plane; frozen: boolean; known: boolean } {
+  const v = cachedVerdict(action.pubkey, action.id)
+  if (v) return { position: v.stand.position, plane: v.stand.plane, frozen: v.frozen, known: true }
+  if (have?.frozen && action.type !== 'spawn') return { position: have.position, plane: have.plane, frozen: true, known: false }
+  return { position: action.position, plane: action.plane, frozen: false, known: false }
+}
+
+/** Chains waiting to be read: the newest action id each person was last seen at. */
+const chainChecks = new Map<string, string>()
+let checking = false
+
+/** Read someone's chain after a newest action of theirs that has no verdict yet. */
+function queueChainCheck(pubkey: string, actionId: string): void {
+  chainChecks.set(pubkey, actionId)
+  if (started) void drainChainChecks()
+}
+
+/** For tests: the reads waiting, as [pubkey, actionId]. */
+export function pendingChainChecks(): Array<[string, string]> {
+  return [...chainChecks]
+}
+
+/** One chain at a time, so a busy neighborhood does not ask the relays for every chain at once. */
+export async function drainChainChecks(): Promise<void> {
+  if (checking) return
+  checking = true
+  try {
+    while (chainChecks.size > 0) {
+      const [pubkey, actionId] = chainChecks.entries().next().value as [string, string]
+      chainChecks.delete(pubkey)
+      try {
+        const v = await readChain(pubkey, actionId)
+        if (v) applyVerdict(pubkey, v)
+      } catch { /* the newest action still places them */ }
+    }
+  } finally {
+    checking = false
+  }
+}
+
+/**
+ * Place someone by what their chain said, if it is still about the action
+ * they show: where their chain puts that action (frozen or not), and off the
+ * neighborhood when that is not here, the same rule ingest and the sweep
+ * use. A read for an action they have since moved past, or respawned past,
+ * is dropped.
+ */
+function applyVerdict(pubkey: string, v: ChainVerdict): void {
+  const person = usePresence.getState().people[pubkey]
+  if (!person || person.actionId !== v.actionId) return
+  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { usePresence.getState().forget(pubkey); return }
+  usePresence.setState((s) => ({ people: { ...s.people, [pubkey]: { ...s.people[pubkey], position: v.stand.position, plane: v.stand.plane, frozen: v.frozen } } }))
+}
+
+/** Read one person's chain now, at the action they show, and place them by it. */
+export async function checkChain(pubkey: string): Promise<void> {
+  const person = usePresence.getState().people[pubkey]
+  if (!person) return
+  const v = await readChain(pubkey, person.actionId)
+  if (v) applyVerdict(pubkey, v)
+}
 
 /** Enter the neighborhood around `at`: forget the old one, fetch, then listen. */
 async function enter(at: Position): Promise<void> {
@@ -185,7 +284,7 @@ async function enter(at: Position): Promise<void> {
  * arrives here. Ask the relay for their newest action of any kind; keep them
  * if it is still in the neighborhood, at its position, or drop them.
  */
-async function sweep(): Promise<void> {
+export async function sweep(): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   const here = useCyberspace.getState().position
   const quiet = Object.values(usePresence.getState().people).filter((p) => now - p.checkedAt >= CONFIRM_AFTER_S)
@@ -194,10 +293,15 @@ async function sweep(): Promise<void> {
       const newest = (await query({ kinds: [ACTION_KIND], authors: [person.pubkey], '#A': PLACING_ACTIONS, limit: 1 }))
         .sort((a, b) => b.created_at - a.created_at)[0]
       const action = newest ? parseAction(newest) : null
-      if (!action || !inNeighborhood(action.position, here)) { usePresence.getState().forget(person.pubkey); continue }
+      if (!action) { usePresence.getState().forget(person.pubkey); continue }
+      // Frozen on a broken chain: still there until a spawn says otherwise,
+      // and the chain is read again at the new action all the same.
+      const at = standing(action, person)
+      if (!inNeighborhood(at.position, here)) { usePresence.getState().forget(person.pubkey); continue }
       usePresence.setState((s) => ({ people: { ...s.people, [person.pubkey]: {
-        ...s.people[person.pubkey], position: action.position, plane: action.plane, lastActive: action.createdAt, type: action.type, checkedAt: now,
+        ...s.people[person.pubkey], position: at.position, plane: at.plane, lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id, frozen: at.frozen,
       } } }))
+      if (!at.known) queueChainCheck(person.pubkey, action.id)
     } catch {
       /* ask again next sweep */
     }
@@ -221,6 +325,8 @@ export function stopPresence(): void {
   stopLive = null
   if (sweepHandle) { clearInterval(sweepHandle); sweepHandle = null }
   started = false
+  chainChecks.clear()
+  forgetNeighborChains()
   usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null })
 }
 

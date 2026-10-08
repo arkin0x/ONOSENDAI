@@ -18,13 +18,22 @@ interface ChainUiState {
    * the switch says so, and a tap there or a commit brings the prompt back.
    */
   promptAside: boolean
+  /**
+   * The broken-chain modal (hud/BrokenChain.tsx): `notice` says which event
+   * broke the chain and why, `confirm` is the respawn's warning and its
+   * confirm step; null when closed.
+   */
+  brokenView: 'notice' | 'confirm' | null
   setExplaining: (open: boolean) => void
   setPromptAside: (aside: boolean) => void
+  setBrokenView: (view: 'notice' | 'confirm' | null) => void
 }
 
 export const useChainUi = create<ChainUiState>((set) => ({
   explaining: false,
   promptAside: false,
+  brokenView: null,
   setExplaining: (explaining) => set({ explaining }),
   setPromptAside: (promptAside) => set({ promptAside }),
+  setBrokenView: (brokenView) => set({ brokenView }),
 }))

@@ -34,7 +34,6 @@
 
 import { bytesToHex, hexToBytes } from 'cyberspace-core'
 import {
-  ZERO_LENGTH_PROOF,
   attemptsRequired,
   computeRideLeaf,
   expectedRidePairs,
@@ -425,11 +424,9 @@ async function runRide(
 ): Promise<RideProof> {
   if (signal?.aborted) throw abortError()
   const { previousEventIdHex, blocks } = job
-  if (blocks.length === 0) {
-    // §5.6 zero-length ride: nothing to compute, no price, nothing to persist.
-    onProgress({ done: 0, total: 0, etaMs: null, price: null })
-    return { ...ZERO_LENGTH_PROOF }
-  }
+  // There is no zero-length ride (arkinox, 2026-10-07): a ride passes at
+  // least one block, and a job with none is a bug upstream, never a proof.
+  if (blocks.length === 0) throw new Error('a ride passes at least one block: there is no zero-length ride')
 
   const db = await openRideDb()
   const cached = await readCachedLeaves(db, previousEventIdHex)

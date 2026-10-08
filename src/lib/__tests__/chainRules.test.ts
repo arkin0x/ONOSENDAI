@@ -123,11 +123,11 @@ describe('virtual brackets (§8.11)', () => {
   const IN2 = positionHex(inArena(9n), plane)
   const exit = exitVirtualEvent({ pubkey: pk, createdAt: 1_023, genesisId: spawn.id, previousId: move2.id, entryId: enter.id, c: IN2, restore: at(1n), plane })
 
-  it('parses an enter-virtual: held at its c, in the game at its C, with its game and region', () => {
+  it('parses an enter-virtual: held at its c, which is also its C, with its game and region', () => {
     const a = parseAction(enter)!
     expect(a).toMatchObject({ type: 'enter-virtual', role: 'enter', coordHex: P1, game: { pubkey: GAME, relayHint: '' } })
     expect(a.position).toEqual(at(1n))
-    expect(a.declared?.position).toEqual(inArena(0n))
+    expect(a.declared).toBeUndefined()
     expect(a.region).toMatchObject({ height: 8, base: regionAround(arena, 8), plane })
   })
 
@@ -138,7 +138,7 @@ describe('virtual brackets (§8.11)', () => {
       expect(a.coordHex).toBe(P1)
       expect(a.bracketId).toBe(enter.id)
     }
-    expect(chain.slice(2).map((a) => a.declared?.position)).toEqual([inArena(0n), inArena(5n), inArena(9n)])
+    expect(chain.slice(2).map((a) => a.declared?.position)).toEqual([undefined, inArena(5n), inArena(9n)])
     expect(actionLabel(chain[4])).toBe('GAME · CAPTURE')
   })
 
@@ -165,11 +165,6 @@ describe('virtual brackets (§8.11)', () => {
     expect(chain[4]).toMatchObject({ role: 'broken', name: 'hop', type: 'other', bracketId: enter.id })
     expect(chainHead(chain)?.position).toEqual(at(1n))
     expect(openBracket(chain)?.id).toBe(enter.id)
-  })
-
-  it('a game move outside the region is broken (rule 4)', () => {
-    const away = virtualEvent({ pubkey: pk, createdAt: 1_022, genesisId: spawn.id, previousId: move1.id, name: 'move', c: IN1, inGame: { ...arena, x: arena.x + (1n << 20n) }, plane })
-    expect(buildChain([spawn, hop1, enter, move1, away])[4].role).toBe('broken')
   })
 
   it('an exit naming the wrong entry, or putting the identity anywhere else, closes nothing (rules 2 and 6)', () => {
@@ -206,9 +201,9 @@ describe('virtual brackets (§8.11)', () => {
       expect(parseAction(enterVirtualEvent({ ...base, pTags: [['p', GAME, 'wss://relay.example', 'game'], ['p', 'cd'.repeat(32)]] }))?.game)
         .toEqual({ pubkey: GAME, relayHint: 'wss://relay.example' })
     })
-    it('wants an aligned region with a canonical height, and the entry inside it', () => {
+    it('wants an aligned region with a canonical height, wherever the region is (form only)', () => {
       expect(parseAction(enterVirtualEvent({ ...base, regionBase: inArena(1n) }))).toBeNull()
-      expect(parseAction(enterVirtualEvent({ ...base, regionBase: regionAround({ ...arena, x: arena.x + (1n << 12n) }, 8) }))).toBeNull()
+      expect(parseAction(enterVirtualEvent({ ...base, regionBase: regionAround({ ...arena, x: arena.x + (1n << 12n) }, 8) }))).not.toBeNull()
       const raw = enterVirtualEvent(base)
       const withH = (h: string): NostrEvent => ({ ...raw, tags: raw.tags.map((t) => (t[0] === 'region' ? [t[0], t[1], h] : t)) })
       expect(parseAction(withH('08'))).toBeNull()
@@ -243,12 +238,14 @@ describe('rules that look back see through skipped actions and brackets (§8.9 r
 })
 
 describe('an action that starts where the chain did not stand is broken (§8.9 rule 2, §8.11.5)', () => {
-  it('a hop whose c is not the last C: flagged, still drawn where it says, and named by firstBreak', () => {
+  it('a hop whose c is not the last C: flagged, frozen at the last valid position, and named by firstBreak', () => {
     const stray = hopEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: hexAt(at(7n)), to: at(8n), plane })
     const chain = buildChain([spawn, hop1, stray])
     expect(chain[2].role).toBe('base')
     expect(chain[2].breaks).toMatch(/starts from/)
-    expect(chain[2].position).toEqual(at(8n))
+    expect(chain[2].breakSince).toBeUndefined()
+    expect(chain[2].position).toEqual(at(1n))
+    expect(chain[2].declared?.position).toEqual(at(8n))
     expect(firstBreak(chain)).toMatchObject({ index: 2 })
     expect(actionLabel(chain[2])).toBe('BROKEN · HOP')
     expect(actionKind(chain[2])).toBe('broken')
@@ -274,14 +271,6 @@ describe('an action that starts where the chain did not stand is broken (§8.9 r
     const chain = buildChain([spawn, hop1, enter])
     expect(chain[2].role).toBe('enter')
     expect(firstBreak(chain)?.index).toBe(2)
-  })
-
-  it('a game move that does not start where the last one left the identity in the game is broken', () => {
-    const enter = enterVirtualEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, c: P1, inGame: inArena(0n), height: 8, game: GAME, plane })
-    const jump = virtualEvent({ pubkey: pk, createdAt: 1_021, genesisId: spawn.id, previousId: enter.id, name: 'move', c: positionHex(inArena(4n), plane), inGame: inArena(5n), plane })
-    const fine = virtualEvent({ pubkey: pk, createdAt: 1_021, genesisId: spawn.id, previousId: enter.id, name: 'move', c: positionHex(inArena(0n), plane), inGame: inArena(5n), plane })
-    expect(firstBreak(buildChain([spawn, hop1, enter, jump]))?.index).toBe(3)
-    expect(firstBreak(buildChain([spawn, hop1, enter, fine]))).toBeNull()
   })
 
   it('a hyperjump after a hop is broken (DECK-0001 §4.3), but not after a boarding seen through a game', () => {

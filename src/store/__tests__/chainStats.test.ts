@@ -13,12 +13,16 @@ if (typeof localStorage === 'undefined') {
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { enterHyperspaceTemplate, hyperjumpTemplate, spawnTemplate, type NostrEvent } from '../../lib/events'
+import { nip19 } from 'nostr-tools'
 import { addRespawn, loadRespawns, useCyberspace } from '../useCyberspace'
 
 describe('chain stats count rides', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     const sk = generateSecretKey()
     const pubkey = getPublicKey(sk)
+    // Signed by the identity whose chain it is: a chain only ever follows its
+    // own author's events (review of #227).
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(sk))
     const spawn = finalizeEvent(spawnTemplate(pubkey, 1_700_000_000), sk)
     const enter = finalizeEvent(enterHyperspaceTemplate({ createdAt: 1_700_000_001, genesisId: spawn.id, previousId: spawn.id, coordHex: pubkey, proofHash: 'a'.repeat(64) }), sk)
     const stop = '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56'

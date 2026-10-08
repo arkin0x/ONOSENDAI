@@ -67,7 +67,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
-    what: 'Pink line: moves inside a game. They are play inside the game, not travel through cyberspace, so your position stays where you entered the game, and the red line holds still there',
+    what: "Pink line: moves inside a game, joining each of the game's actions that names a place in the game (one that names none is passed over). They are play inside the game, not travel through cyberspace, so your position stays exactly where you entered the game, and the red line holds still there",
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff7ad9" strokeWidth="2" strokeLinejoin="round" />

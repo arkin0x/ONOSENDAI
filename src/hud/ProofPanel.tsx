@@ -16,7 +16,9 @@ import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
+import { BROKEN_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
+import { useBrokenChain } from './BrokenChain'
+import { useChainUi } from '../store/useChainUi'
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
   ['single', 'SINGLE ACTION', 'One action per press'],
@@ -72,6 +74,10 @@ export function ProofPanel(): JSX.Element {
   // Live preview of the action the cursor is lining up: the same data the
   // route overlay above the controls shows (routePreview.ts).
   const preview = useRoutePreview()
+  // A broken chain refuses every move (store whyNoMove). Said here whatever
+  // the panel is showing, since a preview of a move that cannot be signed
+  // would otherwise stand in for the reason, with the way to the notice.
+  const broken = useBrokenChain() !== null
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const status =
@@ -93,6 +99,13 @@ export function ProofPanel(): JSX.Element {
         <h2>Movement proof</h2>
         <StatusLabel status={status} />
       </header>
+
+      {broken && (
+        <p className="notice">
+          {BROKEN_CHAIN_MESSAGE}
+          <button className="tag tag--tap" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY, AND RESPAWN</button>
+        </p>
+      )}
 
       <div className="bar">
         <div
@@ -226,7 +239,7 @@ export function ProofPanel(): JSX.Element {
             </div>
           )}
 
-          {proof.message && <p className="notice">{proof.message}</p>}
+          {proof.message && !(broken && proof.message === BROKEN_CHAIN_MESSAGE) && <p className="notice">{proof.message}</p>}
         </>
       )}
 

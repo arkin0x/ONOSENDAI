@@ -5,12 +5,14 @@
  * pubkey, then a live subscription so anyone who hops while the panel is open
  * rises to the top. The relay cannot group by author, so the fold is ours;
  * the limit is generous because one busy avatar can own most of the newest
- * few hundred events.
+ * few hundred events. Each one is placed where their chain really stands
+ * when that is known (lib/neighborChains.ts standingOf).
  */
 
 import { useEffect, useState } from 'react'
 import { fetchRecent, latestByPubkey, mergeEvents, watchRecent } from '../lib/chains'
 import type { ActionEvent, NostrEvent } from '../lib/events'
+import { standingOf } from '../lib/neighborChains'
 
 export interface RecentAvatars {
   avatars: ActionEvent[]
@@ -38,5 +40,8 @@ export function useRecentAvatars(): RecentAvatars {
     return () => { alive = false; close() }
   }, [])
 
-  return { avatars: latestByPubkey(events), status }
+  // Someone whose chain is known to be broken stands where it froze, by the
+  // same cached chain reads presence makes (lib/neighborChains.ts); this list
+  // never asks the relays for a chain itself.
+  return { avatars: latestByPubkey(events).map(standingOf), status }
 }

@@ -14,11 +14,19 @@
  *
  * A game played on the chain is drawn apart (spec §8.11.7). Inside a virtual
  * bracket the identity does not move through cyberspace: the red trail holds
- * still at the place it entered, and the moves inside the game, from the
- * entry's place in the game through each of the game's actions, are a pink
- * line of their own (palette GAME). It never joins the red one, because
- * nothing travelled between the two: the exit puts the identity back where
- * it entered, without a line.
+ * still at the place it entered (P, the entry's c), and the moves inside the
+ * game are a pink line of their own (palette GAME), from each of the game's
+ * actions that carries a coordinate to the next one that does. A bracket is
+ * opaque to the base protocol (arkinox, 2026-10-07), so a game action may
+ * carry no coordinate at all; it is skipped, not a gap or an error. The
+ * entry does not move you and names no place in the game, so the pink line
+ * starts at the first game action with a coordinate. It never joins the red
+ * one, because nothing travelled between the two: the exit puts the
+ * identity back at P, without a line.
+ *
+ * A broken chain stands at its last valid position (arkinox, 2026-10-07):
+ * from the first broken action on, every position is that one, so the red
+ * trail ends there and does not follow the actions no verifier accepts.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
@@ -66,18 +74,19 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     if (spectate) return [] as boolean[]
     return useCyberspace.getState().focusChain().map((a) => published[a.id] !== 'ok')
   }, [spectate, events, published])
-  // The game segments: consecutive actions of one bracket, from the entry
-  // through its virtual actions, each at its place inside the game. Indexed
-  // by the action a segment ends on, like the trail's.
+  // The game segments: within one bracket, from each game action that
+  // carries a coordinate to the next one that does, skipping those without.
+  // Indexed by the action a segment ends on, like the trail's.
   const gameSegments = useMemo(() => {
     const chain = useCyberspace.getState().focusChain()
     const out: Array<{ end: number; from: Position; to: Position }> = []
+    let last: { bracketId: string; at: Position } | null = null
     for (let i = 1; i < chain.length; i++) {
-      const a = chain[i - 1]
       const b = chain[i]
-      if (b.role !== 'virtual' || !a.bracketId || a.bracketId !== b.bracketId) continue
-      if (!a.declared || !b.declared || (a.role !== 'enter' && a.role !== 'virtual')) continue
-      out.push({ end: i, from: a.declared.position, to: b.declared.position })
+      if (b.role === 'enter' || b.role === 'exit') { last = null; continue }
+      if (b.role !== 'virtual' || !b.bracketId || !b.declared) continue
+      if (last && last.bracketId === b.bracketId) out.push({ end: i, from: last.at, to: b.declared.position })
+      last = { bracketId: b.bracketId, at: b.declared.position }
     }
     return out
   }, [spectate, events])

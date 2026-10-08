@@ -188,7 +188,6 @@ export function DeployBar(): JSX.Element | null {
         <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
-          {fit.auto && fit.height !== null && <span className="deploybar__fit"> · fits the whole model</span>}
         </span>
       </div>
       {fit.auto && fit.height === null && (

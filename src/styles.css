@@ -7685,7 +7685,6 @@ kbd {
 .deploybar__body .deploybar__btn { touch-action: pan-y; }
 /* The height row's note that the height was chosen to hold the model, and
    the warning when no region up to the ceiling can. */
-.deploybar__fit { color: var(--ok); }
 .deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
 .deploybar__ask, .deploybar > .notice { flex-shrink: 0; }
 

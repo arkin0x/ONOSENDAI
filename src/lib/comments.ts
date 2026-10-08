@@ -70,12 +70,50 @@ export interface ItemTarget {
   kind: number
   pubkey: string
   address?: string
+  /** The referenced event's id, as last fetched. */
+  id?: string
+  /** A public object (not sealed to the place): a LIVE LINK, yours or another author's. */
+  public?: boolean
 }
 
 /** The target of an item hidden by reference: its referenced event, addressed when the reference is an `a` tag. */
-export function itemTargetOf(inner: { kind: number; pubkey: string } | undefined, ref: string[] | undefined): ItemTarget | undefined {
+export function itemTargetOf(inner: { kind: number; pubkey: string; id?: string; tags?: string[][] } | undefined, ref: string[] | undefined): ItemTarget | undefined {
   if (!inner || !ref) return undefined
-  return { kind: inner.kind, pubkey: inner.pubkey, address: ref[0] === 'a' ? ref[1] : undefined }
+  const isPublic = Array.isArray(inner.tags) && !inner.tags.some((t) => t[0] === 'encrypted')
+  return { kind: inner.kind, pubkey: inner.pubkey, address: ref[0] === 'a' ? ref[1] : undefined, id: inner.id, ...(isPublic ? { public: true } : {}) }
+}
+
+/**
+ * An item that is a public object placed by reference (a LIVE LINK from the
+ * Shard Feed, yours or another author's). Anything public said about it must
+ * not name that object: a comment pairing the bag with the object's id,
+ * address and author tells everyone which public object is hidden in that
+ * bag (review of #233). Its comments answer the bag in public, and say which
+ * item they answer only inside the seal (`sealedBody`); its reactions answer
+ * the object alone, without the bag.
+ */
+export function isForeignItem(subject: Pick<CommentSubject, 'author' | 'target'>): boolean {
+  return subject.target?.public === true
+}
+
+/**
+ * The words a comment seals. A top-level comment on a LIVE LINK also carries,
+ * inside the seal, which item it answers: in public it names only the bag,
+ * and a bag can hold several LIVE LINKs (verification review of #233).
+ */
+export function sealedBody(subject: Pick<CommentSubject, 'author' | 'target' | 'itemId'>, parent: CommentParent, text: string): string {
+  return isForeignItem(subject) && parent.kind !== COMMENT_KIND ? JSON.stringify({ item: subject.itemId, text }) : text
+}
+
+/** What a sealed comment says once opened: its words, and the item it answers when it names one. */
+export function readSealed(raw: string): { text: string; item?: string } {
+  if (raw.startsWith('{')) {
+    try {
+      const o = JSON.parse(raw) as { item?: unknown; text?: unknown }
+      if (typeof o.item === 'string' && typeof o.text === 'string') return { text: o.text.trim().slice(0, MAX_COMMENT_LENGTH), item: o.item }
+    } catch { /* plain words that start with a brace */ }
+  }
+  return { text: raw.slice(0, MAX_COMMENT_LENGTH) }
 }
 
 export interface Comment {
@@ -98,8 +136,9 @@ export function itemKind(type: HiddenType): number {
   return type === 'shard' ? SHARD_KIND : MESSAGE_KIND
 }
 
-/** The item as a parent: a top-level comment answers the item. */
+/** The item as a parent: a top-level comment answers the item, or for a LIVE LINK the bag only. */
 export function itemParent(subject: CommentSubject): CommentParent {
+  if (isForeignItem(subject)) return { id: '', kind: HIDDEN_KIND, pubkey: subject.author, address: bagAddress(subject) }
   const t = subject.target
   return { id: subject.itemId, kind: t?.kind ?? itemKind(subject.type), pubkey: t?.pubkey ?? subject.author, address: t?.address }
 }
@@ -124,7 +163,8 @@ export function commentTemplate(subject: Pick<CommentSubject, 'author' | 'lookup
       ['A', bagAddress(subject)],
       ['K', String(HIDDEN_KIND)],
       ['P', subject.author],
-      ['e', parent.id, '', parent.pubkey],
+      // A parent named by address alone (the bag, for a LIVE LINK) has no `e`.
+      ...(parent.id ? [['e', parent.id, '', parent.pubkey]] : []),
       ...(parent.address ? [['a', parent.address, '']] : []),
       ['k', String(parent.kind)],
       ['p', parent.pubkey],
@@ -135,10 +175,10 @@ export function commentTemplate(subject: Pick<CommentSubject, 'author' | 'lookup
 }
 
 /** The words sealed under the bag's region key, as a ready template. */
-export async function sealedComment(subject: Pick<CommentSubject, 'author' | 'lookupId'>, parent: CommentParent, text: string, createdAt: number, key: Uint8Array): Promise<EventTemplate> {
+export async function sealedComment(subject: Pick<CommentSubject, 'author' | 'lookupId' | 'itemId' | 'target'>, parent: CommentParent, text: string, createdAt: number, key: Uint8Array): Promise<EventTemplate> {
   const body = text.trim().slice(0, MAX_COMMENT_LENGTH)
   if (!body) throw new Error('a comment needs some text')
-  return commentTemplate(subject, parent, await encryptForRegion(key, body), createdAt)
+  return commentTemplate(subject, parent, await encryptForRegion(key, sealedBody(subject, parent, body)), createdAt)
 }
 
 /** The relay filter that finds every comment on a bag, whichever item they answer. */
@@ -170,7 +210,8 @@ function firstTag(ev: NostrEvent, name: string): string[] | undefined {
 export function parseComment(ev: NostrEvent): Parsed | null {
   if (ev.kind !== COMMENT_KIND) return null
   const root = firstTag(ev, 'A')?.[1] ?? firstTag(ev, 'E')?.[1]
-  const parent = firstTag(ev, 'e')?.[1]
+  // The parent's id, or its address when it is named by address alone.
+  const parent = firstTag(ev, 'e')?.[1] ?? firstTag(ev, 'a')?.[1]
   const parentKind = Number(firstTag(ev, 'k')?.[1])
   if (!root || !parent || !Number.isFinite(parentKind)) return null
   const enc = firstTag(ev, 'encrypted')
@@ -187,8 +228,9 @@ export async function openComments(events: NostrEvent[], key: Uint8Array): Promi
   await Promise.all(events.map(async (ev) => {
     const c = parseComment(ev)
     if (!c?.ciphertext) return
+    // Kept whole: a LIVE LINK's comment is a small envelope (readSealed).
     const text = (await decryptForRegion(key, c.ciphertext))?.trim()
-    if (text) out.set(c.id, text.slice(0, MAX_COMMENT_LENGTH))
+    if (text) out.set(c.id, text)
   }))
   return out
 }
@@ -203,6 +245,8 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
   // An item hidden by an `a` reference keeps its address when its author
   // edits it, while its event id changes; a comment made on any version
   // names that address, so it stays under the item across edits.
+  // A LIVE LINK's comments answer the bag in public, and this item inside the seal (isForeignItem).
+  if (isForeignItem(subject)) return threadUnder(events, bagAddress(subject), '', bagAddress(subject), opened, subject.itemId)
   return threadUnder(events, bagAddress(subject), subject.itemId, subject.target?.address, opened)
 }
 
@@ -211,20 +255,23 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
  * what the comments' `A` or `E` tag names, `itemId` (or `itemAddress`) what a
  * top-level comment answers. For an action (social.ts) both are its id.
  */
-export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map()): Comment[] {
+export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map(), sealedItem?: string): Comment[] {
   const address = root
   const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
   for (const ev of events) {
     const c = parseComment(ev)
     if (!c || c.rootAddress !== address || byId.has(c.id)) continue
-    const words = opened.get(c.id)
-    const sealed = c.ciphertext !== null && words === undefined
-    byId.set(c.id, { id: c.id, pubkey: c.pubkey, createdAt: c.createdAt, text: words ?? (sealed ? PLACEHOLDER : c.preview), sealed, parentId: c.parentId, parentKind: c.parentKind, parentAddress: c.parentAddress, replies: [] })
+    const raw = opened.get(c.id)
+    const read = raw === undefined ? undefined : readSealed(raw)
+    // A top-level comment that must name its item inside the seal, and does not name this one, is another item's.
+    if (sealedItem !== undefined && c.parentKind !== COMMENT_KIND && read?.item !== sealedItem) continue
+    const sealed = c.ciphertext !== null && read === undefined
+    byId.set(c.id, { id: c.id, pubkey: c.pubkey, createdAt: c.createdAt, text: read?.text ?? (sealed ? PLACEHOLDER : c.preview), sealed, parentId: c.parentId, parentKind: c.parentKind, parentAddress: c.parentAddress, replies: [] })
   }
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && (c.parentId === itemId || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

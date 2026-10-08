@@ -48,7 +48,7 @@ import { useEffect, useMemo } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { SCAN_MAX_HEIGHT, ownBagIn, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, isProtected, ownBagIn, regionOf, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
@@ -84,6 +84,11 @@ export function DeployBar(): JSX.Element | null {
   const spin = useShards((s) => s.deploySpin)
   const turn = useShards((s) => s.deployTurn)
   const follow = useShards((s) => s.deployFollow)
+  // From the Shard Feed: a copy by default, LIVE LINK by reference (ruling B1).
+  const fromFeed = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object)
+  const link = useShards((s) => s.deployLink)
+  // Protected by its author (NIP-70): only they may republish it, so no LIVE LINK.
+  const guarded = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object && isProtected(s.pending.object))
   const cantorMs = useCalibration((s) => s.cantorMsByHeight)
   // This machine's limit: the calibrated hop ceiling the movement panel shows.
   const hopLimit = useCalibration((s) => s.hopHeight)
@@ -222,9 +227,28 @@ export function DeployBar(): JSX.Element | null {
           : <>At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</>}</div>
       )}
 
+      {/* Someone else's object from the Shard Feed: a copy that stays exactly
+          as placed and credits its author, or LIVE LINK, a reference to their
+          object that follows their edits (spec §7.6). Linked, the size and
+          turns are theirs, so those rows step aside. */}
+      {fromFeed && (
+        <div className="deploybar__row deploybar__row--link">
+          <span className="deploybar__label">LIVE LINK</span>
+          <button
+            className={`deploybar__toggle ${link ? 'is-on' : ''}`}
+            aria-pressed={link}
+            disabled={guarded}
+            title={guarded ? LINK_PROTECTED : undefined}
+            onClick={() => useShards.getState().setDeployLink(!useShards.getState().deployLink)}
+            {...noCallout}
+          >{link ? 'ON' : 'OFF'}</button>
+          <span className="deploybar__radius">{link ? "follows the author's edits" : 'a copy, credited to its author'}</span>
+        </div>
+      )}
+
       {/* How big the thing itself is, for this deployment only. The workshop's
           model keeps its own unit whatever is chosen here. */}
-      {!isMessage && (
+      {!isMessage && !link && (
         <div className="deploybar__row deploybar__row--unit">
           <span className="deploybar__label">SCALE</span>
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit - 1))} disabled={unit <= 0} aria-label="Smaller scale">−</button>
@@ -236,7 +260,7 @@ export function DeployBar(): JSX.Element | null {
 
       {/* Quarter turns about the object's own origin, for this deployment only:
           exact on the lattice, and every reader draws them (lib/turn.ts). */}
-      {!isMessage && (
+      {!isMessage && !link && (
         <div className="deploybar__row deploybar__row--turn">
           <span className="deploybar__label">TURN</span>
           {(['X', 'Y', 'Z'] as const).map((name, axis) => (
@@ -250,7 +274,7 @@ export function DeployBar(): JSX.Element | null {
 
       {/* Standing on the ground, where there is ground: dataspace, and big
           enough that an orientation could ever be seen. */}
-      {!isMessage && snapOffered(plane, height) && (
+      {!isMessage && !link && snapOffered(plane, height) && (
         <div className="deploybar__row deploybar__row--snap">
           <span className="deploybar__label">SNAP TO EARTH</span>
           <button
@@ -263,7 +287,7 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
-      {!isMessage && snapOffered(plane, height) && up && (
+      {!isMessage && !link && snapOffered(plane, height) && up && (
         <div className="deploybar__row deploybar__row--spin">
           <span className="deploybar__label">FINE ROTATION</span>
           <button

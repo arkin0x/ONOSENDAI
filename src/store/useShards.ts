@@ -44,6 +44,7 @@ import {
   bagInners,
   bagTemplate,
   entryKey,
+  linkKey,
   objectTemplate,
   referenceTo,
   wantsReference,
@@ -56,7 +57,8 @@ import {
   type Hidden,
   type HiddenType,
 } from '../lib/hidden'
-import { useWorkshop } from './useWorkshop'
+import { creditOf, useWorkshop } from './useWorkshop'
+import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -119,9 +121,87 @@ export interface WorldItem {
   target?: ItemTarget
 }
 
+/** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
+export const LINK_PROTECTED = 'Protected by its author: it can only be placed as a copy.'
+/** Why a LIVE LINK was not hidden: its author deleted it (NIP-09). */
+export const LINK_DELETED = 'Its author deleted this object.'
+
+/** An event its author protected (NIP-70, the `-` tag): only they may republish it. */
+export function isProtected(o: { event: { tags: string[][] } }): boolean {
+  return o.event.tags.some((t) => t[0] === '-')
+}
+
+/** Whether the object's author deleted it, as the relays you use answer (NIP-09; one tag filter per read). */
+async function authorDeleted(o: { pubkey: string; address: string; id: string; createdAt: number }): Promise<boolean> {
+  try {
+    const found = (await Promise.all(deletionFilters([o]).map((f) => query({ ...f })))).flat()
+    return isDeleted(o, found)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Put a signed event on your relays, each on its own, and answer with the
+ * first that took it, as soon as one does: a silent relay is not waited on.
+ * Null when none takes it.
+ */
+function republish(event: NostrEvent): Promise<string | null> {
+  const urls = relaySet()
+  if (urls.length === 0) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    let left = urls.length
+    let done = false
+    for (const url of urls) {
+      void publishMany([url], event).then((r) => r.ok, () => false).then((ok) => {
+        left -= 1
+        if (ok && !done) { done = true; resolve(url) } else if (left === 0 && !done) resolve(null)
+      })
+    }
+  })
+}
+
+/**
+ * Copy on pick (arkinox's ruling, 2026-10-08): the author's object is put on
+ * your relays the moment LIVE LINK is picked, not when the bag goes out, so
+ * the object and the bag do not reach a watching relay seconds apart and
+ * pair the object with the bag. One background copy per event, remembered:
+ * the deploy takes its relay as the hint and does not copy again. Only while
+ * LIVE: LOCAL sends nothing, and BROADCAST copies with the bag as before.
+ */
+interface LinkCopy { hint: string | null; deleted: boolean }
+const linkCopies = new Map<string, Promise<LinkCopy>>()
+
+/** The background copy of a LIVE LINK object to your relays: refused if its author deleted it, else the first relay that took it. */
+function copyForLink(o: FeedObject): Promise<LinkCopy> {
+  const held = linkCopies.get(o.id)
+  if (held) return held
+  const copy = (async (): Promise<LinkCopy> => {
+    if (await authorDeleted(o)) return { hint: null, deleted: true }
+    return { hint: await republish(o.event as NostrEvent), deleted: false }
+  })()
+  linkCopies.set(o.id, copy)
+  // A copy that no relay took is not remembered: the deploy tries again.
+  void copy.then((c) => { if (!c.hint && !c.deleted && linkCopies.get(o.id) === copy) linkCopies.delete(o.id) })
+  return copy
+}
+
+/** Forget the remembered copies (for tests). */
+export function forgetLinkCopies(): void {
+  linkCopies.clear()
+}
+
+/** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
+export const LINK_REFUSED = "LIVE LINK needs the author's object on one of your relays, and none took it. Place it as a copy instead."
+
 /** What a deploy is placing, before it lands. */
 export type DeployPending =
-  | { type: 'shard'; shardId: string }
+  /**
+   * One of your models (`shardId`), or an object from the Shard Feed
+   * (`object`, with `shardId` its address). From the feed it goes out as a
+   * credited copy, or with LIVE LINK by reference to the author's object.
+   */
+  | { type: 'shard'; shardId: string; object?: FeedObject }
   | { type: 'message'; text: string }
 
 /**
@@ -194,6 +274,13 @@ interface ShardsState {
    */
   deployFollow: boolean
   /**
+   * LIVE LINK, for an object from the Shard Feed: place it by reference to
+   * the author's object (an `a` entry, spec §7.6), so it follows their edits,
+   * instead of a copy that stays exactly as placed (ruling B1: copy by
+   * default). Size, turns and the snap are the author's then, not this deploy's.
+   */
+  deployLink: boolean
+  /**
    * The bag settings the deploy bar shows and the deploy writes: `h`, the
    * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
    * start at your existing bag's settings when the cursor's region holds one
@@ -254,6 +341,9 @@ interface ShardsState {
   setDeploySpin: (spin: number) => void
   /** Hand the spin to the camera, or take it back. */
   setDeployFollow: (follow: boolean) => void
+  setDeployLink: (link: boolean) => void
+  /** Line up an object from the Shard Feed at the build cursor, as a copy. */
+  startDeployObject: (object: FeedObject) => void
   /** The highest height the deploy bar offers: this machine's, or HOSAKA's when cloud compute is on. */
   deployCeiling: () => number
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
@@ -492,6 +582,15 @@ export const useShards = create<ShardsState>((set, get) => {
     const { mine, deleted } = get()
     const have = new Set(mine.map((d) => d.eventId))
     const own: MyDeployment[] = []
+    // A LIVE LINK whose author published a newer version: the same row, its
+    // stored copy refreshed, never a second row (review of #233).
+    let refreshed = false
+    const updated = mine.map((d) => {
+      const h = items.find((x) => x.eventId === d.eventId && x.inner && d.ref && x.inner.id !== d.inner.id && x.inner.created_at > d.inner.created_at)
+      if (!h || !h.inner) return d
+      refreshed = true
+      return { ...d, inner: h.inner, shard: h.shard ?? d.shard }
+    })
     for (const h of items) {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
@@ -501,8 +600,8 @@ export const useShards = create<ShardsState>((set, get) => {
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
       })
     }
-    if (own.length === 0) return
-    const next = [...mine, ...own]
+    if (own.length === 0 && !refreshed) return
+    const next = [...updated, ...own]
     set({ mine: next })
     saveMine(next)
   }
@@ -516,6 +615,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deploySpin: 0,
     deployTurn: [0, 0, 0],
     deployFollow: false,
+    deployLink: false,
     deployBag: DEFAULT_BAG_SETTINGS,
     deployBagFrom: null,
     deployStatus: 'idle',
@@ -540,6 +640,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // never carries silently into this one.
     startDeployShard: (shardId) => set({
       pending: { type: 'shard', shardId },
+      deployLink: false,
       deployHeightAuto: true,
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
       // Flat, aimed north, the camera not driving: the last deploy's pose no
@@ -555,7 +656,24 @@ export const useShards = create<ShardsState>((set, get) => {
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
+    startDeployObject: (object) => set({
+      pending: { type: 'shard', shardId: object.address, object },
+      // A copy, as B1 rules; LIVE LINK is the deploy bar's choice.
+      deployLink: false,
+      deployHeightAuto: true,
+      deployUnit: object.shard.unit,
+      // The pose its author published goes with the copy (DECK-0003 §1.7);
+      // the height decides whether the snap is offered (setDeployHeight).
+      deployUp: object.shard.up ?? false,
+      deploySpin: object.shard.spin ?? 0,
+      deployTurn: [0, 0, 0],
+      deployFollow: false,
+      deployBag: DEFAULT_BAG_SETTINGS,
+      deployBagFrom: null,
+      deployStatus: 'idle',
+      deployError: null,
+    }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
     setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
@@ -583,6 +701,20 @@ export const useShards = create<ShardsState>((set, get) => {
     setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
     setDeploySpin: (spin) => set({ deploySpin: wrapSpin(spin) }),
     setDeployFollow: (follow) => set({ deployFollow: follow }),
+    // Linked, it is the author's object as they publish it: their size, no
+    // turns, no snap. Back to a copy, the bar's own controls apply again.
+    setDeployLink: (link) => {
+      const object = get().pending?.type === 'shard' ? (get().pending as { object?: FeedObject }).object : undefined
+      if (!object) return
+      // Protected by its author (NIP-70): only they may republish it, which a
+      // LIVE LINK must do, so it goes out only as a copy.
+      if (link && isProtected(object)) return
+      set(link
+        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployAsk: null }
+        : { deployLink: false })
+      // Copy on pick, while LIVE only (copyForLink).
+      if (link && cyber().live) void copyForLink(object)
+    },
     turnDeploy: (axis) => { const t = [...get().deployTurn] as Turns; t[axis] = (t[axis] + 1) % 4; set({ deployTurn: t }) },
     resetDeployTurn: () => set({ deployTurn: [0, 0, 0] }),
     deployCeiling: () => {
@@ -597,7 +729,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom, deployLink } = get()
       if (!pending) return
       // One hide at a time. Space (or a second tap) while the key is being
       // computed and the bag sealed used to start a second deploy of the same
@@ -641,8 +773,12 @@ export const useShards = create<ShardsState>((set, get) => {
       let shard: ShardModel | undefined
       let text: string | undefined
       let innerTemplate
+      // From the Shard Feed: the author's object, by reference (LIVE LINK) or
+      // as a copy that credits it (DECK-0003 §3.2; ruling B1).
+      const object = pending.type === 'shard' ? pending.object : undefined
+      const link = !!object && deployLink
       if (pending.type === 'shard') {
-        const model = useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+        const model = object ? object.shard : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
         // An object of parts alone is an object (DECK-0003 §1.9 rule 13).
         if (!model || (model.vertices.length === 0 && (model.parts?.length ?? 0) === 0)) return
         // The deploy carries its own size. A unit the deploy bar changed makes
@@ -656,7 +792,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // The TURN row turns this copy by quarter turns (lib/turn.ts); the
         // workshop's model is never touched.
         const turned = turnShard(model, deployTurn)
-        shard = turned === model && model.unit === deployUnit && model.up === up && model.spin === spin
+        // Linked, it is drawn from the author's event as they publish it:
+        // nothing of this deploy's size or pose can travel with a reference.
+        shard = link || (turned === model && model.unit === deployUnit && model.up === up && model.spin === spin)
           ? model
           : { ...turned, unit: deployUnit, up, spin }
         // The same round trip every reader makes, before the seal: an item the
@@ -667,7 +805,10 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployStatus: 'error', deployError: refusal })
           return
         }
-        innerTemplate = shardInnerTemplate(shard, at, plane, createdAt)
+        // A copy names what it copies: a feed object its author's address, a
+        // remixed model the original it was remixed from (sno-core creditTags).
+        const credit: Credit | undefined = object ? { address: object.address, relay: object.seen?.[0] } : creditOf(model)
+        innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
       } else {
         text = pending.text.trim()
         if (!text) return
@@ -694,7 +835,29 @@ export const useShards = create<ShardsState>((set, get) => {
         // published bag never names something the relay does not have.
         let inner: NostrEvent
         let ref: Reference | undefined
-        if (pending.type === 'shard' && shard && wantsReference(shard)) {
+        if (link && object) {
+          // LIVE LINK: the bag names the author's own object, signed by them;
+          // nothing new is signed for the item. A finder looks it up on their
+          // own relays, so it must be on a relay the bag goes to: the author's
+          // signed event is put on yours first, and the hint names one of
+          // them. If none takes it, LIVE LINK is refused rather than hiding a
+          // reference nobody can follow (review of #233). While LOCAL the bag
+          // goes nowhere yet, and BROADCAST puts the object out with it.
+          inner = object.event as NostrEvent
+          if (isProtected(object)) throw new Error(LINK_PROTECTED)
+          let hint = relaySet()[0] ?? ''
+          if (live) {
+            // The copy made when LIVE LINK was picked, or one made now; never
+            // of what its author deleted (NIP-09). One that no relay took is
+            // tried once more here before the deploy is refused.
+            let copy = await copyForLink(object)
+            if (!copy.hint && !copy.deleted) { linkCopies.delete(object.id); copy = await copyForLink(object) }
+            if (copy.deleted) throw new Error(LINK_DELETED)
+            if (!copy.hint) throw new Error(LINK_REFUSED)
+            hint = copy.hint
+          }
+          ref = referenceTo(inner, at, plane, hint)
+        } else if (pending.type === 'shard' && shard && wantsReference(shard)) {
           inner = await cs.signEvent(await objectTemplate(shard, rk.key, placementId(), createdAt))
           if (live) {
             const sent = await publishMany(relaySet(), inner)
@@ -722,12 +885,14 @@ export const useShards = create<ShardsState>((set, get) => {
         } catch (err) {
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
-          if (ref && live) await retractObject(inner).catch(() => undefined)
+          // Only an object this deploy published; never the author's, for a LIVE LINK.
+          if (ref && live && !link) await retractObject(inner).catch(() => undefined)
           throw err
         }
 
         const item: MyDeployment = {
-          eventId: inner.id,
+          // A LIVE LINK is keyed by its bag and entry (hidden.ts linkKey), as the scan keys it.
+          eventId: link && ref ? linkKey(rk.lookupId, ref) : inner.id,
           inner,
           ref,
           bagId: event.id,
@@ -792,19 +957,36 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         const key = hexToBytes(items[0].keyHex)
         const existing = await gatherInners(lookupId, key, true, items[0].height)
-        // Objects hidden by reference go out before the bag that names them.
+        // Objects hidden by reference go out before the bag that names them,
+        // and so do the authors' objects a LIVE LINK names: a finder looks
+        // them up on the relays the bag goes to.
         const me = cyber().identity.pubkey
+        const hinted = new Map<string, Reference>()
         for (const d of items) {
-          if (!d.ref || d.inner.pubkey !== me) continue
+          if (!d.ref) continue
+          const foreign = d.inner.pubkey !== me
+          if (foreign && (isProtected({ event: d.inner }) || await authorDeleted({ pubkey: d.inner.pubkey, address: d.ref[1], id: d.inner.id, createdAt: d.inner.created_at }))) {
+            set({ broadcasting: null, broadcastError: isProtected({ event: d.inner }) ? LINK_PROTECTED : LINK_DELETED })
+            return false
+          }
           // A bag naming an object no relay holds would be a permanent hole
           // for everyone, carried forward by every later rewrite. Stop here.
-          const sent = await publishMany(relaySet(), d.inner)
-          if (!sent.ok) {
+          const took = await republish(d.inner)
+          if (!took) {
             set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.' })
             return false
           }
+          // A LIVE LINK hidden while LOCAL named your first relay; now it names one that took the object.
+          if (d.ref[0] === 'a' && d.ref[2] !== took) hinted.set(d.eventId, [d.ref[0], d.ref[1], took, ...d.ref.slice(3)] as Reference)
         }
-        const allInners = mergeEntries(existing.entries, items.map(entryOf))
+        if (hinted.size > 0) {
+          const mine = get().mine.map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
+          set({ mine }); saveMine(mine)
+        }
+        const fresh = items.map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
+        // The re-hinted entries replace the bag's older ones for the same placement.
+        const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
+        const allInners = mergeEntries(keep, fresh.map(entryOf))
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
         const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane })
         if (!published) {
@@ -940,7 +1122,14 @@ export const useShards = create<ShardsState>((set, get) => {
       const { deleted } = get()
       const discovered = { ...get().discovered }
       let changed = false
-      for (const h of items) if (!discovered[h.eventId] && !deleted[h.eventId]) { discovered[h.eventId] = h; changed = true }
+      for (const h of items) {
+        if (deleted[h.eventId]) continue
+        const held = discovered[h.eventId]
+        // New, or a LIVE LINK whose author published a newer version: the
+        // same find, refreshed, and no second ceremony (review of #233).
+        const newer = !!held && !!h.inner && !!held.inner && h.inner.id !== held.inner.id && h.inner.created_at > held.inner.created_at
+        if (!held || newer) { discovered[h.eventId] = h; changed = true }
+      }
       if (changed) set({ discovered })
       remember(items.map((h) => h.eventId))
       claimOwn(items)
@@ -976,7 +1165,7 @@ export const useShards = create<ShardsState>((set, get) => {
     pendingShard: () => {
       const { pending } = get()
       if (pending?.type !== 'shard') return null
-      return useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
+      return pending.object?.shard ?? useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
     },
 
     worldItems: () => {

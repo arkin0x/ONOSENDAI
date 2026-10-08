@@ -8,6 +8,12 @@
  * NIP-98 signed submits, a poll token for reading a job without signing, and
  * the deposit rail that turns a Lightning invoice into a prepaid balance.
  *
+ * Every priced submit carries an idempotency key that is a pure function of
+ * what it asks for (idempotencyKeyFor), so every attempt at one job, whether
+ * an automatic retry here or the person committing the same step again,
+ * names the same job, and a provider that honors keys answers a retry with
+ * the job it already made instead of charging twice.
+ *
  * Money never touches this file. HOSAKA issues the invoice, any wallet pays
  * it, and the node's own answer is the payment: the client only shows the
  * invoice and asks whether it settled.
@@ -18,8 +24,9 @@
  */
 
 import * as nip98 from 'nostr-tools/nip98'
+import { sha256 } from '@noble/hashes/sha2.js'
 import type { Plane } from 'cyberspace-core'
-import type { EventTemplate, NostrEvent } from './events'
+import { bytesToHex, type EventTemplate, type NostrEvent } from './events'
 
 /** The production API. VITE_HOSAKA_URL overrides it (a local HOSAKA is
  * `HOSAKA_LOCAL_COMPUTE=1` on 127.0.0.1:8765). */
@@ -53,6 +60,12 @@ const POLL_FAILURE_LIMIT = 3
 const EXPIRY_GRACE_MS = 30_000
 /** A job watched longer than this keeps its record for RESUME instead of holding the tab. */
 const DEFAULT_JOB_WAIT_MS = 60 * 60 * 1000
+/**
+ * The waits before asking again about a submit whose answer was lost, one
+ * per retry. Asked again only against a provider that honors idempotency
+ * keys (see submitPriced); each retry is a fresh signature with the same key.
+ */
+export const LOST_ANSWER_DELAYS_MS: readonly number[] = [1_500, 4_000]
 
 /** What a job computes: a move's proof, or a region key bought on its own. */
 export type HosakaAction = 'hop' | 'sidestep' | 'region_key'
@@ -80,6 +93,12 @@ export interface HosakaProvider {
   services?: Array<{ type: string; max_height: number; min_msats?: number }>
   pricing?: { reference?: boolean; hop?: Array<{ max_height: number; sats: number; est_time: string }>; sidestep?: Array<{ max_height: number; sats: number; est_time: string }> }
   payments?: { methods?: string[]; deposit_min_msats?: number; deposit_max_msats?: number; invoice_ttl_seconds?: number }
+  /**
+   * Present on a provider that honors idempotency keys on priced submits
+   * (hosaka-api#21): a retry with the same key gets back the job the first
+   * attempt made. Absent, a lost submit is never asked again automatically.
+   */
+  idempotency?: { header?: string; body_field?: string; retention_seconds?: number; scope?: string }
   contact?: string
   terms?: string
 }
@@ -242,6 +261,12 @@ export interface HosakaJob {
   new_balance_msats?: number
   deposit?: HosakaDeposit
   next?: string
+  /** The submit's idempotency key, echoed by a provider that honors it. */
+  idempotency_key?: string
+  /** True when this answer is the job an earlier attempt with the same key made. */
+  idempotent_replay?: boolean
+  /** The failed job this one replaced under the same key. */
+  replaces_job_id?: string
 }
 
 export interface HosakaBalance {
@@ -286,9 +311,27 @@ export class HosakaError extends Error {
     return new HosakaError(status, code, message, detail)
   }
 
-  /** A failure the caller may retry later without losing anything. */
+  /**
+   * Nothing here says the request was refused, so it is worth asking again
+   * later: no answer came back (status 0), the server failed (5xx), or it was
+   * busy (429). That is not the same as nothing having happened. A read or a
+   * /start can always be asked again. A priced submit whose answer was lost
+   * may have made its job and charged for it; asking again is safe only
+   * because every submit carries its job's idempotency key, which a provider
+   * that honors keys answers with the same job (submitPriced).
+   */
   get transient(): boolean {
     return this.status === 0 && this.code !== 'aborted' || this.status >= 500 || this.status === 429
+  }
+
+  /**
+   * The request went out and its outcome is unknown: the connection dropped
+   * or timed out, or the server failed while answering. A signer that never
+   * signed (sign_timeout, sign_failed) and a cancel are not lost answers,
+   * since nothing was sent; a 429 is an answer, a refusal.
+   */
+  get answerLost(): boolean {
+    return (this.status === 0 && this.code === 'network') || this.status >= 500
   }
 }
 
@@ -341,6 +384,42 @@ function randomNonce(): string {
 
 function abortError(): HosakaError {
   return new HosakaError(0, 'aborted', 'cancelled')
+}
+
+/** JSON with object keys sorted at every level and bigints as decimal strings: the same value, the same text. */
+function canonicalJson(value: unknown): string {
+  if (typeof value === 'bigint') return JSON.stringify(value.toString())
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return `{${Object.keys(obj).filter((k) => obj[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+/** The body of a hop or sidestep submit, before its key is added. */
+export function moveBody(v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, wants?: HopWants): Record<string, unknown> {
+  return { v1, v2, previous_event_id: previousEventId, ...(wants?.destinationKeys ? { destination_keys: true } : {}) }
+}
+
+/** The body of a region key submit, before its key is added. */
+export function regionKeyBody(at: { x: bigint; y: bigint; z: bigint }, height: number): Record<string, unknown> {
+  return { x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), height }
+}
+
+/**
+ * The idempotency key of one logical job: a hash of the action and exactly
+ * what is submitted. The same move from the same chain head, with the same
+ * options, is always the same key, so it survives a reload, a failed route
+ * committed again, and any number of retries, and needs nothing persisted. A
+ * different move, head, plane, option, cube or height is a different key.
+ * When the head moves the key changes with it, which is right: a proof bound
+ * to the old head is worthless. A provider that honors keys scopes them to the
+ * signing pubkey, and lets a key whose job failed start a new one.
+ */
+export function idempotencyKeyFor(action: HosakaAction, body: Record<string, unknown>): string {
+  const digest = sha256(new TextEncoder().encode(`onosendai/1\n${action}\n${canonicalJson(body)}`))
+  return `onosendai-${bytesToHex(digest)}`
 }
 
 export interface WaitForDepositOptions {
@@ -398,6 +477,8 @@ export interface HosakaClientOptions {
   sign: (template: EventTemplate) => Promise<NostrEvent>
   /** Tests inject one; the app uses the global. */
   fetch?: typeof fetch
+  /** The waits before each retry of a lost submit answer; tests shorten them. */
+  lostAnswerDelaysMs?: readonly number[]
 }
 
 export interface HosakaClient {
@@ -523,13 +604,44 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
 
   const wanted = (wants?: HopWants): Record<string, unknown> => (wants?.destinationKeys ? { destination_keys: true } : {})
 
+  /**
+   * Whether this provider has said it honors idempotency keys: its /provider
+   * advertises `idempotency`, or a submit came back echoing the key it was
+   * sent. Learned per client, which is per API URL.
+   */
+  let honorsKeys = false
+  const lostAnswerDelays = opts.lostAnswerDelaysMs ?? LOST_ANSWER_DELAYS_MS
+
+  /**
+   * A priced submit, once per logical job. The key goes in the body, never in
+   * a header: a header the provider's CORS preflight does not allow blocks the
+   * request in a browser, while a provider that does not know the field
+   * ignores it. When the answer is lost (the connection dropped, our own
+   * timeout, a 5xx) the job may already exist and be charged. Against a
+   * provider that honors keys the submit is asked again, freshly signed, with
+   * the same key, and gets back that job (`idempotent_replay`) instead of a
+   * second one. Against any other the loss is reported, since a retry there
+   * would charge twice; the server-side default keys of a current HOSAKA still
+   * cover the person committing again.
+   */
+  const submitPriced = async (action: HosakaAction, body: Record<string, unknown>, signal?: AbortSignal): Promise<HosakaJob> => {
+    const key = idempotencyKeyFor(action, body)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const job = await request<HosakaJob>(`/api/v1/${action}`, { method: 'POST', auth: true, body: { ...body, idempotency_key: key }, signal })
+        if (job && job.idempotency_key === key) honorsKeys = true
+        return job
+      } catch (err) {
+        const retry = honorsKeys && err instanceof HosakaError && err.answerLost && attempt < lostAnswerDelays.length
+        if (!retry) throw err
+        await sleep(lostAnswerDelays[attempt], signal)
+        if (signal?.aborted) throw abortError()
+      }
+    }
+  }
+
   const submit = (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal, wants?: HopWants): Promise<HosakaJob> =>
-    request<HosakaJob>(`/api/v1/${action}`, {
-      method: 'POST',
-      auth: true,
-      body: { v1, v2, previous_event_id: previousEventId, ...wanted(wants) },
-      signal,
-    })
+    submitPriced(action, moveBody(v1, v2, previousEventId, wants), signal)
 
   const claimDeposit = (depositId: string, signal?: AbortSignal): Promise<HosakaDeposit> =>
     request<HosakaDeposit>(`/api/v1/deposit/${depositId}/claim`, { method: 'POST', auth: true, signal })
@@ -540,18 +652,16 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
   const client: HosakaClient = {
     apiUrl,
     limits: (signal) => request<HosakaLimits>('/api/v1/limits', { method: 'GET', signal }),
-    provider: (signal) => request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal }),
+    provider: async (signal) => {
+      const provider = await request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal })
+      if (provider && typeof provider.idempotency === 'object' && provider.idempotency !== null) honorsKeys = true
+      return provider
+    },
     quote: (action, v1, v2, signal, wants) =>
       request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2, ...wanted(wants) }, signal }),
     submitHop: (v1, v2, previousEventId, signal, wants) => submit('hop', v1, v2, previousEventId, signal, wants),
     submitSidestep: (v1, v2, previousEventId, signal) => submit('sidestep', v1, v2, previousEventId, signal),
-    submitRegionKey: (at, height, signal) =>
-      request<HosakaJob>('/api/v1/region_key', {
-        method: 'POST',
-        auth: true,
-        body: { x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), height },
-        signal,
-      }),
+    submitRegionKey: (at, height, signal) => submitPriced('region_key', regionKeyBody(at, height), signal),
     getJob,
     startJob: (jobId, signal) => request<HosakaJob>(`/api/v1/jobs/${jobId}/start`, { method: 'POST', auth: true, signal }),
     claimDeposit,

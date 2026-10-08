@@ -49,7 +49,7 @@ import { useCalibration } from '../../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
 import { parseAction } from '../../lib/events'
-import { HosakaError, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
+import { HosakaError, idempotencyKeyFor, moveBody, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
 import { useCyberspace } from '../useCyberspace'
@@ -271,6 +271,34 @@ describe('cloud routes', () => {
     expect(JSON.parse(storage.getItem('onosendai:spent')!)[s.genesisId]).toBe(1000)
     const keys = JSON.parse(storage.getItem('onosendai:cloudRegionKeys') ?? '[]') as Array<{ lookupId: string }>
     expect(keys.some((k) => k.lookupId === s.proof.lookupId)).toBe(true)
+  })
+
+  it('a step whose submit answer was lost fails; committing again asks for the very same job, under the same key', async () => {
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    // HOSAKA made the job, but the answer never arrived.
+    fake.submitHop
+      .mockRejectedValueOnce(new HosakaError(0, 'network', 'Failed to fetch'))
+      .mockResolvedValueOnce({ ...funded(), idempotent_replay: true })
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
+
+    await S().commit()
+    await vi.waitFor(() => { expect(S().plan?.status).toBe('failed') })
+    expect(S().position).toEqual(from)
+
+    await S().commit()
+    await idle()
+
+    expect(fake.submitHop).toHaveBeenCalledTimes(2)
+    const [first, second] = fake.submitHop.mock.calls
+    expect(second).toEqual(first)
+    const keyOf = (c: unknown[]): string => idempotencyKeyFor('hop', moveBody(c[0] as never, c[1] as never, c[2] as string, c[4] as never))
+    expect(keyOf(second)).toBe(keyOf(first))
+    // The retry was handed the job the lost attempt made, and the move landed once.
+    expect(S().position).toEqual(to)
+    expect(S().cloud.last?.jobId).toBe('job-1')
   })
 
   it('respawn starts the spent tally over for the new chain', async () => {

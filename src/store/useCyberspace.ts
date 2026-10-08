@@ -2056,6 +2056,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * so it starts at once), the poll, the verification here, then the same
    * signature step a local proof gets. A short balance (the price moved) is
    * paid through the job's own invoice, as before.
+   *
+   * The submit's idempotency key is a function of the step and the chain head
+   * (lib/hosaka.ts idempotencyKeyFor), so a submit whose answer was lost, and
+   * the same step committed again after the route failed over it, name the
+   * job the first attempt made rather than buying a second.
    */
   const startCloudStep = async (step: PlanStep, id: number): Promise<void> => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
@@ -3915,8 +3920,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         set({ cloud: { ...get().cloud, ...idle } })
         return { ok: false, error: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats more than your balance holds and issued no invoice.` }
       }
-      // Not persisted: a reload mid-purchase loses the job, not the money, since
-      // a paid invoice lands on the balance and the next attempt is covered.
+      // Not persisted: a reload mid-purchase loses the job, not the money. A
+      // paid invoice lands on the balance, and the next attempt for the same
+      // cube and height carries the same idempotency key (lib/hosaka.ts), so a
+      // provider that honors keys hands back this job instead of selling it twice.
       const record: PendingCloudJob = {
         version: 1, jobId: job.id, pollToken: job.poll_token, action: 'region_key', pubkey: get().identity.pubkey,
         from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',

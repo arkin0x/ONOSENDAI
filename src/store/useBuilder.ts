@@ -49,11 +49,35 @@
  * - Entering takes the camera back from a hyperspace view (EARTH, a stop, the
  *   scrubber), the way starting to spectate does, so the gibson field comes
  *   back and no second bar offers a RETURN that would end the mode.
+ * - The chain explorer aims the build cursor (arkinox, 2026-10-08: "Chain ui
+ *   chip comes back; scrubbing a chain moves the build cursor to that chain
+ *   position"). In BUILD mode a step along a chain, yours or a spectated
+ *   avatar's, by the CHAIN chip or [ ] Home End, puts the build cursor on
+ *   that action's place in that action's plane (`scrubTo`) and nothing else:
+ *   the scene does not go into history (`exploreIndex` stays null), your
+ *   head, chain and lined-up plane are untouched, and nothing is signed. The
+ *   explorer's mark is `scrub`, the action last aimed at; the cursor stays
+ *   where that action put it until you move it some other way, and the mark
+ *   stays too, so ] carries on from there. Every other way of opening an
+ *   action (the Chain panel, a notification, a broken chain's SHOW THE ROW)
+ *   goes through `walkChain` and aims the same way.
+ * - Spectating does not end the mode (arkinox, 2026-10-08: "Spectating
+ *   should be allowed in build mode and shouldnt end it. Then you can scrub
+ *   thru other avatars chains and build near them."). The driven view stays
+ *   up beside the spectation (useCyberspace `beginSpectate` with keepView):
+ *   the build cursor goes to their spawn, then to their head when the chain
+ *   arrives, the pad keeps driving it, and END SPECTATION leaves it where it
+ *   is. Spectating stays read-only: your head is not on screen, so nothing
+ *   can commit. Entering BUILD while spectating or in history starts the
+ *   build cursor on what is on screen and keeps the spectation. Leaving
+ *   BUILD while spectating goes back to plain spectating, at the action
+ *   last aimed at, since a free view does not stand beside a spectation
+ *   outside the mode.
  * - The mode ends by itself when the view it rides ends some other way
- *   (Earth, a stop, a deployment, history, spectating, an identity switch),
- *   or when your position is replaced under it (a respawn, a ride arriving,
- *   the relays' version of your chain chosen), which carries the cursor off
- *   to your new head. A deploy still lined up then cannot stay, since a
+ *   (Earth, a stop, a deployment, an identity switch), or when your
+ *   position is replaced under it (a respawn, a ride arriving, the relays'
+ *   version of your chain chosen), which carries the cursor off to your
+ *   new head. A deploy still lined up then cannot stay, since a
  *   deploy happens only at a build cursor, but the work is not lost: a
  *   message's text waits in the composer (`messageDraft`), a model is still
  *   in the workshop, and a toast says what happened and why.
@@ -103,6 +127,20 @@ export interface BuilderState {
    */
   messageDraft: string | null
   /**
+   * The action of the chain on show (yours, or the spectated avatar's) that
+   * the build cursor was last aimed at by the chain explorer; null for the
+   * head, or before any scrub. The explorer's mark in BUILD mode, in place
+   * of `exploreIndex`, which stays null so the scene never goes into history.
+   */
+  scrub: number | null
+  /**
+   * Aim the build cursor at action `index` of the chain on show, in its
+   * plane; null or past the end is the head. Moves nothing else.
+   */
+  scrubTo: (index: number | null) => void
+  /** Step the aimed action; clamps at both ends. */
+  scrubStep: (delta: number) => void
+  /**
    * Turn BUILD mode on. From the BUILD control and from DEPLOY alike, the
    * build cursor starts where you are looking when a view is up (a place you
    * went to see, the Earth pin, a stop), and on your avatar otherwise,
@@ -125,9 +163,12 @@ export interface BuilderState {
   takeMessageDraft: () => string | null
 }
 
-/** The free view the build cursor rides is standing: driven, not spectating, not in history. */
+/**
+ * The free view the build cursor rides is standing: driven, and not in
+ * history. A spectation may stand beside it (arkinox, 2026-10-08).
+ */
 function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
-  return s.focus?.drive === true && s.spectate === null && s.exploreIndex === null
+  return s.focus?.drive === true && s.exploreIndex === null
 }
 
 /** The center of all cyberspace, where HyperspacePanel's EARTH, CYBERSPACE and THE RIDE views point. */
@@ -143,14 +184,25 @@ function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return samePosition(s.cursor, s.position) && buildPlane(s) === s.plane
 }
 
-/** A free view that sits on your avatar shows what your head shows: end it, keeping the zoom. */
-function settleView(): void {
+/**
+ * What the free view becomes once the mode is off. A free view that sits on
+ * your avatar shows what your head shows: end it, keeping the zoom. One kept
+ * through a spectation cannot stand without the mode, so it ends and the
+ * scene goes back to watching them, at the action last aimed at (`scrub`).
+ */
+function settleView(scrub: number | null): void {
   const cs = useCyberspace.getState()
-  if (cs.focus?.drive && onAvatar(cs)) cs.clearFocus(true)
+  if (!cs.focus?.drive) return
+  if (cs.spectate) {
+    cs.clearFocus(true)
+    if (scrub !== null) useCyberspace.getState().explore(scrub)
+    return
+  }
+  if (onAvatar(cs)) cs.clearFocus(true)
 }
 
 const END_REASON: Record<BuildEndReason, string> = {
-  view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment, history, or someone else).',
+  view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment).',
   moved: 'Your avatar was moved under it (a respawn, a ride arriving, or the relays\' version of your chain), and the build cursor went with it.',
 }
 
@@ -159,6 +211,29 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   via: null,
   leftAvatar: false,
   messageDraft: null,
+  scrub: null,
+
+  scrubTo: (index) => {
+    if (!get().active) return
+    const cs = useCyberspace.getState()
+    const chain = cs.focusChain()
+    const last = chain.length - 1
+    // A spectated pubkey with no chain on the relay: nothing to aim at.
+    if (last < 0) return
+    const i = index === null || index >= last ? null : Math.max(0, Math.floor(index))
+    const action = chain[i ?? last]
+    // Its place, in its plane, as history would show it: the coordinate the
+    // chain stands on there (a game's entry point, a broken chain's last
+    // valid place). Only the view's cursor moves (aimView).
+    cs.aimView(action.position, action.plane)
+    set({ scrub: i })
+  },
+
+  scrubStep: (delta) => {
+    const last = useCyberspace.getState().focusChain().length - 1
+    const from = get().scrub ?? last
+    get().scrubTo(Math.min(last, Math.max(0, from + delta)))
+  },
 
   enter: (via = 'build') => {
     if (get().active) return
@@ -179,18 +254,28 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // EARTH, CYBERSPACE and THE RIDE look at the whole cube from its center:
     // there is no place in them to build, and the center is Earth's core at
     // 2^52 and up. They count as no view (found in review, 2026-10-07).
-    const looking = cs.focus !== null && cs.spectate === null && cs.exploreIndex === null && !wholeCube(cs.focus)
+    // Spectating or in history, what is on screen is an avatar at an action:
+    // the build cursor starts there, the spectation stays, and the action in
+    // history becomes the explorer's mark (arkinox, 2026-10-08).
+    if (cs.spectate !== null || cs.exploreIndex !== null) {
+      const scrub = cs.exploreIndex
+      cs.driveHere(BUILD_FOCUS_LABEL)
+      set({ active: true, via, scrub, leftAvatar: !onAvatar(useCyberspace.getState()) })
+      return
+    }
+    const looking = cs.focus !== null && !wholeCube(cs.focus)
     if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
     else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
-    set({ active: true, via, leftAvatar: !onAvatar(useCyberspace.getState()) })
+    set({ active: true, via, scrub: null, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 
   exit: () => {
     if (!get().active || useShards.getState().pending) return
+    const scrub = get().scrub
     // Off first, so the view change below is not read as the view ending
     // under a live build mode.
-    set({ active: false, via: null, leftAvatar: false })
-    settleView()
+    set({ active: false, via: null, leftAvatar: false, scrub: null })
+    settleView(scrub)
   },
 
   toggle: () => { if (get().active) get().exit(); else get().enter('build') },
@@ -198,7 +283,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   toAvatar: () => {
     if (!get().active) return
     const cs = useCyberspace.getState()
-    cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
+    // While spectating, aimed rather than re-focused, which would end the
+    // spectation: you are still watching them.
+    if (cs.spectate) cs.aimView(cs.position, cs.plane)
+    else cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
   },
 
   takeMessageDraft: () => {
@@ -214,7 +302,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
  * why the mode ended and where the work is.
  */
 function endUnder(reason: BuildEndReason): void {
-  useBuilder.setState({ active: false, via: null, leftAvatar: false })
+  useBuilder.setState({ active: false, via: null, leftAvatar: false, scrub: null })
   const shards = useShards.getState()
   const pending = shards.pending
   let kept = ''
@@ -248,6 +336,9 @@ useCyberspace.subscribe((s, prev) => {
   if (!b.active) return
   // The view the build cursor rides ended some other way.
   if (!viewStands(s)) { endUnder('view'); return }
+  // Another chain on show (a spectation begun, switched or ended): the mark
+  // was an index into the old one. The cursor stays where it was aimed.
+  if (s.spectate?.pubkey !== prev.spectate?.pubkey && b.scrub !== null) useBuilder.setState({ scrub: null })
   // Your position replaced under the mode, carrying the cursor to the new
   // head: a new chain head that also wrote the cursor. Only a respawn, a ride
   // arriving and a chain chosen from the relays do both. A move committed
@@ -255,7 +346,7 @@ useCyberspace.subscribe((s, prev) => {
   const headChanged = s.prevEventId !== prev.prevEventId || s.genesisId !== prev.genesisId
   if (headChanged && s.cursor !== prev.cursor) {
     endUnder('moved')
-    settleView()
+    settleView(null)
     return
   }
   if (!b.leftAvatar && !onAvatar(s)) useBuilder.setState({ leftAvatar: true })
@@ -274,6 +365,23 @@ useShards.subscribe((s, prev) => {
   const b = useBuilder.getState()
   if (s.pending === null && prev.pending !== null && b.active && b.via === 'deploy' && !b.leftAvatar) b.exit()
 })
+
+/**
+ * Go to action `index` of the chain on show, from the CHAIN chip, [ ] Home
+ * End, the Chain panel, a notification or a broken chain's row: in BUILD
+ * mode it aims the build cursor there (`scrubTo`), and otherwise the scene
+ * goes there in history (useCyberspace `explore`), as it always has.
+ */
+export function walkChain(index: number | null): void {
+  if (useBuilder.getState().active) useBuilder.getState().scrubTo(index)
+  else useCyberspace.getState().explore(index)
+}
+
+/** One action back or forward along the chain on show: `walkChain` by a step. */
+export function stepChain(delta: number): void {
+  if (useBuilder.getState().active) useBuilder.getState().scrubStep(delta)
+  else useCyberspace.getState().exploreStep(delta)
+}
 
 // Escape leaves BUILD mode: on the stack from the moment the mode turns on
 // until it turns off, however it turns off.

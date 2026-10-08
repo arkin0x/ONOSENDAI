@@ -12,7 +12,13 @@
  * space, not a fact you look up. Its heading is the chip that folds it away.
  *
  * Off the head the controls are withdrawn, because nothing in history is a
- * place you can move from; LATEST brings them back. It says LATEST, not LIVE,
+ * place you can move from; LATEST brings them back.
+ *
+ * In BUILD mode it aims the build cursor instead (arkinox, 2026-10-08): a
+ * step puts the build cursor on that action's place, in its plane, and the
+ * scene stays on the build cursor rather than going into history, so the
+ * mark is the Builder's `scrub` and nothing is withdrawn (store/useBuilder.ts
+ * walkChain). It says LATEST, not LIVE,
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
  *
@@ -50,6 +56,7 @@ import { countComments } from '../lib/comments'
 import { ACTION_KIND } from '../lib/social'
 import { useSocialUi } from '../store/useSocialUi'
 import { useEscape } from '../hooks/useEscape'
+import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
@@ -75,12 +82,16 @@ export function ChainExplorer(): JSX.Element {
   }, [fork])
   const spectate = useCyberspace((s) => s.spectate)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  // In BUILD mode the mark is the action the build cursor was last aimed at.
+  const building = useBuilder((s) => s.active)
+  const scrub = useBuilder((s) => s.scrub)
   // Parsed once per chain change; the store caches, this just subscribes.
   const actions = useMemo(() => useCyberspace.getState().focusChain(), [events, spectate])
   const last = actions.length - 1
-  const index = exploreIndex ?? last
+  const marked = building ? scrub : exploreIndex
+  const index = marked === null ? last : Math.min(marked, last)
   const action = actions[index]
-  const atHead = exploreIndex === null
+  const atHead = marked === null
   const secretKeys = useSecrets((s) => s.keys)
   const key = useMemo(
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
@@ -132,8 +143,8 @@ export function ChainExplorer(): JSX.Element {
   }, [])
 
   const bind = useRepeatable()
-  const go = (i: number | null): void => useCyberspace.getState().explore(i)
-  const step = (d: number) => () => useCyberspace.getState().exploreStep(d)
+  const go = walkChain
+  const step = (d: number) => () => stepChain(d)
 
   // The rail: press or drag anywhere on it to land on the nearest action.
   const rail = useRef<HTMLDivElement>(null)
@@ -194,7 +205,7 @@ export function ChainExplorer(): JSX.Element {
           aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
           aria-pressed={open}
         >
-          CHAIN {index + 1}/{actions.length}{atHead ? '' : ' HISTORY'}
+          CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}
         </button>
       )}
 
@@ -262,7 +273,7 @@ export function ChainExplorer(): JSX.Element {
       ))}
 
       {open && action && (
-        <div className={`explorer__body ${atHead ? '' : 'is-history'}`}>
+        <div className={`explorer__body ${atHead || building ? '' : 'is-history'}`}>
           <div className="explorer__row">
             <button className="explorer__btn" title="Spawn (Home)" aria-label="Go to spawn" disabled={index === 0} {...noCallout}
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(0) }}>|◀</button>

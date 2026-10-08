@@ -34,6 +34,7 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
+import { walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
@@ -104,7 +105,7 @@ export function ChainPanel(): JSX.Element {
             opens the chain explorer at the head, a second tap puts it away. */}
         <button
           className="tag tag--tap"
-          onClick={() => useCyberspace.getState().explore(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
+          onClick={() => walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
           aria-pressed={exploreIndex !== null}
           title="Open the chain explorer"
         >
@@ -220,7 +221,7 @@ export function ChainPanel(): JSX.Element {
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
         <p className="notice notice--game">
           IN A GAME: this identity entered a game from another client, so a game holds your avatar where it entered. Nothing here moves you until that client publishes an exit, or until you respawn, which also leaves the game and is the only way out if that client is gone.
-          <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(actions.indexOf(game))}>SHOW THE GAME</button>
+          <button className="tag tag--tap" onClick={() => walkChain(actions.indexOf(game))}>SHOW THE GAME</button>
         </p>
       ) : held ? (
         <p className="notice notice--held">
@@ -235,7 +236,7 @@ export function ChainPanel(): JSX.Element {
       {broken && (
         <BrokenChainNotice broken={broken} actions={(
           <>
-            <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(broken.index)}>SHOW THE ROW</button>
+            <button className="tag tag--tap" onClick={() => walkChain(broken.index)}>SHOW THE ROW</button>
             <button className="brokenchain__respawn" onClick={() => useChainUi.getState().setBrokenView('confirm')}>RESPAWN</button>
           </>
         )} />

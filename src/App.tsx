@@ -231,10 +231,10 @@ export default function App(): JSX.Element {
           {/* BUILD mode, where the free view's bar would be: it rides that view. */}
           <BuildBar />
           <ToastChip />
-          {/* Not while building: history is somewhere nothing can be placed,
-              and its steps would end BUILD mode, as [ ] Home End would
-              (they are ignored while building, useKeyboard). */}
-          {!building && <ChainExplorer />}
+          {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
+              yours or a spectated avatar's, aims the build cursor at the
+              action instead of going into history (useBuilder walkChain). */}
+          <ChainExplorer />
           {!building && <BitReadout />}
           {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
           <NotificationsToast />

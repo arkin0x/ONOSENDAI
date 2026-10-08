@@ -385,8 +385,8 @@ function Controls(): JSX.Element {
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
     ['H', 'hyperspace line scrubber'],
-    ['[ / ]', 'chain explorer: back / forward one action'],
-    ['Home / End', 'chain explorer: spawn / live head'],
+    ['[ / ]', 'chain explorer: back / forward one action (building: the build cursor goes to it)'],
+    ['Home / End', 'chain explorer: spawn / live head (building: the same)'],
   ]
 
   return (
@@ -419,10 +419,17 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // the proof panel is the thing you are watching, so it takes the first
   // position and HOSAKA falls in behind it rather than above it.
   const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
+  // BUILD mode puts the Position panel first, above even a move under way
+  // (arkinox, 2026-10-08): its VIEW, RECENT and starred places are how the
+  // build cursor jumps. The left column comes first on a phone too, where
+  // the columns stack, so it is the first panel on both. Back in its own
+  // place on exit.
+  const building = useBuilder((s) => s.active)
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
         <Brand />
+        {building && <PositionPanel />}
         {proofLeads && <ProofPanel />}
         {cloudLeads && <CloudPanel />}
         {rideSet && <HyperspacePanel />}
@@ -435,7 +442,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       </div>
       <div className="hud__col hud__col--right">
         <ScalePanel />
-        <PositionPanel />
+        {!building && <PositionPanel />}
         {!proofLeads && <ProofPanel />}
         {!cloudLeads && <CloudPanel />}
         <ChainPanel />

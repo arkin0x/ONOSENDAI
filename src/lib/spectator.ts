@@ -10,6 +10,7 @@
 
 import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import type { NostrEvent } from './events'
 
 let current: { pubkey: string; close: () => void } | null = null
@@ -17,7 +18,9 @@ let current: { pubkey: string; close: () => void } | null = null
 export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise<void> {
   stopSpectating()
   const store = useCyberspace.getState()
-  store.beginSpectate(pubkey)
+  // In BUILD mode the build cursor's view stays up and is aimed at them, so
+  // the mode carries on beside the spectation (store/useBuilder.ts).
+  store.beginSpectate(pubkey, useBuilder.getState().active)
 
   // Anything published while the fetch is in flight is caught by the watch,
   // which starts from a minute ago so nothing falls between the two.

@@ -280,3 +280,27 @@ export function surfaceDetailOpacity(scaleExp: number): number {
   return (scaleExp - SURFACE_DETAIL_GONE) / (SURFACE_DETAIL_FULL - SURFACE_DETAIL_GONE)
 }
 
+/**
+ * The finest zoom at which Earth is drawn as a solid: the
+ * depth-only body that hides what is behind the planet (EarthPatch's ground,
+ * then Earth.tsx's globe from 2^50).
+ *
+ * It paints no color, only depth, so what it hides reads as black. That is
+ * the point where the planet curves: across the grid the surface sags about
+ * 0.4 cells at 2^40 and climbs to a full hemisphere by 2^49, so there is a
+ * real far side and a horizon to hide stops beyond. Below 2^40 the surface
+ * in view is flat to well under a cell, so there is no far side for it to
+ * hide, and the only things it did hide were the wrong ones (arkinox,
+ * 2026-10-08): from above, everything just under the ground, the K field and
+ * any shard or avatar a little below it, cut off by a black floor; from
+ * below, everything at all, the whole view gone to black. The graticule and
+ * the coast are lines and have no inside or outside, so they keep drawing
+ * down to surfaceDetailOpacity's floor; only the solid waits for 2^40.
+ */
+export const EARTH_OCCLUDER_MIN_SCALE = 40
+
+/** Whether Earth's depth-only solid is drawn at this zoom. */
+export function earthOccluderOn(scaleExp: number): boolean {
+  return scaleExp >= EARTH_OCCLUDER_MIN_SCALE
+}
+

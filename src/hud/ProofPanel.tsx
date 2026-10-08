@@ -16,7 +16,7 @@ import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { BROKEN_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
+import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
 import { useBrokenChain } from './BrokenChain'
 import { useChainUi } from '../store/useChainUi'
 import { useLayers, type SceneLayer } from '../store/useLayers'
@@ -56,6 +56,19 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
   return <span className={`status status--${status}`}>{label[status] ?? status}</span>
 }
 
+/**
+ * What a move said while the cursor is still aimed: refused, retrying, or
+ * waiting on the saved chain's signatures. The preview of the next move
+ * takes the panel then, so the reason gets one line above it, or nobody
+ * would see why the move did not go (review of #236). Null when nothing is
+ * to be said there, or when the broken-chain line above already says it.
+ */
+export function noticeWhileAimed(previewing: boolean, proof: Pick<ProofState, 'message'>, broken: boolean): string | null {
+  if (!previewing || proof.message === null) return null
+  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE)) return null
+  return proof.message
+}
+
 export function ProofPanel(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
   // What calibration measured this machine finishing in budget: conservative
@@ -85,9 +98,13 @@ export function ProofPanel(): JSX.Element {
   // A broken chain refuses every move (store whyNoMove). Said here whatever
   // the panel is showing, since a preview of a move that cannot be signed
   // would otherwise stand in for the reason, with the way to the notice.
-  const broken = useBrokenChain() !== null
+  const brokenAt = useBrokenChain()
+  const broken = brokenAt !== null
+  const brokenLine = brokenAt ? brokenChainMessage(brokenAt) : null
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
+  const aimedNotice = noticeWhileAimed(previewing, proof, broken)
+  const refusedWhileAimed = aimedNotice !== null && proof.status === 'infeasible'
   const status =
     plan
       ? plan.status === 'paused' ? (plan.awaiting ? 'signing' : 'paused')
@@ -98,7 +115,8 @@ export function ProofPanel(): JSX.Element {
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
+          ? refusedWhileAimed ? 'infeasible'
+            : preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
   return (
@@ -110,7 +128,7 @@ export function ProofPanel(): JSX.Element {
 
       {broken && (
         <p className="notice">
-          {BROKEN_CHAIN_MESSAGE}
+          {brokenLine}
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY, AND RESPAWN</button>
         </p>
       )}
@@ -121,6 +139,8 @@ export function ProofPanel(): JSX.Element {
           style={{ width: `${Math.round(proof.progress * 100)}%` }}
         />
       </div>
+
+      {aimedNotice && <p className="notice" role="status">{aimedNotice}</p>}
 
       {plan ? (
         <RouteView plan={plan} proof={proof} cloud={cloud} onResume={resumePlan} onCancel={cancelPlan} />
@@ -247,7 +267,7 @@ export function ProofPanel(): JSX.Element {
             </div>
           )}
 
-          {proof.message && !(broken && proof.message === BROKEN_CHAIN_MESSAGE) && <p className="notice">{proof.message}</p>}
+          {proof.message && !(broken && proof.message === brokenLine) && <p className="notice">{proof.message}</p>}
         </>
       )}
 

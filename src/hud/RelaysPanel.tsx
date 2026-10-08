@@ -1,7 +1,7 @@
 /**
  * RelaysPanel.tsx — the relays this client fans out across.
  *
- * cyberspace.nostr1.com is the shared default and is pinned: everyone meets
+ * The canonical relay (useRelays DEFAULT_RELAY) is the shared default and is pinned: everyone meets
  * there, so it cannot be removed. Add your own below it, and movement, hidden
  * content, discovery and everyone else's chains all ride the whole set. A dot
  * per relay shows whether the socket is open right now.

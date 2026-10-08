@@ -33,7 +33,7 @@ vi.mock('../../lib/hyperspace/station', async (importOriginal) => ({
 const proofsAsked: unknown[] = []
 vi.mock('../../lib/hyperspace/ridePool', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/hyperspace/ridePool')>()),
-  computeRideProof: async (job: unknown) => { proofsAsked.push(job); return { rootHex: 'ab'.repeat(32), mp: '', mnHex: '0'.repeat(16) } },
+  computeRideProof: async (job: unknown) => { proofsAsked.push(job); return { rootHex: 'ab'.repeat(32), mp: 'ab', mnHex: '0'.repeat(16) } },
 }))
 
 vi.mock('../../store/useHyperspace', async (importOriginal) => ({

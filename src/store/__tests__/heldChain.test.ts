@@ -34,7 +34,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 // No relay: the pre-move head check finds nothing.
 vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
-  return { ...actual, fetchChainEvents: vi.fn(async () => []) }
+  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }
 })
 
 import { ACTION_KIND, buildChain, spawnTemplate, type NostrEvent } from '../../lib/events'

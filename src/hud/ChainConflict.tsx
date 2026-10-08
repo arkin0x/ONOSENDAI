@@ -171,53 +171,27 @@ function branchCells(b: BranchSummary, now: number): ReactNode[] {
 
 /**
  * This device's unpublished moves fork against moves another device of
- * yours already published (lib/branchConflict.ts; arkinox, 2026-10-01). The
- * fork rule is not changed: the older first move continues the chain. The
- * prompt says plainly which side that is, because publishing the older side
- * overturns the other device's published moves for every reader, and
- * publishing the newer side changes nothing anyone sees. So "Publish mine"
- * is offered only when it would place your moves, and asks twice, because
- * then it overrides.
+ * yours already published (lib/branchConflict.ts; arkinox, 2026-10-01).
+ * Since arkinox's ruling of 2026-10-08 a fork ends the whole chain for every
+ * reader, whichever branch came first, so publishing this device's side
+ * would end the chain: the only choice offered is to keep the relays'
+ * version.
  */
 function BranchConflictPrompt(): JSX.Element | null {
   const conflict = useCyberspace((s) => (s.chainConflict?.kind === 'branch' ? s.chainConflict : null))
   const events = useCyberspace((s) => s.events)
   const published = useCyberspace((s) => s.published)
-  const live = useCyberspace((s) => s.live)
   const aside = useChainUi((s) => s.promptAside)
-  const [confirming, setConfirming] = useState(false)
-  useEffect(() => { if (!conflict) setConfirming(false) }, [conflict])
   const div = useMemo(() => (conflict ? findDivergence(events, published, conflict.relayEvents) : null), [conflict, events, published])
   const mine = useMemo(() => (div ? summarizeBranch(div.local) : null), [div])
   const theirs = useMemo(() => (div ? summarizeBranch(div.relay) : null), [div])
 
   if (!conflict || !div || !mine || !theirs || aside) return null
   const now = Date.now() / 1000
-  const setAside = (): void => { setConfirming(false); useChainUi.getState().setPromptAside(true) }
-  const resolve = (choice: 'relay' | 'mine'): void => { setConfirming(false); useCyberspace.getState().resolveBranchConflict(choice) }
+  const setAside = (): void => { useChainUi.getState().setPromptAside(true) }
+  const keepRelays = (): void => { useCyberspace.getState().resolveBranchConflict('relay') }
   const fork = useCyberspace.getState().actions()[div.forkIndex]
   const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
-
-  if (confirming) {
-    return (
-      <ConfirmModal
-        title="Override the other device's moves?"
-        cardClassName="chainconflict"
-        onBackdrop={setAside}
-        body={<>
-          <p><b>What this does:</b> this device's {plural(mine.count, 'unpublished action')} {live
-            ? 'are published to the relays now'
-            : 'are kept and published the next time you take an action while LIVE; your switch is LOCAL, so until then they stay on this device'}.</p>
-          <p><b>What it overrides:</b> your first move after the fork is older than the other device's, so it continues the chain for every reader (the older child wins a fork). The other device's {plural(theirs.count, 'published action')} {theirs.count === 1 ? 'stops' : 'stop'} being part of your chain, on every device, including the other one once it sees your moves. They stay on the relays as a branch nobody follows. This cannot be undone.</p>
-        </>}
-        confirmLabel="PUBLISH AND OVERRIDE"
-        cancelLabel="BACK"
-        danger
-        onConfirm={() => resolve('mine')}
-        onCancel={() => setConfirming(false)}
-      />
-    )
-  }
 
   return (
     <ConfirmModal
@@ -226,8 +200,8 @@ function BranchConflictPrompt(): JSX.Element | null {
       scroll
       onBackdrop={setAside}
       body={<>
-        <p><b>What happened:</b> another device signed in as you published {plural(theirs.count, 'action')} from the same point of your chain where this device has {plural(mine.count, 'unpublished action')}. Both continue from action {div.forkIndex + 1} of the chain{fork ? <> (signed <span title={formatStamp(fork.createdAt)}>{formatAgo(fork.createdAt, now)}</span>)</> : null}, so the chain has forked. Nothing from this device has been published, and the other device's moves have not been adopted here.</p>
-        <p><b>How a fork is resolved:</b> every reader follows the older of the two next actions by created_at (the time each event says it was signed), a tie going to the smaller event id. That rule is the same for everyone and is not changed here.</p>
+        <p><b>What happened:</b> another device signed in as you published {plural(theirs.count, 'action')} from the same point of your chain where this device has {plural(mine.count, 'unpublished action')}. Both continue from action {div.forkIndex + 1} of the chain{fork ? <> (signed <span title={formatStamp(fork.createdAt)}>{formatAgo(fork.createdAt, now)}</span>)</> : null}, so the two would fork the chain. Nothing from this device has been published, and the other device's moves have not been adopted here.</p>
+        <p><b>Why yours cannot be published:</b> a fork ends the whole chain for every reader, whichever branch came first (spec §8.7.3 rule 4, arkinox's ruling of 2026-10-08). Publishing this device's moves would put both branches on the relays and end your chain, so only the relays' version can be kept.</p>
         <ChainCompare
           labels={BRANCH_LABELS}
           columns={[
@@ -235,19 +209,14 @@ function BranchConflictPrompt(): JSX.Element | null {
             { heading: 'THIS DEVICE (UNPUBLISHED)', cells: branchCells(mine, now) },
           ]}
         />
-        {div.overrides ? (
-          <p><b>If you publish yours:</b> your first move after the fork is older than the other device's, so publishing yours wins the fork for every reader. The other device's {plural(theirs.count, 'published action')} {theirs.count === 1 ? 'stops' : 'stop'} being part of your chain. You are asked to confirm this a second time.</p>
-        ) : (
-          <p><b>Why yours cannot be published usefully:</b> your first move after the fork is newer than the other device's, so publishing yours would change nothing anyone sees: every reader, this device included, keeps following the other device's moves, and yours would sit on the relays as a branch nobody follows. Only the relay's version can be kept.</p>
-        )}
         <p><b>Keep the relay's version:</b> this device's {plural(mine.count, 'unpublished action')} after the fork are discarded and you stand where the other device's moves put you. Region keys those moves found stay in your Secrets.</p>
         <p><b>Not now:</b> a tap outside this card sets it aside without choosing. Nothing is published and no move is taken until you choose; BRANCHES DIVERGED, under the LIVE/LOCAL switch and in the Proof chain panel, brings it back.</p>
       </>}
       confirmLabel="KEEP THE RELAY'S VERSION"
-      cancelLabel={div.overrides ? 'PUBLISH MINE' : null}
+      cancelLabel={null}
       danger={false}
-      onConfirm={() => resolve('relay')}
-      onCancel={() => { if (div.overrides) setConfirming(true) }}
+      onConfirm={keepRelays}
+      onCancel={setAside}
     />
   )
 }

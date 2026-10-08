@@ -26,7 +26,7 @@ describe('chain stats count rides', () => {
     const spawn = finalizeEvent(spawnTemplate(pubkey, 1_700_000_000), sk)
     const enter = finalizeEvent(enterHyperspaceTemplate({ createdAt: 1_700_000_001, genesisId: spawn.id, previousId: spawn.id, coordHex: pubkey, proofHash: 'a'.repeat(64) }), sk)
     const stop = '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f56'
-    const jump = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_002, genesisId: spawn.id, previousId: enter.id, prevCoordHex: pubkey, toCoordHex: stop, fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }), sk)
+    const jump = finalizeEvent(hyperjumpTemplate({ createdAt: 1_700_000_002, genesisId: spawn.id, previousId: enter.id, prevCoordHex: pubkey, toCoordHex: stop, fromHeight: 100, toHeight: 398, asOf: 400, rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16) }), sk)
     const events = [spawn, enter, jump] as NostrEvent[]
     const dest = coordToXyz(hexToCoord(stop))
     useCyberspace.setState({
@@ -43,7 +43,7 @@ describe('chain stats count rides', () => {
     await useCyberspace.getState().completeRide({
       previousId: useCyberspace.getState().prevEventId,
       toCoordHex: '56db6db6db6db6db6db6db3e27c436f9d3b79fb5fc6457798936b3e749e38f57',
-      fromHeight: 398, toHeight: 500, asOf: 600, rootHex: '1'.repeat(64), mp: '', mnHex: '0'.repeat(16),
+      fromHeight: 398, toHeight: 500, asOf: 600, rootHex: '1'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16),
     })
     const chain = useCyberspace.getState().chain
     expect(chain.hyperjumps).toBe(2)

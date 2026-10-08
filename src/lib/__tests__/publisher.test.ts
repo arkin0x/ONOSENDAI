@@ -14,16 +14,30 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NostrEvent } from '../events'
 
 const sent: string[] = []
+/**
+ * Who takes a publish: `acceptedBy`, when set, is the relays that took it
+ * (as publish reports them); `canonicalFailsLeft` is how many more times the
+ * canonical relay refuses a retry of its own; `toCanonical` logs each retry.
+ */
+const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[] }))
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
-  publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve({ ok: true as const }) },
+  publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
+  publishMany: (relays: string[], e: NostrEvent) => {
+    pub.toCanonical.push(e.id)
+    if (pub.canonicalFailsLeft > 0) { pub.canonicalFailsLeft--; return Promise.resolve({ ok: false as const, reason: 'timeout' }) }
+    return Promise.resolve({ ok: true as const, accepted: relays })
+  },
 }))
 
 // The look at the relays before a backlog finds nothing here: no relay.
+// `canonical.answers` says whether the canonical relay answers it.
+const canonical = vi.hoisted(() => ({ answers: true }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
-  askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered' as const, events: [] }]),
+  askChainEvents: async () => [{ url: (await import('../../store/useRelays')).DEFAULT_RELAY, outcome: 'answered' as const, events: [] }],
+  confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -102,6 +116,79 @@ describe('the publisher and the release gate', () => {
     expect(sent).toEqual([ev('a1').id, ev('b2').id, ev('c3').id, ev('d4').id])
     for (const id of ['a1', 'b2', 'c3', 'd4']) {
       expect(useCyberspace.getState().published[ev(id).id]).toBe('ok')
+    }
+  })
+
+  it('sends no backlog when the canonical relay did not answer the look, whatever another relay said (review of #236, item 9)', async () => {
+    canonical.answers = false
+    try {
+      setChain(['a1', 'b2', 'c3'])
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('d4')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('a move only one of the player\'s relays took counts as published, and the canonical relay is asked again in the background until it takes it (option B)', async () => {
+    pub.acceptedBy = ['wss://mine.example/']
+    pub.canonicalFailsLeft = 1
+    pub.toCanonical = []
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await vi.advanceTimersByTimeAsync(10)
+      append('b2')
+      await vi.advanceTimersByTimeAsync(10)
+      expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
+      expect(pub.toCanonical).toEqual([])
+      // First background try: the canonical relay still refuses.
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pub.toCanonical).toEqual([ev('b2').id])
+      // The next one, after the backoff, lands.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(pub.toCanonical).toEqual([ev('b2').id, ev('b2').id])
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(pub.toCanonical).toHaveLength(2)
+      // It never stayed pending long, so nothing was shown.
+      expect(useCyberspace.getState().canonicalLate).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      pub.acceptedBy = null
+      pub.canonicalFailsLeft = 0
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('a move the canonical relay keeps refusing for over a minute is counted for the compact status, and cleared when it lands', async () => {
+    pub.acceptedBy = ['wss://mine.example/']
+    pub.canonicalFailsLeft = 4
+    pub.toCanonical = []
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await vi.advanceTimersByTimeAsync(10)
+      append('c3')
+      await vi.advanceTimersByTimeAsync(10)
+      // Tries at 5, 15, 35 and 75 s fail; the one at 75 s is past a minute.
+      await vi.advanceTimersByTimeAsync(75_000)
+      expect(useCyberspace.getState().canonicalLate).toBe(1)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(useCyberspace.getState().canonicalLate).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      pub.acceptedBy = null
+      pub.canonicalFailsLeft = 0
+      useCyberspace.setState({ live: false })
+      await idle()
     }
   })
 

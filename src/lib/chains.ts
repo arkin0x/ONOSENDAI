@@ -20,8 +20,8 @@
  * action is called (§8.9 rule 1), and a game names its own actions inside a
  * bracket (§8.11.2). Asking a chain by name made every chain stop before the
  * first action outside the list, so a game client playing on the same
- * identity was invisible, and this client's next move forked from an
- * earlier point and lost to the game's older branch (§8.7.3). Asking by the
+ * identity was invisible, and this client's next move forked the chain from
+ * an earlier point, which ends it (§8.7.3 rule 4). Asking by the
  * genesis returns every event of the current chain and nothing of any other.
  *
  * Pure helpers first, so the ordering, merging and paging rules can be
@@ -31,7 +31,8 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { query, queryEach, subscribe } from './relay'
+import { CYBERSPACE_RELAY, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
 
 export { PARTIAL_CHAIN_REASON }
@@ -236,6 +237,68 @@ export async function askChainEvents(pubkey: string, knownSpawnId?: string, have
   // self-check reads it as unknown, so a first move holds rather than
   // continuing from a head that is not the head (chainHold.ts).
   return whole ? got : markPartial(got)
+}
+
+/** How long confirming a head waits for the relays, per question. */
+export const HEAD_CONFIRM_MS = 2500
+
+/** How long the other relays are given after the canonical relay answered. */
+export const HEAD_CONFIRM_GRACE_MS = 400
+
+/**
+ * Your own chain from the canonical relay and every configured relay, asked
+ * together (arkinox's ruling of 2026-10-08, option B), or null when none of
+ * them truly answered. Every event any relay sent comes back, so a newer
+ * move any of them holds is folded in by the caller and refuses the move it
+ * was confirming. A relay that answered (EOSE) with nothing newer is what
+ * makes the silence mean "nothing newer":
+ *
+ * | Canonical relay | Other configured relays | Result |
+ * |---|---|---|
+ * | answered | any | the events (pass, unless they move the head) |
+ * | no answer by the deadline | at least one answered | the events (degraded pass) |
+ * | no answer | none answered | null (refuse) |
+ *
+ * The others are given HEAD_CONFIRM_GRACE_MS after the canonical relay
+ * answers, so a slow or dead relay of the player's does not slow every
+ * move; with the canonical relay silent they are waited for up to the
+ * deadline. A chain the relays return with a hole is no answer.
+ *
+ * `since` asks the chain only for events from that second on (inclusive):
+ * the caller passes the created_at of the newest event the relays already
+ * hold, so a long chain on a slow link is not downloaded again for every
+ * move; anything older is in `have`, and a hole is still asked for. An event
+ * names an earlier one as previous and is signed after it, so another
+ * device's move from that point on carries a created_at at or after it.
+ * `reconnect` drops these relays' sockets first, so a socket gone silent, or
+ * one whose auth a signer refused, is replaced rather than asked again
+ * (relay.ts dropRelays, as publishing does).
+ */
+export async function confirmChainEvents(
+  pubkey: string,
+  knownSpawnId: string | undefined,
+  have: NostrEvent[],
+  opts: { since?: number; reconnect?: boolean; maxWait?: number } = {},
+): Promise<NostrEvent[] | null> {
+  const canonical = normalizeURL(CYBERSPACE_RELAY)
+  const relays = [...new Set([canonical, ...relaySet().map((r) => normalizeURL(r))])]
+  const maxWait = opts.maxWait ?? HEAD_CONFIRM_MS
+  if (opts.reconnect) dropRelays(relays)
+  const ask = async (): Promise<NostrEvent[] | null> => {
+    const { got, whole } = await gatherChain((f) => queryEachSettled(relays, f, maxWait, canonical, HEAD_CONFIRM_GRACE_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
+    if (!whole || !got.some((a) => a.outcome === 'answered')) return null
+    return mergeAnswers(got)
+  }
+  // One deadline over the whole attempt, connecting and authenticating
+  // included, so a move never waits on the relays longer than this.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), maxWait * 2) })
+  try {
+    return await Promise.race([ask().catch(() => null), late])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** The same, assembled. */

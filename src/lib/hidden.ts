@@ -144,7 +144,7 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
 
 /**
  * Longest hidden message. The relay is the only hard limit and it is far
- * off: cyberspace.nostr1.com (strfry) takes 262,140 bytes of content, and
+ * off: the canonical relay (strfry) takes 262,140 bytes of content, and
  * the sealed envelope of a 10,000-character message is under 15 KB. Two
  * thousand was a placeholder, and it cut a Cashu token of six proofs in
  * half as it was pasted; ten thousand leaves room for thirty.

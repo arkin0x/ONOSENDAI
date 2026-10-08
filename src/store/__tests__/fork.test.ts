@@ -77,18 +77,20 @@ describe('a chain forked across two devices', () => {
     expect(S().prevEventId).toBe(theirs.id)
   })
 
-  it('says how many of this device\'s actions the fork took out', () => {
+  it('a fork on the relays keeps both branches, and the chain is dead at the spawn coordinate (2026-10-08 ruling)', () => {
     const spawn = S().events[0]
-    // Ours first, so ours is on the chain; then theirs, signed earlier, which
-    // wins the branch because the earlier action continues the chain.
     const ours = hop(hex(2), spawn.id, spawn.id, spawn.created_at + 20, hex(0xbb))
     S().adoptChain([ours])
     expect(S().prevEventId).toBe(ours.id)
+    useCyberspace.setState({ forkNotice: null })
 
     const theirs = hop(hex(3), spawn.id, spawn.id, spawn.created_at + 10, hex(0xcc))
     S().adoptChain([theirs])
-    expect(S().prevEventId).toBe(theirs.id)
-    expect(S().forkNotice).toMatchObject({ dropped: 1, adopted: 1 })
+    expect(S().events.map((e) => e.id).sort()).toEqual([spawn.id, ours.id, theirs.id].sort())
+    const actions = S().actions()
+    expect(actions[0].fork?.branchIds).toEqual([theirs.id, ours.id])
+    expect(S().coordHex()).toBe(spawn.pubkey)
+    expect(S().forkNotice).toBeNull()
   })
 
   it('says nothing when the fold changed nothing', () => {
@@ -108,19 +110,21 @@ describe('a chain forked across two devices', () => {
     expect(S().forkNotice).toBeNull()
   })
 
-  it('says so when another device\'s older branch overturned moves this device had published', () => {
+  it('another device forking against moves this device had published: nothing is dropped, and no move can be signed onto the dead chain', () => {
     const spawn = S().events[0]
     const ours = hop(hex(6), spawn.id, spawn.id, spawn.created_at + 20, hex(0xbb))
     // Ours went out: on the relay, and marked so here.
     useCyberspace.setState({ events: [spawn, ours], prevEventId: ours.id, published: { ...S().published, [ours.id]: 'ok' } })
     const theirs = hop(hex(7), spawn.id, spawn.id, spawn.created_at + 10, hex(0xcc))
     S().adoptChain([theirs])
-    expect(S().prevEventId).toBe(theirs.id)
-    expect(S().forkNotice).toMatchObject({ dropped: 1, overturned: 1, replaced: false, adopted: 1 })
-    // The rest of the other device's branch arrives as its own fold: the
-    // unread notice grows, it is not replaced by a bare adoption.
-    S().adoptChain([hop(hex(10), theirs.id, spawn.id, spawn.created_at + 30, hex(0xdd))])
-    expect(S().forkNotice).toMatchObject({ dropped: 1, overturned: 1, adopted: 2 })
+    expect(S().events).toHaveLength(3)
+    expect(S().published[ours.id]).toBe('ok')
+    expect(S().actions()[0].breaks).toMatch(/^a fork:/)
+    // The rest of the other device's branch arrives too, and is kept.
+    const more = hop(hex(10), theirs.id, spawn.id, spawn.created_at + 30, hex(0xdd))
+    S().adoptChain([more])
+    expect(S().events.map((e) => e.id)).toContain(more.id)
+    expect(S().actions()[0].fork).toBeDefined()
   })
 
   it('names a chain replaced by a newer spawn from another device', () => {
@@ -130,8 +134,8 @@ describe('a chain forked across two devices', () => {
     const respawn: NostrEvent = { ...spawnTemplate(S().identity.pubkey, spawn.created_at + 100), id: hex(9), pubkey: S().identity.pubkey, sig: '0'.repeat(128) }
     S().adoptChain([respawn])
     expect(S().genesisId).toBe(respawn.id)
-    // The whole previous chain left, and none of it counts as "overturned":
-    // nothing forked, a newer spawn took over.
-    expect(S().forkNotice).toMatchObject({ replaced: true, dropped: 2, overturned: 0, adopted: 1 })
+    // The whole previous chain left: nothing forked, a newer spawn took over.
+    expect(S().forkNotice).toEqual(expect.objectContaining({ replaced: true, dropped: 2, adopted: 1 }))
+    expect(S().forkNotice).not.toHaveProperty('overturned')
   })
 })

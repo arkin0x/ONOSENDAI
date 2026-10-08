@@ -52,7 +52,7 @@ describe('publishMany', () => {
 
   it('drops the sockets and sends once more after a timeout', async () => {
     answers = [new Error('publish timed out'), 'ok']
-    expect(await publishMany(['wss://one'], event)).toEqual({ ok: true })
+    expect(await publishMany(['wss://one'], event)).toEqual({ ok: true, accepted: ['wss://one/'] })
     expect(calls.publish).toHaveLength(2)
     expect(calls.closed).toEqual([['wss://one']])
   })

@@ -18,9 +18,10 @@ import {
 } from '../chainHold'
 import { ACTION_KIND, spawnTemplate, type NostrEvent } from '../events'
 import type { RelayAnswer } from '../relayOutcome'
+import { DEFAULT_RELAY } from '../../store/useRelays'
 
 const PUBKEY = 'ab'.repeat(32)
-const CANON = 'wss://cyberspace.nostr1.com'
+const CANON = DEFAULT_RELAY
 const hex = (n: number): string => n.toString(16).padStart(64, '0')
 
 function spawn(id: string, createdAt: number): NostrEvent {
@@ -183,5 +184,18 @@ describe('a held chain against a relay chain', () => {
     expect(foldHeldConflict(null, [hop(hex(40), hex(41), hex(41), 1)], localChain, 1)).toBeNull()
     // Our own events coming back are not a rival chain.
     expect(foldHeldConflict(null, localChain, localChain, 1)).toBeNull()
+  })
+})
+
+describe('the strip when the canonical relay is behind (option B)', () => {
+  const quiet = { live: true, held: false, conflict: null, waiting: 0, online: true, relayUp: true }
+  it('says nothing while every published action is on the canonical relay, or not yet late', () => {
+    expect(chainStatusOf(quiet)).toBeNull()
+    expect(chainStatusOf({ ...quiet, canonicalLate: 0 })).toBeNull()
+  })
+  it('says how many are not on the canonical relay yet, in a few words, once they are late', () => {
+    const status = chainStatusOf({ ...quiet, canonicalLate: 2 })
+    expect(status).toEqual({ kind: 'canonical', count: 2 })
+    expect(chainStatusLabel(status!, null)).toBe('2 NOT ON THE MAIN RELAY YET')
   })
 })

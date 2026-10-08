@@ -41,6 +41,8 @@ const watches: Array<{ pubkey: string; close: ReturnType<typeof vi.fn> }> = []
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: vi.fn(async () => relayChain.events),
+  // The head confirmed before signing (#236) asks the same relay.
+  confirmChainEvents: vi.fn(async () => relayChain.events),
   watchAuthor: vi.fn((pubkey: string) => { const close = vi.fn(); watches.push({ pubkey, close }); return close }),
 }))
 

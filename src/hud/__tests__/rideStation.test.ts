@@ -39,7 +39,7 @@ vi.mock('../../lib/hyperspace/station', async (importOriginal) => ({
 
 vi.mock('../../lib/hyperspace/ridePool', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/hyperspace/ridePool')>()),
-  computeRideProof: async () => ({ rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }),
+  computeRideProof: async () => ({ rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16) }),
 }))
 
 vi.mock('../../store/useHyperspace', async (importOriginal) => ({

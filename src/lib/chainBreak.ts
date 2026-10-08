@@ -8,8 +8,8 @@
  *
  * | Cause | When it is owed | What it says |
  * |---|---|---|
- * | spec change | the rule broken took effect after the event was signed (events.ts `breakSince`, a RuleChange with its effective time) | the action was valid when signed; the rule took effect on that day, by spec PR #44 or by arkinox's ruling |
- * | added validation | the same, for a check the rules gained on what was already there (sector tags, Q9) | the rules gained additional validation after it was signed |
+ * | spec change | the rule broken took effect after the event was signed (events.ts `breakSince`, a RuleChange with its effective time) | the action was valid when signed; the rule took effect on that day, by spec PR #44, by arkinox's ruling (since written into the spec by PR #46), or by PR #46 merging |
+ * | added validation | the same, for a check the rules gained on what was already there (sector tags, Q9; one A tag, Q5; each sector tag once, spec PR #46) | the rules gained additional validation after it was signed |
  * | ONOSENDAI bug, plane bit | a plane-bit boarding signed before PR #225 shipped, plus a day for tabs still running the old bundle (PLANE_BIT_APOLOGY_UNTIL) | ONOSENDAI caused it |
  * | ONOSENDAI offered it | a zero-length ride carrying ONOSENDAI's client tag, signed after the 2026-10-07 ruling: ONOSENDAI kept offering them until this change deployed | ONOSENDAI caused it, offering a ride it had not been updated to refuse |
  *
@@ -22,7 +22,20 @@
  * modal and the tests read the same ones.
  */
 
-import { PLANE_BIT_APOLOGY_UNTIL, type ActionEvent, type RuleChange } from './events'
+import { FORK_RULE_WORDS, PLANE_BIT_APOLOGY_UNTIL, type ActionEvent, type RuleChange } from './events'
+
+/**
+ * The words the broken-chain notice, its modal and its chip use for a
+ * break. A fork stands at the spawn coordinate, not at a last valid
+ * position (spec §3.2, §8.7.3 rule 4), and its rule is said once: the
+ * notice names the two branches, and "Why" is the rule.
+ */
+export function brokenWords(broken: { index: number; action: Pick<ActionEvent, 'fork' | 'breaks'> }): { title: string; chip: string; chipMeta: string; why: string } {
+  if (broken.action.fork) {
+    return { title: 'Your chain forked: you stand at your spawn coordinate', chip: 'CHAIN FORKED', chipMeta: 'AT YOUR SPAWN COORDINATE · TAP FOR WHY AND RESPAWN', why: FORK_RULE_WORDS }
+  }
+  return { title: 'Frozen at your last valid position', chip: `CHAIN BROKEN AT ROW ${broken.index}`, chipMeta: 'FROZEN AT YOUR LAST VALID POSITION · TAP FOR WHY AND RESPAWN', why: broken.action.breaks ?? 'it breaks a chain rule' }
+}
 
 export type BreakCause =
   | { kind: 'spec-change'; rule: RuleChange }
@@ -40,9 +53,9 @@ export function breakCause(a: Broken): BreakCause | null {
 
 /** How a rule came to be, in words: "on 2026-10-07, by arkinox's ruling of that day ...". */
 function cameAbout(rule: RuleChange): string {
-  return rule.by === 'spec-44'
-    ? `on ${rule.since}, when spec PR #44 brought virtual brackets into chain rules revision ${rule.revision}`
-    : `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision} (the spec errata is pending)`
+  if (rule.by === 'spec-44') return `on ${rule.since}, when spec PR #44 brought virtual brackets into chain rules revision ${rule.revision}`
+  if (rule.by === 'spec-46') return `on ${rule.since}, when spec PR #46 merged with arkinox's clarifications in it, into chain rules revision ${rule.revision}`
+  return `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision}${rule.spec ? ` and ${rule.spec}` : ''}`
 }
 
 /** The one-line heading over an apology. */

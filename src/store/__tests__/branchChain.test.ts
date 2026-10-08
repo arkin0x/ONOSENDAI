@@ -27,7 +27,8 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: () => Promise.resolve(relayHas.events),
-  askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: relayHas.down ? 'unreachable' as const : 'answered' as const, reason: 'down', events: relayHas.down ? [] : relayHas.events }]),
+  confirmChainEvents: () => Promise.resolve(relayHas.down ? null : relayHas.events),
+  askChainEvents: async () => ([{ url: (await import('../useRelays')).DEFAULT_RELAY, outcome: relayHas.down ? 'unreachable' as const : 'answered' as const, reason: 'down', events: relayHas.down ? [] : relayHas.events }]),
 }))
 
 import { ACTION_KIND, type NostrEvent } from '../../lib/events'
@@ -40,7 +41,8 @@ const hex = (n: number): string => n.toString(16).padStart(64, '0')
 
 function hop(id: number, prev: string, at: number): NostrEvent {
   const me = S().identity.pubkey
-  const genesis = S().genesisId
+  // This file's chain, whatever a respawn in another case left in the store.
+  const genesis = spawn ? spawn.id : S().genesisId
   return {
     id: hex(id), pubkey: me, created_at: at, kind: ACTION_KIND, content: '', sig: '0'.repeat(128),
     tags: [['A', 'hop'], ['C', hex(0xaa + id)], ['c', me], ['S', '0-0-0'], ['e', genesis, '', 'genesis'], ['e', prev, '', 'previous'], ['proof', hex(0xbeef)]],
@@ -60,7 +62,7 @@ function setUp(mine: NostrEvent[]): void {
   const events = [spawn, h1, ...mine]
   const published: Record<string, 'ok' | 'queued'> = { [spawn.id]: 'ok', [h1.id]: 'ok' }
   for (const e of mine) published[e.id] = 'queued'
-  useCyberspace.setState({ events, published, prevEventId: events[events.length - 1].id, chainConflict: null, held: false })
+  useCyberspace.setState({ events, published, genesisId: spawn.id, prevEventId: events[events.length - 1].id, chainConflict: null, held: false })
 }
 
 describe('unpublished moves against another device\'s published ones', () => {
@@ -99,20 +101,27 @@ describe('unpublished moves against another device\'s published ones', () => {
     expect(S().prevEventId).toBe(r1.id)
   })
 
-  it('keeps and releases the moves on "Publish mine", and does not ask again for that fork', () => {
+  it('a respawn clears a pending choice: it was about a chain that is gone (review of #236, item 10)', async () => {
+    const m1 = hop(0x27, h1.id, spawn.created_at + 20)
+    setUp([m1])
+    S().adoptChain([hop(0x37, h1.id, spawn.created_at + 25)])
+    expect(S().chainConflict?.kind).toBe('branch')
+    await S().respawn()
+    expect(S().chainConflict).toBeNull()
+    expect(S().events).toHaveLength(1)
+  })
+
+  it('never publishes this device\'s side: a fork ends the whole chain (2026-10-08 ruling), so "mine" is refused and the choice stays', () => {
     const m1 = hop(0x22, h1.id, spawn.created_at + 20)
     setUp([m1])
     const r1 = hop(0x32, h1.id, spawn.created_at + 25)
     S().adoptChain([r1])
     const before = S().publishRequest
     S().resolveBranchConflict('mine')
-    expect(S().chainConflict).toBeNull()
-    expect(S().publishRequest).toBe(before + 1)
+    expect(S().chainConflict?.kind).toBe('branch')
+    expect(S().publishRequest).toBe(before)
     expect(S().events.map((e) => e.id)).toEqual([spawn.id, h1.id, m1.id])
-    S().adoptChain([r1])
-    expect(S().chainConflict).toBeNull()
-    // The fork rule, unchanged: the older local move still continues the chain.
-    expect(S().prevEventId).toBe(m1.id)
+    expect(S().published[m1.id]).not.toBe('ok')
   })
 
   it('sends nothing while LIVE when the look before a backlog finds the fork', async () => {

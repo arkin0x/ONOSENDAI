@@ -4,7 +4,7 @@
  *
  * What would go wrong silently: the chain stopping before the first action
  * this client does not recognize, so the head goes stale and the next move
- * forks from an earlier point and loses to the older branch; a skipped
+ * forks the chain from an earlier point, which ends it; a skipped
  * action's own C taken as the position; a game's in-game coordinates taken
  * as where the identity is; and rules that look back stopping at a bracket
  * or a skipped action instead of seeing through it.
@@ -107,10 +107,12 @@ describe('actions this client does not recognize are skipped (§8.9)', () => {
     expect(buildChain([spawn, hop1, stray]).map((a) => a.id)).toEqual([spawn.id, hop1.id])
   })
 
-  it('takes the older branch at a fork whose branches are unknown actions', () => {
+  it('a skipped action is still a link: beside a hop naming the same event it makes a fork, and the chain is dead (2026-10-08 ruling)', () => {
     const early = actionEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, name: 'wave', id: nextId() })
     const late = hopEvent({ pubkey: pk, createdAt: 1_030, genesisId: spawn.id, previousId: hop1.id, c: P1, to: at(2n), plane })
-    expect(chainHead(buildChain([spawn, hop1, late, early]))?.id).toBe(early.id)
+    const chain = buildChain([spawn, hop1, late, early])
+    expect(chainHead(chain)?.id).toBe(hop1.id)
+    expect(chain[0].fork?.branchIds).toEqual([early.id, late.id])
   })
 })
 
@@ -276,7 +278,7 @@ describe('an action that starts where the chain did not stand is broken (§8.9 r
   it('a hyperjump after a hop is broken (DECK-0001 §4.3), but not after a boarding seen through a game', () => {
     const ride = (prev: NostrEvent, c: string): NostrEvent => actionEvent({
       pubkey: pk, createdAt: 1_040, genesisId: spawn.id, previousId: prev.id, name: 'hyperjump', c, C: at(1n), plane,
-      tags: [['from_height', '1'], ['B', '2'], ['as_of', '2'], ['proof', '0'.repeat(64)], ['mp', '']],
+      tags: [['from_height', '1'], ['B', '2'], ['as_of', '2'], ['proof', '0'.repeat(64)], ['mp', 'ab']],
     })
     expect(firstBreak(buildChain([spawn, hop1, ride(hop1, P1)]))?.action.type).toBe('hyperjump')
     const board = actionEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, name: 'enter-hyperspace', c: P1, C: at(1n), plane, tags: [['proof', '0'.repeat(64)]] })

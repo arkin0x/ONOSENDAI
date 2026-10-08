@@ -27,7 +27,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { actionLabel, firstBreak, type ActionEvent } from '../lib/events'
-import { apologyFor, apologyHeading, breakCause, endOfChainLabel } from '../lib/chainBreak'
+import { apologyFor, apologyHeading, breakCause, brokenWords, endOfChainLabel } from '../lib/chainBreak'
 import { useCyberspace } from '../store/useCyberspace'
 import { walkChain } from '../store/useBuilder'
 import { useChainUi } from '../store/useChainUi'
@@ -58,22 +58,29 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
   const { index, action, lastValid } = broken
   const apology = apologyFor(action)
   const cause = breakCause(action)
+  // A fork ends the whole chain (2026-10-08 ruling): the spawn row carries
+  // it, and what broke it is the branches, not the spawn.
+  const fork = action.fork
   return (
     <div className="brokenchain" role="alert">
       <p className="brokenchain__title">
         <TriangleAlert size={13} strokeWidth={2.5} aria-hidden className="chainrows__warn" />
-        YOUR CHAIN IS BROKEN AT ROW {index}
+        {fork ? 'YOUR CHAIN FORKED' : <>YOUR CHAIN IS BROKEN AT ROW {index}</>}
       </p>
       <p className="brokenchain__line">
-        <b>What broke it:</b> {rowName(index, action)}.
+        <b>What broke it:</b> {fork
+          ? <>a fork: {fork.branchIds.map((id) => `event ${id.slice(0, 8)}…`).join(' and ')} each name event {fork.previousId.slice(0, 8)}… as the action before them</>
+          : rowName(index, action)}.
       </p>
       <p className="brokenchain__line">
-        <b>Why:</b> {sentence(action.breaks ?? 'it breaks a chain rule')}.
+        <b>Why:</b> {sentence(brokenWords(broken).why)}.
       </p>
       <p className="brokenchain__line">
-        <b>Where you are now:</b> every verifier treats your chain as invalid from row {index} on, so you stand frozen {lastValid
+        <b>Where you are now:</b> {fork
+          ? <>every verifier treats your chain as dead from its spawn, so you stand at your spawn coordinate, the place your public key decodes to</>
+          : <>every verifier treats your chain as invalid from row {index} on, so you stand frozen {lastValid
           ? <>at your last valid position, where {rowName(index - 1, lastValid)} left you</>
-          : <>at your spawn coordinate, the place your public key decodes to, because the spawn that starts this chain is itself invalid and no event on it counts. The newest spawn always decides which chain is yours, so an older chain of yours does not come back in its place</>}. Nothing more can move you on this chain, and ONOSENDAI will not sign a move onto it. A respawn starts a new chain.
+          : <>at your spawn coordinate, the place your public key decodes to, because the spawn that starts this chain is itself invalid and no event on it counts. The newest spawn always decides which chain is yours, so an older chain of yours does not come back in its place</>}</>}. Nothing more can move you on this chain, and ONOSENDAI will not sign a move onto it. A respawn starts a new chain.
       </p>
       {apology && (
         <p className={`brokenchain__sorry brokenchain__sorry--${cause?.kind ?? 'none'}`}>
@@ -129,12 +136,12 @@ export function BrokenChainChip(): JSX.Element | null {
       className="hyperbar hyperbar--broken"
       onClick={() => useChainUi.getState().setBrokenView('notice')}
       title="Your chain is broken. Tap to see which action broke it, why, and how to respawn."
-      aria-label={`Chain broken at row ${broken.index}. Tap for why and to respawn.`}
+      aria-label={`${brokenWords(broken).chip}. Tap for why and to respawn.`}
     >
       <TriangleAlert size={14} strokeWidth={2.5} aria-hidden className="hyperbar__glyph" />
       <span className="hyperbar__text">
-        <span className="hyperbar__label">CHAIN BROKEN AT ROW {broken.index}</span>
-        <span className="hyperbar__meta">FROZEN AT YOUR LAST VALID POSITION · TAP FOR WHY AND RESPAWN</span>
+        <span className="hyperbar__label">{brokenWords(broken).chip}</span>
+        <span className="hyperbar__meta">{brokenWords(broken).chipMeta}</span>
       </span>
     </button>
   )
@@ -197,7 +204,7 @@ export function BrokenChainModal(): JSX.Element | null {
   if (view === 'notice') {
     return (
       <ConfirmModal
-        title="Frozen at your last valid position"
+        title={brokenWords(broken).title}
         cardClassName="brokenchain__card"
         scroll
         danger={false}

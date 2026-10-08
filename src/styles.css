@@ -1253,6 +1253,17 @@ kbd {
 
 /* ---------- Avatars ---------- */
 
+.avatars__tags {
+  display: flex;
+  gap: 6px;
+}
+
+/* The kept list is showing while the relays are asked for newer moves. */
+.tag--updating {
+  color: var(--dim);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
 .avatars__find {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -59,11 +59,24 @@ export function latestByPubkey(events: NostrEvent[]): ActionEvent[] {
     const a = parseAction(ev)
     if (!a) continue
     const cur = best.get(a.pubkey)
-    if (!cur || a.createdAt > cur.createdAt || (a.createdAt === cur.createdAt && a.id > cur.id)) {
-      best.set(a.pubkey, a)
-    }
+    if (!cur || isNewerAction(a, cur)) best.set(a.pubkey, a)
   }
-  return [...best.values()].sort((x, y) => y.createdAt - x.createdAt || (x.id < y.id ? 1 : -1))
+  return [...best.values()].sort(byNewest)
+}
+
+/**
+ * Whether `a` is a newer action than `cur`: the later created_at, and on the
+ * same second the larger id. Actions are regular events, not replaceable
+ * ones, so NIP-01's lowest-id rule for replaceable events does not apply;
+ * this is only a stable choice of which to show.
+ */
+export function isNewerAction(a: { createdAt: number; id: string }, cur: { createdAt: number; id: string }): boolean {
+  return a.createdAt > cur.createdAt || (a.createdAt === cur.createdAt && a.id > cur.id)
+}
+
+/** Newest first, in the same order isNewerAction picks. */
+export function byNewest(x: { createdAt: number; id: string }, y: { createdAt: number; id: string }): number {
+  return y.createdAt - x.createdAt || (x.id < y.id ? 1 : -1)
 }
 
 /** Union by id, order preserved: what was there first stays first. */
@@ -368,11 +381,6 @@ export async function fetchChain(pubkey: string): Promise<ActionEvent[]> {
 /** Only the events `pubkey` signed. */
 export function ownEvents(events: NostrEvent[], pubkey: string): NostrEvent[] {
   return events.every((e) => e.pubkey === pubkey) ? events : events.filter((e) => e.pubkey === pubkey)
-}
-
-/** The newest placing actions on the relay, any author. */
-export function fetchRecent(limit = 400): Promise<NostrEvent[]> {
-  return query({ kinds: [KIND], '#A': PLACING_ACTIONS, limit })
 }
 
 /** New placing actions from anyone, from `since` on. */

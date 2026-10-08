@@ -34,6 +34,7 @@ import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
@@ -52,6 +53,9 @@ export function ChainPanel(): JSX.Element {
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  // BUILD mode: the ACTIONS tag opens and closes the explorer instead of stepping.
+  const building = useBuilder((s) => s.active)
+  const explorerOpen = useChainUi((s) => s.explorerOpen)
   const respawns = useCyberspace((s) => s.respawns)
   const held = useCyberspace((s) => s.held)
   const check = useCyberspace((s) => s.selfCheck)
@@ -102,10 +106,16 @@ export function ChainPanel(): JSX.Element {
         <h2>Proof chain</h2>
         {/* The whole chain, spawn included, not this session's proofs; a tap
             opens the chain explorer at the head, a second tap puts it away. */}
+        {/* In BUILD mode a step along the chain aims the build cursor, so the
+            tag only opens and closes the explorer there (review of #235: it
+            sent the build cursor back to your avatar). */}
         <button
           className="tag tag--tap"
-          onClick={() => useCyberspace.getState().explore(exploreIndex === null ? Math.max(0, events.length - 1) : null)}
-          aria-pressed={exploreIndex !== null}
+          onClick={() => {
+            if (useBuilder.getState().active) useChainUi.getState().setExplorerOpen(!explorerOpen)
+            else walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
+          }}
+          aria-pressed={building ? explorerOpen : exploreIndex !== null}
           title="Open the chain explorer"
         >
           {events.length} ACTION{events.length === 1 ? '' : 'S'}
@@ -220,7 +230,7 @@ export function ChainPanel(): JSX.Element {
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
         <p className="notice notice--game">
           IN A GAME: this identity entered a game from another client, so a game holds your avatar where it entered. Nothing here moves you until that client publishes an exit, or until you respawn, which also leaves the game and is the only way out if that client is gone.
-          <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(actions.indexOf(game))}>SHOW THE GAME</button>
+          <button className="tag tag--tap" onClick={() => walkChain(actions.indexOf(game))}>SHOW THE GAME</button>
         </p>
       ) : held ? (
         <p className="notice notice--held">
@@ -235,7 +245,7 @@ export function ChainPanel(): JSX.Element {
       {broken && (
         <BrokenChainNotice broken={broken} actions={(
           <>
-            <button className="tag tag--tap" onClick={() => useCyberspace.getState().explore(broken.index)}>SHOW THE ROW</button>
+            <button className="tag tag--tap" onClick={() => walkChain(broken.index)}>SHOW THE ROW</button>
             <button className="brokenchain__respawn" onClick={() => useChainUi.getState().setBrokenView('confirm')}>RESPAWN</button>
           </>
         )} />

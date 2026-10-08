@@ -119,10 +119,11 @@ describe('NIP-22 comment on a hidden item, sealed per FF-1', () => {
 })
 
 describe('comments on an item hidden by reference', () => {
-  it('answer the referenced object by kind, author and address', async () => {
+  it('answer your own referenced object by kind, author and address', async () => {
     const { commentTemplate, itemParent, itemTargetOf } = await import('../comments')
     const author = 'a'.repeat(64)
-    const objectAuthor = 'b'.repeat(64)
+    // A large shard hidden by reference is the bag author's own sealed object.
+    const objectAuthor = author
     const address = `33331:${objectAuthor}:placement`
     const subject = {
       author, lookupId: 'c'.repeat(64), itemId: 'd'.repeat(64), type: 'shard' as const,
@@ -136,6 +137,26 @@ describe('comments on an item hidden by reference', () => {
     expect(t.tags).toContainEqual(['k', '33331'])
     expect(t.tags).toContainEqual(['A', `33330:${author}:${'c'.repeat(64)}`])
   })
+  it('answer the bag only for another author\'s object (a LIVE LINK), naming nothing of it (review of #233)', async () => {
+    const { commentTemplate, itemParent, itemTargetOf } = await import('../comments')
+    const author = 'a'.repeat(64)
+    const objectAuthor = 'b'.repeat(64)
+    const address = `33331:${objectAuthor}:statue`
+    const subject = {
+      author, lookupId: 'c'.repeat(64), itemId: `a:${address}@` + 'e'.repeat(64), type: 'shard' as const,
+      // A public object: no `encrypted` tag.
+      target: itemTargetOf({ kind: 33331, pubkey: objectAuthor, id: 'f'.repeat(64), tags: [['d', 'statue']] }, ['a', address, '', 'e'.repeat(64)]),
+      at: { x: 1n, y: 2n, z: 3n }, height: 4,
+    }
+    const parent = itemParent(subject)
+    const bag = `33330:${author}:${'c'.repeat(64)}`
+    expect(parent).toEqual({ id: '', kind: 33330, pubkey: author, address: bag })
+    const t = commentTemplate(subject, parent, 'ct', 1)
+    expect(JSON.stringify(t.tags)).not.toContain(objectAuthor)
+    expect(JSON.stringify(t.tags)).not.toContain('f'.repeat(64))
+    expect(t.tags.find((x) => x[0] === 'e')).toBeUndefined()
+    expect(t.tags).toContainEqual(['a', bag, ''])
+  })
   it('an inline item keeps the old parent: kind 3330 by the bag author, no a tag', async () => {
     const { itemParent } = await import('../comments')
     const parent = itemParent({ author: 'a'.repeat(64), lookupId: 'x', itemId: 'y', type: 'shard', at: { x: 1n, y: 2n, z: 3n }, height: 4 })
@@ -148,7 +169,8 @@ describe('comments on an addressable item survive its edits', () => {
     const { commentTemplate, itemParent, threadComments, itemTargetOf } = await import('../comments')
     const { finalizeEvent, generateSecretKey } = await import('nostr-tools/pure')
     const author = 'a'.repeat(64)
-    const objectAuthor = 'b'.repeat(64)
+    // Your own object by reference: comments answer it by address.
+    const objectAuthor = author
     const address = `33331:${objectAuthor}:placement`
     const base = { author, lookupId: 'c'.repeat(64), type: 'shard' as const, at: { x: 1n, y: 2n, z: 3n }, height: 4, target: itemTargetOf({ kind: 33331, pubkey: objectAuthor }, ['a', address, '', 'e'.repeat(64)]) }
     const v1 = { ...base, itemId: '1'.repeat(64) }

@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
@@ -126,7 +127,18 @@ function saveRecent(list: RecentView[]): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
 }
 
-function PositionPanel(): JSX.Element {
+/**
+ * What is typed into the Position panel's VIEW field, kept outside the panel:
+ * BUILD mode moves the panel to the top of the menu and back (Hud below),
+ * which mounts it afresh, and a coordinate half typed when DEPLOY turned
+ * BUILD on was lost with it (review of #235).
+ */
+export const useViewDraft = create<{ text: string; setText: (text: string) => void }>((set) => ({
+  text: '',
+  setText: (text) => set({ text }),
+}))
+
+export function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
   // Decimals go to the plane on show: yours at your head, the view's in a view.
@@ -134,7 +146,8 @@ function PositionPanel(): JSX.Element {
   const coordHex = useCyberspace((s) => s.coordHex())
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
-  const [viewText, setViewText] = useState('')
+  const viewText = useViewDraft((s) => s.text)
+  const setViewText = useViewDraft((s) => s.setText)
   const [viewBad, setViewBad] = useState(false)
   const [recent, setRecent] = useState<RecentView[]>(() => loadRecent())
   const [recentOpen, setRecentOpen] = useState(false)
@@ -147,9 +160,6 @@ function PositionPanel(): JSX.Element {
   }, [])
   const [finding, setFinding] = useState(false)
   const [viewNote, setViewNote] = useState<string | null>(null)
-  // In BUILD mode VIEW is how the build cursor jumps: the mode rides the free
-  // view VIEW starts, so the cursor lands on the place typed (useBuilder).
-  const building = useBuilder((s) => s.active)
   const look = (typed: string, target: ViewTarget): void => {
     useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
     // A place on Earth gets the pin: marking the focal point is the whole
@@ -244,7 +254,6 @@ function PositionPanel(): JSX.Element {
           />
           <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
         </form>
-        {building && <p className="viewat__build">Build mode is on: VIEW moves the build cursor to this place, and RECENT does the same. Your avatar stays where it is.</p>}
         {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
           <div className="viewat__recent">
@@ -385,8 +394,8 @@ function Controls(): JSX.Element {
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
     ['H', 'hyperspace line scrubber'],
-    ['[ / ]', 'chain explorer: back / forward one action'],
-    ['Home / End', 'chain explorer: spawn / live head'],
+    ['[ / ]', 'chain explorer: back / forward one action (building: the build cursor goes to it)'],
+    ['Home / End', 'chain explorer: spawn / live head (building: the same)'],
   ]
 
   return (
@@ -419,10 +428,17 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // the proof panel is the thing you are watching, so it takes the first
   // position and HOSAKA falls in behind it rather than above it.
   const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
+  // BUILD mode puts the Position panel first, above even a move under way
+  // (arkinox, 2026-10-08): its VIEW, RECENT and starred places are how the
+  // build cursor jumps. The left column comes first on a phone too, where
+  // the columns stack, so it is the first panel on both. Back in its own
+  // place on exit.
+  const building = useBuilder((s) => s.active)
   return (
     <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
       <div className="hud__col hud__col--left">
         <Brand />
+        {building && <PositionPanel />}
         {proofLeads && <ProofPanel />}
         {cloudLeads && <CloudPanel />}
         {rideSet && <HyperspacePanel />}
@@ -435,7 +451,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       </div>
       <div className="hud__col hud__col--right">
         <ScalePanel />
-        <PositionPanel />
+        {!building && <PositionPanel />}
         {!proofLeads && <ProofPanel />}
         {!cloudLeads && <CloudPanel />}
         <ChainPanel />

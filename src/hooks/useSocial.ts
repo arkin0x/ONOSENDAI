@@ -36,6 +36,7 @@ export function useReactions(target: SocialTarget | null, alsoTell: string[] = [
   const [error, setError] = useState<string | null>(null)
   const id = target?.id ?? null
   const author = target?.pubkey ?? null
+  const address = target?.address ?? null
 
   useEffect(() => {
     if (!id || !author) { setEvents([]); return }
@@ -44,7 +45,12 @@ export function useReactions(target: SocialTarget | null, alsoTell: string[] = [
     void (async () => {
       try {
         const relays = await relaysFor([author])
-        const reactions = await queryAny(relays, { kinds: [REACTION_KIND], '#e': [id], limit: 500 })
+        // By id, and by address for an addressable target (one tag filter each).
+        const [byId, byAddress] = await Promise.all([
+          queryAny(relays, { kinds: [REACTION_KIND], '#e': [id], limit: 500 }),
+          address ? queryAny(relays, { kinds: [REACTION_KIND], '#a': [address], limit: 500 }) : Promise.resolve([]),
+        ])
+        const reactions = [...new Map([...byId, ...byAddress].map((r) => [r.id, r])).values()]
         const ids = reactions.map((r) => r.id)
         const deletions = ids.length ? await queryAny(relays, { kinds: [5], '#e': ids, limit: 500 }) : []
         if (alive) setEvents([...reactions, ...deletions])
@@ -55,10 +61,10 @@ export function useReactions(target: SocialTarget | null, alsoTell: string[] = [
       }
     })()
     return () => { alive = false }
-  }, [id, author])
+  }, [id, author, address])
 
   const authorOf = new Map(events.filter((e) => e.kind === REACTION_KIND).map((e) => [e.id, e.pubkey]))
-  const groups = id ? groupReactions(events, id, deletedBy(events, authorOf)) : []
+  const groups = id ? groupReactions(events, id, deletedBy(events, authorOf), address ?? undefined) : []
 
   const toggle = useCallback(async (content: string): Promise<void> => {
     if (!target) return

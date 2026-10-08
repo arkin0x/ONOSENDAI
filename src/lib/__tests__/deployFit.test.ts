@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { TICKS_PER_UNIT } from 'sno-core/shards'
-import { fitHeight, fitsAt, reachGibsons, reachTicks } from '../deployFit'
+import { fitCause, fitHeight, fitsAt, reachGibsons, reachTicks, sizeHeight } from '../deployFit'
 import { deployPoint, type Position } from '../space'
 
 const T = TICKS_PER_UNIT
@@ -52,5 +52,36 @@ describe('fitHeight', () => {
 
   it('a region can never reach below zero on an axis', () => {
     expect(fitsAt(at(3n), 5n, 10)).toBe(false)
+  })
+})
+
+describe('fitCause: size or place', () => {
+  // About 2^10 across: reach is sqrt(3) * 4 units of 2^7 gibsons, 887 gibsons.
+  const model = cube(4)
+  const unit = 7
+  const inside = (3n << 20n) + (1n << 10n)
+
+  it('the size alone asks for a small height', () => {
+    expect(sizeHeight(model, unit)).toBe(11)
+    expect(sizeHeight({ vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }], parts: undefined }, 0)).toBe(0)
+    const h = fitHeight(model, unit, at(inside, inside, inside), 0, 0, 40)
+    expect(h).toBe(11)
+    expect(fitCause(model, unit, h, 40)).toBe('size')
+  })
+
+  it('one gibson past a 2^30 boundary the fit jumps to 31, and the cause is the edge, not the size', () => {
+    const h = fitHeight(model, unit, at((1n << 30n) + 1n, inside, inside), 0, 0, 40)
+    expect(h).toBe(31)
+    expect(fitCause(model, unit, h, 40)).toBe('edge')
+  })
+
+  it('next to coordinate 0 nothing fits, and that is the place too', () => {
+    const h = fitHeight(model, unit, at(3n, inside, inside), 0, 0, 40)
+    expect(h).toBeNull()
+    expect(fitCause(model, unit, h, 40)).toBe('edge')
+  })
+
+  it('a model larger than any region up to the ceiling is the size', () => {
+    expect(fitCause(cube(8), 20, fitHeight(cube(8), 20, at(1000n), 0, 0, 12), 12)).toBe('size')
   })
 })

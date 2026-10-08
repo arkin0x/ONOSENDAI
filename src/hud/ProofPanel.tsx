@@ -19,6 +19,13 @@ import { formatMs, formatOps } from '../lib/space'
 import { BROKEN_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
 import { useBrokenChain } from './BrokenChain'
 import { useChainUi } from '../store/useChainUi'
+import { useLayers, type SceneLayer } from '../store/useLayers'
+
+/** The scene layers this panel can turn off: [layer, label, tooltip]. */
+const LAYER_TOGGLES: Array<[SceneLayer, string, string]> = [
+  ['dots', 'DOTS', 'Gibson dot grid'],
+  ['boxes', 'hX BOXES', 'hX concentric boxes'],
+]
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
   ['single', 'SINGLE ACTION', 'One action per press'],
@@ -56,6 +63,7 @@ export function ProofPanel(): JSX.Element {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
+  const layers = useLayers((s) => s)
   const heldCount = useSecrets((s) => Object.keys(s.keys).length)
   // In the store, so RETURN from a region can bring the list back.
   const secrets = useSecrets((s) => s.open)
@@ -293,6 +301,21 @@ export function ProofPanel(): JSX.Element {
         that you do not attain the cantor root of the region you enter, so you
         cannot decrypt the region's contents if anything is hidden there.
       </Explanation>
+
+      {/* View only: hiding a layer changes no proof, move or cursor. */}
+      <div className="proof__layers" role="group" aria-label="Scene layers">
+        {LAYER_TOGGLES.map(([layer, label, title]) => (
+          <button
+            key={layer}
+            type="button"
+            role="switch"
+            aria-checked={layers[layer]}
+            title={title}
+            className={`secret__act cloud__mode ${layers[layer] ? 'is-on' : ''}`}
+            onClick={() => useLayers.getState().toggleLayer(layer)}
+          >{label}</button>
+        ))}
+      </div>
     </section>
   )
 }

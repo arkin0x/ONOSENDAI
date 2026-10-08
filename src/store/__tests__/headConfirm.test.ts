@@ -99,15 +99,28 @@ describe('a move is signed only from a head the relays confirm', () => {
     expect(posted).toHaveLength(1)
   })
 
-  it('a quick proof is signed on the commit\'s own confirmation, without asking again', async () => {
+  it('even a proof that took 5 ms asks the relays again immediately before it is signed: no confirmation is reused (arkinox, 2026-10-08)', async () => {
     S().moveCursor(moveDirection(S().axes(), 'right'))
     const head = S().prevEventId
     const events = S().events.length
     await S().commit()
     expect(posted).toHaveLength(1)
-    await S().applyProofMessage(done(5, head))
     expect(relay.asked).toBe(1)
+    await S().applyProofMessage(done(5, head))
+    expect(relay.asked).toBe(2)
     expect(S().events).toHaveLength(events + 1)
+  })
+
+  it('a relay that holds another device\'s newer move: it is adopted and the move refused', async () => {
+    const s = S()
+    const head = s.events[s.events.length - 1]
+    const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to: { ...s.position, z: s.position.z + 4n }, plane: s.headPlane, proofHash: '0'.repeat(64) }))
+    relay.answers = [[theirs]]
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    expect(posted).toEqual([])
+    expect(S().prevEventId).toBe(theirs.id)
+    expect(S().proof.message).toBe('Another device moved you. Re-aim from where you are now.')
   })
 
   it('a long proof asks again before signing, and signs nothing when the relay cannot answer', async () => {

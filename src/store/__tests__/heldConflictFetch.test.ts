@@ -27,7 +27,6 @@ import type { Filter } from 'nostr-tools/filter'
 import type { NostrEvent } from '../../lib/events'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 
-const CANONICAL = 'wss://cyberspace.nostr1.com'
 /** What the one relay holds; it answers three events at a time, newest first. */
 let held: NostrEvent[] = []
 function answer(f: Filter): NostrEvent[] {
@@ -44,7 +43,7 @@ function answer(f: Filter): NostrEvent[] {
 vi.mock('../../lib/relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/relay')>()),
   query: async (f: Filter) => answer(f),
-  queryEach: async (f: Filter): Promise<RelayAnswer[]> => [{ url: CANONICAL, outcome: 'answered', events: answer(f) }],
+  queryEach: async (f: Filter): Promise<RelayAnswer[]> => [{ url: (await import('../useRelays')).DEFAULT_RELAY, outcome: 'answered', events: answer(f) }],
   subscribe: () => () => {},
 }))
 
@@ -54,6 +53,7 @@ import { askChainEvents } from '../../lib/chains'
 import { decideSelfCheck, summarizeChain } from '../../lib/chainHold'
 import { hopEvent } from '../../lib/__tests__/chainFixtures'
 import { useCyberspace } from '../useCyberspace'
+import { DEFAULT_RELAY as CANONICAL } from '../useRelays'
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)

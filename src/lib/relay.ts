@@ -1,8 +1,8 @@
 /**
  * relay.ts — the relays this client talks to, and how.
  *
- * The set is user-configurable (see the relays store); cyberspace.nostr1.com is
- * the default and is always in it. A single pool, created on first use so a
+ * The set is user-configurable (see the relays store); the canonical relay
+ * (useRelays DEFAULT_RELAY) is the default and is always in it. A single pool, created on first use so a
  * page that never goes live never opens a socket, and shared by publishing,
  * lookups and subscriptions so they ride the same connections.
  *
@@ -23,7 +23,7 @@ import { classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
 import { useCyberspace } from '../store/useCyberspace'
 
-/** The default relay, always present; kept here so panels can name it. */
+/** The canonical relay, always present: useRelays DEFAULT_RELAY itself, re-exported so the network code and the panels can name it. */
 export const CYBERSPACE_RELAY = DEFAULT_RELAY
 
 /** How long a publish or a one-shot query waits before giving up. */
@@ -119,7 +119,8 @@ export function relaySet(): string[] {
   return currentRelays()
 }
 
-export type PublishResult = { ok: true } | { ok: false; reason: string }
+/** `accepted`, when known: the relays that took the event (normalized URLs). */
+export type PublishResult = { ok: true; accepted?: string[] } | { ok: false; reason: string }
 
 /** A relay's own refusal (NIP-01 OK false prefixes): asking again would get the same answer. */
 const REFUSED = /^(blocked|invalid|duplicate|pow|rate-limited|restricted|error)\b/i
@@ -153,7 +154,8 @@ async function publishOnce(relays: string[], event: NostrEvent): Promise<Publish
     r.status === 'rejected'
       ? String(r.reason?.message ?? r.reason)
       : String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
-  if (results.some((r) => failed(r) === null)) return { ok: true }
+  const accepted = relays.filter((_, i) => results[i] !== undefined && failed(results[i]) === null).map((r) => normalizeURL(r))
+  if (accepted.length > 0) return { ok: true, accepted }
   const reason = results.map(failed).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }
 }
@@ -366,6 +368,45 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
       }
     },
   }
+}
+
+/**
+ * Ask several relays at once, each on its own (its own connection, its own
+ * auth, its own deadline), and settle without waiting on the slow ones: when
+ * every relay has answered, or `graceMs` after `primary` answered, or at the
+ * deadline, whichever comes first. A relay that has not answered by then
+ * reads as unreachable ("no answer in time"). One dead or hung relay used to
+ * hold every question until it gave up; here it only fails to count.
+ */
+export function queryEachSettled(relays: string[], filter: Filter, maxWait: number, primary: string, graceMs: number): Promise<RelayAnswer[]> {
+  const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
+  const main = normalizeURL(primary)
+  const deadline = Date.now() + maxWait
+  const answers = new Map<string, RelayAnswer>()
+  return new Promise((resolve) => {
+    let settled = false
+    let grace: ReturnType<typeof setTimeout> | undefined
+    const settle = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(backstop)
+      clearTimeout(grace)
+      resolve(urls.map((url) => answers.get(url) ?? { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }))
+    }
+    const backstop = setTimeout(settle, maxWait + 50)
+    for (const url of urls) {
+      const left = (): number => Math.max(0, deadline - Date.now())
+      // Each relay authenticates inside its own time, so one that is slow to
+      // connect or whose signer is slow to answer holds nobody else.
+      void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
+        .then(() => askOne(url, filter, deadline))
+        .then((answer) => {
+          answers.set(url, answer)
+          if (answers.size === urls.length) settle()
+          else if (url === main && answer.outcome === 'answered' && grace === undefined) grace = setTimeout(settle, graceMs)
+        })
+    }
+  })
 }
 
 /** How long a general relay that refused a connection is left alone. */

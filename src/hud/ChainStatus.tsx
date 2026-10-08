@@ -62,11 +62,12 @@ export function useChainStatus(): ChainStatus | null {
   const conflict = useCyberspace((s) => s.chainConflict?.kind ?? null)
   const events = useCyberspace((s) => s.events)
   const published = useCyberspace((s) => s.published)
+  const canonicalLate = useCyberspace((s) => s.canonicalLate)
   const { online, relayUp } = useConnectivity()
   return useMemo(() => {
     const waiting = events.filter((e) => published[e.id] !== 'ok').length
-    return chainStatusOf({ live, held, conflict, waiting, online, relayUp })
-  }, [live, held, conflict, events, published, online, relayUp])
+    return chainStatusOf({ live, held, conflict, waiting, online, relayUp, canonicalLate })
+  }, [live, held, conflict, events, published, online, relayUp, canonicalLate])
 }
 
 /** The strip itself. Rendered by TouchControls directly under the switch. */
@@ -236,6 +237,20 @@ export function ChainStatusModal(): JSX.Element | null {
         cancelLabel="CLOSE"
         danger={false}
         onConfirm={() => { close(); useChainUi.getState().setPromptAside(false) }}
+        onCancel={close}
+      />
+    )
+  }
+  if (status.kind === 'canonical') {
+    return (
+      <ConfirmModal
+        title={`${status.count} action${status.count === 1 ? '' : 's'} not on ${DEFAULT_RELAY} yet`}
+        cardClassName="chainexplain"
+        body={<p>Published to your other relays; {DEFAULT_RELAY}, where every device looks, has not taken {status.count === 1 ? 'it' : 'them'} yet, and ONOSENDAI keeps trying.</p>}
+        confirmLabel="UNDERSTOOD"
+        cancelLabel={null}
+        danger={false}
+        onConfirm={close}
         onCancel={close}
       />
     )

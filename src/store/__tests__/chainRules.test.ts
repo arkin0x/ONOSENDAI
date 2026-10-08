@@ -249,16 +249,16 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     expect(S().prevEventId).toBe(enter.id)
   })
 
-  it('S1: a game entry delivered while the proof computes is held, folded before signing, and refuses the hop', async () => {
+  it('S1: a game entry delivered while the proof computes stops it at once, is folded, and the hop is refused (arkinox, 2026-10-08)', async () => {
     computing()
     const before = S().prevEventId
     const { enter } = enterGame()
     S().adoptChain([enter])
-    // Held back, not dropped: the head does not move under the proof.
-    expect(S().prevEventId).toBe(before)
-    await S().applyProofMessage(doneFromHead({ prevEventId: before }))
+    // The live feed is the early warning: the proof stops now, not at its end.
     expect(S().prevEventId).toBe(enter.id)
     expect(S().proof).toMatchObject({ status: 'infeasible', message: GAME_HOLDS_MESSAGE })
+    // A finish already on its way signs nothing.
+    await S().applyProofMessage(doneFromHead({ prevEventId: before }))
     expect(S().events[S().events.length - 1].id).toBe(enter.id)
   })
 
@@ -283,13 +283,16 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     expect(S().events[S().events.length - 1].id).toBe(theirs.id)
   })
 
-  it('what arrived while computing is folded when the proof ends any other way', () => {
+  it('another device\'s move delivered while computing is folded at once and stops the proof; an echo of what this device holds is only held', () => {
     computing()
+    const echo = S().events[S().events.length - 1]
+    S().adoptChain([echo])
+    expect(S().proof.status).toBe('computing')
     const theirs = theirHop()
     S().adoptChain([theirs])
-    expect(S().prevEventId).not.toBe(theirs.id)
-    useCyberspace.setState({ proof: { ...S().proof, status: 'idle' } })
     expect(S().prevEventId).toBe(theirs.id)
+    expect(S().proof.status).toBe('infeasible')
+    expect(S().proof.message).toMatch(/^Your chain moved while this proof waited to be signed/)
   })
 
   it('an event delivered while a remote signer thinks is folded before the signed event joins: it is discarded, not published', async () => {
@@ -307,7 +310,7 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     expect(S().proof.message).toMatch(/^Your chain moved while this proof waited to be signed/)
   })
 
-  it('a stale proof resumed and dropped leaves no fresh look armed for the next signing', async () => {
+  it('every signing looks at the relays, even a short local proof after a stale one was resumed and dropped (arkinox, 2026-10-08)', async () => {
     const stale = doneFromHead({ id: 999 })
     const plan = {
       target: S().position, ceilings: {}, summary: {}, done: 0,
@@ -318,17 +321,15 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     S().resumePlan()
     await new Promise((r) => setTimeout(r, 0))
     useCyberspace.setState({ plan: null })
-    // A short local proof takes no look: a game entry the relays hold but the
-    // live feed never delivered is not seen, and the hop is signed.
+    // No confirmation is reused: a game entry the relays hold but the live
+    // feed never delivered is found before signing, and nothing is signed.
     const { enter } = enterGame()
     relayHolds = [enter]
     computing()
-    const before = S().prevEventId
     await S().applyProofMessage(doneFromHead())
     const last = S().events[S().events.length - 1]
-    expect(tagOf(last, 'A')).toBe('hop')
-    expect(tagOf(last, 'e', 'previous')).toBe(before)
-    expect(S().proof.status).toBe('done')
+    expect(last.id).toBe(enter.id)
+    expect(S().proof).toMatchObject({ status: 'infeasible', message: GAME_HOLDS_MESSAGE })
   })
 
   it('an event the live feed delivers while the fresh look is out is folded before signing', async () => {

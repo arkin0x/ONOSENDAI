@@ -25,8 +25,8 @@ describe('normalizeRelay', () => {
     expect(normalizeRelay('wss://has space.com')).toBeNull()
   })
 
-  it('has cyberspace.nostr1.com as the default', () => {
-    expect(DEFAULT_RELAY).toBe('wss://cyberspace.nostr1.com')
+  it('has one canonical relay as the default: a wss:// address, already normalized', () => {
+    expect(DEFAULT_RELAY).toMatch(/^wss:\/\/[a-z0-9.-]+$/)
     expect(normalizeRelay(DEFAULT_RELAY)).toBe(DEFAULT_RELAY)
   })
 })

@@ -25,7 +25,7 @@
  * | the canonical relay refused | unknown: refused, with its reason |
  * | the canonical relay did not answer | unknown: unreachable |
  *
- * Only the canonical relay (wss://cyberspace.nostr1.com, always in the set)
+ * Only the canonical relay (useRelays DEFAULT_RELAY, always in the set)
  * can say "none", because it is where every chain is published; a private
  * relay that answers "nothing" only knows about itself.
  *
@@ -130,6 +130,8 @@ export interface StatusFacts {
   online: boolean
   /** Any configured relay connected, as far as the pool knows. */
   relayUp: boolean
+  /** Published actions the canonical relay has not taken for a while (store canonicalLate); absent is none. */
+  canonicalLate?: number
 }
 
 /**
@@ -155,6 +157,7 @@ export type ChainStatus =
   | { kind: 'diverged' }
   | { kind: 'held' }
   | { kind: 'waiting'; count: number; why: 'offline' | 'no-relay' }
+  | { kind: 'canonical'; count: number }
 
 export function chainStatusOf(f: StatusFacts): ChainStatus | null {
   if (f.conflict === 'held') return { kind: 'conflict' }
@@ -162,6 +165,7 @@ export function chainStatusOf(f: StatusFacts): ChainStatus | null {
   if (f.held) return { kind: 'held' }
   if (f.live && f.waiting > 0 && !f.online) return { kind: 'waiting', count: f.waiting, why: 'offline' }
   if (f.live && f.waiting > 0 && !f.relayUp) return { kind: 'waiting', count: f.waiting, why: 'no-relay' }
+  if ((f.canonicalLate ?? 0) > 0) return { kind: 'canonical', count: f.canonicalLate! }
   return null
 }
 
@@ -176,6 +180,7 @@ export function chainStatusLabel(status: ChainStatus, check: SelfCheck | null): 
       return check.cause.kind === 'offline' ? 'HELD · OFFLINE' : check.cause.kind === 'refused' ? 'HELD · RELAY REFUSED' : 'HELD · NO ANSWER'
     }
     case 'waiting': return `${status.count} WAITING · ${status.why === 'offline' ? 'OFFLINE' : 'NO RELAY'}`
+    case 'canonical': return `${status.count} NOT ON THE MAIN RELAY YET`
   }
 }
 

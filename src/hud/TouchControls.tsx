@@ -26,6 +26,7 @@ import { useState } from 'react'
 import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
+import { DEFAULT_RELAY } from '../store/useRelays'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
@@ -240,7 +241,7 @@ export function TouchControls(): JSX.Element {
           <button
             className={`touchmode__opt ${live ? 'is-on' : ''}`}
             aria-pressed={live}
-            title="Live: your next action publishes it and the whole chain behind it to cyberspace.nostr1.com"
+            title={`Live: your next action publishes it and the whole chain behind it to ${DEFAULT_RELAY.replace(/^wss:\/\//, '')}`}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!live) setGoLive(true) }}
           >LIVE</button>

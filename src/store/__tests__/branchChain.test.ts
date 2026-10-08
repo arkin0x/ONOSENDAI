@@ -28,7 +28,7 @@ vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: () => Promise.resolve(relayHas.events),
   confirmChainEvents: () => Promise.resolve(relayHas.down ? null : relayHas.events),
-  askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: relayHas.down ? 'unreachable' as const : 'answered' as const, reason: 'down', events: relayHas.down ? [] : relayHas.events }]),
+  askChainEvents: async () => ([{ url: (await import('../useRelays')).DEFAULT_RELAY, outcome: relayHas.down ? 'unreachable' as const : 'answered' as const, reason: 'down', events: relayHas.down ? [] : relayHas.events }]),
 }))
 
 import { ACTION_KIND, type NostrEvent } from '../../lib/events'

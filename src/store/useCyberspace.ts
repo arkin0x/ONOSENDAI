@@ -233,14 +233,6 @@ export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the pl
  */
 const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
 
-/**
- * Proofs that ran this long, were computed by HOSAKA, or waited on a
- * declined signature get a fresh look at the relays before they are signed:
- * the world had time to move. A shorter local proof relies on the live
- * subscription, whose events are held back while it computes and folded in
- * before signing (adoptChain).
- */
-const FRESH_LOOK_AFTER_MS = 10_000
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
@@ -664,6 +656,12 @@ export interface CyberspaceState {
   published: Record<string, PublishStatus>
   /** The relay's last refusal, for the panel. */
   publishError: string | null
+  /**
+   * How many published actions the canonical relay has not taken after
+   * CANONICAL_LATE_MS, while another relay has (lib/publisher.ts keeps
+   * asking it). Zero almost always; the status strip says so when it is not.
+   */
+  canonicalLate: number
   /** Live publishes the chain as it grows; Local keeps it here. */
   live: boolean
   chain: ChainStats
@@ -1302,17 +1300,6 @@ export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
 export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
 /** How many times a move asks before it refuses. */
 const HEAD_CONFIRM_TRIES = 2
-/**
- * How long a confirmation stands for the same head: a move confirmed when it
- * was committed is not asked about again when a quick proof finishes.
- */
-const HEAD_CONFIRMED_FOR_MS = 3000
-let headConfirmed: { pubkey: string; head: string; at: number } | null = null
-
-/** A head this device just made and nothing can follow yet: a spawn it signed, or a head the relays just confirmed. */
-function markHeadConfirmed(pubkey: string, head: string): void {
-  headConfirmed = { pubkey, head, at: Date.now() }
-}
 
 /**
  * Another tab of this browser moved you: its saves land in the same storage.
@@ -1372,8 +1359,9 @@ async function confirmHead(retrying: () => void): Promise<string | null> {
   const cut = await signaturesChecked(pubkey)
   if (cut) return cut
   foldOtherTabs(pubkey)
-  const s = useCyberspace.getState()
-  if (headConfirmed && headConfirmed.pubkey === pubkey && headConfirmed.head === s.prevEventId && Date.now() - headConfirmed.at < HEAD_CONFIRMED_FOR_MS) return null
+  // No confirmation is reused, however recent (arkinox, 2026-10-08): another
+  // device can move in the second between two looks, and only a fresh answer
+  // makes the relay's silence mean "nothing newer".
   for (let i = 0; i < HEAD_CONFIRM_TRIES; i++) {
     if (i > 0) retrying()
     const now = useCyberspace.getState()
@@ -1386,7 +1374,6 @@ async function confirmHead(retrying: () => void): Promise<string | null> {
     if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
       foldNow(got)
-      markHeadConfirmed(pubkey, useCyberspace.getState().prevEventId)
       return null
     }
   }
@@ -1644,8 +1631,6 @@ let requestId = 0
 let deferred: NostrEvent[] = []
 /** True while foldDeferred or a signing look folds: adoptChain then folds even mid-proof. */
 let folding = false
-/** Set by RESUME on a kept proof: the signing that follows takes a fresh look first. */
-let signingResumed = false
 
 /** Fold `events` into your chain now, even while a proof is computing. */
 function foldNow(events: NostrEvent[]): void {
@@ -1771,6 +1756,27 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * this machine computes it, and on RESUME when HOSAKA would, because that
    * costs sats again. A single move keeps its aim for the next commit.
    */
+  /**
+   * The live feed brought another device's move while a proof computed: the
+   * proof is bound to a head that is no longer the head, so it stops now,
+   * what arrived is folded, and the reason is said: a game that holds the
+   * avatar, a choice between two chains, or the head that moved.
+   */
+  const stopForNewHead = (beforeHead: string): void => {
+    // The worker is stopped; a finish already on its way is refused by
+    // finishProof itself, whose head no longer matches.
+    cancelProof()
+    set({ proof: { ...IDLE_PROOF } })
+    foldDeferred()
+    const reason = whyNoMove(get().actions()) ?? (get().chainConflict ? CHOOSE_FIRST_MESSAGE : null)
+    if (reason) {
+      const { plan } = get()
+      set({ pendingTarget: null, plan: plan ? { ...plan, status: 'failed', message: reason, awaiting: null } : null, proof: { ...IDLE_PROOF, status: 'infeasible', message: reason } })
+      return
+    }
+    if (get().prevEventId !== beforeHead) headMovedUnder()
+  }
+
   const headMovedUnder = (): void => {
     const { plan, position } = get()
     if (!plan) {
@@ -2332,6 +2338,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   viewHistory: [],
   proof: IDLE_PROOF,
   publishError: null,
+  canonicalLate: 0,
   live: loadLive(),
   forkNotice: null,
   selfCheck: { pubkey: pubkeyHex, status: 'checking' },
@@ -2508,7 +2515,6 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         let spawn: NostrEvent
         try {
           spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
-          markHeadConfirmed(pubkey, spawn.id)
         } catch (err) {
           set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
           return
@@ -2658,7 +2664,6 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (plan.awaiting) {
       const msg = plan.awaiting
       set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
-      signingResumed = true
       void get().finishProof(msg)
       return
     }
@@ -2783,21 +2788,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   finishProof: async (msg) => {
-    // Read and cleared before anything can return, so a stale proof never
-    // leaves a RESUME's fresh look armed for the next signing.
-    const resumed = signingResumed
-    signingResumed = false
     if (msg.type !== 'done' || msg.id !== requestId) return
 
-    // The chain as it stands now, not as it stood when the proof started.
-    // Relay events held back while it computed are folded first; a proof that
-    // ran long, was paid for, or waited on a declined signature also takes
-    // the same bounded look at the relays a commit takes before computing.
+    // The chain as it stands now, not as it stood when the proof started:
+    // relay events held back while it computed are folded first. What the
+    // live feed brought already refuses, with no look at the relays needed.
     foldDeferred()
-    // The head is confirmed again before signing, unless the commit's own
-    // confirmation is still fresh for this head (HEAD_CONFIRMED_FOR_MS). A
-    // resumed, paid or long proof always asks.
-    if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) headConfirmed = null
+    const refusedBefore = whyNoMove(get().actions())
+    if (refusedBefore) { refuseSigning(msg, refusedBefore, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
+    // Then the head is confirmed immediately before signing, every time
+    // (arkinox, 2026-10-08): a silent feed is no proof that nothing moved,
+    // since a half-open socket is silent too.
     const unconfirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
     if (msg.id !== requestId) return
     if (unconfirmed) { refuseSigning(msg, unconfirmed, true); return }
@@ -3021,7 +3024,6 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
     }
     const fresh = derive({ ...signed, held: keepHeld })
-    markHeadConfirmed(identity.pubkey, fresh.prevEventId)
     // The old chain's signature check is about a chain that is gone: nothing
     // waits on it any more (review of #242).
     sigCheck = null
@@ -3554,9 +3556,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     // A local commit owns the head while it computes; a relay echo must not
-    // race it. What arrives is held back, not dropped (foldDeferred).
+    // race it. What arrives is held back, not dropped (foldDeferred). But a
+    // move another device made from this head dooms the proof, which is bound
+    // to the head it started from: it is stopped now, not finished and then
+    // refused (arkinox, 2026-10-08: the live feed is the early warning).
     if (cur.proof.status === 'computing' && !folding) {
       deferred = deferred.concat(mine)
+      const have = new Set(cur.events.map((e) => e.id))
+      const fresh = mine.filter((e) => !have.has(e.id))
+      // A HOSAKA job has its own flow and its own cancel (cancelCloud); its
+      // result is refused at signing like any other (finishProof).
+      if (fresh.length === 0 || cur.cloud.status !== 'idle') return
+      const order = buildChain(cur.events.concat(fresh), me)
+      const head = order[order.length - 1]
+      if (order.length > 0 && head.id === cur.prevEventId && order[0].fork === undefined) return
+      stopForNewHead(cur.prevEventId)
       return
     }
     // This device's unpublished moves fork against moves the relays already

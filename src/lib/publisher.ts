@@ -21,8 +21,10 @@
  * here to get out of sync with it.
  */
 
-import { publish } from './relay'
+import { normalizeURL } from 'nostr-tools/utils'
+import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
 import { confirmChainEvents } from './chains'
+import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestOnRelays, useCyberspace } from '../store/useCyberspace'
 
@@ -108,6 +110,10 @@ async function pump(): Promise<void> {
   // no longer in the chain is dropped by setPublishStatus itself.
   const now = useCyberspace.getState()
   if (result.ok) {
+    // Published once any relay took it (arkinox's ruling of 2026-10-08,
+    // option B). The canonical relay is where every other device looks, so
+    // when it was not among them it is asked again in the background.
+    if (result.accepted && !result.accepted.includes(CANONICAL)) awaitCanonical(next)
     now.setPublishStatus(next.id, 'ok')
     backoff = RETRY_MS
     lastFailed = false
@@ -120,6 +126,48 @@ async function pump(): Promise<void> {
   backlogChecked = false
   if (!maySend(now, released)) return
   retryLater()
+}
+
+/** The canonical relay, as publish results name relays. */
+const CANONICAL = normalizeURL(CYBERSPACE_RELAY)
+/** First wait before the canonical relay is asked again; doubles up to the cap. */
+const CANONICAL_RETRY_MS = 5_000
+/** After this long without the canonical relay, the status strip says so. */
+export const CANONICAL_LATE_MS = 60_000
+
+/** Events another relay took and the canonical relay has not, with when they were first sent. */
+const notOnCanonical = new Map<string, { event: NostrEvent; since: number }>()
+let canonicalHandle: ReturnType<typeof setTimeout> | null = null
+let canonicalBackoff = CANONICAL_RETRY_MS
+
+/** How many of them have waited past CANONICAL_LATE_MS, for the status strip. */
+function reportCanonicalLate(): void {
+  const now = Date.now()
+  let late = 0
+  for (const { since } of notOnCanonical.values()) if (now - since >= CANONICAL_LATE_MS) late++
+  if (useCyberspace.getState().canonicalLate !== late) useCyberspace.setState({ canonicalLate: late })
+}
+
+/** Keep asking the canonical relay to take `event` until it does. */
+function awaitCanonical(event: NostrEvent): void {
+  if (!notOnCanonical.has(event.id)) notOnCanonical.set(event.id, { event, since: Date.now() })
+  if (canonicalHandle === null) canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
+}
+
+async function retryCanonical(): Promise<void> {
+  canonicalHandle = null
+  const ids = new Set(useCyberspace.getState().events.map((e) => e.id))
+  for (const [id, { event }] of [...notOnCanonical]) {
+    // An event no longer on this device's chain (a respawn, another chain
+    // kept) is not worth sending.
+    if (!ids.has(id)) { notOnCanonical.delete(id); continue }
+    const result = await publishMany([CANONICAL], event)
+    if (result.ok) notOnCanonical.delete(id)
+  }
+  reportCanonicalLate()
+  if (notOnCanonical.size === 0) { canonicalBackoff = CANONICAL_RETRY_MS; return }
+  canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS)
+  canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
 }
 
 /** Idempotent. Subscribes once for the life of the page. */

@@ -22,6 +22,7 @@ import {
   jsonWithBigints,
   moveBody,
   regionKeyBody,
+  regionKeyIdentity,
   type HosakaDeposit,
   type HosakaJob,
   SIGN_TIMEOUT_MS, keysPending } from '../hosaka'
@@ -370,7 +371,9 @@ describe('polling', () => {
  * for a retry. `loseNext` makes the next answer vanish after the job was made,
  * which is exactly the case that used to charge twice.
  */
-function idempotentServer(opts: { advertise?: boolean } = {}) {
+function idempotentServer(opts: { advertise?: boolean; echo?: boolean; dedupe?: boolean } = {}) {
+  let advertise = opts.advertise !== false
+  let providerDown = 0
   const jobs = new Map<string, HosakaJob>()
   let debits = 0
   let made = 0
@@ -381,16 +384,22 @@ function idempotentServer(opts: { advertise?: boolean } = {}) {
     const authId = decodeToken(call.headers.authorization).id
     const key = body.idempotency_key ?? `none-${authId}`
     submitted.push({ key, authId })
-    const existing = jobs.get(key)
-    if (existing) return { status: 200, body: { ...existing, idempotency_key: key, idempotent_replay: true } }
+    // A server without keys (an older build, a rollback) makes a job every time and echoes nothing.
+    const dedupe = opts.dedupe !== false
+    const echoed = opts.echo === false || !dedupe ? {} : { idempotency_key: key }
+    const existing = dedupe ? jobs.get(key) : undefined
+    if (existing) return { status: 200, body: { ...existing, ...echoed, idempotent_replay: true } }
     made++
     debits++
     const job: HosakaJob = { id: `job-${made}`, status: 'computing', cost_msats: 1000, poll_token: `tok-${made}`, result: null, error: null, payment_required: false, balance_debited: true }
-    jobs.set(key, job)
-    return { status: 201, body: { ...job, idempotency_key: key, idempotent_replay: false } }
+    jobs.set(dedupe ? key : `${key}-${made}`, job)
+    return { status: 201, body: { ...job, ...echoed, ...(dedupe ? { idempotent_replay: false } : {}) } }
   }
   const routes: Record<string, Handler> = {
-    'GET /api/v1/provider': () => ({ body: { version: 1, name: 'HOSAKA', ...(opts.advertise === false ? {} : { idempotency: { header: 'Idempotency-Key', body_field: 'idempotency_key', retention_seconds: 86400 } }) } }),
+    'GET /api/v1/provider': () => {
+      if (providerDown > 0) { providerDown--; throw new TypeError('Failed to fetch') }
+      return { body: { version: 1, name: 'HOSAKA', ...(advertise ? { idempotency: { header: 'Idempotency-Key', body_field: 'idempotency_key', retention_seconds: 86400 } } : {}) } }
+    },
   }
   for (const action of ['hop', 'sidestep', 'region_key']) {
     routes[`POST /api/v1/${action}`] = (call) => {
@@ -406,8 +415,11 @@ function idempotentServer(opts: { advertise?: boolean } = {}) {
   return {
     fetch, calls, submitted,
     loseNext: (how: 'drop' | 502 = 'drop') => { loseNext = how },
+    advertise: (on: boolean) => { advertise = on },
+    providerDownFor: (reads: number) => { providerDown = reads },
     get jobCount() { return jobs.size },
     get debits() { return debits },
+    get made() { return made },
   }
 }
 
@@ -429,11 +441,25 @@ describe('idempotency keys', () => {
     ]
     expect(new Set([hop, ...others]).size).toBe(others.length + 1)
 
+    // A region key is its cube: two points inside one 2^13 cube are one key,
+    // the cube next door or another height is another.
     const cube = { x: 1n << 80n, y: 5n, z: 9n }
-    const key13 = idempotencyKeyFor('region_key', regionKeyBody(cube, 13))
-    expect(idempotencyKeyFor('region_key', regionKeyBody({ ...cube }, 13))).toBe(key13)
-    expect(idempotencyKeyFor('region_key', regionKeyBody(cube, 14))).not.toBe(key13)
-    expect(idempotencyKeyFor('region_key', regionKeyBody({ ...cube, z: 10n }, 13))).not.toBe(key13)
+    const key13 = idempotencyKeyFor('region_key', regionKeyIdentity(cube, 13))
+    expect(idempotencyKeyFor('region_key', regionKeyIdentity({ ...cube }, 13))).toBe(key13)
+    expect(idempotencyKeyFor('region_key', regionKeyIdentity({ x: cube.x + 8191n, y: 4000n, z: 0n }, 13))).toBe(key13)
+    expect(idempotencyKeyFor('region_key', regionKeyIdentity({ ...cube, x: cube.x + 8192n }, 13))).not.toBe(key13)
+    expect(idempotencyKeyFor('region_key', regionKeyIdentity(cube, 14))).not.toBe(key13)
+    expect(regionKeyBody(cube, 13)).toEqual({ x: cube.x.toString(), y: '5', z: '9', height: 13 }) // the body still names the point
+  })
+
+  it('the same cube bought from two points is one job and one debit', async () => {
+    const server = idempotentServer()
+    const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch })
+    const a = await c.submitRegionKey({ x: (1n << 20n) + 1n, y: 2n << 20n, z: 3n << 20n }, 14)
+    const b = await c.submitRegionKey({ x: (1n << 20n) + 2n, y: (2n << 20n) + 7n, z: 3n << 20n }, 14)
+    expect(b.id).toBe(a.id)
+    expect(server.debits).toBe(1)
+    expect(JSON.parse(server.calls[1].body!).x).toBe(((1n << 20n) + 2n).toString())
   })
 
   it('travels in the body, never as a header a provider might not allow', async () => {
@@ -506,14 +532,43 @@ describe('idempotency keys', () => {
     expect(server.debits).toBe(1)
   })
 
-  it('learns that keys are honored from a submit that echoed its key', async () => {
-    const server = idempotentServer({ advertise: false })
+  it('a server rolled back since the tab opened is not asked again: /provider is read fresh before a retry', async () => {
+    // The reviewer's case: the tab read /provider against the new build, then
+    // hosaka-api was rolled back to one without keys and the tab stayed open.
+    const server = idempotentServer({ dedupe: true })
     const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch, lostAnswerDelaysMs: NO_WAIT })
-    await c.submitHop(V1, V2, PREV)          // echoed: this provider dedupes
+    await c.provider!()
+    server.advertise(false)
     server.loseNext('drop')
-    const job = await c.submitHop(V1, V2, 'cd'.repeat(32))
-    expect(job.id).toBe('job-2')
-    expect(server.debits).toBe(2)
+    const err = await rejection(c.submitHop(V1, V2, PREV))
+    expect(err.code).toBe('network')
+    expect(server.submitted).toHaveLength(1)
+    expect(server.made).toBe(1)
+  })
+
+  it('a submit answered without its key echoed ends automatic retries, whatever /provider says', async () => {
+    // A server that ignores keys makes a second job for every retry; the
+    // answer it gave is the evidence, and a stale /provider cannot outvote it.
+    const server = idempotentServer({ dedupe: false })
+    const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch, lostAnswerDelaysMs: NO_WAIT })
+    await c.submitHop(V1, V2, PREV)          // answered, but no key came back
+    server.loseNext('drop')
+    const err = await rejection(c.submitHop(V1, V2, 'cd'.repeat(32)))
+    expect(err.code).toBe('network')
+    expect(server.made).toBe(2)               // the lost one, never a third
+    expect(server.calls.filter((x) => x.url.endsWith('/api/v1/provider'))).toHaveLength(0)
+  })
+
+  it('a /provider that cannot be read yet uses up one wait, and the next one retries', async () => {
+    const server = idempotentServer()
+    const c = createHosaka({ apiUrl: API, sign, fetch: server.fetch, lostAnswerDelaysMs: NO_WAIT })
+    server.loseNext('drop')
+    server.providerDownFor(1)
+    const job = await c.submitHop(V1, V2, PREV)
+    expect(job.id).toBe('job-1')
+    expect(job.idempotent_replay).toBe(true)
+    expect(server.debits).toBe(1)
+    expect(server.submitted).toHaveLength(2)
   })
 
   it('a refusal is an answer and is never asked again', async () => {

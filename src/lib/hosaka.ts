@@ -62,8 +62,9 @@ const EXPIRY_GRACE_MS = 30_000
 const DEFAULT_JOB_WAIT_MS = 60 * 60 * 1000
 /**
  * The waits before asking again about a submit whose answer was lost, one
- * per retry. Asked again only against a provider that honors idempotency
- * keys (see submitPriced); each retry is a fresh signature with the same key.
+ * per retry. Asked again only when the provider says, right then, that it
+ * honors idempotency keys (see submitPriced); each retry is a fresh signature
+ * with the same key.
  */
 export const LOST_ANSWER_DELAYS_MS: readonly number[] = [1_500, 4_000]
 
@@ -96,7 +97,8 @@ export interface HosakaProvider {
   /**
    * Present on a provider that honors idempotency keys on priced submits
    * (hosaka-api#21): a retry with the same key gets back the job the first
-   * attempt made. Absent, a lost submit is never asked again automatically.
+   * attempt made. Read again before every automatic retry; absent then, a
+   * lost submit is not asked again automatically.
    */
   idempotency?: { header?: string; body_field?: string; retention_seconds?: number; scope?: string }
   contact?: string
@@ -408,6 +410,18 @@ export function regionKeyBody(at: { x: bigint; y: bigint; z: bigint }, height: n
 }
 
 /**
+ * What a region key purchase is, for its idempotency key: the cube actually
+ * computed, its corner aligned to 2^height on each axis, not the point it was
+ * asked about. Two points in one cube are one job and one charge, the same
+ * rule hosaka-api applies to its own default key and fingerprint.
+ */
+export function regionKeyIdentity(at: { x: bigint; y: bigint; z: bigint }, height: number): Record<string, unknown> {
+  const h = BigInt(height)
+  const corner = (v: bigint): string => ((v >> h) << h).toString()
+  return { cube: { x: corner(at.x), y: corner(at.y), z: corner(at.z) }, height }
+}
+
+/**
  * The idempotency key of one logical job: a hash of the action and exactly
  * what is submitted. The same move from the same chain head, with the same
  * options, is always the same key, so it survives a reload, a failed route
@@ -605,39 +619,79 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
   const wanted = (wants?: HopWants): Record<string, unknown> => (wants?.destinationKeys ? { destination_keys: true } : {})
 
   /**
-   * Whether this provider has said it honors idempotency keys: its /provider
-   * advertises `idempotency`, or a submit came back echoing the key it was
-   * sent. Learned per client, which is per API URL.
+   * Whether the latest submit answer this client got echoed its key. One that
+   * did not came from a server that ignores keys (an older build, a rollback,
+   * another provider), and until a later answer echoes again nothing is asked
+   * again on its own. Never remembered as a yes: see providerHonorsKeysNow.
    */
-  let honorsKeys = false
+  let lastAnswerEchoed: boolean | null = null
   const lostAnswerDelays = opts.lostAnswerDelaysMs ?? LOST_ANSWER_DELAYS_MS
+
+  /**
+   * Does the provider say, right now, that it honors keys? Read fresh before
+   * every automatic retry rather than remembered from when the tab opened, so
+   * a server rolled back since is caught before it makes a second job.
+   * "unknown" when /provider could not be read (the network still down).
+   */
+  const providerHonorsKeysNow = async (signal?: AbortSignal): Promise<'yes' | 'no' | 'unknown'> => {
+    try {
+      const p = await request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal })
+      return p !== null && typeof p === 'object' && typeof p.idempotency === 'object' && p.idempotency !== null ? 'yes' : 'no'
+    } catch (err) {
+      if (signal?.aborted) throw abortError()
+      return err instanceof HosakaError && err.answerLost ? 'unknown' : 'no'
+    }
+  }
 
   /**
    * A priced submit, once per logical job. The key goes in the body, never in
    * a header: a header the provider's CORS preflight does not allow blocks the
    * request in a browser, while a provider that does not know the field
-   * ignores it. When the answer is lost (the connection dropped, our own
-   * timeout, a 5xx) the job may already exist and be charged. Against a
-   * provider that honors keys the submit is asked again, freshly signed, with
-   * the same key, and gets back that job (`idempotent_replay`) instead of a
-   * second one. Against any other the loss is reported, since a retry there
-   * would charge twice; the server-side default keys of a current HOSAKA still
-   * cover the person committing again.
+   * ignores it.
+   *
+   * When the answer is lost (the connection dropped, our own timeout, a 5xx)
+   * the job may already exist and be charged. After each wait in
+   * LOST_ANSWER_DELAYS_MS the submit is asked again, freshly signed with the
+   * same key, only if the latest submit answer did not come back without its
+   * key AND /provider, read just then, advertises `idempotency`; such a server
+   * answers with the job it already made (`idempotent_replay`). A /provider
+   * that cannot be read yet uses up that wait and the next one tries again;
+   * one that says no ends it. Otherwise the loss is reported, since a retry
+   * would charge twice; a current HOSAKA's own default keys still cover the
+   * person committing again. The caller's signal stops it at once, waits
+   * included. `identity` names the job for its key when that is not the body
+   * itself (a region key is its cube, whichever point inside was asked about).
    */
-  const submitPriced = async (action: HosakaAction, body: Record<string, unknown>, signal?: AbortSignal): Promise<HosakaJob> => {
-    const key = idempotencyKeyFor(action, body)
-    for (let attempt = 0; ; attempt++) {
+  const submitPriced = async (action: HosakaAction, body: Record<string, unknown>, signal?: AbortSignal, identity?: Record<string, unknown>): Promise<HosakaJob> => {
+    const key = idempotencyKeyFor(action, identity ?? body)
+    const once = async (): Promise<HosakaJob> => {
+      const job = await request<HosakaJob>(`/api/v1/${action}`, { method: 'POST', auth: true, body: { ...body, idempotency_key: key }, signal })
+      lastAnswerEchoed = job !== null && typeof job === 'object' && job.idempotency_key === key
+      return job
+    }
+    let lost: HosakaError
+    try {
+      return await once()
+    } catch (err) {
+      if (!(err instanceof HosakaError && err.answerLost)) throw err
+      lost = err
+    }
+    for (const delay of lostAnswerDelays) {
+      if (lastAnswerEchoed === false) break
+      await sleep(delay, signal)
+      if (signal?.aborted) throw abortError()
+      const honors = await providerHonorsKeysNow(signal)
+      if (honors === 'no') break
+      if (honors === 'unknown') continue
+      if (signal?.aborted) throw abortError()
       try {
-        const job = await request<HosakaJob>(`/api/v1/${action}`, { method: 'POST', auth: true, body: { ...body, idempotency_key: key }, signal })
-        if (job && job.idempotency_key === key) honorsKeys = true
-        return job
+        return await once()
       } catch (err) {
-        const retry = honorsKeys && err instanceof HosakaError && err.answerLost && attempt < lostAnswerDelays.length
-        if (!retry) throw err
-        await sleep(lostAnswerDelays[attempt], signal)
-        if (signal?.aborted) throw abortError()
+        if (!(err instanceof HosakaError && err.answerLost)) throw err
+        lost = err
       }
     }
+    throw lost
   }
 
   const submit = (action: HosakaAction, v1: HosakaCoord, v2: HosakaCoord, previousEventId: string, signal?: AbortSignal, wants?: HopWants): Promise<HosakaJob> =>
@@ -652,16 +706,12 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
   const client: HosakaClient = {
     apiUrl,
     limits: (signal) => request<HosakaLimits>('/api/v1/limits', { method: 'GET', signal }),
-    provider: async (signal) => {
-      const provider = await request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal })
-      if (provider && typeof provider.idempotency === 'object' && provider.idempotency !== null) honorsKeys = true
-      return provider
-    },
+    provider: (signal) => request<HosakaProvider>('/api/v1/provider', { method: 'GET', signal }),
     quote: (action, v1, v2, signal, wants) =>
       request<HosakaQuote>('/api/v1/quote', { method: 'POST', body: { action, v1, v2, ...wanted(wants) }, signal }),
     submitHop: (v1, v2, previousEventId, signal, wants) => submit('hop', v1, v2, previousEventId, signal, wants),
     submitSidestep: (v1, v2, previousEventId, signal) => submit('sidestep', v1, v2, previousEventId, signal),
-    submitRegionKey: (at, height, signal) => submitPriced('region_key', regionKeyBody(at, height), signal),
+    submitRegionKey: (at, height, signal) => submitPriced('region_key', regionKeyBody(at, height), signal, regionKeyIdentity(at, height)),
     getJob,
     startJob: (jobId, signal) => request<HosakaJob>(`/api/v1/jobs/${jobId}/start`, { method: 'POST', auth: true, signal }),
     claimDeposit,

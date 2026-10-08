@@ -2080,20 +2080,29 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       },
     })
     let job: HosakaJob
+    // The submit may ask again on its own after a lost answer (lib/hosaka.ts),
+    // so it runs under the cloud flow's abort like every other cloud wait: X
+    // (cancelCloud, cancelPlan) stops the retries, and a step cancelled during
+    // one is never charged by a retry that lands after it.
+    stopCloud()
+    const abort = new AbortController()
+    cloudAbort = abort
     try {
       const v1 = hosakaCoord(step.from, plane)
       const v2 = hosakaCoord(step.to, plane)
       job = step.kind === 'hop'
-        ? await client.submitHop(v1, v2, prevEventId, undefined, hopWants('hop'))
-        : await client.submitSidestep(v1, v2, prevEventId)
+        ? await client.submitHop(v1, v2, prevEventId, abort.signal, hopWants('hop'))
+        : await client.submitSidestep(v1, v2, prevEventId, abort.signal)
       const after = job.new_balance_msats ?? job.current_balance_msats
       if (typeof after === 'number') get().noteBalance(after)
     } catch (err) {
-      if (id !== requestId) return
+      if (id !== requestId || abort.signal.aborted) return
       routeFail(describeCloudError(err))
       return
+    } finally {
+      if (cloudAbort === abort) cloudAbort = null
     }
-    if (id !== requestId) return
+    if (id !== requestId || abort.signal.aborted) return
     const paying = job.payment_required === true && job.deposit !== undefined
     const record: PendingCloudJob = {
       version: 1,

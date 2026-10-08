@@ -228,7 +228,7 @@ describe('cloud routes', () => {
 
     const s = S()
     expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, { destinationKeys: true })
-    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, { destinationKeys: true })
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, expect.any(AbortSignal), { destinationKeys: true })
     expect(s.position).toEqual(to)
   })
 
@@ -248,7 +248,7 @@ describe('cloud routes', () => {
     expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, undefined)
     expect(fake.balance).toHaveBeenCalled()
     expect(fake.deposit).not.toHaveBeenCalled()          // the balance covered it
-    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, undefined)
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, expect.any(AbortSignal), undefined)
     expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
     expect(s.plan).toBeNull()
     expect(s.events).toHaveLength(before + 1)
@@ -293,12 +293,37 @@ describe('cloud routes', () => {
 
     expect(fake.submitHop).toHaveBeenCalledTimes(2)
     const [first, second] = fake.submitHop.mock.calls
-    expect(second).toEqual(first)
+    // Everything but the signal, which is each attempt's own.
+    const asked = (c: unknown[]): unknown[] => [c[0], c[1], c[2], c[4]]
+    expect(asked(second)).toEqual(asked(first))
     const keyOf = (c: unknown[]): string => idempotencyKeyFor('hop', moveBody(c[0] as never, c[1] as never, c[2] as string, c[4] as never))
     expect(keyOf(second)).toBe(keyOf(first))
     // The retry was handed the job the lost attempt made, and the move landed once.
     expect(S().position).toEqual(to)
     expect(S().cloud.last?.jobId).toBe('job-1')
+  })
+
+  it('X during a step\'s submit aborts it, so no retry of it can be charged after the cancel', async () => {
+    lineUpH13()
+    fake.quote.mockResolvedValue(quote('hop'))
+    let seen: AbortSignal | undefined
+    // A submit still out (its answer lost, waiting to ask again): it ends only
+    // when its signal does.
+    fake.submitHop.mockImplementation((_v1: unknown, _v2: unknown, _prev: unknown, signal?: AbortSignal) => new Promise<HosakaJob>((_resolve, reject) => {
+      seen = signal
+      signal?.addEventListener('abort', () => reject(new HosakaError(0, 'aborted', 'cancelled')))
+    }))
+
+    void S().commit()
+    await vi.waitFor(() => { expect(fake.submitHop).toHaveBeenCalledTimes(1) })
+    expect(seen).toBeInstanceOf(AbortSignal)
+    expect(seen!.aborted).toBe(false)
+
+    S().cancelPlan()
+    expect(seen!.aborted).toBe(true)
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('idle') })
+    expect(S().plan).toBeNull()
+    expect(fake.waitForJob).not.toHaveBeenCalled()
   })
 
   it('respawn starts the spent tally over for the new chain', async () => {
@@ -374,7 +399,7 @@ describe('cloud routes', () => {
     settle.resolve(deposit('d1', 'settled'))
     await committed
     await idle()
-    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head, undefined, undefined)
+    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head, expect.any(AbortSignal), undefined)
     expect(fake.startJob).not.toHaveBeenCalled()         // funded from the balance: it started at once
     expect(S().events).toHaveLength(before + 1)
     expect(S().position).toEqual(to)
@@ -531,7 +556,7 @@ describe('cloud routes', () => {
     expect(fake.quote).toHaveBeenCalledTimes(1)
     expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, undefined, undefined)
     await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
-    expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
+    expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String), expect.any(AbortSignal))
     const ev = S().events[S().events.length - 1]
     const p = computeSidestepProof(edge, from.y, from.z, landing, from.y, from.z, s0.headPlane, ev.tags.find((t) => t[0] === 'e' && t[3] === 'previous')![1])
     expect(ev.tags.find((t) => t[0] === 'A')?.[1]).toBe('sidestep')

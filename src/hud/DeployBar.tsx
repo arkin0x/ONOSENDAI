@@ -136,6 +136,9 @@ export function DeployBar(): JSX.Element | null {
   const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
   const empty = isMessage ? pending.text.trim().length === 0 : !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   const working = status === 'working'
+  // This machine's time is the button's tooltip, not a row (arkinox,
+  // 2026-10-08: trim the deploy bar); HOSAKA's time and price stay a row.
+  const localEst = route !== 'local' ? undefined : height === 0 ? 'No key work at height 0' : localSeconds === null ? 'Computed on this machine; the benchmark has not run yet' : `Computed on this machine, ${waitLabel(localSeconds)}`
 
   return (
     <div className="deploybar" role="dialog" aria-label={isMessage ? 'Hide message' : 'Deploy shard'}>
@@ -151,6 +154,7 @@ export function DeployBar(): JSX.Element | null {
           <button
             className="deploybar__deploy"
             disabled={empty || working}
+            title={localEst}
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
@@ -188,7 +192,6 @@ export function DeployBar(): JSX.Element | null {
         <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
         <span className="deploybar__radius">
           {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
-          {fit.auto && fit.height !== null && <span className="deploybar__fit"> · fits the whole model</span>}
         </span>
       </div>
       {fit.auto && fit.height === null && (
@@ -262,15 +265,15 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
-      {/* What the key costs: this machine's time below its ceiling, HOSAKA's
-          time and price above it, and whether the mode will ask first. */}
-      <div className="deploybar__row deploybar__est">
-        {route === 'local'
-          ? (height === 0 ? 'No key work at height 0.' : localSeconds === null ? `Computed on this machine; the benchmark has not run yet.` : `Computed on this machine, ${waitLabel(localSeconds)}.`)
-          : quote
+      {/* What HOSAKA's key costs, its time and price, and whether the mode
+          will ask first. This machine's time is the button's tooltip. */}
+      {route !== 'local' && (
+        <div className="deploybar__row deploybar__est">
+          {quote
             ? `Computed by HOSAKA, ${quote.seconds !== null ? waitLabel(quote.seconds) : 'time unknown'} · ${quote.sats} sats from your balance${willAsk ? ', asked first' : cloudMode === 'auto' ? ', without asking (AUTO)' : ''}.`
             : `Computed by HOSAKA; its price for 2^${height} is not known yet.`}
-      </div>
+        </div>
+      )}
 
       <BagControls height={height} bag={bag} existing={existing?.count ?? 0} />
       </div>
@@ -297,11 +300,16 @@ function BagControls({ height, bag, existing }: { height: number; bag: ReturnTyp
   const otherBox = bag.hint && !isSectorHint(bag.hint) ? bag.hint : null
   return (
     <div className="deploybar__bag">
-      <div className="deploybar__scope">
-        {existing > 0
-          ? <>You already hid {existing === 1 ? 'one thing' : `${existing} things`} in this region. These settings are its bag&apos;s, so they apply to everything you hid here as well as this.</>
-          : <>These settings belong to this region&apos;s bag: anything else you hide in this region later shares them.</>}
-      </div>
+      {/* A chip, its explanation the tooltip (arkinox, 2026-10-08: trim the
+          deploy bar). */}
+      <span
+        className="deploybar__scope"
+        title={existing > 0
+          ? `You already hid ${existing === 1 ? 'one thing' : `${existing} things`} in this region. These settings are its bag's, so they apply to everything you hid here as well as this.`
+          : `These settings belong to this region's bag: anything else you hide in this region later shares them.`}
+      >
+        {existing > 0 ? `BAG · ${existing} HERE` : 'NEW BAG'}
+      </span>
 
       <Field id="deploy-height-hint" label="Publish height hint" hint="Tells seekers what height they must calculate to in order to find this.">
         <Switch id="deploy-height-hint" checked={bag.heightTag} onCheckedChange={(v) => set({ heightTag: v })} />

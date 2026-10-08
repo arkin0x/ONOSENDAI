@@ -18,6 +18,7 @@ import { useChat, sendKey, type ChatLine } from '../store/useChat'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
 import { ProfilePic } from './ProfileBadge'
+import { pressGuard } from './pressGuard'
 import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
@@ -63,6 +64,8 @@ export function ChatDock(): JSX.Element {
   const atHead = useCyberspace((s) => s.atHead())
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
+  // The chip takes only a click whose press began on it (pressGuard.ts).
+  const chipPress = useMemo(() => pressGuard(), [])
   const now = Math.floor(Date.now() / 1000)
 
   // The region a line would go to right now: its size is the room's name.
@@ -91,7 +94,8 @@ export function ChatDock(): JSX.Element {
     return (
       <button
         className="chip chatdock__chip"
-        onClick={() => useChat.setState({ open: true, unread: 0, focusOnOpen: false })}
+        onPointerDown={(e) => chipPress.press(e.timeStamp)}
+        onClick={(e) => { if (chipPress.real(e.detail, e.timeStamp)) useChat.setState({ open: true, unread: 0, focusOnOpen: false }) }}
         aria-label={unread > 0 ? `Open chat, ${unread} new` : 'Open chat'}
         title="Chat with whoever is standing here (/)"
       >

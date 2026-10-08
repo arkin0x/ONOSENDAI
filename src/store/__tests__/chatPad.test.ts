@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { useChat } from '../useChat'
-import { linkChatAndPad, usePad } from '../usePad'
+import { linkChatAndPad, tapScene, usePad } from '../usePad'
 
 // The chat dock and the touch controls, where the open dock runs through the
 // controls' column (a phone) and where it does not (a desktop).
@@ -53,11 +53,47 @@ describe('the chat and the controls take turns', () => {
     expect(usePad.getState().open).toBe(true)
   })
 
-  it('a scene tap that brings the controls back is the same as the CONTROLS chip', () => {
+  // arkinox, 2026-10-08: "closing the chat opens the controls even if it was
+  // closed before. this should not happen." A tap on the scene while the chat
+  // covers the controls is a tap outside the chat: it folds the chat, and the
+  // controls come back only if they were out when the chat opened.
+  it('a scene tap folds the chat and leaves hidden controls hidden', () => {
+    usePad.getState().setOpen(false)
     useChat.getState().setOpen(true)
-    usePad.getState().toggle()
+    tapScene()
+    expect(useChat.getState().open).toBe(false)
+    expect(usePad.getState().open).toBe(false)
+  })
+
+  it('a scene tap folds the chat and brings back controls that were out', () => {
+    useChat.getState().setOpen(true)
+    tapScene()
     expect(useChat.getState().open).toBe(false)
     expect(usePad.getState().open).toBe(true)
+  })
+
+  it('folding by a scene tap leaves nothing behind for the next fold', () => {
+    usePad.getState().setOpen(false)
+    useChat.getState().setOpen(true)
+    tapScene()
+    useChat.getState().setOpen(true)
+    useChat.getState().setOpen(false)
+    expect(usePad.getState().open).toBe(false)
+  })
+
+  it('a scene tap with the chat folded toggles the controls as it always has', () => {
+    tapScene()
+    expect(usePad.getState().open).toBe(false)
+    tapScene()
+    expect(usePad.getState().open).toBe(true)
+  })
+
+  it('on a desktop a scene tap toggles the controls even with the chat open', () => {
+    overlap = false
+    useChat.getState().setOpen(true)
+    tapScene()
+    expect(useChat.getState().open).toBe(true)
+    expect(usePad.getState().open).toBe(false)
   })
 
   it('the controls owe nothing to a chat that was folded by bringing them back', () => {

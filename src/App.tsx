@@ -56,7 +56,7 @@ import { setSyncPriority } from './lib/hyperspace/anchors'
 /** How long after the panels open the anchor sync goes full tilt. */
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
-import { CHAT_COVERS_PAD, linkChatAndPad, usePad } from './store/usePad'
+import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
@@ -189,7 +189,8 @@ export default function App(): JSX.Element {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
     if (viewMenuOpen) { setViewMenuOpen(false); return }
-    usePad.getState().toggle()
+    // With the chat open over the controls, this folds the chat (usePad).
+    tapScene()
   }, [viewMenuOpen])
   useCanvasTap(onSceneTap, !crowded)
 

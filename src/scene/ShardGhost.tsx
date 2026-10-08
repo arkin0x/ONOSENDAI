@@ -35,6 +35,7 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import { Group } from 'three'
 import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
+import { buildPlane } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -72,7 +73,8 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   const clip = useMemo(() => (shard ? regionBox(at, deployHeight, unit, axes) : undefined), [shard, at, deployHeight, unit, axes])
 
   // Standing on the ground where it lands, if that is what is being deployed.
-  const plane = useCyberspace((s) => s.plane)
+  // The build view's plane, where the deploy lands (lib/buildCursor.ts).
+  const plane = useCyberspace(buildPlane)
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
   const standing = up && snapOffered(plane, deployHeight)

@@ -18,6 +18,12 @@ export const DANGER = '#ff3b6b'
 /** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
 export const SIDESTEP = '#c07dff'
 /**
+ * The build cursor (store/useBuilder.ts): white, so it reads as neither the
+ * amber cursor of a move nor the green region box of a deploy. It is not
+ * where you are going; it is where the next thing you place lands.
+ */
+export const BUILD = '#f2f7ff'
+/**
  * Play inside a game: the moves a chain makes inside a virtual bracket and
  * the region the game is played in (spec §8.11.7). Pink, because nothing
  * that means travel is pink: the trail is red, sidesteps purple, stations

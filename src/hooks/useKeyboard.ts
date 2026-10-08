@@ -13,6 +13,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
+import { useBuilder } from '../store/useBuilder'
 import { useChat } from '../store/useChat'
 import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
@@ -77,6 +78,18 @@ export function useKeyboard(): void {
       // What is on screen, which under free orbit is not the snapped frame.
       // Without this, orbiting 180 degrees leaves WASD inverted.
       const axes = store.screenAxes ?? store.axes()
+      // BUILD mode (store/useBuilder.ts): the same keys move the build cursor,
+      // and the few that would reach the movement chain are answered here.
+      const building = useBuilder.getState().active
+
+      // B: into BUILD mode, or out of it, like the BUILD control. Leaving is
+      // refused while a deploy is lined up (useBuilder `exit`): that is
+      // CANCEL's (or Escape's) to end, not a letter's.
+      if (event.code === 'KeyB') {
+        event.preventDefault()
+        useBuilder.getState().toggle()
+        return
+      }
 
       if (event.code === 'Tab') {
         event.preventDefault()
@@ -87,6 +100,9 @@ export function useKeyboard(): void {
       // The chain explorer: one action back or forward, held keys repeat
       // through the keyboard's own repeat; Home and End are the spawn and the
       // head. These work wherever the scene is anchored, head included.
+      // Not while building: history is somewhere you cannot place anything,
+      // and walking it would end BUILD mode on a stray key.
+      if (building && (event.code === 'BracketLeft' || event.code === 'BracketRight' || event.code === 'Home' || event.code === 'End')) return
       if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
         event.preventDefault()
         store.exploreStep(event.code === 'BracketLeft' ? -1 : 1)
@@ -118,6 +134,8 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
+        // Building never moves you: with nothing to place, Space does nothing.
+        if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
         // card first (Space again goes); too far does nothing; the rest commit.
         const next = nextAction()
@@ -128,9 +146,14 @@ export function useKeyboard(): void {
       }
 
       // Cancel an in-flight proof, or recall the cursor when idle.
+      // While building, X stops a move or a route from before, running,
+      // paused or failed (that is stopping a move, not making one), and
+      // otherwise brings the build cursor back to your avatar, the builder's
+      // own recall.
       if (event.code === 'KeyX') {
         event.preventDefault()
-        store.cancel()
+        if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
+        else store.cancel()
         return
       }
 

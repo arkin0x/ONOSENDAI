@@ -1,5 +1,6 @@
 /**
- * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals.
+ * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals, and the
+ * Builder's Hide a Message composer.
  * State in hud/stash.ts; mounted once at the app root.
  */
 
@@ -7,11 +8,12 @@ import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
 import { useShards, type MyDeployment } from '../store/useShards'
-import { useWorkshop } from '../store/useWorkshop'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
+import { MessageCompose } from './MessageCompose'
+import { PlaceObjectPicker } from './PlaceObjectPicker'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -76,9 +78,8 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag } = useStash()
+  const { models, bags, bag, message } = useStash()
   const mine = useShards((s) => s.mine)
-  const shards = useWorkshop((s) => s.shards)
   const close = useStash.getState().close
   const all = bagsOf(mine)
 
@@ -109,26 +110,18 @@ export function StashModals(): JSX.Element | null {
       </Shell>
     )
   }
-  if (models) {
-    const list = [...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+  if (message) {
     return (
-      <Shell title="Deploy an object" onClose={close}>
-        <p className="login__note">Choose one of your models. You aim and place it next; CANCEL on the bar brings you back here.</p>
-        {list.length === 0 ? <p className="login__note">No models yet. Make one in the workshop.</p> : (
-          <ul className="objpick__list">
-            {list.map((s) => {
-              const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
-              return (
-                <li key={s.id}>
-                  <button className="objpick__row" disabled={empty} onClick={() => useStash.getState().deployModel(s.id)} title={empty ? 'Nothing in it to place yet' : `Place "${s.name}"`}>
-                    <span className="objpick__name">{s.name}</span>
-                    <span className="objpick__meta">{empty ? 'EMPTY' : `${s.vertices.length} v · ${s.faces.length} f${s.parts?.length ? ` · ${s.parts.length} obj` : ''}`}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+      <Shell title="Hide a message" onClose={close}>
+        <p className="login__note">Write the message, then aim it: it lands at the build cursor, and the bar that comes next sets how far away someone can be and still find it. Building does not move your avatar.</p>
+        <MessageCompose onDone={close} />
+      </Shell>
+    )
+  }
+  if (models) {
+    return (
+      <Shell title="Place an object" onClose={close}>
+        <PlaceObjectPicker />
       </Shell>
     )
   }

@@ -68,11 +68,15 @@ interface StashModals {
   bags: boolean
   /** The bag whose contents are open, by lookup id. */
   bag: string | null
+  /** The Builder's HIDE MESSAGE composer. */
+  message: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
   returnToModels: boolean
   openModels: () => void
   openBags: () => void
   openBag: (lookupId: string) => void
+  /** Write a message to hide at the build cursor. */
+  openMessage: () => void
   close: () => void
   /** Start deploying a model from the Models modal. */
   deployModel: (id: string) => void
@@ -82,11 +86,13 @@ export const useStash = create<StashModals>((set) => ({
   models: false,
   bags: false,
   bag: null,
+  message: false,
   returnToModels: false,
-  openModels: () => set({ models: true, bags: false, bag: null }),
-  openBags: () => set({ bags: true, models: false, bag: null }),
-  openBag: (lookupId) => set({ bag: lookupId, models: false }),
-  close: () => set({ models: false, bags: false, bag: null }),
+  openModels: () => set({ models: true, bags: false, bag: null, message: false }),
+  openBags: () => set({ bags: true, models: false, bag: null, message: false }),
+  openBag: (lookupId) => set({ bag: lookupId, models: false, message: false }),
+  openMessage: () => set({ message: true, models: false, bags: false, bag: null }),
+  close: () => set({ models: false, bags: false, bag: null, message: false }),
   deployModel: (id) => {
     set({ models: false, returnToModels: true })
     useShards.getState().startDeployShard(id)

@@ -14,8 +14,9 @@
  * Folded, while the spot at the center of the screen is not your avatar (the
  * cursor moved off it, or the view is elsewhere), the chip is a star instead
  * (StarChip.tsx): you cannot speak from there, and that is where you would
- * want to mark a place. Back on your avatar, CHAT returns. Unfolded, the dock
- * stays as it is either way.
+ * want to mark a place. Back on your avatar, CHAT returns. In BUILD mode CHAT
+ * stays, since the Builder owns that moment. Unfolded, the dock stays as it
+ * is either way.
  */
 
 import { Fragment, useEffect, useMemo, useRef } from 'react'
@@ -31,6 +32,7 @@ import { MAX_CHAT_LENGTH } from '../lib/hidden'
 import { useEscape } from '../hooks/useEscape'
 import { bottomChip } from '../lib/starred'
 import { StarChip } from './StarChip'
+import { useBuilder } from '../store/useBuilder'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */
 const SHOWN = 200
@@ -71,6 +73,10 @@ export function ChatDock(): JSX.Element {
   const current = useSecrets((s) => s.current)
   const atHead = useCyberspace((s) => s.atHead())
   const chip = useCyberspace((s) => bottomChip(s))
+  // BUILD mode is off your avatar by design, but the star is not what that
+  // spot is for while building: the Builder's overlay and its PLACE buttons
+  // own the moment, so the plain CHAT chip stays instead (useBuilder).
+  const building = useBuilder((s) => s.active)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
   // The chip takes only a click whose press began on it (pressGuard.ts).
@@ -99,7 +105,7 @@ export function ChatDock(): JSX.Element {
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
 
-  if (!open && chip === 'star') return <StarChip />
+  if (!open && chip === 'star' && !building) return <StarChip />
   if (!open) {
     return (
       <button

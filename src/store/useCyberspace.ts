@@ -206,6 +206,10 @@ export function whyNoMove(chain: ActionEvent[]): string | null {
 
 /** Why a finished proof is not signed while a choice between two chains is waiting. */
 const CHOOSE_FIRST_MESSAGE = 'Another version of your chain arrived while this proof was computing. Choose which to keep first; the proof is kept, and RESUME signs it if your chain is still where it was.'
+/** A commit whose wait ended with you no longer at your head (BUILD mode, a VIEW): nothing was sent. */
+export const LEFT_HEAD_MESSAGE = 'This move was not sent: you left your avatar (BUILD mode or a VIEW) while it was being checked, and a move is only ever taken from where you stand to where you aimed it. Return to your avatar and commit again.'
+/** A commit whose cursor or plane changed while it waited: nothing was sent. */
+export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the plane changed while it was being checked. Commit again to go where the cursor is now.'
 
 /**
  * The message for a proof whose head moved before it was signed: the work is
@@ -740,8 +744,13 @@ export interface CyberspaceState {
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
-  /** Stop looking; the scene returns to your avatar. */
-  clearFocus: () => void
+  /**
+   * Stop looking; the scene returns to your avatar. With `keepScale` the zoom
+   * stays where it is instead of going back to the one the look began at:
+   * the Builder ends a view that already sits on your avatar this way, so
+   * leaving build mode changes nothing on screen (useBuilder `exit`).
+   */
+  clearFocus: (keepScale?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
   transit: TransitState | null
   /** §3: sign and queue an enter-hyperspace event from the current position. */
@@ -2047,6 +2056,23 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
 
+    // What this commit was pressed for, held across every wait below. The
+    // look at the relay, the first move's check and its signer, and HOSAKA's
+    // caps can each take seconds, and the cursor is free to move meanwhile:
+    // into BUILD mode or a VIEW, where it is a build cursor or a view's
+    // cursor and never a destination, or simply re-aimed at your head. A move
+    // reading the cursor after the wait flew to wherever it had gone (found
+    // in review, 2026-10-07). So the move goes where it was aimed when it was
+    // pressed, from your head, or not at all.
+    const aimedCursor = { ...get().cursor }
+    const aimedPlane = get().plane
+    const lostAim = (): boolean => {
+      const now = get()
+      if (now.atHead() && samePosition(now.cursor, aimedCursor) && now.plane === aimedPlane) return false
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: now.atHead() ? AIM_CHANGED_MESSAGE : LEFT_HEAD_MESSAGE } })
+      return true
+    }
+
     // One look at the relay before signing anything.
     //
     // An action names the one before it, so an action signed from a head
@@ -2074,6 +2100,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMoveNow } })
         return
       }
+      // Before the aim: adopting another device's move carries the cursor
+      // with it, and that is the reason to give, not "the cursor changed".
       if (get().prevEventId !== beforeHead) {
         set({
           pendingTarget: null,
@@ -2081,6 +2109,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         })
         return
       }
+      if (lostAim()) return
     }
 
     // A provisional identity (logged in or loaded, never placed) has no
@@ -2112,6 +2141,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
           return
         }
+        if (lostAim()) return
         set({ proof: IDLE_PROOF })
         let spawn: NostrEvent
         try {
@@ -2127,6 +2157,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
           return
         }
+        // Left your head while the signer was thinking: the spawn is dropped
+        // unused, never saved or sent, and nothing moves.
+        if (lostAim()) return
         // Decided on the check as it stands now, which the signer's wait may
         // have settled.
         const now = get().selfCheck
@@ -2189,6 +2222,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop', message: 'Asking HOSAKA for its caps.' } })
       await ensureCloudLimits()
       set({ proof: IDLE_PROOF })
+      if (lostAim()) return
     }
     // Local first, per step, as the button promised (lib/movePlan.ts): the
     // step is this machine's whenever it has one; HOSAKA's caps enter only
@@ -2836,8 +2870,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { pin } = get()
     if (!pin) return
     // Driven, like a VIEW and unlike a block: the cursor comes with you, so a
-    // shard or a message composed from here lands at the pin rather than at
-    // your head. Standing at the venue is not required to hide something in it.
+    // deploy started from there lands at the pin rather than at your head:
+    // BUILD mode starts its build cursor where you are looking (useBuilder,
+    // ruling A, 2026-10-07). Standing at the venue is not required to hide
+    // something in it.
     get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
   },
 
@@ -2864,7 +2900,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (focus) set({ focus: { ...focus, item: true } })
   },
 
-  clearFocus: () => {
+  clearFocus: (keepScale = false) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus } = get()
@@ -2877,7 +2913,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // A cursor that went out with the view comes home with it.
       ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
-      scaleExp: focusReturnScale ?? scaleExp,
+      scaleExp: keepScale ? scaleExp : focusReturnScale ?? scaleExp,
       focusReturnScale: null,
     })
   },

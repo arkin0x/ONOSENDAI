@@ -10,6 +10,7 @@ import { DeploymentDetail } from './hud/DeploymentDetail'
 import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
+import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { ActionModal } from './hud/ActionModal'
 import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
@@ -59,6 +60,7 @@ import { setSyncPriority } from './lib/hyperspace/anchors'
 /** How long after the panels open the anchor sync goes full tilt. */
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
+import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
@@ -145,7 +147,18 @@ export default function App(): JSX.Element {
   // spectating ends the spectation, and the panels hidden behind it would
   // come straight back over the thing just asked for.
   const viewing = useCyberspace((s) => s.focus !== null)
-  useEffect(() => { if ((driving || stationView || viewingSecret || viewing) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, isMobile])
+  // BUILD from the Stash panel, even from a view already driven: the scene is
+  // where building happens, so on a phone the panels fold away.
+  const building = useBuilder((s) => s.active)
+  useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
+  // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
+  // where VIEW is how the build cursor jumps: none of the flags above change,
+  // so the fold above does not fire again and the menu stayed over the place
+  // just asked for. A driven view's focus is replaced on every VIEW; with the
+  // menu covering the scene nothing else can replace it (the pad and the keys
+  // stand down), so a new one is always a VIEW from the panels.
+  const drivenFocus = useCyberspace((s) => (s.focus?.drive ? s.focus : null))
+  useEffect(() => { if (drivenFocus && isMobile) setPanelsOpen(false) }, [drivenFocus, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
@@ -206,14 +219,23 @@ export default function App(): JSX.Element {
           {/* Ordered by how often each is reached for right now: hyperspace
               on top with its status bar, the chain under it, the XOR readout
               last. */}
-          {/* A broken chain first: nothing else moves you until you respawn. */}
+          {/* A broken chain first: nothing else moves you until you respawn.
+              It stays in BUILD mode too; building is not moving. */}
           <BrokenChainChip />
-          <LineScrubber />
+          {/* BUILD mode keeps the stack to what building needs (arkinox,
+              2026-10-08): the hyperspace chip and XOR BITS step aside and
+              come back on exit. */}
+          {!building && <LineScrubber />}
           <HyperspaceBar />
           <FocusBar />
+          {/* BUILD mode, where the free view's bar would be: it rides that view. */}
+          <BuildBar />
           <ToastChip />
-          <ChainExplorer />
-          <BitReadout />
+          {/* Not while building: history is somewhere nothing can be placed,
+              and its steps would end BUILD mode, as [ ] Home End would
+              (they are ignored while building, useKeyboard). */}
+          {!building && <ChainExplorer />}
+          {!building && <BitReadout />}
           {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
           <NotificationsToast />
           {/* Under XOR BITS, spaced as the rest are: what was just found, what

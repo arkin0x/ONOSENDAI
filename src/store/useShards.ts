@@ -58,9 +58,11 @@ import {
 } from '../lib/hidden'
 import { useWorkshop } from './useWorkshop'
 import { useCeremony } from './useCeremony'
+import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
 import type { Plane } from 'cyberspace-core'
 import { deployPoint, type Position } from '../lib/space'
+import { buildCursorOf, buildPlane } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
@@ -257,6 +259,11 @@ interface ShardsState {
   /** Answer the ask: yes goes to HOSAKA, no keeps the shard pending. */
   confirmDeploy: () => void
   declineDeploy: () => void
+  /**
+   * Drop the lined-up deploy. Not once it is hiding: the key is being
+   * computed and the bag sealed, and it finishes where it was placed, so a
+   * CANCEL then would only pretend (found in review, 2026-10-07).
+   */
   cancelDeploy: () => void
   /** Hide the pending thing at the cursor. `confirmed` is the yes to a HOSAKA ask. */
   deploy: (confirmed?: boolean) => Promise<void>
@@ -564,7 +571,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const height = Math.max(0, Math.min(get().deployCeiling(), Math.round(h)))
       // Below the snap's height there is no snap: the control goes away, and
       // so does what it was set to, rather than lying in wait.
-      const offered = snapOffered(cyber().plane, height)
+      const offered = snapOffered(buildPlane(cyber()), height)
       // A hint smaller than the region cannot contain it (spec §7.7): the
       // sector hint goes off above height 30 the way the snap goes off below
       // its own height, rather than lying in wait.
@@ -582,20 +589,30 @@ export const useShards = create<ShardsState>((set, get) => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
     },
-    cancelDeploy: () => set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null }),
+    cancelDeploy: () => {
+      if (get().deployStatus === 'working') return
+      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+    },
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
       const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom } = get()
       if (!pending) return
+      // One hide at a time. Space (or a second tap) while the key is being
+      // computed and the bag sealed used to start a second deploy of the same
+      // thing: two signatures, and the item in the bag twice (found in
+      // review, 2026-10-07).
+      if (get().deployStatus === 'working') return
       const cs = cyber()
-      // The centre of the cursor's cell at the zoom you are building in (or of
-      // the region, for a bag smaller than a cell), where the ghost showed it:
-      // lib/space.ts deployPoint (arkinox, 2026-10-01). At 2^0 that is the
-      // cursor's own coordinate, as it always was.
-      const at: Position = deployPoint(cs.cursor, cs.scaleExp, deployHeight)
-      const plane = cs.plane
+      // The center of the build cursor's cell at the zoom you are building in
+      // (or of the region, for a bag smaller than a cell), where the ghost
+      // showed it: lib/space.ts deployPoint (arkinox, 2026-10-01). At 2^0 that
+      // is the cursor's own coordinate, as it always was. A deploy happens in
+      // BUILD mode (useBuilder), so the cursor is the build cursor and the
+      // plane is the one the build view shows (lib/buildCursor.ts).
+      const { position: cursor, plane } = buildCursorOf(cs)
+      const at: Position = deployPoint(cursor, cs.scaleExp, deployHeight)
       const createdAt = Math.floor(Date.now() / 1000)
       if (deployBag.hint && !hintFits(deployBag.hint, deployHeight)) {
         set({ deployStatus: 'error', deployError: `A sector hint cannot contain a height ${deployHeight} region: a sector is 2^30 on a side. Turn the hint off or hide lower.` })
@@ -730,10 +747,15 @@ export const useShards = create<ShardsState>((set, get) => {
           ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
-        set({ mine, deployStatus: 'done', pending: null, deployNote: null })
+        // Only this deploy is finished. One lined up since (a DEPLOY from the
+        // workshop while this was hiding) is a deploy of its own, and stays.
+        if (get().pending === pending) set({ mine, deployStatus: 'done', pending: null, deployNote: null })
+        else set({ mine })
         saveMine(mine)
       } catch (err) {
-        set({ deployStatus: 'error', deployNote: null, deployError: err instanceof Error ? err.message : String(err) })
+        const reason = err instanceof Error ? err.message : String(err)
+        if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployError: reason })
+        else useToast.getState().show({ label: 'AN EARLIER HIDE FAILED', meta: `${reason} Nothing from it was placed.`, mark: 'build' })
       }
     },
 

@@ -12,7 +12,7 @@ if (typeof localStorage === 'undefined') {
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { ACTION_KIND, hopTemplate, positionHex } from '../../lib/events'
-import { inNeighborhood, neighborhoodFilter, sectorKey, usePresence } from '../usePresence'
+import { MAX_TAG_FILTERS, inNeighborhood, neighborhoodFilter, sectorKey, usePresence } from '../usePresence'
 import { useCyberspace } from '../useCyberspace'
 
 const SECTOR = 1n << 30n
@@ -34,6 +34,21 @@ describe('the neighborhood', () => {
     expect(f['#X']).toEqual(['4', '5', '6'])
     expect(f['#Y']).toEqual(['8', '9', '10'])
     expect(f['#Z']).toEqual(['2', '3', '4'])
+  })
+
+  it('asks for no more tag filters than the relay accepts, so the relay answers it', () => {
+    // strfry refuses a filter with more than three tag filters (CLOSED "too
+    // many tags in filter"), and presence then never loads (2026-10-08).
+    const tagFilters = Object.keys(neighborhoodFilter(here)).filter((k) => k.startsWith('#'))
+    expect(tagFilters.length).toBeLessThanOrEqual(MAX_TAG_FILTERS)
+    expect(neighborhoodFilter(here)['#A']).toBeUndefined()
+  })
+
+  it('still drops an event that is not a recognized action, now that the relay does not filter by name', () => {
+    const sk = generateSecretKey()
+    const ev = finalizeEvent({ kind: ACTION_KIND, created_at: 1_700_000_000, content: '', tags: [['A', 'drift'], ['C', positionHex(here, 0)], ['X', '5'], ['Y', '9'], ['Z', '3'], ['S', '5-9-3']] }, sk)
+    usePresence.getState().ingest(ev as never)
+    expect(usePresence.getState().people[getPublicKey(sk)]).toBeUndefined()
   })
 
   it('names the sector the way the S tag does', () => {

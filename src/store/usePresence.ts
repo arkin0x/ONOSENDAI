@@ -58,11 +58,24 @@ export function sectorKey(p: Position): string {
   return `${s.sx}-${s.sy}-${s.sz}`
 }
 
-/** The 27 sectors around a position, as one relay filter. */
+/**
+ * Most tag filters a relay accepts in one filter. The cyberspace relay
+ * (strfry) refuses a filter with more, answering CLOSED "bad req: too many
+ * tags in filter", so a query that asks for four never gets an answer
+ * (arkinox, 2026-10-08: presence sat on SCANNING everywhere).
+ */
+export const MAX_TAG_FILTERS = 3
+
+/**
+ * The 27 sectors around a position, as one relay filter. Only the three
+ * sector tags go to the relay: the action name is checked on arrival
+ * instead (ingest drops anything that is not a recognized action), which
+ * loses nothing, since an event without sector tags never matches anyway.
+ */
 export function neighborhoodFilter(p: Position): Filter {
   const s = xyzToSectorId(p.x, p.y, p.z)
   const around = (v: bigint): string[] => [v - 1n, v, v + 1n].map(String)
-  return { kinds: [ACTION_KIND], '#A': PLACING_ACTIONS, '#X': around(s.sx), '#Y': around(s.sy), '#Z': around(s.sz) }
+  return { kinds: [ACTION_KIND], '#X': around(s.sx), '#Y': around(s.sy), '#Z': around(s.sz) }
 }
 
 /** Whether a position's sector is within one of the given sector on every axis. */

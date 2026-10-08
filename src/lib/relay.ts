@@ -37,8 +37,31 @@ let pool: AbstractSimplePool | null = null
  * (our hidden content carries the `-` tag): only the authenticated author may
  * write them.
  */
+/**
+ * Relays whose NIP-42 AUTH is waiting on the signer right now (normalized
+ * URL to how many are). A remote signer can take seconds over that, and a
+ * socket dropped meanwhile throws the AUTH away: the next socket brings a
+ * new challenge and a second prompt (verification of #236, finding 4).
+ */
+const authSigning = new Map<string, number>()
+
+/** Whether an AUTH for this relay is waiting on the signer. */
+export function authPending(url: string): boolean {
+  return authSigning.has(normalizeURL(url))
+}
+
+/** Every NIP-42 AUTH this client sends is signed here, so authPending knows what is in flight. */
 function authSign(template: EventTemplate): Promise<VerifiedEvent> {
-  return useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
+  const relayTag = template.tags.find((t) => t[0] === 'relay')?.[1]
+  const key = relayTag ? normalizeURL(relayTag) : null
+  if (key) authSigning.set(key, (authSigning.get(key) ?? 0) + 1)
+  const signed = useCyberspace.getState().signEvent(template) as unknown as Promise<VerifiedEvent>
+  return signed.finally(() => {
+    if (!key) return
+    const left = (authSigning.get(key) ?? 1) - 1
+    if (left > 0) authSigning.set(key, left)
+    else authSigning.delete(key)
+  })
 }
 
 export function getPool(): AbstractSimplePool {
@@ -204,11 +227,13 @@ interface OpenSub {
  * the relay auth-gates reads and a fresh socket's first REQ can beat the
  * challenge.
  */
-async function askOne(url: string, filter: Filter, deadline: number): Promise<RelayAnswer> {
+async function askOne(url: string, filter: Filter, deadline: number, answerMs?: number, onSent?: () => void): Promise<RelayAnswer> {
   const remaining = (): number => Math.max(0, deadline - Date.now())
   let relay: AbstractRelay
   try {
-    relay = await getPool().ensureRelay(url, { connectionTimeout: Math.max(1, remaining()) })
+    // With `answerMs` (a question timed from its REQ), a connect never gets
+    // less than a second, however late a busy main thread let it start.
+    relay = await getPool().ensureRelay(url, { connectionTimeout: Math.max(answerMs === undefined ? 1 : 1_000, remaining()) })
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err ?? '')
     return { url, outcome: 'unreachable', reason: reason || 'connection failed', events: [] }
@@ -231,7 +256,14 @@ async function askOne(url: string, filter: Filter, deadline: number): Promise<Re
       }
       resolve(answer)
     }
-    const timer = setTimeout(() => finish({ url, outcome: 'unreachable', reason: 'no answer in time', events: got() }), remaining())
+    // How long the relay has to answer. With `answerMs` it counts from the
+    // moment the REQ is written, not from when the question was asked: a
+    // main thread busy for seconds after a long chain loads (the tab drawing
+    // it, the signatures checked) used to spend the whole budget before the
+    // request had even gone out (verification of #236, finding 6).
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const arm = (ms: number): void => { clearTimeout(timer); timer = setTimeout(() => finish({ url, outcome: 'unreachable', reason: 'no answer in time', events: got() }), ms) }
+    if (answerMs === undefined) arm(remaining())
     const open = (): void => {
       try {
         sub = relay.subscribe([filter], {
@@ -251,6 +283,8 @@ async function askOne(url: string, filter: Filter, deadline: number): Promise<Re
           },
           eoseTimeout: NOSTR_TOOLS_EOSE_MS,
         }) as unknown as OpenSub
+        if (answerMs !== undefined && timer === undefined) arm(answerMs)
+        onSent?.()
       } catch (err) {
         finish({ url, outcome: 'unreachable', reason: err instanceof Error ? err.message : String(err), events: got() })
       }
@@ -378,9 +412,11 @@ export function subscribeOne(url: string, filter: Filter, handlers: { onevent: (
  * reads as unreachable ("no answer in time"). One dead or hung relay used to
  * hold every question until it gave up; here it only fails to count.
  */
-export function queryEachSettled(relays: string[], filter: Filter, maxWait: number, primary: string, graceMs: number): Promise<RelayAnswer[]> {
+export function queryEachSettled(relays: string[], filter: Filter, maxWait: number, primary: string, graceMs: number, onSent?: () => void): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const main = normalizeURL(primary)
+  // `maxWait` to connect and authenticate, then `maxWait` from the moment
+  // the REQ goes out (askOne answerMs).
   const deadline = Date.now() + maxWait
   const answers = new Map<string, RelayAnswer>()
   return new Promise((resolve) => {
@@ -393,13 +429,16 @@ export function queryEachSettled(relays: string[], filter: Filter, maxWait: numb
       clearTimeout(grace)
       resolve(urls.map((url) => answers.get(url) ?? { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }))
     }
-    const backstop = setTimeout(settle, maxWait + 50)
+    // Only an outer bound: every relay ends on its own timers (its connect,
+    // then its answer, timed from its REQ), and a busy main thread before the
+    // REQ must not spend this.
+    const backstop = setTimeout(settle, 4 * maxWait + 50)
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
-        .then(() => askOne(url, filter, deadline))
+        .then(() => askOne(url, filter, deadline, maxWait, onSent))
         .then((answer) => {
           answers.set(url, answer)
           if (answers.size === urls.length) settle()

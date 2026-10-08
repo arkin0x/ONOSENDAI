@@ -36,7 +36,7 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
+import { GAME_HOLDS_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
 import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
@@ -107,8 +107,10 @@ export async function startRide(): Promise<void> {
   // signed: a ride computed from a head another device or tab has moved
   // past is minutes of work nobody can sign (confirmHead).
   riding = true
-  let refusal: string | null
+  let refusal: string | null | typeof STALE_CONFIRMATION
   try { refusal = await useCyberspace.getState().confirmHeadNow() } finally { riding = false }
+  // A respawn or an identity switch landed while it asked: this ride was for a chain that is gone.
+  if (refusal === STALE_CONFIRMATION) return
   if (refusal) {
     useRideRun.setState({ error: refusal, progress: null })
     return

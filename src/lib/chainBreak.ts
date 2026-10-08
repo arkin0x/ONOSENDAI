@@ -30,11 +30,11 @@ import { FORK_RULE_WORDS, PLANE_BIT_APOLOGY_UNTIL, type ActionEvent, type RuleCh
  * position (spec §3.2, §8.7.3 rule 4), and its rule is said once: the
  * notice names the two branches, and "Why" is the rule.
  */
-export function brokenWords(broken: { index: number; action: Pick<ActionEvent, 'fork' | 'breaks'> }): { title: string; chip: string; chipMeta: string; why: string } {
+export function brokenWords(broken: { index: number; action: Pick<ActionEvent, 'fork' | 'breaks'> }): { title: string; chip: string; chipMeta: string; why: string; respawnPlace: string } {
   if (broken.action.fork) {
-    return { title: 'Your chain forked: you stand at your spawn coordinate', chip: 'CHAIN FORKED', chipMeta: 'AT YOUR SPAWN COORDINATE · TAP FOR WHY AND RESPAWN', why: FORK_RULE_WORDS }
+    return { title: 'Your chain forked: you stand at your spawn coordinate', chip: 'CHAIN FORKED', chipMeta: 'AT YOUR SPAWN COORDINATE · TAP FOR WHY AND RESPAWN', why: FORK_RULE_WORDS, respawnPlace: 'at your spawn coordinate, where the forked chain stands' }
   }
-  return { title: 'Frozen at your last valid position', chip: `CHAIN BROKEN AT ROW ${broken.index}`, chipMeta: 'FROZEN AT YOUR LAST VALID POSITION · TAP FOR WHY AND RESPAWN', why: broken.action.breaks ?? 'it breaks a chain rule' }
+  return { title: 'Frozen at your last valid position', chip: `CHAIN BROKEN AT ROW ${broken.index}`, chipMeta: 'FROZEN AT YOUR LAST VALID POSITION · TAP FOR WHY AND RESPAWN', why: broken.action.breaks ?? 'it breaks a chain rule', respawnPlace: 'at your last valid position' }
 }
 
 export type BreakCause =

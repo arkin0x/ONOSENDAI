@@ -26,7 +26,10 @@
 import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
 import { decideSelfCheck } from './chainHold'
 import { onResume } from './relay'
-import type { NostrEvent } from './events'
+import { newestSpawn, type NostrEvent } from './events'
+import type { RelayAnswer } from './relayOutcome'
+import { requeueForCanonical } from './publisher'
+import { normalizeURL } from 'nostr-tools/utils'
 import { DEFAULT_RELAY } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -74,6 +77,7 @@ async function check(pubkey: string): Promise<void> {
     const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
     useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online()))
+    requeueMissingOnCanonical(pubkey, answers)
   } catch {
     // The query reports rather than throws; anything that escapes is a
     // relay we could not ask.
@@ -84,6 +88,30 @@ async function check(pubkey: string): Promise<void> {
     if (checking === pubkey) checking = null
     if (again) { again = false; recheckIfUnknown() }
   }
+}
+
+/**
+ * Published events of this device's chain that the canonical relay, asked
+ * just now, does not hold: another relay took them and the canonical relay
+ * never did, and a reload forgot that it still had to (verification of
+ * #236, finding 3). They are sent to it again in the background. They are
+ * never dropped from this device's chain for it: the chain this device holds
+ * stays the chain, and the canonical relay is brought up to it. Nothing is
+ * sent when the canonical relay did not answer, or when its newest spawn is
+ * newer than this chain's (this chain is the old one then).
+ */
+function requeueMissingOnCanonical(pubkey: string, answers: RelayAnswer[]): void {
+  const canonical = normalizeURL(DEFAULT_RELAY)
+  const answer = answers.find((a) => normalizeURL(a.url) === canonical && a.outcome === 'answered')
+  if (!answer) return
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events.length === 0) return
+  const ours = newestSpawn(s.events, pubkey)
+  const theirs = newestSpawn(answer.events, pubkey)
+  if (ours && theirs && theirs.id !== ours.id && theirs.created_at > ours.created_at) return
+  const held = new Set(answer.events.map((e) => e.id))
+  const missing = s.events.filter((e) => s.published[e.id] === 'ok' && !held.has(e.id))
+  if (missing.length > 0) requeueForCanonical(missing)
 }
 
 /** Ask again, but only when the last answer for the current identity was "nobody could say". */

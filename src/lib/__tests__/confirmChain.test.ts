@@ -18,6 +18,10 @@ const net = vi.hoisted(() => ({
   answers: new Map<string, { outcome: 'answered' | 'unreachable'; events: unknown[] }>(),
   log: [] as string[],
   filters: [] as Array<Record<string, unknown>>,
+  /** Relays whose AUTH is waiting on the signer. */
+  authing: new Set<string>(),
+  /** How long before each REQ is written (a busy main thread); 0 is at once. */
+  reqDelayMs: 0,
 }))
 vi.mock('../relay', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../relay')>()
@@ -25,9 +29,12 @@ vi.mock('../relay', async (importOriginal) => {
     ...actual,
     relaySet: () => [actual.CYBERSPACE_RELAY, net.user],
     dropRelays: (relays: string[]) => { net.log.push(`drop ${relays.join(',')}`) },
-    queryEachSettled: async (relays: string[], filter: Record<string, unknown>) => {
+    authPending: (url: string) => net.authing.has(url),
+    queryEachSettled: async (relays: string[], filter: Record<string, unknown>, _maxWait: number, _primary: string, _grace: number, onSent?: () => void) => {
       net.log.push(`ask ${relays.join(',')}`)
       net.filters.push(filter)
+      if (net.reqDelayMs > 0) await new Promise((r) => setTimeout(r, net.reqDelayMs))
+      onSent?.()
       return relays.map((url) => {
         const a = net.answers.get(url) ?? { outcome: 'answered' as const, events: [] }
         return a.outcome === 'answered' ? { url, outcome: 'answered', events: a.events } : { url, outcome: 'unreachable', reason: 'no answer in time', events: a.events }
@@ -47,7 +54,7 @@ const child: NostrEvent = { ...hopTemplate({ createdAt: 1_010, genesisId: spawn.
 const canonical = normalizeURL(CYBERSPACE_RELAY)
 /** The player's own relay, as confirmation names it (normalized). */
 const user = normalizeURL(net.user)
-const reset = (): void => { net.answers.clear(); net.log = []; net.filters = [] }
+const reset = (): void => { net.answers.clear(); net.log = []; net.filters = []; net.authing.clear(); net.reqDelayMs = 0 }
 
 describe('confirming a head against the canonical relay and the configured relays (option B)', () => {
   it('asks them all together', async () => {
@@ -98,5 +105,63 @@ describe('confirming a head against the canonical relay and the configured relay
     reset()
     await confirmChainEvents(PK, spawn.id, [spawn])
     expect(net.log.some((l) => l.startsWith('drop'))).toBe(false)
+  })
+
+  it('a redial keeps a socket whose AUTH is still waiting on the signer: the second try rides on it (verification of #236, finding 4)', async () => {
+    reset()
+    net.authing.add(canonical)
+    await confirmChainEvents(PK, spawn.id, [spawn], { reconnect: true })
+    expect(net.log[0]).toBe(`drop ${user}`)
+  })
+})
+
+describe('a degraded pass needs a relay that holds the chain (verification of #236, finding 1)', () => {
+  // The newest event already on the relays: `since` is its created_at, and a
+  // relay that really holds this chain returns it.
+  const anchor = child
+
+  it('canonical relay silent, a configured relay answers with nothing: no pass, refused', async () => {
+    reset()
+    net.answers.set(canonical, { outcome: 'unreachable', events: [] })
+    net.answers.set(user, { outcome: 'answered', events: [] })
+    expect(await confirmChainEvents(PK, spawn.id, [spawn, anchor], { since: anchor.created_at, anchorId: anchor.id })).toBeNull()
+  })
+
+  it('canonical relay silent, a configured relay answers holding the anchor: a degraded pass', async () => {
+    reset()
+    net.answers.set(canonical, { outcome: 'unreachable', events: [] })
+    net.answers.set(user, { outcome: 'answered', events: [anchor] })
+    expect(await confirmChainEvents(PK, spawn.id, [spawn, anchor], { since: anchor.created_at, anchorId: anchor.id })).toEqual([anchor])
+  })
+
+  it('canonical relay silent, a configured relay without the anchor but with a newer move: handed back, to adopt and refuse on', async () => {
+    reset()
+    const newer: NostrEvent = { ...hopTemplate({ createdAt: 1_020, genesisId: spawn.id, previousId: anchor.id, prevCoordHex: PK, to: { x: 2n, y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64) }), id: 'ff'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
+    net.answers.set(canonical, { outcome: 'unreachable', events: [] })
+    net.answers.set(user, { outcome: 'answered', events: [newer] })
+    expect((await confirmChainEvents(PK, spawn.id, [spawn, anchor], { since: anchor.created_at, anchorId: anchor.id }))?.map((e) => e.id)).toEqual([newer.id])
+  })
+
+  it('the canonical relay answering with nothing still counts, as before', async () => {
+    reset()
+    net.answers.set(canonical, { outcome: 'answered', events: [] })
+    net.answers.set(user, { outcome: 'unreachable', events: [] })
+    expect(await confirmChainEvents(PK, spawn.id, [spawn, anchor], { since: anchor.created_at, anchorId: anchor.id })).toEqual([])
+  })
+
+  it('with nothing of the chain on the relays yet (no anchor), any answer counts, as before', async () => {
+    reset()
+    net.answers.set(canonical, { outcome: 'unreachable', events: [] })
+    net.answers.set(user, { outcome: 'answered', events: [] })
+    expect(await confirmChainEvents(PK, spawn.id, [spawn])).toEqual([])
+  })
+})
+
+describe('the confirmation\'s overall deadline (verification of #236, finding 6)', () => {
+  it('runs from the first REQ written, not from the call: a REQ held back by a busy main thread still gets its answer counted', async () => {
+    reset()
+    // Held back for longer than the whole old budget (2 x 200 + 100 ms).
+    net.reqDelayMs = 700
+    expect(await confirmChainEvents(PK, spawn.id, [spawn], { maxWait: 200 })).toEqual([])
   })
 })

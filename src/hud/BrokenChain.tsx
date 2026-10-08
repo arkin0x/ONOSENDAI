@@ -148,7 +148,7 @@ export function BrokenChainChip(): JSX.Element | null {
 }
 
 /** What a respawn does, said in full before it is done. `lastValid` names the End of Chain entry: the invalid spawn when no event is valid. */
-function RespawnWarning({ lastValid }: { lastValid: ActionEvent }): JSX.Element {
+function RespawnWarning({ lastValid, place }: { lastValid: ActionEvent; place: string }): JSX.Element {
   const events = useCyberspace((s) => s.events.length)
   return (
     <>
@@ -158,7 +158,7 @@ function RespawnWarning({ lastValid }: { lastValid: ActionEvent }): JSX.Element 
         <li><b>The old chain stays on the relays as history.</b> All {events} of its actions remain there, but from now on it no longer places you anywhere, for anyone.</li>
         <li><b>The travel on the old chain is lost.</b> You do not keep the position it reached; getting back there means traveling there again on the new chain.</li>
         <li><b>Your region keys and your items are kept.</b> A region key is knowledge, not chain state, and nothing you hold is stored on the chain.</li>
-        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, at your last valid position, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
+        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, {place}, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
       </ul>
     </>
   )
@@ -226,7 +226,7 @@ export function BrokenChainModal(): JSX.Element | null {
       busy={busy}
       body={(
         <>
-          <RespawnWarning lastValid={broken.lastValid ?? broken.action} />
+          <RespawnWarning lastValid={broken.lastValid ?? broken.action} place={brokenWords(broken).respawnPlace} />
           {failed && <p className="notice" role="alert">{failed}</p>}
         </>
       )}

@@ -26,7 +26,7 @@ import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
 import { confirmChainEvents } from './chains'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestOnRelays, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -54,17 +54,20 @@ let lastFailed = false
  * the head a moment ago (useCyberspace confirmHead).
  *
  * The look is the same confirmation a move takes (chains.ts
- * confirmChainEvents): it counts only when the canonical relay truly
- * answered with the whole chain from the newest event it already holds. A
- * look taken while it was unreachable proves nothing, and a send retried a
- * moment later, once it is back, would go out into a fork nobody checked
- * for. So with no answer nothing is sent, and the publisher tries again on
- * its usual backoff, looking again first. Resolves to whether it answered.
+ * confirmChainEvents, arkinox's ruling of 2026-10-08, option B): the
+ * canonical relay and every configured relay are asked together, and it
+ * counts when the canonical relay answered, or, the canonical relay silent,
+ * when another relay answered holding the newest event already on the
+ * relays. A look nobody answered proves nothing, and a send retried a moment
+ * later would go out into a fork nobody checked for. So with no answer
+ * nothing is sent, and the publisher tries again on its usual backoff,
+ * looking again first. Resolves to whether the look counted.
  */
 async function preflight(): Promise<boolean> {
   const s = useCyberspace.getState()
   const pubkey = s.identity.pubkey
-  const events = await confirmChainEvents(pubkey, s.genesisId || undefined, s.events, { since: newestOnRelays(s.events, s.published) }).catch(() => null)
+  const anchor = newestEventOnRelays(s.events, s.published)
+  const events = await confirmChainEvents(pubkey, s.genesisId || undefined, s.events, { since: anchor?.created_at, anchorId: anchor?.id }).catch(() => null)
   if (events === null) return false
   const now = useCyberspace.getState()
   if (now.identity.pubkey === pubkey && events.length > 0) now.adoptChain(events)
@@ -140,30 +143,91 @@ const notOnCanonical = new Map<string, { event: NostrEvent; since: number }>()
 let canonicalHandle: ReturnType<typeof setTimeout> | null = null
 let canonicalBackoff = CANONICAL_RETRY_MS
 
+/**
+ * Where that set is kept for an identity, beside its saved chain: a reload
+ * used to forget it, and the canonical relay never got those events
+ * (verification of #236, finding 3). Event ids and when each was first sent;
+ * the events themselves are in the saved chain.
+ */
+const pendingKeyFor = (pubkey: string): string => `onosendai:canonical-pending:${pubkey}`
+
+function savePending(pubkey: string): void {
+  const entries: Record<string, number> = {}
+  for (const [id, { event, since }] of notOnCanonical) if (event.pubkey === pubkey) entries[id] = since
+  try {
+    if (Object.keys(entries).length === 0) localStorage.removeItem(pendingKeyFor(pubkey))
+    else localStorage.setItem(pendingKeyFor(pubkey), JSON.stringify(entries))
+  } catch { /* private mode: the retry still runs for this page */ }
+}
+
+/** Take up the set saved for the current identity: what a reload or a switch back left waiting. */
+function restorePending(): void {
+  const s = useCyberspace.getState()
+  let saved: Record<string, number> = {}
+  try { saved = JSON.parse(localStorage.getItem(pendingKeyFor(s.identity.pubkey)) ?? '{}') as Record<string, number> } catch { saved = {} }
+  const byId = new Map(s.events.map((e) => [e.id, e]))
+  for (const [id, since] of Object.entries(saved)) {
+    const event = byId.get(id)
+    if (event && !notOnCanonical.has(id)) notOnCanonical.set(id, { event, since })
+  }
+  reportCanonicalLate()
+  scheduleCanonical()
+}
+
 /** How many of them have waited past CANONICAL_LATE_MS, for the status strip. */
 function reportCanonicalLate(): void {
   const now = Date.now()
+  // Only what is on the chain in hand counts: another identity's set waits
+  // in its own storage until that identity is back (restorePending).
+  const onChain = new Set(useCyberspace.getState().events.map((e) => e.id))
   let late = 0
-  for (const { since } of notOnCanonical.values()) if (now - since >= CANONICAL_LATE_MS) late++
+  let nextLate = Infinity
+  for (const [id, { since }] of notOnCanonical) {
+    if (!onChain.has(id)) continue
+    if (now - since >= CANONICAL_LATE_MS) late++
+    else nextLate = Math.min(nextLate, since + CANONICAL_LATE_MS)
+  }
   if (useCyberspace.getState().canonicalLate !== late) useCyberspace.setState({ canonicalLate: late })
+  // Said at the minute itself, not at the next retry after it.
+  clearTimeout(lateHandle)
+  if (nextLate !== Infinity) lateHandle = setTimeout(reportCanonicalLate, Math.max(0, nextLate - now))
+}
+let lateHandle: ReturnType<typeof setTimeout> | undefined
+
+function scheduleCanonical(): void {
+  if (canonicalHandle === null && notOnCanonical.size > 0) canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
 }
 
 /** Keep asking the canonical relay to take `event` until it does. */
 function awaitCanonical(event: NostrEvent): void {
   if (!notOnCanonical.has(event.id)) notOnCanonical.set(event.id, { event, since: Date.now() })
-  if (canonicalHandle === null) canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
+  savePending(event.pubkey)
+  reportCanonicalLate()
+  scheduleCanonical()
+}
+
+/**
+ * Published events the canonical relay was found not to hold (the startup
+ * self-check, lib/selfSync.ts): asked again in the background like any
+ * other, whatever this page remembers.
+ */
+export function requeueForCanonical(events: NostrEvent[]): void {
+  for (const e of events) awaitCanonical(e)
 }
 
 async function retryCanonical(): Promise<void> {
   canonicalHandle = null
-  const ids = new Set(useCyberspace.getState().events.map((e) => e.id))
+  const s = useCyberspace.getState()
+  const ids = new Set(s.events.map((e) => e.id))
   for (const [id, { event }] of [...notOnCanonical]) {
     // An event no longer on this device's chain (a respawn, another chain
-    // kept) is not worth sending.
+    // kept) is not worth sending; another identity's is still in its own
+    // storage, for when that identity is back.
     if (!ids.has(id)) { notOnCanonical.delete(id); continue }
     const result = await publishMany([CANONICAL], event)
     if (result.ok) notOnCanonical.delete(id)
   }
+  savePending(s.identity.pubkey)
   reportCanonicalLate()
   if (notOnCanonical.size === 0) { canonicalBackoff = CANONICAL_RETRY_MS; return }
   canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS)
@@ -174,8 +238,12 @@ async function retryCanonical(): Promise<void> {
 export function startPublisher(): void {
   if (started) return
   started = true
+  // What a reload left waiting for the canonical relay is asked for again.
+  restorePending()
 
   useCyberspace.subscribe((s, prev) => {
+    // Another identity: its own set, and its own count on the strip.
+    if (s.identity.pubkey !== prev.identity.pubkey) restorePending()
     // Every change is offered to the gate first, because the thing that opens
     // it, a new head signed here, arrives as an ordinary store update.
     released = gateAfter(released, chainFacts(prev), chainFacts(s))

@@ -119,7 +119,7 @@ describe('the publisher and the release gate', () => {
     }
   })
 
-  it('sends no backlog when the canonical relay did not answer the look, whatever another relay said (review of #236, item 9)', async () => {
+  it('sends no backlog when the look did not count: no relay answered that holds the chain (review of #236, item 9; option B)', async () => {
     canonical.answers = false
     try {
       setChain(['a1', 'b2', 'c3'])

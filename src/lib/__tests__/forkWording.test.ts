@@ -46,6 +46,10 @@ describe('a forked chain, in words', () => {
     for (const text of Object.values(w)) expect(text).not.toMatch(/last valid/i)
   })
 
+  it('the respawn warning puts the End of Chain entry at the spawn coordinate, not at a last valid position (verification of #236)', () => {
+    expect(brokenWords(broken).respawnPlace).toBe('at your spawn coordinate, where the forked chain stands')
+  })
+
   it('"Why" is the rule, once; the branches are named elsewhere, not repeated in it', () => {
     const w = brokenWords(broken)
     expect(w.why).toBe(FORK_RULE_WORDS)
@@ -64,5 +68,6 @@ describe('a forked chain, in words', () => {
     const chain = buildChain([spawn, hop1, wrong])
     expect(whyNoMove(chain)).toBe(BROKEN_CHAIN_MESSAGE)
     expect(brokenWords(firstBreak(chain)!).title).toBe('Frozen at your last valid position')
+    expect(brokenWords(firstBreak(chain)!).respawnPlace).toBe('at your last valid position')
   })
 })

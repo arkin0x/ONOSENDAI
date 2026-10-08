@@ -24,6 +24,7 @@
 import { normalizeURL } from 'nostr-tools/utils'
 import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
 import { confirmChainEvents } from './chains'
+import { noteChainHolders } from './chainHolders'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
@@ -56,9 +57,10 @@ let lastFailed = false
  * The look is the same confirmation a move takes (chains.ts
  * confirmChainEvents, arkinox's ruling of 2026-10-08, option B): the
  * canonical relay and every configured relay are asked together, and it
- * counts when the canonical relay answered, or, the canonical relay silent,
- * when another relay answered holding the newest event already on the
- * relays. A look nobody answered proves nothing, and a send retried a moment
+ * counts when the canonical relay answered (every relay that holds this
+ * chain then waited for up to the deadline), or, the canonical relay
+ * silent, when another relay answered holding the newest event already on
+ * the relays. A look nobody answered proves nothing, and a send retried a moment
  * later would go out into a fork nobody checked for. So with no answer
  * nothing is sent, and the publisher tries again on its usual backoff,
  * looking again first. Resolves to whether the look counted.
@@ -117,6 +119,9 @@ async function pump(): Promise<void> {
     // option B). The canonical relay is where every other device looks, so
     // when it was not among them it is asked again in the background.
     if (result.accepted && !result.accepted.includes(CANONICAL)) awaitCanonical(next)
+    // Every relay that took it now holds this chain, and a move's
+    // confirmation waits for it from now on (chainHolders.ts).
+    if (result.accepted) noteChainHolders(next.pubkey, result.accepted)
     now.setPublishStatus(next.id, 'ok')
     backoff = RETRY_MS
     lastFailed = false

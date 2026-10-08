@@ -1347,9 +1347,11 @@ function foldOtherTabs(pubkey: string): void {
  * client that signs from a stale head forks the chain, and a fork ends it.
  * Another tab's saves and the relays' answers are folded in first; the
  * caller then compares the head with the one it meant to extend. Null when
- * confirmed: the canonical relay answered, or, the canonical relay silent,
+ * confirmed: the canonical relay answered, and every relay that holds this
+ * chain answered or the deadline passed; or, the canonical relay silent,
  * another configured relay answered holding the newest event already on the
- * relays (chains.ts confirmChainEvents, option B). The refusal's words when
+ * relays (chains.ts confirmChainEvents, option B and the ruling on the
+ * slow-relay grace). The refusal's words when
  * nothing counted after HEAD_CONFIRM_TRIES asks (`retrying` runs before each
  * ask after the first), and the move is then refused rather than signed
  * blind: offline, slow relays, or a chain returned with a hole.

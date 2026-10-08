@@ -22,6 +22,8 @@ const net = vi.hoisted(() => ({
   authing: new Set<string>(),
   /** How long before each REQ is written (a busy main thread); 0 is at once. */
   reqDelayMs: 0,
+  /** The relays each question was told to wait for. */
+  waitFor: [] as string[][],
 }))
 vi.mock('../relay', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../relay')>()
@@ -30,11 +32,22 @@ vi.mock('../relay', async (importOriginal) => {
     relaySet: () => [actual.CYBERSPACE_RELAY, net.user],
     dropRelays: (relays: string[]) => { net.log.push(`drop ${relays.join(',')}`) },
     authPending: (url: string) => net.authing.has(url),
-    queryEachSettled: async (relays: string[], filter: Record<string, unknown>, _maxWait: number, _primary: string, _grace: number, onSent?: () => void) => {
+    // The startup self-check's question (askChainEvents), answered the same way.
+    queryEach: async (filter: Record<string, unknown>) => {
+      const { normalizeURL } = await import('nostr-tools/utils')
+      net.filters.push(filter)
+      return [actual.CYBERSPACE_RELAY, net.user].map((r) => {
+        const url = normalizeURL(r)
+        const a = net.answers.get(url) ?? { outcome: 'answered' as const, events: [] }
+        return a.outcome === 'answered' ? { url, outcome: 'answered', events: a.events } : { url, outcome: 'unreachable', reason: 'no answer in time', events: a.events }
+      })
+    },
+    queryEachSettled: async (relays: string[], filter: Record<string, unknown>, _maxWait: number, _primary: string, waitFor: string[], opts: { onSent?: () => void } = {}) => {
       net.log.push(`ask ${relays.join(',')}`)
       net.filters.push(filter)
+      net.waitFor.push(waitFor)
       if (net.reqDelayMs > 0) await new Promise((r) => setTimeout(r, net.reqDelayMs))
-      onSent?.()
+      opts.onSent?.()
       return relays.map((url) => {
         const a = net.answers.get(url) ?? { outcome: 'answered' as const, events: [] }
         return a.outcome === 'answered' ? { url, outcome: 'answered', events: a.events } : { url, outcome: 'unreachable', reason: 'no answer in time', events: a.events }
@@ -44,7 +57,8 @@ vi.mock('../relay', async (importOriginal) => {
 })
 
 import { normalizeURL } from 'nostr-tools/utils'
-import { confirmChainEvents } from '../chains'
+import { askChainEvents, confirmChainEvents } from '../chains'
+import { chainHolders } from '../chainHolders'
 import { CYBERSPACE_RELAY } from '../relay'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 
@@ -54,7 +68,7 @@ const child: NostrEvent = { ...hopTemplate({ createdAt: 1_010, genesisId: spawn.
 const canonical = normalizeURL(CYBERSPACE_RELAY)
 /** The player's own relay, as confirmation names it (normalized). */
 const user = normalizeURL(net.user)
-const reset = (): void => { net.answers.clear(); net.log = []; net.filters = []; net.authing.clear(); net.reqDelayMs = 0 }
+const reset = (): void => { net.answers.clear(); net.log = []; net.filters = []; net.authing.clear(); net.reqDelayMs = 0; net.waitFor = [] }
 
 describe('confirming a head against the canonical relay and the configured relays (option B)', () => {
   it('asks them all together', async () => {
@@ -163,5 +177,35 @@ describe('the confirmation\'s overall deadline (verification of #236, finding 6)
     // Held back for longer than the whole old budget (2 x 200 + 100 ms).
     net.reqDelayMs = 700
     expect(await confirmChainEvents(PK, spawn.id, [spawn], { maxWait: 200 })).toEqual([])
+  })
+})
+
+describe('the relays a confirmation waits for (ruling of 2026-10-08 on the slow-relay grace)', () => {
+  /** An identity of its own, so what earlier tests taught about PK does not leak in. */
+  const PK2 = 'a2'.repeat(32)
+  const spawn2: NostrEvent = { ...spawnTemplate(PK2, 2_000), id: 'a3'.repeat(32), pubkey: PK2, sig: '0'.repeat(128) }
+
+  it('the canonical relay alone, until a relay sends back one of the chain\'s events; that relay is waited for from the next confirmation on', async () => {
+    reset()
+    net.answers.set(user, { outcome: 'answered', events: [] })
+    await confirmChainEvents(PK2, spawn2.id, [spawn2])
+    expect(net.waitFor.length).toBeGreaterThan(0)
+    expect(net.waitFor.every((w) => w.join(',') === canonical)).toBe(true)
+    reset()
+    net.answers.set(user, { outcome: 'answered', events: [spawn2] })
+    await confirmChainEvents(PK2, spawn2.id, [spawn2])
+    reset()
+    await confirmChainEvents(PK2, spawn2.id, [spawn2])
+    expect(net.waitFor.every((w) => w.join(',') === `${canonical},${user}`)).toBe(true)
+  })
+
+  it('the startup self-check notes the relays whose answers held the chain', async () => {
+    reset()
+    const PK3 = 'a4'.repeat(32)
+    const spawn3: NostrEvent = { ...spawnTemplate(PK3, 3_000), id: 'a5'.repeat(32), pubkey: PK3, sig: '0'.repeat(128) }
+    net.answers.set(user, { outcome: 'answered', events: [spawn3] })
+    expect(chainHolders(PK3).has(user)).toBe(false)
+    await askChainEvents(PK3)
+    expect(chainHolders(PK3).has(user)).toBe(true)
   })
 })

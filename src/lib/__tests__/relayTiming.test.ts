@@ -61,7 +61,7 @@ describe('the confirmation\'s timing (verification of #236, finding 6)', () => {
   it('a relay that answers soon after its REQ counts, however long the main thread was busy before the REQ went out', async () => {
     fake.relays.clear(); fake.challenge = undefined; fake.eoseMs = 50
     const url = 'ws://relay.one/'
-    const asking = queryEachSettled([url], { kinds: [3333] }, 600, url, 400)
+    const asking = queryEachSettled([url], { kinds: [3333] }, 600, url, [])
     // Before the REQ is written (it waits for a challenge first), the main
     // thread is held for longer than the whole budget.
     setTimeout(() => busy(1_300), 0)
@@ -74,10 +74,10 @@ describe('an AUTH waiting on the signer (verification of #236, finding 4)', () =
   it('is known while the signer works, and a second ask rides on it: one AUTH, one prompt', async () => {
     fake.relays.clear(); fake.challenge = 'c1'; fake.eoseMs = 10; fake.signerMs = 300; fake.signed = 0
     const url = 'ws://relay.two/'
-    const first = queryEachSettled([url], { kinds: [3333] }, 2_000, url, 400)
+    const first = queryEachSettled([url], { kinds: [3333] }, 2_000, url, [])
     await new Promise((r) => setTimeout(r, 100))
     expect(authPending(url)).toBe(true)
-    const second = queryEachSettled([url], { kinds: [3333] }, 2_000, url, 400)
+    const second = queryEachSettled([url], { kinds: [3333] }, 2_000, url, [])
     const [a, b] = await Promise.all([first, second])
     expect(a[0].outcome).toBe('answered')
     expect(b[0].outcome).toBe('answered')

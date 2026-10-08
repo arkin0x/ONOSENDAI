@@ -150,6 +150,18 @@ describe('a fork ends the whole chain (ruling 5)', () => {
     expect(actionLabel(chain[0])).toBe('BROKEN · SPAWN')
   })
 
+  it('a fork overrides freezing: S, a, x, b with x invalid and two events naming b stands at the spawn coordinate, not frozen at a (spec §3.2, §8.7.3)', () => {
+    const x = plus(hop2, [['C', ZERO]])
+    const b = hopEvent({ pubkey: pk, createdAt: 1_030, genesisId: spawn.id, previousId: x.id, c: hexAt(at(2n)), to: at(3n), plane })
+    const c = hopEvent({ pubkey: pk, createdAt: 1_040, genesisId: spawn.id, previousId: b.id, c: hexAt(at(3n)), to: at(4n), plane })
+    const d = hopEvent({ pubkey: pk, createdAt: 1_041, genesisId: spawn.id, previousId: b.id, c: hexAt(at(3n)), to: at(5n), plane })
+    const chain = buildChain([spawn, hop1, x, b, c, d])
+    expect(chain.map((e) => e.id)).toEqual([spawn.id, hop1.id, x.id, b.id])
+    expect(firstBreak(chain)?.index).toBe(0)
+    expect(chain[0].fork?.branchIds).toEqual([c.id, d.id])
+    expect(chain.every((e) => e.coordHex === pk)).toBe(true)
+  })
+
   it('a fork deep in the chain still freezes the identity at its spawn coordinate, not at the fork', () => {
     const rival = hopEvent({ pubkey: pk, createdAt: 1_025, genesisId: spawn.id, previousId: hop1.id, c: hexAt(at(1n)), to: at(7n), plane })
     const chain = buildChain([spawn, hop1, hop2, rival])
@@ -177,7 +189,7 @@ describe('a fork ends the whole chain (ruling 5)', () => {
     const b = hopEvent({ pubkey: pk, createdAt: t + 2, genesisId: s.id, previousId: s.id, c: pk, to: at(2n), plane })
     expect(apologyFor(buildChain([s, a, b])[0])).toBeNull()
     const old = buildChain([spawn, hop1, hopEvent({ pubkey: pk, createdAt: 1_015, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(5n), plane })])[0]
-    expect(apologyFor(old)).toMatch(/took effect on 2026-10-08, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets, after this action was signed/)
+    expect(apologyFor(old)).toMatch(/took effect on 2026-10-08, by arkinox's ruling of that day, folded into chain rules revision 2026-09-28-virtual-brackets and written into the spec by PR #48 that day, after this action was signed/)
   })
 })
 

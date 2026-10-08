@@ -546,17 +546,17 @@ export interface CyberspaceState {
    *
    * `adopted` is how many actions came from another device, which explains an
    * avatar that moved on its own. `dropped` is how many of this device's
-   * actions the fork took out.
+   * actions the fold left out of the chain.
    *
-   * Two cases get their own words, because the generic count hides what
-   * happened (arkinox, 2026-10-01). `replaced`: the adopted chain begins with
-   * a newer spawn, so this device's whole chain was superseded (§3.2: a
-   * respawn on another device, or another device answering the held-chain
-   * prompt with "Keep the local chain"). `overturned`: of the dropped
-   * actions, how many this device had already published; another device's
-   * older branch won the fork and took them out for every reader.
+   * `replaced` gets its own words, because the generic count hides what
+   * happened (arkinox, 2026-10-01): the adopted chain begins with a newer
+   * spawn, so this device's whole chain was superseded (§3.2: a respawn on
+   * another device, or another device answering the held-chain prompt with
+   * "Keep the local chain"). A fork is never reported here: a fork ends the
+   * whole chain (spec §8.7.3 rule 4, arkinox 2026-10-08), so both branches
+   * are kept and the broken-chain notice says so.
    */
-  forkNotice: { adopted: number; dropped: number; overturned: number; replaced: boolean; at: number } | null
+  forkNotice: { adopted: number; dropped: number; replaced: boolean; at: number } | null
   /**
    * Whether this identity already has a chain on the relays, as last asked
    * (lib/chainHold.ts, lib/selfSync.ts): `checking`, `found`, `none`, or
@@ -595,10 +595,9 @@ export interface CyberspaceState {
   resolveHeldConflict: (choice: 'relay' | 'local') => void
   /**
    * Answer the diverged-branch prompt. `relay` discards this device's
-   * unpublished moves after the fork and takes the relays' version; `mine`
-   * keeps them and lets them publish (now, while LIVE), which wins the fork
-   * for every reader only when they are the older branch (the prompt says
-   * which, and asks twice when they would override published moves).
+   * unpublished moves after the fork and takes the relays' version. `mine`
+   * is refused: publishing them would fork the chain on the relays, and a
+   * fork ends the whole chain (spec §8.7.3 rule 4, arkinox 2026-10-08).
    */
   resolveBranchConflict: (choice: 'relay' | 'mine') => void
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
@@ -3279,30 +3278,28 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const d = derive(saved)
     const following = cur.atHead()
     // What this fold cost and what it brought. Dropped actions are this
-    // device's own work that the fork took out of the chain; adopted ones are
-    // another device's, and are why the avatar just moved on its own.
+    // device's own work the fold left out of the chain (a newer spawn took
+    // over); adopted ones are another device's, and are why the avatar just
+    // moved on its own.
     const kept = new Set(chainEvents.map((e) => e.id))
     const lost = cur.events.filter((e) => !kept.has(e.id))
     const dropped = lost.length
     const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
-    // A different genesis is a newer spawn taking over, not a fork within
-    // the chain; within the chain, the published ones among the dropped are
-    // moves every reader had already seen and no longer sees.
+    // A different genesis is a newer spawn taking over.
     const replaced = cur.events.length > 0 && d.genesisId !== cur.genesisId
-    const overturned = replaced ? 0 : lost.filter((e) => cur.published[e.id] === 'ok').length
     // A loss stays reported until it is read. The other device's events
-    // arrive one fold at a time, so the fold that overturned your moves is
-    // usually followed at once by one that only brings the rest of its
-    // branch; that one must add to the unread notice, not replace it. A
-    // notice that only explained an adoption is replaced as before.
+    // arrive one fold at a time, so the fold that replaced your chain is
+    // usually followed at once by one that only brings the rest of it; that
+    // one must add to the unread notice, not replace it. A notice that only
+    // explained an adoption is replaced as before.
     const prior = cur.forkNotice
     const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
     const notice = forked
       ? null
       : dropped > 0 || adopted > 0
       ? unreadLoss
-        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, overturned: prior.overturned + overturned, replaced: prior.replaced || replaced, at: Date.now() }
-        : { adopted, dropped, overturned, replaced, at: Date.now() }
+        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, replaced: prior.replaced || replaced, at: Date.now() }
+        : { adopted, dropped, replaced, at: Date.now() }
       : null
     set({
       events: d.events,

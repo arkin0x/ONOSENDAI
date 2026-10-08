@@ -31,13 +31,17 @@ export const ACTION_KIND = 3333
 
 /**
  * The chain rules this client implements (spec §8.12), as the spec states
- * them at commit 912f3d7 (spec PR #46, merged 2026-10-08T04:04:00Z, which is
- * 23:04 on 2026-10-07 at UTC-5, the time zone this file names days in), which
- * wrote arkinox's rulings of 2026-10-07 and the clarifications he gave while
- * it was open into this revision: no zero-length ride, a virtual bracket opaque to the base
- * protocol, exactly one A tag on every event, and sector tags that must
- * agree with the coordinate, each carried exactly once. Every spec section
- * cited in this file is numbered as of that commit. A rule this revision
+ * them at commit 1bf5694 (spec PR #48, merged 2026-10-08T09:52:23Z). Spec PR
+ * #46 (912f3d7, merged 2026-10-08T04:04:00Z, which is 23:04 on 2026-10-07 at
+ * UTC-5, the time zone this file names days in) wrote arkinox's rulings of
+ * 2026-10-07 and his first clarifications into this revision: no zero-length
+ * ride, a virtual bracket opaque to the base protocol, exactly one A tag on
+ * every event, and sector tags that must agree with the coordinate, each
+ * carried exactly once. Spec PR #48 wrote his second round of 2026-10-08: a
+ * fork is fatal, any A tag equal to spawn makes a spawn and a spawn is never
+ * a link, every tag a chain rule reads appears exactly once with a value,
+ * and the network is Bitcoin mainnet, so a net tag is never read. Every spec
+ * section cited in this file is numbered as of 1bf5694. A rule this revision
  * introduced is marked on the break (`breakSince`), because a chain made
  * before the rule took effect was valid when it was made, and the person
  * whose chain it is deserves to be told so.
@@ -113,17 +117,17 @@ export const DUPLICATE_SECTOR_RULE: RuleChange = {
  * appears exactly once with a value (an empty A tag included), and every
  * chain event carries exactly one e genesis and one e previous (an exit one
  * e entry). In effect from the start of that day at UTC-5, like the rulings
- * of 2026-10-07. The spec text has not caught up yet, so the notice names
- * the ruling alone.
+ * of 2026-10-07. Spec PR #48 wrote them into the spec at 09:52 UTC that day
+ * (1bf5694), without moving the date.
  */
 export const RULINGS_2026_10_08: RuleChange = {
-  revision: CHAIN_RULES_REVISION, since: '2026-10-08', by: 'ruling', effectiveAt: Date.parse('2026-10-08T05:00:00Z') / 1000, kind: 'rule',
+  revision: CHAIN_RULES_REVISION, since: '2026-10-08', by: 'ruling', spec: 'written into the spec by PR #48 that day', effectiveAt: Date.parse('2026-10-08T05:00:00Z') / 1000, kind: 'rule',
 }
 
-/** A fork ends the whole chain (2026-10-08 ruling): a new rule, replacing the rule that the older branch continued (spec §8.7.3 rule 4). */
+/** A fork ends the whole chain (spec §8.7.3 rule 4, 2026-10-08 ruling): a new rule, replacing the earlier rule that one branch of a fork continued it. */
 export const FORK_RULE: RuleChange = RULINGS_2026_10_08
 
-/** Every tag a chain rule reads exactly once, with a value (2026-10-08 ruling): validation the rules gained. */
+/** Every tag a chain rule reads exactly once, with a value (spec §8.8, 2026-10-08 ruling): validation the rules gained. */
 export const TAGS_ONCE_RULE: RuleChange = { ...RULINGS_2026_10_08, kind: 'validation' }
 
 /**
@@ -602,7 +606,7 @@ function aTagsWrong(ev: NostrEvent): { breaks: string; since: RuleChange } | nul
   if (names.length === 1) {
     if (names[0] !== '') return null
     // A bare ["A"] or ["A", ""] is an A tag, and names nothing (2026-10-08 ruling).
-    return { since: TAGS_ONCE_RULE, breaks: 'an event whose A tag is empty, so it names no action at all. The A tag has to say what the event does, and an empty one counts as an A tag that says nothing (per the 2026-10-08 ruling)' }
+    return { since: TAGS_ONCE_RULE, breaks: 'an event whose A tag is empty, so it names no action at all. The A tag has to say what the event does, and an empty one counts as an A tag that says nothing (spec §8.8, per the 2026-10-08 ruling)' }
   }
   if (names.length === 0) return { since: ONE_A_TAG_RULE, breaks: 'an event on your chain with no A tag, so it names no action at all. Every event on a chain has to carry exactly one A tag, the name of what it does (spec §8.8)' }
   const said = names.map((n) => (n.length > 20 ? `${n.slice(0, 20)}…` : n)).join(', ')
@@ -651,7 +655,7 @@ function readTagsWrong(ev: NostrEvent, read: RecognizedAction | 'links', label: 
   const doubled = READ_TAGS[read].map((k) => [k, readCount(ev, k)] as const).filter(([, n]) => n > 1)
   if (doubled.length === 0) return null
   const said = doubled.map(([k, n]) => `${countWord(n)} ${k.startsWith('e:') ? `e tags marked ${k.slice(2)}` : `${k} tags`}`).join(' and ')
-  return `${an(label)} carrying ${said}. Every tag the chain rules read has to appear exactly once, even when the copies agree, so that every reader reads the same thing (per the 2026-10-08 ruling)`
+  return `${an(label)} carrying ${said}. Every tag the chain rules read has to appear exactly once, even when the copies agree, so that every reader reads the same thing (spec §8.8, per the 2026-10-08 ruling)`
 }
 
 function marked(ev: NostrEvent, marker: string): string | undefined {
@@ -809,10 +813,10 @@ export interface ActionLink {
  * published), and one without both `e` links.
  *
  * An event with no `A` tag, or with several, still has its links read:
- * resolution chooses the chain by links, `created_at` and ids alone, before
- * any tag is checked (spec §8.7.3, Validity and position), so such an event
- * can continue a chain or win a fork, and it is then where the chain stops
- * being valid (§8.8), not a gap the chain quietly ends at.
+ * resolution follows the chain by links alone, before any tag is checked
+ * (spec §8.7.3, Validity and position), so such an event can continue a
+ * chain, or make a fork beside another event, and it is then where the
+ * chain stops being valid (§8.8), not a gap the chain quietly ends at.
  */
 export function actionLink(ev: NostrEvent): ActionLink | null {
   if (ev.kind !== ACTION_KIND) return null
@@ -912,9 +916,9 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
  * Spec §8.7.3: the newest spawn wins, and only events whose genesis names it
  * can be part of the chain; events that name another spawn are history, even
  * if their `previous` link would fit. From that spawn the chain is followed
- * forward through `previous` links, and at a fork (two events naming the
- * same predecessor) the older branch continues, a tie going to the smaller
- * id, so a later attempt to rewrite cannot displace what was there first.
+ * forward through `previous` links. At a fork (two events naming the
+ * current event as previous) the walk ends, and the whole chain is dead from
+ * its spawn (spec §8.7.3 rule 4, arkinox 2026-10-08).
  *
  * The links are followed through every event, recognized or not (§8.9 rule
  * 1): an action this client does not recognize is skipped, never a place
@@ -1013,7 +1017,7 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
     for (let i = 1; i < chain.length; i++) chain[i] = standingAt(chain[i], home)
     chain[0] = {
       ...chain[0],
-      breaks: `a fork: ${countWord(ids.length)} events (${listed}) ${ids.length === 2 ? 'both name' : 'all name'} row ${shared} (event ${fork.previousId.slice(0, 8)}…) as the action before them. A chain may only ever have one next action after each event, so a fork ends the whole chain, whichever branch came first or is valid, and you stand at your spawn coordinate (per the 2026-10-08 ruling)`,
+      breaks: `a fork: ${countWord(ids.length)} events (${listed}) ${ids.length === 2 ? 'both name' : 'all name'} row ${shared} (event ${fork.previousId.slice(0, 8)}…) as the action before them. A chain may only ever have one next action after each event, so a fork ends the whole chain, whichever branch came first or is valid, and you stand at your spawn coordinate (spec §8.7.3 rule 4, per the 2026-10-08 ruling)`,
       breakSince: FORK_RULE,
       fork: { previousId: fork.previousId, branchIds: fork.branches.map((b) => b.id) },
     }
@@ -1033,7 +1037,7 @@ function rideBreak(ride: ActionEvent, stood: ActionEvent | null, ev: NostrEvent)
   if (stood?.type === 'enter-hyperspace') {
     // Read here and only here (spec PR #48): exactly once, base-10.
     const asOfTags = tagCount(ev, 'as_of')
-    if (asOfTags > 1) return `a first ride after boarding carrying ${countWord(asOfTags)} as_of tags. Every tag the chain rules read has to appear exactly once (per the 2026-10-08 ruling)`
+    if (asOfTags > 1) return `a first ride after boarding carrying ${countWord(asOfTags)} as_of tags. Every tag the chain rules read has to appear exactly once (DECK-0001 §8, per the 2026-10-08 ruling)`
     if (asOfTags === 1 && ride.asOf === undefined) return 'a first ride after boarding whose as_of tag is not a block height (DECK-0001 §4.2)'
     if (ride.asOf === undefined) return 'a first ride after boarding with no as_of tag. The first ride from a station has to say up to which block it looked when it found that station, in its as_of tag (DECK-0001 §4.2, §4.3)'
     if (ride.asOf < ride.toHeight!) return `a first ride whose as_of (${ride.asOf}) is below the block it rides to (${ride.toHeight}). Its station is found among the blocks up to as_of, so as_of can never be lower than the destination (DECK-0001 §4.2)`

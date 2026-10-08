@@ -5,8 +5,8 @@
  * taken this identity into a game.
  *
  * What would go wrong silently: a move after an action this client does not
- * recognize naming an earlier event as its previous (a fork that loses to
- * the older branch), or taking that action's own C as its `c` (an invalid
+ * recognize naming an earlier event as its previous (a fork, which ends the
+ * whole chain), or taking that action's own C as its `c` (an invalid
  * chain); and a move signed while a game holds the avatar, which makes the
  * chain invalid from that point for every verifier.
  */

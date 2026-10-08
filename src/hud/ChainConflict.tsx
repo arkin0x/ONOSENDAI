@@ -201,7 +201,7 @@ function BranchConflictPrompt(): JSX.Element | null {
       onBackdrop={setAside}
       body={<>
         <p><b>What happened:</b> another device signed in as you published {plural(theirs.count, 'action')} from the same point of your chain where this device has {plural(mine.count, 'unpublished action')}. Both continue from action {div.forkIndex + 1} of the chain{fork ? <> (signed <span title={formatStamp(fork.createdAt)}>{formatAgo(fork.createdAt, now)}</span>)</> : null}, so the two would fork the chain. Nothing from this device has been published, and the other device's moves have not been adopted here.</p>
-        <p><b>Why yours cannot be published:</b> a fork ends the whole chain for every reader, whichever branch came first (arkinox's ruling of 2026-10-08). Publishing this device's moves would put both branches on the relays and end your chain, so only the relays' version can be kept.</p>
+        <p><b>Why yours cannot be published:</b> a fork ends the whole chain for every reader, whichever branch came first (spec §8.7.3 rule 4, arkinox's ruling of 2026-10-08). Publishing this device's moves would put both branches on the relays and end your chain, so only the relays' version can be kept.</p>
         <ChainCompare
           labels={BRANCH_LABELS}
           columns={[

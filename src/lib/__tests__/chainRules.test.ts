@@ -4,7 +4,7 @@
  *
  * What would go wrong silently: the chain stopping before the first action
  * this client does not recognize, so the head goes stale and the next move
- * forks from an earlier point and loses to the older branch; a skipped
+ * forks the chain from an earlier point, which ends it; a skipped
  * action's own C taken as the position; a game's in-game coordinates taken
  * as where the identity is; and rules that look back stopping at a bracket
  * or a skipped action instead of seeing through it.

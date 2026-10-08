@@ -134,8 +134,8 @@ describe('a chain forked across two devices', () => {
     const respawn: NostrEvent = { ...spawnTemplate(S().identity.pubkey, spawn.created_at + 100), id: hex(9), pubkey: S().identity.pubkey, sig: '0'.repeat(128) }
     S().adoptChain([respawn])
     expect(S().genesisId).toBe(respawn.id)
-    // The whole previous chain left, and none of it counts as "overturned":
-    // nothing forked, a newer spawn took over.
-    expect(S().forkNotice).toMatchObject({ replaced: true, dropped: 2, overturned: 0, adopted: 1 })
+    // The whole previous chain left: nothing forked, a newer spawn took over.
+    expect(S().forkNotice).toEqual(expect.objectContaining({ replaced: true, dropped: 2, adopted: 1 }))
+    expect(S().forkNotice).not.toHaveProperty('overturned')
   })
 })

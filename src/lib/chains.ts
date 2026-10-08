@@ -20,8 +20,8 @@
  * action is called (§8.9 rule 1), and a game names its own actions inside a
  * bracket (§8.11.2). Asking a chain by name made every chain stop before the
  * first action outside the list, so a game client playing on the same
- * identity was invisible, and this client's next move forked from an
- * earlier point and lost to the game's older branch (§8.7.3). Asking by the
+ * identity was invisible, and this client's next move forked the chain from
+ * an earlier point, which ends it (§8.7.3 rule 4). Asking by the
  * genesis returns every event of the current chain and nothing of any other.
  *
  * Pure helpers first, so the ordering, merging and paging rules can be

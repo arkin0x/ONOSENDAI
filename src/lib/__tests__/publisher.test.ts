@@ -20,10 +20,13 @@ vi.mock('../relay', async (importOriginal) => ({
 }))
 
 // The look at the relays before a backlog finds nothing here: no relay.
+// `canonical.answers` says whether the canonical relay answers it.
+const canonical = vi.hoisted(() => ({ answers: true }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
   askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered' as const, events: [] }]),
+  confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -102,6 +105,22 @@ describe('the publisher and the release gate', () => {
     expect(sent).toEqual([ev('a1').id, ev('b2').id, ev('c3').id, ev('d4').id])
     for (const id of ['a1', 'b2', 'c3', 'd4']) {
       expect(useCyberspace.getState().published[ev(id).id]).toBe('ok')
+    }
+  })
+
+  it('sends no backlog when the canonical relay did not answer the look, whatever another relay said (review of #236, item 9)', async () => {
+    canonical.answers = false
+    try {
+      setChain(['a1', 'b2', 'c3'])
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('d4')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
     }
   })
 

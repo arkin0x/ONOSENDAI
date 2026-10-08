@@ -62,6 +62,19 @@ describe('checking signatures off the main thread', () => {
     expect([...await pending]).toEqual([many[41].id])
   })
 
+  it('a worker that never answers is given up on at its deadline, and the main thread answers instead (review of #242)', async () => {
+    const made: string[] = []
+    ;(globalThis as { Worker?: unknown }).Worker = class {
+      onmessage: unknown = null
+      onerror: unknown = null
+      constructor(url: URL) { made.push(String(url)) }
+      postMessage(): void { /* never answers */ }
+      terminate(): void { made.push('terminated') }
+    }
+    expect([...await checkSignatures(events, 30)].sort()).toEqual(bad.sort())
+    expect(made).toContain('terminated')
+  })
+
   it('asks nothing for nothing', async () => {
     expect((await checkSignatures([])).size).toBe(0)
   })

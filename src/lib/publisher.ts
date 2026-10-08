@@ -22,10 +22,9 @@
  */
 
 import { publish } from './relay'
-import { askChainEvents } from './chains'
-import { mergeAnswers } from './relayOutcome'
+import { confirmChainEvents } from './chains'
 import { chainFacts, gateAfter, maySend } from './release'
-import { useCyberspace } from '../store/useCyberspace'
+import { newestOnRelays, useCyberspace } from '../store/useCyberspace'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -49,27 +48,25 @@ let lastFailed = false
  * published from the same point meanwhile, and these events would fork
  * against it; adoptChain finds that and raises the diverged-branch prompt
  * (lib/branchConflict.ts), which stops the drain before anything goes out.
- * A single fresh action needs no look: the commit that signed it looked
- * a moment ago (useCyberspace freshHead).
+ * A single fresh action needs no look: the action that signed it confirmed
+ * the head a moment ago (useCyberspace confirmHead).
  *
- * The look counts only when a relay really answered (relayOutcome.ts). A
- * look taken while the relays were unreachable proves nothing, and a send
- * retried a moment later, once they are back, would go out into a fork
- * nobody checked for. So with no answer nothing is sent, and the publisher
- * tries again on its usual backoff, looking again first. Resolves to whether
- * a relay answered.
+ * The look is the same confirmation a move takes (chains.ts
+ * confirmChainEvents): it counts only when the canonical relay truly
+ * answered with the whole chain from the newest event it already holds. A
+ * look taken while it was unreachable proves nothing, and a send retried a
+ * moment later, once it is back, would go out into a fork nobody checked
+ * for. So with no answer nothing is sent, and the publisher tries again on
+ * its usual backoff, looking again first. Resolves to whether it answered.
  */
 async function preflight(): Promise<boolean> {
-  const pubkey = useCyberspace.getState().identity.pubkey
-  let answered = false
-  try {
-    const answers = await askChainEvents(pubkey, useCyberspace.getState().genesisId || undefined, useCyberspace.getState().events)
-    answered = answers.some((a) => a.outcome === 'answered')
-    const events = mergeAnswers(answers)
-    const now = useCyberspace.getState()
-    if (now.identity.pubkey === pubkey && events.length > 0) now.adoptChain(events)
-  } catch { /* the query reports rather than throws; nothing answered */ }
-  return answered
+  const s = useCyberspace.getState()
+  const pubkey = s.identity.pubkey
+  const events = await confirmChainEvents(pubkey, s.genesisId || undefined, s.events, { since: newestOnRelays(s.events, s.published) }).catch(() => null)
+  if (events === null) return false
+  const now = useCyberspace.getState()
+  if (now.identity.pubkey === pubkey && events.length > 0) now.adoptChain(events)
+  return true
 }
 
 /** Try again after the current backoff, doubling it for the time after. */

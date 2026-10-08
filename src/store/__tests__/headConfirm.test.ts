@@ -12,10 +12,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+/** Every key read from storage, in order. */
+const reads = vi.hoisted(() => ({ keys: [] as string[] }))
 vi.hoisted(() => {
   const mem = new Map<string, string>()
   ;(globalThis as { localStorage?: unknown }).localStorage = {
-    getItem: (k: string) => mem.get(k) ?? null,
+    getItem: (k: string) => { reads.keys.push(k); return mem.get(k) ?? null },
     setItem: (k: string, v: string) => { mem.set(k, String(v)) },
     removeItem: (k: string) => { mem.delete(k) },
     clear: () => { mem.clear() },
@@ -30,11 +32,12 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 /** What the canonical relay answers each confirmation, in turn: events, or null for no answer. Empty when out: "nothing new". */
-const relay = vi.hoisted(() => ({ answers: [] as Array<unknown[] | null>, asked: 0, onAsk: null as (() => void) | null }))
+const relay = vi.hoisted(() => ({ answers: [] as Array<unknown[] | null>, asked: 0, onAsk: null as (() => void) | null, args: [] as Array<{ since?: number; reconnect?: boolean }> }))
 vi.mock('../../lib/chains', async (orig) => ({
   ...(await orig() as object),
   fetchChainEvents: vi.fn(async () => []),
-  confirmChainEvents: vi.fn(async () => {
+  confirmChainEvents: vi.fn(async (_pk: string, _g: string, _have: unknown[], opts: { since?: number; reconnect?: boolean } = {}) => {
+    relay.args.push({ since: opts.since, reconnect: opts.reconnect })
     relay.asked++
     relay.onAsk?.()
     return relay.answers.length ? relay.answers.shift() : []
@@ -144,7 +147,9 @@ describe('a move is signed only from a head the relays confirm', () => {
     // Signed with this identity's key, as the other tab would sign it.
     const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to, plane: s.headPlane, proofHash: '0'.repeat(64) }))
     const stored = [...s.events, theirs]
+    // What the other tab's save writes: the chain, and a new mark beside it.
     localStorage.setItem(`onosendai:chain:${s.identity.pubkey}`, JSON.stringify({ version: 2, events: stored, published: s.events.map((e) => e.id), stats: {} }))
+    localStorage.setItem(`onosendai:chain-mark:${s.identity.pubkey}`, 'the other tab')
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
     expect(posted).toEqual([])
@@ -152,5 +157,35 @@ describe('a move is signed only from a head the relays confirm', () => {
     expect(S().coordHex()).toBe(positionHex(to, s.headPlane))
     expect(S().published[theirs.id]).toBe('queued')
     expect(S().proof.message).toBe('Another device moved you. Re-aim from where you are now.')
+  })
+
+  it('a move does not read the saved chain when no other tab has saved since this one did (the mark is unchanged)', async () => {
+    const key = `onosendai:chain:${S().identity.pubkey}`
+    reads.keys = []
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    expect(posted).toHaveLength(1)
+    expect(reads.keys.filter((k) => k === key)).toEqual([])
+  })
+
+  it('asks the relay only from the newest event it already holds, and over a fresh socket the second time', async () => {
+    relay.answers = [null, []]
+    relay.args = []
+    // The chain is on the relays: every event published.
+    useCyberspace.setState({ published: Object.fromEntries(S().events.map((e) => [e.id, 'ok' as const])) })
+    const s = S()
+    const newest = Math.max(...s.events.map((e) => e.created_at))
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    expect(relay.args).toEqual([{ since: newest, reconnect: false }, { since: newest, reconnect: true }])
+  })
+
+  it('with nothing of the chain on the relays yet, asks for the whole chain, so a move published meanwhile is found', async () => {
+    relay.answers = [[]]
+    relay.args = []
+    useCyberspace.setState({ published: Object.fromEntries(S().events.map((e) => [e.id, 'queued' as const])) })
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    expect(relay.args).toEqual([{ since: undefined, reconnect: false }])
   })
 })

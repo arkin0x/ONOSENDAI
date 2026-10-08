@@ -36,7 +36,7 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove } from '../store/useCyberspace'
+import { GAME_HOLDS_MESSAGE, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
 import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
@@ -80,6 +80,15 @@ export const useRideRun = create<RideRun>(() => ({ progress: null, path: null, e
 let riding = false
 let rideAbort: AbortController | null = null
 
+/**
+ * A finished ride proof that was not signed: the head check or the signer
+ * refused it at the last step. Kept so RIDE again signs it without computing
+ * it again (minutes on a phone), as long as it is still the same ride from
+ * the same head: the proof is seeded by that head (§5.3), so a head that
+ * moved makes it worthless (review of #236).
+ */
+let keptRide: CompletedRide | null = null
+
 /** Stop the pool. The boarded state survives; EXIT clears that separately. */
 export function abortRide(): void {
   rideAbort?.abort()
@@ -94,6 +103,16 @@ export async function startRide(): Promise<void> {
   if (riding) return
   const destination = useHyperspace.getState().destination
   if (destination === null) return
+  // The head is confirmed before any work, not only when the ride is
+  // signed: a ride computed from a head another device or tab has moved
+  // past is minutes of work nobody can sign (confirmHead).
+  riding = true
+  let refusal: string | null
+  try { refusal = await useCyberspace.getState().confirmHeadNow() } finally { riding = false }
+  if (refusal) {
+    useRideRun.setState({ error: refusal, progress: null })
+    return
+  }
   // The chain head decides everything: an enter-hyperspace head is a boarding
   // (this session's or one from before a reload), a hyperjump head is standing
   // at its stop and the next ride chains from it with no second boarding
@@ -195,21 +214,24 @@ export async function startRide(): Promise<void> {
     81,
   )
   try {
-    const { rootHex, mp, mnHex } = await computeRideProof(
-      { previousEventIdHex: previousId, blocks },
-      (p) => useRideRun.setState({ progress: p }),
-      controller.signal,
-    )
-    await useCyberspace.getState().completeRide({
-      previousId,
-      asOf,
-      toCoordHex: coordToHex(stopCoordExact(destStop)),
-      fromHeight,
-      toHeight: destination,
-      rootHex,
-      mp,
-      mnHex,
-    })
+    const kept = keptRide
+    const ride: CompletedRide = kept && kept.previousId === previousId && kept.fromHeight === fromHeight && kept.toHeight === destination
+      ? kept
+      : {
+          previousId,
+          asOf,
+          toCoordHex: coordToHex(stopCoordExact(destStop)),
+          fromHeight,
+          toHeight: destination,
+          ...await computeRideProof(
+            { previousEventIdHex: previousId, blocks },
+            (p) => useRideRun.setState({ progress: p }),
+            controller.signal,
+          ),
+        }
+    keptRide = ride
+    await useCyberspace.getState().completeRide(ride)
+    keptRide = null
     useHyperspace.getState().setDestination(null)
   } catch (err) {
     // An abort is the user's own hand; only a real failure is worth a notice.

@@ -35,11 +35,23 @@ async function inChunks(events: NostrEvent[]): Promise<Set<string>> {
 }
 
 /**
- * The ids of the events in `events` whose NIP-01 id or signature does not
- * verify. Never rejects: a worker that cannot start or fails falls back to
- * the main thread.
+ * How long the worker is given before the main thread takes the check over:
+ * a base, and a little per event, far beyond what a slow phone takes (about
+ * 1 ms per event in the worker), so it only ever ends a worker that is not
+ * answering at all.
  */
-export function checkSignatures(events: NostrEvent[]): Promise<Set<string>> {
+export function sigCheckDeadlineMs(count: number): number {
+  return 10_000 + 5 * count
+}
+
+/**
+ * The ids of the events in `events` whose NIP-01 id or signature does not
+ * verify. Never rejects, and never waits forever: a worker that cannot
+ * start, fails, or has not answered by `deadlineMs` falls back to the main
+ * thread (review of #242: a worker that never answered held every chain
+ * action for the rest of the page).
+ */
+export function checkSignatures(events: NostrEvent[], deadlineMs = sigCheckDeadlineMs(events.length)): Promise<Set<string>> {
   if (events.length === 0) return Promise.resolve(new Set())
   if (typeof Worker === 'undefined') return inChunks(events)
   return new Promise((resolve) => {
@@ -50,14 +62,17 @@ export function checkSignatures(events: NostrEvent[]): Promise<Set<string>> {
       resolve(inChunks(events))
       return
     }
-    worker.onmessage = (message: MessageEvent<SigCheckResponse>) => {
+    let settled = false
+    const settle = (answer: Set<string> | Promise<Set<string>>): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       worker.terminate()
-      resolve(new Set(message.data.bad))
+      resolve(answer)
     }
-    worker.onerror = () => {
-      worker.terminate()
-      resolve(inChunks(events))
-    }
+    const timer = setTimeout(() => settle(inChunks(events)), deadlineMs)
+    worker.onmessage = (message: MessageEvent<SigCheckResponse>) => settle(new Set(message.data.bad))
+    worker.onerror = () => settle(inChunks(events))
     const request: SigCheckRequest = { events }
     worker.postMessage(request)
   })

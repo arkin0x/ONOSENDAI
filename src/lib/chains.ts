@@ -31,7 +31,7 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, query, queryEach, queryEachAt, subscribe } from './relay'
+import { CYBERSPACE_RELAY, dropRelays, query, queryEach, queryEachAt, subscribe } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
 
@@ -250,12 +250,29 @@ export const HEAD_CONFIRM_MS = 2500
  * canonical relay, whatever else a client's relay set holds (useRelays.ts),
  * so a move another device or tab published is there; asking it alone keeps
  * the confirmation to one round trip, whatever other relays are slow.
+ *
+ * `since` asks the chain only for events from that second on (inclusive):
+ * the caller passes the created_at of the newest event the relays already
+ * hold, so a long chain on a slow link is not downloaded again for every
+ * move; anything older is in `have`, and a hole is still asked for. An event
+ * names an earlier one as previous and is signed after it, so another
+ * device's move from that point on carries a created_at at or after it.
+ * `reconnect` drops the canonical relay's socket first, so a socket gone
+ * silent, or one whose auth a signer refused, is replaced rather than asked
+ * again (relay.ts dropRelays, as publishing does).
  */
-export async function confirmChainEvents(pubkey: string, knownSpawnId: string | undefined, have: NostrEvent[], maxWait = HEAD_CONFIRM_MS): Promise<NostrEvent[] | null> {
+export async function confirmChainEvents(
+  pubkey: string,
+  knownSpawnId: string | undefined,
+  have: NostrEvent[],
+  opts: { since?: number; reconnect?: boolean; maxWait?: number } = {},
+): Promise<NostrEvent[] | null> {
   const canonical = normalizeURL(CYBERSPACE_RELAY)
+  const maxWait = opts.maxWait ?? HEAD_CONFIRM_MS
+  if (opts.reconnect) dropRelays([canonical])
   const ask = async (): Promise<NostrEvent[] | null> => {
     const { got, whole } = await gatherChain((f) => queryEachAt([canonical], f, maxWait), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
-      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
     const answer = got.find((a) => a.url === canonical)
     return whole && answer?.outcome === 'answered' ? answer.events : null
   }

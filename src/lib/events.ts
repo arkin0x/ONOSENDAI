@@ -593,6 +593,9 @@ function carriesSpawn(ev: NostrEvent): boolean {
   return ev.tags.some((t) => t[0] === 'A' && t[1] === 'spawn')
 }
 
+/** The fork rule, as a fork's break and the broken-chain notice say it (spec §8.7.3 rule 4). */
+export const FORK_RULE_WORDS = 'A chain may only ever have one next action after each event, so a fork ends the whole chain, whichever branch came first or is valid, and you stand at your spawn coordinate (spec §8.7.3 rule 4, per the 2026-10-08 ruling)'
+
 /** "two", "three": how many, in words, up to five. */
 const countWord = (n: number): string => ['no', 'one', 'two', 'three', 'four', 'five'][n] ?? String(n)
 
@@ -1017,7 +1020,7 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
     for (let i = 1; i < chain.length; i++) chain[i] = standingAt(chain[i], home)
     chain[0] = {
       ...chain[0],
-      breaks: `a fork: ${countWord(ids.length)} events (${listed}) ${ids.length === 2 ? 'both name' : 'all name'} row ${shared} (event ${fork.previousId.slice(0, 8)}…) as the action before them. A chain may only ever have one next action after each event, so a fork ends the whole chain, whichever branch came first or is valid, and you stand at your spawn coordinate (spec §8.7.3 rule 4, per the 2026-10-08 ruling)`,
+      breaks: `a fork: ${countWord(ids.length)} events (${listed}) ${ids.length === 2 ? 'both name' : 'all name'} row ${shared} (event ${fork.previousId.slice(0, 8)}…) as the action before them. ${FORK_RULE_WORDS}`,
       breakSince: FORK_RULE,
       fork: { previousId: fork.previousId, branchIds: fork.branches.map((b) => b.id) },
     }

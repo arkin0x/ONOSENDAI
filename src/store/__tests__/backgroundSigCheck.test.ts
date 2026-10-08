@@ -12,6 +12,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+const relayHolds = vi.hoisted(() => ({ events: [] as unknown[] }))
 const { storage, checked, posted } = vi.hoisted(() => {
   const m = new Map<string, string>()
   const storage: Storage = {
@@ -44,7 +45,7 @@ vi.mock('../../lib/workers', async (orig) => ({
 vi.mock('../../lib/chains', async (orig) => ({
   ...(await orig() as object),
   fetchChainEvents: vi.fn(async () => []),
-  confirmChainEvents: vi.fn(async () => []),
+  confirmChainEvents: vi.fn(async () => relayHolds.events),
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -117,7 +118,8 @@ describe('the saved chain is drawn first, and its signatures checked off the boo
     expect(S().events).toHaveLength(5)
     await vi.waitFor(() => expect(S().events.map((e) => e.id)).toEqual([stored[0].id, stored[1].id]))
     expect(S().prevEventId).toBe(stored[1].id)
-    expect(S().proof.message).toBe('One saved action failed the signature check and was set aside. Your chain continues from the action before it.')
+    // The forged one and the two after it: every action set aside is counted.
+    expect(S().proof.message).toBe('3 saved actions were set aside, from the first one that failed the signature check on. Your chain continues from the action before them.')
     const saved = JSON.parse(storage.getItem(`onosendai:chain:${pk}`) ?? 'null') as { events: NostrEvent[] }
     expect(saved.events.map((e) => e.id)).toEqual([stored[0].id, stored[1].id])
   })
@@ -132,5 +134,24 @@ describe('the saved chain is drawn first, and its signatures checked off the boo
     expect(posted).toEqual([])
     expect(S().events).toHaveLength(4)
     expect(S().proof.message).toMatch(/^One saved action failed the signature check/)
+  })
+
+  it('the next move after a cut, when the relays still hold the genuine actions, says the chain was restored, not that another device moved you', async () => {
+    const stored = chainOf(4)
+    const forged = { ...stored[4], sig: stored[4].sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) }
+    const { useCyberspace } = await boot([...stored.slice(0, 4), forged])
+    const S = useCyberspace.getState
+    await vi.waitFor(() => expect(S().events).toHaveLength(4))
+    expect(S().proof.message).toBe('One saved action failed the signature check and was set aside. Your chain continues from the action before it.')
+    relayHolds.events = stored
+    try {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      await S().commit()
+      expect(S().prevEventId).toBe(stored[4].id)
+      expect(S().proof.message).toBe('The relays still hold the actions set aside here, correctly signed, so your chain was restored from them. Re-aim from where you are now.')
+      expect(posted).toEqual([])
+    } finally {
+      relayHolds.events = []
+    }
   })
 })

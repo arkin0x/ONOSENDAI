@@ -161,6 +161,36 @@ function republish(event: NostrEvent): Promise<string | null> {
   })
 }
 
+/**
+ * Copy on pick (arkinox's ruling, 2026-10-08): the author's object is put on
+ * your relays the moment LIVE LINK is picked, not when the bag goes out, so
+ * the object and the bag do not reach a watching relay seconds apart and
+ * pair the object with the bag. One background copy per event, remembered:
+ * the deploy takes its relay as the hint and does not copy again. Only while
+ * LIVE: LOCAL sends nothing, and BROADCAST copies with the bag as before.
+ */
+interface LinkCopy { hint: string | null; deleted: boolean }
+const linkCopies = new Map<string, Promise<LinkCopy>>()
+
+/** The background copy of a LIVE LINK object to your relays: refused if its author deleted it, else the first relay that took it. */
+function copyForLink(o: FeedObject): Promise<LinkCopy> {
+  const held = linkCopies.get(o.id)
+  if (held) return held
+  const copy = (async (): Promise<LinkCopy> => {
+    if (await authorDeleted(o)) return { hint: null, deleted: true }
+    return { hint: await republish(o.event as NostrEvent), deleted: false }
+  })()
+  linkCopies.set(o.id, copy)
+  // A copy that no relay took is not remembered: the deploy tries again.
+  void copy.then((c) => { if (!c.hint && !c.deleted && linkCopies.get(o.id) === copy) linkCopies.delete(o.id) })
+  return copy
+}
+
+/** Forget the remembered copies (for tests). */
+export function forgetLinkCopies(): void {
+  linkCopies.clear()
+}
+
 /** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
 export const LINK_REFUSED = "LIVE LINK needs the author's object on one of your relays, and none took it. Place it as a copy instead."
 
@@ -682,6 +712,8 @@ export const useShards = create<ShardsState>((set, get) => {
       set(link
         ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployAsk: null }
         : { deployLink: false })
+      // Copy on pick, while LIVE only (copyForLink).
+      if (link && cyber().live) void copyForLink(object)
     },
     turnDeploy: (axis) => { const t = [...get().deployTurn] as Turns; t[axis] = (t[axis] + 1) % 4; set({ deployTurn: t }) },
     resetDeployTurn: () => set({ deployTurn: [0, 0, 0] }),
@@ -813,11 +845,14 @@ export const useShards = create<ShardsState>((set, get) => {
           if (isProtected(object)) throw new Error(LINK_PROTECTED)
           let hint = relaySet()[0] ?? ''
           if (live) {
-            // Never republish what its author deleted (NIP-09).
-            if (await authorDeleted(object)) throw new Error(LINK_DELETED)
-            const took = await republish(inner)
-            if (!took) throw new Error(LINK_REFUSED)
-            hint = took
+            // The copy made when LIVE LINK was picked, or one made now; never
+            // of what its author deleted (NIP-09). One that no relay took is
+            // tried once more here before the deploy is refused.
+            let copy = await copyForLink(object)
+            if (!copy.hint && !copy.deleted) { linkCopies.delete(object.id); copy = await copyForLink(object) }
+            if (copy.deleted) throw new Error(LINK_DELETED)
+            if (!copy.hint) throw new Error(LINK_REFUSED)
+            hint = copy.hint
           }
           ref = referenceTo(inner, at, plane, hint)
         } else if (pending.type === 'shard' && shard && wantsReference(shard)) {

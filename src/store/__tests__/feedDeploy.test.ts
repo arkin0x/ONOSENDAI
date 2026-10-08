@@ -32,7 +32,7 @@ import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { objectFromEvent, readCredit, type FeedObject } from 'sno-core/feed'
 import { useCyberspace } from '../useCyberspace'
-import { useShards } from '../useShards'
+import { forgetLinkCopies, useShards } from '../useShards'
 import { useWorkshop, creditOf } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { HIDDEN_KIND, OBJECT_KIND, SHARD_KIND, unbag } from '../../lib/hidden'
@@ -57,6 +57,7 @@ const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as
 
 beforeEach(() => {
   sent.length = 0
+  forgetLinkCopies()
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useBuilder.getState().exit()
   useCyberspace.getState().clearFocus()

@@ -54,7 +54,7 @@ import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { objectFromEvent, type FeedObject } from 'sno-core/feed'
 import { useCyberspace } from '../useCyberspace'
-import { LINK_DELETED, LINK_PROTECTED, LINK_REFUSED, useShards } from '../useShards'
+import { LINK_DELETED, LINK_PROTECTED, LINK_REFUSED, forgetLinkCopies, useShards } from '../useShards'
 import { useBuilder } from '../useBuilder'
 import { HIDDEN_KIND, OBJECT_KIND, linkKey, unbag } from '../../lib/hidden'
 import { commentTemplate, itemParent, itemTargetOf, threadComments, bagAddress, type CommentSubject } from '../../lib/comments'
@@ -89,6 +89,7 @@ const shardOf = (name: string): ShardModel => ({
 
 beforeEach(() => {
   sent.length = 0
+  forgetLinkCopies()
   refusedIds.clear()
   deletions.length = 0
   silentDown = false
@@ -315,5 +316,57 @@ describe('reactions on an addressable object', () => {
     expect(t.tags).toContainEqual(['a', v1.address, ''])
     const r = finalizeEvent(t, generateSecretKey()) as unknown as NostrEvent
     expect(groupReactions([r], v2.id, new Set(), v2.address)[0]?.pubkeys).toHaveLength(1)
+  })
+})
+
+describe('copy on pick (arkinox, 2026-10-08): the object goes out when LIVE LINK is picked, not with the bag', () => {
+  const settle = async (): Promise<void> => { for (let i = 0; i < 20; i++) await Promise.resolve() }
+
+  it('while LIVE, picking LIVE LINK puts the author\'s object on your relays before any bag; the deploy does not send it again', async () => {
+    const o = version('Statue', 1_700_000_000)
+    useShards.getState().startDeployObject(o)
+    useShards.getState().setDeployLink(true)
+    await settle()
+    expect(sent.map((e) => e.id)).toEqual([o.id])
+    expect(bags()).toHaveLength(0)
+    useShards.setState({ deployHeight: 4 })
+    await useShards.getState().deploy()
+    expect(sent.filter((e) => e.id === o.id)).toHaveLength(1)
+    expect(sent.at(-1)?.kind).toBe(HIDDEN_KIND)
+    expect(useShards.getState().mine[0].ref?.[2]).toBe('wss://mine.test')
+  })
+
+  it('while LOCAL, picking LIVE LINK sends nothing, and neither does the deploy', async () => {
+    useCyberspace.setState({ live: false })
+    const o = version('Statue', 1_700_000_000)
+    useShards.getState().startDeployObject(o)
+    useShards.getState().setDeployLink(true)
+    await settle()
+    useShards.setState({ deployHeight: 4 })
+    await useShards.getState().deploy()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('a cancel after the pick does nothing more: the copy simply stays on your relay', async () => {
+    const o = version('Statue', 1_700_000_000)
+    useShards.getState().startDeployObject(o)
+    useShards.getState().setDeployLink(true)
+    await settle()
+    useShards.getState().cancelDeploy()
+    expect(sent.map((e) => e.id)).toEqual([o.id])
+    expect(bags()).toHaveLength(0)
+  })
+
+  it('a copy no relay took at the pick is tried again by the deploy', async () => {
+    const o = version('Statue', 1_700_000_000)
+    refusedIds.add(o.id)
+    useShards.getState().startDeployObject(o)
+    useShards.getState().setDeployLink(true)
+    await settle()
+    refusedIds.delete(o.id)
+    useShards.setState({ deployHeight: 4 })
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(sent[0].id).toBe(o.id)
   })
 })

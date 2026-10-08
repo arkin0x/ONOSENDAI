@@ -281,10 +281,13 @@ describe('buildChain (§8.7.3: the newest spawn wins)', () => {
     expect(buildChain([spawnB, b1, stray]).map((e) => e.id)).toEqual([spawnB.id, b1.id])
   })
 
-  it('takes the older branch at a fork', () => {
+  it('stops at a fork, and the whole chain is dead from its spawn (2026-10-08 ruling; spec PR #48)', () => {
     const early = link(b1, spawnB, 220, 1n)
     const late = link(b1, spawnB, 230, 2n)
-    expect(buildChain([spawnB, b1, late, early]).map((e) => e.id)).toEqual([spawnB.id, b1.id, early.id])
+    const chain = buildChain([spawnB, b1, late, early])
+    expect(chain.map((e) => e.id)).toEqual([spawnB.id, b1.id])
+    expect(chain[0].fork).toEqual({ previousId: b1.id, branchIds: [early.id, late.id] })
+    expect(chain[1].coordHex).toBe(spawnB.pubkey)
   })
 
   it('is empty without a spawn', () => {

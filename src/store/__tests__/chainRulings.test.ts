@@ -115,7 +115,7 @@ describe('Q3: your broken chain stands at its last valid position, and nothing m
     await S().boardHyperspace()
     await expect(S().completeRide({
       previousId: S().prevEventId, toCoordHex: S().coordHex(), fromHeight: 1, toHeight: 2,
-      rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16),
+      rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16),
     })).rejects.toThrow(BROKEN_CHAIN_MESSAGE)
     expect(S().events).toHaveLength(count)
     expect(BROKEN_CHAIN_MESSAGE).toMatch(/RESPAWN/)
@@ -214,7 +214,7 @@ describe('Q1: the store never signs a zero-length ride', () => {
     const count = S().events.length
     await expect(S().completeRide({
       previousId: S().prevEventId, toCoordHex: S().coordHex(), fromHeight: 7, toHeight: 7,
-      rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16),
+      rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16),
     })).rejects.toThrow(/ride to any other block first, then ride back to block 7/)
     expect(S().events).toHaveLength(count)
   })

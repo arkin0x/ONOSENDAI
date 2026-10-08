@@ -297,6 +297,15 @@ export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayA
   return queryRelays(relaySet(), filter, maxWait)
 }
 
+/**
+ * The same, for an explicit set of relays: each asked and answered on its
+ * own. For a read that must hear from one particular relay, such as the
+ * canonical relay confirming a chain's head before a move is signed.
+ */
+export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
+  return queryRelays(relays, filter, maxWait)
+}
+
 /** How long a general relay that refused a connection is left alone. */
 const DEAD_MS = 5 * 60_000
 const deadUntil = new Map<string, number>()

@@ -56,12 +56,14 @@ export interface RuleChange {
   since: string
   /**
    * How it took effect. `spec-44`: spec PR #44 merging. `ruling`: arkinox's
-   * ruling of that day, in effect from the ruling, and written into the spec
-   * by PR #46 late that day. `spec-46`: spec PR #46 merging, for the
+   * ruling of that day, in effect from the ruling (`spec` says when the spec
+   * caught up, if it has). `spec-46`: spec PR #46 merging, for the
    * clarifications arkinox gave while it was open (the evening of
    * 2026-10-07 at UTC-5; the spec dates them 2026-10-08, in UTC).
    */
   by: 'spec-44' | 'ruling' | 'spec-46'
+  /** For a ruling the spec has since carried: how it got there, in words ("written into the spec by PR #46 later that day"). */
+  spec?: string
   /** Unix seconds when it took effect. */
   effectiveAt: number
   /** `rule`: a new chain rule. `validation`: a check the rules gained on what was already there. */
@@ -83,7 +85,7 @@ export const BRACKET_RULES: RuleChange = {
  * folded in on 2026-10-07 (spec §8.12).
  */
 export const RULINGS_2026_10_07: RuleChange = {
-  revision: CHAIN_RULES_REVISION, since: '2026-10-07', by: 'ruling', effectiveAt: Date.parse('2026-10-07T05:00:00Z') / 1000, kind: 'rule',
+  revision: CHAIN_RULES_REVISION, since: '2026-10-07', by: 'ruling', spec: 'written into the spec by PR #46 later that day', effectiveAt: Date.parse('2026-10-07T05:00:00Z') / 1000, kind: 'rule',
 }
 
 /** Sector tags must be present and agree with the coordinate (Q9, spec §10): validation the rules gained by the 2026-10-07 ruling. */
@@ -104,6 +106,25 @@ export const ONE_A_TAG_RULE: RuleChange = { ...RULINGS_2026_10_07, kind: 'valida
 export const DUPLICATE_SECTOR_RULE: RuleChange = {
   revision: CHAIN_RULES_REVISION, since: '2026-10-07', by: 'spec-46', effectiveAt: Date.parse('2026-10-08T04:04:00Z') / 1000, kind: 'validation',
 }
+
+/**
+ * arkinox's rulings of 2026-10-08, on the points the reference verifiers
+ * left open: a fork ends the whole chain, every tag a chain rule reads
+ * appears exactly once with a value (an empty A tag included), and every
+ * chain event carries exactly one e genesis and one e previous (an exit one
+ * e entry). In effect from the start of that day at UTC-5, like the rulings
+ * of 2026-10-07. The spec text has not caught up yet, so the notice names
+ * the ruling alone.
+ */
+export const RULINGS_2026_10_08: RuleChange = {
+  revision: CHAIN_RULES_REVISION, since: '2026-10-08', by: 'ruling', effectiveAt: Date.parse('2026-10-08T05:00:00Z') / 1000, kind: 'rule',
+}
+
+/** A fork ends the whole chain (2026-10-08 ruling): a new rule, replacing the rule that the older branch continued (spec §8.7.3 rule 4). */
+export const FORK_RULE: RuleChange = RULINGS_2026_10_08
+
+/** Every tag a chain rule reads exactly once, with a value (2026-10-08 ruling): validation the rules gained. */
+export const TAGS_ONCE_RULE: RuleChange = { ...RULINGS_2026_10_08, kind: 'validation' }
 
 /**
  * When ONOSENDAI stopped signing the plane-bit boarding: PR #225 merged,
@@ -286,6 +307,13 @@ export interface ActionEvent {
    * apology, by when each was signed.
    */
   breakBug?: 'plane-bit' | 'zero-length-offered'
+  /**
+   * Set on the spawn, with `breaks`, when the chain forks (2026-10-08
+   * ruling): the event that two or more actions name as their previous, and
+   * those actions, oldest first. A fork ends the whole chain, so the spawn
+   * carries it and the identity stands at its spawn coordinate.
+   */
+  fork?: { previousId: string; branchIds: string[] }
   /** Hyperjump only (DECK-0001 v3 §5.2): the boarding and destination heights. */
   fromHeight?: number
   toHeight?: number
@@ -569,12 +597,61 @@ const countWord = (n: number): string => ['no', 'one', 'two', 'three', 'four', '
  * (Q5, spec §8.8). Asked of every event on a chain: base actions, skipped
  * actions (§8.9), and every event inside a bracket (§8.11.4 rule 4).
  */
-function aTagsWrong(ev: NostrEvent): string | null {
+function aTagsWrong(ev: NostrEvent): { breaks: string; since: RuleChange } | null {
   const names = ev.tags.filter((t) => t[0] === 'A').map((t) => t[1] ?? '')
-  if (names.length === 1) return null
-  if (names.length === 0) return 'an event on your chain with no A tag, so it names no action at all. Every event on a chain has to carry exactly one A tag, the name of what it does (spec §8.8)'
+  if (names.length === 1) {
+    if (names[0] !== '') return null
+    // A bare ["A"] or ["A", ""] is an A tag, and names nothing (2026-10-08 ruling).
+    return { since: TAGS_ONCE_RULE, breaks: 'an event whose A tag is empty, so it names no action at all. The A tag has to say what the event does, and an empty one counts as an A tag that says nothing (per the 2026-10-08 ruling)' }
+  }
+  if (names.length === 0) return { since: ONE_A_TAG_RULE, breaks: 'an event on your chain with no A tag, so it names no action at all. Every event on a chain has to carry exactly one A tag, the name of what it does (spec §8.8)' }
   const said = names.map((n) => (n.length > 20 ? `${n.slice(0, 20)}…` : n)).join(', ')
-  return `an event carrying ${countWord(names.length)} A tags (${said}). Every event on a chain has to carry exactly one A tag, even when the copies agree, so that every reader agrees on what it does (spec §8.8)`
+  return { since: ONE_A_TAG_RULE, breaks: `an event carrying ${countWord(names.length)} A tags (${said}). Every event on a chain has to carry exactly one A tag, even when the copies agree, so that every reader agrees on what it does (spec §8.8)` }
+}
+
+/** The links every chain event but a spawn is read for: one e genesis and one e previous. */
+const LINK_TAGS = ['e:genesis', 'e:previous'] as const
+
+/**
+ * The tags the chain rules read on each recognized action, beyond the A tag
+ * and the sector tags, which have rules of their own: `e:<marker>` for an e
+ * tag with that marker. Each may appear at most once (2026-10-08 ruling);
+ * whether a required one is there, with a well-formed value, is parseAction's
+ * to say. Inside a bracket and on a skipped action only the links are read
+ * (`links`), and an exit's c is never read, so it is not here.
+ */
+const READ_TAGS: Record<RecognizedAction | 'links', readonly string[]> = {
+  links: LINK_TAGS,
+  spawn: ['C'],
+  hop: [...LINK_TAGS, 'c', 'C', 'proof'],
+  sidestep: [...LINK_TAGS, 'c', 'C', 'proof', 'mr', 'mp', 'mn', 'hx', 'hy', 'hz'],
+  'enter-hyperspace': [...LINK_TAGS, 'c', 'C', 'proof'],
+  hyperjump: [...LINK_TAGS, 'c', 'C', 'from_height', 'B', 'proof', 'mp', 'mn'],
+  'enter-virtual': [...LINK_TAGS, 'c', 'C', 'region'],
+  'exit-virtual': [...LINK_TAGS, 'C', 'e:entry'],
+}
+
+/** How many tags an event carries under a READ_TAGS name. */
+function readCount(ev: NostrEvent, key: string): number {
+  if (!key.startsWith('e:')) return tagCount(ev, key)
+  const marker = key.slice(2)
+  let n = 0
+  for (const t of ev.tags) if (t[0] === 'e' && t[3] === marker) n++
+  return n
+}
+
+/**
+ * Why an event carries a tag the chain rules read more than once, or null
+ * (2026-10-08 ruling): every such tag appears exactly once, and a second
+ * copy is invalid even when it agrees with the first. Resolution still
+ * follows the first copy of each link, so the event is on the chain, and
+ * breaks it there. Tags the rules do not read are free.
+ */
+function readTagsWrong(ev: NostrEvent, read: RecognizedAction | 'links', label: string): string | null {
+  const doubled = READ_TAGS[read].map((k) => [k, readCount(ev, k)] as const).filter(([, n]) => n > 1)
+  if (doubled.length === 0) return null
+  const said = doubled.map(([k, n]) => `${countWord(n)} ${k.startsWith('e:') ? `e tags marked ${k.slice(2)}` : `${k} tags`}`).join(' and ')
+  return `${an(label)} carrying ${said}. Every tag the chain rules read has to appear exactly once, even when the copies agree, so that every reader reads the same thing (per the 2026-10-08 ruling)`
 }
 
 function marked(ev: NostrEvent, marker: string): string | undefined {
@@ -676,21 +753,28 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   const mn = tag(ev, 'mn')
   if (mn !== undefined && !/^[0-9a-f]{16}$/.test(mn)) return null
   if (type === 'sidestep') {
-    for (const t of ['mr', 'mp', 'hx', 'hy', 'hz']) if (tag(ev, t) === undefined) return null
+    // §8.5 as spec PR #48 reads it: three colon-joined roots, openings that
+    // are there, and base-10 heights.
+    if (!/^[0-9a-f]{64}(:[0-9a-f]{64}){2}$/.test(tag(ev, 'mr') ?? '')) return null
+    if (!tag(ev, 'mp')) return null
+    for (const t of ['hx', 'hy', 'hz']) if (!/^\d+$/.test(tag(ev, t) ?? '')) return null
   }
   if (type === 'enter-hyperspace') {
     // §3.1: an enter does not move; c must equal C.
     if (prevCoordHex !== coordHex) return null
   }
   if (type === 'hyperjump') {
-    // §5.2: boarding and destination heights, and the openings tag (possibly empty).
+    // §5.2: boarding and destination heights. The openings are required
+    // and must not be empty, but buildChain says so only after the
+    // zero-length check (spec PR #48 orders a ride's checks: from_height and
+    // B, then zero-length, then the rest), so a zero-length ride is told as
+    // one. as_of is read only on the first ride after boarding (rideBreak).
     const fromStr = tag(ev, 'from_height')
     const toStr = tag(ev, 'B')
     if (fromStr === undefined || !/^\d+$/.test(fromStr)) return null
     if (toStr === undefined || !/^\d+$/.test(toStr)) return null
     if (tag(ev, 'mp') === undefined) return null
     const asOfStr = tag(ev, 'as_of')
-    if (asOfStr !== undefined && !/^\d+$/.test(asOfStr)) return null
     return {
       ...base,
       type,
@@ -698,7 +782,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
       proofHash,
       fromHeight: Number.parseInt(fromStr, 10),
       toHeight: Number.parseInt(toStr, 10),
-      asOf: asOfStr !== undefined ? Number.parseInt(asOfStr, 10) : undefined,
+      asOf: asOfStr !== undefined && /^\d+$/.test(asOfStr) ? Number.parseInt(asOfStr, 10) : undefined,
       mp: tag(ev, 'mp'),
       ...(mn !== undefined ? { mn } : {}),
     }
@@ -781,7 +865,8 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
   const parsed = parseAction(ev)
   const home = placeOf(ev.pubkey)
   const aWrong = aTagsWrong(ev)
-  if (parsed && parsed.type === 'spawn' && !aWrong) {
+  const tagsWrong = readTagsWrong(ev, 'spawn', 'spawn')
+  if (parsed && parsed.type === 'spawn' && !aWrong && !tagsWrong) {
     const sectors = sectorTagsWrong(ev, 'spawn', parsed.position)
     if (!sectors || !home) return parsed
     return { ...parsed, ...home, type: 'other', role: 'broken', breaks: sectors.breaks, breakSince: sectors.since }
@@ -792,8 +877,11 @@ function spawnEntry(ev: NostrEvent | null): ActionEvent | null {
   let breaks: string
   let since: RuleChange | undefined
   if (aWrong) {
-    breaks = aWrong
-    since = ONE_A_TAG_RULE
+    breaks = aWrong.breaks
+    since = aWrong.since
+  } else if (tagsWrong) {
+    breaks = tagsWrong
+    since = TAGS_ONCE_RULE
   } else if (claimed && C !== ev.pubkey) {
     const [said, own] = shownApart(C!, ev.pubkey)
     breaks = `a spawn whose C (${said}) is not the coordinate your public key decodes to (${own}). A spawn always places you at your own key's coordinate, never anywhere else (spec §8.3)`
@@ -882,19 +970,28 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
   let open: ActionEvent | null = null
   /** Where the identity stands once the chain has broken: its last valid position (Q3). */
   let frozenAt: Placed | null = spawn.breaks ? { coordHex: spawn.coordHex, position: spawn.position, plane: spawn.plane, sector: spawn.sector } : null
+  /** The fork the walk reached, if it reached one: the head two or more events name, and those events. */
+  let fork: { previousId: string; branches: ActionLink[] } | null = null
   for (;;) {
-    const next = (byPrev.get(head.id) ?? [])
-      .filter((c) => !seen.has(c.link.id))
-      .sort((a, b) => -newer(a.link, b.link))[0]
+    // A fork ends the whole chain (2026-10-08 ruling; spec PR #48): two or
+    // more events naming the head as previous, by each one's first e
+    // previous, whichever is valid or earlier. It is found here, on the walk
+    // from the spawn, and only here: events that name an event the walk
+    // never reaches (a discarded one, an unknown id) make no fork. The chain
+    // has no next event at a fork, so the walk ends at its head.
+    const children = [...new Map((byPrev.get(head.id) ?? []).map((c) => [c.link.id, c])).values()]
+    if (children.length > 1) {
+      fork = { previousId: head.id, branches: children.map((c) => c.link).sort((a, b) => -newer(a, b)) }
+      break
+    }
+    const next = children.filter((c) => !seen.has(c.link.id))[0]
     if (!next) break
     let entry = placeInChain(next.ev, next.link, head, open)
     // DECK-0001 §4.3, read through games and skipped actions (§8.9 rule 4,
     // §8.11.4 rule 8): a ride follows a boarding or another ride.
     if (entry.type === 'hyperjump' && !entry.breaks) {
-      const stood = lookBack(chain, chain.length)
-      if (stood?.type !== 'enter-hyperspace' && stood?.type !== 'hyperjump') {
-        entry = { ...entry, breaks: 'a ride (hyperjump) that does not follow a boarding or another ride: a ride may only come straight after an enter-hyperspace or a hyperjump (DECK-0001 §4.3)' }
-      }
+      const ride = rideBreak(entry, lookBack(chain, chain.length), next.ev)
+      if (ride) entry = { ...entry, breaks: ride }
     }
     if (entry.breaks && !frozenAt) frozenAt = { coordHex: head.coordHex, position: head.position, plane: head.plane, sector: head.sector }
     if (entry.role === 'enter') open = entry
@@ -906,7 +1003,47 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
     seen.add(entry.id)
     head = entry
   }
+  if (fork && !spawn.breaks) {
+    // Dead from the spawn: every row stands at the spawn coordinate, and
+    // the spawn row says why, naming the branches.
+    const home: Placed = { coordHex: spawn.coordHex, position: spawn.position, plane: spawn.plane, sector: spawn.sector }
+    const ids = fork.branches.map((b) => `${b.id.slice(0, 8)}…`)
+    const listed = ids.length === 2 ? `${ids[0]} and ${ids[1]}` : `${ids.slice(0, -1).join(', ')} and ${ids[ids.length - 1]}`
+    const shared = chain.length - 1
+    for (let i = 1; i < chain.length; i++) chain[i] = standingAt(chain[i], home)
+    chain[0] = {
+      ...chain[0],
+      breaks: `a fork: ${countWord(ids.length)} events (${listed}) ${ids.length === 2 ? 'both name' : 'all name'} row ${shared} (event ${fork.previousId.slice(0, 8)}…) as the action before them. A chain may only ever have one next action after each event, so a fork ends the whole chain, whichever branch came first or is valid, and you stand at your spawn coordinate (per the 2026-10-08 ruling)`,
+      breakSince: FORK_RULE,
+      fork: { previousId: fork.previousId, branchIds: fork.branches.map((b) => b.id) },
+    }
+  }
   return chain
+}
+
+/**
+ * Why a ride breaks the rules about where it may start, or null (DECK-0001
+ * §4.2, §4.3), given the action it looks back to (§8.9 rule 4, §8.11.4 rule
+ * 8). Checked without any block data: a ride follows a boarding or a ride; a
+ * first ride after boarding names its as_of bound, and the bound is not
+ * below the block it rides to; a later ride leaves from the block the ride
+ * before it reached.
+ */
+function rideBreak(ride: ActionEvent, stood: ActionEvent | null, ev: NostrEvent): string | null {
+  if (stood?.type === 'enter-hyperspace') {
+    // Read here and only here (spec PR #48): exactly once, base-10.
+    const asOfTags = tagCount(ev, 'as_of')
+    if (asOfTags > 1) return `a first ride after boarding carrying ${countWord(asOfTags)} as_of tags. Every tag the chain rules read has to appear exactly once (per the 2026-10-08 ruling)`
+    if (asOfTags === 1 && ride.asOf === undefined) return 'a first ride after boarding whose as_of tag is not a block height (DECK-0001 §4.2)'
+    if (ride.asOf === undefined) return 'a first ride after boarding with no as_of tag. The first ride from a station has to say up to which block it looked when it found that station, in its as_of tag (DECK-0001 §4.2, §4.3)'
+    if (ride.asOf < ride.toHeight!) return `a first ride whose as_of (${ride.asOf}) is below the block it rides to (${ride.toHeight}). Its station is found among the blocks up to as_of, so as_of can never be lower than the destination (DECK-0001 §4.2)`
+    return null
+  }
+  if (stood?.type === 'hyperjump') {
+    if (ride.fromHeight !== stood.toHeight) return `a ride that leaves from block ${ride.fromHeight}, but the ride before it stopped at block ${stood.toHeight}. A ride always leaves from the block the last ride reached (DECK-0001 §4.3)`
+    return null
+  }
+  return 'a ride (hyperjump) that does not follow a boarding or another ride: a ride may only come straight after an enter-hyperspace or a hyperjump (DECK-0001 §4.3)'
 }
 
 /**
@@ -1008,11 +1145,19 @@ function withSectorCheck(ev: NostrEvent, a: ActionEvent, name: string): ActionEv
  * reader is told is the A tags, before anything else the event got wrong.
  */
 function placeInChain(ev: NostrEvent, link: ActionLink, before: ActionEvent, open: ActionEvent | null): ActionEvent {
-  const aWrong = aTagsWrong(ev)
   const placed = placeByName(ev, link, before, open)
-  if (!aWrong) return placed
+  const aWrong = aTagsWrong(ev)
+  // What the rules read on it: inside a bracket only the links, and an
+  // exit's entry and C (§8.11.4 rule 4); outside, the action's own tags, or
+  // only the links on an action this client skips (§8.9).
+  const read: RecognizedAction | 'links' = open
+    ? (link.name === 'exit-virtual' ? 'exit-virtual' : 'links')
+    : (isRecognized(link.name) ? link.name : 'links')
+  const tagsWrong = aWrong ? null : readTagsWrong(ev, read, read === 'links' ? 'event' : read === 'enter-hyperspace' ? 'boarding' : link.name)
+  const wrong = aWrong ?? (tagsWrong ? { breaks: tagsWrong, since: TAGS_ONCE_RULE } : null)
+  if (!wrong) return placed
   const { breakBug: _bug, ...rest } = placed
-  return { ...rest, role: placed.role === 'skipped' || link.name === '' ? 'broken' : placed.role, breaks: aWrong, breakSince: ONE_A_TAG_RULE }
+  return { ...rest, role: placed.role === 'skipped' || link.name === '' ? 'broken' : placed.role, breaks: wrong.breaks, breakSince: wrong.since }
 }
 
 /** placeInChain for an event read by its (first) A tag. */
@@ -1084,6 +1229,9 @@ function placeByName(ev: NostrEvent, link: ActionLink, before: ActionEvent, open
     if (parsed.type === 'hyperjump' && parsed.fromHeight === parsed.toHeight) {
       const offered = tag(ev, 'client') === CLIENT_NAME ? { breakBug: 'zero-length-offered' as const } : {}
       return { ...parsed, breaks: `a zero-length ride: it rides from block ${parsed.fromHeight} to block ${parsed.toHeight}, the same block, so it goes nowhere. A ride must always go to a different block than the one it starts from (DECK-0001 §5.6, per the 2026-10-07 ruling)`, ...RULED_2026_10_07, ...offered }
+    }
+    if (parsed.type === 'hyperjump' && !parsed.mp) {
+      return { ...parsed, breaks: 'a ride whose mp tag is empty, so it carries none of the openings its proof needs (DECK-0001 §5.2, §5.5)' }
     }
     return withSectorCheck(ev, parsed, parsed.type === 'enter-hyperspace' ? 'boarding' : parsed.type)
   }

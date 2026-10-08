@@ -27,6 +27,7 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: () => Promise.resolve(relayHas.events),
+  confirmChainEvents: () => Promise.resolve(relayHas.events),
   askChainEvents: () => Promise.resolve([{ url: 'wss://cyberspace.nostr1.com', outcome: relayHas.down ? 'unreachable' as const : 'answered' as const, reason: 'down', events: relayHas.down ? [] : relayHas.events }]),
 }))
 
@@ -99,20 +100,17 @@ describe('unpublished moves against another device\'s published ones', () => {
     expect(S().prevEventId).toBe(r1.id)
   })
 
-  it('keeps and releases the moves on "Publish mine", and does not ask again for that fork', () => {
+  it('never publishes this device\'s side: a fork ends the whole chain (2026-10-08 ruling), so "mine" is refused and the choice stays', () => {
     const m1 = hop(0x22, h1.id, spawn.created_at + 20)
     setUp([m1])
     const r1 = hop(0x32, h1.id, spawn.created_at + 25)
     S().adoptChain([r1])
     const before = S().publishRequest
     S().resolveBranchConflict('mine')
-    expect(S().chainConflict).toBeNull()
-    expect(S().publishRequest).toBe(before + 1)
+    expect(S().chainConflict?.kind).toBe('branch')
+    expect(S().publishRequest).toBe(before)
     expect(S().events.map((e) => e.id)).toEqual([spawn.id, h1.id, m1.id])
-    S().adoptChain([r1])
-    expect(S().chainConflict).toBeNull()
-    // The fork rule, unchanged: the older local move still continues the chain.
-    expect(S().prevEventId).toBe(m1.id)
+    expect(S().published[m1.id]).not.toBe('ok')
   })
 
   it('sends nothing while LIVE when the look before a backlog finds the fork', async () => {

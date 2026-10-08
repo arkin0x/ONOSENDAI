@@ -49,7 +49,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 
 vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
-  return { ...actual, fetchChainEvents: vi.fn(async () => []) }
+  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }
 })
 
 // The boarding's entry proof does terrain work at a random coordinate; what
@@ -190,7 +190,7 @@ describe("a remote signer's answer is checked on every path, and a refusal is sa
       fromHeight: 1,
       toHeight: 2,
       rootHex: '0'.repeat(64),
-      mp: '',
+      mp: 'ab',
       mnHex: '0'.repeat(16),
     })).rejects.toThrow(/^Signing failed: the signer returned an event whose signature does not verify/)
     expect(S().events).toHaveLength(stored.length)

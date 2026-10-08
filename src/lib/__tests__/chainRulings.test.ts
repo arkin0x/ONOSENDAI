@@ -66,7 +66,7 @@ function boardAndRide(from: number, to: number, C: Position = at(1n)): NostrEven
   const board = actionEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: hop1.id, name: 'enter-hyperspace', c: P1, C: at(1n), plane, tags: [['proof', '0'.repeat(64)]] })
   const ride = actionEvent({
     pubkey: pk, createdAt: 1_030, genesisId: spawn.id, previousId: board.id, name: 'hyperjump', c: P1, C, plane,
-    tags: [['from_height', String(from)], ['B', String(to)], ['as_of', String(Math.max(from, to))], ['proof', '0'.repeat(64)], ['mp', ''], ['mn', '0'.repeat(16)]],
+    tags: [['from_height', String(from)], ['B', String(to)], ['as_of', String(Math.max(from, to))], ['proof', '0'.repeat(64)], ['mp', 'ab'], ['mn', '0'.repeat(16)]],
   })
   return [board, ride]
 }
@@ -87,7 +87,7 @@ describe('Q1: no zero-length rides, ever', () => {
   })
 
   it('the template refuses to build one, so nothing can sign one', () => {
-    const input = { createdAt: 1, genesisId: '0'.repeat(64), previousId: '0'.repeat(64), prevCoordHex: P1, toCoordHex: P1, rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16) }
+    const input = { createdAt: 1, genesisId: '0'.repeat(64), previousId: '0'.repeat(64), prevCoordHex: P1, toCoordHex: P1, rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16) }
     expect(() => hyperjumpTemplate({ ...input, fromHeight: 5, toHeight: 5 })).toThrow(/zero-length/)
     expect(() => hyperjumpTemplate({ ...input, fromHeight: 5, toHeight: 6 })).not.toThrow()
   })

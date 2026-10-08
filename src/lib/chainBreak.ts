@@ -42,7 +42,7 @@ export function breakCause(a: Broken): BreakCause | null {
 function cameAbout(rule: RuleChange): string {
   if (rule.by === 'spec-44') return `on ${rule.since}, when spec PR #44 brought virtual brackets into chain rules revision ${rule.revision}`
   if (rule.by === 'spec-46') return `on ${rule.since}, when spec PR #46 merged with arkinox's clarifications in it, into chain rules revision ${rule.revision}`
-  return `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision} and written into the spec by PR #46 later that day`
+  return `on ${rule.since}, by arkinox's ruling of that day, folded into chain rules revision ${rule.revision}${rule.spec ? ` and ${rule.spec}` : ''}`
 }
 
 /** The one-line heading over an apology. */

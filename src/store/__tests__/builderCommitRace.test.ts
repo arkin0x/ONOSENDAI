@@ -31,6 +31,7 @@ vi.mock('../../lib/relay', () => ({
 vi.mock('../../lib/chains', async (orig) => ({
   ...(await orig() as object),
   fetchChainEvents: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 200))),
+  confirmChainEvents: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 200))),
 }))
 vi.mock('../../lib/workers', async (orig) => ({
   ...(await orig() as object),

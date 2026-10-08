@@ -33,7 +33,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 
 vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
-  return { ...actual, fetchChainEvents: vi.fn(async () => []) }
+  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }
 })
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'

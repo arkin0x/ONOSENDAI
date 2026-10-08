@@ -57,14 +57,19 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
   const { index, action, lastValid } = broken
   const apology = apologyFor(action)
   const cause = breakCause(action)
+  // A fork ends the whole chain (2026-10-08 ruling): the spawn row carries
+  // it, and what broke it is the branches, not the spawn.
+  const fork = action.fork
   return (
     <div className="brokenchain" role="alert">
       <p className="brokenchain__title">
         <TriangleAlert size={13} strokeWidth={2.5} aria-hidden className="chainrows__warn" />
-        YOUR CHAIN IS BROKEN AT ROW {index}
+        {fork ? 'YOUR CHAIN FORKED' : <>YOUR CHAIN IS BROKEN AT ROW {index}</>}
       </p>
       <p className="brokenchain__line">
-        <b>What broke it:</b> {rowName(index, action)}.
+        <b>What broke it:</b> {fork
+          ? <>a fork: {fork.branchIds.map((id) => `event ${id.slice(0, 8)}…`).join(' and ')} each name event {fork.previousId.slice(0, 8)}… as the action before them</>
+          : rowName(index, action)}.
       </p>
       <p className="brokenchain__line">
         <b>Why:</b> {sentence(action.breaks ?? 'it breaks a chain rule')}.
@@ -72,7 +77,9 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
       <p className="brokenchain__line">
         <b>Where you are now:</b> every verifier treats your chain as invalid from row {index} on, so you stand frozen {lastValid
           ? <>at your last valid position, where {rowName(index - 1, lastValid)} left you</>
-          : <>at your spawn coordinate, the place your public key decodes to, because the spawn that starts this chain is itself invalid and no event on it counts. The newest spawn always decides which chain is yours, so an older chain of yours does not come back in its place</>}. Nothing more can move you on this chain, and ONOSENDAI will not sign a move onto it. A respawn starts a new chain.
+          : fork
+            ? <>at your spawn coordinate, the place your public key decodes to, because a fork ends the whole chain from its spawn, whichever branch came first</>
+            : <>at your spawn coordinate, the place your public key decodes to, because the spawn that starts this chain is itself invalid and no event on it counts. The newest spawn always decides which chain is yours, so an older chain of yours does not come back in its place</>}. Nothing more can move you on this chain, and ONOSENDAI will not sign a move onto it. A respawn starts a new chain.
       </p>
       {apology && (
         <p className={`brokenchain__sorry brokenchain__sorry--${cause?.kind ?? 'none'}`}>

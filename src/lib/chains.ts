@@ -31,7 +31,8 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { query, queryEach, subscribe } from './relay'
+import { CYBERSPACE_RELAY, query, queryEach, queryEachAt, subscribe } from './relay'
+import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
 
 export { PARTIAL_CHAIN_REASON }
@@ -236,6 +237,37 @@ export async function askChainEvents(pubkey: string, knownSpawnId?: string, have
   // self-check reads it as unknown, so a first move holds rather than
   // continuing from a head that is not the head (chainHold.ts).
   return whole ? got : markPartial(got)
+}
+
+/** How long confirming a head waits for the canonical relay, per question. */
+export const HEAD_CONFIRM_MS = 2500
+
+/**
+ * Your own chain from the canonical relay, only if it truly answered: every
+ * question met with its EOSE, and the chain whole. Null when it did not
+ * (unreachable, refused, slow, or a hole left), which is the difference
+ * between "nothing newer" and "nobody said". Every chain is published to the
+ * canonical relay, whatever else a client's relay set holds (useRelays.ts),
+ * so a move another device or tab published is there; asking it alone keeps
+ * the confirmation to one round trip, whatever other relays are slow.
+ */
+export async function confirmChainEvents(pubkey: string, knownSpawnId: string | undefined, have: NostrEvent[], maxWait = HEAD_CONFIRM_MS): Promise<NostrEvent[] | null> {
+  const canonical = normalizeURL(CYBERSPACE_RELAY)
+  const ask = async (): Promise<NostrEvent[] | null> => {
+    const { got, whole } = await gatherChain((f) => queryEachAt([canonical], f, maxWait), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
+    const answer = got.find((a) => a.url === canonical)
+    return whole && answer?.outcome === 'answered' ? answer.events : null
+  }
+  // One deadline over the whole attempt, connecting and authenticating
+  // included, so a move never waits on a relay longer than this.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), maxWait * 2) })
+  try {
+    return await Promise.race([ask().catch(() => null), late])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** The same, assembled. */

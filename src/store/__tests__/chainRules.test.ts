@@ -20,6 +20,7 @@ let duringLook: (() => void) | null = null
 vi.mock('../../lib/chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/chains')>()),
   fetchChainEvents: async () => { duringLook?.(); return relayHolds },
+  confirmChainEvents: async () => { duringLook?.(); return relayHolds },
 }))
 
 if (typeof localStorage === 'undefined') {
@@ -85,6 +86,9 @@ beforeEach(async () => {
   }
   relayHolds = []
   duringLook = null
+  // The chain an earlier case saved would read as another tab that moved on
+  // (confirmHead folds other tabs' saves), so each case starts with none.
+  localStorage.removeItem(`onosendai:chain:${S().identity.pubkey}`)
   useCyberspace.setState({
     ...fresh, events: [...fresh.events], published: { ...fresh.published }, positionHistory: [...fresh.positionHistory],
     cursor: fresh.position, pendingTarget: null, forkNotice: null, chainConflict: null, plan: null,
@@ -144,7 +148,7 @@ describe('a game holds the avatar (§8.11)', () => {
     const count = S().events.length
     await expect(S().completeRide({
       previousId: S().prevEventId, toCoordHex: positionHex(arena, 0), fromHeight: 1, toHeight: 2,
-      rootHex: '0'.repeat(64), mp: '', mnHex: '0'.repeat(16),
+      rootHex: '0'.repeat(64), mp: 'ab', mnHex: '0'.repeat(16),
     })).rejects.toThrow(GAME_HOLDS_MESSAGE)
     await S().boardHyperspace()
     expect(S().events).toHaveLength(count)

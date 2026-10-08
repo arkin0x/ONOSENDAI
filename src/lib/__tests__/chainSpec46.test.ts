@@ -193,11 +193,11 @@ describe('an event with no A tag (spec §8.8, §8.7.3)', () => {
     expect(actionLabel(chain[1])).toBe('BROKEN')
   })
 
-  it('wins a fork over a later valid branch, because a fork is decided before validity (§8.7.3)', () => {
+  it('takes part in resolution, so beside a valid sibling it makes a fork, and the whole chain is dead (2026-10-08 ruling)', () => {
     const later = hopEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(2n), plane })
     const chain = buildChain([spawn, later, noA])
-    expect(chain.map((a) => a.id)).toEqual([spawn.id, noA.id])
-    expect(firstBreak(chain)?.index).toBe(1)
+    expect(firstBreak(chain)?.index).toBe(0)
+    expect(chain[0].fork?.branchIds).toEqual([noA.id, later.id])
   })
 })
 
@@ -235,13 +235,13 @@ describe('doubled sector tags inside a bracket follow the bracket rules (§8.11.
 })
 
 describe('the rest of #46, as checked', () => {
-  it('a fork is decided by signing time before validity: an earlier branch with wrong sector tags beats a later valid one (§8.7.3)', () => {
+  it('a fork is decided without validity, and since the 2026-10-08 ruling it ends the whole chain: neither the earlier branch nor the valid one continues it', () => {
     const early = { ...hopEvent({ pubkey: pk, createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(1n), plane }) }
     const wrong: NostrEvent = { ...early, tags: early.tags.map((t) => (t[0] === 'S' ? ['S', '9-9-9'] : t)) }
     const later = hopEvent({ pubkey: pk, createdAt: 1_020, genesisId: spawn.id, previousId: spawn.id, c: pk, to: at(2n), plane })
     const chain = buildChain([spawn, later, wrong])
-    expect(chain.map((a) => a.id)).toEqual([spawn.id, wrong.id])
-    expect(chain[1].breaks).toMatch(/sector tags do not agree/)
+    expect(firstBreak(chain)?.index).toBe(0)
+    expect(chain.every((a) => a.coordHex === pk)).toBe(true)
   })
 
   it('a game region far from where the identity stands breaks nothing: proximity is the game\'s (§8.11.1)', () => {

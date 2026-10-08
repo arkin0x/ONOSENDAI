@@ -72,7 +72,7 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
-import { fetchChainEvents } from '../lib/chains'
+import { confirmChainEvents } from '../lib/chains'
 import {
   firstMove,
   foldHeldConflict,
@@ -1016,11 +1016,14 @@ function loadChain(pubkey: string): PersistedChain | null {
     const kept = data.events.filter((e) => e && e.pubkey === pubkey && authentic(e))
     const resolved = buildChain(kept, pubkey)
     const onChain = new Set(resolved.map((a) => a.id))
-    const events = kept.length === data.events.length ? kept : kept.filter((e) => onChain.has(e.id))
+    // A forked chain is kept whole: it is dead at the spawn coordinate, and
+    // both branches stay so the notice can name them (2026-10-08 ruling).
+    const forked = resolved[0]?.fork !== undefined
+    const events = forked || kept.length === data.events.length ? kept : kept.filter((e) => onChain.has(e.id))
     // Must reassemble to exactly what was kept, from our own key. Anything
     // else is a chain that cannot be continued, and pretending otherwise would
     // sign hops onto a history the relay will reject.
-    if (resolved.length === 0 || resolved.length !== events.length || resolved[0].pubkey !== pubkey) return null
+    if (resolved.length === 0 || (!forked && resolved.length !== events.length) || resolved[0].pubkey !== pubkey) return null
     return {
       version: 2,
       events,
@@ -1187,28 +1190,85 @@ function wakeSigner(): void {
   void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
 }
 
-/** How long a pre-flight look at the relay is worth. Past this, move anyway. */
-const HEAD_CHECK_MS = 1500
+/** Said while a move asks the relays again for your latest move. */
+export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
+/** Said when the relays still could not confirm it, and the move is refused. */
+export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
+/** How many times a move asks before it refuses. */
+const HEAD_CONFIRM_TRIES = 2
+/**
+ * How long a confirmation stands for the same head: a move confirmed when it
+ * was committed is not asked about again when a quick proof finishes.
+ */
+const HEAD_CONFIRMED_FOR_MS = 3000
+let headConfirmed: { pubkey: string; head: string; at: number } | null = null
+
+/** A head this device just made and nothing can follow yet: a spawn it signed, or a head the relays just confirmed. */
+function markHeadConfirmed(pubkey: string, head: string): void {
+  headConfirmed = { pubkey, head, at: Date.now() }
+}
 
 /**
- * This identity's chain from the relay, or nothing if the relay is slow or
- * unreachable. Bounded on purpose: this runs in front of every commit, and
- * the answer is only ever used to avoid forking, never to permit moving.
+ * Another tab of this browser moved you: its saves land in the same storage.
+ * What it signed is folded in, and whatever of it is not yet published stays
+ * queued (adoptChain counts what it folds as already on the relays).
  */
-async function freshHead(pubkey: string, genesisId: string, have: NostrEvent[]): Promise<NostrEvent[]> {
-  try {
-    return await Promise.race([
-      // The genesis in hand lets the chain and the spawns be asked at once,
-      // and the chain in hand fills every hole older than the relays' newest
-      // page, so this asks for what is newer and pages only when more than a
-      // page of it is new. A chain the relays return with a hole this cannot
-      // fill rejects, and reads as no answer, like a slow relay.
-      fetchChainEvents(pubkey, genesisId || undefined, have),
-      new Promise<NostrEvent[]>((resolve) => { setTimeout(() => resolve([]), HEAD_CHECK_MS) }),
-    ])
-  } catch {
-    return []
+function foldOtherTabs(pubkey: string): void {
+  const s = useCyberspace.getState()
+  if (s.events.length === 0) return
+  const stored = loadChain(pubkey)
+  if (!stored) return
+  const have = new Set(s.events.map((e) => e.id))
+  const extra = stored.events.filter((e) => !have.has(e.id))
+  if (extra.length === 0) return
+  // Only what another tab can have done: moved on from this tab's head (the
+  // stored chain holds every event this tab holds), or respawned (a newer
+  // spawn). Storage that disagrees in any other way is not taken on trust
+  // here; what was published is on the relays, and confirmHead asks them.
+  const storedIds = new Set(stored.events.map((e) => e.id))
+  const movedOn = s.events.every((e) => storedIds.has(e.id))
+  const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
+  if (!movedOn && !respawned) return
+  foldNow(extra)
+  const now = useCyberspace.getState()
+  const queued = extra.filter((e) => !stored.published.includes(e.id) && now.published[e.id] === 'ok')
+  if (queued.length === 0) return
+  const published = { ...now.published }
+  for (const e of queued) published[e.id] = 'queued'
+  useCyberspace.setState({ published })
+  saveChain(now.events, published, now.chain)
+}
+
+/**
+ * Confirm this device holds the identity's live head before a chain action
+ * is signed (arkinox's ruling of 2026-10-08, normative in the spec): a
+ * client that signs from a stale head forks the chain, and a fork ends it.
+ * Another tab's saves and the canonical relay's answer are folded in first;
+ * the caller then compares the head with the one it meant to extend. True
+ * when confirmed. False when the canonical relay did not truly answer, after
+ * HEAD_CONFIRM_TRIES asks (`retrying` runs before each ask after the first),
+ * and the move is then refused rather than signed blind: offline, a slow
+ * relay, or a chain the relay returned with a hole. A spawn needs none of
+ * this, since nothing can follow a spawn signed a moment ago.
+ */
+async function confirmHead(retrying: () => void): Promise<boolean> {
+  const pubkey = useCyberspace.getState().identity.pubkey
+  foldOtherTabs(pubkey)
+  const s = useCyberspace.getState()
+  if (headConfirmed && headConfirmed.pubkey === pubkey && headConfirmed.head === s.prevEventId && Date.now() - headConfirmed.at < HEAD_CONFIRMED_FOR_MS) return true
+  for (let i = 0; i < HEAD_CONFIRM_TRIES; i++) {
+    if (i > 0) retrying()
+    const now = useCyberspace.getState()
+    if (now.identity.pubkey !== pubkey) return false
+    const got = await confirmChainEvents(pubkey, now.genesisId || undefined, now.events).catch(() => null)
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return false
+    if (got) {
+      foldNow(got)
+      markHeadConfirmed(pubkey, useCyberspace.getState().prevEventId)
+      return true
+    }
   }
+  return false
 }
 
 const pubkeyHex = currentSigner.pubkey
@@ -1415,12 +1475,6 @@ const FIRST_MOVE_WAIT_MS = 4000
 /** A first move is waiting on the check or the signer: a second press must not sign a second spawn. */
 let firstMoveInFlight = false
 
-/**
- * Forks answered with "Publish mine", as `forkId:firstRelayChildId`, so the
- * same fork is not asked about again while its moves wait to go out (a LOCAL
- * device keeps them until LIVE and an action). Kept for the page's life.
- */
-const acceptedForks = new Set<string>()
 
 export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   /**
@@ -2122,25 +2176,25 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return true
     }
 
-    // One look at the relay before signing anything.
+    // The head is confirmed before anything is computed or signed.
     //
     // An action names the one before it, so an action signed from a head
-    // another device has already moved past forks the chain, and a fork is
-    // work thrown away: the earlier branch wins for every reader and the
-    // other branch's actions, paid hops included, stop being in the chain.
-    // The live subscription usually has us up to date, so this only catches
-    // the gap between an event reaching the relay and reaching us. LOCAL
-    // changes nothing here: it decides what this device publishes, not
-    // whether it can read. It is bounded and it fails open, because an
-    // unreachable relay must never stop someone moving, and a device that is
-    // genuinely offline cannot be warned at all.
+    // another device or tab has already moved past forks the chain, and a
+    // fork ends the whole chain for every reader (arkinox, 2026-10-08). The
+    // live subscription usually has us up to date; this closes the gap
+    // between an event reaching the relay and reaching us, and refuses to
+    // sign when the relays cannot say (confirmHead). LOCAL changes nothing
+    // here: it decides what this device publishes, not whether it can read.
     //
     // Only for a chain that exists. A provisional identity's question is a
     // different one (does it have a chain at all?) and is answered below.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
-      if (fresh.length > 0) get().adoptChain(fresh)
+      const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      if (!confirmed) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: HEAD_UNCONFIRMED_MESSAGE } })
+        return
+      }
       // On a held chain, a relay chain does not move you: it raises the prompt.
       if (get().chainConflict) return
       // The look may have brought a game's entry: a game holds the avatar now.
@@ -2195,6 +2249,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         let spawn: NostrEvent
         try {
           spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
+          markHeadConfirmed(pubkey, spawn.id)
         } catch (err) {
           set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
           return
@@ -2478,13 +2533,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // ran long, was paid for, or waited on a declined signature also takes
     // the same bounded look at the relays a commit takes before computing.
     foldDeferred()
-    if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) {
-      const fresh = await freshHead(get().identity.pubkey, get().genesisId, get().events)
-      if (msg.id !== requestId) return
-      foldNow(fresh)
-      // The live feed kept delivering while the look was out.
-      foldDeferred()
-    }
+    // The head is confirmed again before signing, unless the commit's own
+    // confirmation is still fresh for this head (HEAD_CONFIRMED_FOR_MS). A
+    // resumed, paid or long proof always asks.
+    if (resumed || msg.source === 'cloud' || msg.elapsedMs >= FRESH_LOOK_AFTER_MS) headConfirmed = null
+    const confirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
+    if (msg.id !== requestId) return
+    if (!confirmed) { refuseSigning(msg, HEAD_UNCONFIRMED_MESSAGE, true); return }
+    // The live feed kept delivering while the look was out.
+    foldDeferred()
     // A game entered meanwhile (a hop now would be a base action inside it,
     // spec §8.11.4 rule 3), a choice between two chains waiting, or a head
     // that moved: none of them is signed onto.
@@ -2703,6 +2760,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
     }
     const fresh = derive({ ...signed, held: keepHeld })
+    markHeadConfirmed(identity.pubkey, fresh.prevEventId)
     set({
       ...fresh,
       cursor: fresh.position,
@@ -2804,15 +2862,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!conflict || conflict.kind !== 'branch') return
     const div = findDivergence(events, published, conflict.relayEvents)
     if (!div) { set({ chainConflict: null }); return }
-    if (choice === 'mine') {
-      // Kept, and not asked about again for this fork (in memory: a reload
-      // that finds the same fork unpublished asks once more). While LIVE the
-      // answer is the deliberate act that opens the publish gate; while LOCAL
-      // the moves stay here until LIVE and an action, like any others.
-      acceptedForks.add(`${div.forkId}:${div.relay[0].id}`)
-      set({ chainConflict: null, publishRequest: get().publishRequest + 1 })
-      return
-    }
+    // Publishing this device's side would put a fork on the relays, and a
+    // fork ends the whole chain for every reader (arkinox, 2026-10-08), so
+    // "mine" is never carried out: the prompt stays until the relays'
+    // version is kept.
+    if (choice === 'mine') return
     // Keep the relays' version: the shared part, then the relays' branch.
     // This device's moves after the fork are dropped; region keys they found
     // stay in Secrets, as with any chain that leaves the store.
@@ -2988,6 +3042,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
     // The Hyperspace panel withholds BOARD and says why; this is the backstop.
     if (whyNoMove(get().actions())) return
+    // The head is confirmed before the boarding is signed (confirmHead).
+    const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (!confirmed) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: HEAD_UNCONFIRMED_MESSAGE } }); return }
+    if (get().prevEventId !== prevEventId) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: 'Another device moved you. Board again from where you are now.' } }); return }
+    if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     const head = events[events.length - 1]
     // Where the chain says you stand, plane bit included: the last recognized
     // action's C. Not `position` with `plane`: `plane` is the plane lined up
@@ -3031,6 +3090,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   completeRide: async (ride) => {
+    if (!get().genesisId || !get().prevEventId) return
+    // The head is confirmed before the ride is signed (confirmHead). The
+    // ride's proof is bound to the head it started from, so a head that the
+    // confirmation moved is refused below like any other.
+    const confirmed = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
+    if (!confirmed) throw new Error(HEAD_UNCONFIRMED_MESSAGE)
     const { events, genesisId, prevEventId, transit } = get()
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
@@ -3171,12 +3237,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
-    // offline). Folding now would let the fork rule pick a winner in silence,
-    // and publishing would make that pick for every reader; neither happens
-    // until the person chooses (lib/branchConflict.ts; arkinox, 2026-10-01).
-    // A fork already answered with "Publish mine" is not asked again.
+    // offline). Folding now would decide in silence, and publishing this
+    // device's side would fork the chain on the relays, which ends it for
+    // every reader (arkinox, 2026-10-08); nothing happens until the person
+    // keeps the relays' version (lib/branchConflict.ts; arkinox, 2026-10-01).
     const div = findDivergence(cur.events, cur.published, mine)
-    if (div && !acceptedForks.has(`${div.forkId}:${div.relay[0].id}`)) {
+    if (div) {
       set({ chainConflict: { kind: 'branch', forkId: div.forkId, relayEvents: mine, at: Date.now() } })
       useChainUi.getState().setPromptAside(false)
       return
@@ -3189,10 +3255,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // raw events the store actually holds.
     const order = buildChain(merged, me)
     if (order.length === 0) return
+    // A fork on the relays ends the whole chain (arkinox, 2026-10-08): both
+    // branches are kept, so the chain shows dead at the spawn coordinate with
+    // the branches named, nothing of either is dropped, and no move can be
+    // signed onto it (whyNoMove) until a respawn.
+    const forked = order[0].fork !== undefined
+    if (forked && merged.length === cur.events.length) return
     const head = order[order.length - 1]
-    if (head.id === cur.prevEventId && order.length === cur.events.length) return
+    if (!forked && head.id === cur.prevEventId && order.length === cur.events.length) return
     const byId = new Map(merged.map((e) => [e.id, e]))
-    const chainEvents = order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
+    const chainEvents = forked ? merged : order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
     // Relay events are on the wire; keep whatever of ours was already published.
     const okIds = new Set<string>([
       ...mine.map((e) => e.id),
@@ -3225,7 +3297,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // notice that only explained an adoption is replaced as before.
     const prior = cur.forkNotice
     const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
-    const notice = dropped > 0 || adopted > 0
+    const notice = forked
+      ? null
+      : dropped > 0 || adopted > 0
       ? unreadLoss
         ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, overturned: prior.overturned + overturned, replaced: prior.replaced || replaced, at: Date.now() }
         : { adopted, dropped, overturned, replaced, at: Date.now() }

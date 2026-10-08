@@ -56,6 +56,7 @@ import { setSyncPriority } from './lib/hyperspace/anchors'
 /** How long after the panels open the anchor sync goes full tilt. */
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
+import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
@@ -174,7 +175,10 @@ export default function App(): JSX.Element {
     return () => window.clearTimeout(t)
   }, [showPanels])
 
-  const [padOpen, setPadOpen] = useState(true)
+  const padOpen = usePad((s) => s.open)
+  // On a phone the open chat dock runs through the controls' column, so the
+  // two take turns there: whichever was opened last wins (usePad).
+  useEffect(() => linkChatAndPad(() => window.matchMedia(CHAT_COVERS_PAD).matches), [])
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
   // The pad no longer depends on being at your own head. Off-head it empties
   // its movement cells and keeps its scale ones (TouchControls), because scale
@@ -184,12 +188,10 @@ export default function App(): JSX.Element {
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
-    setViewMenuOpen((menu) => {
-      if (menu) return false
-      setPadOpen((open) => !open)
-      return false
-    })
-  }, [])
+    if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // With the chat open over the controls, this folds the chat (usePad).
+    tapScene()
+  }, [viewMenuOpen])
   useCanvasTap(onSceneTap, !crowded)
 
   return (
@@ -232,7 +234,7 @@ export default function App(): JSX.Element {
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); usePad.getState().setOpen(true) }}
           aria-label="Show controls"
         >CONTROLS</button>
       )}

@@ -4437,8 +4437,10 @@ kbd {
   /* The chat sits between the hamburger (352px in, 46px wide) and the pad
    * column (332px in from the right, 122px wide), never under either. The
    * chip centres on the scene, which is 10px right of the viewport's centre
-   * with 320px of panels on the left and 300px on the right. */
-  .chatdock {
+   * with 320px of panels on the left and 300px on the right.
+   * `.app` because the base `.chatdock` rule comes later in this file and
+   * its left and right won on source order, so the dock sat under both. */
+  .app .chatdock {
     left: 424px;
     right: 470px;
   }
@@ -6373,6 +6375,21 @@ kbd {
   padding: 8px 12px;
 }
 
+/* Something was said while the dock stayed folded: a red dot on the chip's
+ * top right corner until the chat is opened (arkinox, 2026-10-07). The ring
+ * in the chip's own dark keeps it a dot over the border, not a blob. */
+.chatdock__dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 6px rgba(255, 59, 107, 0.6);
+  pointer-events: none;
+}
+
 .chatdock__badge {
   min-width: 16px;
   padding: 0 5px;
@@ -6390,7 +6407,10 @@ kbd {
   left: 84px;
   right: 152px;
   margin: 0 auto;
-  width: min(480px, 100%);
+  /* A cap, not a width. A width beat left and right whenever the gap between
+     them was under 480px, and the dock ran under the controls and the menu
+     button (from 641px, and on a desktop up to about 1370px). */
+  max-width: 480px;
   max-height: 33vh;
   z-index: 101;
   display: flex;
@@ -6544,6 +6564,7 @@ kbd {
     right: 10px;
     bottom: 80px;
     width: auto;
+    max-width: none;
     max-height: 38vh;
   }
 }

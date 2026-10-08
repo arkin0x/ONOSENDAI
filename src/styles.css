@@ -2374,7 +2374,7 @@ kbd {
 }
 @media (max-width: 1100px) {
   /* A little taller than the quarter it was (arkinox, 2026-10-08: "maybe
-     make the box a little taller"), still well clear of the centre. */
+     make the box a little taller"), still well clear of the center. */
   .deploybar {
     max-height: 30vh;
     max-height: 30dvh;

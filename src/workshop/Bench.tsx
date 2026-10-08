@@ -25,7 +25,7 @@ import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRen
 import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
-import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -118,8 +118,7 @@ function Grid(): JSX.Element {
     const w = useWorkshop.getState()
     const at = snap(e.point, w.level, w.step(), w.plane)
     if (w.tool === 'stamp' && w.stampMode === 'object') {
-      const me = useCyberspace.getState().identity.pubkey
-      w.placeObject(at, w.currentId ? `33331:${me}:${w.currentId}` : undefined)
+      w.placeObject(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
     } else if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }

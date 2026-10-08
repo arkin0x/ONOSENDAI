@@ -37,6 +37,7 @@ import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { PresenceChip } from './hud/PresenceChip'
 import { startPresence } from './store/usePresence'
+import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
 import { watchConnectivity } from './lib/relay'
@@ -80,6 +81,9 @@ export default function App(): JSX.Element {
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
   useEffect(() => watchConnectivity(), [])
+  // The Avatars list kept on this device is read now, so the menu opens on
+  // it; the relays are asked when the panel first mounts (useRoster).
+  useEffect(() => { void hydrateRoster() }, [])
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])

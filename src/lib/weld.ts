@@ -35,7 +35,7 @@ export interface Welded {
 const sameColor = (a: ShardVertex, b: ShardVertex): boolean => a.c[0] === b.c[0] && a.c[1] === b.c[1] && a.c[2] === b.c[2]
 
 /** The colour a face shows without one of its own: the average of its corners. */
-function cornerAverage(s: ShardModel, f: Tri): Rgb {
+export function cornerAverage(s: Pick<ShardModel, 'vertices'>, f: Tri): Rgb {
   const sum: Rgb = [0, 0, 0]
   for (const i of f) {
     const v = s.vertices[i]

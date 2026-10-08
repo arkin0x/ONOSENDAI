@@ -7,7 +7,10 @@
  * moved lately or is not on this relay's feed at all. Your own key is listed
  * when it has published, marked YOU, since spectating yourself is just being
  * here. The panel shows the five newest; VIEW MORE opens the whole list in an
- * overlay that scrolls, so the menu column stays short.
+ * overlay that scrolls, so the menu column stays short. The list is kept by
+ * store/useRoster.ts, so closing the menu loses nothing and a reload paints
+ * the kept list at once; UPDATING shows while the relays are being asked for
+ * what is newer.
  */
 
 import { useEffect, useState } from 'react'
@@ -28,7 +31,7 @@ import { useEscape } from '../hooks/useEscape'
 const SHOWN = 5
 
 export function AvatarsPanel(): JSX.Element {
-  const { avatars, status } = useRecentAvatars()
+  const { avatars, status, updating } = useRecentAvatars()
   const me = useCyberspace((s) => s.identity.pubkey)
   const targets = useCyberspace((s) => s.targets)
   const [input, setInput] = useState('')
@@ -79,7 +82,10 @@ export function AvatarsPanel(): JSX.Element {
     <section className="panel panel--avatars">
       <header className="panel__head">
         <h2>Avatars</h2>
-        <span className="tag">{status === 'loading' ? 'LOADING' : `${avatars.length} SEEN`}</span>
+        <span className="avatars__tags">
+          {updating && avatars.length > 0 && <span className="tag tag--updating" title="Asking the relays for newer moves">UPDATING</span>}
+          <span className="tag">{status === 'loading' ? 'LOADING' : `${avatars.length} SEEN`}</span>
+        </span>
       </header>
 
       <form

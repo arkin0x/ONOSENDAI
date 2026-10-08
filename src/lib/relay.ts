@@ -225,6 +225,8 @@ interface AskOptions {
   onSent?: () => void
   /** Ends the question at once, as no answer in time, with whatever events came. */
   stop?: AbortSignal
+  /** Handed every event the moment it lands, before the relay has finished answering. */
+  onEvent?: (ev: NostrEvent) => void
 }
 
 /**
@@ -238,7 +240,7 @@ interface AskOptions {
  * challenge.
  */
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop } = opts
+  const { answerMs, onSent, stop, onEvent } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
   if (stop?.aborted) return late()
@@ -284,7 +286,11 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
     const open = (): void => {
       try {
         sub = relay.subscribe([filter], {
-          onevent: (e) => { events.set(e.id, e as NostrEvent) },
+          onevent: (e) => {
+            if (settled || events.has(e.id)) return
+            events.set(e.id, e as NostrEvent)
+            onEvent?.(e as NostrEvent)
+          },
           oneose: () => finish({ url, outcome: 'answered', events: got() }),
           onclose: (reason) => {
             if (settled) return
@@ -520,6 +526,51 @@ async function reachable(relays: string[]): Promise<string[]> {
     try { await getPool().ensureRelay(url); out.push(url) } catch { deadUntil.set(url, now + DEAD_MS) }
   }))
   return out
+}
+
+/**
+ * Ask one relay on its own, handing over each event the moment it lands.
+ * Its connection and its NIP-42 auth happen inside its own time, so a relay
+ * that is slow to connect, or whose signer is slow to answer the challenge,
+ * holds back no other relay: `query` authenticates every relay before asking
+ * any of them, and resolves only when the slowest has answered, which is
+ * what kept the Avatars list empty until the slowest relay's EOSE. `maxWait`
+ * bounds the connect and auth, and then the answer, timed from the REQ
+ * (askOne answerMs). With `skipDead`, a relay that refused a connection is
+ * left alone for DEAD_MS, as queryAny does for the general relays.
+ */
+export async function askRelay(
+  url: string,
+  filter: Filter,
+  onEvent: (ev: NostrEvent) => void,
+  opts: { maxWait?: number; skipDead?: boolean } = {},
+): Promise<RelayAnswer> {
+  const maxWait = opts.maxWait ?? MAX_WAIT_MS
+  const norm = normalizeURL(url)
+  const deadline = Date.now() + maxWait
+  const left = (): number => Math.max(0, deadline - Date.now())
+  if (opts.skipDead) {
+    if ((deadUntil.get(norm) ?? 0) > Date.now()) return { url: norm, outcome: 'unreachable', reason: 'recently unreachable', events: [] }
+    try {
+      await getPool().ensureRelay(norm, { connectionTimeout: Math.max(1_000, left()) })
+    } catch (err) {
+      deadUntil.set(norm, Date.now() + DEAD_MS)
+      return { url: norm, outcome: 'unreachable', reason: err instanceof Error ? err.message : 'connection failed', events: [] }
+    }
+  }
+  await Promise.race([authRelay(norm), new Promise<void>((r) => setTimeout(r, left()))])
+  return askOne(norm, filter, deadline, { answerMs: maxWait, onEvent })
+}
+
+/** askRelay across a set, every relay at once and on its own; resolves when each has answered or given up. */
+export function askEach(
+  relays: string[],
+  filter: Filter,
+  onEvent: (ev: NostrEvent) => void,
+  opts: { maxWait?: number; skipDead?: boolean } = {},
+): Promise<RelayAnswer[]> {
+  const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
+  return Promise.all(urls.map((url) => askRelay(url, filter, onEvent, opts)))
 }
 
 /** Query an explicit set, for the few things that live elsewhere (profiles, contact lists). */

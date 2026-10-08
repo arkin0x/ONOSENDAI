@@ -7838,14 +7838,6 @@ kbd {
   border-color: var(--build);
 }
 
-/* The Position panel's line while BUILD mode is on. */
-.viewat__build {
-  margin: 4px 0 0;
-  font-size: 9px;
-  line-height: 1.5;
-  color: var(--build);
-}
-
 /* The wrench inside the Stash panel's BUILD control, on the text's line. */
 .shards__build-icon {
   vertical-align: -1px;

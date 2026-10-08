@@ -160,9 +160,6 @@ export function PositionPanel(): JSX.Element {
   }, [])
   const [finding, setFinding] = useState(false)
   const [viewNote, setViewNote] = useState<string | null>(null)
-  // In BUILD mode VIEW is how the build cursor jumps: the mode rides the free
-  // view VIEW starts, so the cursor lands on the place typed (useBuilder).
-  const building = useBuilder((s) => s.active)
   const look = (typed: string, target: ViewTarget): void => {
     useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
     // A place on Earth gets the pin: marking the focal point is the whole
@@ -257,7 +254,6 @@ export function PositionPanel(): JSX.Element {
           />
           <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
         </form>
-        {building && <p className="viewat__build">Build mode is on: VIEW moves the build cursor to this place, and RECENT does the same. Your avatar stays where it is.</p>}
         {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
           <div className="viewat__recent">

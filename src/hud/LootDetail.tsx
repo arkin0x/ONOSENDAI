@@ -32,6 +32,7 @@ import { useShards, positionOf } from '../store/useShards'
 import { ProfilePic } from './ProfileBadge'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
+import { useBagReading } from '../hooks/useBagReadings'
 
 /** An item of this bag that this client can already see, from a scan or from its own deployments. */
 interface OpenedItem {
@@ -133,6 +134,7 @@ export function LootDetail(): JSX.Element | null {
   const name = profileLabel(profile, npub)
   const yours = item.author === me
   const opened = openedItems(item, discovered, mine)
+  const reading = useBagReading(item.bagId)
   const close = (): void => useLootView.getState().select(null)
 
   const view = (o: OpenedItem): void => {
@@ -185,6 +187,19 @@ export function LootDetail(): JSX.Element | null {
           <div><dt>Payload</dt><dd>{formatBytes(item.bytes)}</dd></div>
           <div><dt>Where</dt><dd>{opened.length > 0 ? (opened[0].plane === 0 ? 'known · dataspace' : 'known · ideaspace') : 'hidden'}</dd></div>
         </dl>
+
+        {/* What the key opened but this client could not read, said rather than
+            left blank (spec §7.6). An unknown kind, a failed verification, or a
+            reference that could not be fetched. */}
+        {reading && (reading.opaque || reading.entries > reading.readable || reading.entries === 0) && (
+          <span className="shards__compose-note shards__compose-note--warn" role="status" title="An item of a kind this client does not know, one that fails to verify, or a reference it could not fetch (spec §7.6)">
+            {reading.opaque
+              ? 'Opened: this bag holds something other than a list of items.'
+              : reading.entries === 0
+                ? 'Opened: nothing inside.'
+                : `Opened: ${reading.entries - reading.readable} of ${reading.entries} entries here cannot be read by this client.`}
+          </span>
+        )}
 
         {opened.length > 0 ? (
           <ul className="lootd__items">

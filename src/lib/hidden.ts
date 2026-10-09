@@ -623,14 +623,46 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string, facts: 
  * a bag whose hider left `h` off (arkinox, 2026-10-01) from reading as a
  * single gibson. Without it the `h` tag is used, and 0 when there is none.
  */
+/**
+ * What opening a bag found, by bag id: how many entries it held and how many
+ * this client could read. A bag whose entries were all dropped (an unknown
+ * kind, a failed verification, a reference that could not be fetched) was
+ * still opened, and the reader is told so rather than shown nothing, as spec
+ * §7.6 asks. An opaque payload (not a list of entries) is noted the same way.
+ * Session-local, like the scan that fills it; a wrong key is not an opening
+ * and leaves no reading.
+ */
+export interface BagReading {
+  entries: number
+  readable: number
+  opaque: boolean
+}
+const readings = new Map<string, BagReading>()
+const readingListeners = new Set<() => void>()
+let readingsVersion = 0
+export function bagReading(bagId: string): BagReading | undefined { return readings.get(bagId) }
+/** Rises whenever a reading changes, for hooks that subscribe. */
+export function bagReadingsVersion(): number { return readingsVersion }
+export function onBagReadings(listener: () => void): () => void {
+  readingListeners.add(listener)
+  return () => { readingListeners.delete(listener) }
+}
+function noteReading(bagId: string, reading: BagReading): void {
+  const prev = readings.get(bagId)
+  if (prev && prev.entries === reading.entries && prev.readable === reading.readable && prev.opaque === reading.opaque) return
+  readings.set(bagId, reading)
+  readingsVersion++
+  for (const listener of readingListeners) listener()
+}
+
 export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
   if (!json) return []
   let entries: unknown
-  try { entries = JSON.parse(json) } catch { return [] }
-  if (!Array.isArray(entries)) return []
+  try { entries = JSON.parse(json) } catch { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
+  if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
@@ -649,7 +681,9 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
     }
     await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, refs.length) }, worker))
   }
-  return out.filter((h): h is Hidden => h !== null)
+  const items = out.filter((h): h is Hidden => h !== null)
+  noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false })
+  return items
 }
 
 /**

@@ -28,6 +28,10 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { MessageText } from './CashuCard'
+import { ChestBlock, KeyLine } from './ItemRows'
+
+/** The badge each kind of hidden thing opens under. */
+const BADGE: Record<string, string> = { message: '✎ MESSAGE', shard: '◇ SHARD', key: '⚷ KEY', chest: '▣ CHEST' }
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -52,8 +56,11 @@ export function SecretModal(): JSX.Element | null {
 
   const goTo = (): void => {
     close()
-    useCyberspace.getState().focusItem(item.at, item.plane, item.type === 'message' ? name : item.shard?.name ?? 'shard', item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.shard?.name ?? 'shard'
+    useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
+  // Where it was found, for what is taken out of a chest here.
+  const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
   const watch = (): void => { close(); void spectate(author) }
   // A message with a Cashu token in it copies only the words around the
   // token: the token has its own COPY TOKEN on the card, and a message that
@@ -73,13 +80,17 @@ export function SecretModal(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className={`secret__badge secret__badge--${item.type}`}>{item.type === 'message' ? '✎ MESSAGE' : '◇ SHARD'}</span>
+          <span className={`secret__badge secret__badge--${item.type}`}>{BADGE[item.type] ?? item.type.toUpperCase()}</span>
           {mine && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
 
         {item.type === 'message' ? (
           <MessageText text={item.text ?? ''} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
+        ) : item.type === 'key' && item.keyItem ? (
+          <div className="secret__shard"><KeyLine name={item.keyItem.name} author={author} /></div>
+        ) : item.type === 'chest' && item.chest ? (
+          <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
@@ -124,7 +135,7 @@ export function SecretModal(): JSX.Element | null {
 
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo}>GO TO IT</button>
-          {(!coin || words) && (
+          {(item.type === 'shard' || item.type === 'message') && (!coin || words) && (
             <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your Stash' : coin ? 'Copy the words around the token' : 'Copy the text'}>
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO STASH' : 'COPY TEXT'}
             </button>

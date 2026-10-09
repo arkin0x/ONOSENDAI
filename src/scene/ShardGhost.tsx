@@ -119,11 +119,12 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
-  // A message ghosts as a dim note that follows the cursor.
-  if (pending?.type === 'message') {
+  // A message ghosts as a dim note that follows the cursor; a key and a chest
+  // ghost as their mark and name, the way the world draws them once hidden.
+  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest') {
     return (
       <WorldLabel
-        text={messagePreview(pending.text, 40)}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : `▣ ${pending.name}`}
         color="#ffd27d"
         follow={landingAt}
         align="center"

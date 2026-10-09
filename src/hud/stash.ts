@@ -16,7 +16,7 @@ import { create } from 'zustand'
 import type { MyDeployment } from '../store/useShards'
 import { useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
-import { messagePreview } from '../lib/hidden'
+import { hiddenLabel } from '../lib/hidden'
 import type { FeedObject } from 'sno-core/feed'
 
 export interface Bag {
@@ -54,7 +54,7 @@ export function bagsOf(mine: MyDeployment[]): Bag[] {
 }
 
 export function depName(d: MyDeployment): string {
-  return d.type === 'message' ? messagePreview(d.text ?? '', 24) : d.shard?.name ?? 'object'
+  return d.type === 'shard' ? d.shard?.name ?? 'object' : hiddenLabel(d, 24)
 }
 
 /** Fly the scene to one deployment and open its record: what tapping one has always done. */
@@ -71,6 +71,10 @@ interface StashModals {
   bag: string | null
   /** The Builder's HIDE MESSAGE composer. */
   message: boolean
+  /** The FORGE A KEY composer (Keys and Chests B1 §3.1). */
+  key: boolean
+  /** The SEAL A CHEST composer. */
+  chest: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
@@ -86,6 +90,10 @@ interface StashModals {
   openBag: (lookupId: string) => void
   /** Write a message to hide at the build cursor. */
   openMessage: () => void
+  /** Forge a key to hide at the build cursor. */
+  openKey: () => void
+  /** Seal a chest to hide at the build cursor. */
+  openChest: () => void
   /** Browse the Shard Feed. */
   openFeed: () => void
   close: () => void
@@ -95,21 +103,28 @@ interface StashModals {
   deployObject: (object: FeedObject) => void
 }
 
+/** Every modal closed: what each open sets before opening its own. */
+const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, feed: false }
+
 export const useStash = create<StashModals>((set) => ({
   models: false,
   bags: false,
   bag: null,
   message: false,
+  key: false,
+  chest: false,
   feed: false,
   returnToModels: false,
   returnToFeed: false,
   pickTab: null,
-  openModels: () => set({ models: true, bags: false, bag: null, message: false, feed: false }),
-  openBags: () => set({ bags: true, models: false, bag: null, message: false, feed: false }),
-  openBag: (lookupId) => set({ bag: lookupId, models: false, message: false, feed: false }),
-  openMessage: () => set({ message: true, models: false, bags: false, bag: null, feed: false }),
-  openFeed: () => set({ feed: true, models: false, bags: false, bag: null, message: false }),
-  close: () => set({ models: false, bags: false, bag: null, message: false, feed: false }),
+  openModels: () => set({ ...NONE_OPEN, models: true }),
+  openBags: () => set({ ...NONE_OPEN, bags: true }),
+  openBag: (lookupId) => set({ ...NONE_OPEN, bag: lookupId }),
+  openMessage: () => set({ ...NONE_OPEN, message: true }),
+  openKey: () => set({ ...NONE_OPEN, key: true }),
+  openChest: () => set({ ...NONE_OPEN, chest: true }),
+  openFeed: () => set({ ...NONE_OPEN, feed: true }),
+  close: () => set(NONE_OPEN),
   deployModel: (id) => {
     set({ models: false, returnToModels: true, pickTab: 'mine' })
     useShards.getState().startDeployShard(id)

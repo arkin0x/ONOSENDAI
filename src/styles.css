@@ -7882,9 +7882,13 @@ kbd {
 }
 
 /* The wrench inside the Stash panel's BUILD control, on the text's line. */
+/* The icon before a stash button's label: one size for all six, large enough
+ * to read at the label's small type. The four composer buttons used text
+ * glyphs here until 2026-10-09, which drew at the label's size and were too
+ * small to read (arkinox). */
 .shards__build-icon {
-  vertical-align: -1px;
-  margin-right: 2px;
+  vertical-align: -2px;
+  margin-right: 4px;
 }
 
 /* PLACE OBJECT's empty state: the note, then the way to make a model. */

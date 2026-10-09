@@ -17,7 +17,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Rss, Wrench } from 'lucide-react'
+import { Archive, Diamond, KeyRound, PencilLine, Rss, Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -55,7 +55,7 @@ export function ShardsPanel(): JSX.Element {
           <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
           {/* Everyone's published objects, beside the workshop where yours are made (the Shard Feed). */}
           <button className="avatars__go shards__compose-open shards__feed" onClick={() => useStash.getState().openFeed()} title="Browse everyone's published objects: place one, or remix it as your own">
-            <Rss className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> SHARD FEED
+            <Rss className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SHARD FEED
           </button>
           {/* BUILD mode, beside the workshop it is the other half of: the
               workshop makes objects, the Builder places them (useBuilder). */}
@@ -65,14 +65,14 @@ export function ShardsPanel(): JSX.Element {
             disabled={building && deploying}
             onClick={() => useBuilder.getState().toggle()}
             title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
-          >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={11} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
+          >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
       </div>
 
       <div className="shards__section">
         <span className="legend__label">Place a hidden object</span>
         <div>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}>◇ DEPLOY AN OBJECT</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}><Diamond className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> DEPLOY AN OBJECT</button>
         </div>
       </div>
 
@@ -81,7 +81,7 @@ export function ShardsPanel(): JSX.Element {
         {composing ? (
           <MessageCompose onDone={() => setComposing(false)} />
         ) : (
-          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}>✎ WRITE A MESSAGE</button>
+          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}><PencilLine className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> WRITE A MESSAGE</button>
         )}
       </div>
 
@@ -91,8 +91,8 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <span className="legend__label">Place a key or a chest</span>
         <div className="shards__modes">
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it">⚷ FORGE A KEY</button>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it">▣ SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it"><KeyRound className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> FORGE A KEY</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><Archive className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A CHEST</button>
         </div>
       </div>
 

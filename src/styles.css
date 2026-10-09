@@ -6864,21 +6864,28 @@ kbd {
 }
 
 /* ---------- Presence: who is in this sector ---------- */
-.presence { pointer-events: auto; flex-direction: column; align-items: stretch; gap: 0; }
+/* The pill's padding lives on the head, not on the pill, so that the whole
+ * pill is the button: with the padding on the pill, its rim looked like part
+ * of the button and did nothing, and only the words took the tap (arkinox,
+ * 2026-10-09). The open list and the explanation carry the same padding as
+ * margins, so nothing moved. The NEARBY chip shares this markup. */
+.presence { pointer-events: auto; flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
 .presence__head {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0;
+  width: 100%;
+  padding: 7px 8px 7px 12px;
   font: inherit;
   color: inherit;
+  text-align: left;
   background: transparent;
   border: 0;
   cursor: pointer;
 }
 .presence__list {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0 8px 7px 12px;
   padding: 6px 0 0;
   border-top: 1px solid var(--border);
   display: flex;
@@ -6923,7 +6930,7 @@ kbd {
 /* SCANNING, opened: what it is doing, in a few lines, and a mark that says
  * tapping the head closes it. */
 .presence__explain {
-  margin: 8px 0 0;
+  margin: 1px 8px 7px 12px;
   padding: 8px 0 0;
   max-width: 34ch;
   border-top: 1px solid var(--border);

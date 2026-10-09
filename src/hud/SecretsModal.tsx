@@ -38,8 +38,6 @@ import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
-import { Checkbox } from './ui/Checkbox'
-import { Field } from './ui/Switch'
 import { useEscape } from '../hooks/useEscape'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
@@ -54,7 +52,6 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const placesVersion = useSecrets((s) => s.placesVersion)
   const rescan = useSecrets((s) => s.rescan)
   const discovered = useShards((s) => s.discovered)
-  const showSecrets = useCyberspace((s) => s.showSecrets)
   const position = useCyberspace((s) => s.position)
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
@@ -182,10 +179,6 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
           <span>{storage.mode === 'indexeddb'
             ? `${formatBytes(storage.bytes)} of ${formatBytes(storage.budget)} on this device`
             : storage.mode === 'local' ? `${formatBytes(storage.bytes)} in localStorage and memory` : 'Opening storage…'}</span>
-          <span className="secrets__gap" />
-          <Field id="secrets-draw" label="Draw them in the scene">
-            <Checkbox id="secrets-draw" checked={showSecrets} onCheckedChange={(v) => useCyberspace.getState().setShowSecrets(v === true)} />
-          </Field>
         </div>
 
         <div className="secrets__body">

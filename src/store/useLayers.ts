@@ -1,10 +1,10 @@
 /**
  * useLayers.ts - which optional scene layers are drawn, per device.
  *
- * Two layers can be turned off from the bottom of the Movement Proof panel:
- * the gibson dot grid (the terrain K field, scene/ShaderPointField.tsx) and
- * the hX concentric boxes (the nested aligned-subtree cells around the
- * anchor, scene/Rooms.tsx). Both default on, which is the look the scene has
+ * Two layers can be turned off from the View panel (hud/ViewPanel.tsx): the
+ * terrain dots (the terrain K field, scene/ShaderPointField.tsx) and the hX
+ * concentric boxes (the nested aligned-subtree cells around the anchor,
+ * scene/Rooms.tsx). Both default on, which is the look the scene has
  * always had. This is a view preference only: nothing about the proof, the
  * movement, the cursor or the chain reads it.
  *

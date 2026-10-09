@@ -124,7 +124,7 @@ function World(): JSX.Element {
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
   const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
-  // The two layers the Movement Proof panel can turn off (store/useLayers).
+  // The two layers the View panel can turn off (store/useLayers).
   // The dots switched off suspend exactly as a hyperspace view does: no scans,
   // no terrain runs queued, no per-frame uniforms. Only drawing changes.
   const dotsOn = useLayers((s) => s.dots)

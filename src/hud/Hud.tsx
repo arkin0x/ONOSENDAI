@@ -29,6 +29,7 @@ import { RelaysPanel } from './RelaysPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
+import { ViewPanel } from './ViewPanel'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
@@ -456,6 +457,8 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         {!cloudLeads && <CloudPanel />}
         <ChainPanel />
         {!rideSet && <HyperspacePanel />}
+        {/* What the scene draws, just above the Legend that decodes it. */}
+        <ViewPanel />
         <Legend />
         <Controls />
         <DerezzPanel />

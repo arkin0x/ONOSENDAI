@@ -6103,10 +6103,6 @@ kbd {
   color: var(--dim);
 }
 
-/* The draw-keys checkbox sits on the summary line, centred with it. */
-.secrets__summary .ui-field { margin: 0; align-items: center; gap: 7px; }
-.secrets__summary .ui-field__label { font-size: 9px; }
-
 /* Everything under the summary scrolls as one: two lists that each scrolled
    inside the card would put a scroller in a scroller, which eats the drag
    meant for the other. */
@@ -6316,16 +6312,6 @@ kbd {
   margin: 4px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-}
-
-/* The scene layer switches, last in the panel: two chips in one row. */
-.proof__layers {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
 }
 
 /* A rule before the benchmark, which is a different subject from the controls. */
@@ -7692,6 +7678,13 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .ui-switch, .ui-switch__thumb, .ui-checkbox { transition: none; }
 }
+
+/* VIEW: what the scene draws, one switch to a row (hud/ViewPanel.tsx). The
+   last row's own margin would double the panel's bottom padding. */
+.panel--view .ui-field:last-child { margin-bottom: 2px; }
+
+/* The h of hX keeps its case under the field label's capitals. */
+.view__hx { text-transform: none; }
 
 /* The action in the title row, beside CANCEL: compact, never wrapping, the
    title giving way first (arkinox, 2026-10-01). */

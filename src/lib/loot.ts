@@ -12,7 +12,7 @@
 
 import type { NostrEvent } from './events'
 import { ciphertextOf, heightHint, HIDDEN_KIND } from './hidden'
-import { parseHint, SECTOR_HEIGHT } from './hint'
+import { parseHint, SECTOR_HEIGHT, type HintBox } from './hint'
 import { formatCellSize } from 'sno-core/scale'
 
 export interface LootItem {
@@ -39,6 +39,8 @@ export interface LootItem {
    * this is computed from the hint, never read off `S`.
    */
   sector: string | null
+  /** The hider's hint box (spec §7.7), or null when the bag carries no well-formed one. */
+  hint: HintBox | null
 }
 
 const LOOKUP_ID = /^[0-9a-f]{64}$/
@@ -74,7 +76,26 @@ export function summarizeBag(ev: NostrEvent): LootItem | null {
     bytes: payloadBytes(ciphertext),
     riddle: ev.content.trim().replace(/\s+/g, ' '),
     sector: hintedSector(ev.tags, heightHint(ev) ?? 0),
+    hint: parseHint(ev.tags, heightHint(ev) ?? 0),
   }
+}
+
+/**
+ * The search a hint box asks of a seeker, as a power of two: one region key
+ * per candidate region of the bag's height inside the box, summed over the
+ * three axes (spec §7.7 "Why the hint is a knob"). An axis at 85 is open and
+ * counts the whole axis.
+ */
+export function hintSearchExponent(hint: HintBox, bagHeight: number): number {
+  return hint.heights.reduce((sum, h) => sum + Math.max(0, h - bagHeight), 0)
+}
+
+/** A hint box in words: a cube when the heights agree, a box otherwise, an open axis named. */
+export function hintBoxLabel(hint: HintBox): string {
+  const [hx, hy, hz] = hint.heights
+  if (hx === hy && hy === hz) return hx === 85 ? 'all of cyberspace' : `a cube 2^${hx} gibsons on a side`
+  const side = (h: number): string => (h === 85 ? 'open' : `2^${h}`)
+  return `a box of ${side(hx)} by ${side(hy)} by ${side(hz)} gibsons`
 }
 
 /** The sector a well-formed hint fixes on all three axes, as "sx-sy-sz", or null (spec §7.7, §10). */

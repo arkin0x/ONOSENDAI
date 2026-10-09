@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { Explanation } from './Explanation'
 import { nip19 } from 'nostr-tools'
 import { forgeKey } from '../lib/chests'
 import { MAX_ITEM_NAME, type KeyItem } from '../lib/hidden'
@@ -72,6 +73,9 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
         <button className="avatars__go" disabled={!key.name.trim()} onClick={place} title="Aim it at the build cursor; the key goes into your LOOT when it is hidden">PLACE KEY ▸</button>
       </div>
+      <Explanation>
+        A key is a keypair hidden as an item: whoever reads it holds it, and it lands in their LOOT. Seal a chest to it and only a holder can open that chest. A mini quest is four steps: forge a key, hide it somewhere, seal a chest to it with a prize inside, and hide the chest somewhere else.
+      </Explanation>
     </div>
   )
 }

@@ -215,26 +215,38 @@ function capped(tags: string[][], name: string, max: number): string {
   return (tagValue(tags, name) ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
 }
 
-/** A key's or a chest's name tag, capped; `fallback` when it carries none. */
+/**
+ * A key's or a chest's title, capped; `fallback` when it carries none. The tag
+ * is `title`, the one other nostr kinds use for a human name, so a client that
+ * knows nothing of keys and chests can still label one (arkinox, 2026-10-09).
+ * Items forged before the switch carry `name`, and are still read.
+ */
 function nameOf(tags: string[][], fallback: string): string {
-  return capped(tags, 'name', MAX_ITEM_NAME) || fallback
+  return capped(tags, 'title', MAX_ITEM_NAME) || capped(tags, 'name', MAX_ITEM_NAME) || fallback
 }
 
 /**
  * A key item out of its event, or null when it is not one this client can
- * hold: the content must be a valid 32-byte secret, and an `item` tag, when
- * carried, must be the public key that secret derives, or the item is corrupt
- * and nothing sealed to it could ever be opened with it.
+ * hold: the `secret` tag must be a valid 32-byte secret, and an `item` tag,
+ * when carried, must be the public key that secret derives, or the item is
+ * corrupt and nothing sealed to it could ever be opened with it.
+ *
+ * Keys forged on 2026-10-09, before the secret moved into its tag, carry it
+ * as the content and their sentence in an `about` tag; they are still read.
  */
 export function keyItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): KeyItem | null {
   if (ev.kind !== KEY_KIND || !wellShaped(ev)) return null
-  const secretHex = ev.content.trim()
+  const tagged = tagValue(ev.tags, 'secret')
+  const secretHex = (tagged ?? ev.content).trim()
   if (!HEX_64.test(secretHex)) return null
   let itemPubkey: string
   try { itemPubkey = getPublicKey(hexToBytes(secretHex)) } catch { return null }
   const claimed = tagValue(ev.tags, 'item')
   if (claimed !== undefined && claimed !== itemPubkey) return null
-  return { name: nameOf(ev.tags, 'key'), about: capped(ev.tags, 'about', MAX_ABOUT), itemPubkey, secretHex }
+  const about = tagged !== undefined
+    ? ev.content.trim().replace(/\s+/g, ' ').slice(0, MAX_ABOUT)
+    : capped(ev.tags, 'about', MAX_ABOUT)
+  return { name: nameOf(ev.tags, 'key'), about, itemPubkey, secretHex }
 }
 
 /** A chest item out of its event, or null when its lock tag or payload is malformed. */
@@ -396,14 +408,16 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
 
 /**
  * The inner key event template (kind 3340), signed by the hider (B1 §2.1).
- * The content is the item's private key; `item` is its public key, so a
+ * The private key rides in a `secret` tag and never in the content: a client
+ * that does not know this kind shows an item's content as text, and a secret
+ * must not be the thing it shows (arkinox, 2026-10-09). The content is the
+ * hider's sentence about the key, or empty. `item` is the public key, so a
  * reader can check one against the other; `-` is NIP-70, so a finder cannot
  * republish the hider's signed item to a compliant relay.
  */
 export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
-  const tags: string[][] = [['C', positionHex(at, plane)], ['name', key.name.slice(0, MAX_ITEM_NAME)], ['item', key.itemPubkey], ['-']]
-  if (key.about) tags.push(['about', key.about])
-  return { kind: KEY_KIND, created_at: createdAt, content: key.secretHex, tags }
+  const tags: string[][] = [['C', positionHex(at, plane)], ['title', key.name.slice(0, MAX_ITEM_NAME)], ['item', key.itemPubkey], ['secret', key.secretHex], ['-']]
+  return { kind: KEY_KIND, created_at: createdAt, content: key.about.slice(0, MAX_ABOUT), tags }
 }
 
 /**
@@ -417,7 +431,7 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['name', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires]],
   }
 }
 

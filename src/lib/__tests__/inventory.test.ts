@@ -81,7 +81,7 @@ describe('a key as text (COPY and PASTE)', () => {
   it('an unsigned key is a claim with its hash for an id, so it can never stand in for a real key', () => {
     const real = heldFromFind(me, keyFind(forge('Real')), 1)!
     const other = forge('Impostor')
-    const unsigned = { ...real.event, id: real.id, sig: '', content: other.secretHex, tags: [['name', 'Impostor'], ['item', other.itemPubkey]] }
+    const unsigned = { ...real.event, id: real.id, sig: '', content: '', tags: [['title', 'Impostor'], ['item', other.itemPubkey], ['secret', other.secretHex]] }
     const back = parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(unsigned))
     expect(back).not.toBeNull()
     expect(back!.verified).toBe(false)
@@ -96,9 +96,9 @@ describe('a key as text (COPY and PASTE)', () => {
     expect(parseKeyText(text.slice(KEY_TEXT_PREFIX.length))).toBeNull()
     expect(parseKeyText('cyberspace-key:not json')).toBeNull()
     expect(parseKeyText('cyberspace-key:[1,2]')).toBeNull()
-    const tampered = { ...held.event, tags: held.event.tags.map((t) => (t[0] === 'name' ? ['name', 'Renamed'] : t)) }
+    const tampered = { ...held.event, tags: held.event.tags.map((t) => (t[0] === 'title' ? ['title', 'Renamed'] : t)) }
     expect(parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(tampered))).toBeNull()
-    const wrongSecret = { ...held.event, sig: '', content: bytesToHex(generateSecretKey()) }
+    const wrongSecret = { ...held.event, sig: '', tags: held.event.tags.map((t) => (t[0] === 'secret' ? ['secret', bytesToHex(generateSecretKey())] : t)) }
     expect(parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(wrongSecret))).toBeNull()
     // Unsigned, consistent: read, the hider a claim.
     const unsigned = { ...held.event, sig: '' }

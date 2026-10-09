@@ -26,7 +26,8 @@ import { findCashuToken } from '../lib/cashu'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLoot } from '../hooks/useLoot'
-import { hiddenGlyph, messagePreview } from '../lib/hidden'
+import { bagReading, hiddenGlyph, messagePreview } from '../lib/hidden'
+import { useBagReadingsVersion } from '../hooks/useBagReadings'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { formatAgo, formatStamp } from '../lib/time'
@@ -40,6 +41,14 @@ import { useEscape } from '../hooks/useEscape'
 
 /** Rows a panel shows before VIEW MORE takes over. */
 const SHOWN = 4
+
+/** Why an opened bag shows no items: the reading's word, for a tooltip. */
+function unreadableTitle(bagId: string): string {
+  const r = bagReading(bagId)
+  if (!r) return 'Opened'
+  if (r.opaque) return 'Opened: this bag holds something other than a list of items'
+  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}`
+}
 
 type Mode = 'hidden' | 'discovered'
 
@@ -72,7 +81,15 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     for (const [bag, list] of by) out.set(bag, list.sort((a, b) => a.at - b.at).map((x) => x.glyph).join(''))
     return out
   }, [discovered])
-  const opened = useMemo(() => new Set(kinds.keys()), [kinds])
+  // A bag is opened when a key of ours decrypted it, whether or not anything in
+  // it could be read: an opened bag with nothing readable is not hidden.
+  const readingsVersion = useBagReadingsVersion()
+  const opened = useMemo(
+    () => new Set([...kinds.keys(), ...items.filter((it) => bagReading(it.bagId) !== undefined).map((it) => it.bagId)]),
+    // readingsVersion is what changes bagReading's answers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kinds, items, readingsVersion],
+  )
   const nearbyCount = useNearbyLoot().length
   // One state per panel: the opened bags here, the rest there.
   const shown = useMemo(
@@ -100,7 +117,9 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
         <div className="loot__top">
           <ProfileBadge pubkey={it.author} />
           {it.author === me && <span className="avatars__you">YOURS</span>}
-          {opened.has(it.bagId) && <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.length ?? 0} items`}>{kinds.get(it.bagId)}</span>}
+          {kinds.has(it.bagId)
+            ? <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.length ?? 0} items`}>{kinds.get(it.bagId)}</span>
+            : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>
         <div className="loot__meta">{regionLabel(it.height)} · {formatBytes(it.bytes)}</div>

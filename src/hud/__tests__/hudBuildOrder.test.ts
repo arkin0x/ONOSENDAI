@@ -103,6 +103,32 @@ describe('the Position panel in BUILD mode', () => {
   })
 })
 
+describe('the View panel in the menu (arkinox, 2026-10-09)', () => {
+  /** The panel right after View in the right column. */
+  const afterView = (): string | undefined => {
+    const { right } = columns()
+    return right[right.indexOf('ViewPanel') + 1]
+  }
+
+  it('is in the right column, once, immediately before the Legend', () => {
+    const { left, right } = columns()
+    expect(left).not.toContain('ViewPanel')
+    expect(right.filter((n) => n === 'ViewPanel')).toHaveLength(1)
+    expect(afterView()).toBe('Legend')
+  })
+
+  it('stays immediately before the Legend while BUILD mode or a move under way reorders the menu', () => {
+    useBuilder.getState().enter('build')
+    expect(afterView()).toBe('Legend')
+    useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
+    try {
+      expect(afterView()).toBe('Legend')
+    } finally {
+      useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
+    }
+  })
+})
+
 /** Find the first element in a tree whose props pass the test. */
 function findIn(node: ReactNode, test: (props: Record<string, unknown>) => boolean): ReactElement<Record<string, unknown>> | null {
   if (Array.isArray(node)) {

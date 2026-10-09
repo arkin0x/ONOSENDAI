@@ -112,7 +112,7 @@ export function Legend(): JSX.Element {
       </header>
 
       <div className="legend__row">
-        <span className="legend__label">Terrain K</span>
+        <span className="legend__label">Terrain dots - terrain difficulty (K)</span>
         <div className="swatches">
           {TERRAIN_SAMPLES.map((k) => (
             <span
@@ -159,12 +159,14 @@ export function Legend(): JSX.Element {
       <Explanation>
         Cyberspace is not flat. A terrain function required for movement proofs
         imposes hills and valleys on the geography of cyberspace, represented by
-        the colorful point cloud surrounding your avatar. The terrain K value is
-        the difficulty to move to each point. The cubic grids represent the
-        power-of-2 regions you are currently within. Leaving a region is when the
-        cost of movement jumps the most; depending on the alignment of the region,
-        the cost may be impossibly high, requiring either cloud compute or a trip
-        through hyperspace.
+        the terrain dots, the colorful point cloud surrounding your avatar. Each
+        dot shows terrain difficulty: its terrain K value is the difficulty to
+        move to that point, and the warmer its color, the more work a hop there
+        takes. The cubic grids represent the power-of-2 regions you are
+        currently within. Leaving a region is when the cost of movement jumps
+        the most; depending on the alignment of the region, the cost may be
+        impossibly high, requiring either cloud compute or a trip through
+        hyperspace.
       </Explanation>
     </section>
   )

@@ -1,6 +1,7 @@
 /**
- * layers.test.ts - the DOTS and hX BOXES switches at the bottom of the
- * Movement Proof panel.
+ * layers.test.ts - the store behind the Terrain dots and hX boxes switches in
+ * the View panel (the switches themselves are in
+ * hud/__tests__/viewPanel.test.ts).
  *
  * Both layers start on, which is the scene as it has always looked. Turning
  * one off flips only that layer, is remembered on this device, and survives a

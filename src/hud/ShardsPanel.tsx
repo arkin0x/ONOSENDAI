@@ -17,7 +17,7 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Archive, Diamond, KeyRound, PencilLine, Rss, Wrench } from 'lucide-react'
+import { Diamond, KeyRound, PencilLine, Rss, Vault, Wrench } from 'lucide-react'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -92,7 +92,7 @@ export function ShardsPanel(): JSX.Element {
         <span className="legend__label">Place a key or a chest</span>
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it"><KeyRound className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> FORGE A KEY</button>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><Archive className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><Vault className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A CHEST</button>
         </div>
       </div>
 

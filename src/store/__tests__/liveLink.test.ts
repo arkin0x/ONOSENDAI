@@ -59,6 +59,7 @@ import { useBuilder } from '../useBuilder'
 import { HIDDEN_KIND, OBJECT_KIND, linkKey, unbag } from '../../lib/hidden'
 import { commentTemplate, itemParent, itemTargetOf, threadComments, bagAddress, type CommentSubject } from '../../lib/comments'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
+import { alignTo } from '../../lib/space'
 
 const AUTHOR = generateSecretKey()
 /** The author's object, at a version: same address, a new event each edit. */
@@ -242,10 +243,19 @@ describe('verification review of #233', () => {
   it('two LIVE LINKs in one bag have their own comment threads, told apart only inside the seal', async () => {
     const { openComments, sealedComment } = await import('../../lib/comments')
     const a = version('Statue', 1_700_000_000)
+    const height = 4
     useBuilder.getState().enter('build')
-    await placeLinked(a)
+    // A bag is the 2^height region around the point, and the build cursor
+    // starts on the avatar, at the spawn of this run's random identity. When
+    // that x was the last one of its region (1 run in 16), the step below
+    // crossed into the next region, and the second placement went into a bag
+    // of its own. Starting at the region's first x keeps both in one bag,
+    // whatever the key.
+    const start = S().cursor
+    S().aimView({ ...start, x: alignTo(start.x, height) }, S().anchorPlane)
+    await placeLinked(a, height)
     S().moveCursor({ axis: 'x', dir: 1 })
-    await placeLinked(a)
+    await placeLinked(a, height)
     const [d1, d2] = useShards.getState().mine
     expect(d1.lookupId).toBe(d2.lookupId)
     const me = S().identity.pubkey

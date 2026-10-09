@@ -34,6 +34,7 @@ import {
   signerFromPref,
   nip07Signer,
   nip46Signer,
+  NIP44_UNAVAILABLE,
   prefOf,
   loadSignerPref,
   saveSignerPref,
@@ -870,6 +871,12 @@ export interface CyberspaceState {
    * markup, so no caller can offer an unprotected export by forgetting a check.
    */
   exportKey: (password: string, again: string) => string
+  /**
+   * Open a NIP-44 payload sealed to this identity by `senderPubkey`: a chest
+   * sealed to a person (lib/chests.ts). Rejects, in words, when the signer
+   * offers no NIP-44 decrypt, which in this slice is every extension and bunker.
+   */
+  decryptSealed: (senderPubkey: string, payload: string) => Promise<string>
 
   /** HOSAKA cloud compute: the flow in progress and its pending job. */
   cloud: CloudState
@@ -3774,6 +3781,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
   useNewKey: async () => { await switchTo(randomSigner()) },
   exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
+  decryptSealed: (senderPubkey, payload) => {
+    const open = currentSigner.nip44Decrypt
+    return open ? open(senderPubkey, payload) : Promise.reject(new Error(NIP44_UNAVAILABLE))
+  },
   useNsec: async (nsec) => {
     try { await switchTo(signerFromNsec(nsec)) }
     catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }

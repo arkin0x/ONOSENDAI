@@ -13,6 +13,7 @@
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
@@ -28,6 +29,14 @@ export interface Signer {
   kind: SignerKind
   pubkey: string
   signEvent: (template: EventTemplate) => Promise<NostrEvent>
+  /**
+   * NIP-44 v2 decrypt of a payload sealed to this identity by `senderPubkey`,
+   * as NIP-07 and NIP-46 both phrase it: what opens a chest sealed to a
+   * person (lib/chests.ts). Present for a local key. An extension or a bunker
+   * is not asked for it yet, so in this slice such a chest opens for local
+   * identities only (Keys and Chests B1); the message below says so.
+   */
+  nip44Decrypt?: (senderPubkey: string, payload: string) => Promise<string>
   /** Present only for local signers, so the key can be persisted. */
   secretKey?: Uint8Array
   /** For a bunker: what to persist to reconnect it. */
@@ -52,6 +61,9 @@ export function hasNip07(): boolean {
   return typeof window !== 'undefined' && !!windowNostr()
 }
 
+/** Why a chest sealed to this identity will not open: the signer has no NIP-44 door here yet. */
+export const NIP44_UNAVAILABLE = 'Opening a chest sealed to you needs a key held on this device. An extension or a bunker cannot open one yet.'
+
 /** A local key: the default random one, or one you brought. */
 export function localSigner(secretKey: Uint8Array): Signer {
   const pubkey = getPublicKey(secretKey)
@@ -60,6 +72,7 @@ export function localSigner(secretKey: Uint8Array): Signer {
     pubkey,
     secretKey,
     signEvent: (template) => Promise.resolve(finalizeEvent(attributed(template), secretKey) as unknown as NostrEvent),
+    nip44Decrypt: async (senderPubkey, payload) => nip44.decrypt(payload, nip44.utils.getConversationKey(secretKey, senderPubkey)),
   }
 }
 

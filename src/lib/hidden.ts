@@ -9,10 +9,17 @@
  * thing is, or what it is, leaks: the coordinate lives inside the ciphertext.
  *
  * A bag is a list of entries (spec §7.6). An entry that is an event is an
- * item carried inline; two inner kinds so far:
+ * item carried inline; four inner kinds so far:
  *   - a shard, kind 3330 (v1's shard kind), geometry in the content;
- *   - a message, kind 1, text in the content.
- * Both carry their coordinate in a `C` tag, decoded on discovery.
+ *   - a message, kind 1, text in the content;
+ *   - a key, kind 3340: an item that is a keypair. The content is the item's
+ *     private key, so reading it is holding it (Keys and Chests B1, §2.1);
+ *   - a chest, kind 3341: a list of entries sealed with NIP-44 v2 to a public
+ *     key, an item's or a person's (B1 §2.2). The sealing and opening live in
+ *     lib/chests.ts; here the chest is read as an item like any other.
+ * All four carry their coordinate in a `C` tag, decoded on discovery. Keys and
+ * chests only ever live inside bags: a key carries the NIP-70 `-` tag so no
+ * finder can republish it under the hider's name.
  *
  * An entry that is an array is a reference: `["a", "<kind>:<pubkey>:<d>",
  * relay, coord]` or `["e", id, relay, coord]`, naming an event published on
@@ -29,9 +36,9 @@
  * and finished events only.
  */
 
-import { verifyEvent } from 'nostr-tools/pure'
+import { getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
-import { bytesToHex, positionHex, type EventTemplate, type NostrEvent } from './events'
+import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
@@ -54,6 +61,17 @@ export const MAX_CHAT_LENGTH = 500
 export const SHARD_KIND = 3330
 /** A plain note, inside the envelope. */
 export const MESSAGE_KIND = 1
+/**
+ * A key, inside the envelope (Keys and Chests B1 §2.1): an item that is a
+ * keypair, its private key in the content. A regular kind unused anywhere
+ * else in this client; these items are never published on their own, so a
+ * collision on a relay could not matter.
+ */
+export const KEY_KIND = 3340
+/** A chest, inside the envelope (B1 §2.2): a list of entries sealed to a public key. */
+export const CHEST_KIND = 3341
+/** Longest name a key or a chest carries: a label for a row, not a letter. */
+export const MAX_ITEM_NAME = 64
 /** A standalone SNO object (DECK-0003 §3.1); a shard hidden by reference is one of these (§3.4). */
 export const OBJECT_KIND = 33331
 /** FF-1's key derivation for a key computed from a place rather than served (spec §7.6). */
@@ -151,7 +169,105 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
  */
 export const MAX_MESSAGE_LENGTH = 10_000
 
-export type HiddenType = 'shard' | 'message'
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest'
+
+/** What a key item carries, read out of its event (B1 §2.1). */
+export interface KeyItem {
+  name: string
+  /** The hider's sentence about it, or empty. */
+  about: string
+  /** The item's public key: the lock a chest names when it is sealed to this key. */
+  itemPubkey: string
+  /** The item's private key, 64 lowercase hex. Holding it is holding the item. */
+  secretHex: string
+}
+
+/** What a chest item carries, read out of its event (B1 §2.2); the payload is still sealed. */
+export interface ChestItem {
+  name: string
+  /** The public key the chest is sealed to: an item's, or a person's. */
+  lockPubkey: string
+  /** The one-time sender key's public half, which the opener needs for the conversation key. */
+  senderPubkey: string
+  /** The hider's label of what opens it, for a reader who does not hold it. */
+  requires: string
+  /** The NIP-44 v2 payload, base64, as the chest carries it. */
+  payload: string
+}
+
+const HEX_64 = /^[0-9a-f]{64}$/
+
+function tagValue(tags: string[][], name: string): string | undefined {
+  return tags.find((t) => t[0] === name)?.[1]
+}
+
+/** A key's or a chest's name tag, trimmed and capped; `fallback` when it carries none. */
+function nameOf(tags: string[][], fallback: string): string {
+  const name = (tagValue(tags, 'name') ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_ITEM_NAME)
+  return name || fallback
+}
+
+/**
+ * A key item out of its event, or null when it is not one this client can
+ * hold: the content must be a valid 32-byte secret, and an `item` tag, when
+ * carried, must be the public key that secret derives, or the item is corrupt
+ * and nothing sealed to it could ever be opened with it.
+ */
+export function keyItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): KeyItem | null {
+  if (ev.kind !== KEY_KIND) return null
+  const secretHex = ev.content.trim()
+  if (!HEX_64.test(secretHex)) return null
+  let itemPubkey: string
+  try { itemPubkey = getPublicKey(hexToBytes(secretHex)) } catch { return null }
+  const claimed = tagValue(ev.tags, 'item')
+  if (claimed !== undefined && claimed !== itemPubkey) return null
+  return { name: nameOf(ev.tags, 'key'), about: (tagValue(ev.tags, 'about') ?? '').trim(), itemPubkey, secretHex }
+}
+
+/** A chest item out of its event, or null when its lock tag or payload is malformed. */
+export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): ChestItem | null {
+  if (ev.kind !== CHEST_KIND) return null
+  const lock = ev.tags.find((t) => t[0] === 'lock')
+  if (!lock || !HEX_64.test(lock[1] ?? '') || !HEX_64.test(lock[2] ?? '')) return null
+  if (!ev.content) return null
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: (tagValue(ev.tags, 'requires') ?? '').trim(), payload: ev.content }
+}
+
+/** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
+export interface ItemBody {
+  type: HiddenType
+  shard?: ShardModel
+  text?: string
+  key?: KeyItem
+  chest?: ChestItem
+}
+
+/**
+ * Read an inline item by its kind, or null for a kind this client does not
+ * know or an item that does not parse (spec §7.6: a reader skips what it
+ * cannot read, and only that). The same reading serves a bag's items and a
+ * chest's contents, so a key is a key wherever it is found.
+ */
+export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'>): ItemBody | null {
+  if (inner.kind === SHARD_KIND) {
+    let raw: unknown
+    try { raw = JSON.parse(inner.content) } catch { return null }
+    const shard = fromPayload(raw, inner.id)
+    return shard ? { type: 'shard', shard } : null
+  }
+  if (inner.kind === MESSAGE_KIND) {
+    return inner.content ? { type: 'message', text: inner.content.slice(0, MAX_MESSAGE_LENGTH) } : null
+  }
+  if (inner.kind === KEY_KIND) {
+    const key = keyItemOf(inner)
+    return key ? { type: 'key', key } : null
+  }
+  if (inner.kind === CHEST_KIND) {
+    const chest = chestItemOf(inner)
+    return chest ? { type: 'chest', chest } : null
+  }
+  return null
+}
 
 /** A short one-line look at a message, for a title or a row. */
 export function messagePreview(text: string, max = 32): string {
@@ -199,6 +315,8 @@ export interface Hidden {
   type: HiddenType
   shard?: ShardModel
   text?: string
+  key?: KeyItem
+  chest?: ChestItem
   /**
    * Set when the item was hidden by reference: the entry itself, which is what
    * a rewrite of the bag must carry forward. `inner` is then the referenced
@@ -243,6 +361,33 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
     created_at: createdAt,
     content: text.slice(0, MAX_MESSAGE_LENGTH),
     tags: [['C', positionHex(at, plane)]],
+  }
+}
+
+/**
+ * The inner key event template (kind 3340), signed by the hider (B1 §2.1).
+ * The content is the item's private key; `item` is its public key, so a
+ * reader can check one against the other; `-` is NIP-70, so a finder cannot
+ * republish the hider's signed item to a compliant relay.
+ */
+export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  const tags: string[][] = [['C', positionHex(at, plane)], ['name', key.name.slice(0, MAX_ITEM_NAME)], ['item', key.itemPubkey], ['-']]
+  if (key.about) tags.push(['about', key.about])
+  return { kind: KEY_KIND, created_at: createdAt, content: key.secretHex, tags }
+}
+
+/**
+ * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
+ * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
+ * the public key it is sealed to and the one-time sender's public key, and
+ * `requires` is the hider's label of what opens it.
+ */
+export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  return {
+    kind: CHEST_KIND,
+    created_at: createdAt,
+    content: chest.payload,
+    tags: [['C', positionHex(at, plane)], ['name', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires]],
   }
 }
 
@@ -417,18 +562,8 @@ function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string, facts: 
     createdAt: inner.created_at,
   }
 
-  if (inner.kind === SHARD_KIND) {
-    let raw: unknown
-    try { raw = JSON.parse(inner.content) } catch { return null }
-    const shard = fromPayload(raw, inner.id)
-    if (!shard) return null
-    return { ...base, type: 'shard', shard }
-  }
-  if (inner.kind === MESSAGE_KIND) {
-    if (!inner.content) return null
-    return { ...base, type: 'message', text: inner.content.slice(0, MAX_MESSAGE_LENGTH) }
-  }
-  return null
+  const body = readItem(inner)
+  return body ? { ...base, ...body } : null
 }
 
 /**

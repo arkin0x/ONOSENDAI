@@ -27,7 +27,8 @@
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
-import { isReference, readItem, type BagEntry, type ChestItem, type ItemBody, type KeyItem } from './hidden'
+import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -215,4 +216,46 @@ export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey
  */
 export function requiresLabel(chest: Pick<ChestItem, 'requires'>): string {
   return chest.requires || 'an item you have not found'
+}
+
+const HEX64_RE = /^[0-9a-f]{64}$/
+
+/**
+ * A chest's contents as finds in the world: the gate of Keys and Chests B1.
+ * Each entry stands at its own `C` when it carries one inside the chest's
+ * region, else where the chest stands; the chest's bag, lookup id, height and
+ * hider carry over, so the scene draws a revealed room exactly as it draws a
+ * found shard, and the record lists it under the same bag. A door is a chest
+ * whose contents are the room behind it.
+ */
+export function revealedIn(chest: Pick<Hidden, 'bagId' | 'lookupId' | 'author' | 'at' | 'plane' | 'height' | 'bag' | 'keyHex'>, entries: ChestEntry[]): Hidden[] {
+  const shift = BigInt(chest.height)
+  const inRegion = (p: { x: bigint; y: bigint; z: bigint }): boolean =>
+    (p.x >> shift) === (chest.at.x >> shift) && (p.y >> shift) === (chest.at.y >> shift) && (p.z >> shift) === (chest.at.z >> shift)
+  const out: Hidden[] = []
+  for (const e of entries) {
+    let at = chest.at
+    const c = e.event.tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
+    if (typeof c === 'string' && HEX64_RE.test(c)) {
+      try {
+        const p = coordToXyz(hexToCoord(c))
+        if (p.plane === chest.plane && inRegion(p)) at = { x: p.x, y: p.y, z: p.z }
+      } catch { /* a point that does not parse: the chest's place stands */ }
+    }
+    out.push({
+      eventId: e.id,
+      inner: e.event,
+      keyHex: chest.keyHex,
+      bagId: chest.bagId,
+      lookupId: chest.lookupId,
+      author: chest.author,
+      at,
+      plane: chest.plane,
+      height: chest.height,
+      bag: chest.bag,
+      createdAt: e.event.created_at,
+      ...e.body,
+    })
+  }
+  return out
 }

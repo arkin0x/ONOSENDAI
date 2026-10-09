@@ -15,8 +15,7 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, sealEntries, sizeRefusal,
-} from '../chests'
+  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, sealEntries, sizeRefusal, revealedIn } from '../chests'
 import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, unbag, type ChestItem, type KeyItem,
 } from '../hidden'
@@ -260,5 +259,23 @@ describe('a key item from before the secret moved into its tag (2026-10-09)', ()
     expect(read?.secretHex).toBe(key.secretHex)
     expect(read?.about).toBe('opens the gate')
     expect(read?.name).toBe('New Key')
+  })
+})
+
+describe('a door: what a chest reveals stands in the world (B1, the gate)', () => {
+  it('places each content at its own point inside the region, else where the chest stands, under the chest\'s bag', () => {
+    const lock = forge('Room Key')
+    const inside = { ...at, x: at.x + 3n }
+    const room = finalizeEvent(messageInnerTemplate('the room behind the door', inside, 0, 8), hider)
+    const far = finalizeEvent(messageInnerTemplate('too far to be in this region', { ...at, x: at.x + 1_000_000n }, 0, 9), hider)
+    const c = chest('Door', lock.itemPubkey, [room, far], 'Room Key')
+    const contents = readContents(openWithSecret(c.item, lock.secretHex))
+    const door = { bagId: 'bag', lookupId: 'look', author: hiderPk, at, plane: 0 as const, height: 6 }
+    const found = revealedIn(door, contents)
+    expect(found.map((f) => f.text)).toEqual(['the room behind the door', 'too far to be in this region'])
+    expect(found[0].at).toEqual(inside)
+    expect(found[1].at).toEqual(at)
+    expect(found.every((f) => f.bagId === 'bag' && f.lookupId === 'look' && f.height === 6 && f.author === hiderPk)).toBe(true)
+    expect(found[0].eventId).toBe(room.id)
   })
 })

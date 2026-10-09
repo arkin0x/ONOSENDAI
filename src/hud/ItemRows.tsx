@@ -18,7 +18,8 @@
 import { useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, type ChestEntry } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
+import { positionOf, useShards } from '../store/useShards'
 import { hiddenGlyph, hiddenLabel, type ChestItem } from '../lib/hidden'
 import { openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
@@ -85,6 +86,12 @@ export function ChestBlock({ id, chest, author, verified, place }: { id: string;
       setEntries(contents)
       // A key read is held, wherever it was read (B1 §2.1).
       useInventory.getState().take(contents.filter((e) => e.body.type === 'key'), from, place)
+      // What the chest held is found in place: the room behind the door is
+      // drawn where the door stands, as a scan's finds are.
+      if (place) {
+        const door = { bagId: place.bagId, lookupId: place.lookupId, author, at: positionOf(place), plane: place.plane, height: place.height }
+        useShards.getState().addDiscovered(revealedIn(door, contents))
+      }
       if (contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))

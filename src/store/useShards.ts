@@ -69,8 +69,8 @@ import {
   type HiddenType,
   type KeyItem,
 } from '../lib/hidden'
-import { sealEntries } from '../lib/chests'
-import type { HeldPlace } from '../lib/inventory'
+import { openWithSecret, openerFor, readContents, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
+import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
@@ -1271,12 +1271,39 @@ export const useShards = create<ShardsState>((set, get) => {
         const newer = !!held && !!h.inner && !!held.inner && h.inner.id !== held.inner.id && h.inner.created_at > held.inner.created_at
         if (!held || newer) { discovered[h.eventId] = h; changed = true }
       }
+      // A chest that a held key opens is opened here, and what it holds is
+      // found too, in place: the gate of B1. A room sealed behind a door
+      // appears where the door stands the moment its key is in LOOT, on
+      // every scan, and a key inside opens the next chest in the same pass.
+      // A chest sealed to this identity waits for OPEN in the record, since a
+      // signer may have to be asked.
+      const keys: OpeningKey[] = openingKeys(useInventory.getState().items)
+      const queue = items.filter((h) => h.type === 'chest' && h.chest)
+      const revealed: Hidden[] = []
+      while (queue.length > 0) {
+        const door = queue.shift()!
+        const opener = openerFor(door.chest!, keys, '')
+        if (!opener || opener.by !== 'key') continue
+        let inside: Hidden[]
+        try { inside = revealedIn(door, readContents(openWithSecret(door.chest!, opener.key.secretHex))) } catch { continue }
+        for (const r of inside) {
+          if (deleted[r.eventId] || discovered[r.eventId]) continue
+          discovered[r.eventId] = r
+          revealed.push(r)
+          changed = true
+          if (r.type === 'chest' && r.chest) queue.push(r)
+          if (r.type === 'key' && r.key) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
+        }
+      }
       if (changed) set({ discovered })
-      remember(items.map((h) => h.eventId))
-      claimOwn(items)
+      const all = [...items, ...revealed]
+      remember(all.map((h) => h.eventId))
+      claimOwn(all)
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
       // into the inventory, once, whoever hid it.
-      useInventory.getState().holdFinds(items)
+      useInventory.getState().holdFinds(all)
+      // What a door revealed gets the find ceremony, as a scan's finds do.
+      if (revealed.length > 0) useCeremony.getState().mark(revealed)
     },
 
     freshOf: (items) => {

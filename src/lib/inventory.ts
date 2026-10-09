@@ -17,11 +17,11 @@
  */
 
 import type { Plane } from 'cyberspace-core'
-import { verifyEvent } from 'nostr-tools/pure'
+import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
-import { KEY_KIND, keyItemOf, messagePreview, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
+import { KEY_KIND, hiddenLabel, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
 
 /** What a key looks like as text, for COPY and PASTE across devices. */
 export const KEY_TEXT_PREFIX = 'cyberspace-key:'
@@ -56,8 +56,10 @@ export interface HeldItem {
   name: string
   /** The item's event as it was read: a key's signed event (or unsigned when pasted so), a taken content's event. */
   event: NostrEvent
-  /** Who made it: the event's pubkey (the hider, for a key they forged). A claim when the event is unsigned. */
+  /** Who made it: the event's pubkey (the hider, for a key they forged). A claim unless `verified`. */
   author: string
+  /** The event carried a signature that checked out (spec §7.6: an unsigned item's author is a claim, never a fact). */
+  verified: boolean
   source: HeldSource
   /** Where it was found, or null for a key pasted from another device. */
   place: HeldPlace | null
@@ -79,23 +81,16 @@ export function placeOf(h: Pick<Hidden, 'lookupId' | 'bagId' | 'at' | 'plane' | 
   return { lookupId: h.lookupId, bagId: h.bagId, at: { x: h.at.x.toString(), y: h.at.y.toString(), z: h.at.z.toString() }, plane: h.plane, height: h.height }
 }
 
-/** A row's name, by what it is. */
-export function nameOfBody(body: ItemBody): string {
-  if (body.type === 'key') return body.key?.name ?? 'key'
-  if (body.type === 'chest') return body.chest?.name ?? 'chest'
-  if (body.type === 'shard') return body.shard?.name ?? 'shard'
-  return messagePreview(body.text ?? '', 48)
-}
-
-function row(owner: string, event: NostrEvent, body: ItemBody, source: HeldSource, place: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
+function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean, source: HeldSource, place: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
   return {
     rowKey: rowKeyOf(owner, event.id),
     owner,
     id: event.id,
     type: body.type,
-    name: nameOfBody(body),
+    name: hiddenLabel(body, 48),
     event,
     author: event.pubkey,
+    verified,
     source,
     place,
     from,
@@ -114,22 +109,23 @@ function row(owner: string, event: NostrEvent, body: ItemBody, source: HeldSourc
  */
 export function heldFromFind(owner: string, h: Hidden, at: number): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
-  return row(owner, h.inner, { type: 'key', key: h.key }, 'found', placeOf(h), null, at)
+  // A bag's items are verified against the bag's author before they are found at all (hidden.ts fromInner).
+  return row(owner, h.inner, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
 }
 
 /** A key the identity forged and hid, held at once so chests can be sealed to it (B1 §3.1). */
 export function heldFromForged(owner: string, event: NostrEvent, key: KeyItem, place: HeldPlace, at: number): HeldItem {
-  return row(owner, event, { type: 'key', key }, 'forged', place, null, at)
+  return row(owner, event, { type: 'key', key }, true, 'forged', place, null, at)
 }
 
 /** A content taken out of an opened chest. */
 export function heldFromEntry(owner: string, entry: ChestEntry, from: HeldFrom, place: HeldPlace | null, at: number): HeldItem {
-  return row(owner, entry.event, entry.body, 'taken', place, from, at)
+  return row(owner, entry.event, entry.body, entry.verified, 'taken', place, from, at)
 }
 
-/** A key pasted as text from another device. */
-export function heldFromPasted(owner: string, event: NostrEvent, key: KeyItem, at: number): HeldItem {
-  return row(owner, event, { type: 'key', key }, 'pasted', null, null, at)
+/** A key pasted as text from another device; `verified` is parseKeyText's word on its signature. */
+export function heldFromPasted(owner: string, event: NostrEvent, key: KeyItem, verified: boolean, at: number): HeldItem {
+  return row(owner, event, { type: 'key', key }, verified, 'pasted', null, null, at)
 }
 
 /**
@@ -154,26 +150,42 @@ export function keyText(item: Pick<HeldItem, 'event'>): string {
   return KEY_TEXT_PREFIX + JSON.stringify(item.event)
 }
 
+const HEX_64 = /^[0-9a-f]{64}$/
+
 /**
  * A key read back from its text, or null when the text is not one: not the
  * prefix, not JSON, not a key item, a secret that does not match its `item`
  * tag, or a signature that does not verify. An unsigned key (no `sig`) is
- * read, with its hider a claim, as §7.6 allows of any unsigned item.
+ * read, with its hider a claim, as §7.6 allows of any unsigned item; its id
+ * is its hash, whatever the text claimed, so it can never stand in the
+ * inventory for a real key's row. `verified` is whether a signature was
+ * there and checked out.
  */
-export function parseKeyText(text: string): { event: NostrEvent; key: KeyItem } | null {
+export function parseKeyText(text: string): { event: NostrEvent; key: KeyItem; verified: boolean } | null {
   const t = text.trim()
   if (!t.startsWith(KEY_TEXT_PREFIX)) return null
   let parsed: unknown
   try { parsed = JSON.parse(t.slice(KEY_TEXT_PREFIX.length)) } catch { return null }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const ev = parsed as Partial<NostrEvent>
-  if (ev.kind !== KEY_KIND || typeof ev.content !== 'string' || !Array.isArray(ev.tags) || typeof ev.pubkey !== 'string' || typeof ev.id !== 'string') return null
-  if (!/^[0-9a-f]{64}$/.test(ev.id) || !/^[0-9a-f]{64}$/.test(ev.pubkey)) return null
+  if (ev.kind !== KEY_KIND || typeof ev.content !== 'string' || !Array.isArray(ev.tags) || typeof ev.pubkey !== 'string' || !HEX_64.test(ev.pubkey)) return null
   if (!ev.tags.every((tag) => Array.isArray(tag) && tag.every((v) => typeof v === 'string'))) return null
-  const event: NostrEvent = { id: ev.id, pubkey: ev.pubkey, created_at: typeof ev.created_at === 'number' ? ev.created_at : 0, kind: ev.kind, tags: ev.tags, content: ev.content, sig: typeof ev.sig === 'string' ? ev.sig : '' }
-  if (event.sig && !verifyEvent(event)) return null
+  const plain = { pubkey: ev.pubkey, created_at: typeof ev.created_at === 'number' ? ev.created_at : 0, kind: ev.kind, tags: ev.tags, content: ev.content }
+  const signed = typeof ev.sig === 'string' && ev.sig.length > 0
+  let event: NostrEvent
+  try {
+    if (signed) {
+      if (typeof ev.id !== 'string' || !HEX_64.test(ev.id)) return null
+      event = { ...plain, id: ev.id, sig: ev.sig as string }
+      if (!verifyEvent(event)) return null
+    } else {
+      event = { ...plain, id: getEventHash(plain), sig: '' }
+    }
+  } catch {
+    return null
+  }
   const key = keyItemOf(event)
-  return key ? { event, key } : null
+  return key ? { event, key, verified: signed } : null
 }
 
 /** The held keys as the opener needs them (lib/chests.ts openerFor). */

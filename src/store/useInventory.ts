@@ -46,8 +46,10 @@ interface InventoryState {
   storage: InventoryStorage
   /** Read this identity's items (the current one when no owner is given), and start following identity changes. */
   load: (owner?: string) => Promise<void>
-  /** Hold these; returns what was new. Rows for another identity than the current owner are written but not shown. */
+  /** Hold these; returns what was new. */
   add: (items: HeldItem[]) => HeldItem[]
+  /** Resolves once every write so far has reached the database, or failed and been said. */
+  flush: () => Promise<void>
   /** Hold every key among a scan's finds (B1 §2.1: reading a key is holding it). */
   holdFinds: (finds: Hidden[]) => HeldItem[]
   /** Hold a key this identity forged and hid, at once (B1 §3.1). */
@@ -71,12 +73,19 @@ function database(): Promise<IDBDatabase | null> {
   return db
 }
 
+/** The writes so far, one after another, so flush() can wait for every one of them. */
+let writes: Promise<void> = Promise.resolve()
+
 /** Write rows, off the frame; a failed write is said once and the rows stay in memory. */
-function persist(rows: HeldItem[]): void {
-  if (rows.length === 0) return
-  void database().then((d) => (d ? writeHeld(d, rows) : undefined)).catch((err: unknown) => {
-    console.warn(`[inventory] could not write ${rows.length} item${rows.length === 1 ? '' : 's'}: ${describeError(err)}`)
-  })
+function persist(rows: HeldItem[]): Promise<void> {
+  if (rows.length === 0) return writes
+  writes = writes
+    .then(() => database())
+    .then((d) => (d ? writeHeld(d, rows) : undefined))
+    .catch((err: unknown) => {
+      console.warn(`[inventory] could not write ${rows.length} item${rows.length === 1 ? '' : 's'}: ${describeError(err)}`)
+    })
+  return writes
 }
 
 let watching = false
@@ -125,20 +134,19 @@ export const useInventory = create<InventoryState>((set, get) => {
     for (const r of rows) onDisk[r.id] = r
     const { items, added } = addHeld(onDisk, Object.values(get().items))
     set({ items, storage: 'indexeddb' })
-    persist(added)
+    void persist(added)
   },
 
   add: (list) => {
-    const owner = ownerNow()
-    const shown = list.filter((it) => it.owner === owner)
-    const { items, added } = addHeld(get().items, shown)
+    // Every row is built for the owner as it stands (ownerNow), so all of them are this identity's.
+    ownerNow()
+    const { items, added } = addHeld(get().items, list)
     if (added.length > 0) set({ items })
-    // Rows for another identity (a find landing as the identity switched) are
-    // kept for that identity, not shown here.
-    const others = list.filter((it) => it.owner !== owner)
-    persist([...added, ...others])
+    void persist(added)
     return added
   },
+
+  flush: () => writes,
 
   holdFinds: (finds) => {
     const owner = ownerNow()
@@ -169,7 +177,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     const owner = ownerNow()
     const held = get().items[parsed.event.id]
     if (held) return { ok: true, item: held, already: true }
-    const item = heldFromPasted(owner, parsed.event, parsed.key, now())
+    const item = heldFromPasted(owner, parsed.event, parsed.key, parsed.verified, now())
     get().add([item])
     return { ok: true, item, already: false }
   },

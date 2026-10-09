@@ -1,5 +1,5 @@
 /**
- * LootDetail.tsx — one bag, opened from the DISCOVERED list.
+ * LootDetail.tsx: one bag, opened from the DISCOVERED list.
  *
  * Everything a seeker can know about a bag without opening it: who hid it and
  * when, the size of the region it is encrypted to, how much is inside, the
@@ -13,15 +13,15 @@
  */
 
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { nip19 } from 'nostr-tools'
 import type { Plane } from 'cyberspace-core'
 import { useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
-import { hiddenGlyph, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
+import { hiddenGlyph, hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
 import { placeOf, type HeldPlace } from '../lib/inventory'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
+import { safeNpub } from '../lib/npub'
 import type { Position } from '../lib/space'
 import { spectate } from '../lib/spectator'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -55,10 +55,6 @@ function cashuOrPreview(text: string | undefined): string {
   return token ? `₿ ${cashuLabel(token)} hidden here` : raw ? '₿ cashu token hidden here' : messagePreview(text ?? '', 48)
 }
 
-function safeNpub(pubkey: string): string {
-  try { return nip19.npubEncode(pubkey) } catch { return pubkey }
-}
-
 function Copyable({ label, value }: { label: string; value: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
@@ -77,10 +73,7 @@ function Copyable({ label, value }: { label: string; value: string }): JSX.Eleme
 
 /** A row's label by what it is: a message's words or coin, else its name. */
 function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?: KeyItem; chest?: ChestItem }): string {
-  if (x.type === 'message') return cashuOrPreview(x.text)
-  if (x.type === 'key') return x.key?.name ?? 'key'
-  if (x.type === 'chest') return x.chest?.name ?? 'chest'
-  return x.shard?.name ?? 'shard'
+  return x.type === 'message' ? cashuOrPreview(x.text) : hiddenLabel(x)
 }
 
 /** The bag's items this client can see: found by its scan, or its own. */
@@ -202,7 +195,7 @@ export function LootDetail(): JSX.Element | null {
                 {o.type === 'key' && o.key
                   ? <KeyLine name={o.key.name} author={item.author} />
                   : o.type === 'chest' && o.chest
-                    ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} place={o.place} />
+                    ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} verified place={o.place} />
                     : <span className="lootd__item-label" title={o.label}>{o.label}</span>}
                 <span className="lootd__acts">
                   <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>

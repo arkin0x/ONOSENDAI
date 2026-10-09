@@ -16,18 +16,19 @@
  */
 
 import { useMemo, useState } from 'react'
-import { nip19 } from 'nostr-tools'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, type ChestEntry } from '../lib/chests'
 import { hiddenGlyph, hiddenLabel, type ChestItem } from '../lib/hidden'
 import { openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
+import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { profileLabel } from '../store/useProfiles'
 
-function safeNpub(pubkey: string): string {
-  try { return nip19.npubEncode(pubkey) } catch { return pubkey }
+/** The mark on an item that carries no signature: its author is a claim, never a fact (spec §7.6). */
+export function Unsigned(): JSX.Element {
+  return <span className="item__meta" title="This item carries no signature, so its author is a claim">UNSIGNED</span>
 }
 
 /** "you", or the hider's name. */
@@ -59,10 +60,11 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
 
 /**
  * A chest: its name, what opens it, OPEN when you hold it, and its contents
- * once open. `id` is the chest's event id, `author` its hider, `place` where
- * it was found (null for a chest held in LOOT with no place of its own).
+ * once open. `id` is the chest's event id, `author` its hider (a claim unless
+ * `verified`), `place` where it was found (null for a chest held in LOOT
+ * with no place of its own).
  */
-export function ChestBlock({ id, chest, author, place }: { id: string; chest: ChestItem; author: string; place: HeldPlace | null }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -98,7 +100,7 @@ export function ChestBlock({ id, chest, author, place }: { id: string; chest: Ch
         <span className="item__line">
           <span className="item__name" title={chest.name}>{chest.name}</span>
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {entries ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}
+            {entries ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
         {opener && !entries && (
@@ -125,11 +127,11 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
     <li className="chest__row">
       <span className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} aria-hidden="true">{hiddenGlyph(type, coin)}</span>
       {type === 'chest' && entry.body.chest
-        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} place={place} />
+        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>
-            {!entry.verified && <span className="item__meta" title="This item carries no signature, so its author is a claim">UNSIGNED</span>}
+            {!entry.verified && <Unsigned />}
           </span>
         )}
       {type === 'key'

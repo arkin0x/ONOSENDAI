@@ -70,8 +70,10 @@ export const MESSAGE_KIND = 1
 export const KEY_KIND = 3340
 /** A chest, inside the envelope (B1 §2.2): a list of entries sealed to a public key. */
 export const CHEST_KIND = 3341
-/** Longest name a key or a chest carries: a label for a row, not a letter. */
+/** Longest name a key or a chest carries: a label for a row, not a letter. The `requires` label is capped the same. */
 export const MAX_ITEM_NAME = 64
+/** Longest `about` a key carries: a sentence. */
+export const MAX_ABOUT = 280
 /** A standalone SNO object (DECK-0003 §3.1); a shard hidden by reference is one of these (§3.4). */
 export const OBJECT_KIND = 33331
 /** FF-1's key derivation for a key computed from a place rather than served (spec §7.6). */
@@ -197,14 +199,25 @@ export interface ChestItem {
 
 const HEX_64 = /^[0-9a-f]{64}$/
 
-function tagValue(tags: string[][], name: string): string | undefined {
-  return tags.find((t) => t[0] === name)?.[1]
+/** Whether an item's content and tags have the shape every reading below assumes: an unsigned entry may have any shape at all. */
+function wellShaped(ev: Pick<NostrEvent, 'content' | 'tags'>): boolean {
+  return typeof ev.content === 'string' && Array.isArray(ev.tags)
 }
 
-/** A key's or a chest's name tag, trimmed and capped; `fallback` when it carries none. */
+/** The first tag of that name's value; a tag that is not an array of strings is passed over. */
+function tagValue(tags: string[][], name: string): string | undefined {
+  const t = tags.find((t) => Array.isArray(t) && t[0] === name)
+  return t && typeof t[1] === 'string' ? t[1] : undefined
+}
+
+/** A tag's text as a label: trimmed, one space between words, capped at `max`. */
+function capped(tags: string[][], name: string, max: number): string {
+  return (tagValue(tags, name) ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
+}
+
+/** A key's or a chest's name tag, capped; `fallback` when it carries none. */
 function nameOf(tags: string[][], fallback: string): string {
-  const name = (tagValue(tags, 'name') ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_ITEM_NAME)
-  return name || fallback
+  return capped(tags, 'name', MAX_ITEM_NAME) || fallback
 }
 
 /**
@@ -214,23 +227,23 @@ function nameOf(tags: string[][], fallback: string): string {
  * and nothing sealed to it could ever be opened with it.
  */
 export function keyItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): KeyItem | null {
-  if (ev.kind !== KEY_KIND) return null
+  if (ev.kind !== KEY_KIND || !wellShaped(ev)) return null
   const secretHex = ev.content.trim()
   if (!HEX_64.test(secretHex)) return null
   let itemPubkey: string
   try { itemPubkey = getPublicKey(hexToBytes(secretHex)) } catch { return null }
   const claimed = tagValue(ev.tags, 'item')
   if (claimed !== undefined && claimed !== itemPubkey) return null
-  return { name: nameOf(ev.tags, 'key'), about: (tagValue(ev.tags, 'about') ?? '').trim(), itemPubkey, secretHex }
+  return { name: nameOf(ev.tags, 'key'), about: capped(ev.tags, 'about', MAX_ABOUT), itemPubkey, secretHex }
 }
 
 /** A chest item out of its event, or null when its lock tag or payload is malformed. */
 export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): ChestItem | null {
-  if (ev.kind !== CHEST_KIND) return null
-  const lock = ev.tags.find((t) => t[0] === 'lock')
-  if (!lock || !HEX_64.test(lock[1] ?? '') || !HEX_64.test(lock[2] ?? '')) return null
+  if (ev.kind !== CHEST_KIND || !wellShaped(ev)) return null
+  const lock = ev.tags.find((t) => Array.isArray(t) && t[0] === 'lock')
+  if (!lock || typeof lock[1] !== 'string' || typeof lock[2] !== 'string' || !HEX_64.test(lock[1]) || !HEX_64.test(lock[2])) return null
   if (!ev.content) return null
-  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: (tagValue(ev.tags, 'requires') ?? '').trim(), payload: ev.content }
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content }
 }
 
 /** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
@@ -249,6 +262,7 @@ export interface ItemBody {
  * chest's contents, so a key is a key wherever it is found.
  */
 export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'>): ItemBody | null {
+  if (!wellShaped(inner)) return null
   if (inner.kind === SHARD_KIND) {
     let raw: unknown
     try { raw = JSON.parse(inner.content) } catch { return null }

@@ -17,29 +17,31 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { forgeKey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
+import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
+import { attributed } from '../lib/client'
 import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, hiddenGlyph, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { findCashuToken } from '../lib/cashu'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { useShards, type ChestContent, type ChestLock } from '../store/useShards'
-import { useWorkshop } from '../store/useWorkshop'
+import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
 
-const HEX_64 = /^[0-9a-f]{64}$/
-
-/** A pasted lock: an item's public key as hex, or a person's npub. */
+/** A pasted lock: an item's public key as hex, or a person's npub; either must name a point on the curve. */
 function parseLock(text: string): ChestLock | null {
   const t = text.trim()
-  if (HEX_64.test(t)) return { pubkey: t, label: 'a pasted key' }
+  if (isLockPubkey(t)) return { pubkey: t, label: 'a pasted key' }
   try {
     const d = nip19.decode(t)
-    if (d.type === 'npub') return { pubkey: d.data, label: 'a person' }
+    if (d.type === 'npub' && isLockPubkey(d.data)) return { pubkey: d.data, label: 'a person' }
   } catch { /* not an npub */ }
   return null
 }
+
+/** A ten-digit time, the width every created_at has for decades, so the meter's count is the deploy's. */
+const SAMPLE_CREATED_AT = 1_700_000_000
 
 /** What a content row says. */
 function contentLabel(c: ChestContent, shardName: (id: string) => string): string {
@@ -61,8 +63,8 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const [name, setName] = useState(draft?.name ?? '')
   const [requires, setRequires] = useState(draft?.requires ?? '')
   const [requiresTouched, setRequiresTouched] = useState(!!draft)
-  // The lock: a held key by its id, or pasted text.
-  const [lockKeyId, setLockKeyId] = useState<string>(() => (draft ? '' : keys[0]?.id ?? ''))
+  // The lock: a held key by its id, or pasted text. A restored draft keeps its lock.
+  const [lockKeyId, setLockKeyId] = useState<string>(() => (draft ? keys.find((k) => k.key?.itemPubkey === draft.lock.pubkey)?.id ?? '' : keys[0]?.id ?? ''))
   const [pasted, setPasted] = useState(draft && draft.lock.label !== 'a person' && !keys.some((k) => k.key?.itemPubkey === draft.lock.pubkey) ? draft.lock.pubkey : draft?.lock.label === 'a person' ? nip19.npubEncode(draft.lock.pubkey) : '')
   const [contents, setContents] = useState<ChestContent[]>(draft?.contents ?? [])
   // What is being added: one editor open at a time.
@@ -84,14 +86,17 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const cashu = useCashu(adding === 'message' && settled ? text : null)
   const verdict = composeVerdict(settled, cashu)
 
-  // The sealed size, as the deploy will see it: every content as the event it becomes.
+  // The sealed size, as the deploy will see it: every content as the event it
+  // becomes, built the way sealChest builds it (useShards): the text trimmed,
+  // a shard with its credit, every template attributed with the client tag
+  // the signer adds, and a created_at as wide as the real one.
   const bytes = useMemo(() => {
     const at = { x: 0n, y: 0n, z: 0n }
     const templates = contents.map((c) => {
-      if (c.kind === 'message') return messageInnerTemplate(c.text, at, 0, 0)
-      if (c.kind === 'key') return keyInnerTemplate(c.key, at, 0, 0)
+      if (c.kind === 'message') return attributed(messageInnerTemplate(c.text.trim(), at, 0, SAMPLE_CREATED_AT))
+      if (c.kind === 'key') return attributed(keyInnerTemplate(c.key, at, 0, SAMPLE_CREATED_AT))
       const model = models.find((s) => s.id === c.shardId)
-      return model ? shardInnerTemplate(model, at, 0, 0) : messageInnerTemplate('', at, 0, 0)
+      return attributed(model ? shardInnerTemplate(model, at, 0, SAMPLE_CREATED_AT, creditOf(model)) : messageInnerTemplate('', at, 0, SAMPLE_CREATED_AT))
     })
     return templateBytes(templates, me || '0'.repeat(64))
   }, [contents, models, me])

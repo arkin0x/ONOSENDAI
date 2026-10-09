@@ -873,8 +873,8 @@ export interface CyberspaceState {
   exportKey: (password: string, again: string) => string
   /**
    * Open a NIP-44 payload sealed to this identity by `senderPubkey`: a chest
-   * sealed to a person (lib/chests.ts). Rejects, in words, when the signer
-   * offers no NIP-44 decrypt, which in this slice is every extension and bunker.
+   * sealed to a person (lib/chests.ts). Rejects, in words, only when the
+   * signer truly offers no NIP-44 decrypt (lib/signers.ts).
    */
   decryptSealed: (senderPubkey: string, payload: string) => Promise<string>
 

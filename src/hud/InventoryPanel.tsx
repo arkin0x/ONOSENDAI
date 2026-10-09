@@ -14,12 +14,12 @@
  */
 
 import { useMemo, useState } from 'react'
-import { nip19 } from 'nostr-tools'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hiddenGlyph } from '../lib/hidden'
 import { chestsOpenedBy, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
+import { safeNpub } from '../lib/npub'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -28,12 +28,8 @@ import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
 import { Explanation } from './Explanation'
-import { ChestBlock } from './ItemRows'
+import { ChestBlock, Unsigned } from './ItemRows'
 import { useCashu, cashuStateLabel } from './useCashu'
-
-function safeNpub(pubkey: string): string {
-  try { return nip19.npubEncode(pubkey) } catch { return pubkey }
-}
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
@@ -87,8 +83,9 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
       <span className="item__line">
         <span className="item__name" title={item.name}>{item.name}</span>
         <span className="item__meta">
-          {item.source === 'forged' ? 'forged by you' : `forged by ${who}`} · {SOURCE[item.source] === 'forged by you' ? 'hidden' : SOURCE[item.source]} <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
+          {item.source === 'forged' ? 'forged by you' : `forged by ${who}`} · {item.source === 'forged' ? 'hidden' : SOURCE[item.source]} <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
           {opens > 0 && <> · <span className="secrets__found" title="Discovered chests whose lock is this key">opens {opens} chest{opens === 1 ? '' : 's'}</span></>}
+          {!item.verified && <> · <Unsigned /></>}
         </span>
       </span>
       <span className="held__acts">
@@ -128,13 +125,14 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     <li className="secrets__row held__row">
       <span className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} aria-hidden="true">{hiddenGlyph(item.type, coin)}</span>
       {item.type === 'chest' && item.chest
-        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} place={item.place} />
+        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>
             <span className="item__meta">
               {item.from ? `from “${item.from.chestName}”` : SOURCE[item.source]} · <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
               {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
+              {!item.verified && <> · <Unsigned /></>}
             </span>
           </span>
         )}
@@ -195,7 +193,7 @@ export function InventoryPanel(): JSX.Element {
         </div>
       )}
 
-      {count === 0 && <p className="avatars__empty">Nothing held yet. Keys you find, and what you take from chests, go here.</p>}
+      {count === 0 && <p className="avatars__empty">Nothing held yet.</p>}
 
       {/* A key from another device, as COPY wrote it. */}
       <form className="loot__paste" onSubmit={(e) => { e.preventDefault(); doPaste() }}>

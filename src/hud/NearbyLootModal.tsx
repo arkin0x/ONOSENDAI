@@ -13,8 +13,9 @@ import { useMemo } from 'react'
 import { useNearbyLoot, type NearbyItem } from '../hooks/useNearbyLoot'
 import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
-import { hiddenGlyph, messagePreview } from '../lib/hidden'
+import { hiddenGlyph, hiddenLabel, messagePreview } from '../lib/hidden'
 import type { HeldPlace } from '../lib/inventory'
+import { safeNpub } from '../lib/npub'
 import { formatDistance } from 'sno-core/scale'
 import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel } from '../store/useProfiles'
@@ -22,12 +23,7 @@ import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { ChestBlock, KeyLine } from './ItemRows'
-import { nip19 } from 'nostr-tools'
 import { useEscape } from '../hooks/useEscape'
-
-function safeNpub(pubkey: string): string {
-  try { return nip19.npubEncode(pubkey) } catch { return pubkey }
-}
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
@@ -37,8 +33,7 @@ function placeOf(item: NearbyItem): HeldPlace {
 /** The first line: the message itself, the shard named in quotes with its size, or the key's or chest's name. */
 function labelOf(item: NearbyItem): string {
   if (item.type === 'message') return findCashuToken(item.text) ? '₿ cashu token' : messagePreview(item.text ?? '', 160)
-  if (item.type === 'key') return item.keyItem?.name ?? 'key'
-  if (item.type === 'chest') return item.chest?.name ?? 'chest'
+  if (item.type !== 'shard') return hiddenLabel({ ...item, key: item.keyItem })
   const shard = item.shard
   return shard ? `\u201c${shard.name}\u201d shard \u00b7 ${shard.vertices.length} vertices \u00b7 ${shard.faces.length} faces` : 'shard'
 }
@@ -59,7 +54,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
         {item.type === 'key' && item.keyItem
           ? <KeyLine name={item.keyItem.name} author={author} />
           : item.type === 'chest' && item.chest
-            ? <ChestBlock id={item.key} chest={item.chest} author={author} place={placeOf(item)} />
+            ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} />
             : <span className="nearby__label">{labelOf(item)}</span>}
         <span className="nearby__where">{whereOf(item)}</span>
         <span className="nearby__meta">

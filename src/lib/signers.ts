@@ -32,9 +32,10 @@ export interface Signer {
   /**
    * NIP-44 v2 decrypt of a payload sealed to this identity by `senderPubkey`,
    * as NIP-07 and NIP-46 both phrase it: what opens a chest sealed to a
-   * person (lib/chests.ts). Present for a local key. An extension or a bunker
-   * is not asked for it yet, so in this slice such a chest opens for local
-   * identities only (Keys and Chests B1); the message below says so.
+   * person (lib/chests.ts). A local key does it directly; an extension offers
+   * it through `window.nostr.nip44`, when it has one; a bunker through its
+   * `nip44_decrypt` request. Absent only when the signer truly lacks it, and
+   * NIP44_UNAVAILABLE says so.
    */
   nip44Decrypt?: (senderPubkey: string, payload: string) => Promise<string>
   /** Present only for local signers, so the key can be persisted. */
@@ -53,6 +54,8 @@ export interface Signer {
 interface WindowNostr {
   getPublicKey(): Promise<string>
   signEvent(event: EventTemplate): Promise<NostrEvent>
+  /** NIP-07's optional NIP-44 pair; decrypt is what opens a chest sealed to this identity. */
+  nip44?: { decrypt(pubkey: string, ciphertext: string): Promise<string> }
 }
 function windowNostr(): WindowNostr | null {
   return (window as unknown as { nostr?: WindowNostr }).nostr ?? null
@@ -61,8 +64,8 @@ export function hasNip07(): boolean {
   return typeof window !== 'undefined' && !!windowNostr()
 }
 
-/** Why a chest sealed to this identity will not open: the signer has no NIP-44 door here yet. */
-export const NIP44_UNAVAILABLE = 'Opening a chest sealed to you needs a key held on this device. An extension or a bunker cannot open one yet.'
+/** Why a chest sealed to this identity will not open: the signer offers no NIP-44 decrypt. */
+export const NIP44_UNAVAILABLE = 'Your signer offers no NIP-44 decrypt, so a chest sealed to you cannot be opened with it.'
 
 /** A local key: the default random one, or one you brought. */
 export function localSigner(secretKey: Uint8Array): Signer {
@@ -109,10 +112,13 @@ export async function nip07Signer(): Promise<Signer> {
   const ext = windowNostr()
   if (!ext) throw new Error('No NIP-07 extension found')
   const pubkey = await ext.getPublicKey()
+  // NIP-44 is optional in NIP-07: offered only when the extension has it.
+  const nip44Ext = ext.nip44
   return {
     kind: 'nip07',
     pubkey,
     signEvent: (template) => ext.signEvent(attributed(template)),
+    ...(nip44Ext ? { nip44Decrypt: (pk: string, ct: string) => nip44Ext.decrypt(pk, ct) } : {}),
   }
 }
 
@@ -134,6 +140,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     bunkerUri,
     clientSecretKey: clientSk,
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -188,6 +195,7 @@ function wrapBunkerSigner(
     clientSecretKey,
     nostrConnectSession,
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)
@@ -212,7 +220,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
     clientPubkey: getPublicKey(clientSecretKey),
     relays: signerRelays(relay),
     secret: randomHex(generateSecretKey()),
-    perms: ['get_public_key', 'sign_event'],
+    perms: ['get_public_key', 'sign_event', 'nip44_decrypt'],
     name: 'ONOSENDAI',
     ...(typeof location !== 'undefined' ? { url: location.origin } : {}),
   })
@@ -340,6 +348,11 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     kind: pref.kind,
     pubkey: pref.pubkey,
     signEvent: (template) => ensure().then((s) => s.signEvent(template)),
+    // Whether the live signer offers NIP-44 is known only once it is up.
+    nip44Decrypt: (pk, ct) => ensure().then((s) => {
+      if (!s.nip44Decrypt) throw new Error(NIP44_UNAVAILABLE)
+      return s.nip44Decrypt(pk, ct)
+    }),
     reconnect: ensure,
   }
 }

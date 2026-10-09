@@ -90,7 +90,7 @@ export function SecretModal(): JSX.Element | null {
         ) : item.type === 'key' && item.keyItem ? (
           <div className="secret__shard"><KeyLine name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
-          <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} place={place} /></div>
+          <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>

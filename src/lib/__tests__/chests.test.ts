@@ -13,8 +13,9 @@ import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
+import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, sealEntries, sizeRefusal,
+  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, sealEntries, sizeRefusal,
 } from '../chests'
 import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, unbag, type ChestItem, type KeyItem,
@@ -150,6 +151,38 @@ describe('the chest plaintext is a list of entries (spec §7.6)', () => {
     const read = readContents([note, ref, forged, unsigned])
     expect(read.map((c) => c.body.text)).toEqual(['x', 'claim'])
     expect(read.map((c) => c.verified)).toEqual([true, false])
+    // An unsigned entry's id is its hash, whatever it claimed.
+    expect(read[1].id).toBe(getEventHash(unsigned))
+    const claiming = { ...unsigned, id: note.id }
+    expect(readContents([claiming])[0].id).toBe(getEventHash(unsigned))
+  })
+
+  it('one malformed entry never blocks the rest', () => {
+    const good = finalizeEvent(messageInnerTemplate('still here', at, 0, 7), hider)
+    const badSig = { ...wire(good), sig: 'not even hex' }
+    const badShape = { kind: KEY_KIND, pubkey: hiderPk, created_at: 1, content: 5, tags: 'x', id: 'a', sig: '' }
+    const badTags = { kind: 1, pubkey: hiderPk, created_at: 1, content: 'tags are wrong', tags: [null, 7, ['C']], id: '', sig: '' }
+    const noPubkey = { kind: 1, pubkey: 'nobody', created_at: 1, content: 'no author', tags: [], id: '', sig: '' }
+    const read = readContents([badSig, badShape as never, badTags as never, noPubkey as never, good])
+    expect(read.map((c) => c.body.text)).toEqual(['still here'])
+    // A key with a tag that is not an array of strings reads as the key it is, the tag passed over.
+    const key = forge('odd tags')
+    const oddKey = { ...wire(finalizeEvent(keyInnerTemplate(key, at, 0, 8), hider)) }
+    oddKey.tags = [...oddKey.tags, ['about', 'x'.repeat(1000)]]
+    const unsignedOdd = { ...oddKey, sig: '' }
+    const found = readContents([unsignedOdd])
+    expect(found).toHaveLength(1)
+    expect(found[0].body.key?.name).toBe('odd tags')
+    expect(found[0].body.key?.about.length).toBe(280)
+  })
+
+  it('a pasted lock must name a point on the curve', () => {
+    const key = forge('k')
+    expect(isLockPubkey(key.itemPubkey)).toBe(true)
+    expect(isLockPubkey(hiderPk)).toBe(true)
+    expect(isLockPubkey('00'.repeat(32))).toBe(false)
+    expect(isLockPubkey('ff'.repeat(32))).toBe(false)
+    expect(isLockPubkey('abc')).toBe(false)
   })
 
   it('nests: a chest inside a chest parses, and opens with its own key', () => {

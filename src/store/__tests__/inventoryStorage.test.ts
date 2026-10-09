@@ -67,12 +67,13 @@ describe('held items in IndexedDB', () => {
     expect(m.useInventory.getState().holdFinds([find, find])).toHaveLength(1)
     expect(m.useInventory.getState().holdFinds([find])).toHaveLength(0)
     expect(Object.keys(m.useInventory.getState().items)).toEqual([find.eventId])
-    await new Promise((r) => setTimeout(r, 20))
+    await m.useInventory.getState().flush()
 
     const again = await boot()
     const held = again.useInventory.getState().items[find.eventId]
     expect(held?.key).toEqual(find.key)
     expect(held?.source).toBe('found')
+    expect(held?.verified).toBe(true)
     expect(held?.place?.lookupId).toBe('lookup')
 
     const other = await boot(OTHER)
@@ -87,7 +88,7 @@ describe('held items in IndexedDB', () => {
     mod.useInventory.getState().holdFinds([find])
     await loading
     expect(mod.useInventory.getState().items[find.eventId]).toBeDefined()
-    await new Promise((r) => setTimeout(r, 20))
+    await mod.useInventory.getState().flush()
     const again = await boot()
     expect(again.useInventory.getState().items[find.eventId]?.name).toBe('Early')
   })
@@ -102,6 +103,7 @@ describe('held items in IndexedDB', () => {
     expect(first.ok).toBe(true)
     expect(first.already).toBe(false)
     expect(first.item?.source).toBe('pasted')
+    expect(first.item?.verified).toBe(true)
     expect(first.item?.place).toBeNull()
     const second = other.useInventory.getState().paste(text)
     expect(second.already).toBe(true)
@@ -113,14 +115,14 @@ describe('held items in IndexedDB', () => {
     const m = await boot()
     const mine = keyFind(forge('Mine'))
     m.useInventory.getState().holdFinds([mine])
-    await new Promise((r) => setTimeout(r, 20))
+    await m.useInventory.getState().flush()
     identity = OTHER
     await m.useInventory.getState().load()
     expect(m.useInventory.getState().owner).toBe(OTHER)
     expect(Object.keys(m.useInventory.getState().items)).toEqual([])
     const theirs = keyFind(forge('Theirs'))
     m.useInventory.getState().holdFinds([theirs])
-    await new Promise((r) => setTimeout(r, 20))
+    await m.useInventory.getState().flush()
     identity = ME
     await m.useInventory.getState().load()
     expect(Object.keys(m.useInventory.getState().items)).toEqual([mine.eventId])

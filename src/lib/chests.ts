@@ -72,9 +72,9 @@ export interface Sealed {
  * made, so the composer and the deploy refuse the same way.
  */
 export function sealEntries(entries: BagEntry[], lockPubkey: string): Sealed {
-  const plaintext = JSON.stringify(entries)
-  const refusal = sizeRefusal(new TextEncoder().encode(plaintext).length)
+  const refusal = sizeRefusal(plaintextBytes(entries))
   if (refusal) throw new Error(refusal)
+  const plaintext = JSON.stringify(entries)
   const senderSecret = generateSecretKey()
   const senderPubkey = getPublicKey(senderSecret)
   const payload = nip44.encrypt(plaintext, nip44.utils.getConversationKey(senderSecret, lockPubkey))
@@ -121,30 +121,70 @@ export interface ChestEntry {
   body: ItemBody
 }
 
+const HEX_64 = /^[0-9a-f]{64}$/
+
+/** Whether an entry has the fields an event is read by, each of its type; a chest's plaintext may hold anything. */
+function wellFormed(ev: Partial<NostrEvent>): ev is NostrEvent {
+  return typeof ev.kind === 'number' && typeof ev.content === 'string' && typeof ev.created_at === 'number'
+    && typeof ev.pubkey === 'string' && HEX_64.test(ev.pubkey)
+    && Array.isArray(ev.tags) && ev.tags.every((t) => Array.isArray(t) && t.every((v) => typeof v === 'string'))
+}
+
+/**
+ * One entry of an opened chest, readable, or null: not well formed, signed
+ * but failing to verify, or a kind this client does not read. Anything that
+ * throws on the way (a signature that is not even hex) is null too, so one
+ * malformed entry never blocks the chest.
+ */
+function readEntry(e: BagEntry): ChestEntry | null {
+  try {
+    if (isReference(e) || !wellFormed(e as Partial<NostrEvent>)) return null
+    const ev = e
+    const signed = typeof ev.sig === 'string' && ev.sig.length > 0
+    // The fields alone, as a plain copy: nostr-tools remembers a verification
+    // on the object itself, and a copy made in memory would inherit it.
+    const plain = { pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content }
+    if (signed && !verifyEvent({ ...plain, id: ev.id, sig: ev.sig })) return null
+    // An unsigned entry's id is its hash, whatever it claims: a claimed id
+    // could otherwise stand in for a real item's in the inventory.
+    const id = signed ? ev.id : getEventHash(plain)
+    const body = readItem({ ...plain, id })
+    return body ? { id, event: { ...plain, id, sig: signed ? ev.sig : '' }, verified: signed, body } : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * The readable contents of an opened chest. A signed item that fails to
  * verify is dropped, and only that item; an unsigned item is kept with its
- * author marked as a claim; a reference is skipped, because B1 produces none
- * and following one is a relay query a chest should not make on its own; a
- * kind this client does not read is skipped as §7.6 says.
+ * author marked as a claim (spec §7.6); a reference is skipped, because B1
+ * produces none and following one is a relay query a chest should not make
+ * on its own; a kind this client does not read, or an entry that is not an
+ * event at all, is skipped as §7.6 says.
  */
 export function readContents(entries: BagEntry[]): ChestEntry[] {
   const out: ChestEntry[] = []
   for (const e of entries) {
-    if (isReference(e)) continue
-    const ev = e as NostrEvent
-    const signed = typeof ev.sig === 'string' && ev.sig.length > 0
-    // Verified as a plain copy: nostr-tools remembers a verification on the
-    // object itself, and a copy made in memory would inherit it, so the check
-    // is made on the fields alone, as it is for anything read from JSON.
-    if (signed && !verifyEvent({ id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig })) continue
-    let id: string
-    try { id = typeof ev.id === 'string' && /^[0-9a-f]{64}$/.test(ev.id) ? ev.id : getEventHash(ev) } catch { continue }
-    const body = readItem({ ...ev, id })
-    if (!body) continue
-    out.push({ id, event: { ...ev, id, sig: signed ? ev.sig : '' }, verified: signed, body })
+    const entry = readEntry(e)
+    if (entry) out.push(entry)
   }
   return out
+}
+
+/**
+ * Whether a pasted lock is a public key a chest can be sealed to: 64 hex
+ * characters that name a point on the curve. NIP-44's own conversation key
+ * says so by refusing anything else, asked with a throwaway secret.
+ */
+export function isLockPubkey(hex: string): boolean {
+  if (!HEX_64.test(hex)) return false
+  try {
+    nip44.utils.getConversationKey(generateSecretKey(), hex)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** A key as the opener needs it: which inventory row it is, and its two halves. */

@@ -57,16 +57,18 @@ describe('the key line', () => {
 describe('the chest block', () => {
   it('says its name, what it requires and who hid it, and offers no OPEN with nothing held', () => {
     const key = forgeKey('Wind Key')
-    const text = visible(createElement(ChestBlock, { id: 'c1', chest: chestTo(key.itemPubkey, 'the Wind Key'), author: hiderPk, place }))
+    const text = visible(createElement(ChestBlock, { id: 'c1', chest: chestTo(key.itemPubkey, 'the Wind Key'), author: hiderPk, verified: true, place }))
     expect(text).toContain('Wind Chest')
     expect(text).toContain('REQUIRES: the Wind Key')
     expect(text).toContain('hidden by')
     expect(text).not.toContain('OPEN')
+    expect(text).not.toContain('UNSIGNED')
   })
 
-  it('names what is needed in the hider’s words, or says only that an item is', () => {
-    const text = visible(createElement(ChestBlock, { id: 'c2', chest: chestTo(getPublicKey(generateSecretKey()), ''), author: hiderPk, place }))
+  it('names what is needed in the hider’s words, or says only that an item is, and marks an unsigned chest', () => {
+    const text = visible(createElement(ChestBlock, { id: 'c2', chest: chestTo(getPublicKey(generateSecretKey()), ''), author: hiderPk, verified: false, place }))
     expect(text).toContain('REQUIRES: an item you have not found')
+    expect(text).toContain('UNSIGNED')
     expect(text).not.toContain('TAKE')
   })
 })

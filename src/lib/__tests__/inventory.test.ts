@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getEventHash, getPublicKey } from 'nostr-tools/pure'
 import { bytesToHex } from '../events'
 import { sealEntries, readContents } from '../chests'
 import { chestInnerTemplate, keyInnerTemplate, keyItemOf, messageInnerTemplate, type Hidden, type KeyItem } from '../hidden'
@@ -73,7 +73,21 @@ describe('a key as text (COPY and PASTE)', () => {
     expect(back).not.toBeNull()
     expect(back!.event).toEqual(find.inner)
     expect(back!.key).toEqual(key)
+    expect(back!.verified).toBe(true)
     expect(keyItemOf(back!.event)).toEqual(key)
+    expect(held.verified).toBe(true)
+  })
+
+  it('an unsigned key is a claim with its hash for an id, so it can never stand in for a real key', () => {
+    const real = heldFromFind(me, keyFind(forge('Real')), 1)!
+    const other = forge('Impostor')
+    const unsigned = { ...real.event, id: real.id, sig: '', content: other.secretHex, tags: [['name', 'Impostor'], ['item', other.itemPubkey]] }
+    const back = parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(unsigned))
+    expect(back).not.toBeNull()
+    expect(back!.verified).toBe(false)
+    expect(back!.event.id).not.toBe(real.id)
+    expect(back!.event.id).toBe(getEventHash(unsigned))
+    expect(back!.key.name).toBe('Impostor')
   })
 
   it('refuses text that is not a key, a tampered signature, and a secret that does not match its item tag', () => {
@@ -88,7 +102,9 @@ describe('a key as text (COPY and PASTE)', () => {
     expect(parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(wrongSecret))).toBeNull()
     // Unsigned, consistent: read, the hider a claim.
     const unsigned = { ...held.event, sig: '' }
-    expect(parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(unsigned))?.key).toEqual(held.key)
+    const claim = parseKeyText(KEY_TEXT_PREFIX + JSON.stringify(unsigned))
+    expect(claim?.key).toEqual(held.key)
+    expect(claim?.verified).toBe(false)
   })
 })
 

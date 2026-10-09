@@ -8,24 +8,16 @@
  */
 
 import { useState } from 'react'
-import { nip19 } from 'nostr-tools'
+import { npubOf } from '../lib/npub'
 import { targetColor } from '../lib/targets'
 import { profileLabel } from '../store/useProfiles'
 import { useProfile } from '../hooks/useProfile'
 
-/**
- * npubEncode throws on anything that is not a 32-byte hex pubkey: a synthetic
- * landmark id like "earth", a truncated key from a bad tag. A profile view is
- * never worth taking the whole render down for, so callers that might be handed
- * one encode through this and fall back.
- */
-function safeNpub(pubkey: string): string | null {
-  try {
-    return nip19.npubEncode(pubkey)
-  } catch {
-    return null
-  }
-}
+// npubEncode throws on anything that is not a 32-byte hex pubkey (a synthetic
+// landmark id like "earth", a truncated key from a bad tag), and a profile
+// view is never worth taking the whole render down for: lib/npub.ts npubOf
+// answers null instead, and the callers below fall back.
+const safeNpub = npubOf
 
 export function ProfilePic({ pubkey, size = 22 }: { pubkey: string; size?: number }): JSX.Element {
   const profile = useProfile(pubkey)

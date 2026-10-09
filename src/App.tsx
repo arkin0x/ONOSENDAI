@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
+import { CrashNote } from './hud/CrashNote'
 import { ChainExplorer } from './hud/ChainExplorer'
 import { HyperspaceBar } from './hud/HyperspaceBar'
 import { LineScrubber } from './hud/LineScrubber'
@@ -250,7 +251,7 @@ export default function App(): JSX.Element {
           <PresenceChip />
         </div>
       )}
-      {showPanels && !offerUp && <Hud menuOpen={crowded} />}
+      {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
       {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
@@ -275,14 +276,18 @@ export default function App(): JSX.Element {
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
       <DeployBar />
-      <DeploymentDetail />
-      <StashModals />
-      <SecretModal />
-      <ActionModal />
-      <NotificationsModal />
-      <LootDetail />
-      <NearbyLootModal />
-      <StarredPlaceCard />
+      {/* One boundary for the record and its neighbors: a crash in one modal
+          shows its error where the modal was, and the scene stays up. */}
+      <CrashNote where="a modal">
+        <DeploymentDetail />
+        <StashModals />
+        <SecretModal />
+        <ActionModal />
+        <NotificationsModal />
+        <LootDetail />
+        <NearbyLootModal />
+        <StarredPlaceCard />
+      </CrashNote>
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
       {!showPanels && <HosakaPulse />}

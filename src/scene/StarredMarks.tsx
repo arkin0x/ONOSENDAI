@@ -38,7 +38,7 @@ import { TapTarget } from './TapTarget'
 export const STAR_REACH = GRID_RADIUS * 8
 /** The star's yellow: the chip's, lit. */
 export const STAR_YELLOW = '#ffd84d'
-/** How wide the star stands, in CSS pixels: small, under the coin's 51. */
+/** How wide the star stands, in CSS pixels: small, under the coin's 40. */
 const STAR_PX = 20
 /** The glow behind it, as a multiple of the star. */
 const GLOW = 2.6

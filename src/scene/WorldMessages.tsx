@@ -23,6 +23,14 @@
  * scene of many items keeps its layout as you zoom out, and an item focus
  * (focusItem) frames exactly that place, so the camera and the note still
  * agree at every zoom (arkinox, 2026-10-01).
+ *
+ * Not everything is drawn at every zoom. A coin the mint has not called
+ * redeemed is money, and money shows from anywhere. A note, and a coin the
+ * mint says is spent, are drawn at 2^1 and below only: zoomed out, a field of
+ * notes was a field of clutter (arkinox, 2026-10-09), and the words were
+ * always one tap away. The rule is markShown (lib/worldMarks). A spent coin
+ * keeps its place as a still gray diamond, so a visitor sees that someone was
+ * here and the coin is gone, rather than a coin.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -37,6 +45,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
+import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
+import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
@@ -49,11 +59,14 @@ const NOTE = '#ffd27d'
 const BITCOIN = '#f7931a'
 /** The note's own blue, for the cube a message hangs on. */
 const NOTE_BLUE = '#4aa3ff'
+/** Steel, for a coin that has been redeemed: the shape stays, the money is gone. */
+const SPENT = '#7f8891'
 /** How wide the mark behind an item stands, in CSS pixels. The coin is larger
- * than the note: it is a whole object in itself, where the cube is a backing. */
-const MARK_PX = { coin: 51, note: 34 } as const
-/** The coin's own mark, in CSS pixels. */
-const COIN_PX = 39
+ * than the note: it is a whole object in itself, where the cube is a backing.
+ * It was 51 until 2026-10-09; smaller reads less like a billboard (arkinox). */
+const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
+/** The ₿ on a coin, in CSS pixels. */
+const COIN_PX = 31
 
 interface Props {
   axes: ViewAxes
@@ -129,10 +142,14 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
+    // Notes are not drawn past MESSAGE_SCALE_MAX (markShown). Coins stay in
+    // the list at every zoom: whether one is spent is the mint's word, which
+    // CoinItem asks for, and a spent coin drops out there.
+    const notesShown = markShown('note', scaleExp)
     return useShards.getState().worldItems()
       .filter((w) => w.type === 'message' && w.text && w.plane === anchorPlane)
-      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', centre: itemCentre(w.at, origin, scaleExp, axes) }))
-      .filter((w) => Math.hypot(...w.centre) <= REACH)
+      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', coin: findCashuToken(w.text!) !== null, centre: itemCentre(w.at, origin, scaleExp, axes) }))
+      .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered])
@@ -143,31 +160,13 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
-        // Money reads as money: a coin is the turning diamond and the ₿, and
-        // nothing else. Its token is two thousand characters of base64 that
-        // say nothing to anybody, and the words someone leaves around one are
-        // usually about the coin rather than worth reading at distance. They
-        // used to hang under the mark as a second label, which in a field of
-        // coins was a field of paragraphs; the mark alone is legible at any
-        // zoom and the words are one tap away, which is where the rest of the
-        // message already lived (arkinox, 2026-09-16). The credit line went the
-        // same way: "you" under your own coin said nothing the tap does not
-        // (arkinox, 2026-09-24).
-        const coin = findCashuToken(w.text) !== null
+        if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         return (
           <group key={w.key}>
-            <WorldMark kind={coin ? 'coin' : 'note'} at={w.centre} />
-            {coin
-              ? <WorldLabel
-                  text="₿"
-                  color={BITCOIN}
-                  at={w.centre}
-                  align="center"
-                  px={COIN_PX}
-                />
-              : births[w.key] !== undefined
-                ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
-                : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
+            <WorldMark kind="note" at={w.centre} />
+            {births[w.key] !== undefined
+              ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
+              : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
 
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
@@ -180,11 +179,47 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
 }
 
 /**
+ * A coin in the world: the diamond and the ₿, and nothing else. Its token is
+ * two thousand characters of base64 that say nothing to anybody, and the
+ * words someone leaves around one are usually about the coin rather than
+ * worth reading at distance. They used to hang under the mark as a second
+ * label, which in a field of coins was a field of paragraphs; the mark alone
+ * is legible at any zoom and the words are one tap away, which is where the
+ * rest of the message already lived (arkinox, 2026-09-16). The credit line
+ * went the same way: "you" under your own coin said nothing the tap does not
+ * (arkinox, 2026-09-24).
+ *
+ * Whether the coin is still there is the mint's word (useCashu: it asks once
+ * when the coin mounts, from a cache the item's card, the STASH rows and the
+ * compose box share, good for a minute; a token once called redeemed is
+ * remembered on this device and never asked about again). Redeemed, it
+ * turns gray and stops turning, and past 2^1 it is not drawn at all. Until
+ * the mint answers, or when it cannot be reached, the coin is drawn as a
+ * coin: nobody has said it is gone.
+ */
+function CoinItem({ text, at, scaleExp, onTap }: { text: string; at: [number, number, number]; scaleExp: number; onTap: () => void }): JSX.Element | null {
+  const { state } = useCashu(text)
+  const kind = coinKind(state)
+  if (!markShown(kind, scaleExp)) return null
+  const spent = kind === 'spent'
+  return (
+    <group>
+      <WorldMark kind={kind} at={at} />
+      <WorldLabel text="₿" color={spent ? SPENT : BITCOIN} opacity={spent ? 0.7 : 1} at={at} align="center" px={COIN_PX} />
+      <TapTarget px={TAP_PX} at={at} onTap={onTap} />
+    </group>
+  )
+}
+
+/**
  * A message that was just found: its characters resolve out of glyphs over
  * TEXT_DECODE_MS, each at its own moment, then it is an ordinary label.
  */
 function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; birth: number; at: [number, number, number] }): JSX.Element {
-  const [shown, setShown] = useState(() => decodeText(text, 0, seed, 0))
+  // Start from where the ceremony really is: a note found while zoomed out
+  // past where notes are drawn is first mounted later, and should read as
+  // text at once rather than show a frame of glyphs.
+  const [shown, setShown] = useState(() => decodeText(text, (performance.now() - birth) / TEXT_DECODE_MS, seed, 0))
   const frame = useRef(0)
   const last = useRef(0)
   const done = useRef(false)
@@ -202,16 +237,24 @@ function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; 
 }
 
 
+/** The line color and opacity of each mark. A spent coin is steel and faint. */
+const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
+  coin: { color: BITCOIN, opacity: 0.9 },
+  spent: { color: SPENT, opacity: 0.6 },
+  note: { color: NOTE_BLUE, opacity: 0.55 },
+}
+
 /**
- * The shape behind a hidden thing: a turning diamond for a coin, a still cube
- * for a message. Outlines rather than solids, so they read as drawn light like
- * everything else in the scene, and held to a constant size on screen so a
- * note is the same size to the eye wherever it is.
+ * The shape behind a hidden thing: a turning diamond for a coin, the same
+ * diamond still and gray once the mint says the coin was redeemed, a still
+ * cube for a message. Outlines rather than solids, so they read as drawn light
+ * like everything else in the scene, and held to a constant size on screen so
+ * a note is the same size to the eye wherever it is.
  */
-function WorldMark({ kind, at }: { kind: 'coin' | 'note'; at: [number, number, number] }): JSX.Element {
+function WorldMark({ kind, at }: { kind: MarkKind; at: [number, number, number] }): JSX.Element {
   const group = useRef<Group>(null)
   const geometry = useMemo(
-    () => new EdgesGeometry(kind === 'coin' ? new OctahedronGeometry(0.5) : new BoxGeometry(0.72, 0.72, 0.72)),
+    () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(0.72, 0.72, 0.72) : new OctahedronGeometry(0.5)),
     [kind],
   )
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -222,19 +265,23 @@ function WorldMark({ kind, at }: { kind: 'coin' | 'note'; at: [number, number, n
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
     g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX[kind]))
-    // The coin turns; a note stays where it was left. Two axes at speeds that
-    // do not divide evenly, so the diamond tumbles slowly instead of spinning
-    // on a spit, the way a selected hyperjump does (StopCubes).
+    // A live coin turns; a note, and a spent coin, stay where they were left.
+    // Two axes at speeds that do not divide evenly, so the diamond tumbles
+    // slowly instead of spinning on a spit, the way a selected hyperjump does
+    // (StopCubes). A coin that the mint calls redeemed while it is on screen
+    // snaps to rest upright: the kind changes, the group is remounted by its
+    // key below, and a fresh group has no rotation.
     if (kind === 'coin') {
       g.rotation.y = state.clock.elapsedTime * 0.6
       g.rotation.z = state.clock.elapsedTime * 0.41
     }
   })
 
+  const look = MARK_LOOK[kind]
   return (
-    <group ref={group} position={at}>
+    <group key={kind} ref={group} position={at}>
       <lineSegments geometry={geometry} frustumCulled={false}>
-        <lineBasicMaterial color={kind === 'coin' ? BITCOIN : NOTE_BLUE} toneMapped={false} transparent opacity={kind === 'coin' ? 0.9 : 0.55} depthWrite={false} />
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity} depthWrite={false} />
       </lineSegments>
     </group>
   )

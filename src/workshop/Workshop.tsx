@@ -26,6 +26,9 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
+import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
+import { BUILT_IN } from 'sno-core/snoPalette'
+import { importFiles } from '../lib/meshImport'
 import { formatCellSize } from 'sno-core/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useAvatars } from '../store/useAvatars'
@@ -383,6 +386,11 @@ export function Workshop(): JSX.Element | null {
   }, [])
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
+  // IMPORT: the file input it opens, whether a file is being read, and
+  // whether files are being dragged over the workshop.
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  const [dropping, setDropping] = useState(false)
   // ADD, SELECT and FACE have nothing under them, so choosing one by key puts
   // the TOOLS panel away; STAMP keeps it for the shape, size and facing.
   useEffect(() => { if (tool !== 'stamp') setPanel((p) => (p === 'tools' ? null : p)) }, [tool])
@@ -479,13 +487,46 @@ export function Workshop(): JSX.Element | null {
     setPasteOpen(true)
   }
 
+  /**
+   * IMPORT: a 3D file picked or dropped, read off the main thread
+   * (lib/meshImport), fitted to this shard's grid with its lowest point on
+   * the working plane, and put down selected, one UNDO from gone. In an
+   * empty shard it becomes the shard. The line it leaves says what happened,
+   * simplified or not.
+   */
+  const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
+    const files = list ? Array.from(list) : []
+    const s = w().current()
+    if (!files.length || importing || !s) return
+    setImporting(true)
+    say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
+    try {
+      const res = await importFiles(files, { fit: s.extent * TICKS_PER_UNIT, unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
+      if (!res.ok) { say(res.error); return }
+      w().insertImport(res.shard, `${res.report.summary}.`)
+    } finally {
+      setImporting(false)
+    }
+  }
+  const draggingFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
+
   const ToolIcon = TOOL_ICON[tool]
 
   return (
-    <div className="workshop" role="dialog" aria-label="Object workshop">
+    <div
+      className="workshop"
+      role="dialog"
+      aria-label="Object workshop"
+      onDragOver={(e) => { if (!draggingFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dropping) setDropping(true) }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false) }}
+      onDrop={(e) => { if (!draggingFiles(e)) return; e.preventDefault(); setDropping(false); void importFromFiles(e.dataTransfer.files) }}
+    >
       <div className="workshop__bench">
         <Bench />
       </div>
+      {/* IMPORT's picker, kept mounted so a panel closing cannot drop its answer. */}
+      <input ref={fileInput} type="file" accept={IMPORT_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
+      {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />
 
@@ -599,6 +640,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
+            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
           </div>
           {pasteOpen && (
             <div className="workshop__paste">

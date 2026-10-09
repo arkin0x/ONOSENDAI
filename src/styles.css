@@ -3006,6 +3006,23 @@ kbd {
   margin-top: 8px;
 }
 
+/* Files dragged over the workshop: one line, and the bench outlined, nothing to catch a tap. */
+.workshop__drop {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(0, 229, 255, 0.06);
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
 .workshop__paste-box {
   display: block;
   width: 100%;

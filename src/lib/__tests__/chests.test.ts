@@ -60,12 +60,13 @@ function chest(name: string, lock: string, entries: ReturnType<typeof finalizeEv
 }
 
 describe('a key item (B1 §2.1)', () => {
-  it('carries its secret in the content, its public key and name in tags, and the NIP-70 mark', () => {
+  it('carries its secret in a tag and never in the content, its public key and name in tags, and the NIP-70 mark', () => {
     const key = forge('Wind Key')
     const t = keyInnerTemplate(key, at, 0, 5)
     expect(t.kind).toBe(KEY_KIND)
-    expect(t.content).toBe(key.secretHex)
-    expect(t.tags).toContainEqual(['name', 'Wind Key'])
+    expect(t.content).toBe('')
+    expect(t.tags).toContainEqual(['secret', key.secretHex])
+    expect(t.tags).toContainEqual(['title', 'Wind Key'])
     expect(t.tags).toContainEqual(['item', key.itemPubkey])
     expect(t.tags).toContainEqual(['-'])
     expect(t.tags.find((x) => x[0] === 'C')).toBeDefined()
@@ -168,7 +169,7 @@ describe('the chest plaintext is a list of entries (spec §7.6)', () => {
     // A key with a tag that is not an array of strings reads as the key it is, the tag passed over.
     const key = forge('odd tags')
     const oddKey = { ...wire(finalizeEvent(keyInnerTemplate(key, at, 0, 8), hider)) }
-    oddKey.tags = [...oddKey.tags, ['about', 'x'.repeat(1000)]]
+    oddKey.content = 'x'.repeat(1000)
     const unsignedOdd = { ...oddKey, sig: '' }
     const found = readContents([unsignedOdd])
     expect(found).toHaveLength(1)
@@ -240,5 +241,24 @@ describe('keys and chests inside a bag (lib/hidden.ts)', () => {
     expect(c.inner?.kind).toBe(CHEST_KIND)
     // The chest found in the bag opens with the key found beside it.
     expect(readContents(openWithSecret(c.chest!, k.key!.secretHex))[0].body.text).toBe('inside')
+  })
+})
+
+describe('a key item from before the secret moved into its tag (2026-10-09)', () => {
+  it('still reads: the secret in the content, name and about in tags', () => {
+    const key = forge('Old Key')
+    const legacy = finalizeEvent({ kind: KEY_KIND, created_at: 5, content: key.secretHex, tags: [['name', 'Old Key'], ['item', key.itemPubkey], ['about', 'from the first day'], ['-']] }, hider)
+    const read = keyItemOf(legacy)
+    expect(read?.secretHex).toBe(key.secretHex)
+    expect(read?.name).toBe('Old Key')
+    expect(read?.about).toBe('from the first day')
+  })
+
+  it('the new form puts the sentence in the content and the secret in its tag', () => {
+    const key = forge('New Key')
+    const read = keyItemOf(finalizeEvent(keyInnerTemplate({ ...key, about: 'opens the gate' }, at, 0, 5), hider))
+    expect(read?.secretHex).toBe(key.secretHex)
+    expect(read?.about).toBe('opens the gate')
+    expect(read?.name).toBe('New Key')
   })
 })

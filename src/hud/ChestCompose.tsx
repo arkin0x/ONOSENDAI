@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { Explanation } from './Explanation'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
@@ -181,6 +182,9 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
         <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick a key or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
       </div>
+      <Explanation>
+        A chest is sealed to a key from your LOOT (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new key inside, then PLACE it at the build cursor. Anyone who finds the chest sees what it requires; only a holder of that key, or that person, can open it and TAKE what is inside.
+      </Explanation>
     </div>
   )
 }

@@ -20,7 +20,7 @@ import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
 import { hiddenGlyph, hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
 import { placeOf, type HeldPlace } from '../lib/inventory'
-import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
+import { formatBytes, hintBoxLabel, hintSearchExponent, regionLabel, type LootItem } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
 import type { Position } from '../lib/space'
 import { spectate } from '../lib/spectator'
@@ -51,6 +51,17 @@ interface OpenedItem {
 }
 
 /** A message's preview, or what its Cashu token holds when it carries one; a coin that cannot be read is still a coin. */
+/**
+ * A hint's search in words: the number of region keys a seeker derives, one
+ * per candidate region in the box (spec §7.7), as a count while it is one a
+ * person might try, and as a plain refusal past that.
+ */
+function searchLabel(exponent: number): string {
+  if (exponent === 0) return 'one region key, which names the place itself'
+  if (exponent > 40) return `more region keys (2^${exponent}) than anyone will ever try`
+  return `about ${(2 ** exponent).toLocaleString('en-US')} region keys`
+}
+
 function cashuOrPreview(text: string | undefined): string {
   const { raw, token } = readCashuToken(text)
   return token ? `₿ ${cashuLabel(token)} hidden here` : raw ? '₿ cashu token hidden here' : messagePreview(text ?? '', 48)
@@ -228,9 +239,13 @@ export function LootDetail(): JSX.Element | null {
           </ul>
         ) : (
           <p className="lootd__hidden">
-            {item.sector
-              ? 'The hider named the sector this bag is in, a cube 2^30 gibsons on a side, but not where in it. Only a scan that computes its region key can open it.'
-              : 'This bag carries no hint, so nothing here says where it is. Only a scan that computes its region key can open it.'}
+            {item.hint
+              ? `The hider hinted ${hintBoxLabel(item.hint)}; the bag is somewhere inside it, and a seeker tries ${searchLabel(hintSearchExponent(item.hint, item.height ?? 0))} to find it.`
+              : item.sector
+                ? 'The hider named the sector this bag is in, a cube 2^30 gibsons on a side, but not where in it. Only a scan that computes its region key can open it.'
+                : item.riddle
+                  ? 'This bag carries no hint box, so the riddle above is the only clue to where it is. Only a scan that computes its region key can open it.'
+                  : 'This bag carries no hint, so nothing here says where it is. Only a scan that computes its region key can open it.'}
             {item.height !== null && ' The region size above is how large an area it can be found from, not how far away it is.'}
           </p>
         )}

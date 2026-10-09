@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NostrEvent } from '../events'
-import { formatBytes, mergeLoot, payloadBytes, regionLabel, summarizeBag, afterBackfill, type LootItem } from '../loot'
+import { formatBytes, mergeLoot, payloadBytes, regionLabel, summarizeBag, afterBackfill, type LootItem, hintBoxLabel, hintSearchExponent } from '../loot'
 
 const pk = (n: number): string => n.toString(16).padStart(64, '0')
 const lookup = (n: number): string => (n + 1).toString(16).padStart(64, 'a')
@@ -57,7 +57,7 @@ describe('payloadBytes', () => {
   })
 })
 
-const row = (key: string, createdAt = 10): LootItem => ({ bagId: key, key, author: 'a'.repeat(64), lookupId: 'b'.repeat(64), height: 8, createdAt, bytes: 10, riddle: '', sector: null })
+const row = (key: string, createdAt = 10): LootItem => ({ bagId: key, key, author: 'a'.repeat(64), lookupId: 'b'.repeat(64), height: 8, createdAt, bytes: 10, riddle: '', sector: null, hint: null })
 
 describe('afterBackfill', () => {
   it('drops what a complete answer left out, and keeps everything when the answer was cut short', () => {
@@ -102,5 +102,21 @@ describe('labels', () => {
   it('formats bytes below a kilobyte and KB above', () => {
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(2048)).toBe('2.0 KB')
+  })
+})
+
+describe('the hint box on a row', () => {
+  const hint = ['hint', 'c492492492492492492492edf5bee7267451c787d80000000000000000000000', '30', '30', '30']
+  it('is read beside the sector, and sizes the search it asks for', () => {
+    const it = summarizeBag(bag({ tags: [['d', lookup(1)], ['encrypted', 'aes-256-gcm', 'Zm9v'], ['version', '2'], ['h', '12'], hint] }))!
+    expect(it.hint?.heights).toEqual([30, 30, 30])
+    // Three axes, each 30 minus 12: a box of 2^54 candidate regions.
+    expect(hintSearchExponent(it.hint!, 12)).toBe(54)
+    expect(hintBoxLabel(it.hint!)).toBe('a cube 2^30 gibsons on a side')
+    expect(hintBoxLabel({ ...it.hint!, heights: [12, 85, 12] })).toBe('a box of 2^12 by open by 2^12 gibsons')
+    expect(hintSearchExponent({ ...it.hint!, heights: [12, 85, 12] }, 12)).toBe(73)
+  })
+  it('is null when the bag carries no well-formed hint', () => {
+    expect(summarizeBag(bag({ content: '', h: '12', cipher: 'Zm9v' }))?.hint).toBeNull()
   })
 })

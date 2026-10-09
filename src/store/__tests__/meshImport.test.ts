@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TICKS_PER_UNIT as T, ticksOf } from 'sno-core/shards'
 import { BUILT_IN, indexOf, toBytes } from 'sno-core/snoPalette'
+import { importFitFor } from 'sno-core/meshToShard'
 import { useWorkshop } from '../useWorkshop'
 import { importFiles, tooLarge } from '../../lib/meshImport'
 
@@ -33,7 +34,7 @@ const ply = (name: string, text: string): File => new File([text], name)
 /** Read a file through the workshop's own path, fitted to the current shard, and put it down. */
 async function importInto(file: File): Promise<boolean> {
   const s = w().current()!
-  const res = await importFiles([file], { fit: s.extent * T, unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
+  const res = await importFiles([file], { fit: importFitFor(s.extent), unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
   if (!res.ok) throw new Error(res.error)
   return w().insertImport(res.shard, `${res.report.summary}.`)
 }
@@ -58,13 +59,13 @@ describe('IMPORT in the workshop', () => {
     expect(s.faces).toHaveLength(12)
     expect(s.faces.every((f) => f.every((i) => i >= 1))).toBe(true)
     expect(s.mode).toBe('solid')
-    // Fitted to the grid: its largest side is GRID SIZE units (as it was when
-    // the file was read), resting on the level, centered; the grid grew to hold it.
+    // Fitted to the grid: its largest side is half the GRID SIZE (sno-core
+    // importFitFor), resting on the level, centered, inside the grid.
     const ys = s.vertices.slice(1).map((v) => ticksOf(v)[1])
     const xs = s.vertices.slice(1).map((v) => ticksOf(v)[0])
     expect(Math.min(...ys)).toBe(2 * T)
-    expect(Math.max(...ys) - Math.min(...ys)).toBe(before.extent * T)
-    expect(s.extent).toBe(before.extent + 2)
+    expect(Math.max(...ys) - Math.min(...ys)).toBe((before.extent / 2) * T)
+    expect(s.extent).toBe(before.extent)
     expect(Math.min(...xs) + Math.max(...xs)).toBe(0)
     // Selected, exactly the new points, ready for the nudges.
     expect(w().selection).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
@@ -116,8 +117,8 @@ describe('IMPORT in the workshop', () => {
     w().setLevel(6 * T)
     await importInto(ply('cube.ply', cubePly()))
     const s = w().current()!
-    expect(s.extent).toBe(14)
-    expect(Math.max(...s.vertices.map((v) => ticksOf(v)[1]))).toBe(14 * T)
+    expect(s.extent).toBe(10)
+    expect(Math.max(...s.vertices.map((v) => ticksOf(v)[1]))).toBe(10 * T)
   })
 
   it('refuses a file over the size cap before reading it, and says why a bad file failed', async () => {

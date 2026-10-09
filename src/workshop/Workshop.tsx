@@ -27,6 +27,7 @@ import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
+import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { importFiles } from '../lib/meshImport'
 import { formatCellSize } from 'sno-core/scale'
@@ -489,8 +490,8 @@ export function Workshop(): JSX.Element | null {
 
   /**
    * IMPORT: a 3D file picked or dropped, read off the main thread
-   * (lib/meshImport), fitted to this shard's grid with its lowest point on
-   * the working plane, and put down selected, one UNDO from gone. In an
+   * (lib/meshImport), fitted to half this shard's grid (sno-core importFitFor)
+   * with its lowest point on the working plane, and put down selected, one UNDO from gone. In an
    * empty shard it becomes the shard. The line it leaves says what happened,
    * simplified or not.
    */
@@ -501,7 +502,7 @@ export function Workshop(): JSX.Element | null {
     setImporting(true)
     say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
     try {
-      const res = await importFiles(files, { fit: s.extent * TICKS_PER_UNIT, unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
+      const res = await importFiles(files, { fit: importFitFor(s.extent), unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
       if (!res.ok) { say(res.error); return }
       w().insertImport(res.shard, `${res.report.summary}.`)
     } finally {

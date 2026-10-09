@@ -27,7 +27,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sno-core": "github:arkin0x/sno-core#2cb8c80733e789f00182b6ac6cb7b394b6ac7e99",
+    "sno-core": "github:arkin0x/sno-core#c7a35042a7ed8c8b3a8680f267c8caf7104a8fa3",
     "three": "^0.169.0",
     "zustand": "^4.5.5"
   },

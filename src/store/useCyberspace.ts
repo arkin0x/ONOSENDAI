@@ -2056,6 +2056,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * so it starts at once), the poll, the verification here, then the same
    * signature step a local proof gets. A short balance (the price moved) is
    * paid through the job's own invoice, as before.
+   *
+   * The submit's idempotency key is a function of the step and the chain head
+   * (lib/hosaka.ts idempotencyKeyFor), so a submit whose answer was lost, and
+   * the same step committed again after the route failed over it, name the
+   * job the first attempt made rather than buying a second.
    */
   const startCloudStep = async (step: PlanStep, id: number): Promise<void> => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
@@ -2075,20 +2080,38 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       },
     })
     let job: HosakaJob
+    // The submit may ask again on its own after a lost answer (lib/hosaka.ts),
+    // so it runs under the cloud flow's abort like every other cloud wait: X
+    // (cancelCloud, cancelPlan) stops the retries, and a step cancelled during
+    // one is never charged by a retry that lands after it.
+    stopCloud()
+    const abort = new AbortController()
+    cloudAbort = abort
     try {
       const v1 = hosakaCoord(step.from, plane)
       const v2 = hosakaCoord(step.to, plane)
       job = step.kind === 'hop'
-        ? await client.submitHop(v1, v2, prevEventId, undefined, hopWants('hop'))
-        : await client.submitSidestep(v1, v2, prevEventId)
+        ? await client.submitHop(v1, v2, prevEventId, abort.signal, hopWants('hop'))
+        : await client.submitSidestep(v1, v2, prevEventId, abort.signal)
       const after = job.new_balance_msats ?? job.current_balance_msats
       if (typeof after === 'number') get().noteBalance(after)
+      if (job.followed_existing) {
+        // The same move was already on HOSAKA with the other cube setting:
+        // that job is followed rather than paid for twice (lib/hosaka.ts).
+        useToast.getState().show({
+          label: 'SAME MOVE ALREADY ON HOSAKA',
+          meta: 'Following the job already running, so nothing is charged twice. Your new cube setting applies from your next move.',
+          mark: 'hosaka',
+        })
+      }
     } catch (err) {
-      if (id !== requestId) return
+      if (id !== requestId || abort.signal.aborted) return
       routeFail(describeCloudError(err))
       return
+    } finally {
+      if (cloudAbort === abort) cloudAbort = null
     }
-    if (id !== requestId) return
+    if (id !== requestId || abort.signal.aborted) return
     const paying = job.payment_required === true && job.deposit !== undefined
     const record: PendingCloudJob = {
       version: 1,
@@ -3915,8 +3938,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         set({ cloud: { ...get().cloud, ...idle } })
         return { ok: false, error: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats more than your balance holds and issued no invoice.` }
       }
-      // Not persisted: a reload mid-purchase loses the job, not the money, since
-      // a paid invoice lands on the balance and the next attempt is covered.
+      // Not persisted: a reload mid-purchase loses the job, not the money. A
+      // paid invoice lands on the balance, and the next attempt for the same
+      // cube and height carries the same idempotency key (lib/hosaka.ts), so a
+      // provider that honors keys hands back this job instead of selling it twice.
       const record: PendingCloudJob = {
         version: 1, jobId: job.id, pollToken: job.poll_token, action: 'region_key', pubkey: get().identity.pubkey,
         from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',

@@ -49,7 +49,7 @@ import { useCalibration } from '../../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
 import { parseAction } from '../../lib/events'
-import { HosakaError, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
+import { HosakaError, idempotencyKeyFor, moveIdentity, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
 import { useCyberspace } from '../useCyberspace'
@@ -228,7 +228,7 @@ describe('cloud routes', () => {
 
     const s = S()
     expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, { destinationKeys: true })
-    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, { destinationKeys: true })
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, expect.any(AbortSignal), { destinationKeys: true })
     expect(s.position).toEqual(to)
   })
 
@@ -248,7 +248,7 @@ describe('cloud routes', () => {
     expect(fake.quote).toHaveBeenCalledWith('hop', { ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, undefined, undefined)
     expect(fake.balance).toHaveBeenCalled()
     expect(fake.deposit).not.toHaveBeenCalled()          // the balance covered it
-    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, undefined, undefined)
+    expect(fake.submitHop).toHaveBeenCalledWith({ ...from, plane: s.headPlane }, { ...to, plane: s.headPlane }, head, expect.any(AbortSignal), undefined)
     expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
     expect(s.plan).toBeNull()
     expect(s.events).toHaveLength(before + 1)
@@ -271,6 +271,81 @@ describe('cloud routes', () => {
     expect(JSON.parse(storage.getItem('onosendai:spent')!)[s.genesisId]).toBe(1000)
     const keys = JSON.parse(storage.getItem('onosendai:cloudRegionKeys') ?? '[]') as Array<{ lookupId: string }>
     expect(keys.some((k) => k.lookupId === s.proof.lookupId)).toBe(true)
+  })
+
+  it('a step whose submit answer was lost fails; committing again asks for the very same job, under the same key', async () => {
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    // HOSAKA made the job, but the answer never arrived.
+    fake.submitHop
+      .mockRejectedValueOnce(new HosakaError(0, 'network', 'Failed to fetch'))
+      .mockResolvedValueOnce({ ...funded(), idempotent_replay: true })
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
+
+    await S().commit()
+    await vi.waitFor(() => { expect(S().plan?.status).toBe('failed') })
+    expect(S().position).toEqual(from)
+
+    await S().commit()
+    await idle()
+
+    expect(fake.submitHop).toHaveBeenCalledTimes(2)
+    const [first, second] = fake.submitHop.mock.calls
+    // Everything but the signal, which is each attempt's own.
+    const asked = (c: unknown[]): unknown[] => [c[0], c[1], c[2], c[4]]
+    expect(asked(second)).toEqual(asked(first))
+    const keyOf = (c: unknown[]): string => idempotencyKeyFor('hop', moveIdentity(c[0] as never, c[1] as never, c[2] as string))
+    expect(keyOf(second)).toBe(keyOf(first))
+    // The retry was handed the job the lost attempt made, and the move landed once.
+    expect(S().position).toEqual(to)
+    expect(S().cloud.last?.jobId).toBe('job-1')
+  })
+
+  it('X during a step\'s submit aborts it, so no retry of it can be charged after the cancel', async () => {
+    lineUpH13()
+    fake.quote.mockResolvedValue(quote('hop'))
+    let seen: AbortSignal | undefined
+    // A submit still out (its answer lost, waiting to ask again): it ends only
+    // when its signal does.
+    fake.submitHop.mockImplementation((_v1: unknown, _v2: unknown, _prev: unknown, signal?: AbortSignal) => new Promise<HosakaJob>((_resolve, reject) => {
+      seen = signal
+      signal?.addEventListener('abort', () => reject(new HosakaError(0, 'aborted', 'cancelled')))
+    }))
+
+    void S().commit()
+    await vi.waitFor(() => { expect(fake.submitHop).toHaveBeenCalledTimes(1) })
+    expect(seen).toBeInstanceOf(AbortSignal)
+    expect(seen!.aborted).toBe(false)
+
+    S().cancelPlan()
+    expect(seen!.aborted).toBe(true)
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('idle') })
+    expect(S().plan).toBeNull()
+    expect(fake.waitForJob).not.toHaveBeenCalled()
+  })
+
+  it('a step whose cube setting changed after the move was sent follows the job already running, and says so', async () => {
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    // lib/hosaka.ts followed the 409 to the job already running for this move.
+    fake.submitHop.mockResolvedValue({ ...funded(), idempotent_replay: true, followed_existing: true })
+    const done = deferred<HosakaJob>()
+    fake.waitForJob.mockReturnValue(done.promise)
+
+    await S().commit()
+    await vi.waitFor(() => { expect(fake.waitForJob).toHaveBeenCalled() })
+    expect(useToast.getState().toast?.label).toBe('SAME MOVE ALREADY ON HOSAKA')
+    expect(useToast.getState().toast?.meta).toContain('nothing is charged twice')
+    expect(fake.waitForJob).toHaveBeenCalledWith('job-1', 'tok-job-1', expect.anything())
+
+    done.resolve(completed(hopResult(from, to, S().plane, head)))
+    await idle()
+    expect(S().position).toEqual(to)
+    expect(fake.submitHop).toHaveBeenCalledTimes(1)
   })
 
   it('respawn starts the spent tally over for the new chain', async () => {
@@ -346,7 +421,7 @@ describe('cloud routes', () => {
     settle.resolve(deposit('d1', 'settled'))
     await committed
     await idle()
-    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head, undefined, undefined)
+    expect(fake.submitHop).toHaveBeenCalledWith(expect.anything(), expect.anything(), head, expect.any(AbortSignal), undefined)
     expect(fake.startJob).not.toHaveBeenCalled()         // funded from the balance: it started at once
     expect(S().events).toHaveLength(before + 1)
     expect(S().position).toEqual(to)
@@ -503,7 +578,7 @@ describe('cloud routes', () => {
     expect(fake.quote).toHaveBeenCalledTimes(1)
     expect(fake.quote).toHaveBeenCalledWith('sidestep', { ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, undefined, undefined)
     await vi.waitFor(() => { expect(S().position.x).toBe(landing) }, { timeout: 5000 })
-    expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String))
+    expect(fake.submitSidestep).toHaveBeenCalledWith({ ...from, x: edge, plane: s0.headPlane }, { ...from, x: landing, plane: s0.headPlane }, expect.any(String), expect.any(AbortSignal))
     const ev = S().events[S().events.length - 1]
     const p = computeSidestepProof(edge, from.y, from.z, landing, from.y, from.z, s0.headPlane, ev.tags.find((t) => t[0] === 'e' && t[3] === 'previous')![1])
     expect(ev.tags.find((t) => t[0] === 'A')?.[1]).toBe('sidestep')

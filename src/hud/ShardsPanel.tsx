@@ -43,7 +43,7 @@ export function ShardsPanel(): JSX.Element {
     <section className="panel panel--shards">
       <header className="panel__head">
         <h2>Stash</h2>
-        <span className={`tag ${scanning ? 'tag--scan' : ''}`}>{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING HIDDEN' : `${hiddenCount} HIDDEN`}</span>
+        <span className={`tag ${scanning ? 'tag--scan' : ''}`} title="What you have placed in cyberspace from this stash">{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING PLACED' : `${hiddenCount} PLACED`}</span>
       </header>
 
       {/* The models themselves live in the workshop, which is where they are

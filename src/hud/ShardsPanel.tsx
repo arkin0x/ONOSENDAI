@@ -85,6 +85,17 @@ export function ShardsPanel(): JSX.Element {
         )}
       </div>
 
+      {/* Keys and chests (B1 §3.1): a key is a keypair hidden as an item, and
+          a chest is contents sealed to a key or a person. Both compose in a
+          modal (StashModals), since a chest's composer is taller than a panel row. */}
+      <div className="shards__section">
+        <span className="legend__label">Place a key or a chest</span>
+        <div className="shards__modes">
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it">⚷ FORGE A KEY</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it">▣ SEAL A CHEST</button>
+        </div>
+      </div>
+
       {mine.length > 0 && (
         <div className="shards__section">
           <span className="legend__label">Deployed — hidden in cyberspace</span>

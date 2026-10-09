@@ -146,9 +146,19 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // the list at every zoom: whether one is spent is the mint's word, which
     // CoinItem asks for, and a spent coin drops out there.
     const notesShown = markShown('note', scaleExp)
+    // A key and a chest are drawn as notes are: a cube and a short label with
+    // the item's name, so VIEW and GO TO IT have something to arrive at. What
+    // they are and what they open is in the lists (ItemRows), one tap away.
     return useShards.getState().worldItems()
-      .filter((w) => w.type === 'message' && w.text && w.plane === anchorPlane)
-      .map((w) => ({ key: w.key, text: w.text!, mine: w.mine, author: w.author ?? '', coin: findCashuToken(w.text!) !== null, centre: itemCentre(w.at, origin, scaleExp, axes) }))
+      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || w.type === 'chest') && w.plane === anchorPlane)
+      .map((w) => ({
+        key: w.key,
+        text: w.type === 'message' ? w.text! : w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`,
+        mine: w.mine,
+        author: w.author ?? '',
+        coin: w.type === 'message' && findCashuToken(w.text!) !== null,
+        centre: itemCentre(w.at, origin, scaleExp, axes),
+      }))
       .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps

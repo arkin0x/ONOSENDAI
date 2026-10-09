@@ -22,7 +22,7 @@ import { create } from 'zustand'
 import type { NostrEvent } from '../lib/events'
 import type { ChestEntry } from '../lib/chests'
 import type { Hidden, KeyItem } from '../lib/hidden'
-import { addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { describeError } from '../lib/secrets/db'
 import { openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
 import { useCyberspace } from './useCyberspace'
@@ -82,7 +82,21 @@ function persist(rows: HeldItem[]): void {
 let watching = false
 const now = (): number => Math.floor(Date.now() / 1000)
 
-export const useInventory = create<InventoryState>((set, get) => ({
+export const useInventory = create<InventoryState>((set, get) => {
+  /**
+   * Whose items are being held. Before load() has run (a find in the first
+   * moment of a session) the owner is the identity as it stands, adopted here
+   * so the hold is shown, and load() for the same identity merges onto it.
+   */
+  const ownerNow = (): string => {
+    const o = get().owner
+    if (o) return o
+    const who = useCyberspace.getState().identity.pubkey
+    set({ owner: who })
+    return who
+  }
+
+  return {
   owner: '',
   items: {},
   storage: 'loading',
@@ -115,7 +129,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
   },
 
   add: (list) => {
-    const owner = get().owner
+    const owner = ownerNow()
     const shown = list.filter((it) => it.owner === owner)
     const { items, added } = addHeld(get().items, shown)
     if (added.length > 0) set({ items })
@@ -127,7 +141,7 @@ export const useInventory = create<InventoryState>((set, get) => ({
   },
 
   holdFinds: (finds) => {
-    const owner = get().owner || useCyberspace.getState().identity.pubkey
+    const owner = ownerNow()
     const at = now()
     const rows: HeldItem[] = []
     for (const h of finds) {
@@ -138,22 +152,21 @@ export const useInventory = create<InventoryState>((set, get) => ({
   },
 
   holdForged: (event, key, place) => {
-    const owner = get().owner || useCyberspace.getState().identity.pubkey
-    const item = heldFromForged(owner, event, key, place, now())
+    const item = heldFromForged(ownerNow(), event, key, place, now())
     get().add([item])
     return get().items[item.id] ?? item
   },
 
   take: (entries, from, place) => {
-    const owner = get().owner || useCyberspace.getState().identity.pubkey
+    const owner = ownerNow()
     const at = now()
     return get().add(entries.map((e) => heldFromEntry(owner, e, from, place, at)))
   },
 
   paste: (text) => {
     const parsed = parseKeyText(text)
-    if (!parsed) return { ok: false, reason: `Not a key. A key copied from LOOT begins with ${'cyberspace-key:'} and carries the key item as JSON.` }
-    const owner = get().owner || useCyberspace.getState().identity.pubkey
+    if (!parsed) return { ok: false, reason: `Not a key. A key copied from LOOT begins with ${KEY_TEXT_PREFIX} and carries the key item as JSON.` }
+    const owner = ownerNow()
     const held = get().items[parsed.event.id]
     if (held) return { ok: true, item: held, already: true }
     const item = heldFromPasted(owner, parsed.event, parsed.key, now())
@@ -162,7 +175,8 @@ export const useInventory = create<InventoryState>((set, get) => ({
   },
 
   has: (id) => !!get().items[id],
-}))
+  }
+})
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __inventory?: unknown }).__inventory = useInventory

@@ -20,7 +20,8 @@ import { LoginModal } from './LoginModal'
 import { NotificationsButton } from './Notifications'
 import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
-import { LootPanel } from './LootPanel'
+import { DiscoveredPanel } from './DiscoveredPanel'
+import { InventoryPanel } from './InventoryPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
@@ -444,7 +445,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         {cloudLeads && <CloudPanel />}
         {rideSet && <HyperspacePanel />}
         <IdentityPanel />
-        <LootPanel />
+        {/* The three bag panels (Keys and Chests B1, ruling 14): DISCOVERED,
+            what your keys have opened where it stands; LOOT, what you hold.
+            HIDDEN, the hint work, comes later. */}
+        <DiscoveredPanel />
+        <InventoryPanel />
         <ShardsPanel />
         <AvatarsPanel />
         <TargetsPanel />

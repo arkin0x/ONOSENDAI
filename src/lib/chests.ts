@@ -26,8 +26,25 @@
 
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
-import { hexToBytes, type NostrEvent } from './events'
-import { isReference, readItem, type BagEntry, type ChestItem, type ItemBody } from './hidden'
+import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
+import { isReference, readItem, type BagEntry, type ChestItem, type ItemBody, type KeyItem } from './hidden'
+
+/** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
+export function forgeKey(name: string, about = ''): KeyItem {
+  const sk = generateSecretKey()
+  return { name, about, itemPubkey: getPublicKey(sk), secretHex: bytesToHex(sk) }
+}
+
+/**
+ * How many bytes a chest's contents will be once signed, before they are:
+ * each template as the event it becomes, with the id, pubkey and signature
+ * at their fixed lengths, so the composer's meter reads what the seal will
+ * see, give or take nothing.
+ */
+export function templateBytes(templates: EventTemplate[], pubkey: string): number {
+  const events = templates.map((t) => ({ id: '0'.repeat(64), pubkey, created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, sig: '0'.repeat(128) }))
+  return new TextEncoder().encode(JSON.stringify(events)).length
+}
 
 /** NIP-44 v2 seals at most this many bytes of plaintext; a chest's list of entries must fit. */
 export const NIP44_MAX_PLAINTEXT = 65_535

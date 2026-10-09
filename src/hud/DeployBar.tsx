@@ -48,9 +48,9 @@ import { useEffect, useMemo } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, isProtected, ownBagIn, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, isProtected, ownBagIn, pendingEmpty, pendingName, regionOf, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
-import { MAX_RIDDLE_LENGTH, messagePreview } from '../lib/hidden'
+import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
@@ -146,9 +146,11 @@ export function DeployBar(): JSX.Element | null {
 
   if (!pending) return null
 
-  const isMessage = pending.type === 'message'
-  const name = isMessage ? messagePreview(pending.text) : shard?.name ?? 'shard'
-  const empty = isMessage ? pending.text.trim().length === 0 : !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
+  // A message, a key and a chest have no size or pose: only a shard gets those rows.
+  const isMessage = pending.type !== 'shard'
+  const title = pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
+  const name = pendingName(pending, shard)
+  const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
   const stepOpen = building && drivable && !working
   // This machine's time is the button's tooltip, not a row (arkinox,
@@ -156,14 +158,14 @@ export function DeployBar(): JSX.Element | null {
   const localEst = route !== 'local' ? undefined : height === 0 ? 'No key work at height 0' : localSeconds === null ? 'Computed on this machine; the benchmark has not run yet' : `Computed on this machine, ${waitLabel(localSeconds)}`
 
   return (
-    <div className="deploybar" role="dialog" aria-label={isMessage ? 'Hide message' : 'Deploy shard'}>
+    <div className="deploybar" role="dialog" aria-label={pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
       {/* The title row carries the action, left of CANCEL, so the rest of the
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}
       <div className="deploybar__row deploybar__head">
         <span className="deploybar__eye" aria-hidden="true">◇</span>
         <span className="deploybar__title">
-          {isMessage ? 'HIDE MESSAGE' : 'DEPLOY'} <strong>{name}</strong>
+          {title} <strong>{name}</strong>
         </span>
         {!ask && (
           <button
@@ -173,7 +175,7 @@ export function DeployBar(): JSX.Element | null {
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
-            {empty ? (isMessage ? 'MESSAGE IS EMPTY' : 'SHARD IS EMPTY') : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}

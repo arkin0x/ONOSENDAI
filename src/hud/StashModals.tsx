@@ -1,18 +1,22 @@
 /**
- * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals, and the
- * Builder's Hide a Message composer.
+ * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals, the
+ * Builder's Hide a Message composer, and the Forge a Key and Seal a Chest
+ * composers (Keys and Chests B1 §3.1).
  * State in hud/stash.ts; mounted once at the app root.
  */
 
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
+import { hiddenGlyph } from '../lib/hidden'
 import { useShards, type MyDeployment } from '../store/useShards'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
+import { KeyCompose } from './KeyCompose'
+import { ChestCompose } from './ChestCompose'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
@@ -43,7 +47,7 @@ function Shell({ title, onClose, children }: { title: string; onClose: () => voi
 
 /** One bag as a row: what is in it, how big a region it is sealed to, whether it is out. */
 export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.Element {
-  const kinds = bag.items.map((d) => (d.type === 'message' ? (/cashu[AB]/.test(d.text ?? '') ? '₿' : '✎') : '◇')).join('')
+  const kinds = bag.items.map((d) => hiddenGlyph(d.type, d.type === 'message' && /cashu[AB]/.test(d.text ?? ''))).join('')
   const first = depName(bag.items[0])
   return (
     <li className="shards__row shards__row--deployed">
@@ -68,11 +72,11 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">
         <span className="avatars__who">
-          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{coin ? '₿' : d.type === 'message' ? '✎' : '◇'}</span>
+          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{hiddenGlyph(d.type, coin)}</span>
           {coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : depName(d)}
         </span>
         <span className="shards__meta">
-          {d.type === 'message' ? (coin ? 'cashu token' : 'message') : 'object'}{d.published ? ' · LIVE' : ' · LOCAL'}
+          {d.type === 'message' ? (coin ? 'cashu token' : 'message') : d.type === 'shard' ? 'object' : d.type}{d.published ? ' · LIVE' : ' · LOCAL'}
           {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
         </span>
       </button>
@@ -107,7 +111,7 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag, message, feed } = useStash()
+  const { models, bags, bag, message, key, chest, feed } = useStash()
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
@@ -154,6 +158,22 @@ export function StashModals(): JSX.Element | null {
       <Shell title="Hide a message" onClose={close}>
         <p className="login__note">Write the message, then aim it: it lands at the build cursor, and the bar that comes next sets how far away someone can be and still find it. Building does not move your avatar.</p>
         <MessageCompose onDone={close} />
+      </Shell>
+    )
+  }
+  // No paragraph on either: what a key or a chest is lives in the tooltips
+  // and the LOOT panel's EXPLAIN (the standing rule).
+  if (key) {
+    return (
+      <Shell title="Forge a key" onClose={close}>
+        <KeyCompose onDone={close} />
+      </Shell>
+    )
+  }
+  if (chest) {
+    return (
+      <Shell title="Seal a chest" onClose={close}>
+        <ChestCompose onDone={close} />
       </Shell>
     )
   }

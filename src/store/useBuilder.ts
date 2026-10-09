@@ -93,7 +93,7 @@
 
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
-import { useShards } from './useShards'
+import { useShards, type DeployPending } from './useShards'
 import { useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useStash } from '../hud/stash'
@@ -126,6 +126,11 @@ export interface BuilderState {
    * is lost. Taken, and cleared, by the next composer that opens.
    */
   messageDraft: string | null
+  /**
+   * A key or a chest whose deploy BUILD mode had to end, kept whole the way a
+   * message's text is: the composer that opens next starts from it.
+   */
+  itemDraft: DeployPending | null
   /**
    * The action of the chain on show (yours, or the spectated avatar's) that
    * the build cursor was last aimed at by the chain explorer; null for the
@@ -161,6 +166,8 @@ export interface BuilderState {
   toAvatar: () => void
   /** The composer took the kept message. */
   takeMessageDraft: () => string | null
+  /** The kept key or chest draft of that type, taken: the composer owns it now. */
+  takeItemDraft: (type: 'key' | 'chest') => DeployPending | null
 }
 
 /**
@@ -212,6 +219,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   via: null,
   leftAvatar: false,
   messageDraft: null,
+  itemDraft: null,
   scrub: null,
 
   scrubTo: (index) => {
@@ -299,6 +307,13 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (draft !== null) set({ messageDraft: null })
     return draft
   },
+
+  takeItemDraft: (type) => {
+    const draft = get().itemDraft
+    if (!draft || draft.type !== type) return null
+    set({ itemDraft: null })
+    return draft
+  },
 }))
 
 /**
@@ -317,7 +332,9 @@ function endUnder(reason: BuildEndReason): void {
     // to say (found in review, 2026-10-07: it used to say "kept" and publish).
     kept = pending.type === 'message'
       ? ' Your message was already being hidden, and it finishes at the place you chose.'
-      : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
+      : pending.type === 'key' || pending.type === 'chest'
+        ? ` Your ${pending.type} was already being hidden, and it finishes at the place you chose.`
+        : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
   } else if (pending) {
     // What was set for this one deploy goes with it; say so plainly.
     const riddle = shards.deployBag.riddle.trim() !== ''
@@ -325,6 +342,10 @@ function endUnder(reason: BuildEndReason): void {
     if (pending.type === 'message') {
       useBuilder.setState({ messageDraft: pending.text })
       kept = ' Your message is kept: WRITE A MESSAGE in the Stash, or HIDE MESSAGE in build mode, opens it again.' + dropped
+    } else if (pending.type === 'key' || pending.type === 'chest') {
+      // Kept whole, as a message is: the key's pair and name, or the chest's lock and contents.
+      useBuilder.setState({ itemDraft: pending })
+      kept = ` Your ${pending.type} is kept: ${pending.type === 'key' ? 'FORGE A KEY' : 'SEAL A CHEST'} in the Stash opens it again.` + dropped
     } else {
       const name = shards.pendingShard()?.name ?? 'the object'
       kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped

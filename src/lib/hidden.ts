@@ -275,6 +275,22 @@ export function messagePreview(text: string, max = 32): string {
   return t.length > max ? `${t.slice(0, max)}…` : t || 'empty'
 }
 
+/** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest'>, max = 32): string {
+  if (h.type === 'message') return messagePreview(h.text ?? '', max)
+  if (h.type === 'key') return h.key?.name ?? 'key'
+  if (h.type === 'chest') return h.chest?.name ?? 'chest'
+  return h.shard?.name ?? 'shard'
+}
+
+/** The glyph each kind of hidden thing is marked with in a row: a shard, a note, a coin, a key, a chest. */
+export function hiddenGlyph(type: HiddenType, coin = false): string {
+  if (type === 'key') return '⚷'
+  if (type === 'chest') return '▣'
+  if (type === 'message') return coin ? '₿' : '✎'
+  return '◇'
+}
+
 /** What a decoded hidden thing carries, ready to render. */
 export interface Hidden {
   /**

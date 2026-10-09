@@ -22,7 +22,7 @@
  * the key from the location. No `d` tag, as FF-1 requires of derived events.
  */
 
-import { HIDDEN_KIND, MESSAGE_KIND, SHARD_KIND, type HiddenType } from './hidden'
+import { CHEST_KIND, HIDDEN_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, type HiddenType } from './hidden'
 import type { EventTemplate, NostrEvent } from './events'
 import { CLIENT_TAG } from './client'
 import { decryptForRegion, encryptForRegion } from './shardCrypto'
@@ -133,7 +133,7 @@ export function bagAddress(subject: Pick<CommentSubject, 'author' | 'lookupId'>)
 }
 
 export function itemKind(type: HiddenType): number {
-  return type === 'shard' ? SHARD_KIND : MESSAGE_KIND
+  return type === 'shard' ? SHARD_KIND : type === 'key' ? KEY_KIND : type === 'chest' ? CHEST_KIND : MESSAGE_KIND
 }
 
 /** The item as a parent: a top-level comment answers the item, or for a LIVE LINK the bag only. */

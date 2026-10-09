@@ -1,5 +1,5 @@
 /**
- * LootDetail.tsx — one bag, opened from the Loot list.
+ * LootDetail.tsx — one bag, opened from the DISCOVERED list.
  *
  * Everything a seeker can know about a bag without opening it: who hid it and
  * when, the size of the region it is encrypted to, how much is inside, the
@@ -7,7 +7,9 @@
  * stays hidden until its hider adds a hint, and the view says so in plain
  * words rather than leaving a number to be misread as a distance. A bag your
  * own scan has already opened, or one of your own, lists its items with a
- * VIEW button that flies the scene to each.
+ * VIEW button that flies the scene to each. A key found is marked as held;
+ * a chest found says what opens it and, when you hold that, opens here with
+ * its contents beneath and TAKE on each (ItemRows, Keys and Chests B1 §3.2).
  */
 
 import { cashuLabel, readCashuToken } from '../lib/cashu'
@@ -17,7 +19,8 @@ import { useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
-import { messagePreview } from '../lib/hidden'
+import { hiddenGlyph, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
+import { placeOf, type HeldPlace } from '../lib/inventory'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
 import type { Position } from '../lib/space'
 import { spectate } from '../lib/spectator'
@@ -25,20 +28,25 @@ import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLootView } from '../store/useLootView'
 import { profileLabel } from '../store/useProfiles'
-import { useShards } from '../store/useShards'
+import { useShards, positionOf } from '../store/useShards'
 import { ProfilePic } from './ProfileBadge'
+import { ChestBlock, KeyLine } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 
 /** An item of this bag that this client can already see, from a scan or from its own deployments. */
 interface OpenedItem {
   eventId: string
-  type: 'shard' | 'message'
+  type: HiddenType
   label: string
   at: Position
   plane: Plane
   unit: number
   shard?: ShardModel
   text?: string
+  key?: KeyItem
+  chest?: ChestItem
+  /** Where it was found, for what is taken out of a chest here. */
+  place: HeldPlace
 }
 
 /** A message's preview, or what its Cashu token holds when it carries one; a coin that cannot be read is still a coin. */
@@ -67,6 +75,14 @@ function Copyable({ label, value }: { label: string; value: string }): JSX.Eleme
   )
 }
 
+/** A row's label by what it is: a message's words or coin, else its name. */
+function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?: KeyItem; chest?: ChestItem }): string {
+  if (x.type === 'message') return cashuOrPreview(x.text)
+  if (x.type === 'key') return x.key?.name ?? 'key'
+  if (x.type === 'chest') return x.chest?.name ?? 'chest'
+  return x.shard?.name ?? 'shard'
+}
+
 /** The bag's items this client can see: found by its scan, or its own. */
 function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.getState>['discovered'], mine: ReturnType<typeof useShards.getState>['mine']): OpenedItem[] {
   const out = new Map<string, OpenedItem>()
@@ -75,12 +91,15 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(h.eventId, {
       eventId: h.eventId,
       type: h.type,
-      label: h.type === 'message' ? cashuOrPreview(h.text) : h.shard?.name ?? 'shard',
+      label: labelOf(h),
       at: h.at,
       plane: h.plane,
       unit: h.type === 'shard' ? h.shard?.unit ?? 0 : 0,
       shard: h.shard,
       text: h.text,
+      key: h.key,
+      chest: h.chest,
+      place: placeOf(h),
     })
   }
   for (const d of mine) {
@@ -88,12 +107,15 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(d.eventId, {
       eventId: d.eventId,
       type: d.type,
-      label: d.type === 'message' ? cashuOrPreview(d.text) : d.shard?.name ?? 'shard',
-      at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) },
+      label: labelOf(d),
+      at: positionOf(d),
       plane: d.plane,
       unit: d.type === 'shard' ? d.shard?.unit ?? 0 : 0,
       shard: d.shard,
       text: d.text,
+      key: d.key,
+      chest: d.chest,
+      place: { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height },
     })
   }
   return [...out.values()]
@@ -143,7 +165,7 @@ export function LootDetail(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden bag" onPointerDown={close}>
       <div className="modal__card secret lootd" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className="secret__badge">◈ LOOT</span>
+          <span className="secret__badge">◈ DISCOVERED</span>
           {opened.length > 0 && <span className="tag tag--live">{yours ? 'YOURS' : 'FOUND'}</span>}
           {yours && opened.length === 0 && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
@@ -174,15 +196,24 @@ export function LootDetail(): JSX.Element | null {
         {opened.length > 0 ? (
           <ul className="lootd__items">
             {opened.map((o) => (
-              <li key={o.eventId} className="lootd__item">
-                <span className={`secret__badge secret__badge--${o.type}`}>{o.type === 'message' ? (o.label.startsWith('₿') ? '₿' : '✎') : '◇'}</span>
-                <span className="lootd__item-label" title={o.label}>{o.label}</span>
+              <li key={o.eventId} className={`lootd__item ${o.type === 'chest' ? 'lootd__item--chest' : ''}`}>
+                <span className={`secret__badge secret__badge--${o.type}`}>{hiddenGlyph(o.type, o.label.startsWith('₿'))}</span>
+                {/* A key says it is held; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
+                {o.type === 'key' && o.key
+                  ? <KeyLine name={o.key.name} author={item.author} />
+                  : o.type === 'chest' && o.chest
+                    ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} place={o.place} />
+                    : <span className="lootd__item-label" title={o.label}>{o.label}</span>}
                 <span className="lootd__acts">
                   <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>
-                  <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>
-                  <button className="secret__act lootd__view" onClick={() => copy(o)} title={o.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
-                    {copied === o.eventId ? 'COPIED' : 'COPY'}
-                  </button>
+                  {(o.type === 'shard' || o.type === 'message') && (
+                    <>
+                      <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>
+                      <button className="secret__act lootd__view" onClick={() => copy(o)} title={o.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
+                        {copied === o.eventId ? 'COPIED' : 'COPY'}
+                      </button>
+                    </>
+                  )}
                 </span>
               </li>
             ))}

@@ -8185,3 +8185,66 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   flex-direction: column;
   gap: 3px;
 }
+/* ---------------------------------------------------------------------------
+   Keys and chests (B1): the key line and chest block wherever found things
+   are listed (ItemRows), the FORGE A KEY and SEAL A CHEST composers, and the
+   LOOT panel's rows (InventoryPanel). Appended whole, per the note above. */
+.item__line { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.item__name { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item__meta { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.item__held { font-size: 8px; letter-spacing: 0.14em; color: var(--ok); white-space: nowrap; }
+.chest { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.chest__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chest__act {
+  flex: none;
+  padding: 3px 9px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chest__act:hover { background: rgba(0, 229, 255, 0.16); }
+.chest__act:disabled { opacity: 0.45; cursor: default; }
+.chest__act.is-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: transparent; }
+.chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
+.chest__contents {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chest__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chest__glyph { flex: none; font-size: 13px; color: var(--accent); }
+.chest__glyph--key { color: #e8c547; }
+.chest__glyph--message { color: #ffd27d; }
+.chest__glyph--cashu { color: #f7931a; }
+.secret__badge--key { color: #e8c547; }
+.lootd__item--chest { align-items: flex-start; }
+/* The composers: a row of controls, the contents list, and the size meter. */
+.compose__row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.compose__row .avatars__input { flex: 1 1 auto; min-width: 0; }
+.compose__select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+.compose__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.compose__list .item__name { flex: 1 1 auto; }
+.compose__pubkey { font-size: 9px; color: var(--dim); word-break: break-all; }
+.compose__meter { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.compose__meter.is-over { color: var(--warn); }
+/* LOOT: a held row is glyph, line, actions; DETAILS opens under all three. */
+.held__list { max-height: 40vh; overflow-y: auto; }
+.held__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.held__row .chest { grid-column: 2; }
+.held__acts { display: flex; gap: 4px; align-items: center; }
+.held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
+.held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+.held__details dt { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); align-self: center; }
+.held__details dd { margin: 0; word-break: break-all; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.loot__paste { display: flex; gap: 6px; margin-top: 6px; }
+.loot__paste .avatars__input { flex: 1 1 auto; min-width: 0; }

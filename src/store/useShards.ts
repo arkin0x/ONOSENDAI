@@ -19,6 +19,13 @@
  * scan after another device placed it, kept with each item's signed inner
  * event so a bag can be rebuilt without the relay; `discovered` is what a scan
  * turned up near you and could decrypt and verify.
+ *
+ * Two more item kinds hide the same way (Keys and Chests B1): a key, a keypair
+ * the hider forges, and a chest, contents sealed to a key's or a person's
+ * public key (lib/chests.ts). A chest's contents are signed here one by one
+ * and sealed before the region key is computed; a key hidden, alone or inside
+ * a chest, goes into the hider's own inventory at once (store/useInventory.ts),
+ * and every key a scan reads is held the moment it is read.
  */
 
 import { clampUnit, normalizeStored } from 'sno-core/shards'
@@ -28,7 +35,7 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
-import { bytesToHex, hexToBytes, type NostrEvent } from '../lib/events'
+import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } from '../lib/deployPlan'
@@ -50,13 +57,21 @@ import {
   wantsReference,
   type BagEntry,
   type Reference,
+  chestInnerTemplate,
+  keyInnerTemplate,
   messageInnerTemplate,
+  messagePreview,
   shardInnerTemplate,
   shardRefusal,
   unbag,
+  type ChestItem,
   type Hidden,
   type HiddenType,
+  type KeyItem,
 } from '../lib/hidden'
+import { sealEntries } from '../lib/chests'
+import type { HeldPlace } from '../lib/inventory'
+import { useInventory } from './useInventory'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { useCeremony } from './useCeremony'
@@ -86,6 +101,8 @@ export interface MyDeployment {
   type: HiddenType
   shard?: ShardModel
   text?: string
+  key?: KeyItem
+  chest?: ChestItem
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
@@ -114,9 +131,14 @@ export interface WorldItem {
   author?: string
   shard?: ShardModel
   text?: string
+  /** The key item, for a key (`key` above is the world item's own id). */
+  keyItem?: KeyItem
+  chest?: ChestItem
   createdAt?: number
   /** The bag's lookup id, for anything addressed to the bag (comments). */
   lookupId?: string
+  /** The bag's event id, for the inventory's record of where a thing was found. */
+  bagId?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
 }
@@ -194,6 +216,29 @@ export function forgetLinkCopies(): void {
 /** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
 export const LINK_REFUSED = "LIVE LINK needs the author's object on one of your relays, and none took it. Place it as a copy instead."
 
+/** What the composer puts in a chest: signed at COMMIT, then sealed (B1 §3.1). */
+export type ChestContent =
+  | { kind: 'message'; text: string }
+  /** One of your workshop models, carried inline. */
+  | { kind: 'shard'; shardId: string }
+  /** A new key forged inline, for chaining: it is held by you the moment the chest is hidden. */
+  | { kind: 'key'; key: KeyItem }
+
+/** What a chest is sealed to, and how the composer named it. */
+export interface ChestLock {
+  pubkey: string
+  /** For the bar and the ghost: the key's name, or "a person". */
+  label: string
+}
+
+/** A chest as the composer hands it over, before anything is signed or sealed. */
+export interface ChestDraft {
+  name: string
+  lock: ChestLock
+  requires: string
+  contents: ChestContent[]
+}
+
 /** What a deploy is placing, before it lands. */
 export type DeployPending =
   /**
@@ -203,6 +248,29 @@ export type DeployPending =
    */
   | { type: 'shard'; shardId: string; object?: FeedObject }
   | { type: 'message'; text: string }
+  /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
+  | { type: 'key'; key: KeyItem }
+  | ({ type: 'chest' } & ChestDraft)
+
+/** The name a pending deploy goes by in the bar and the ghost. */
+export function pendingName(pending: DeployPending, shard: ShardModel | null): string {
+  switch (pending.type) {
+    case 'message': return messagePreview(pending.text)
+    case 'key': return pending.key.name
+    case 'chest': return pending.name
+    default: return shard?.name ?? 'shard'
+  }
+}
+
+/** Whether a pending deploy has nothing in it to hide. */
+export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): boolean {
+  switch (pending.type) {
+    case 'message': return pending.text.trim().length === 0
+    case 'key': return pending.key.name.trim().length === 0
+    case 'chest': return pending.name.trim().length === 0 || pending.contents.length === 0
+    default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
+  }
+}
 
 /**
  * A region as one string: plane, height and aligned base. Two placements are in
@@ -332,6 +400,10 @@ interface ShardsState {
 
   startDeployShard: (shardId: string) => void
   startDeployMessage: (text: string) => void
+  /** Hide a key the composer forged (B1 §3.1). */
+  startDeployKey: (key: KeyItem) => void
+  /** Hide a chest as the composer drafted it; its contents are signed and sealed when it is hidden. */
+  startDeployChest: (draft: ChestDraft) => void
   setDeployHeight: (h: number) => void
   /** Set the size this deployment goes out at, inside the same bounds the workshop uses. */
   setDeployUnit: (unit: number) => void
@@ -427,7 +499,7 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
   } catch { return [] }
 }
 
@@ -595,7 +667,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
-        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text,
+        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
       })
@@ -604,6 +676,46 @@ export const useShards = create<ShardsState>((set, get) => {
     const next = [...updated, ...own]
     set({ mine: next })
     saveMine(next)
+  }
+
+  /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
+  const freshDeploy = {
+    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false,
+    deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
+  }
+
+  /**
+   * A chest's contents, signed one by one by this identity and sealed to the
+   * lock (lib/chests.ts). Signing is here and not in the composer because the
+   * contents carry the place they are hidden at, which is only known now, and
+   * because a signer may be remote and slow, which the bar shows as work.
+   * Returns the chest item for the inner template and the keys forged inside,
+   * each with its signed event, for the inventory.
+   */
+  async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }> }> {
+    const cs = cyber()
+    const signed: NostrEvent[] = []
+    const forged: Array<{ event: NostrEvent; key: KeyItem }> = []
+    for (const c of draft.contents) {
+      if (c.kind === 'message') {
+        const text = c.text.trim()
+        if (!text) continue
+        signed.push(await cs.signEvent(messageInnerTemplate(text, at, plane, createdAt)))
+      } else if (c.kind === 'shard') {
+        const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
+        if (!model) throw new Error('A model in this chest is no longer in your workshop.')
+        const refusal = shardRefusal(model)
+        if (refusal) throw new Error(refusal)
+        signed.push(await cs.signEvent(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
+      } else {
+        const event = await cs.signEvent(keyInnerTemplate(c.key, at, plane, createdAt))
+        signed.push(event)
+        forged.push({ event, key: c.key })
+      }
+    }
+    if (signed.length === 0) throw new Error('The chest is empty.')
+    const sealed = sealEntries(signed, draft.lock.pubkey)
+    return { chest: { name: draft.name.trim(), lockPubkey: draft.lock.pubkey, senderPubkey: sealed.senderPubkey, requires: draft.requires.trim(), payload: sealed.payload }, forged }
   }
 
   return {
@@ -673,7 +785,9 @@ export const useShards = create<ShardsState>((set, get) => {
       deployStatus: 'idle',
       deployError: null,
     }),
-    startDeployMessage: (text) => set({ pending: { type: 'message', text }, deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0], deployFollow: false, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null }),
+    startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
+    startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft }, ...freshDeploy }),
     setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
@@ -772,7 +886,11 @@ export const useShards = create<ShardsState>((set, get) => {
 
       let shard: ShardModel | undefined
       let text: string | undefined
-      let innerTemplate
+      let key: KeyItem | undefined
+      let chest: ChestItem | undefined
+      // Keys forged inside a chest, held by the hider once the chest is hidden.
+      let forgedInside: Array<{ event: NostrEvent; key: KeyItem }> = []
+      let innerTemplate: EventTemplate | undefined
       // From the Shard Feed: the author's object, by reference (LIVE LINK) or
       // as a copy that credits it (DECK-0003 §3.2; ruling B1).
       const object = pending.type === 'shard' ? pending.object : undefined
@@ -809,6 +927,14 @@ export const useShards = create<ShardsState>((set, get) => {
         // remixed model the original it was remixed from (sno-core creditTags).
         const credit: Credit | undefined = object ? { address: object.address, relay: object.seen?.[0] } : creditOf(model)
         innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
+      } else if (pending.type === 'key') {
+        if (!pending.key.name.trim()) return
+        key = { ...pending.key, name: pending.key.name.trim(), about: pending.key.about.trim() }
+        innerTemplate = keyInnerTemplate(key, at, plane, createdAt)
+      } else if (pending.type === 'chest') {
+        // Signed and sealed inside the try below: the contents are signed by
+        // the identity, which may be a remote signer, and the bar shows it.
+        if (!pending.name.trim() || pending.contents.length === 0) return
       } else {
         text = pending.text.trim()
         if (!text) return
@@ -817,6 +943,13 @@ export const useShards = create<ShardsState>((set, get) => {
 
       set({ deployStatus: 'working', deployError: null, deployAsk: null })
       try {
+        if (pending.type === 'chest') {
+          set({ deployNote: 'Signing and sealing the chest' })
+          const sealed = await sealChest(pending, at, plane, createdAt)
+          chest = sealed.chest
+          forgedInside = sealed.forged
+          innerTemplate = chestInnerTemplate(chest, at, plane, createdAt)
+        }
         let rk: { key: Uint8Array; lookupId: string }
         if (route === 'cloud') {
           set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
@@ -866,6 +999,7 @@ export const useShards = create<ShardsState>((set, get) => {
           ref = referenceTo(inner, at, plane, relaySet()[0] ?? '')
           forgetReference(ref)
         } else {
+          if (!innerTemplate) throw new Error('Nothing to hide.')
           inner = await cs.signEvent(innerTemplate)
         }
         let event: NostrEvent
@@ -899,6 +1033,8 @@ export const useShards = create<ShardsState>((set, get) => {
           type: pending.type,
           shard,
           text,
+          key,
+          chest,
           at: storedAt(at),
           plane,
           height: deployHeight,
@@ -909,6 +1045,11 @@ export const useShards = create<ShardsState>((set, get) => {
           published,
           bag: settings,
         }
+        // A key you hid is yours to hold at once, alone or inside a chest, so
+        // chests can be sealed to it from here on (B1 §3.1).
+        const place: HeldPlace = { lookupId: rk.lookupId, bagId: event.id, at: storedAt(at), plane, height: deployHeight }
+        if (key) useInventory.getState().holdForged(inner, key, place)
+        for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
         const mine = [
           ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
@@ -1133,6 +1274,9 @@ export const useShards = create<ShardsState>((set, get) => {
       if (changed) set({ discovered })
       remember(items.map((h) => h.eventId))
       claimOwn(items)
+      // Reading a key is holding it (B1 §2.1): every key a scan opened goes
+      // into the inventory, once, whoever hid it.
+      useInventory.getState().holdFinds(items)
     },
 
     freshOf: (items) => {
@@ -1174,11 +1318,11 @@ export const useShards = create<ShardsState>((set, get) => {
       const me = useCyberspace.getState().identity.pubkey
       for (const d of get().mine) {
         seen.add(d.eventId)
-        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, createdAt: d.createdAt, lookupId: d.lookupId, target: itemTargetOf(d.inner, d.ref) })
+        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref) })
       }
       for (const h of Object.values(get().discovered)) {
         if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, createdAt: h.createdAt, lookupId: h.lookupId, target: itemTargetOf(h.inner, h.ref) })
+        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref) })
       }
       return out
     },

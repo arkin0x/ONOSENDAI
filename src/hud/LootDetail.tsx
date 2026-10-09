@@ -138,6 +138,10 @@ export function LootDetail(): JSX.Element | null {
   const [copied, setCopied] = useState<string | null>(null)
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', item !== null, () => useLootView.getState().select(null))
+  // The bag's reading, also above the return: with it below, the first tap
+  // on any bag rendered one hook more than the empty render before it, and
+  // React threw error 310 (arkinox, 2026-10-09).
+  const reading = useBagReading(item?.bagId ?? '')
 
   if (!item) return null
 
@@ -145,7 +149,6 @@ export function LootDetail(): JSX.Element | null {
   const name = profileLabel(profile, npub)
   const yours = item.author === me
   const opened = openedItems(item, discovered, mine)
-  const reading = useBagReading(item.bagId)
   const close = (): void => useLootView.getState().select(null)
 
   const view = (o: OpenedItem): void => {

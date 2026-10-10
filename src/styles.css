@@ -8595,3 +8595,21 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* AGENTS: a labeled COPY with the last meeting code beside it, then MY AGENTS rows of face, npub, SPECTATE. */
+.agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
+.agents__code {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  padding: 0 6px;
+  height: 26px;
+  line-height: 24px;
+  border: 1px dashed rgba(0, 229, 255, 0.4);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.agents__row { grid-template-columns: 1fr auto auto; }
+.agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
+.agents__npub:hover { color: var(--accent); }

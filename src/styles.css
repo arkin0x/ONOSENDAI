@@ -1554,6 +1554,10 @@ kbd {
   white-space: pre-wrap;
 }
 
+/* A body of a few short lines, each on its own, a little apart. */
+.modal__line { display: block; }
+.modal__line + .modal__line { margin-top: 6px; }
+
 .modal__row {
   display: grid;
   grid-template-columns: 1fr 1fr;

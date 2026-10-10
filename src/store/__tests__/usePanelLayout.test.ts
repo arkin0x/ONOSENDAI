@@ -44,10 +44,10 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 
 describe('the default order', () => {
   it('is the menu as it was, every panel once, in one column', () => {
-    expect(DEFAULT_ORDER.left).toEqual(['identity', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'])
+    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'])
     expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(19)
+    expect(PANEL_IDS).toHaveLength(20)
   })
 
   it('comes as a fresh copy each time', () => {
@@ -107,7 +107,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 

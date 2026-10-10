@@ -24,9 +24,14 @@ export const PANEL_LAYOUT_KEY = 'onosendai:panel-layout'
 export type Column = 'left' | 'right'
 export const COLUMNS: readonly Column[] = ['left', 'right']
 
-/** The menu as Hud.tsx laid it out before the order could change, top to bottom. */
+/**
+ * The menu as Hud.tsx laid it out before the order could change, top to
+ * bottom. AGENTS came after (arkinox, 2026-10-09, ruling 4: a panel beside
+ * IDENTITY and LINKS), right under Identity, and mergeOrder puts it there in
+ * a saved layout that predates it.
+ */
 export const DEFAULT_ORDER = {
-  left: ['identity', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+  left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
   right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
 } as const satisfies Record<Column, readonly string[]>
 

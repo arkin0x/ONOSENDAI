@@ -20,6 +20,7 @@ import { LoginModal } from './LoginModal'
 import { NotificationsButton } from './Notifications'
 import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
+import { AgentsPanel } from './AgentsPanel'
 import { DiscoveredPanel, HiddenPanel } from './DiscoveredPanel'
 import { InventoryPanel } from './InventoryPanel'
 import { ChainPanel } from './ChainPanel'
@@ -424,16 +425,18 @@ function Controls(): JSX.Element {
 /**
  * Every panel under its layout id (usePanelLayout). The default order there
  * is the menu as it was before the order could change: the left column held
- * Identity, then the three bag panels (Keys and Chests B1, ruling 14) in a
- * bag's order of life (HIDDEN BAGS, on the relay and not yet opened by your
- * keys; DISCOVERED BAGS, opened where it stands; ITEMS, what you hold), then
- * Create, Avatars, Targets and the Official links; the right column Scale,
- * Position, Movement proof, Cloud compute, Proof chain, Hyperspace, View
- * (what the scene draws, just above the Legend that decodes it), Legend,
- * Controls, Derezz and Relays.
+ * Identity, then Agents (added 2026-10-10, ruling 4 of the agents track:
+ * beside IDENTITY and LINKS), then the three bag panels (Keys and Chests B1,
+ * ruling 14) in a bag's order of life (HIDDEN BAGS, on the relay and not yet
+ * opened by your keys; DISCOVERED BAGS, opened where it stands; ITEMS, what
+ * you hold), then Create, Avatars, Targets and the Official links; the right
+ * column Scale, Position, Movement proof, Cloud compute, Proof chain,
+ * Hyperspace, View (what the scene draws, just above the Legend that decodes
+ * it), Legend, Controls, Derezz and Relays.
  */
 const PANELS: Record<PanelId, () => JSX.Element> = {
   identity: IdentityPanel,
+  agents: AgentsPanel,
   hidden: HiddenPanel,
   discovered: DiscoveredPanel,
   items: InventoryPanel,

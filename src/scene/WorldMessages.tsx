@@ -45,6 +45,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
+import { useProfile } from '../hooks/useProfile'
+import { profileLabel } from '../store/useProfiles'
 import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
@@ -153,6 +155,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || w.type === 'chest') && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,
+        type: w.type,
         text: w.type === 'message' ? w.text! : w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`,
         mine: w.mine,
         author: w.author ?? '',
@@ -171,13 +174,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
+        if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
+        // A key or a chest: the cube and its short name, as before.
         return (
           <group key={w.key}>
             <WorldMark kind="note" at={w.centre} />
-            {births[w.key] !== undefined
-              ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={births[w.key]} at={w.centre} />
-              : <WorldLabel text={messageBillboard(w.text)} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />}
-
+            <WorldLabel text={w.text} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
@@ -185,6 +187,41 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         )
       })}
     </>
+  )
+}
+
+/** How long a found message's words stay once they have resolved, before the cube and the name are all that is left. */
+const FLOURISH_HOLD_MS = 2600
+
+/**
+ * A message in the world: the cube and the hider's name under it, and nothing
+ * else; the words are one tap away in the item modal (arkinox, 2026-10-10,
+ * decision B: the full-text billboards piled up on each other and over
+ * everything near them, and were unreadable at distance anyway). A message
+ * just found keeps its flourish: the words resolve out of glyphs
+ * (DecodingLabel), hold for a moment, then give way to the cube and the name.
+ * The name is the profile's where one is known, "you" for your own.
+ */
+function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
+  const profile = useProfile(w.author || null)
+  const until = birth === undefined ? 0 : birth + TEXT_DECODE_MS + FLOURISH_HOLD_MS
+  const [flourish, setFlourish] = useState(() => performance.now() < until)
+  useEffect(() => {
+    if (!flourish) return
+    const t = window.setTimeout(() => setFlourish(false), Math.max(0, until - performance.now()))
+    return () => window.clearTimeout(t)
+  }, [flourish, until])
+  const name = w.mine ? 'you' : profileLabel(profile, shortAuthor(w.author, false))
+  return (
+    <group>
+      <WorldMark kind="note" at={w.centre} />
+      {flourish && birth !== undefined
+        ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
+        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} offsetPx={[0, -26]} />}
+      {/* The mark is a fixed size on screen at any zoom, so its target is
+          too: a fingertip over the mark (TapTarget). */}
+      <TapTarget px={TAP_PX} at={w.centre} onTap={onTap} />
+    </group>
   )
 }
 

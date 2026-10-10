@@ -3423,6 +3423,8 @@ kbd {
   font-weight: 700;
 }
 .benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
+/* SUBDIVIDE is the row's one long word: the pad's JOINED and DELETE size, tighter, so it fits a 48px key. */
+.benchclip .touchpad__key--long .touchpad__sub { font-size: 7px; letter-spacing: 0.04em; }
 /* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
    in its top right corner, so it reads as two steps before it is pressed.
    The dot lights while its question is open (arkinox, 2026-09-27). */

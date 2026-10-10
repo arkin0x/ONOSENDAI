@@ -52,6 +52,7 @@ import { flipFace, flipSurface, windAdded, windOutward } from 'sno-core/winding'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
+import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
@@ -461,6 +462,12 @@ export interface WorkshopState {
   fill: () => void
   /** Faces for the selected points at once: a flat set becomes one polygon, a solid set its convex hull. */
   fillSelection: () => void
+  /**
+   * SUBDIVIDE: every fully selected face cut into four, with the neighbors
+   * split to match, or the one selected edge cut in two (lib/subdivide). The
+   * corners and the new points stay selected, so a second press cuts again.
+   */
+  subdivideSelection: () => void
   removeFace: (index: number) => void
   clearShard: () => void
   undo: () => void
@@ -1348,6 +1355,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       })
       const added = (get().current()?.faces.length ?? before) - before
       set({ notice: added ? `${added} face${added === 1 ? '' : 's'} ${faces.hull ? 'around' : 'across'} ${idx.length} points.` : 'Those faces are already there.' })
+    },
+
+    subdivideSelection: () => {
+      const s = get().current()
+      const { selection } = get()
+      if (!s || selection.length === 0) return
+      const res = subdivide(s, selection)
+      if ('refused' in res) { set({ notice: res.refused }); return }
+      edit(() => res.shard, subdivideNotice(res))
+      // Whole points, as every selection is, so a midpoint that landed on an
+      // occupied spot is in hand with what stands there.
+      get().setSelection([...res.corners, ...res.added])
     },
 
     removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),

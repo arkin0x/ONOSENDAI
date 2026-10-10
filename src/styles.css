@@ -4477,6 +4477,16 @@ kbd {
 .touchops__commit:active {
   transform: scale(0.95);
 }
+/* VIEW in the commit slot while there is nothing to commit (arkinox,
+   2026-10-10): yellow words on the resting button, and the armed yellow fill
+   while the free view is on. */
+.touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
+.touchops__commit.is-view.is-on {
+  color: #05070d;
+  background: var(--warn, #ffb020);
+  border-color: var(--warn, #ffb020);
+  font-weight: 700;
+}
 
 /* ---------- Zoom-out hint ----------
  *

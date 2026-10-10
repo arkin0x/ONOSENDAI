@@ -78,8 +78,10 @@ export function TouchControls(): JSX.Element {
   // stays, at its own size and in its own place, with those cells emptied.
   // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
   const atHead = useCyberspace((s) => s.canDrive())
-  // The commit row is for a move of your own: only at your head.
+  // The commit row is for a move of your own: only at your head, and while
+  // the pad's VIEW is on, where it holds RECALL and the lit VIEW.
   const home = useCyberspace((s) => s.atHead())
+  const viewing = useCyberspace((s) => s.viewing())
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -201,10 +203,10 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {home && <div className={`touchops${chainStatus ? ' touchops--status' : ''}`}>
+      {(home || viewing) && <div className={`touchops${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
-          title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}
+          title={computing ? 'Cancel proof (X)' : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
@@ -213,6 +215,23 @@ export function TouchControls(): JSX.Element {
         >
           {computing ? 'STOP' : 'RECALL'}
         </button>
+        {/* VIEW in the commit slot while there is nothing to commit (arkinox,
+            2026-10-10): a free view from your head, so the pad moves the
+            cursor to look around without planning a hop. Lit while it is on;
+            pressing it again, or RECALL, ends it. */}
+        {(viewing || (!armed && !deploying && !computing)) ? (
+          <button
+            className={`touchops__commit is-view ${viewing ? 'is-on' : ''}`}
+            aria-pressed={viewing}
+            title={viewing ? 'Viewing: the pad moves the cursor without planning a hop. Press again, or RECALL, to end it' : 'Move the cursor around without planning a hop; RECALL brings it back'}
+            {...noCallout}
+            onPointerDown={(e) => {
+              e.preventDefault(); e.stopPropagation()
+              const s = useCyberspace.getState()
+              if (s.viewing()) s.cancel(); else s.viewHere()
+            }}
+          >VIEW</button>
+        ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
           disabled={(!deploying && !armed && !computing) || tooFar}
@@ -227,6 +246,7 @@ export function TouchControls(): JSX.Element {
         >
           {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
+        )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the
             only control whose meaning it changes, and a switch rather than a
             toggle so the current mode is always spelled out, not implied. */}

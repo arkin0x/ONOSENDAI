@@ -798,6 +798,14 @@ export interface CyberspaceState {
    * on what you were looking at.
    */
   driveHere: (label: string) => void
+  /**
+   * VIEW from the pad (arkinox, 2026-10-10): a free view from your own head,
+   * so the pad moves the cursor to look around without planning a hop. The
+   * commit row keeps RECALL, which ends it; VIEW again ends it too.
+   */
+  viewHere: () => void
+  /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
+  viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
   /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
@@ -974,6 +982,9 @@ const CHAIN_KEY = 'onosendai:chain'
 function chainKeyFor(pubkey: string): string {
   return `${CHAIN_KEY}:${pubkey}`
 }
+/** The focus label of the pad's VIEW: what the focus bar says, and how `viewing` tells it from a pin's or a star's view. */
+export const VIEW_FOCUS_LABEL = 'VIEW'
+
 const LIVE_KEY = 'onosendai:live'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
 const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
@@ -2762,6 +2773,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ pendingTarget: null, proof: IDLE_PROOF })
       return
     }
+    // The pad's VIEW ends here too: the focus goes, and with it the cursor
+    // comes home and the zoom returns (clearFocus).
+    if (get().viewing()) { get().clearFocus(); return }
     // Not computing: recall the cursor, plane included, to where you stand.
     // The view follows the lined-up plane, so at your own head it comes back too.
     const atHead = get().exploreIndex === null && get().focus === null && get().spectate === null
@@ -3348,6 +3362,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set({ cursor: next, ...(plane !== get().anchorPlane ? { anchorPlane: plane, focus: { ...focus, plane } } : {}) })
     rideView(next)
   },
+
+  viewHere: () => { if (get().atHead()) get().driveHere(VIEW_FOCUS_LABEL) },
+
+  viewing: () => get().focus?.drive === true && get().focus?.label === VIEW_FOCUS_LABEL && get().exploreIndex === null,
 
   driveHere: (label) => {
     const { anchor, anchorPlane, focus, scaleExp, focusReturnScale } = get()

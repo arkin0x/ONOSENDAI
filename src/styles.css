@@ -2238,8 +2238,10 @@ kbd {
 
 /* ---------- Deploy bar ----------
  *
- * Up while you are placing a shard. Bottom of the scene on a phone, above the
- * pad; a floating card on the left on a desktop, clear of both panel columns.
+ * Up while you are placing a shard. A floating card at the top left, capped
+ * in height so the centre of the screen, where the build cursor and the ghost
+ * are, stays clear (the rules below); on a desktop it moves right, clear of
+ * the panel column.
  */
 .deploybar {
   position: fixed;
@@ -2390,6 +2392,21 @@ kbd {
     max-height: 30vh;
     max-height: 30dvh;
     padding-bottom: 12px;
+  }
+}
+/*
+ * On a wide tablet or a small desktop window the same cap applies. From 1101px
+ * the bar stands 332px in and 360px wide, so its right edge is at 692px, and
+ * a screen narrower than about 1660px has its centre inside that span: let
+ * down to the middle, the bar's lower edge sat on the build cursor and the
+ * ghost (arkinox, 2026-10-10, on a tablet). This is the compass's own overlap
+ * rule (the 1660px breakpoint above): only where the bar ends well short of
+ * the centre may it grow to the middle.
+ */
+@media (min-width: 1101px) and (max-width: 1659px) {
+  .deploybar {
+    max-height: 30vh;
+    max-height: 30dvh;
   }
 }
 .deploybar__head,

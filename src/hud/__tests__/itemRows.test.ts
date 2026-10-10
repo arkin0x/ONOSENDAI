@@ -27,7 +27,7 @@ if (typeof localStorage === 'undefined') {
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bytesToHex } from '../../lib/events'
 import { forgeKey, sealEntries } from '../../lib/chests'
-import { hiddenGlyph, hiddenLabel, messageInnerTemplate, type ChestItem } from '../../lib/hidden'
+import { hiddenLabel, messageInnerTemplate, type ChestItem } from '../../lib/hidden'
 import { pendingEmpty, pendingName } from '../../store/useShards'
 import { depName } from '../stash'
 import { ChestBlock, KeyLine } from '../ItemRows'
@@ -84,9 +84,6 @@ describe('what a key and a chest are called', () => {
     expect(pendingEmpty({ ...draft, contents: [{ kind: 'message', text: 'x' }] }, null)).toBe(false)
     expect(hiddenLabel({ type: 'key', key })).toBe('Wind Key')
     expect(hiddenLabel({ type: 'chest', chest: chestTo(key.itemPubkey, '') })).toBe('Wind Chest')
-    expect(hiddenGlyph('key')).toBe('⚷')
-    expect(hiddenGlyph('chest')).toBe('▣')
-    expect(hiddenGlyph('message', true)).toBe('₿')
     const dep = { eventId: 'e', lookupId: 'l', createdAt: 1, type: 'key' as const, key, height: 1, plane: 0 as const, published: true, at: { x: '1', y: '2', z: '3' }, keyHex: bytesToHex(hider), relays: [], bagId: 'b', inner: {} as never }
     expect(depName(dep)).toBe('Wind Key')
   })

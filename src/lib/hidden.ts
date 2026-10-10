@@ -309,14 +309,6 @@ export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' 
   return h.shard?.name ?? 'shard'
 }
 
-/** The glyph each kind of hidden thing is marked with in a row: a shard, a note, a coin, a key, a chest. */
-export function hiddenGlyph(type: HiddenType, coin = false): string {
-  if (type === 'key') return '⚷'
-  if (type === 'chest') return '▣'
-  if (type === 'message') return coin ? '₿' : '✎'
-  return '◇'
-}
-
 /** What a decoded hidden thing carries, ready to render. */
 export interface Hidden {
   /**

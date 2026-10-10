@@ -16,7 +16,7 @@
 import { useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { hiddenGlyph } from '../lib/hidden'
+import { ItemIcon } from './ItemIcon'
 import { chestsOpenedBy, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -79,7 +79,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const pubkey = item.key?.itemPubkey ?? ''
   return (
     <li className="secrets__row held__row">
-      <span className="chest__glyph chest__glyph--key" aria-hidden="true">{hiddenGlyph('key')}</span>
+      <ItemIcon className="chest__glyph chest__glyph--key" type="key" />
       <span className="item__line">
         <span className="item__name" title={item.name}>{item.name}</span>
         <span className="item__meta">
@@ -123,7 +123,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   }
   return (
     <li className="secrets__row held__row">
-      <span className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} aria-hidden="true">{hiddenGlyph(item.type, coin)}</span>
+      <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} />
         : (

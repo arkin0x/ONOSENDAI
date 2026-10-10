@@ -1617,12 +1617,16 @@ kbd {
 }
 
 .secret__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--accent);
 }
 
 .secret__badge--message { color: #ffd27d; }
+.secret__badge--cashu { color: #f7931a; }
 
 .secret__mine {
   font-size: 8px;
@@ -1819,7 +1823,7 @@ kbd {
   gap: 8px;
 }
 
-.detail__eye { color: var(--accent); font-size: 13px; }
+.detail__eye { color: var(--accent); }
 
 .detail__title {
   flex: 1;
@@ -2114,7 +2118,6 @@ kbd {
   color: #f7931a;
 }
 
-.cashucard__glyph { font-size: 14px; }
 
 .cashucard__amount {
   font-size: 18px;
@@ -2274,7 +2277,6 @@ kbd {
 
 .deploybar__eye {
   color: var(--ok);
-  font-size: 13px;
 }
 
 .deploybar__title {
@@ -5956,9 +5958,11 @@ kbd {
   color: var(--cloud, #ffd27d);
 }
 
-/* Loot: what a found bag holds, as glyphs; per-item actions in the record */
+/* Loot: what a found bag holds, one icon per kind; per-item actions in the record */
 .loot__kinds {
-  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .lootd__acts {
   display: flex;
@@ -7063,7 +7067,7 @@ kbd {
 .loot__actions--one { grid-template-columns: 1fr; }
 .loot__actions .avatars__more { margin-top: 0; }
 .nearby__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
-.nearby__glyph { font-size: 14px; color: var(--accent, #00e5ff); }
+.nearby__glyph { color: var(--accent, #00e5ff); }
 .nearby__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .nearby__label { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nearby__meta { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
@@ -7320,7 +7324,7 @@ kbd {
 /* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
 .modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }
 .stash-modal .avatars__list { max-height: 55vh; overflow-y: auto; }
-.shards__type--bag { letter-spacing: 0.1em; min-width: 0; }
+.shards__type--bag { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; }
 .objpick__row:disabled { opacity: 0.45; cursor: default; }
 
 /* ---- The color corner and palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
@@ -7970,6 +7974,16 @@ kbd {
   margin-right: 4px;
 }
 
+/* The one icon each kind of hidden thing wears in a row, a badge or a button
+ * (ItemIcon.tsx). It sits on the text's line a hair under the baseline, as
+ * the build icons do, and a flex row never squeezes it. Its color is the
+ * text's, through currentColor, so a row's color class is all it needs
+ * (arkinox, 2026-10-10: one lucide icon per kind, everywhere). */
+.item-icon {
+  flex: none;
+  vertical-align: -2px;
+}
+
 /* PLACE OBJECT's empty state: the note, then the way to make a model. */
 .objpick__empty {
   display: flex;
@@ -8307,7 +8321,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   gap: 4px;
 }
 .chest__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.chest__glyph { flex: none; font-size: 13px; color: var(--accent); }
+.chest__glyph { flex: none; color: var(--accent); }
 .chest__glyph--key { color: #e8c547; }
 .chest__glyph--message { color: #ffd27d; }
 .chest__glyph--cashu { color: #f7931a; }

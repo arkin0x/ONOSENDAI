@@ -17,6 +17,7 @@ import { cashuTokensAsWritten, cashuWalletHref, textWithoutToken } from '../lib/
 import { useCashu } from './useCashu'
 import { cashuCardModel } from './cashuCardModel'
 import { Explanation } from './Explanation'
+import { ItemIcon } from './ItemIcon'
 
 /**
  * A hidden message's full text, as a panel shows it. `words` draws text the
@@ -60,7 +61,7 @@ export function CashuCard({ token }: { token: string }): JSX.Element {
   return (
     <section className={`cashucard cashucard--${card.tone}`} aria-label="Cashu token">
       <div className="cashucard__head">
-        <span className="cashucard__title"><span className="cashucard__glyph" aria-hidden="true">₿</span> CASHU TOKEN</span>
+        <span className="cashucard__title"><ItemIcon type="message" coin size={14} /> CASHU TOKEN</span>
         {card.amount && <span className="cashucard__amount">{card.amount}</span>}
       </div>
 

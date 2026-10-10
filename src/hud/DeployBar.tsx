@@ -51,12 +51,14 @@ import { formatCellSize } from 'sno-core/scale'
 import { LINK_PROTECTED, SCAN_MAX_HEIGHT, isProtected, ownBagIn, pendingEmpty, pendingName, regionOf, useShards } from '../store/useShards'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
+import { findCashuToken } from '../lib/cashu'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { stepBuild } from '../store/buildStep'
 import { useBuilder } from '../store/useBuilder'
 import { Field, Switch } from './ui/Switch'
+import { ItemIcon } from './ItemIcon'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
@@ -163,7 +165,7 @@ export function DeployBar(): JSX.Element | null {
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}
       <div className="deploybar__row deploybar__head">
-        <span className="deploybar__eye" aria-hidden="true">◇</span>
+        <ItemIcon className="deploybar__eye" type={pending.type} coin={pending.type === 'message' && findCashuToken(pending.text) !== null} />
         <span className="deploybar__title">
           {title} <strong>{name}</strong>
         </span>

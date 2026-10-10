@@ -8,7 +8,6 @@
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
-import { hiddenGlyph } from '../lib/hidden'
 import { useShards, type MyDeployment } from '../store/useShards'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
@@ -17,6 +16,7 @@ import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
 import { KeyCompose } from './KeyCompose'
 import { ChestCompose } from './ChestCompose'
+import { ItemIcon, distinctKinds } from './ItemIcon'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
@@ -47,13 +47,15 @@ function Shell({ title, onClose, children }: { title: string; onClose: () => voi
 
 /** One bag as a row: what is in it, how big a region it is sealed to, whether it is out. */
 export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.Element {
-  const kinds = bag.items.map((d) => hiddenGlyph(d.type, d.type === 'message' && /cashu[AB]/.test(d.text ?? ''))).join('')
+  // One icon per kind in the bag, the oldest item's kind first; how many
+  // items there are is on the line below.
+  const kinds = distinctKinds(bag.items.map((d) => ({ type: d.type, coin: d.type === 'message' && /cashu[AB]/.test(d.text ?? '') })))
   const first = depName(bag.items[0])
   return (
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onOpen} title="See what is in this bag">
         <span className="avatars__who">
-          <span className="shards__type shards__type--bag">{kinds.slice(0, 6)}{kinds.length > 6 ? '…' : ''}</span>
+          <span className="shards__type shards__type--bag">{kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={12} />)}</span>
           {bag.items.length === 1 ? first : `${first} + ${bag.items.length - 1} more`}
         </span>
         <span className="shards__meta">
@@ -72,7 +74,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">
         <span className="avatars__who">
-          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{hiddenGlyph(d.type, coin)}</span>
+          <ItemIcon className={`shards__type shards__type--${coin ? 'cashu' : d.type}`} type={d.type} coin={coin} size={12} />
           {coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : depName(d)}
         </span>
         <span className="shards__meta">

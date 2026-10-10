@@ -17,10 +17,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Explanation } from './Explanation'
+import { ItemIcon } from './ItemIcon'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
-import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, hiddenGlyph, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
+import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { findCashuToken } from '../lib/cashu'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
@@ -121,7 +122,8 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <span className="legend__label">Lock</span>
         <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => setLockKeyId(e.target.value)} aria-label="Seal to a key you hold" title="A key in your LOOT: whoever holds it opens the chest">
           <option value="">{keys.length === 0 ? 'no keys in your LOOT' : 'paste a key below'}</option>
-          {keys.map((k) => <option key={k.id} value={k.id}>⚷ {k.name}</option>)}
+          {/* No icon on an option: a select's options are text only, and the select says these are keys. */}
+          {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
         </select>
       </div>
       {!heldLock && (
@@ -134,7 +136,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <ul className="compose__list">
           {contents.map((c, i) => (
             <li key={i} className="chest__row">
-              <span className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} aria-hidden="true">{hiddenGlyph(c.kind, c.kind === 'message' && !!findCashuToken(c.text))}</span>
+              <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} type={c.kind} coin={c.kind === 'message' && !!findCashuToken(c.text)} />
               <span className="item__name" title={contentLabel(c, shardName)}>{contentLabel(c, shardName)}</span>
               <button className="chest__act" onClick={() => remove(i)} aria-label="Take it out" title="Take it out of the chest">×</button>
             </li>
@@ -159,7 +161,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
       ) : adding === 'shard' ? (
         <div className="compose__row">
           <select className="avatars__input compose__select" value={shardId} onChange={(e) => setShardId(e.target.value)} aria-label="Model to seal">
-            {models.map((s) => <option key={s.id} value={s.id}>◇ {s.name}</option>)}
+            {models.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
           <button className="chest__act" disabled={!shardId} onClick={() => add({ kind: 'shard', shardId })}>ADD</button>

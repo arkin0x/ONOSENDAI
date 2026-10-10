@@ -13,7 +13,8 @@ import { useMemo } from 'react'
 import { useNearbyLoot, type NearbyItem } from '../hooks/useNearbyLoot'
 import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
-import { hiddenGlyph, hiddenLabel, messagePreview } from '../lib/hidden'
+import { hiddenLabel, messagePreview } from '../lib/hidden'
+import { ItemIcon } from './ItemIcon'
 import type { HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { formatDistance } from 'sno-core/scale'
@@ -32,7 +33,7 @@ function placeOf(item: NearbyItem): HeldPlace {
 
 /** The first line: the message itself, the shard named in quotes with its size, or the key's or chest's name. */
 function labelOf(item: NearbyItem): string {
-  if (item.type === 'message') return findCashuToken(item.text) ? '₿ cashu token' : messagePreview(item.text ?? '', 160)
+  if (item.type === 'message') return findCashuToken(item.text) ? 'cashu token' : messagePreview(item.text ?? '', 160)
   if (item.type !== 'shard') return hiddenLabel({ ...item, key: item.keyItem })
   const shard = item.shard
   return shard ? `\u201c${shard.name}\u201d shard \u00b7 ${shard.vertices.length} vertices \u00b7 ${shard.faces.length} faces` : 'shard'
@@ -49,7 +50,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
   return (
     <li className="secrets__row nearby__row">
-      <span className="nearby__glyph" aria-hidden="true">{hiddenGlyph(item.type, item.type === 'message' && findCashuToken(item.text) !== null)}</span>
+      <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />
       <div className="nearby__body">
         {item.type === 'key' && item.keyItem
           ? <KeyLine name={item.keyItem.name} author={author} />

@@ -25,6 +25,7 @@ import { PublishSwitch } from './PublishSwitch'
 import { useEscape } from '../hooks/useEscape'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { MessageText } from './CashuCard'
+import { ItemIcon } from './ItemIcon'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -72,7 +73,7 @@ export function DeploymentDetail(): JSX.Element | null {
   return (
     <div className="detail" role="dialog" aria-label={`Deployment ${name}`}>
       <div className="detail__head">
-        <span className={`detail__eye ${coin ? 'detail__eye--cashu' : ''}`} aria-hidden="true">{coin ? '₿' : isMessage ? '✎' : '◇'}</span>
+        <ItemIcon className={`detail__eye ${coin ? 'detail__eye--cashu' : ''}`} type={dep.type} coin={coin} />
         <span className="detail__title">VIEWING <strong>{name}</strong></span>
         <button className="detail__exit" onClick={exit}>EXIT</button>
       </div>

@@ -18,7 +18,8 @@ import { useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
-import { hiddenGlyph, hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
+import { hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
+import { ItemIcon } from './ItemIcon'
 import { placeOf, type HeldPlace } from '../lib/inventory'
 import { formatBytes, hintBoxLabel, hintSearchExponent, regionLabel, type LootItem } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -39,6 +40,8 @@ interface OpenedItem {
   eventId: string
   type: HiddenType
   label: string
+  /** A message that carries a Cashu token, marked as a coin. */
+  coin: boolean
   at: Position
   plane: Plane
   unit: number
@@ -62,11 +65,6 @@ function searchLabel(exponent: number): string {
   return `about ${(2 ** exponent).toLocaleString('en-US')} region keys`
 }
 
-function cashuOrPreview(text: string | undefined): string {
-  const { raw, token } = readCashuToken(text)
-  return token ? `₿ ${cashuLabel(token)} hidden here` : raw ? '₿ cashu token hidden here' : messagePreview(text ?? '', 48)
-}
-
 function Copyable({ label, value }: { label: string; value: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
@@ -83,9 +81,11 @@ function Copyable({ label, value }: { label: string; value: string }): JSX.Eleme
   )
 }
 
-/** A row's label by what it is: a message's words or coin, else its name. */
-function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?: KeyItem; chest?: ChestItem }): string {
-  return x.type === 'message' ? cashuOrPreview(x.text) : hiddenLabel(x)
+/** A row's label by what it is, and whether it is a coin: a message's words or its token, else its name. */
+function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?: KeyItem; chest?: ChestItem }): { label: string; coin: boolean } {
+  if (x.type !== 'message') return { label: hiddenLabel(x), coin: false }
+  const { raw, token } = readCashuToken(x.text)
+  return { label: token ? `${cashuLabel(token)} hidden here` : raw ? 'cashu token hidden here' : messagePreview(x.text ?? '', 48), coin: raw !== null }
 }
 
 /** The bag's items this client can see: found by its scan, or its own. */
@@ -96,7 +96,7 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(h.eventId, {
       eventId: h.eventId,
       type: h.type,
-      label: labelOf(h),
+      ...labelOf(h),
       at: h.at,
       plane: h.plane,
       unit: h.type === 'shard' ? h.shard?.unit ?? 0 : 0,
@@ -112,7 +112,7 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
     out.set(d.eventId, {
       eventId: d.eventId,
       type: d.type,
-      label: labelOf(d),
+      ...labelOf(d),
       at: positionOf(d),
       plane: d.plane,
       unit: d.type === 'shard' ? d.shard?.unit ?? 0 : 0,
@@ -219,7 +219,7 @@ export function LootDetail(): JSX.Element | null {
           <ul className="lootd__items">
             {opened.map((o) => (
               <li key={o.eventId} className={`lootd__item ${o.type === 'chest' ? 'lootd__item--chest' : ''}`}>
-                <span className={`secret__badge secret__badge--${o.type}`}>{hiddenGlyph(o.type, o.label.startsWith('₿'))}</span>
+                <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemIcon type={o.type} coin={o.coin} size={12} /></span>
                 {/* A key says it is held; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
                 {o.type === 'key' && o.key
                   ? <KeyLine name={o.key.name} author={item.author} />

@@ -67,7 +67,7 @@ function cashuOrPreview(text: string | undefined): string {
   return token ? `₿ ${cashuLabel(token)} hidden here` : raw ? '₿ cashu token hidden here' : messagePreview(text ?? '', 48)
 }
 
-function Copyable({ label, value }: { label: string; value: string }): JSX.Element {
+function Copyable({ label, value, title }: { label: string; value: string; title?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
     void navigator.clipboard?.writeText(value).then(() => {
@@ -77,7 +77,7 @@ function Copyable({ label, value }: { label: string; value: string }): JSX.Eleme
   }
   return (
     <>
-      <dt>{label}</dt>
+      <dt title={title}>{label}</dt>
       <dd><button className="lootd__copy" title={`${value} (click to copy)`} onClick={copy}>{copied ? 'copied' : shortHex(value, 12, 8)}</button></dd>
     </>
   )
@@ -258,8 +258,11 @@ export function LootDetail(): JSX.Element | null {
         )}
 
         <dl className="lootd__wire">
-          <Copyable label="lookup" value={item.lookupId} />
-          <Copyable label="bag" value={item.bagId} />
+          {/* Two hashes that mean different things (arkinox, 2026-10-10: "what
+              is the bag hash?"): the address a scan asks the relay for, which
+              never changes, and the envelope's event id, which does. */}
+          <Copyable label="Lookup id" value={item.lookupId} title="The bag's address on the relay: its d tag, derived from the region key (spec §8.6). A scan asks the relay for this; it stays the same however often the bag is rewritten." />
+          <Copyable label="Event id" value={item.bagId} title="The id of the bag's current nostr event (kind 33330). The hider's every rewrite is a new event with a new id; the lookup id is what stays." />
         </dl>
 
         {!yours && (

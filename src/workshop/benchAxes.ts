@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand'
-import { Quaternion, Vector3, type Camera } from 'three'
+import { Quaternion, Spherical, Vector3, type Camera } from 'three'
 import type { WorkPlane } from 'sno-core/stamps'
 
 export type NudgeName = 'up' | 'down' | 'left' | 'right' | 'away' | 'toward'
@@ -108,6 +108,34 @@ export function planeAfter(plane: WorkPlane, axes: BenchAxes, about: 'tip' | 'ro
 }
 
 export const useBenchView = create<{ axes: BenchAxes; request: ViewRequest | null }>(() => ({ axes: DEFAULT_AXES, request: null }))
+
+/** The orbit ball's diameter in CSS pixels: the pad's width, three keys and two gaps. */
+export const SPHERE_PX = 152
+/** A drag across the ball's full width turns the view half way round. */
+export const RAD_PER_PX = Math.PI / SPHERE_PX
+/** The poles stay a hair away, as OrbitControls keeps them: straight along the up axis loses the up vector. */
+const POLE_MARGIN = 0.02
+
+/**
+ * The camera's offset from its target after a drag of dx, dy pixels on the
+ * orbit ball: longitude from dx, latitude from dy, the same senses as a drag
+ * on the bench itself (right turns the view left round the target, down
+ * brings the top toward you), the poles kept clear. Pure, so the ball's feel
+ * is tested without a camera.
+ */
+export function orbitOffset(offset: Vector3, dx: number, dy: number, radPerPx: number = RAD_PER_PX): Vector3 {
+  const s = new Spherical().setFromVector3(offset)
+  s.theta -= dx * radPerPx
+  s.phi = Math.min(Math.PI - POLE_MARGIN, Math.max(POLE_MARGIN, s.phi - dy * radPerPx))
+  return new Vector3().setFromSpherical(s)
+}
+
+type OrbitSink = (dx: number, dy: number) => void
+let orbitSink: OrbitSink | null = null
+/** The bench registers what an orbit drag does to its camera (Bench ViewDriver); null while no bench is up. */
+export function setOrbitSink(sink: OrbitSink | null): void { orbitSink = sink }
+/** Turn the bench view by a drag of dx, dy pixels on the orbit ball. Nothing happens without a bench. */
+export function orbitBy(dx: number, dy: number): void { orbitSink?.(dx, dy) }
 
 let asked = 0
 /** Ask the bench camera for the default view. */

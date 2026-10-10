@@ -42,7 +42,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { Bench } from './Bench'
-import { benchPose, nudgeFor, nudgeLabel, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
+import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedCount } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
 import { useEscape } from '../hooks/useEscape'
@@ -73,7 +73,7 @@ function Intro(): JSX.Element | null {
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
         <li><b>STAMP</b> a shape: pick one under TOOLS, tap the grid where the ghost shows.</li>
-        <li>One finger <b>orbits</b>, two fingers <b>pan</b>. GRID raises the level to stack things.</li>
+        <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball; two fingers <b>pan</b>. GRID raises the level to stack things.</li>
         <li><b>DEPLOY</b> hides it in the world at a place you choose.</li>
       </ol>
       <button className="workshop__btn workshop__intro-ok" onClick={done}>GOT IT</button>
@@ -101,10 +101,61 @@ function Toast(): JSX.Element | null {
  * right now), the corners CONNECT and DELETE, the hub counts the points and
  * clears them.
  */
+/**
+ * The orbit ball, right of the pad and its size (arkinox, 2026-10-10: "not
+ * being able to orbit hurts"). A drag on it turns the view about the shard,
+ * and pointer capture keeps the drag alive after the finger leaves the ball,
+ * until it lifts. A tap, no drag, sends the view home. It works with any
+ * tool, which is the point: in SELECT a one-finger drag on the bench is the
+ * box, and this is how you orbit meanwhile.
+ */
+function OrbitSphere(): JSX.Element {
+  const last = useRef<{ x: number; y: number } | null>(null)
+  const moved = useRef(false)
+  const down = (e: React.PointerEvent<HTMLButtonElement>): void => {
+    if (!e.isPrimary) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    last.current = { x: e.clientX, y: e.clientY }
+    moved.current = false
+  }
+  const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
+    if (!last.current) return
+    const dx = e.clientX - last.current.x
+    const dy = e.clientY - last.current.y
+    if (dx === 0 && dy === 0) return
+    last.current = { x: e.clientX, y: e.clientY }
+    moved.current = true
+    orbitBy(dx, dy)
+  }
+  const up = (): void => {
+    if (!last.current) return
+    last.current = null
+    if (!moved.current) requestView({ kind: 'home' })
+  }
+  return (
+    <button
+      className="benchorb"
+      title="Drag to orbit the view; keep dragging past the ball. Tap to send the view home."
+      aria-label="Orbit the view. Drag to turn, tap for the home view."
+      {...noCallout}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={up}
+    >
+      <span className="benchorb__sub">ORBIT</span>
+    </button>
+  )
+}
+
 function ControlsPad({ points, objects = 0 }: { points: number; objects?: number }): JSX.Element {
   // Points and placed objects move, turn, cut and copy together.
   const held = points + objects
   const axes = useBenchView((s) => s.axes)
+  // In FACE the face row has its own DELETE, for the face; the pad's would
+  // take the corners and every face on them, so it stays off there.
+  const tool = useWorkshop((s) => s.tool)
   const bind = useRepeatable()
   const w = useWorkshop.getState
   const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().step()) }
@@ -130,10 +181,12 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
         <Link size={14} strokeWidth={2.25} aria-hidden />
         <span className="touchpad__sub">JOINED</span>
       </button>
-      <button className="touchpad__key touchpad__key--delete" title="Delete the selected points (Del)" aria-label="Delete selected" {...noCallout} onClick={() => w().deleteSelected()}>
-        <Trash2 size={14} strokeWidth={2.25} aria-hidden />
-        <span className="touchpad__sub">DELETE</span>
-      </button>
+      {tool !== 'face' && (
+        <button className="touchpad__key touchpad__key--delete" title="Delete the selected points (Del)" aria-label="Delete selected" {...noCallout} onClick={() => w().deleteSelected()}>
+          <Trash2 size={14} strokeWidth={2.25} aria-hidden />
+          <span className="touchpad__sub">DELETE</span>
+        </button>
+      )}
       <button className="touchpad__hub" title="Clear the selection (Esc)" aria-label={`${points} points and ${objects} objects selected. Tap to clear.`} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); w().selectVertex(null) }}>
         {points > 0 && `${points} ${points === 1 ? 'PT' : 'PTS'}`}{points > 0 && objects > 0 && ' · '}{objects > 0 && `${objects} OBJ`}
       </button>
@@ -795,7 +848,12 @@ export function Workshop(): JSX.Element | null {
             </button>
           </div>
         )}
-        {(selection.length > 0 || partSel.length > 0) && <ControlsPad points={selectedPoints} objects={partSel.length} />}
+        {/* The pad keeps its place with nothing selected (its keys are simply
+            absent), so the orbit ball beside it never moves. */}
+        <div className="benchrow">
+          <ControlsPad points={selectedPoints} objects={partSel.length} />
+          <OrbitSphere />
+        </div>
       {panel === 'tools' && (
         <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
           <div className="workshop__row" role="group" aria-label="Tool">

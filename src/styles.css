@@ -3328,6 +3328,61 @@ kbd {
 }
 .benchpad > * { pointer-events: auto; }
 
+/* The pad and the orbit ball side by side. The pad's grid keeps its size when
+   nothing is selected (its keys are simply absent), so the ball never moves
+   under the thumb when a selection comes and goes. */
+.benchrow {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.benchrow > * { pointer-events: auto; }
+.benchrow .benchpad { pointer-events: none; }
+.benchrow .benchpad > * { pointer-events: auto; }
+/* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag
+   on it turns the view about the shard and keeps turning after the finger
+   leaves it (pointer capture); a tap sends the view home. Drawn as a lit
+   globe with a meridian and an equator, so it reads as something that turns. */
+.benchorb {
+  position: relative;
+  width: 152px;
+  height: 152px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(82, 227, 159, 0.45);
+  background: radial-gradient(circle at 36% 32%, rgba(82, 227, 159, 0.28), rgba(6, 14, 22, 0.78) 62%, rgba(6, 14, 22, 0.92));
+  box-shadow: 0 0 14px rgba(82, 227, 159, 0.12), inset 0 0 22px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  color: var(--fg, #c8f5ff);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.benchorb:active { cursor: grabbing; }
+.benchorb::before,
+.benchorb::after {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 245, 255, 0.14);
+  pointer-events: none;
+}
+.benchorb::before { transform: scaleX(0.42); }
+.benchorb::after { transform: scaleY(0.42); }
+.benchorb__sub { font-size: 8px; letter-spacing: 0.14em; color: var(--dim, #7fa3b3); }
+/* A narrow phone: the ball gives up a little so the color column in the other
+   corner keeps its room. */
+@media (max-width: 380px) {
+  .benchorb { width: 120px; height: 120px; }
+}
+
 /* The clipboard row: first in the bottom-left column, so the pad, TURN and
    the color column in the other corner never stand on it. */
 .benchclip {

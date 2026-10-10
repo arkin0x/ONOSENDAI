@@ -224,6 +224,17 @@ describe('foldsAt: a tap on the title line', () => {
     expect(foldsAt(icon, head)).toBe(false)
   })
 
+  it('folds from the title although the title is a button to the keyboard (the first run in a browser missed this)', () => {
+    const head = el([])
+    const title = el(['control'], head)
+    const titleText = el([], title)
+    expect(foldsAt(title, head, title)).toBe(true)
+    expect(foldsAt(titleText, head, title)).toBe(true)
+    // Another control with the same role is still a control.
+    const other = el(['control'], head)
+    expect(foldsAt(other, head, title)).toBe(false)
+  })
+
   it('does not fold from the body of the panel, or with no line to fold', () => {
     const section = el([])
     const head = el([], section)

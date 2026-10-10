@@ -31,14 +31,15 @@ export interface ElementLike {
 
 /**
  * Whether a tap at `target` is on the title line `head` itself: inside it,
- * and not inside a control in it. The walk stops at the head, so the head's
- * own role (the title is a button to the keyboard) does not count.
+ * and not inside a control in it. The `title` is exempt: it is given
+ * role=button for the keyboard (PanelSlot below), which would otherwise read
+ * as a control and stop the very tap it exists for.
  */
-export function foldsAt(target: ElementLike | null, head: ElementLike | null): boolean {
+export function foldsAt(target: ElementLike | null, head: ElementLike | null, title: ElementLike | null = null): boolean {
   if (!head || !target) return false
   let el: ElementLike | null = target
   while (el && el !== head) {
-    if (el.matches(CONTROL)) return false
+    if (el !== title && el.matches(CONTROL)) return false
     el = el.parentElement
   }
   return el === head
@@ -83,7 +84,7 @@ export function PanelSlot({ id, lead, lifting, onGrab, children }: Props): JSX.E
   const toggle = (): void => usePanelLayout.getState().toggle(id)
 
   const onClick = (e: ReactMouseEvent<HTMLDivElement>): void => {
-    if (foldsAt(e.target instanceof Element ? e.target : null, headOf(ref.current))) toggle()
+    if (foldsAt(e.target instanceof Element ? e.target : null, headOf(ref.current), titleOf(ref.current))) toggle()
   }
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {

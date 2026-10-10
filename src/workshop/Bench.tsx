@@ -6,8 +6,11 @@
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
  * so DELETE can take it. Dragging orbits. R3F
- * reports how far the pointer travelled between down and up, which is what
- * separates a tap from an orbit, so a thumb that wobbles still taps.
+ * reports how far the pointer travelled between down and up, and the bench
+ * compares that with a dead zone that depends on what pressed (deadZone.ts):
+ * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
+ * is held still and a lift is a tap, so a thumb that rolls still picks the
+ * point it pressed; past it, the drag is an orbit from there.
  *
  * The ghost is the aim. A mouse hovers it into place; a finger presses and
  * slides it; either way you see where the thing will land before it lands,
@@ -28,9 +31,8 @@ import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
 import { useCyberspace } from '../store/useCyberspace'
+import { Hold, noteGesture, tapSlop } from './deadZone'
 
-/** A press that travels further than this is an orbit, not a tap. */
-const TAP_SLOP = 8
 /** The unit grid's line colour when a unit is not divided. */
 const UNIT_LINE = '#1d3547'
 /**
@@ -110,7 +112,7 @@ function Grid(): JSX.Element {
   const places = tool === 'add' || tool === 'stamp'
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     // Read the store at tap time rather than from the render closure: a level
     // changed a moment ago must apply to this tap even if the bench has not
@@ -275,7 +277,7 @@ function Handles(): JSX.Element | null {
   const hitRadius = hitRadiusFor(tool)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     const w = useWorkshop.getState()
     if (tool === 'face') {
@@ -376,6 +378,52 @@ function FaceHighlight(): JSX.Element | null {
       <primitive object={lit.edge} />
     </>
   )
+}
+
+/**
+ * The orbit's dead zone. OrbitControls starts turning on the first pixel of a
+ * drag, so a thumb pressing a dot moved the view under itself. From the press
+ * until it has travelled past the slop for its pointer type, the controls'
+ * rotate speed is zero: the view holds still and a lift is a tap. Once past,
+ * the speed comes back and the drag orbits from there with no jump, because
+ * the controls measure each move from the last one. The press's pointer type
+ * is noted here, in capture, before any tap handler runs, so tapSlop() is
+ * right for the taps of this very press. A second finger means a pan, which
+ * has its own speed and is never held.
+ */
+function OrbitHold(): null {
+  const gl = useThree((s) => s.gl)
+  const controls = useThree((s) => s.controls) as unknown as { rotateSpeed: number } | null
+  useEffect(() => {
+    if (!controls) return
+    const canvas = gl.domElement
+    const speed = controls.rotateSpeed
+    const hold = new Hold(tapSlop)
+    const release = (): void => { if (hold.holding) controls.rotateSpeed = speed; hold.up() }
+    const down = (e: PointerEvent): void => {
+      if (!e.isPrimary) { release(); return }
+      noteGesture(e.pointerType)
+      if (e.button !== 0) return
+      hold.down(e.clientX, e.clientY)
+      controls.rotateSpeed = 0
+    }
+    const move = (e: PointerEvent): void => {
+      if (!hold.holding) return
+      if (!hold.move(e.clientX, e.clientY)) controls.rotateSpeed = speed
+    }
+    canvas.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    return () => {
+      canvas.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      controls.rotateSpeed = speed
+    }
+  }, [gl, controls])
+  return null
 }
 
 /**
@@ -483,7 +531,7 @@ function Marquee(): null {
     const move = (e: PointerEvent): void => {
       if (!start) return
       const { x, y } = local(e)
-      if (!active && Math.hypot(x - start.x, y - start.y) < TAP_SLOP) return
+      if (!active && Math.hypot(x - start.x, y - start.y) < tapSlop()) return
       active = true
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
@@ -602,13 +650,13 @@ export function Bench(): JSX.Element {
   // never selects a face of this object hidden behind it. In the placing
   // tools it lets the tap through, to the grid it stands on.
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     if (useWorkshop.getState().tool === 'select') useWorkshop.getState().togglePart(part)
   }
 
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     useWorkshop.getState().selectFace(face)
   }
@@ -639,6 +687,7 @@ export function Bench(): JSX.Element {
           plane; pinch or the wheel dollies, in to 0.6 of a gibson so a fifth-gibson
           step fills a good share of a phone's screen. These are the controls' own bindings. */}
       <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+      <OrbitHold />
       <Marquee />
       <Aim />
       <Keys />

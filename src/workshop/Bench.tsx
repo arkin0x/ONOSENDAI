@@ -596,8 +596,8 @@ function Keys(): null {
       if (e.code === 'Digit4') w.setTool('select')
       if (e.code === 'Digit5') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
-      if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
-      if (e.code === 'KeyE') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
+      if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
+      if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }
@@ -645,14 +645,19 @@ export function Bench(): JSX.Element {
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT a tap puts
-  // it in or out of the selection; in FACE it is caught here, so a tap on it
-  // never selects a face of this object hidden behind it. In the placing
-  // tools it lets the tap through, to the grid it stands on.
+  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT and in
+  // VIEW a tap puts it in or out of the selection, so the pad can move, turn
+  // and delete a stamped object with the tool put down (arkinox, 2026-10-10);
+  // in FACE it is caught here, so a tap on it never selects a face of this
+  // object hidden behind it. In the placing tools it lets the tap through, to
+  // the grid it stands on.
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
     if (e.delta > tapSlop()) return
     e.stopPropagation()
-    if (useWorkshop.getState().tool === 'select') useWorkshop.getState().togglePart(part)
+    const t = useWorkshop.getState().tool
+    // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
+    // stamped object picks it, and the pad moves, turns and deletes it.
+    if (t === 'select' || t === 'view') useWorkshop.getState().togglePart(part)
   }
 
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
@@ -697,7 +702,7 @@ export function Bench(): JSX.Element {
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
+      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
       <Ghost />
       <PickLoop />
       <FaceHighlight />

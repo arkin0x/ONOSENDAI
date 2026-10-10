@@ -3366,19 +3366,6 @@ kbd {
 }
 .benchpad > * { pointer-events: auto; }
 
-/* The pad and the orbit ball side by side. The pad's grid keeps its size when
-   nothing is selected (its keys are simply absent), so the ball never moves
-   under the thumb when a selection comes and goes. */
-.benchrow {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  pointer-events: none;
-}
-.benchrow > * { pointer-events: auto; }
-.benchrow .benchpad { pointer-events: none; }
-.benchrow .benchpad > * { pointer-events: auto; }
 /* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag
    on it turns the view about the shard and keeps turning after the finger
    leaves it (pointer capture); a tap sends the view home. Drawn as a lit
@@ -3551,12 +3538,14 @@ kbd {
   padding: 5px 4px;
 }
 
+/* The turn row: LEFT, RIGHT, then CUT, COPY and PASTE (arkinox, 2026-10-10),
+   a flex row of 48px keys; relative, so PASTE's question anchors to it. */
 .benchturn {
-  display: grid;
-  grid-template-columns: repeat(2, 48px);
-  grid-template-rows: 48px;
+  position: relative;
+  display: flex;
   gap: 4px;
 }
+.benchturn .touchpad__key { width: 48px; height: 48px; }
 .benchops {
   display: flex;
   align-items: center;
@@ -7399,11 +7388,28 @@ kbd {
    above the colour chip in their own right. Larger than they were, because they
    are now a first-class control rather than a footer inside a panel. */
 .ws__acts {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 5px;
 }
+/* The bucket as a two-stage key while a face is in hand (FILL or SEAM): the
+   same dot the two-stage pad keys wear, and its question opens to the left,
+   since the column stands at the right edge. */
+.ws__act--two { position: relative; }
+.ws__act--two::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+.ws__act--two[aria-expanded='true']::after { background: var(--accent); }
+.benchpaste--right { left: auto; right: 0; bottom: 44px; }
 .ws__act {
   width: 34px;
   height: 34px;

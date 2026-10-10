@@ -39,9 +39,12 @@ export async function derezzNow(): Promise<string | null> {
 export function DerezzPanel(): JSX.Element {
   const [armed, setArmed] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
-  const chain = useCyberspace((s) => s.chain)
   const live = useCyberspace((s) => s.live)
-  const actions = chain.hops + chain.sidesteps
+  // The chain a derezz retires: its events, the same count the Chain panel
+  // wears. It used to add the lifetime hop and sidestep statistics (every
+  // chain this device ever moved), which is not what a derezz discards
+  // (arkinox, 2026-10-10: "derezz shows the wrong count of actions").
+  const actions = useCyberspace((s) => s.events.length)
 
   // A broken chain respawns the way the broken-chain notice does, so the
   // End of Chain entry goes into RECENT first (store respawnFromBrokenChain).

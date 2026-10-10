@@ -205,10 +205,15 @@ export default function App(): JSX.Element {
   // The pad no longer depends on being at your own head. Off-head it empties
   // its movement cells and keeps its scale ones (TouchControls), because scale
   // is the one axis that still means something while viewing or spectating.
-  // Not while a modal is up: the pad hovered over every modal (arkinox,
-  // 2026-10-10). Its own open state is kept, so it is back when the modal goes.
+  // Hidden, not unmounted, while a modal is up: the pad hovered over every
+  // modal (arkinox, 2026-10-10), but it also owns the SWITCH TO LIVE
+  // confirmation, which is a modal itself. Unmounting the pad when that card
+  // opened took the card with it, and LIVE could not be reached (arkinox,
+  // the same evening: "the local button is stuck"). The card portals to the
+  // body, so a hidden pad still shows it; the pad's open state is kept, so
+  // it is back the moment the last modal closes.
   const modalUp = useModalUp()
-  const showPad = padOpen && !crowded && !modalUp
+  const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -264,8 +269,10 @@ export default function App(): JSX.Element {
       {/* The nickname field for a place just starred, over the star (StarNickname.tsx). */}
       <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
-      {showPad && !offerUp && <TouchControls />}
-      {showPad && !offerUp && <RouteOverlay />}
+      <div hidden={modalUp}>
+        {showPad && !offerUp && <TouchControls />}
+        {showPad && !offerUp && <RouteOverlay />}
+      </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
       {!crowded && !padOpen && !offerUp && !modalUp && (

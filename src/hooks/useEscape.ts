@@ -20,7 +20,7 @@
  * chip that mounts open) in the wrong order; render order is parent first.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 /** Where a closer sits in the order: a modal before the menu before a chip. */
 export type EscapeLayer = 'modal' | 'menu' | 'chip'
@@ -37,6 +37,18 @@ interface Entry {
 const entries = new Set<Entry>()
 let opened = 0
 
+/**
+ * Who wants to know when the stack changes: the pad hides while a modal is
+ * up (useModalUp). The stack is the one place every modal already announces
+ * itself, so nothing else has to be told about a new one.
+ */
+const listeners = new Set<() => void>()
+let version = 0
+function changed(): void {
+  version += 1
+  for (const l of listeners) l()
+}
+
 /** The next opening's place in time. */
 export function nextEscapeOrder(): number {
   opened += 1
@@ -50,7 +62,32 @@ export function nextEscapeOrder(): number {
 export function registerEscape(layer: EscapeLayer, close: () => void, order: number = nextEscapeOrder()): () => void {
   const entry: Entry = { layer, order, close }
   entries.add(entry)
-  return () => { entries.delete(entry) }
+  changed()
+  return () => { if (entries.delete(entry)) changed() }
+}
+
+/** Whether anything on the modal layer is open: a modal, a record, a sheet over the scene. */
+export function modalUp(): boolean {
+  for (const e of entries) if (e.layer === 'modal') return true
+  return false
+}
+
+/** Hear every change of the stack, until the returned function stops it. */
+export function subscribeEscape(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+const stackVersion = (): number => version
+
+/**
+ * Whether a modal is up, live. The controls pad hides while one is, so it
+ * never hovers over a modal (arkinox, 2026-10-10), and comes back by itself
+ * when the last modal closes, since its own open state is untouched.
+ */
+export function useModalUp(): boolean {
+  useSyncExternalStore(subscribeEscape, stackVersion, stackVersion)
+  return modalUp()
 }
 
 /** The highest layer's most recent entry. */

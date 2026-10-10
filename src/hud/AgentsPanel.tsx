@@ -11,7 +11,8 @@
  * put it in the message it hides for you and you need it to know that
  * message is theirs. MY AGENTS lists the kind 0 profiles that carry
  * bot: true and a p tag naming you as operator (ruling 9), with the npub
- * copyable and SPECTATE as the Avatars panel has it (ruling 4).
+ * copyable and SPECTATE as the Avatars panel has it (ruling 4), kept to
+ * the ones you also follow (arkinox, 2026-10-10).
  */
 
 import { useState } from 'react'
@@ -82,7 +83,7 @@ export function AgentsPanel(): JSX.Element {
           )
         })}
         {status !== 'loading' && agents.length === 0 && (
-          <li className="avatars__empty">No agents name you as operator yet.</li>
+          <li className="avatars__empty">No agents yet.</li>
         )}
       </ul>
       {status === 'error' && <p className="notice">Could not reach the relays.</p>}
@@ -94,10 +95,12 @@ export function AgentsPanel(): JSX.Element {
         its. COPY puts an invitation on the clipboard with everything the
         agent needs: the guide, the install line, your npub, your current
         coordinate as the rendezvous, a one-time meeting code and a suggested
-        budget. Paste it to the agent. In this version nobody can travel to
+        budget. Paste it to the agent. An agent is listed under MY AGENTS
+        when its profile names you as operator and you follow it from your
+        own account; a profile that names you without your follow is never
+        shown. In this version nobody can travel to
         anybody, so the agent hides a message at your coordinate and you find
-        it from where you stand. Agents whose profile names you as operator
-        are listed under MY AGENTS.
+        it from where you stand.
       </Explanation>
     </section>
   )

@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatCellSize } from 'sno-core/scale'
-import { messagePreview, shardRefusal } from '../lib/hidden'
+import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
@@ -61,7 +61,14 @@ export function DeploymentDetail(): JSX.Element | null {
   // is, never by the first characters of the token.
   const cashu = isMessage ? readCashuToken(dep.text) : { raw: null, token: null }
   const coin = cashu.raw !== null
-  const name = coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : isMessage ? messagePreview(dep.text ?? '', 22) : dep.shard?.name ?? 'shard'
+  // Named and kinded by what it is: a key item or a chest is not a shard
+  // (arkinox, 2026-10-10: the record called the Vapor Key a shard, kind 3330).
+  const name = coin
+    ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token')
+    : isMessage ? messagePreview(dep.text ?? '', 22) : dep.type === 'key' ? dep.key?.name ?? 'item' : dep.type === 'chest' ? dep.chest?.name ?? 'chest' : dep.shard?.name ?? 'shard'
+  const kindLabel = isMessage
+    ? `message (kind ${MESSAGE_KIND})`
+    : dep.type === 'key' ? `item (kind ${KEY_KIND})` : dep.type === 'chest' ? `chest (kind ${CHEST_KIND})` : dep.ref ? 'shard (kind 33331, by reference)' : `shard (kind ${SHARD_KIND})`
   const runTest = async (): Promise<void> => {
     setTest('testing')
     setTest(await useShards.getState().testDiscovery(dep.eventId))
@@ -81,7 +88,7 @@ export function DeploymentDetail(): JSX.Element | null {
       {isMessage && <MessageText text={dep.text ?? ''} words={(t) => <div className="detail__message">“{t}”</div>} />}
 
       <div className="detail__grid">
-        <Field label="kind" value={isMessage ? 'message (kind 1)' : dep.ref ? 'shard (kind 33331, by reference)' : 'shard (kind 3330)'} />
+        <Field label="kind" value={kindLabel} />
         <Field label="event" value={shortHex(dep.eventId, 10, 8)} full={dep.eventId} />
         <Field label="lookup" value={shortHex(dep.lookupId, 10, 8)} full={dep.lookupId} />
         <Field label="coord" value={`${shortHex(dep.at.x, 6, 4)} / ${shortHex(dep.at.y, 6, 4)} / ${shortHex(dep.at.z, 6, 4)}`} full={`${dep.at.x}\n${dep.at.y}\n${dep.at.z}`} />

@@ -44,10 +44,18 @@ vi.mock('zustand', async (importOriginal) => {
 })
 
 import { Hud, PositionPanel, useViewDraft } from '../Hud'
+import { PanelSlot } from '../PanelSlot'
 import { ChainPanel } from '../ChainPanel'
 import { useChainUi } from '../../store/useChainUi'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
+import { defaultOrder, moveBefore, usePanelLayout } from '../../store/usePanelLayout'
+
+/** The name of the component at `k`: a panel's own, seen through the PanelSlot every panel sits in. */
+function nameOf(k: ReactElement): string {
+  const inner = k.type === PanelSlot ? (k as ReactElement<{ children: ReactElement }>).props.children : k
+  return (inner.type as { name: string }).name
+}
 
 /** The names of the components in each column, in order, as Hud lays them out. */
 function columns(): { left: string[]; right: string[] } {
@@ -56,9 +64,10 @@ function columns(): { left: string[]; right: string[] } {
   renderToString(createElement(() => { tree = Hud({}); return null }))
   const names = (col: ReactNode): string[] => {
     const kids = (col as ReactElement<{ children: ReactNode[] }>).props.children
-    return (Array.isArray(kids) ? kids : [kids])
+    // The panels come as one array from the layout's map, beside the brand or the license.
+    return (Array.isArray(kids) ? kids.flat() : [kids])
       .filter((k): k is ReactElement => isValidElement(k) && typeof k.type === 'function')
-      .map((k) => (k.type as { name: string }).name)
+      .map(nameOf)
   }
   const [left, right] = (tree! as ReactElement<{ children: ReactNode[] }>).props.children
   return { left: names(left), right: names(right) }
@@ -182,5 +191,61 @@ describe('review of #235, NIT 6: the Position panel keeps a half-typed VIEW acro
     expect(typed()).toBe(true)
     useBuilder.getState().exit()
     expect(typed()).toBe(true)
+  })
+})
+
+describe('the saved panel layout (arkinox, 2026-10-10)', () => {
+  afterEach(() => usePanelLayout.setState({ order: defaultOrder(), collapsed: {} }))
+
+  it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
+    usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
+    const { left, right } = columns()
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'DiscoveredPanel', 'InventoryPanel', 'ShardsPanel', 'AvatarsPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
+  })
+
+  it('a priority state draws its panel first without writing to the saved order, which applies again when it ends', () => {
+    const order = moveBefore(defaultOrder(), 'position', 'relays', 'right')
+    usePanelLayout.setState({ order })
+    useBuilder.getState().enter('build')
+    expect(columns().left.slice(0, 2)).toEqual(['Brand', 'PositionPanel'])
+    expect(columns().right).not.toContain('PositionPanel')
+    expect(usePanelLayout.getState().order).toBe(order)
+    useBuilder.getState().exit()
+    const { right } = columns()
+    expect(right.slice(-2)).toEqual(['PositionPanel', 'RelaysPanel'])
+    expect(usePanelLayout.getState().order).toBe(order)
+  })
+
+  it('a panel saved into the left column still leads while its state holds, and is not drawn twice', () => {
+    usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'proof', null, 'left') })
+    useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
+    try {
+      const { left } = columns()
+      expect(left.slice(0, 2)).toEqual(['Brand', 'ProofPanel'])
+      expect(left.filter((n) => n === 'ProofPanel')).toHaveLength(1)
+    } finally {
+      useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
+    }
+    expect(columns().left.slice(-1)).toEqual(['ProofPanel'])
+  })
+
+  it('a slot is folded when saved so, and only a folded panel that is not leading has a grip', () => {
+    const slot = (id: 'hidden' | 'position', lead = false): string =>
+      renderToString(createElement(PanelSlot, {
+        id, lead, lifting: false, onGrab: () => {},
+        children: createElement('section', { className: 'panel' }, createElement('header', { className: 'panel__head' }, createElement('h2', null, 'Title'))),
+      }))
+    expect(slot('hidden')).toContain('class="slot"')
+    expect(slot('hidden')).not.toContain('slot__grip')
+    usePanelLayout.getState().toggle('hidden')
+    expect(slot('hidden')).toContain('class="slot slot--collapsed"')
+    expect(slot('hidden')).toContain('slot__grip')
+    expect(slot('hidden')).toContain('lucide-grip-vertical')
+    expect(slot('hidden', true)).toContain('class="slot slot--collapsed"')
+    expect(slot('hidden', true)).not.toContain('slot__grip')
+    expect(slot('position')).toContain('class="slot"')
+    usePanelLayout.getState().toggle('hidden')
+    expect(slot('hidden')).toContain('class="slot"')
   })
 })

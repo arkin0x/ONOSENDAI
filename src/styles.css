@@ -160,6 +160,140 @@ body {
   color: var(--accent);
 }
 
+/* ---------- Panel slots: fold and reorder (arkinox, 2026-10-10) ---------- */
+
+/* The slot (PanelSlot.tsx) carries the state, folded or lifted, so a panel's
+   own className stays its own and no panel's markup changes. One rule moved
+   here with the wrapping: the Official links keep to the foot of the column. */
+.slot {
+  position: relative;
+}
+
+.slot[data-panel-id="links"] {
+  margin-top: auto;
+}
+
+/* The title line is the fold control: the whole line taps, the title holds
+   the focus (role=button, set by PanelSlot) and wears the chevron. The title
+   pushes the rest to the right, which is what space-between did with the two
+   children every header has. */
+.slot > .panel > .panel__head {
+  cursor: pointer;
+  justify-content: flex-start;
+}
+
+.slot > .panel > .panel__head > h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+  border-radius: 2px;
+}
+
+.slot > .panel > .panel__head > h2:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The chevron: down while open, right while folded. */
+.slot > .panel > .panel__head > h2::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-top: -2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.slot--collapsed > .panel > .panel__head > h2::before {
+  transform: rotate(-45deg);
+}
+
+/* Folded: the title line alone, the rule under it gone, and room at its right
+   end for the grip. */
+.slot--collapsed > .panel {
+  padding-bottom: 10px;
+}
+
+.slot--collapsed > .panel--links {
+  padding-bottom: 12px;
+}
+
+.slot--collapsed > .panel > .panel__head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  padding-right: 22px;
+  border-bottom: 0;
+}
+
+.slot--collapsed > .panel > :not(.panel__head) {
+  display: none;
+}
+
+/* The grip, on a folded panel only, at the right end of its title line.
+   touch-action: none so a finger on it drags the panel and never scrolls.
+   pointer-events back on: the grip sits beside the panel, not in it, and
+   .hud is pointer-events: none (the first run in a browser pressed the
+   title line through it). */
+.slot__grip {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--dim);
+  cursor: grab;
+  touch-action: none;
+  transform: translateY(-50%);
+}
+
+.slot__grip:hover,
+.slot__grip:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.slot--lifting > .panel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+
+.slot--lifting .slot__grip {
+  color: var(--accent);
+  cursor: grabbing;
+}
+
+/* While a panel is lifted the whole screen is the drop surface. The pointer
+   is captured here (Hud.tsx), so a panel moving in the DOM under the pointer
+   cannot end the drag, and nothing beneath gets a hover or a selection. */
+.hud__grab {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud--dragging {
+  user-select: none;
+}
+
+.hud--dragging .hud__grab {
+  pointer-events: auto;
+  cursor: grabbing;
+  touch-action: none;
+}
+
 /* ---------- Stats ---------- */
 
 .stats {

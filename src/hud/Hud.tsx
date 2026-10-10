@@ -3,7 +3,7 @@
  * would cost, and what the chain has cost so far.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
@@ -36,6 +36,8 @@ import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
 import { StarredPlaces } from './StarredPlaces'
+import { PanelSlot } from './PanelSlot'
+import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayout'
 import { jobInProgress } from '../lib/cloud'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
@@ -419,6 +421,66 @@ function Controls(): JSX.Element {
   )
 }
 
+/**
+ * Every panel under its layout id (usePanelLayout). The default order there
+ * is the menu as it was before the order could change: the left column held
+ * Identity, then the three bag panels (Keys and Chests B1, ruling 14) in a
+ * bag's order of life (HIDDEN BAGS, on the relay and not yet opened by your
+ * keys; DISCOVERED BAGS, opened where it stands; ITEMS, what you hold), then
+ * Create, Avatars, Targets and the Official links; the right column Scale,
+ * Position, Movement proof, Cloud compute, Proof chain, Hyperspace, View
+ * (what the scene draws, just above the Legend that decodes it), Legend,
+ * Controls, Derezz and Relays.
+ */
+const PANELS: Record<PanelId, () => JSX.Element> = {
+  identity: IdentityPanel,
+  hidden: HiddenPanel,
+  discovered: DiscoveredPanel,
+  items: InventoryPanel,
+  create: ShardsPanel,
+  avatars: AvatarsPanel,
+  targets: TargetsPanel,
+  links: LinksPanel,
+  scale: ScalePanel,
+  position: PositionPanel,
+  proof: ProofPanel,
+  cloud: CloudPanel,
+  chain: ChainPanel,
+  hyperspace: HyperspacePanel,
+  view: ViewPanel,
+  legend: Legend,
+  controls: Controls,
+  derezz: DerezzPanel,
+  relays: RelaysPanel,
+}
+
+/**
+ * Where a lifted panel lands for a pointer at (x, y): in the column under
+ * the point (or nearest it, when the point is in the gap between the
+ * columns), before the first panel there whose middle is below the point,
+ * last when none is. The lifted panel is skipped, and so is a leading
+ * panel: it is drawn at the top of the left column, not at its saved place,
+ * and the saved order is what a drag edits.
+ */
+function dropTarget(hud: HTMLElement, lifting: PanelId, leads: readonly PanelId[], x: number, y: number): { column: Column; before: PanelId | null } | null {
+  let column: HTMLElement | null = null
+  let nearest = Infinity
+  for (const col of hud.querySelectorAll<HTMLElement>('.hud__col')) {
+    const r = col.getBoundingClientRect()
+    const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom))
+    if (d < nearest) { nearest = d; column = col }
+  }
+  if (!column) return null
+  const name = column.dataset.column as Column
+  for (const slot of column.querySelectorAll<HTMLElement>(':scope > [data-panel-id]')) {
+    const id = slot.dataset.panelId as PanelId
+    if (id === lifting || leads.includes(id)) continue
+    const r = slot.getBoundingClientRect()
+    if (y < r.top + r.height / 2) return { column: name, before: id }
+  }
+  return { column: name, before: null }
+}
+
 export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // With a destination picked, the ride is the thing you are doing: the
   // Hyperspace panel leads the left column until the destination is cleared.
@@ -436,39 +498,69 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // the columns stack, so it is the first panel on both. Back in its own
   // place on exit.
   const building = useBuilder((s) => s.active)
+  // The saved layout (arkinox, 2026-10-10): read before the first render, so
+  // a refresh shows the menu as it was left, and written on every fold and
+  // move. A priority state above only rearranges what is drawn; it writes
+  // nothing here, so when it ends the saved order applies again untouched.
+  const order = usePanelLayout((s) => s.order)
+  const [lifting, setLifting] = useState<PanelId | null>(null)
+  const drag = useRef<{ id: PanelId; pointerId: number } | null>(null)
+  const hudRef = useRef<HTMLDivElement>(null)
+  const grabRef = useRef<HTMLDivElement>(null)
+
+  const leads: PanelId[] = []
+  if (building) leads.push('position')
+  if (proofLeads) leads.push('proof')
+  if (cloudLeads) leads.push('cloud')
+  if (rideSet) leads.push('hyperspace')
+  const left = [...leads, ...order.left.filter((id) => !leads.includes(id))]
+  const right = order.right.filter((id) => !leads.includes(id))
+
+  // The drag. The pointer is captured by the drag surface (the .hud__grab
+  // div), not by the grip it started on: a lifted panel moves in the DOM as
+  // the pointer passes other panels, and a column change mounts it afresh,
+  // and either would end a capture held by the grip (a removed element
+  // loses its capture, and a touch's events then go to the node it began
+  // on). The surface never moves, so the gesture outlives every reorder.
+  const grab = (id: PanelId, e: ReactPointerEvent<HTMLButtonElement>): void => {
+    const surface = grabRef.current
+    if (!surface || drag.current || e.button !== 0) return
+    try { surface.setPointerCapture(e.pointerId) } catch { return }
+    e.preventDefault()
+    drag.current = { id, pointerId: e.pointerId }
+    setLifting(id)
+  }
+  const over = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.pointerId || !hudRef.current) return
+    const target = dropTarget(hudRef.current, d.id, leads, e.clientX, e.clientY)
+    if (target) usePanelLayout.getState().move(d.id, target.before, target.column)
+  }
+  // Up, cancel and a lost capture all end it; the order is already saved.
+  const drop = (): void => {
+    if (!drag.current) return
+    drag.current = null
+    setLifting(null)
+  }
+
+  const slot = (id: PanelId): JSX.Element => {
+    const Panel = PANELS[id]
+    return (
+      <PanelSlot key={id} id={id} lead={leads.includes(id)} lifting={lifting === id} onGrab={grab}>
+        <Panel />
+      </PanelSlot>
+    )
+  }
+
+  const cls = ['hud', menuOpen && 'hud--menu', lifting && 'hud--dragging'].filter(Boolean).join(' ')
   return (
-    <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
-      <div className="hud__col hud__col--left">
+    <div ref={hudRef} className={cls}>
+      <div className="hud__col hud__col--left" data-column="left">
         <Brand />
-        {building && <PositionPanel />}
-        {proofLeads && <ProofPanel />}
-        {cloudLeads && <CloudPanel />}
-        {rideSet && <HyperspacePanel />}
-        <IdentityPanel />
-        {/* The three bag panels (Keys and Chests B1, ruling 14), in a bag's
-            order of life: HIDDEN BAGS, on the relay and not yet opened by your
-            keys; DISCOVERED BAGS, opened where it stands; ITEMS, what you hold. */}
-        <HiddenPanel />
-        <DiscoveredPanel />
-        <InventoryPanel />
-        <ShardsPanel />
-        <AvatarsPanel />
-        <TargetsPanel />
-        <LinksPanel />
+        {left.map(slot)}
       </div>
-      <div className="hud__col hud__col--right">
-        <ScalePanel />
-        {!building && <PositionPanel />}
-        {!proofLeads && <ProofPanel />}
-        {!cloudLeads && <CloudPanel />}
-        <ChainPanel />
-        {!rideSet && <HyperspacePanel />}
-        {/* What the scene draws, just above the Legend that decodes it. */}
-        <ViewPanel />
-        <Legend />
-        <Controls />
-        <DerezzPanel />
-        <RelaysPanel />
+      <div className="hud__col hud__col--right" data-column="right">
+        {right.map(slot)}
         {/* The license, just above the build. */}
         <div className="hud__license">
           <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a>
@@ -477,6 +569,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
             many PRs had merged that day, and which PR this is. */}
         <div className="hud__version" title="2 . day merged . PRs merged that day . this PR">{__ONOSENDAI_VERSION__}</div>
       </div>
+      <div ref={grabRef} className="hud__grab" onPointerMove={over} onPointerUp={drop} onPointerCancel={drop} onLostPointerCapture={drop} aria-hidden="true" />
     </div>
   )
 }

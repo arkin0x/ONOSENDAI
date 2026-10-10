@@ -26,6 +26,7 @@
 
 import { Bitcoin, KeyRound, Pyramid, ScrollText, Vault, type LucideIcon } from 'lucide-react'
 import type { HiddenType } from '../lib/hidden'
+import { isPictureUri } from '../lib/itemPicture'
 
 /** A kind as a row shows it: a message that carries a Cashu token is a coin, apart from a message. */
 export interface ItemKind {
@@ -69,4 +70,17 @@ interface Props {
 export function ItemIcon({ type, coin = false, size = 13, strokeWidth = 2.25, className }: Props): JSX.Element {
   const Icon = itemIconOf(type, coin)
   return <Icon className={className ? `item-icon ${className}` : 'item-icon'} size={size} strokeWidth={strokeWidth} aria-hidden />
+}
+
+/**
+ * An item's own picture where its kind's icon would stand, at the icon's
+ * size, or the icon when it has none (arkinox, 2026-10-10: "Display the image
+ * itself for the item icon in the ITEMS panel"). The parser admits only a
+ * data URI (lib/itemPicture pictureOf), and this checks once more, so no
+ * other scheme reaches an <img> src from here whatever a stored row holds.
+ * Drawn pixelated and rounded by `.item-pic` (styles.css, beside .item-icon).
+ */
+export function ItemFace({ image, type, coin = false, size = 13, strokeWidth = 2.25, className }: Props & { image?: string }): JSX.Element {
+  if (image && isPictureUri(image)) return <img className={className ? `item-pic ${className}` : 'item-pic'} src={image} width={size} height={size} alt="" aria-hidden />
+  return <ItemIcon type={type} coin={coin} size={size} strokeWidth={strokeWidth} className={className} />
 }

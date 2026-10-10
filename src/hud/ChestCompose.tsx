@@ -1,12 +1,13 @@
 /**
  * ChestCompose.tsx: sealing a chest to hide (Keys and Chests B1 §3.1).
  *
- * A chest has a name, a lock and contents. The lock is one of your LOOT keys
- * (so you can seal to a key you forged, or to one you found that someone else
- * forged), or a pasted item public key or npub, which seals it to a person.
- * The contents are a message (which may hold a Cashu token, checked at the
- * mint as a hidden message is), one of your workshop models, or a new key
- * forged here, for chaining. Nothing is signed or sealed in the composer: the
+ * A chest has a name, a lock and contents. The lock is one of the keypair
+ * items in your ITEMS (so you can seal to an item you forged, or to one you
+ * found that someone else forged), or a pasted item public key or npub, which
+ * seals it to a person. The contents are a message (which may hold a Cashu
+ * token, checked at the mint as a hidden message is), one of your workshop
+ * models, or a new item forged here, for chaining. The lock select is text
+ * only: an <option> cannot hold an item's picture, so none is drawn there. Nothing is signed or sealed in the composer: the
  * deploy does that at the place it lands (useShards `deploy`). The meter
  * shows the sealed size against NIP-44's 65,535 bytes, and PLACE CHEST is
  * refused past it, in the same words the deploy would use.
@@ -153,17 +154,17 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
     <div className="shards__compose">
       <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the chest" maxLength={MAX_ITEM_NAME} autoFocus aria-label="Chest name" />
 
-      {/* The lock: a key you hold, or a pasted public key. */}
+      {/* The lock: an item you hold, or a pasted public key. */}
       <div className="compose__row">
         <span className="legend__label">Lock</span>
-        <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => setLockKeyId(e.target.value)} aria-label="Seal to a key you hold" title="A key in your LOOT: whoever holds it opens the chest">
-          <option value="">{keys.length === 0 ? 'no keys in your LOOT' : 'paste a key below'}</option>
-          {/* No icon on an option: a select's options are text only, and the select says these are keys. */}
+        <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => setLockKeyId(e.target.value)} aria-label="Seal to an item you hold" title="An item in your ITEMS: whoever holds it opens the chest">
+          <option value="">{keys.length === 0 ? 'no items in your ITEMS' : 'paste a public key below'}</option>
+          {/* No icon or picture on an option: a select's options are text only, and the select says these are your items. */}
           {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
         </select>
       </div>
       {!heldLock && (
-        <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex) or an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="A key’s public key seals it to that key; an npub seals it to that person" />
+        <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex) or an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="An item’s public key seals it to that item; an npub seals it to that person" />
       )}
       <input className="avatars__input" value={requires} onChange={(e) => { setRequires(e.target.value.slice(0, MAX_ITEM_NAME)); setRequiresTouched(true) }} placeholder="What opens it, for those who cannot" maxLength={MAX_ITEM_NAME} aria-label="Requires" title="Shown to anyone who finds the chest without its key" />
 
@@ -188,7 +189,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('message')} title="A message, which may hold a cashu token">+ MESSAGE</button>
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>
-          <button className="chest__act" onClick={() => setAdding('key')} title="A new key forged here, for the next chest">+ KEY</button>
+          <button className="chest__act" onClick={() => setAdding('key')} title="A new item forged here, for the next chest">+ ITEM</button>
         </div>
       ) : adding === 'message' ? (
         <>
@@ -209,7 +210,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         </div>
       ) : (
         <div className="compose__row">
-          <input className="avatars__input" value={keyName} onChange={(e) => setKeyName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the key inside" maxLength={MAX_ITEM_NAME} autoFocus aria-label="Key to seal" />
+          <input className="avatars__input" value={keyName} onChange={(e) => setKeyName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the item inside" maxLength={MAX_ITEM_NAME} autoFocus aria-label="Item to seal" />
           <button className="chest__act" onClick={() => { setAdding(null); setKeyName('') }}>CANCEL</button>
           <button className="chest__act" disabled={!keyName.trim()} onClick={() => add({ kind: 'key', key: forgeKey(keyName.trim()) })}>ADD</button>
         </div>
@@ -223,10 +224,10 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
-        <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick a key or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
+        <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
       </div>
       <Explanation>
-        A chest is sealed to a key from your LOOT (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new key inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that key, or that person, can open it and TAKE what is inside.
+        A chest is sealed to an item from your ITEMS (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new item inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that item, or that person, can open it and TAKE what is inside.
       </Explanation>
     </div>
   )

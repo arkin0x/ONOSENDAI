@@ -7,9 +7,9 @@
  * where their content sits. Your own also offers to delete it, after a
  * confirmation.
  *
- * This is the "who is this and what do I do about them" view. The Stash panel's
- * deployment detail is the "manage my own on the wire" view; the two are
- * reached differently and answer different questions.
+ * This is the "who is this and what do I do about them" view. The CREATE
+ * panel's deployment detail is the "manage my own on the wire" view; the two
+ * are reached differently and answer different questions.
  */
 
 import { useEffect, useState } from 'react'
@@ -32,7 +32,7 @@ import { deleteWords, removeWords } from '../lib/deleteWords'
 import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
-import { ItemIcon } from './ItemIcon'
+import { ItemFace } from './ItemIcon'
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -84,7 +84,7 @@ export function SecretModal(): JSX.Element | null {
   // is nothing but a token has no words, so it offers no COPY TEXT at all.
   const coin = item.type === 'message' && findCashuToken(item.text) !== null
   const words = coin ? textWithoutToken(item.text) : item.text ?? ''
-  // A shard copies into your Stash as a model; a message copies its text.
+  // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
     if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
     else if (words) void navigator.clipboard?.writeText(words)
@@ -107,8 +107,10 @@ export function SecretModal(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          {/* The badge each kind of hidden thing opens under: its icon (ItemIcon) and its name. */}
-          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemIcon type={item.type} coin={coin} size={11} />{item.type.toUpperCase()}</span>
+          {/* The badge each kind of hidden thing opens under: its icon, or a
+              keypair item's own picture (ItemFace), and its name. A kind 'key'
+              is an ITEM to the reader (arkinox, 2026-10-10: "keys ARE items"). */}
+          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemFace type={item.type} coin={coin} image={item.keyItem?.image} size={11} />{item.type === 'key' ? 'ITEM' : item.type.toUpperCase()}</span>
           {mine && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
@@ -164,8 +166,8 @@ export function SecretModal(): JSX.Element | null {
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo}>GO TO IT</button>
           {(item.type === 'shard' || item.type === 'message') && (!coin || words) && (
-            <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your Stash' : coin ? 'Copy the words around the token' : 'Copy the text'}>
-              {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO STASH' : 'COPY TEXT'}
+            <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : 'Copy the text'}>
+              {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}
             </button>
           )}
           {!mine && (

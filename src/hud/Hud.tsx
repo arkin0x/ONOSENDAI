@@ -446,8 +446,8 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         {rideSet && <HyperspacePanel />}
         <IdentityPanel />
         {/* The three bag panels (Keys and Chests B1, ruling 14), in a bag's
-            order of life: HIDDEN, on the relay and not yet opened by your keys;
-            DISCOVERED, opened where it stands; LOOT, what you hold. */}
+            order of life: HIDDEN BAGS, on the relay and not yet opened by your
+            keys; DISCOVERED BAGS, opened where it stands; ITEMS, what you hold. */}
         <HiddenPanel />
         <DiscoveredPanel />
         <InventoryPanel />

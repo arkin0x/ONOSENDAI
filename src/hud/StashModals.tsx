@@ -163,11 +163,11 @@ export function StashModals(): JSX.Element | null {
       </Shell>
     )
   }
-  // No paragraph on either: what a key or a chest is lives in the tooltips
-  // and the LOOT panel's EXPLAIN (the standing rule).
+  // No paragraph on either: what an item or a chest is lives in the tooltips
+  // and the ITEMS panel's EXPLAIN (the standing rule).
   if (key) {
     return (
-      <Shell title="Forge a key" onClose={close}>
+      <Shell title="Forge an item" onClose={close}>
         <KeyCompose onDone={close} />
       </Shell>
     )

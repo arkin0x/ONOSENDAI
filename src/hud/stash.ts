@@ -79,7 +79,7 @@ interface StashModals {
   bag: string | null
   /** The Builder's HIDE MESSAGE composer. */
   message: boolean
-  /** The FORGE A KEY composer (Keys and Chests B1 §3.1). */
+  /** The FORGE AN ITEM composer (Keys and Chests B1 §3.1; the item is a keypair, so the name says key). */
   key: boolean
   /** The SEAL A CHEST composer. */
   chest: boolean

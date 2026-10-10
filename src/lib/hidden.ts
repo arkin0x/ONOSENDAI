@@ -43,6 +43,7 @@ import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
+import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
 import type { Position } from './space'
 
 /** The location-encrypted envelope (spec §8.6). */
@@ -182,6 +183,16 @@ export interface KeyItem {
   itemPubkey: string
   /** The item's private key, 64 lowercase hex. Holding it is holding the item. */
   secretHex: string
+  /**
+   * The item's picture (lib/itemPicture.ts): a raster data URI at most 32
+   * pixels a side, shown as its icon in ITEMS and wherever it is listed
+   * (arkinox, 2026-10-10). Optional; an item without one wears its kind's
+   * icon. `imageDim` is its width and height, known when it was forged and
+   * carried in the tag's `dim`, so no reader has to decode the picture to
+   * know its size. Both are set together or not at all.
+   */
+  image?: string
+  imageDim?: PictureDim
 }
 
 /** What a chest item carries, read out of its event (B1 §2.2); the payload is still sealed. */
@@ -246,7 +257,11 @@ export function keyItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): Ke
   const about = tagged !== undefined
     ? ev.content.trim().replace(/\s+/g, ' ').slice(0, MAX_ABOUT)
     : capped(ev.tags, 'about', MAX_ABOUT)
-  return { name: nameOf(ev.tags, 'key'), about, itemPubkey, secretHex }
+  // The picture, when the item carries one this client accepts: only a data
+  // URI, at most 32 a side (lib/itemPicture pictureOf, and why). An imeta tag
+  // that says anything else is passed over, and the item reads as one without.
+  const picture = pictureOf(ev.tags)
+  return { name: nameOf(ev.tags, 'key'), about, itemPubkey, secretHex, ...(picture ? { image: picture.image, imageDim: picture.dim } : {}) }
 }
 
 /** A chest item out of its event, or null when its lock tag or payload is malformed. */
@@ -413,9 +428,17 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
  * hider's sentence about the key, or empty. `item` is the public key, so a
  * reader can check one against the other; `-` is NIP-70, so a finder cannot
  * republish the hider's signed item to a compliant relay.
+ *
+ * A picture rides in NIP-92's `imeta` tag as a data URI with its mime and
+ * size (lib/itemPicture.ts, arkinox, 2026-10-10). The tag is optional and a
+ * reader that does not know it skips it, so an item with a picture reads the
+ * same as one without on a client that only knows the tags above (the MCP
+ * server among them).
  */
 export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
   const tags: string[][] = [['C', positionHex(at, plane)], ['title', key.name.slice(0, MAX_ITEM_NAME)], ['item', key.itemPubkey], ['secret', key.secretHex], ['-']]
+  const picture = key.image && key.imageDim ? imetaTag(key.image, key.imageDim) : null
+  if (picture) tags.push(picture)
   return { kind: KEY_KIND, created_at: createdAt, content: key.about.slice(0, MAX_ABOUT), tags }
 }
 
@@ -454,7 +477,7 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
 
 /**
  * Longest riddle a bag carries in its `content` (spec §7.7 "Riddles"). It is
- * public plaintext that every seeker reads in the LOOT list before finding
+ * public plaintext that every seeker reads in the HIDDEN BAGS list before finding
  * anything, so it is a clue rather than a letter: 280 characters, a post's
  * length, is room for a riddle of a few lines and keeps the list legible. A
  * longer message belongs inside the bag, where MAX_MESSAGE_LENGTH applies.

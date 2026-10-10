@@ -1465,7 +1465,7 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       // A chest that a held key opens is opened here, and what it holds is
       // found too, in place: the gate of B1. A room sealed behind a door
-      // appears where the door stands the moment its key is in LOOT, on
+      // appears where the door stands the moment its key is in ITEMS, on
       // every scan, and a key inside opens the next chest in the same pass.
       // A chest sealed to this identity waits for OPEN in the record, since a
       // signer may have to be asked.

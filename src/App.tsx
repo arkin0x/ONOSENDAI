@@ -45,7 +45,7 @@ import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
-import { useEscape } from './hooks/useEscape'
+import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
@@ -205,7 +205,10 @@ export default function App(): JSX.Element {
   // The pad no longer depends on being at your own head. Off-head it empties
   // its movement cells and keeps its scale ones (TouchControls), because scale
   // is the one axis that still means something while viewing or spectating.
-  const showPad = padOpen && !crowded
+  // Not while a modal is up: the pad hovered over every modal (arkinox,
+  // 2026-10-10). Its own open state is kept, so it is back when the modal goes.
+  const modalUp = useModalUp()
+  const showPad = padOpen && !crowded && !modalUp
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
@@ -265,7 +268,7 @@ export default function App(): JSX.Element {
       {showPad && !offerUp && <RouteOverlay />}
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
-      {!crowded && !padOpen && !offerUp && (
+      {!crowded && !padOpen && !offerUp && !modalUp && (
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}

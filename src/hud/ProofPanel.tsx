@@ -8,8 +8,9 @@
  * the real computation.
  */
 
-import { CloudUpload, Footprints, KeyRound, OctagonAlert } from 'lucide-react'
+import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
+import { ItemIcon } from './ItemIcon'
 import { SecretsModal } from './SecretsModal'
 import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
@@ -266,7 +267,7 @@ export function ProofPanel(): JSX.Element {
       {/* Every region you hold the key to, and what it cost to get there. */}
       <div className="proof__secrets">
         <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
-          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
+          <ItemIcon type="key" size={12} /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
       {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}

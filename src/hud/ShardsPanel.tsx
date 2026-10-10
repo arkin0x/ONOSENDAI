@@ -17,7 +17,8 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Diamond, KeyRound, PencilLine, Rss, Vault, Wrench } from 'lucide-react'
+import { Rss, Wrench } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
@@ -74,7 +75,7 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <span className="legend__label">Place a hidden object</span>
         <div>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}><Diamond className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> DEPLOY AN OBJECT</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}><ItemIcon type="shard" className="shards__build-icon" size={13} strokeWidth={2.5} /> DEPLOY AN OBJECT</button>
         </div>
       </div>
 
@@ -83,7 +84,7 @@ export function ShardsPanel(): JSX.Element {
         {composing ? (
           <MessageCompose onDone={() => setComposing(false)} />
         ) : (
-          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}><PencilLine className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> WRITE A MESSAGE</button>
+          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}><ItemIcon type="message" className="shards__build-icon" size={13} strokeWidth={2.5} /> WRITE A MESSAGE</button>
         )}
       </div>
 
@@ -93,8 +94,8 @@ export function ShardsPanel(): JSX.Element {
       <div className="shards__section">
         <span className="legend__label">Place a key or a chest</span>
         <div className="shards__modes">
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it"><KeyRound className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> FORGE A KEY</button>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><Vault className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE A KEY</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
         </div>
       </div>
 

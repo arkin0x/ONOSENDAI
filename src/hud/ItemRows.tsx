@@ -20,7 +20,8 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
-import { hiddenGlyph, hiddenLabel, type ChestItem } from '../lib/hidden'
+import { hiddenLabel, type ChestItem } from '../lib/hidden'
+import { ItemIcon } from './ItemIcon'
 import { openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
@@ -132,7 +133,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
   const take = (): void => { useInventory.getState().take([entry], from, place) }
   return (
     <li className="chest__row">
-      <span className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} aria-hidden="true">{hiddenGlyph(type, coin)}</span>
+      <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} />
       {type === 'chest' && entry.body.chest
         ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} />
         : (

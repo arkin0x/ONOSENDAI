@@ -25,7 +25,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { KeyRound, MapPin } from 'lucide-react'
+import { MapPin } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { formatAgo } from '../lib/time'
 import { axisDistance } from '../lib/nearby'
@@ -170,7 +171,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     <div className="modal" role="dialog" aria-label="Region keys" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
-          <h2><KeyRound size={14} strokeWidth={2.25} aria-hidden /> Region keys</h2>
+          <h2><ItemIcon type="key" size={14} /> Region keys</h2>
           <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
           <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
         </header>
@@ -285,7 +286,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                   <li className="secrets__row">
                     <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                       <span className="secrets__where">
-                        <KeyRound size={11} strokeWidth={2.25} aria-hidden />
+                        <ItemIcon type="key" size={11} />
                         {sizeLabel(k)}
                       </span>
                       {/* Every side, in real units: a region is a volume and one

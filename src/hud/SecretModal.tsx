@@ -32,9 +32,7 @@ import { deleteWords, removeWords } from '../lib/deleteWords'
 import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
-
-/** The badge each kind of hidden thing opens under. */
-const BADGE: Record<string, string> = { message: '✎ MESSAGE', shard: '◇ SHARD', key: '⚷ KEY', chest: '▣ CHEST' }
+import { ItemIcon } from './ItemIcon'
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -107,7 +105,8 @@ export function SecretModal(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className={`secret__badge secret__badge--${item.type}`}>{BADGE[item.type] ?? item.type.toUpperCase()}</span>
+          {/* The badge each kind of hidden thing opens under: its icon (ItemIcon) and its name. */}
+          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemIcon type={item.type} coin={coin} size={11} />{item.type.toUpperCase()}</span>
           {mine && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>

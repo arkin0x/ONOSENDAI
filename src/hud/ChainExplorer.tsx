@@ -43,7 +43,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound, MessageCircle, TriangleAlert } from 'lucide-react'
+import { MessageCircle, TriangleAlert } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
@@ -320,7 +321,7 @@ export function ChainExplorer(): JSX.Element {
                   ? `This hop yielded the key to its 2^${key.height} region, and you still hold it.`
                   : `This hop yielded the key to its 2^${key.height} region. It is not in your Secrets list.`}
               >
-                <KeyRound size={11} strokeWidth={2.25} aria-hidden />2^{key.height}
+                <ItemIcon type="key" size={11} />2^{key.height}
               </span>
             )}
             {atHead ? (

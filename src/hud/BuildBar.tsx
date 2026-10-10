@@ -25,7 +25,8 @@ import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
-import { Diamond, House, Pencil, Wrench } from 'lucide-react'
+import { House, Wrench } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
 
 /** The buttons' icons, one size for all three, matched to the 8px capitals beside them. */
 const ICON = 12
@@ -74,8 +75,8 @@ export function BuildBar(): JSX.Element | null {
       )}
 
       <div className="buildbar__acts">
-        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor"><Diamond className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />PLACE OBJECT</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Write a message and hide it at the build cursor"><Pencil className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />HIDE MESSAGE</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />PLACE OBJECT</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />HIDE MESSAGE</button>
         <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
       </div>
 

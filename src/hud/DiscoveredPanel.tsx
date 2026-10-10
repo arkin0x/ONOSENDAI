@@ -11,7 +11,7 @@
  * when, how much, and the riddle if there is one. Where a bag is stays hidden
  * until hints land (the spec amendment is in progress); HIDDEN answers the
  * question a newcomer asks first, whether there is anything out there at all.
- * A DISCOVERED row also shows what was in it as glyphs, and tapping a bag opens
+ * A DISCOVERED row also shows what was in it, one icon per kind, and tapping a bag opens
  * its record (LootDetail), where its messages, shards, coins, keys and chests
  * are listed, with OPEN and TAKE on a chest (ItemRows). Your own bags are
  * marked YOURS. Each panel shows the four newest; VIEW MORE opens the whole
@@ -27,7 +27,7 @@ import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLoot } from '../hooks/useLoot'
-import { bagReading, hiddenGlyph, messagePreview } from '../lib/hidden'
+import { bagReading, messagePreview } from '../lib/hidden'
 import { useBagReadingsVersion } from '../hooks/useBagReadings'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -37,6 +37,7 @@ import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
+import { ItemIcon, distinctKinds, type ItemKind } from './ItemIcon'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
 import { useEscape } from '../hooks/useEscape'
 
@@ -70,16 +71,17 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   useEscape('modal', more, () => setMore(false))
   const me = useCyberspace((s) => s.identity.pubkey)
   const discovered = useShards((s) => s.discovered)
-  // What each opened bag holds, oldest item first, as glyphs: ◇ a shard, ✎ a message, ₿ a coin, ⚷ a key, ▣ a chest.
+  // What each opened bag holds: how many items, and one icon per kind in it
+  // (ItemIcon), the oldest item's kind first, a coin apart from a message.
   const kinds = useMemo(() => {
-    const by = new Map<string, { at: number; glyph: string }[]>()
+    const by = new Map<string, (ItemKind & { at: number })[]>()
     for (const h of Object.values(discovered)) {
       const list = by.get(h.bagId) ?? []
-      list.push({ at: h.createdAt, glyph: hiddenGlyph(h.type, h.type === 'message' && findCashuToken(h.text) !== null) })
+      list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null })
       by.set(h.bagId, list)
     }
-    const out = new Map<string, string>()
-    for (const [bag, list] of by) out.set(bag, list.sort((a, b) => a.at - b.at).map((x) => x.glyph).join(''))
+    const out = new Map<string, { count: number; kinds: ItemKind[] }>()
+    for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)) })
     return out
   }, [discovered])
   // A bag is opened when a key of ours decrypted it, whether or not anything in
@@ -121,7 +123,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
           <ProfileBadge pubkey={it.author} />
           {it.author === me && <span className="avatars__you">YOURS</span>}
           {kinds.has(it.bagId)
-            ? <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.length ?? 0} items`}>{kinds.get(it.bagId)}</span>
+            ? <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.count ?? 0} items`}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
             : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>

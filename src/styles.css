@@ -3414,6 +3414,15 @@ kbd {
 }
 .benchclip .touchpad__key { width: 48px; height: 48px; flex-direction: column; gap: 2px; font-size: 17px; }
 .benchclip .touchpad__sub { font-size: 8px; }
+/* A mode key lit while its mode is on (INVERT, arkinox, 2026-10-10), in the
+   same lit treatment as a tool chip, so "on" reads the same everywhere. */
+.benchclip .touchpad__key.is-on {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
 /* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
    in its top right corner, so it reads as two steps before it is pressed.
    The dot lights while its question is open (arkinox, 2026-09-27). */

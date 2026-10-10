@@ -11,6 +11,17 @@
  * shows the sealed size against NIP-44's 65,535 bytes, and PLACE CHEST is
  * refused past it, in the same words the deploy would use.
  *
+ * A shard inside is AIMED (arkinox, 2026-10-10: "When I hid a shard in the
+ * chest I never got to position it"): AIM parks the whole draft, closes the
+ * composer and lines the shard up on the deploy bar as any shard is, with its
+ * STEP, SCALE, TURN and SNAP; PUT IN CHEST signs it there and the composer
+ * comes back with that shard aimed (useShards `startDeployIntoChest`, hud
+ * stash `aimIntoChest`). An aimed shard's signed event is what the seal takes,
+ * and the chest's own height rises to hold where it stands (DeployBar), since
+ * a content stands at its own point only inside the chest's region
+ * (lib/chests.ts revealedIn). Messages and keys reveal at the chest and are
+ * not aimed. CANCEL on the bar brings the draft back unchanged.
+ *
  * Nested chests are read and opened wherever they are found, but not composed
  * here: a chest inside a chest would need this whole composer inside itself.
  */
@@ -25,8 +36,9 @@ import { findCashuToken } from '../lib/cashu'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { useShards, type ChestContent, type ChestLock } from '../store/useShards'
+import { useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
+import { useStash } from './stash'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
 
@@ -52,8 +64,17 @@ function contentLabel(c: ChestContent, shardName: (id: string) => string): strin
 }
 
 export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
-  // A chest whose deploy ended under it comes back whole (useBuilder `itemDraft`).
-  const draft = useMemo(() => { const d = useBuilder.getState().itemDraft; return d?.type === 'chest' ? d : null }, [])
+  // A chest whose deploy ended under it comes back whole (useBuilder
+  // `itemDraft`), and one parked by AIM comes back with that shard aimed. An
+  // aim signed by another identity (switched since) is dropped: it is not
+  // this identity's event to seal in, so that shard is simply unaimed again.
+  const draft = useMemo(() => {
+    const d = useBuilder.getState().itemDraft
+    if (d?.type !== 'chest') return null
+    const me = useCyberspace.getState().identity.pubkey
+    const contents = d.contents.map((c): ChestContent => (c.kind === 'shard' && c.aimed && c.aimed.signed.pubkey !== me ? { kind: 'shard', shardId: c.shardId } : c))
+    return { ...d, contents }
+  }, [])
   useEffect(() => { useBuilder.getState().takeItemDraft('chest') }, [])
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useInventory((s) => s.items)
@@ -63,10 +84,14 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   const [name, setName] = useState(draft?.name ?? '')
   const [requires, setRequires] = useState(draft?.requires ?? '')
-  const [requiresTouched, setRequiresTouched] = useState(!!draft)
-  // The lock: a held key by its id, or pasted text. A restored draft keeps its lock.
-  const [lockKeyId, setLockKeyId] = useState<string>(() => (draft ? keys.find((k) => k.key?.itemPubkey === draft.lock.pubkey)?.id ?? '' : keys[0]?.id ?? ''))
-  const [pasted, setPasted] = useState(draft && draft.lock.label !== 'a person' && !keys.some((k) => k.key?.itemPubkey === draft.lock.pubkey) ? draft.lock.pubkey : draft?.lock.label === 'a person' ? nip19.npubEncode(draft.lock.pubkey) : '')
+  // A restored label that was never written (a draft parked by AIM before
+  // the lock was chosen) still follows the lock once one is picked.
+  const [requiresTouched, setRequiresTouched] = useState(!!draft && draft.requires.trim() !== '')
+  // The lock: a held key by its id, or pasted text. A restored draft keeps
+  // its lock; one parked by AIM before a lock was chosen has none yet.
+  const kept = draft?.lock ?? null
+  const [lockKeyId, setLockKeyId] = useState<string>(() => (kept ? keys.find((k) => k.key?.itemPubkey === kept.pubkey)?.id ?? '' : keys[0]?.id ?? ''))
+  const [pasted, setPasted] = useState(kept && kept.label !== 'a person' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
   const [contents, setContents] = useState<ChestContent[]>(draft?.contents ?? [])
   // What is being added: one editor open at a time.
   const [adding, setAdding] = useState<'message' | 'shard' | 'key' | null>(null)
@@ -90,12 +115,15 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   // The sealed size, as the deploy will see it: every content as the event it
   // becomes, built the way sealChest builds it (useShards): the text trimmed,
   // a shard with its credit, every template attributed with the client tag
-  // the signer adds, and a created_at as wide as the real one.
+  // the signer adds, and a created_at as wide as the real one. An aimed shard
+  // is already the event the seal takes, client tag and all, so it is counted
+  // as it is: its size, not the bench model's.
   const bytes = useMemo(() => {
     const at = { x: 0n, y: 0n, z: 0n }
     const templates = contents.map((c) => {
       if (c.kind === 'message') return attributed(messageInnerTemplate(c.text.trim(), at, 0, SAMPLE_CREATED_AT))
       if (c.kind === 'key') return attributed(keyInnerTemplate(c.key, at, 0, SAMPLE_CREATED_AT))
+      if (c.aimed) { const { kind, created_at, tags, content } = c.aimed.signed; return { kind, created_at, tags, content } }
       const model = models.find((s) => s.id === c.shardId)
       return attributed(model ? shardInnerTemplate(model, at, 0, SAMPLE_CREATED_AT, creditOf(model)) : messageInnerTemplate('', at, 0, SAMPLE_CREATED_AT))
     })
@@ -106,9 +134,17 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const add = (c: ChestContent): void => { setContents((list) => [...list, c]); setAdding(null); setText(''); setKeyName('') }
   const remove = (i: number): void => setContents((list) => list.filter((_, j) => j !== i))
   const ready = name.trim().length > 0 && !!lock && contents.length > 0 && !refusal
+  // The draft as it stands, lock or no lock: what AIM parks and PLACE CHEST hands over.
+  const current = (): ChestDraft => ({ name: name.trim(), lock, requires: requires.trim(), contents })
   const place = (): void => {
     if (!ready || !lock) return
-    useShards.getState().startDeployChest({ name: name.trim(), lock, requires: requires.trim(), contents })
+    useShards.getState().startDeployChest({ ...current(), lock })
+    onDone()
+  }
+  // AIM: the deploy bar takes over with this shard; the composer comes back
+  // with the draft, aimed or not, when the bar is done (hud/stash.ts).
+  const aim = (i: number): void => {
+    useStash.getState().aimIntoChest(current(), i)
     onDone()
   }
 
@@ -136,6 +172,11 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
             <li key={i} className="chest__row">
               <span className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} aria-hidden="true">{hiddenGlyph(c.kind, c.kind === 'message' && !!findCashuToken(c.text))}</span>
               <span className="item__name" title={contentLabel(c, shardName)}>{contentLabel(c, shardName)}</span>
+              {/* Only a shard has a place of its own to aim; a message or key reveals at the chest. */}
+              {c.kind === 'shard' && c.aimed && <span className="chest__aimed" title="Signed where it will stand when the chest opens, at this size">aimed · 2^{c.aimed.unit}</span>}
+              {c.kind === 'shard' && (
+                <button className="chest__act" onClick={() => aim(i)} title="Place this shard where it should stand when the chest opens">{c.aimed ? 'RE-AIM' : 'AIM'}</button>
+              )}
               <button className="chest__act" onClick={() => remove(i)} aria-label="Take it out" title="Take it out of the chest">×</button>
             </li>
           ))}
@@ -183,7 +224,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick a key or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
       </div>
       <Explanation>
-        A chest is sealed to a key from your LOOT (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new key inside, then PLACE it at the build cursor. Anyone who finds the chest sees what it requires; only a holder of that key, or that person, can open it and TAKE what is inside.
+        A chest is sealed to a key from your LOOT (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new key inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that key, or that person, can open it and TAKE what is inside.
       </Explanation>
     </div>
   )

@@ -5,7 +5,8 @@
  * every point, and a ghost of what the next tap would make. Taps do the work:
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
- * so DELETE can take it. Dragging orbits. R3F
+ * and its corners, so the pad moves and turns it and DELETE can take it.
+ * Dragging orbits, and so does the orbit ball beside the pad. R3F
  * reports how far the pointer travelled between down and up, and the bench
  * compares that with a dead zone that depends on what pressed (deadZone.ts):
  * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
@@ -25,7 +26,7 @@ import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32Buf
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
-import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
+import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
@@ -622,6 +623,20 @@ function ViewDriver(): null {
     camera.position.copy(controls.target).add(new Vector3(HOME[0], HOME[1], HOME[2]))
     controls.update()
   }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The orbit ball (Workshop OrbitSphere) turns the camera about the controls'
+  // target through this sink, outside React: a drag arrives at pointer rate.
+  // OrbitControls rebuilds its own angles from the camera's position on every
+  // update, so moving the camera and calling update keeps the two agreed.
+  useEffect(() => {
+    if (!controls) return
+    setOrbitSink((dx, dy) => {
+      const offset = camera.position.clone().sub(controls.target)
+      camera.position.copy(controls.target).add(orbitOffset(offset, dx, dy))
+      camera.lookAt(controls.target)
+      controls.update()
+    })
+    return () => setOrbitSink(null)
+  }, [camera, controls])
   return null
 }
 

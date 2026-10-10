@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_AXES, nudgeFor, nudgeLabel, planeAfter } from '../benchAxes'
+import { Vector3 } from 'three'
+import { DEFAULT_AXES, RAD_PER_PX, SPHERE_PX, nudgeFor, nudgeLabel, orbitBy, orbitOffset, planeAfter, setOrbitSink } from '../benchAxes'
+
+describe('orbitOffset (the orbit ball)', () => {
+  const start = new Vector3(0, 0, 10)
+  it('keeps the distance and turns the view half way round across the ball\'s width', () => {
+    const after = orbitOffset(start, SPHERE_PX, 0)
+    expect(after.length()).toBeCloseTo(10, 6)
+    // A drag to the right turns the camera the other way round the target, as a bench drag does.
+    expect(after.z).toBeCloseTo(-10, 5)
+    expect(Math.abs(after.x)).toBeLessThan(1e-5)
+    expect(RAD_PER_PX * SPHERE_PX).toBeCloseTo(Math.PI, 12)
+  })
+  it('a drag down brings the camera up over the target, and never over the pole', () => {
+    const up = orbitOffset(start, 0, 40)
+    expect(up.y).toBeGreaterThan(0)
+    expect(up.length()).toBeCloseTo(10, 6)
+    const past = orbitOffset(start, 0, 10_000)
+    expect(past.y).toBeLessThan(10)
+    expect(past.y).toBeGreaterThan(9.99)
+    const under = orbitOffset(start, 0, -10_000)
+    expect(under.y).toBeLessThan(-9.99)
+  })
+  it('orbitBy reaches the registered sink and nothing without one', () => {
+    const got: Array<[number, number]> = []
+    setOrbitSink((dx, dy) => { got.push([dx, dy]) })
+    orbitBy(3, -4)
+    setOrbitSink(null)
+    orbitBy(1, 1)
+    expect(got).toEqual([[3, -4]])
+  })
+})
 
 describe('benchAxes', () => {
   it('turns screen directions into model moves, with Z mirrored as the bench draws it', () => {

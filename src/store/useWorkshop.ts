@@ -889,7 +889,24 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
     },
 
-    selectFace: (index) => set({ selectedFace: index, selection: index === null ? get().selection : [] }),
+    selectFace: (index) => {
+      if (index === null) { set({ selectedFace: null }); return }
+      const s = get().current()
+      const f = s?.faces[index]
+      if (!s || !f) return
+      // A face is its corners: picking it puts them in the selection (every
+      // vertex on each corner's point, as a point tap does), so the pad moves
+      // and turns the face as one thing. Picking a face whose corners are all
+      // in hand already takes them back out (arkinox, 2026-10-10: selecting a
+      // face should let you move it; before, it emptied the selection).
+      const corners = [...new Set(f.flatMap((v) => group(s, v)))]
+      const sel = get().selection
+      const held = corners.every((i) => sel.includes(i))
+      set({
+        selectedFace: held ? null : index,
+        selection: held ? sel.filter((i) => !corners.includes(i)) : [...new Set([...sel, ...corners])].sort((a, b) => a - b),
+      })
+    },
 
     deleteSelectedFace: () => {
       const { selectedFace } = get()

@@ -23,6 +23,8 @@ import { Explanation } from './Explanation'
 import { GitFork, Wrench } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { useWorkshop } from '../store/useWorkshop'
+import { usePublished } from '../store/usePublished'
+import { useCyberspace } from '../store/useCyberspace'
 
 export const BAG_EXPLAINER =
   'A bag is a collection of one or more messages, objects, or cashu tokens encrypted to (hidden at) a location. All users can see a bag exists but they have no information about where to find it. Bags are opened automatically by attempting decryption with all your collected Region Keys.'
@@ -96,18 +98,31 @@ const ICON = 12
  * lists (PR 4); a disabled button until then would only be noise.
  */
 function FeedActions({ object }: { object: FeedObject }): JSX.Element {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const own = object.pubkey === me
   // BUILD starts where you are looking (ruling A), the object lined up as a
   // copy; a cancel comes back to this window.
   const use = (): void => useStash.getState().useFromFeed(object)
   const remix = (): void => {
-    const id = useWorkshop.getState().importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
+    const ws = useWorkshop.getState()
+    let id: string
+    if (own) {
+      // Your own object comes back under its `d`, as snocrash's adopt brings
+      // one back, so PUBLISH edits it in place rather than publishing a second
+      // copy beside it. The model already here is the one to edit: the relay's
+      // copy may be older than it. No credit: you do not credit yourself.
+      id = ws.shards.some((s) => s.id === object.d) ? object.d : ws.importShard(object.shard, undefined, object.d)
+      usePublished.getState().learn([object.event])
+    } else {
+      id = ws.importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
+    }
     useStash.getState().close()
-    useWorkshop.getState().openWorkshop(id)
+    ws.openWorkshop(id)
   }
   return (
     <>
       <button className="feed__act" onClick={use} title="Place it at the build cursor, as a copy that credits its author"><Wrench size={ICON} strokeWidth={2.25} aria-hidden />USE IN BUILDER</button>
-      <button className="feed__act" onClick={remix} title="Copy it into your workshop as your own, still credited"><GitFork size={ICON} strokeWidth={2.25} aria-hidden />REMIX</button>
+      <button className="feed__act" onClick={remix} title={own ? 'Open it in your workshop under its own address, so PUBLISH edits it in place' : 'Copy it into your workshop as your own, still credited'}><GitFork size={ICON} strokeWidth={2.25} aria-hidden />{own ? 'EDIT' : 'REMIX'}</button>
     </>
   )
 }

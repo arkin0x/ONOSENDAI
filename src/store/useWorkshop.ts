@@ -481,8 +481,12 @@ export interface WorkshopState {
    * to your Stash; returns its new id. With
    * `credit`, the copy remembers whose object it was made from (REMIX from
    * the Shard Feed), and every copy deployed from it carries the credit tag.
+   * With `id`, the copy keeps that id and its name instead of taking new
+   * ones: your own published object taken back from the Shard Feed under its
+   * `d`, so PUBLISH edits it in place rather than publishing a second copy
+   * beside it, as snocrash's adopt does (arkinox, 2026-10-10).
    */
-  importShard: (model: ShardModel, credit?: Credit) => string
+  importShard: (model: ShardModel, credit?: Credit, id?: string) => string
   current: () => ShardModel | null
 }
 
@@ -1410,10 +1414,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return s.id
     },
 
-    importShard: (model, credit) => {
+    importShard: (model, credit, id) => {
       const taken = new Set(get().shards.map((s) => s.name))
-      const name = taken.has(model.name) ? `${model.name} copy` : model.name
-      const base: ShardModel = { ...model, id: uuid(), name, vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      // Your own object comes back under its own name: there is no other to be a copy of.
+      const name = !id && taken.has(model.name) ? `${model.name} copy` : model.name
+      const base: ShardModel = { ...model, id: id ?? uuid(), name, vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const copy: ShardModel = credit ? withCredit(base, credit) : base
       const list = [...get().shards, copy]
       set({ shards: list }); save(list)

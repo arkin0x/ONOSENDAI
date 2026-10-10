@@ -46,7 +46,6 @@ import { useSecrets } from './useSecrets'
 import {
   DEFAULT_BAG_SETTINGS,
   HIDDEN_KIND,
-  OBJECT_KIND,
   bagEntries,
   bagSettingsOf,
   resolveBagSettings,
@@ -72,6 +71,7 @@ import {
   type HiddenType,
   type KeyItem,
 } from '../lib/hidden'
+import { retractionTemplate } from '../lib/published'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
@@ -652,15 +652,10 @@ function nextBagAt(lookupId: string): number {
 export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
-  /** Take down an object hidden by reference (NIP-09), once no bag names it. */
+  /** Take down an object hidden by reference (NIP-09), once no bag names it. The same deletion RETRACT sends for a public object (lib/published.ts). */
   async function retractObject(object: NostrEvent, relays: string[] = relaySet()): Promise<void> {
     const d = object.tags.find((t) => t[0] === 'd')?.[1] ?? ''
-    const del = await cyber().signEvent({
-      kind: 5,
-      created_at: Math.floor(Date.now() / 1000),
-      content: 'hidden object removed',
-      tags: [['a', `${OBJECT_KIND}:${object.pubkey}:${d}`], ['e', object.id], ['k', String(OBJECT_KIND)]],
-    })
+    const del = await cyber().signEvent(retractionTemplate(object.pubkey, d, object.id, Math.floor(Date.now() / 1000), 'hidden object removed'))
     await publishMany(relays, del)
   }
 

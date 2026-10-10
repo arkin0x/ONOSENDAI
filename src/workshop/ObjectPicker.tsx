@@ -20,6 +20,7 @@ import { fetchRef } from '../lib/parts'
 import { queryAny, relaySet } from '../lib/relay'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
+import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
 
 const OBJECT_KIND = 33331
@@ -70,7 +71,13 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     let live = true
     setMine(null)
     void queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
-      .then((events) => { if (live) setMine(objectsOf(events)) }, () => { if (live) setMine([]) })
+      .then((events) => {
+        // What the relays hold under this key is what the MENU's PUBLISH tag
+        // reports (store/usePublished.ts): an object published from another
+        // browser or from snocrash reads as PUBLISHED here from this read on.
+        usePublished.getState().learn(events)
+        if (live) setMine(objectsOf(events))
+      }, () => { if (live) setMine([]) })
     return () => { live = false }
   }, [me])
 
@@ -104,7 +111,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
         </div>
         <p className="login__note">
           Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
-          placed; publish one from snocrash first.
+          placed: PUBLISH one from the MENU first, here or in snocrash.
         </p>
         <div className="login__section">
           <span className="login__label">Yours</span>

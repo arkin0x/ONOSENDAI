@@ -42,6 +42,9 @@ import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
+import { usePublished } from '../store/usePublished'
+import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../lib/published'
+import { ConfirmModal } from '../hud/ConfirmModal'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedCount } from '../lib/weld'
@@ -466,6 +469,19 @@ export function Workshop(): JSX.Element | null {
   const adoptError = useAvatars((s) => s.adoptError)
   const minePublished = useAvatars((s) => s.minePublished)
   const live = useCyberspace((s) => s.live)
+  // PUBLISH (store/usePublished.ts): where this shard stands with the Shard
+  // Feed, which the bench cannot show, since a published object and one that
+  // never left the browser look the same. RETRACT asks first, so the asking
+  // is state here; the yes goes to the store.
+  const ledger = usePublished((s) => s.ledger)
+  const publishing = usePublished((s) => s.publishing)
+  const retracting = usePublished((s) => s.retracting)
+  const [retractAsk, setRetractAsk] = useState(false)
+  const pubState = useMemo(
+    () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
+    [shard, ledger, me],
+  )
+  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(shard))).length : 0), [shard])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -766,6 +782,51 @@ export function Workshop(): JSX.Element | null {
               </span>
             )}
           </div>
+          {/* PUBLISH: this shard as a public kind 33331 object, listed by the
+              Shard Feed and read by other apps (DECK-0003 §3.1), the way
+              snocrash.art publishes one (arkinox, 2026-10-10: "I want to make
+              steps, rivers, walls, and other pieces that should show up in the
+              shard feed instantly"). Hiding seals a copy at a place; this puts
+              the object itself on your relays for anyone to place. The tag is
+              the ledger's word (lib/published.ts), since no relay keeps one. */}
+          <div className="workshop__avatar" role="group" aria-label="Publishing">
+            <div className="workshop__row">
+              <span className="workshop__label">SHARD FEED</span>
+              <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
+              <span className="workshop__gap" />
+            </div>
+            <div className="workshop__list-row">
+              <button
+                className="workshop__btn workshop__btn--warn"
+                disabled={!hasContent || publishing || retracting || !me}
+                onClick={() => { void usePublished.getState().publish(shard) }}
+                title={!hasContent
+                  ? 'Nothing to publish yet: add points, or place objects'
+                  : pubState === 'other-key'
+                    ? STATE_HELP['other-key']
+                    : 'Publish this shard as a public object on your relays: the Shard Feed lists it and anyone can place it. PUBLISH AGAIN replaces it in place, same address.'}
+              >{publishing ? 'PUBLISHING' : pubState === 'published' || pubState === 'edited' ? 'PUBLISH AGAIN' : 'PUBLISH'}</button>
+              {(pubState === 'published' || pubState === 'edited') && (
+                <button
+                  className="workshop__btn workshop__btn--danger"
+                  disabled={publishing || retracting}
+                  onClick={() => setRetractAsk(true)}
+                  title="Ask your relays to drop the published object (NIP-09). Copies others made stay theirs. The shard stays here."
+                >{retracting ? 'RETRACTING' : 'RETRACT'}</button>
+              )}
+            </div>
+            <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
+          </div>
+          {retractAsk && (
+            <ConfirmModal
+              title={`Retract "${shard.name}"?`}
+              body={<>A deletion goes to your relays, naming the object&apos;s address (NIP-09). Relays that honor it drop the object and the Shard Feed stops listing it; a relay that does not may keep handing it out. Copies and LIVE LINKs others placed stay theirs. The shard stays in your workshop, and PUBLISH puts it back.</>}
+              confirmLabel="RETRACT"
+              busy={retracting}
+              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(false)) }}
+              onCancel={() => setRetractAsk(false)}
+            />
+          )}
           <div className="ws__panel-title">SHARDS ({shards.length})</div>
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
@@ -832,7 +893,10 @@ export function Workshop(): JSX.Element | null {
               blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
               DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
               the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
-              the object at true size before you place it. Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
+              the object at true size before you place it. Under SHARD FEED, PUBLISH puts the shard on your relays as a
+              public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
+              address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
+              Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
               RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
               deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
               clears, then closes the workshop.

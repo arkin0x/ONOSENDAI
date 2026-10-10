@@ -58,6 +58,16 @@ export function primeRef(ref: Ref, payload: unknown): void {
   cache.set(refKey(ref), Promise.resolve(payload))
 }
 
+/**
+ * Drop a reference from the cache, after publishing a new version of the
+ * object it names (store/usePublished.ts), so the next draw of anything that
+ * places it fetches that version rather than the one held here. Ported from
+ * snocrash's forgetRef.
+ */
+export function forgetRef(ref: Ref): void {
+  cache.delete(refKey(ref))
+}
+
 /** What a reference resolved to, whatever its placement: its object and that object's own parts. */
 export type Resolved = Pick<Placed, 'model' | 'missing' | 'children'>
 

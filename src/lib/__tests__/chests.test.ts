@@ -15,10 +15,12 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sizeRefusal, revealedIn } from '../chests'
+  NIP44_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sizeRefusal, revealedIn } from '../chests'
 import {
-  CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
+  CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, shardInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
+import { newShard, type ShardModel } from 'sno-core/shards'
+import { reachGibsons } from '../deployFit'
 
 // signers imports the relay layer, which imports the store, which reads
 // localStorage as it loads and imports signers back; loaded the way the app
@@ -279,6 +281,31 @@ describe('a door: what a chest reveals stands in the world (B1, the gate)', () =
     expect(found[0].eventId).toBe(room.id)
     // Each remembers the chest it came out of, so its hider can take it out again.
     expect(found.every((f) => f.chestId === c.event.id)).toBe(true)
+  })
+})
+
+describe('where a content stands by its own C (placeOf, aimedPoint), for the chest\'s fit (arkinox, 2026-10-10)', () => {
+  it('reads the C tag as a point in a plane, and nothing from an event without one it can read', () => {
+    const ev = finalizeEvent(messageInnerTemplate('here', { x: 10n, y: 20n, z: 30n }, 1, 8), hider)
+    expect(placeOf(ev)).toEqual({ at: { x: 10n, y: 20n, z: 30n }, plane: 1 })
+    expect(placeOf({ tags: [['title', 'no place']] })).toBeNull()
+    expect(placeOf({ tags: [['C', 'not a coordinate']] })).toBeNull()
+  })
+
+  it('an aimed shard carries the reach of its model at the unit it was signed with; a message is a point alone', () => {
+    const model: ShardModel = {
+      ...newShard('Obelisk'),
+      unit: 4,
+      vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [3, 0, 0], c: [1, 1, 1] }, { p: [0, 1, 0], c: [1, 1, 1] }],
+      faces: [[0, 1, 2]],
+    }
+    const aimed = aimedPoint(wire(finalizeEvent(shardInnerTemplate(model, at, 0, 10), hider)))!
+    expect(aimed.at).toEqual(at)
+    expect(aimed.plane).toBe(0)
+    expect(aimed.reach).toBe(reachGibsons(model, 4))
+    expect(aimed.reach).toBeGreaterThan(0n)
+    expect(aimedPoint(finalizeEvent(messageInnerTemplate('a note', at, 0, 10), hider))?.reach).toBe(0n)
+    expect(aimedPoint(finalizeEvent({ kind: 1, created_at: 1, content: '', tags: [] }, hider))).toBeNull()
   })
 })
 

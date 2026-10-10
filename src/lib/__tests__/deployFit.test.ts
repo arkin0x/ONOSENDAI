@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { TICKS_PER_UNIT } from 'sno-core/shards'
-import { fitCause, fitHeight, fitsAt, reachGibsons, reachTicks, sizeHeight } from '../deployFit'
+import { fitCause, fitHeight, fitHeightAll, fitsAllAt, fitsAt, outsideAt, reachGibsons, reachTicks, sizeHeight, type FitPoint } from '../deployFit'
 import { deployPoint, type Position } from '../space'
 
 const T = TICKS_PER_UNIT
@@ -52,6 +52,63 @@ describe('fitHeight', () => {
 
   it('a region can never reach below zero on an axis', () => {
     expect(fitsAt(at(3n), 5n, 10)).toBe(false)
+  })
+})
+
+/**
+ * A chest with shards aimed inside (arkinox, 2026-10-10): the height must
+ * hold the chest's own point and every aimed point, each with its reach, in
+ * one region, since a content stands at its own point only inside the
+ * chest's region (chests.ts revealedIn).
+ */
+describe('fitHeightAll: one region for several points', () => {
+  // Points of the same 2^12 cube that no 2^8 cube holds together.
+  const base = (5n << 40n) + (3n << 20n)
+  const chestAt: Position = { x: base + 7n, y: base + 7n, z: base + 7n }
+  const near: FitPoint = { at: { x: base + 100n, y: base + 7n, z: base + 7n }, reach: 0n }
+  const far: FitPoint = { at: { x: base + 2000n, y: base + 7n, z: base + 7n }, reach: 0n }
+
+  it('with no extra points is exactly the single-shard fit', () => {
+    for (const x of [1000n, 1023n, 1024n, 4095n, 70000n]) {
+      const r = reachGibsons(cube(2), 0)
+      expect(fitHeightAll(r, [], at(x), 0, 0, 40)).toBe(fitHeight(cube(2), 0, at(x), 0, 0, 40))
+    }
+    expect(fitHeightAll(reachGibsons(cube(8), 20), [], at(1000n), 0, 0, 12)).toBeNull()
+  })
+
+  it('is the smallest height whose region, around the deploy point, holds every point', () => {
+    const h = fitHeightAll(0n, [near, far], chestAt, 0, 0, 40)!
+    expect(h).toBe(11)
+    expect(fitsAllAt(deployPoint(chestAt, 0, h), h, [near, far])).toBe(true)
+    for (let lower = 0; lower < h; lower++) expect(fitsAllAt(deployPoint(chestAt, 0, lower), lower, [near, far])).toBe(false)
+    // The near point alone asks for less.
+    expect(fitHeightAll(0n, [near], chestAt, 0, 0, 40)).toBe(7)
+  })
+
+  it('a point with reach must fit whole: the same point raises the height when something big stands there', () => {
+    const small = fitHeightAll(0n, [near], chestAt, 0, 0, 40)!
+    const big = fitHeightAll(0n, [{ ...near, reach: 1000n }], chestAt, 0, 0, 40)!
+    expect(big).toBeGreaterThan(small)
+    expect(fitsAt(near.at, 1000n, big)).toBe(true)
+  })
+
+  it('two points in different cubes of a height do not fit it even when each fits its own', () => {
+    const h = 9
+    const a: FitPoint = { at: { x: (base >> 9n << 9n) + 10n, y: base, z: base }, reach: 0n }
+    const b: FitPoint = { at: { x: (base >> 9n << 9n) + 600n, y: base, z: base }, reach: 0n }
+    expect(fitsAt(a.at, 0n, h) && fitsAt(b.at, 0n, h)).toBe(true)
+    expect(fitsAllAt(a.at, h, [b])).toBe(false)
+  })
+
+  it('is null when no height up to the ceiling holds them all', () => {
+    expect(fitHeightAll(0n, [far], chestAt, 0, 0, 8)).toBeNull()
+  })
+
+  it('outsideAt counts the points the region at a height leaves out, which stand at the chest', () => {
+    const h = fitHeightAll(0n, [near, far], chestAt, 0, 0, 40)!
+    expect(outsideAt(deployPoint(chestAt, 0, h), h, [near, far])).toBe(0)
+    expect(outsideAt(deployPoint(chestAt, 0, 8), 8, [near, far])).toBe(1)
+    expect(outsideAt(deployPoint(chestAt, 0, 0), 0, [near, far])).toBe(2)
   })
 })
 

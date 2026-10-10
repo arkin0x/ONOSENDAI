@@ -13,7 +13,7 @@
  */
 
 import { create } from 'zustand'
-import type { MyDeployment } from '../store/useShards'
+import type { ChestDraft, MyDeployment } from '../store/useShards'
 import { useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
 import { hiddenLabel } from '../lib/hidden'
@@ -81,10 +81,18 @@ interface StashModals {
   returnToModels: boolean
   /** A deploy was started from the SHARD FEED window (USE IN BUILDER): cancelling it reopens the window. */
   returnToFeed: boolean
+  /**
+   * A shard is being aimed into a chest from the SEAL A CHEST composer
+   * (arkinox, 2026-10-10): the composer comes back when the aim ends,
+   * signed or canceled alike, with the draft (useBuilder `itemDraft`).
+   */
+  returnToChest: boolean
   /** The PLACE OBJECT tab last picked from, so a cancelled deploy comes back to it. */
   pickTab: 'mine' | 'feed' | null
   /** USE IN BUILDER from the SHARD FEED window: the object lined up, the window back on a cancel. */
   useFromFeed: (object: FeedObject) => void
+  /** AIM on a shard in the chest composer: the composer closes, the shard is lined up, the composer comes back after. */
+  aimIntoChest: (draft: ChestDraft, contentIndex: number) => void
   openModels: () => void
   openBags: () => void
   openBag: (lookupId: string) => void
@@ -116,6 +124,7 @@ export const useStash = create<StashModals>((set) => ({
   feed: false,
   returnToModels: false,
   returnToFeed: false,
+  returnToChest: false,
   pickTab: null,
   openModels: () => set({ ...NONE_OPEN, models: true }),
   openBags: () => set({ ...NONE_OPEN, bags: true }),
@@ -137,13 +146,20 @@ export const useStash = create<StashModals>((set) => ({
     set({ feed: false, returnToFeed: true })
     useShards.getState().startDeployObject(object)
   },
+  aimIntoChest: (draft, contentIndex) => {
+    set({ chest: false, returnToChest: true })
+    useShards.getState().startDeployIntoChest(draft, contentIndex)
+  },
 }))
 
 // A deploy that ends without placing anything, started from the Models
-// modal, returns to it; one that places, or any other ending, forgets.
+// modal, returns to it; one that places, or any other ending, forgets. An
+// aim into a chest returns to the composer either way: it placed nothing
+// in the world, and the chest is still to be hidden.
 useShards.subscribe((s, prev) => {
   if (prev.pending === null || s.pending !== null) return
-  const { returnToModels, returnToFeed } = useStash.getState()
+  const { returnToModels, returnToFeed, returnToChest } = useStash.getState()
+  if (returnToChest) { useStash.setState({ ...NONE_OPEN, returnToChest: false, chest: true }); return }
   if (returnToFeed) { useStash.setState({ returnToFeed: false, feed: s.deployStatus !== 'done' }); return }
   if (!returnToModels) return
   useStash.setState({ returnToModels: false, models: s.deployStatus !== 'done' })

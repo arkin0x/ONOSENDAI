@@ -8333,6 +8333,8 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .compose__select { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .compose__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .compose__list .item__name { flex: 1 1 auto; }
+/* A shard aimed through the deploy bar: where it will stand is signed in. */
+.chest__aimed { flex: none; font-size: 8px; letter-spacing: 0.14em; color: var(--ok); white-space: nowrap; }
 .compose__pubkey { font-size: 9px; color: var(--dim); word-break: break-all; }
 .compose__meter { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .compose__meter.is-over { color: var(--warn); }

@@ -1,5 +1,5 @@
 /**
- * LootDetail.tsx: one bag, opened from the DISCOVERED list.
+ * LootDetail.tsx: one bag, opened from the HIDDEN BAGS or DISCOVERED BAGS list.
  *
  * Everything a seeker can know about a bag without opening it: who hid it and
  * when, the size of the region it is encrypted to, how much is inside, the
@@ -65,7 +65,7 @@ function searchLabel(exponent: number): string {
   return `about ${(2 ** exponent).toLocaleString('en-US')} region keys`
 }
 
-function Copyable({ label, value }: { label: string; value: string }): JSX.Element {
+function Copyable({ label, value, title }: { label: string; value: string; title?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
     void navigator.clipboard?.writeText(value).then(() => {
@@ -75,7 +75,7 @@ function Copyable({ label, value }: { label: string; value: string }): JSX.Eleme
   }
   return (
     <>
-      <dt>{label}</dt>
+      <dt title={title}>{label}</dt>
       <dd><button className="lootd__copy" title={`${value} (click to copy)`} onClick={copy}>{copied ? 'copied' : shortHex(value, 12, 8)}</button></dd>
     </>
   )
@@ -174,7 +174,11 @@ export function LootDetail(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden bag" onPointerDown={close}>
       <div className="modal__card secret lootd" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className="secret__badge">◈ DISCOVERED</span>
+          {/* The same rule as the panels (DiscoveredPanel `opened`): a bag is
+              DISCOVERED once a key of this client has read it, else it is
+              still HIDDEN, whichever list it was opened from (arkinox,
+              2026-10-10: a bag from HIDDEN BAGS said DISCOVERED). */}
+          <span className="secret__badge">◈ {reading !== undefined || opened.length > 0 ? 'DISCOVERED BAG' : 'HIDDEN BAG'}</span>
           {opened.length > 0 && <span className="tag tag--live">{yours ? 'YOURS' : 'FOUND'}</span>}
           {yours && opened.length === 0 && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
@@ -254,8 +258,11 @@ export function LootDetail(): JSX.Element | null {
         )}
 
         <dl className="lootd__wire">
-          <Copyable label="lookup" value={item.lookupId} />
-          <Copyable label="bag" value={item.bagId} />
+          {/* Two hashes that mean different things (arkinox, 2026-10-10: "what
+              is the bag hash?"): the address a scan asks the relay for, which
+              never changes, and the envelope's event id, which does. */}
+          <Copyable label="Lookup id" value={item.lookupId} title="The bag's address on the relay: its d tag, derived from the region key (spec §8.6). A scan asks the relay for this; it stays the same however often the bag is rewritten." />
+          <Copyable label="Event id" value={item.bagId} title="The id of the bag's current nostr event (kind 33330). The hider's every rewrite is a new event with a new id; the lookup id is what stays." />
         </dl>
 
         {!yours && (

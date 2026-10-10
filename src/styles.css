@@ -3501,10 +3501,11 @@ kbd {
    globe with a meridian and an equator, so it reads as something that turns. */
 .benchorb {
   /* Docked at the bottom right beside the color column (right 14px, 38px
-     wide), out of every column, so no row has to clear it (arkinox,
+     wide, then a 6px gap, halved from 12 to keep clear of the pad on its
+     left), out of every column, so no row has to clear it (arkinox,
      2026-10-10: "right aligned, not left"). */
   position: absolute;
-  right: 64px;
+  right: 58px;
   bottom: 14px;
   z-index: 3;
   width: 152px;

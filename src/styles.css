@@ -3134,6 +3134,22 @@ kbd {
   pointer-events: none;
 }
 .ws__top > * { pointer-events: auto; }
+/* The grid floor's LEVEL under the chip row (Workshop LevelStack, arkinox
+   2026-10-10): up, the level, down, one narrow column so it covers as little
+   of the bench as a chip does. */
+.ws__level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.ws__level-key { width: 38px; height: 34px; }
+.ws__level-value {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim, #7fa3b3);
+  font-variant-numeric: tabular-nums;
+}
 /* Room on the right for DEPLOY and the way out, which share the top edge. */
 .ws__chips {
   display: flex;

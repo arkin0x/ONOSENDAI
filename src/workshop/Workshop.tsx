@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ClipboardPaste, Copy, Eye, FlipVertical2, Globe, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eye, FlipVertical2, Globe, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -101,6 +101,32 @@ function Toast(): JSX.Element | null {
  * right now), the corners CONNECT and DELETE, the hub counts the points and
  * clears them.
  */
+/**
+ * The grid floor's LEVEL, raised and lowered from the top left on every tool
+ * (arkinox, 2026-10-10): up, the level, down, stacked under the chip row. The
+ * same step as GRID's LEVEL row and the ] and [ keys, one step of the current
+ * division per press, held to repeat, so stacking things no longer means
+ * opening GRID between every layer.
+ */
+function LevelStack(): JSX.Element {
+  const level = useWorkshop((s) => s.level)
+  const plane = useWorkshop((s) => s.plane)
+  const extentTicks = useWorkshop((s) => (s.current()?.extent ?? 0) * TICKS_PER_UNIT)
+  const bind = useRepeatable()
+  const w = useWorkshop.getState
+  return (
+    <div className="ws__level" role="group" aria-label="Grid level">
+      <button className="touchpad__key ws__level-key" {...bind(() => w().setLevel(w().level + w().step()))} disabled={level >= extentTicks} title="Raise the grid floor one step (])" aria-label="Raise the grid floor">
+        <ChevronUp size={16} strokeWidth={2.5} aria-hidden />
+      </button>
+      <span className="ws__level-value" title={`LEVEL ${'XYZ'[plane]}: the height the placing tools work at`}>{unitsLabel(level)}</span>
+      <button className="touchpad__key ws__level-key" {...bind(() => w().setLevel(w().level - w().step()))} disabled={level <= -extentTicks} title="Lower the grid floor one step ([)" aria-label="Lower the grid floor">
+        <ChevronDown size={16} strokeWidth={2.5} aria-hidden />
+      </button>
+    </div>
+  )
+}
+
 /**
  * The orbit ball, right of the pad and its size (arkinox, 2026-10-10: "not
  * being able to orbit hurts"). A drag on it turns the view about the shard,
@@ -609,6 +635,10 @@ export function Workshop(): JSX.Element | null {
           </span>
         )}
       </div>
+      {/* The grid floor's level, under the chips on every tool. Out of the way
+          while a panel is open, as undo and redo are: GRID has its own LEVEL
+          row, and the others need the room. */}
+      {!panel && shard && <LevelStack />}
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
           <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Object name" spellCheck={false} />

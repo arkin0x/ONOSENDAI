@@ -157,3 +157,16 @@ export function agentsOf(
     .sort((a, b) => b[1].at - a[1].at || (a[1].id < b[1].id ? -1 : 1))
     .map(([pk]) => pk)
 }
+
+/**
+ * The agents that are really mine (arkinox, 2026-10-10): a bot profile that
+ * names me as operator is only half a claim, since anyone can publish one.
+ * The other half is mine to give, by following the agent in my ordinary
+ * follow list (kind 3). Only pubkeys on both sides count, in the order the
+ * profiles gave. There is no pending list of claims: an unfollowed claim is
+ * never shown, so it cannot be used to spam the panel.
+ */
+export function followedAgents(claimed: readonly string[], follows: Iterable<string>): string[] {
+  const mine = new Set(follows)
+  return claimed.filter((pk) => mine.has(pk))
+}

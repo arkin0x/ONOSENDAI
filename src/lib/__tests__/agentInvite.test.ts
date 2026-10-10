@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AGENTS_MD_URL, CODE_SHAPE, CODE_WORDS, SUGGESTED_BUDGET,
   agentsOf, invitationText, isBotProfile, isOperatorTag, meetingCode, namesOperator,
+  followedAgents,
 } from '../agentInvite'
 
 const npub = 'npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w'
@@ -132,5 +133,16 @@ describe('agentsOf', () => {
     expect(agentsOf([ev('1', a, 200), ev('2', b, 150)], me, cached)).toEqual([b])
     // The same second is the same profile, so it stays.
     expect(agentsOf([ev('1', a, 200)], me, () => 200)).toEqual([a])
+  })
+})
+
+describe('followedAgents (arkinox, 2026-10-10)', () => {
+  const xor = 'd4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4'
+  const stranger = 'a'.repeat(64)
+  it('keeps only claimed agents the operator follows, in the claimed order', () => {
+    expect(followedAgents([stranger, xor], [xor, 'b'.repeat(64)])).toEqual([xor])
+  })
+  it('shows nothing for claims the operator never followed, so a claim alone cannot spam the panel', () => {
+    expect(followedAgents([stranger], [])).toEqual([])
   })
 })

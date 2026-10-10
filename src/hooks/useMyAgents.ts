@@ -8,6 +8,11 @@
  * into the profile cache, so the rows show the agents' names without a
  * second fetch.
  *
+ * A profile's claim is half of it (arkinox, 2026-10-10): the agent is mine
+ * only when I also follow it in my kind 3 list, so my follow list is fetched
+ * beside the profiles and only pubkeys on both sides are kept
+ * (lib/agentInvite.ts followedAgents).
+ *
  * The answer is shared (arkinox, 2026-10-10): the Hud reads it to decide
  * whether the AGENTS panel is shown at all, and the panel reads it for its
  * rows, so both ask once between them. Asked again when the pubkey changes
@@ -17,8 +22,8 @@
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { agentsOf } from '../lib/agentInvite'
-import { GENERAL_RELAYS } from '../lib/contacts'
+import { agentsOf, followedAgents } from '../lib/agentInvite'
+import { fetchContacts, GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { askEach, relaySet } from '../lib/relay'
 import { useProfiles } from '../store/useProfiles'
@@ -51,13 +56,14 @@ function ask(me: string): void {
   useAnswer.setState({ me, agents: prior.me === me ? prior.agents : [], status: 'loading' })
   const heard: NostrEvent[] = []
   const relays = [...new Set([...GENERAL_RELAYS, ...relaySet()])]
-  askEach(relays, { kinds: [0], '#p': [me] }, (ev) => { heard.push(ev) }, { maxWait: WAIT_MS, skipDead: true })
-    .then((answers) => {
+  const follows = fetchContacts(me).then((list) => list.map((c) => c.pubkey))
+  Promise.all([askEach(relays, { kinds: [0], '#p': [me] }, (ev) => { heard.push(ev) }, { maxWait: WAIT_MS, skipDead: true }), follows])
+    .then(([answers, followed]) => {
       if (mine !== asking) return
       const profiles = useProfiles.getState()
       // A cached profile newer than what the query returned means a later
       // kind 0 dropped the tag, so that pubkey is no longer my agent.
-      const list = agentsOf(heard, me, (pk) => profiles.get(pk)?.at)
+      const list = followedAgents(agentsOf(heard, me, (pk) => profiles.get(pk)?.at), followed)
       for (const ev of heard) if (list.includes(ev.pubkey)) profiles.remember(ev)
       // Only an answer says "none": with every relay unreachable the list is unknown, not empty.
       useAnswer.setState({ me, agents: list, status: answers.some((a) => a.outcome === 'answered') ? 'ready' : 'error' })

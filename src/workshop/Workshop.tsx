@@ -62,7 +62,7 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap points, or drag boxes, to gather them. INVERT makes taps and boxes take points out; DESELECT lets go. Drag the ORBIT ball to turn the view.',
-  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; drag a box to gather points. A dark face shows its back: FLIP turns it round, AUTO turns every face outward. Drag the ORBIT ball to turn the view.',
+  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it and move it with the pad. A dark face shows its back: FLIP turns it round, AUTO turns every face outward. One finger orbits, or drag the ORBIT ball.',
 }
 
 type Panel = 'menu' | 'tools' | 'grid'
@@ -282,7 +282,9 @@ function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points:
   const [asking, setAsking] = useState(false)
   useEffect(() => { if (face === null) setAsking(false) }, [face])
   const selecting = tool === 'select' || tool === 'face'
-  const showAll = selecting && (verts > 0 || parts > 0)
+  // ALL under SELECT only: in FACE it confused what a tap on a face does
+  // (arkinox, 2026-10-10).
+  const showAll = tool === 'select' && (verts > 0 || parts > 0)
   const picking = tool === 'face' && picks > 0
   const showFill = picking || points >= 3
   const showSub = selecting && points >= 2
@@ -1045,26 +1047,27 @@ export function Workshop(): JSX.Element | null {
 
         {/* The tool in hand, and an X joined to the chip that puts it down: VIEW,
             the tool that builds nothing. */}
-        {/* The bottom row: the tool chip, shorter now (the TOOLS word and the
-            wrench went, arkinox 2026-10-10), and the orbit ball beside it. The
-            ball lives here, not beside the pad, so it stays at the bottom of
-            the screen whatever opens above: the panel, the pad, the rows. It
-            flew up the screen when the panel opened and sank when nothing was
-            selected ("Orbit flies away when you tap stamp"). */}
-        <div className="ws__bottomrow">
-          <div className="ws__toolchips">
-            <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')} title="Tools: pick what a tap does">
-              <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
+        {/* The tool chip, last in the column so every row stands directly
+            above it (arkinox, 2026-10-10). Shorter than it was: the TOOLS
+            word and the wrench went. The orbit ball is not in this column at
+            all any more: docked at the bottom right (below), so no row ever
+            has to clear it. */}
+        <div className="ws__toolchips">
+          <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')} title="Tools: pick what a tap does">
+            <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
+          </button>
+          {tool !== 'view' && (
+            <button className="chip ws__chip ws__chip--x" onClick={() => w().setTool('view')} title="Put the tool down (1)" aria-label="Put the tool down">
+              <X size={13} strokeWidth={2.25} aria-hidden />
             </button>
-            {tool !== 'view' && (
-              <button className="chip ws__chip ws__chip--x" onClick={() => w().setTool('view')} title="Put the tool down (1)" aria-label="Put the tool down">
-                <X size={13} strokeWidth={2.25} aria-hidden />
-              </button>
-            )}
-          </div>
-          <OrbitSphere />
+          )}
         </div>
       </div>
+      {/* The orbit ball, docked at the bottom right beside the color column,
+          on every tool (arkinox, 2026-10-10: right aligned, and the left-hand
+          rows must never jump above it). It sat in the bottom-left column's
+          last row first, where its height lifted every row by 152px. */}
+      <OrbitSphere />
 
       {/* Bottom right: the color column. FILL for a set of points is on the
           clipboard row, and the FACE tool's actions on its own row there. */}

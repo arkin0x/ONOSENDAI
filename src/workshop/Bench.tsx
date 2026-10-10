@@ -6,12 +6,14 @@
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
  * and its corners, so the pad moves and turns it and DELETE can take it.
- * Dragging orbits in VIEW, STAMP and ADD, and the orbit ball beside the pad
- * orbits on every tool. In SELECT and FACE a drag is the box instead
- * (arkinox, 2026-10-10, decision A): each box adds the points inside it, so
- * several little boxes build a selection, and INVERT makes taps and boxes
- * take away. Nothing on the bench deselects by itself: a tap on empty space
- * is nothing, and DESELECT, the pad's hub and Esc let go. R3F
+ * Dragging orbits on every tool but SELECT, and the orbit ball at the bottom
+ * right orbits on every tool. In SELECT a drag is the box instead (arkinox,
+ * 2026-10-10): each box adds the points inside it, so several little boxes
+ * build a selection, and INVERT makes taps and boxes take away. (FACE had the
+ * box for an evening and got its orbit back: the box was not needed there.)
+ * In SELECT and FACE nothing on the bench deselects by itself: a tap on
+ * empty space is nothing, and DESELECT, the pad's hub and Esc let go. In
+ * VIEW a tap on empty space lets go, since VIEW has none of those rows. R3F
  * reports how far the pointer travelled between down and up, and the bench
  * compares that with a dead zone that depends on what pressed (deadZone.ts):
  * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
@@ -473,18 +475,18 @@ function Aim(): null {
  * selection (arkinox, 2026-10-10, decision A); under INVERT a box takes
  * away instead. Shift does nothing any more, and is harmless. The box is a
  * plain element over the canvas, drawn here without React. A tap (no drag)
- * is left to the handles; orbit is off in SELECT and FACE (Bench), so a
- * one-finger drag is the box's alone, and the orbit ball beside the pad turns
- * the view meanwhile. In FACE the box gathers points, as in SELECT, and
- * leaves the face pick (FILL's corners) alone. A second finger means a pan:
- * the box cancels and the selection is put back.
+ * is left to the handles; orbit is off in SELECT (Bench), so a one-finger
+ * drag is the box's alone, and the orbit ball turns the view meanwhile. SELECT
+ * only: FACE had the box for an evening and did not need it (arkinox,
+ * 2026-10-10), so a drag there orbits as it always did. A second finger
+ * means a pan: the box cancels and the selection is put back.
  */
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
   const camera = useThree((s) => s.camera)
   const tool = useWorkshop((s) => s.tool)
   useEffect(() => {
-    if (tool !== 'select' && tool !== 'face') return
+    if (tool !== 'select') return
     const canvas = gl.domElement
     const host = canvas.parentElement
     if (!host) return
@@ -705,15 +707,21 @@ export function Bench(): JSX.Element {
     useWorkshop.getState().selectFace(face)
   }
 
-  // No onPointerMissed: a tap that hits nothing is nothing. It used to deselect
-  // and drop a half-built face, and on a phone a thumb that missed a point by a
-  // hair lost the whole selection (arkinox, 2026-10-10). DESELECT in the
-  // bottom-left column, the pad's hub and Esc are how you let go now.
+  // A tap that hits nothing lets go only in VIEW (arkinox, 2026-10-10): there
+  // a tap on a stamped object or a point selects it and VIEW has no DESELECT
+  // row, so empty space is the way out. In SELECT and FACE empty space is
+  // nothing, because a thumb that missed a point by a hair used to lose the
+  // whole selection; DESELECT, the pad's hub and Esc let go there.
   return (
     <Canvas
       camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
+      onPointerMissed={(e) => {
+        if ((e as PointerEvent).button !== 0) return
+        const w = useWorkshop.getState()
+        if (w.tool === 'view' && (w.selection.length || w.partSel.length)) w.selectVertex(null)
+      }}
       style={{ background: BG }}
     >
       {/* A key light high and to one side, a dim fill from behind: faces read by
@@ -721,13 +729,13 @@ export function Bench(): JSX.Element {
       <ambientLight intensity={0.4} />
       <directionalLight position={[8, 12, 6]} intensity={0.9} />
       <directionalLight position={[-9, 2, -3]} intensity={0.6} />
-      {/* One finger or left drag orbits, except in SELECT and FACE where that
-          drag is the marquee's and the orbit ball beside the pad turns the view
-          (arkinox, 2026-10-10, decision A). Two fingers, or the right button, pan
+      {/* One finger or left drag orbits, except in SELECT where that drag is
+          the marquee's and the orbit ball turns the view (arkinox,
+          2026-10-10). Two fingers, or the right button, pan
           the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
           gibson so a fifth-gibson step fills a good share of a phone's screen.
           These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select' && tool !== 'face'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
       <OrbitHold />
       <Marquee />
       <Aim />

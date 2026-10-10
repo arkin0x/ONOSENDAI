@@ -38,6 +38,14 @@ export interface Signer {
    * NIP44_UNAVAILABLE says so.
    */
   nip44Decrypt?: (senderPubkey: string, payload: string) => Promise<string>
+  /**
+   * NIP-44 v2 encrypt of `plaintext` from this identity to `recipientPubkey`:
+   * what seals a private message (NIP-17) to an agent (lib/dm.ts; arkinox,
+   * 2026-10-10, operator and agent DMs). Offered the same way as decrypt and
+   * absent only when the signer truly lacks it; NIP44_ENCRYPT_UNAVAILABLE
+   * says so.
+   */
+  nip44Encrypt?: (recipientPubkey: string, plaintext: string) => Promise<string>
   /** Present only for local signers, so the key can be persisted. */
   secretKey?: Uint8Array
   /** For a bunker: what to persist to reconnect it. */
@@ -55,7 +63,7 @@ interface WindowNostr {
   getPublicKey(): Promise<string>
   signEvent(event: EventTemplate): Promise<NostrEvent>
   /** NIP-07's optional NIP-44 pair; decrypt is what opens a chest sealed to this identity. */
-  nip44?: { decrypt(pubkey: string, ciphertext: string): Promise<string> }
+  nip44?: { decrypt(pubkey: string, ciphertext: string): Promise<string>; encrypt?(pubkey: string, plaintext: string): Promise<string> }
 }
 function windowNostr(): WindowNostr | null {
   return (window as unknown as { nostr?: WindowNostr }).nostr ?? null
@@ -67,6 +75,9 @@ export function hasNip07(): boolean {
 /** Why a chest sealed to this identity will not open: the signer offers no NIP-44 decrypt. */
 export const NIP44_UNAVAILABLE = 'Your signer offers no NIP-44 decrypt, so a chest sealed to you cannot be opened with it.'
 
+/** Why a private message cannot be sent: the signer offers no NIP-44 encrypt to seal it with. */
+export const NIP44_ENCRYPT_UNAVAILABLE = 'Your signer offers no NIP-44 encrypt, so a private message cannot be sealed with it.'
+
 /** A local key: the default random one, or one you brought. */
 export function localSigner(secretKey: Uint8Array): Signer {
   const pubkey = getPublicKey(secretKey)
@@ -76,6 +87,7 @@ export function localSigner(secretKey: Uint8Array): Signer {
     secretKey,
     signEvent: (template) => Promise.resolve(finalizeEvent(attributed(template), secretKey) as unknown as NostrEvent),
     nip44Decrypt: async (senderPubkey, payload) => nip44.decrypt(payload, nip44.utils.getConversationKey(secretKey, senderPubkey)),
+    nip44Encrypt: async (recipientPubkey, plaintext) => nip44.encrypt(plaintext, nip44.utils.getConversationKey(secretKey, recipientPubkey)),
   }
 }
 
@@ -119,6 +131,8 @@ export async function nip07Signer(): Promise<Signer> {
     pubkey,
     signEvent: (template) => ext.signEvent(attributed(template)),
     ...(nip44Ext ? { nip44Decrypt: (pk: string, ct: string) => nip44Ext.decrypt(pk, ct) } : {}),
+    // Encrypt is checked on its own: an extension could offer one half.
+    ...(nip44Ext?.encrypt ? { nip44Encrypt: (pk: string, pt: string) => nip44Ext.encrypt!(pk, pt) } : {}),
   }
 }
 
@@ -141,6 +155,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     clientSecretKey: clientSk,
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
+    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -196,6 +211,7 @@ function wrapBunkerSigner(
     nostrConnectSession,
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
+    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)
@@ -220,7 +236,8 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
     clientPubkey: getPublicKey(clientSecretKey),
     relays: signerRelays(relay),
     secret: randomHex(generateSecretKey()),
-    perms: ['get_public_key', 'sign_event', 'nip44_decrypt'],
+    // nip44_encrypt seals a private message to an agent (arkinox, 2026-10-10).
+    perms: ['get_public_key', 'sign_event', 'nip44_decrypt', 'nip44_encrypt'],
     name: 'ONOSENDAI',
     ...(typeof location !== 'undefined' ? { url: location.origin } : {}),
   })
@@ -352,6 +369,10 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     nip44Decrypt: (pk, ct) => ensure().then((s) => {
       if (!s.nip44Decrypt) throw new Error(NIP44_UNAVAILABLE)
       return s.nip44Decrypt(pk, ct)
+    }),
+    nip44Encrypt: (pk, pt) => ensure().then((s) => {
+      if (!s.nip44Encrypt) throw new Error(NIP44_ENCRYPT_UNAVAILABLE)
+      return s.nip44Encrypt(pk, pt)
     }),
     reconnect: ensure,
   }

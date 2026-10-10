@@ -8596,7 +8596,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   overflow-wrap: anywhere;
 }
 
-/* AGENTS: a labeled COPY with the last meeting code beside it, then MY AGENTS rows of face, npub, SPECTATE. */
+/* AGENTS: a labeled COPY with the last meeting code beside it, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
 .agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
 .agents__code {
@@ -8610,6 +8610,78 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   border-radius: 3px;
   white-space: nowrap;
 }
-.agents__row { grid-template-columns: 1fr auto auto; }
+.agents__row { grid-template-columns: 1fr auto auto auto; }
 .agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
 .agents__npub:hover { color: var(--accent); }
+.agents__talk { display: inline-flex; align-items: center; gap: 4px; }
+
+/* AGENTS TALK: one agent's private conversation (arkinox, 2026-10-10). A
+ * column that fits a phone: the STRATEGY line, the history (the one part
+ * that scrolls), the quick orders, the composer. */
+.modal__card.talk {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 460px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+.talk .login__head { margin-bottom: 0; }
+.talk__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.talk__title .badge { min-width: 0; }
+.talk__notice { margin: 0; }
+.talk__strategy {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 5px;
+}
+.talk__strategy .legend__label { margin: 0; }
+.talk__strategy-text {
+  font-size: 10px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 72px;
+  overflow-y: auto;
+}
+.talk__strategy-text.is-empty { color: var(--dim); }
+.talk__strategy-edit { grid-column: 1 / -1; }
+.talk__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 80px;
+  max-height: 40dvh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.talk__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 85%;
+  margin: 0 auto 6px 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(200, 245, 255, 0.05);
+  border: 1px solid rgba(200, 245, 255, 0.12);
+}
+.talk__msg--mine {
+  margin: 0 0 6px auto;
+  background: rgba(0, 229, 255, 0.07);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.talk__meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
+.talk__text { font-size: 11px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.talk__orders { display: flex; flex-wrap: wrap; gap: 6px; }
+.talk__orders .avatars__go,
+.talk__strategy .avatars__go,
+.talk__send { display: inline-flex; align-items: center; gap: 4px; }
+.talk__compose { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+.talk__compose .shards__textarea { resize: none; }
+.talk__send { height: 36px; }

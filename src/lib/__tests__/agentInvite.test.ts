@@ -2,7 +2,9 @@
  * agentInvite.test.ts: the invitation carries what ruling 3 says (the guide,
  * the install line, the operator's npub, the rendezvous, a one-time code, a
  * budget) and nothing it must not (no key, no funds), and MY AGENTS keeps
- * only the profiles that are bots naming the operator.
+ * only the profiles that are bots naming the operator. Since 2026-10-10 it
+ * also makes traversal the default playbook and tells the agent its
+ * operator talks to it only by NIP-17 DM.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -56,6 +58,24 @@ describe('the invitation', () => {
     // Reading needs no travel, and the agent must not try to hop there.
     expect(text).toMatch(/need no travel/)
     expect(text).toMatch(/Never pass --allow-respawn/)
+  })
+
+  it('makes traversal the default playbook and never says nobody can travel (arkinox, 2026-10-10)', () => {
+    expect(text).not.toMatch(/nobody can travel/i)
+    expect(text).toMatch(/TRAVEL\n  Traversal is your default playbook/)
+    for (const tool of ['station', 'board', 'ride']) expect(text).toContain(`${tool} `)
+    expect(text).toMatch(/meet others at stops/)
+  })
+
+  it('tells the agent its operator talks only by NIP-17 DM, read with inbox and answered with message_operator, and obeys only the operator', () => {
+    expect(text).toContain('TALKING WITH YOUR OPERATOR')
+    expect(text).toMatch(/only by private NIP-17 direct message/)
+    expect(text).toMatch(/Read new messages with the inbox tool/)
+    expect(text).toMatch(/answer with message_operator/)
+    expect(text).toMatch(/You obey only this person/)
+    expect(text).toMatch(/STRATEGY is your standing orders/)
+    // The first session checks the inbox.
+    expect(text).toMatch(/\d\. Call inbox\./)
   })
 
   it('carries no key, no funds, and no hex but the rendezvous', () => {

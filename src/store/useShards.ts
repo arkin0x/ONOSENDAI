@@ -25,7 +25,10 @@
  * public key (lib/chests.ts). A chest's contents are signed here one by one
  * and sealed before the region key is computed; a key hidden, alone or inside
  * a chest, goes into the hider's own inventory at once (store/useInventory.ts),
- * and every key a scan reads is held the moment it is read.
+ * and every key a scan reads is held the moment it is read. A shard inside a
+ * chest may be aimed first (startDeployIntoChest, arkinox 2026-10-10): signed
+ * through the deploy bar where it should stand when the chest opens, and
+ * sealed as it is.
  */
 
 import { clampUnit, normalizeStored } from 'sno-core/shards'
@@ -218,11 +221,23 @@ export function forgetLinkCopies(): void {
 /** Why a LIVE LINK was not hidden: the author's object could not be put where finders look. */
 export const LINK_REFUSED = "LIVE LINK needs the author's object on one of your relays, and none took it. Place it as a copy instead."
 
+/**
+ * A shard aimed from the chest composer (arkinox, 2026-10-10: "When I hid a
+ * shard in the chest I never got to position it"): its inner event, signed
+ * through the deploy bar at the place, size and pose it should have when the
+ * chest opens, and the unit it went out at, for the composer's row. The seal
+ * takes the event as it is instead of signing the model at the chest.
+ */
+export interface AimedShard {
+  signed: NostrEvent
+  unit: number
+}
+
 /** What the composer puts in a chest: signed at COMMIT, then sealed (B1 §3.1). */
 export type ChestContent =
   | { kind: 'message'; text: string }
-  /** One of your workshop models, carried inline. */
-  | { kind: 'shard'; shardId: string }
+  /** One of your workshop models, carried inline; aimed, it is already signed where it should stand. */
+  | { kind: 'shard'; shardId: string; aimed?: AimedShard }
   /** A new key forged inline, for chaining: it is held by you the moment the chest is hidden. */
   | { kind: 'key'; key: KeyItem }
 
@@ -233,12 +248,29 @@ export interface ChestLock {
   label: string
 }
 
-/** A chest as the composer hands it over, before anything is signed or sealed. */
+/**
+ * A chest as the composer hands it over, before anything is sealed. The lock
+ * is null only while drafting: a shard can be aimed before the lock is
+ * chosen, and the composer comes back to the draft as it was. PLACE CHEST
+ * needs the lock (startDeployChest).
+ */
 export interface ChestDraft {
   name: string
-  lock: ChestLock
+  lock: ChestLock | null
   requires: string
   contents: ChestContent[]
+}
+
+/** Whether any shard in the draft has been aimed: the chest's height then follows them (DeployBar). */
+export function hasAimed(draft: Pick<ChestDraft, 'contents'>): boolean {
+  return draft.contents.some((c) => c.kind === 'shard' && !!c.aimed)
+}
+
+/** The aimed shards of a draft, by their index in the contents. */
+export function aimedOf(draft: Pick<ChestDraft, 'contents'>): Array<{ index: number; aimed: AimedShard }> {
+  const out: Array<{ index: number; aimed: AimedShard }> = []
+  draft.contents.forEach((c, index) => { if (c.kind === 'shard' && c.aimed) out.push({ index, aimed: c.aimed }) })
+  return out
 }
 
 /** What a deploy is placing, before it lands. */
@@ -247,8 +279,12 @@ export type DeployPending =
    * One of your models (`shardId`), or an object from the Shard Feed
    * (`object`, with `shardId` its address). From the feed it goes out as a
    * credited copy, or with LIVE LINK by reference to the author's object.
+   * With `intoChest` it is a model aimed from the chest composer: the deploy
+   * signs it where it stands and hands the chest back with it inside, and
+   * hides nothing (no key, no bag, no relay). The chest rides along so CANCEL
+   * and BUILD mode ending both have it to give back.
    */
-  | { type: 'shard'; shardId: string; object?: FeedObject }
+  | { type: 'shard'; shardId: string; object?: FeedObject; intoChest?: { draft: ChestDraft; contentIndex: number } }
   | { type: 'message'; text: string }
   /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
   | { type: 'key'; key: KeyItem }
@@ -306,6 +342,16 @@ export type DeployStatus = 'idle' | 'working' | 'done' | 'error'
 
 interface ShardsState {
   pending: DeployPending | null
+  /**
+   * A chest handed back by a shard aimed into it (startDeployIntoChest): the
+   * draft with the shard signed in when PUT IN CHEST ended the deploy, and as
+   * it was when CANCEL did. useBuilder moves it into `itemDraft`, which is the
+   * one place the chest composer restores from, the moment it is set. Not
+   * written to `itemDraft` from here because useBuilder imports this store.
+   */
+  chestBack: ChestDraft | null
+  /** The handed-back chest, taken: useBuilder owns it from here. */
+  takeChestBack: () => ChestDraft | null
   deployHeight: number
   /**
    * The height follows the model: the smallest region that holds all of it
@@ -404,8 +450,15 @@ interface ShardsState {
   startDeployMessage: (text: string) => void
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
-  /** Hide a chest as the composer drafted it; its contents are signed and sealed when it is hidden. */
-  startDeployChest: (draft: ChestDraft) => void
+  /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
+  startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
+  /**
+   * Aim one shard of a chest draft through the deploy bar (arkinox,
+   * 2026-10-10): the content at `contentIndex` is lined up as a shard deploy
+   * that signs instead of hiding, and the whole draft rides with it. Nothing
+   * happens for a content that is not a shard.
+   */
+  startDeployIntoChest: (draft: ChestDraft, contentIndex: number) => void
   setDeployHeight: (h: number) => void
   /** Set the size this deployment goes out at, inside the same bounds the workshop uses. */
   setDeployUnit: (unit: number) => void
@@ -703,6 +756,7 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }> }> {
     const cs = cyber()
+    if (!draft.lock) throw new Error('The chest has no lock.')
     const signed: NostrEvent[] = []
     const forged: Array<{ event: NostrEvent; key: KeyItem }> = []
     for (const c of draft.contents) {
@@ -711,6 +765,15 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!text) continue
         signed.push(await cs.signEvent(messageInnerTemplate(text, at, plane, createdAt)))
       } else if (c.kind === 'shard') {
+        // Aimed, it was signed where it should stand (startDeployIntoChest),
+        // at its own size and pose: that event goes in as it is, so long as
+        // this identity signed it (a draft outlives an identity switch).
+        // Unaimed, the model is signed here, at the chest, as it always was.
+        if (c.aimed) {
+          if (c.aimed.signed.pubkey !== cs.identity.pubkey) throw new Error('A shard in this chest was aimed by another identity. AIM it again from the composer.')
+          signed.push(c.aimed.signed)
+          continue
+        }
         const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
         if (!model) throw new Error('A model in this chest is no longer in your workshop.')
         const refusal = shardRefusal(model)
@@ -729,6 +792,12 @@ export const useShards = create<ShardsState>((set, get) => {
 
   return {
     pending: null,
+    chestBack: null,
+    takeChestBack: () => {
+      const draft = get().chestBack
+      if (draft) set({ chestBack: null })
+      return draft
+    },
     deployHeight: 0,
     deployHeightAuto: false,
     deployUnit: 0,
@@ -796,7 +865,29 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
-    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft }, ...freshDeploy }),
+    // With shards aimed inside, the height starts at the fit that holds them
+    // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
+    // until + or - is pressed, as a shard's own height does.
+    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft }, ...freshDeploy, deployHeightAuto: hasAimed(draft) }),
+    startDeployIntoChest: (draft, contentIndex) => {
+      const c = draft.contents[contentIndex]
+      if (c?.kind !== 'shard') return
+      set({
+        pending: { type: 'shard', shardId: c.shardId, intoChest: { draft, contentIndex } },
+        deployLink: false,
+        deployHeightAuto: true,
+        // A re-aim starts at the size it was aimed at; a first aim at the model's own.
+        deployUnit: c.aimed?.unit ?? useWorkshop.getState().shards.find((s) => s.id === c.shardId)?.unit ?? 0,
+        deployUp: false,
+        deploySpin: 0,
+        deployTurn: [0, 0, 0],
+        deployFollow: false,
+        deployBag: DEFAULT_BAG_SETTINGS,
+        deployBagFrom: null,
+        deployStatus: 'idle',
+        deployError: null,
+      })
+    },
     setDeployBag: (patch) => set({ deployBag: { ...get().deployBag, ...patch } }),
     seedDeployBag: (bag) => {
       const from = get().deployBagFrom
@@ -846,7 +937,11 @@ export const useShards = create<ShardsState>((set, get) => {
     },
     cancelDeploy: () => {
       if (get().deployStatus === 'working') return
-      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+      // A shard being aimed into a chest gives the chest back as it was: the
+      // composer reopens with the draft intact and that shard as before.
+      const { pending } = get()
+      const chestBack = pending?.type === 'shard' && pending.intoChest ? pending.intoChest.draft : null
+      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null, chestBack })
     },
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
     declineDeploy: () => set({ deployAsk: null }),
@@ -876,12 +971,17 @@ export const useShards = create<ShardsState>((set, get) => {
         return
       }
 
+      // A shard aimed into a chest is signed, not hidden: no key is computed
+      // for it, so no route and no HOSAKA ask (its height is only the cell
+      // its point is centered in, as for any shard).
+      const intoChest = pending.type === 'shard' ? pending.intoChest : undefined
+
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
       // priced as a hop at that height, and the Cloud compute panel's mode says
       // whether to ask first.
       const inputs = { localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null }
       const route = deployRoute(deployHeight, inputs)
-      if (route === 'cloud') {
+      if (route === 'cloud' && !intoChest) {
         if (cs.cloudPrefs.mode === 'off' || deployHeight > deployCeiling(inputs)) {
           set({ deployStatus: 'error', deployError: `Height ${deployHeight} is past what this machine computes, and cloud compute is off.` })
           return
@@ -943,11 +1043,32 @@ export const useShards = create<ShardsState>((set, get) => {
       } else if (pending.type === 'chest') {
         // Signed and sealed inside the try below: the contents are signed by
         // the identity, which may be a remote signer, and the bar shows it.
-        if (!pending.name.trim() || pending.contents.length === 0) return
+        if (!pending.name.trim() || pending.contents.length === 0 || !pending.lock) return
       } else {
         text = pending.text.trim()
         if (!text) return
         innerTemplate = messageInnerTemplate(text, at, plane, createdAt)
+      }
+
+      // PUT IN CHEST: the shard's inner event, built above exactly as a hide
+      // would build it (its `C` the deploy point, its size, turns and pose in
+      // the payload), signed and written into the chest draft at its index,
+      // and the chest handed back to its composer (`chestBack`). Nothing is
+      // hidden and nothing is published: the chest's own hide seals it.
+      if (intoChest && shard && innerTemplate) {
+        set({ deployStatus: 'working', deployError: null, deployAsk: null, deployNote: 'Signing for the chest' })
+        try {
+          const signed = await cs.signEvent(innerTemplate)
+          const aimed: AimedShard = { signed, unit: shard.unit }
+          const contents = intoChest.draft.contents.map((c, i) => (i === intoChest.contentIndex && c.kind === 'shard' ? { ...c, aimed } : c))
+          const draft: ChestDraft = { ...intoChest.draft, contents }
+          if (get().pending === pending) set({ pending: null, deployStatus: 'done', deployNote: null, chestBack: draft })
+          else set({ chestBack: draft })
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err)
+          if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployError: reason })
+        }
+        return
       }
 
       set({ deployStatus: 'working', deployError: null, deployAsk: null })

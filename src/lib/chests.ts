@@ -27,8 +27,11 @@
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
-import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
+import { fromPayload } from 'sno-core/shards'
 import { entryKey, isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { reachGibsons, type FitPoint } from './deployFit'
+import type { Position } from './space'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -221,6 +224,41 @@ export function requiresLabel(chest: Pick<ChestItem, 'requires'>): string {
 const HEX64_RE = /^[0-9a-f]{64}$/
 
 /**
+ * Where an item says it stands: its `C` tag read as a point in a plane, or
+ * null when it has none that parses. What a chest's contents stand at when
+ * the chest opens (revealedIn), and what the chest's own height must hold
+ * when it is placed (DeployBar, lib/deployFit.ts fitHeightAll).
+ */
+export function placeOf(event: Pick<NostrEvent, 'tags'>): { at: Position; plane: Plane } | null {
+  const c = event.tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
+  if (typeof c !== 'string' || !HEX64_RE.test(c)) return null
+  try {
+    const p = coordToXyz(hexToCoord(c))
+    return { at: { x: p.x, y: p.y, z: p.z }, plane: p.plane }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A shard aimed into a chest (useShards ChestContent `aimed`), as the chest's
+ * fit must hold it: its place, and the reach of the model it was signed with
+ * at that model's unit, so it comes out whole and not clipped at the region's
+ * edge. Null when the signed event carries no place; a payload the format
+ * refuses counts as a point alone.
+ */
+export function aimedPoint(signed: NostrEvent): (FitPoint & { plane: Plane }) | null {
+  const place = placeOf(signed)
+  if (!place) return null
+  let reach = 0n
+  try {
+    const model = fromPayload(JSON.parse(signed.content), signed.id)
+    if (model) reach = reachGibsons(model, model.unit)
+  } catch { /* not a shard payload: the point stands for it */ }
+  return { ...place, reach }
+}
+
+/**
  * A chest's contents as finds in the world: the gate of Keys and Chests B1.
  * Each entry stands at its own `C` when it carries one inside the chest's
  * region, else where the chest stands; the chest's bag, lookup id, height and
@@ -235,13 +273,9 @@ export function revealedIn(chest: Pick<Hidden, 'eventId' | 'bagId' | 'lookupId' 
   const out: Hidden[] = []
   for (const e of entries) {
     let at = chest.at
-    const c = e.event.tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
-    if (typeof c === 'string' && HEX64_RE.test(c)) {
-      try {
-        const p = coordToXyz(hexToCoord(c))
-        if (p.plane === chest.plane && inRegion(p)) at = { x: p.x, y: p.y, z: p.z }
-      } catch { /* a point that does not parse: the chest's place stands */ }
-    }
+    // A point that does not parse: the chest's place stands.
+    const own = placeOf(e.event)
+    if (own && own.plane === chest.plane && inRegion(own.at)) at = own.at
     out.push({
       eventId: e.id,
       inner: e.event,

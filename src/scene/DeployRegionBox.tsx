@@ -6,6 +6,10 @@
  * powers of two as you change the height, so you can see how far away someone
  * could be and still find it. At height 0 it is a single gibson; each step up
  * doubles each side. Drawn from the cursor, so it moves as you aim.
+ *
+ * Not drawn for a shard being aimed into a chest (useShards `intoChest`): the
+ * content has no region of its own, only the chest's, and a box here would
+ * promise one (arkinox, 2026-10-10).
  */
 
 import { useMemo } from 'react'
@@ -31,7 +35,7 @@ export function DeployRegionBox({ axes }: Props): JSX.Element | null {
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
   const box = useMemo(() => {
-    if (!pending) return null
+    if (!pending || (pending.type === 'shard' && pending.intoChest)) return null
     // Side length in cells at this zoom: 2^(height - scaleExp).
     const exp = height - scaleExp
     const side = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))

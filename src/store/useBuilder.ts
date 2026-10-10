@@ -346,12 +346,18 @@ function endUnder(reason: BuildEndReason): void {
       // Kept whole, as a message is: the key's pair and name, or the chest's lock and contents.
       useBuilder.setState({ itemDraft: pending })
       kept = ` Your ${pending.type} is kept: ${pending.type === 'key' ? 'FORGE A KEY' : 'SEAL A CHEST'} in the Stash opens it again.` + dropped
+    } else if (pending.intoChest) {
+      // A shard being aimed into a chest: the chest comes back whole through
+      // cancelDeploy (chestBack, moved into itemDraft below), that shard not
+      // aimed. An aim has no height or bag settings of its own to lose.
+      const name = shards.pendingShard()?.name ?? 'the object'
+      kept = ` Your chest is kept: SEAL A CHEST in the Stash opens it again. "${name}" is not aimed; AIM it again from there.`
     } else {
       const name = shards.pendingShard()?.name ?? 'the object'
       kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped
     }
-    // Not back to the Models modal: the view went somewhere on purpose.
-    useStash.setState({ returnToModels: false, returnToFeed: false })
+    // Not back to the Models modal, or the chest composer: the view went somewhere on purpose.
+    useStash.setState({ returnToModels: false, returnToFeed: false, returnToChest: false })
     shards.cancelDeploy()
   }
   useToast.getState().show({ label: 'BUILD MODE ENDED', meta: END_REASON[reason] + kept + ' Press BUILD to start again.', mark: 'build' })
@@ -392,6 +398,16 @@ useCyberspace.subscribe((s, prev) => {
 })
 
 useShards.subscribe((s, prev) => {
+  // A chest handed back by a shard aimed into it (useShards `chestBack`,
+  // set when PUT IN CHEST signs the shard and when the aim is canceled) is
+  // kept here as `itemDraft`, the one place the chest composer restores
+  // from, whether the Stash reopens the composer at once or the user opens
+  // SEAL A CHEST later. useShards cannot write it: it would have to import
+  // this store, which imports it.
+  if (s.chestBack !== null && s.chestBack !== prev.chestBack) {
+    const draft = useShards.getState().takeChestBack()
+    if (draft) useBuilder.setState({ itemDraft: { type: 'chest', ...draft } })
+  }
   // Every deploy happens in BUILD mode (R5): one that starts with the mode
   // off turns it on, at the place you are looking or else your avatar, so
   // the deploy lands at the build cursor and never at a cursor lined up for

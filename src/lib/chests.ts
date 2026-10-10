@@ -28,7 +28,7 @@ import { v2 as nip44 } from 'nostr-tools/nip44'
 import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
-import { isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { entryKey, isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -228,7 +228,7 @@ const HEX64_RE = /^[0-9a-f]{64}$/
  * found shard, and the record lists it under the same bag. A door is a chest
  * whose contents are the room behind it.
  */
-export function revealedIn(chest: Pick<Hidden, 'bagId' | 'lookupId' | 'author' | 'at' | 'plane' | 'height' | 'bag' | 'keyHex'>, entries: ChestEntry[]): Hidden[] {
+export function revealedIn(chest: Pick<Hidden, 'eventId' | 'bagId' | 'lookupId' | 'author' | 'at' | 'plane' | 'height' | 'bag' | 'keyHex'>, entries: ChestEntry[]): Hidden[] {
   const shift = BigInt(chest.height)
   const inRegion = (p: { x: bigint; y: bigint; z: bigint }): boolean =>
     (p.x >> shift) === (chest.at.x >> shift) && (p.y >> shift) === (chest.at.y >> shift) && (p.z >> shift) === (chest.at.z >> shift)
@@ -254,8 +254,27 @@ export function revealedIn(chest: Pick<Hidden, 'bagId' | 'lookupId' | 'author' |
       height: chest.height,
       bag: chest.bag,
       createdAt: e.event.created_at,
+      // The chest it came out of, so it can be taken out again (resealWithout).
+      chestId: chest.eventId,
       ...e.body,
     })
   }
   return out
+}
+
+/**
+ * The chest sealed again without one of its contents, for its hider. `raw` is
+ * what the chest holds as it opened (openWithSecret or openWithSigner, before
+ * readContents drops what this client cannot read, so nothing unreadable is
+ * lost in the rewrite); `id` is the content to take out, by its entry key.
+ * A fresh one-time sender key seals it, as sealEntries always does, and the
+ * lock stays, so the same key or person opens it as before. Null when nothing
+ * inside has that id. An emptied chest is sealed as empty: it still stands
+ * where it was hidden, and says so when opened.
+ */
+export function resealWithout(chest: ChestItem, raw: BagEntry[], id: string): { chest: ChestItem; left: BagEntry[] } | null {
+  const left = raw.filter((e) => entryKey(e) !== id)
+  if (left.length === raw.length) return null
+  const sealed = sealEntries(left, chest.lockPubkey)
+  return { chest: { ...chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload }, left }
 }

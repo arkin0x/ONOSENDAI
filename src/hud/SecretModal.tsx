@@ -41,6 +41,11 @@ export function SecretModal(): JSX.Element | null {
   const author = item?.author ?? ''
   const profile = useProfile(author || null)
   const [copied, setCopied] = useState(false)
+  // REMOVE FROM CHEST, for a thing revealed from a chest of yours: whether it
+  // is working, and the sentence when it could not. Above the early return,
+  // as every hook here must be.
+  const [removing, setRemoving] = useState(false)
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
@@ -146,10 +151,27 @@ export function SecretModal(): JSX.Element | null {
               <button className="secret__act" onClick={watch}>SPECTATE</button>
             </>
           )}
-          {mine && (
+          {/* A thing revealed from a chest of yours is part of that chest's
+              sealed contents, not a bag entry: it comes out by sealing the
+              chest again without it (useShards removeFromChest). DELETE's
+              bag rewrite could not reach it, and did nothing (arkinox,
+              2026-10-10). */}
+          {mine && !item.chestId && (
             <button className="secret__act secret__act--danger" onClick={() => { close(); void useShards.getState().deleteInstance(item.key) }}>DELETE</button>
           )}
+          {mine && item.chestId && (
+            <button
+              className="secret__act secret__act--danger"
+              disabled={removing}
+              title="Open the chest, seal it again without this, and republish the bag"
+              onClick={() => {
+                setRemoving(true); setRefusal(null)
+                void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) setRefusal(why); else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
+              }}
+            >{removing ? 'REMOVING…' : 'REMOVE FROM CHEST'}</button>
+          )}
         </div>
+        {refusal && <p className="secret__status" role="status">{refusal}</p>}
       </div>
     </div>
   )

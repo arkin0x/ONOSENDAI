@@ -1067,7 +1067,9 @@ export function Workshop(): JSX.Element | null {
           on every tool (arkinox, 2026-10-10: right aligned, and the left-hand
           rows must never jump above it). It sat in the bottom-left column's
           last row first, where its height lifted every row by 152px. */}
-      <OrbitSphere />
+      {/* Away while the TOOLS panel is open: the panel stands where the ball
+          does, and the ball covered it (arkinox, 2026-10-10). */}
+      {panel !== 'tools' && <OrbitSphere />}
 
       {/* Bottom right: the color column. FILL for a set of points is on the
           clipboard row, and the FACE tool's actions on its own row there. */}

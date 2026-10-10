@@ -5414,6 +5414,9 @@ kbd {
 .loot__top .avatars__when {
   margin-left: auto;
 }
+/* The cube before a bag's height and size, when its hider named the sector
+   (DiscoveredPanel row): the meta line's own color, on the baseline. */
+.loot__sector { display: inline-block; vertical-align: -2px; margin-right: 5px; }
 .loot__meta {
   margin-top: 2px;
   font-size: 9px;

@@ -291,7 +291,7 @@ describe('BUILD mode ending under an aim', () => {
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(false)
     const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).toMatch(/Your chest is kept: SEAL A CHEST in the Stash opens it again/)
+    expect(meta).toMatch(/Your chest is kept: SEAL A CHEST in CREATE opens it again/)
     expect(meta).toMatch(/"Crucifix" is not aimed/)
   })
 })

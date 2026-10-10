@@ -50,7 +50,7 @@ describe('the key line', () => {
     const text = visible(createElement(KeyLine, { name: 'Wind Key', author: hiderPk }))
     expect(text).toContain('Wind Key')
     expect(text).toContain('forged by')
-    expect(text).toContain('IN YOUR LOOT')
+    expect(text).toContain('IN YOUR ITEMS')
   })
 })
 

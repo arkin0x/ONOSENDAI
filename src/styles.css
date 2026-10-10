@@ -7999,6 +7999,32 @@ kbd {
   flex: none;
   vertical-align: -2px;
 }
+/* An item's own picture in its icon's place (ItemFace): at most 32 pixels a
+   side on the wire, drawn at the icon's size, so it is pixel art and is kept
+   crisp rather than blurred (arkinox, 2026-10-10). */
+.item-pic {
+  flex: none;
+  vertical-align: -2px;
+  image-rendering: pixelated;
+  border-radius: 2px;
+}
+/* The forge composer's PICTURE row: the preview at its own size inside a
+   32 by 32 well, then the buttons. */
+.compose__pic-box {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.18);
+}
+.compose__pic-preview {
+  image-rendering: pixelated;
+  border-radius: 2px;
+}
 
 /* PLACE OBJECT's empty state: the note, then the way to make a model. */
 .objpick__empty {

@@ -88,14 +88,16 @@ export function ShardsPanel(): JSX.Element {
         )}
       </div>
 
-      {/* Keys and chests (B1 §3.1): a key is a keypair hidden as an item, and
-          a chest is contents sealed to a key or a person. Both compose in a
-          modal (StashModals), since a chest's composer is taller than a panel row. */}
+      {/* Items and chests (B1 §3.1): an item is a keypair hidden in a bag, and
+          a chest is contents sealed to an item or a person (arkinox,
+          2026-10-10: "keys ARE items"; key is the role an item plays when a
+          chest is sealed to it). Both compose in a modal (StashModals), since
+          a chest's composer is taller than a panel row. */}
       <div className="shards__section">
-        <span className="legend__label">Place a key or a chest</span>
+        <span className="legend__label">Place an item or a chest</span>
         <div className="shards__modes">
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair and hide it as an item; whoever reads it holds it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE A KEY</button>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or a key to a key or a person, and hide it"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever reads it holds it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or an item to an item or a person, and hide it"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
         </div>
       </div>
 

@@ -1,22 +1,25 @@
 /**
- * InventoryPanel.tsx: LOOT, what this identity holds (Keys and Chests B1 §3.3).
+ * InventoryPanel.tsx: ITEMS, what this identity holds (Keys and Chests B1 §3.3).
  *
- * The third of the three bag panels: HIDDEN (later), DISCOVERED (opened where
- * it stands) and this one, what you hold, kept per identity in IndexedDB
- * (store/useInventory.ts). Keys first: each with its name, who forged it,
- * where it was found and when, and which DISCOVERED chests it opens, computed
- * from the lock tags of chests seen. Then what was taken out of chests: coins
- * with the Cashu card and its mint state, shards with COPY TO STASH, messages,
- * and chests, which open here as they do where they were found. COPY puts a
- * key on the clipboard as text (`cyberspace-key:` and its event) and PASTE
- * reads one back, so a key crosses devices. Nothing here is destructive; BURN
+ * The third of the three bag panels: HIDDEN BAGS (later), DISCOVERED BAGS
+ * (opened where it stands) and this one, what you hold, kept per identity in
+ * IndexedDB (store/useInventory.ts). The keypair items you hold first
+ * (arkinox, 2026-10-10: "keys ARE items", so the panel is ITEMS and the
+ * forged thing is an item; the TypeScript names keep saying key): each with
+ * its picture when it has one (ItemFace), its name, who forged it, where it
+ * was found and when, and which DISCOVERED chests it opens, computed from the
+ * lock tags of chests seen. Then what was taken out of chests: coins with the
+ * Cashu card and its mint state, shards with COPY TO WORKSHOP, messages, and
+ * chests, which open here as they do where they were found. COPY puts an item
+ * on the clipboard as text (`cyberspace-key:` and its event) and PASTE reads
+ * one back, so an item crosses devices. Nothing here is destructive; BURN
  * comes later.
  */
 
 import { useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { ItemIcon } from './ItemIcon'
+import { ItemFace, ItemIcon } from './ItemIcon'
 import { chestsOpenedBy, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -63,7 +66,7 @@ function FoundAt({ item }: { item: HeldItem }): JSX.Element | null {
   )
 }
 
-/** A held key: name, who forged it, where and when, what it opens, DETAILS and COPY. */
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS and COPY. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -79,18 +82,18 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const pubkey = item.key?.itemPubkey ?? ''
   return (
     <li className="secrets__row held__row">
-      <ItemIcon className="chest__glyph chest__glyph--key" type="key" />
+      <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
       <span className="item__line">
         <span className="item__name" title={item.name}>{item.name}</span>
         <span className="item__meta">
           {item.source === 'forged' ? 'forged by you' : `forged by ${who}`} · {item.source === 'forged' ? 'hidden' : SOURCE[item.source]} <span title={formatStamp(item.at)}>{formatAgo(item.at)}</span>
-          {opens > 0 && <> · <span className="secrets__found" title="Discovered chests whose lock is this key">opens {opens} chest{opens === 1 ? '' : 's'}</span></>}
+          {opens > 0 && <> · <span className="secrets__found" title="Discovered chests whose lock is this item">opens {opens} chest{opens === 1 ? '' : 's'}</span></>}
           {!item.verified && <> · <Unsigned /></>}
         </span>
       </span>
       <span className="held__acts">
         <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
-        <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the key as text, to paste into LOOT on another device">{copied ? 'COPIED' : 'COPY'}</button>
+        <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
       </span>
       {open && (
         <div className="held__details">
@@ -137,7 +140,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           </span>
         )}
       <span className="held__acts">
-        {item.type === 'shard' && <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={toStash} title="Copy this model into your workshop">{copied ? 'COPIED' : 'COPY TO STASH'}</button>}
+        {item.type === 'shard' && <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={toStash} title="Copy this model into your workshop">{copied ? 'COPIED' : 'COPY TO WORKSHOP'}</button>}
         {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin ? 'CARD' : 'READ'}</button>}
       </span>
       {open && item.type === 'message' && (
@@ -154,13 +157,13 @@ export function InventoryPanel(): JSX.Element {
   const storage = useInventory((s) => s.storage)
   const discovered = useShards((s) => s.discovered)
   const { keys, taken } = useMemo(() => splitPanels([], Object.values(items)).loot, [items])
-  // Which DISCOVERED chests each key opens, from the lock tags of chests seen.
+  // Which DISCOVERED chests each item opens, from the lock tags of chests seen.
   const chests = useMemo(() => Object.values(discovered).filter((h) => h.type === 'chest' && h.chest).map((h) => ({ id: h.eventId, chest: h.chest! })), [discovered])
   const [paste, setPaste] = useState('')
   const [note, setNote] = useState<string | null>(null)
   const doPaste = (): void => {
     const r = useInventory.getState().paste(paste)
-    setNote(r.ok ? (r.already ? `Already in your LOOT: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not a key.')
+    setNote(r.ok ? (r.already ? `Already in your ITEMS: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not an item.')
     if (r.ok) setPaste('')
   }
   const count = keys.length + taken.length
@@ -168,16 +171,19 @@ export function InventoryPanel(): JSX.Element {
   return (
     <section className="panel panel--loot">
       <header className="panel__head">
-        <h2>Loot</h2>
+        {/* ITEMS (arkinox, 2026-10-10): what you hold. The CSS classes still say loot. */}
+        <h2>Items</h2>
         <span className="loot__tags">
           {storage === 'memory' && <span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span>}
-          <span className="tag">{count === 0 ? 'NOTHING HELD' : `${keys.length} KEY${keys.length === 1 ? '' : 'S'}${taken.length > 0 ? ` · ${taken.length} TAKEN` : ''}`}</span>
+          <span className="tag">{count === 0 ? 'NOTHING HELD' : `${keys.length} ITEM${keys.length === 1 ? '' : 'S'}${taken.length > 0 ? ` · ${taken.length} TAKEN` : ''}`}</span>
         </span>
       </header>
 
+      {/* Two sections, so each keeps its heading: the keypair items you hold,
+          then what was taken out of chests. */}
       {keys.length > 0 && (
         <div className="shards__section">
-          <span className="legend__label">Keys</span>
+          <span className="legend__label">Items you hold</span>
           <ul className="secrets__list held__list">
             {keys.map((k) => <KeyRow key={k.id} item={k} opens={k.key ? chestsOpenedBy(k.key, chests).length : 0} />)}
           </ul>
@@ -195,18 +201,18 @@ export function InventoryPanel(): JSX.Element {
 
       {count === 0 && <p className="avatars__empty">Nothing held yet.</p>}
 
-      {/* A key from another device, as COPY wrote it. */}
+      {/* An item from another device, as COPY wrote it. The prefix is the wire format and keeps its name. */}
       <form className="loot__paste" onSubmit={(e) => { e.preventDefault(); doPaste() }}>
-        <input className="avatars__input" value={paste} onChange={(e) => { setPaste(e.target.value); setNote(null) }} placeholder="cyberspace-key:…" spellCheck={false} autoComplete="off" aria-label="A key as text" />
-        <button className="avatars__go" type="submit" disabled={!paste.trim()} title="Hold a key copied from LOOT on another device">PASTE</button>
+        <input className="avatars__input" value={paste} onChange={(e) => { setPaste(e.target.value); setNote(null) }} placeholder="cyberspace-key:…" spellCheck={false} autoComplete="off" aria-label="An item as text" />
+        <button className="avatars__go" type="submit" disabled={!paste.trim()} title="Hold an item copied from ITEMS on another device">PASTE</button>
       </form>
       {note && <p className="notice" role="status">{note}</p>}
 
       <Explanation>
-        What you hold: keys read out of bags or forged by you, and what you took
-        out of chests. A chest sealed to one of these keys opens where it is
-        found, in DISCOVERED. Kept on this device per identity; COPY and PASTE
-        carry a key to another device as text.
+        What you hold: items read out of bags or forged by you, and what you
+        took out of chests. A chest sealed to one of these items opens where it
+        is found, in DISCOVERED BAGS. Kept on this device per identity; COPY
+        and PASTE carry an item to another device as text.
       </Explanation>
     </section>
   )

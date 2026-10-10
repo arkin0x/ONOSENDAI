@@ -19,7 +19,7 @@ import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
 import { hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
-import { ItemIcon } from './ItemIcon'
+import { ItemFace } from './ItemIcon'
 import { placeOf, type HeldPlace } from '../lib/inventory'
 import { formatBytes, hintBoxLabel, hintSearchExponent, regionLabel, type LootItem } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -160,7 +160,7 @@ export function LootDetail(): JSX.Element | null {
     view(o)
     useShards.getState().selectSecret(o.eventId)
   }
-  // A shard copies into your Stash as a model; a message copies its text.
+  // A shard copies into your workshop as a model; a message copies its text.
   const copy = (o: OpenedItem): void => {
     if (o.type === 'shard' && o.shard) useWorkshop.getState().importShard(o.shard)
     else if (o.text) void navigator.clipboard?.writeText(o.text)
@@ -223,8 +223,8 @@ export function LootDetail(): JSX.Element | null {
           <ul className="lootd__items">
             {opened.map((o) => (
               <li key={o.eventId} className={`lootd__item ${o.type === 'chest' ? 'lootd__item--chest' : ''}`}>
-                <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemIcon type={o.type} coin={o.coin} size={12} /></span>
-                {/* A key says it is held; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
+                <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemFace type={o.type} coin={o.coin} image={o.key?.image} size={12} /></span>
+                {/* A keypair item says it is held, its picture in the badge when it has one; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
                 {o.type === 'key' && o.key
                   ? <KeyLine name={o.key.name} author={item.author} />
                   : o.type === 'chest' && o.chest
@@ -235,7 +235,7 @@ export function LootDetail(): JSX.Element | null {
                   {(o.type === 'shard' || o.type === 'message') && (
                     <>
                       <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>
-                      <button className="secret__act lootd__view" onClick={() => copy(o)} title={o.type === 'shard' ? 'Copy this model into your Stash' : 'Copy the text'}>
+                      <button className="secret__act lootd__view" onClick={() => copy(o)} title={o.type === 'shard' ? 'Copy this model into your workshop' : 'Copy the text'}>
                         {copied === o.eventId ? 'COPIED' : 'COPY'}
                       </button>
                     </>

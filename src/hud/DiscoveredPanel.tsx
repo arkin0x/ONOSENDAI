@@ -4,7 +4,7 @@
  * A bag (kind:33330) on the relay is in one of three states for this identity,
  * and each state has a panel (Keys and Chests B1, ruling 14): HIDDEN, the bag
  * is on the relay and your keys have not opened it; DISCOVERED, your keys have
- * opened it where it stands; LOOT (InventoryPanel), you took something from it.
+ * opened it where it stands; ITEMS (InventoryPanel), you took something from it.
  * The first two share one list shape, so they share this module.
  *
  * Every row is a bag: who hid it, the size of the region it is encrypted to,
@@ -177,18 +177,19 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
         ? (
           <Explanation>
             Identities can encrypt messages, 3D objects (shards), bitcoin (cashu
-            ecash), keys and chests by location. These encrypted bundles are called
-            "bags" and might have clues as to where they can be found. The size is
-            the area wherein the bag can be found; larger is more work to decrypt
-            but easier to find, smaller is less work to decrypt but harder to find.
-            A bag moves to DISCOVERED the moment your keys open it.
+            ecash), keypair items and chests by location. These encrypted bundles
+            are called "bags" and might have clues as to where they can be found.
+            The size is the area wherein the bag can be found; larger is more work
+            to decrypt but easier to find, smaller is less work to decrypt but
+            harder to find. A bag moves to DISCOVERED BAGS the moment your keys
+            open it.
           </Explanation>
         )
         : (
           <Explanation>
             Bags your keys have opened. Tap one for what was in it: messages,
-            shards, coins, keys and chests. A chest opens here with a key from
-            your LOOT, and TAKE moves what you want into LOOT.
+            shards, coins, keypair items and chests. A chest opens here with an
+            item from your ITEMS, and TAKE moves what you want into ITEMS.
           </Explanation>
         )}
 

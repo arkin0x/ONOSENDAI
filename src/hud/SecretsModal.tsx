@@ -236,12 +236,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             {rescan && !rescan.running && rescan.error === null && rescan.skipped.length > 0 && (
               <span className="secrets__error">
                 Incomplete: not every relay answered in full, so something hidden may have been missed. {describeSkips(rescan.skipped)}.
-                What was found is in your Stash; press RESCAN ALL to ask again.
+                What was found is in DISCOVERED BAGS; press RESCAN ALL to ask again.
               </span>
             )}
             {rescan && rescan.error !== null && (
               <span className="secrets__error">
-                RESCAN ALL stopped: {rescan.error}. Whatever it opened before stopping is in your Stash; press RESCAN ALL to run it again.
+                RESCAN ALL stopped: {rescan.error}. Whatever it opened before stopping is in DISCOVERED BAGS; press RESCAN ALL to run it again.
               </span>
             )}
           </div>
@@ -401,7 +401,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
       {forgetAll && (
         <ConfirmModal
           title={`Forget all ${list.length} keys?`}
-          body={`Anything they have already opened stays in your Stash. The keys themselves come back by standing in those regions again${bought > 0 ? `, except the ${bought} bought from HOSAKA, which this machine cannot compute and would have to be bought again` : ''}. Scanned places are not touched.`}
+          body={`Anything they have already opened stays in DISCOVERED BAGS. The keys themselves come back by standing in those regions again${bought > 0 ? `, except the ${bought} bought from HOSAKA, which this machine cannot compute and would have to be bought again` : ''}. Scanned places are not touched.`}
           confirmLabel="FORGET ALL KEYS"
           onConfirm={() => { useSecrets.getState().forgetAll(); setForgetAll(false) }}
           onCancel={() => setForgetAll(false)}
@@ -410,7 +410,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
       {forgetPlaces && (
         <ConfirmModal
           title={`Forget all ${storage.places} places?`}
-          body="Each place is a spot you stood on and the cube keys the scan had there, kept so RESCAN ALL can look there again. Forgetting them frees that storage and takes nothing else: held keys, bought ones included, stay, and anything already opened stays in your Stash. Standing on a spot again records it again."
+          body="Each place is a spot you stood on and the cube keys the scan had there, kept so RESCAN ALL can look there again. Forgetting them frees that storage and takes nothing else: held keys, bought ones included, stay, and anything already opened stays in DISCOVERED BAGS. Standing on a spot again records it again."
           confirmLabel="FORGET ALL PLACES"
           onConfirm={() => { void useSecrets.getState().forgetAllPlaces(); setForgetPlaces(false) }}
           onCancel={() => setForgetPlaces(false)}

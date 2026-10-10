@@ -2,17 +2,21 @@
  * ItemRows.tsx: the key line and the chest block, wherever found things are
  * listed (Keys and Chests B1 §3.2).
  *
- * A key found says its name, who forged it, and that it is in your LOOT,
- * because reading it was holding it. A chest says its name and what opens it;
- * when something you hold does (a key whose public key is the lock, or the
- * lock is your own identity), OPEN decrypts it where it stands and lists what
- * is inside, each row with TAKE, which copies the thing into LOOT. A key
- * inside an opened chest is held the moment it is read, like any key. A chest
- * inside a chest is a chest block of its own, so chaining reads as nesting.
+ * A keypair item found says its name, who forged it, and that it is in your
+ * ITEMS, because reading it was holding it (arkinox, 2026-10-10: "keys ARE
+ * items"; the TypeScript names keep saying key). A chest says its name and
+ * what opens it; when something you hold does (an item whose public key is
+ * the lock, or the lock is your own identity), OPEN decrypts it where it
+ * stands and lists what is inside, each row with TAKE, which copies the thing
+ * into ITEMS. An item inside an opened chest is held the moment it is read,
+ * like any item. A chest inside a chest is a chest block of its own, so
+ * chaining reads as nesting.
  *
  * Used by the bag record (LootDetail), the nearby list (NearbyLootModal), the
- * item modal (SecretModal) and the LOOT panel's taken chests, so a chest opens
- * the same way from every door. Opening is a local act: nothing is published.
+ * item modal (SecretModal) and the ITEMS panel's taken chests, so a chest
+ * opens the same way from every door. Opening is a local act: nothing is
+ * published. An item's picture stands where its kind's icon would, in every
+ * row that draws one (ItemFace); the key line itself is the words.
  */
 
 import { useMemo, useState } from 'react'
@@ -21,7 +25,7 @@ import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
-import { ItemIcon } from './ItemIcon'
+import { ItemFace } from './ItemIcon'
 import { openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
@@ -40,13 +44,13 @@ export function useWho(pubkey: string): string {
   return pubkey === me ? 'you' : profileLabel(profile, safeNpub(pubkey))
 }
 
-/** A key where it was found: its name, who forged it, and that it is held. */
+/** A keypair item where it was found: its name, who forged it, and that it is held. */
 export function KeyLine({ name, author }: { name: string; author: string }): JSX.Element {
   const who = useWho(author)
   return (
     <span className="item__line">
       <span className="item__name" title={name}>{name}</span>
-      <span className="item__meta">forged by {who} · <span className="item__held" title="Reading a key is holding it: it is in your LOOT">IN YOUR LOOT</span></span>
+      <span className="item__meta">forged by {who} · <span className="item__held" title="Reading an item is holding it: it is in your ITEMS">IN YOUR ITEMS</span></span>
     </span>
   )
 }
@@ -63,7 +67,7 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
 /**
  * A chest: its name, what opens it, OPEN when you hold it, and its contents
  * once open. `id` is the chest's event id, `author` its hider (a claim unless
- * `verified`), `place` where it was found (null for a chest held in LOOT
+ * `verified`), `place` where it was found (null for a chest held in ITEMS
  * with no place of its own).
  */
 export function ChestBlock({ id, chest, author, verified, place }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null }): JSX.Element {
@@ -101,7 +105,7 @@ export function ChestBlock({ id, chest, author, verified, place }: { id: string;
     }
   }
 
-  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : items[opener.key.id]?.name ?? 'a key you hold'
+  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : items[opener.key.id]?.name ?? 'an item you hold'
   return (
     <div className="chest">
       <div className="chest__head">
@@ -133,7 +137,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
   const take = (): void => { useInventory.getState().take([entry], from, place) }
   return (
     <li className="chest__row">
-      <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} />
+      <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />
       {type === 'chest' && entry.body.chest
         ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} />
         : (
@@ -143,8 +147,8 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
           </span>
         )}
       {type === 'key'
-        ? <span className="item__held" title="Reading a key is holding it: it is in your LOOT">IN YOUR LOOT</span>
-        : <button className={`chest__act ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your LOOT' : 'Copy it into your LOOT'}>{held ? 'TAKEN' : 'TAKE'}</button>}
+        ? <span className="item__held" title="Reading an item is holding it: it is in your ITEMS">IN YOUR ITEMS</span>
+        : <button className={`chest__act ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>}
     </li>
   )
 }

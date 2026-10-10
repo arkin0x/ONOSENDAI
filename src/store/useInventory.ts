@@ -1,5 +1,5 @@
 /**
- * useInventory.ts: the LOOT panel's store, what this identity holds.
+ * useInventory.ts: the ITEMS panel's store, what this identity holds.
  *
  * Keys read out of bags, keys the identity forged, and contents taken out of
  * chests (lib/inventory.ts HeldItem), one row per item, kept in IndexedDB per
@@ -173,7 +173,7 @@ export const useInventory = create<InventoryState>((set, get) => {
 
   paste: (text) => {
     const parsed = parseKeyText(text)
-    if (!parsed) return { ok: false, reason: `Not a key. A key copied from LOOT begins with ${KEY_TEXT_PREFIX} and carries the key item as JSON.` }
+    if (!parsed) return { ok: false, reason: `Not an item. An item copied from ITEMS begins with ${KEY_TEXT_PREFIX} and carries the item's event as JSON.` }
     const owner = ownerNow()
     const held = get().items[parsed.event.id]
     if (held) return { ok: true, item: held, already: true }

@@ -21,6 +21,10 @@ import {
 } from '../hidden'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { reachGibsons } from '../deployFit'
+import { MAX_PICTURE_URI } from '../itemPicture'
+
+/** A 1x1 PNG as a data URI: the smallest picture an item can wear. */
+const DOT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
 // signers imports the relay layer, which imports the store, which reads
 // localStorage as it loads and imports signers back; loaded the way the app
@@ -79,6 +83,40 @@ describe('a key item (B1 §2.1)', () => {
     const key = forge('Forged')
     const t = keyInnerTemplate({ ...key, itemPubkey: getPublicKey(generateSecretKey()) }, at, 0, 5)
     expect(keyItemOf(finalizeEvent(t, hider))).toBeNull()
+  })
+
+  it('carries its picture as one NIP-92 imeta tag, a data URI with its mime and size, and reads it back (arkinox, 2026-10-10)', () => {
+    const key: KeyItem = { ...forge('Red Dot'), image: DOT, imageDim: { w: 1, h: 1 } }
+    const t = keyInnerTemplate(key, at, 0, 5)
+    expect(t.tags.filter((x) => x[0] === 'imeta')).toEqual([['imeta', `url ${DOT}`, 'm image/png', 'dim 1x1']])
+    // Everything else about the item is as it was.
+    expect(t.tags).toContainEqual(['secret', key.secretHex])
+    expect(t.tags).toContainEqual(['-'])
+    expect(keyItemOf(finalizeEvent(t, hider))).toEqual(key)
+    // An item without a picture carries no tag and reads back with no picture fields.
+    const bare = keyInnerTemplate(forge('Plain'), at, 0, 5)
+    expect(bare.tags.some((x) => x[0] === 'imeta')).toBe(false)
+    expect(keyItemOf(finalizeEvent(bare, hider))).not.toHaveProperty('image')
+  })
+
+  it('reads an item whose imeta tag it will not honor as one without a picture: an http url, a dim over 32, an over-long data URI', () => {
+    const key = forge('Odd')
+    const withTag = (tag: string[]): KeyItem | null => {
+      const t = keyInnerTemplate(key, at, 0, 5)
+      return keyItemOf(finalizeEvent({ ...t, tags: [...t.tags, tag] }, hider))
+    }
+    const refused = [
+      ['imeta', 'url https://example.com/a.png', 'm image/png', 'dim 1x1'],
+      ['imeta', 'url http://example.com/a.png', 'm image/png', 'dim 1x1'],
+      ['imeta', `url ${DOT}`, 'm image/png', 'dim 64x64'],
+      ['imeta', `url data:image/png;base64,${'A'.repeat(MAX_PICTURE_URI)}`, 'm image/png', 'dim 1x1'],
+    ]
+    for (const tag of refused) {
+      const read = withTag(tag)
+      expect(read).toEqual(key)
+      expect(read).not.toHaveProperty('image')
+      expect(read).not.toHaveProperty('imageDim')
+    }
   })
 })
 

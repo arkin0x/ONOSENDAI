@@ -333,7 +333,7 @@ function endUnder(reason: BuildEndReason): void {
     kept = pending.type === 'message'
       ? ' Your message was already being hidden, and it finishes at the place you chose.'
       : pending.type === 'key' || pending.type === 'chest'
-        ? ` Your ${pending.type} was already being hidden, and it finishes at the place you chose.`
+        ? ` Your ${pending.type === 'key' ? 'item' : 'chest'} was already being hidden, and it finishes at the place you chose.`
         : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
   } else if (pending) {
     // What was set for this one deploy goes with it; say so plainly.
@@ -341,17 +341,18 @@ function endUnder(reason: BuildEndReason): void {
     const dropped = ` Its height and bag settings${riddle ? ', including the hint message you wrote,' : ''} were not kept.`
     if (pending.type === 'message') {
       useBuilder.setState({ messageDraft: pending.text })
-      kept = ' Your message is kept: WRITE A MESSAGE in the Stash, or HIDE MESSAGE in build mode, opens it again.' + dropped
+      // The panel is CREATE and the forged thing is an item (arkinox, 2026-10-10); the type still says key.
+      kept = ' Your message is kept: WRITE A MESSAGE in CREATE, or HIDE MESSAGE in build mode, opens it again.' + dropped
     } else if (pending.type === 'key' || pending.type === 'chest') {
-      // Kept whole, as a message is: the key's pair and name, or the chest's lock and contents.
+      // Kept whole, as a message is: the item's pair, name and picture, or the chest's lock and contents.
       useBuilder.setState({ itemDraft: pending })
-      kept = ` Your ${pending.type} is kept: ${pending.type === 'key' ? 'FORGE A KEY' : 'SEAL A CHEST'} in the Stash opens it again.` + dropped
+      kept = ` Your ${pending.type === 'key' ? 'item' : 'chest'} is kept: ${pending.type === 'key' ? 'FORGE AN ITEM' : 'SEAL A CHEST'} in CREATE opens it again.` + dropped
     } else if (pending.intoChest) {
       // A shard being aimed into a chest: the chest comes back whole through
       // cancelDeploy (chestBack, moved into itemDraft below), that shard not
       // aimed. An aim has no height or bag settings of its own to lose.
       const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` Your chest is kept: SEAL A CHEST in the Stash opens it again. "${name}" is not aimed; AIM it again from there.`
+      kept = ` Your chest is kept: SEAL A CHEST in CREATE opens it again. "${name}" is not aimed; AIM it again from there.`
     } else {
       const name = shards.pendingShard()?.name ?? 'the object'
       kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped

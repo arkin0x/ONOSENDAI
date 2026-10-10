@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
 import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
@@ -700,12 +701,12 @@ export function Workshop(): JSX.Element | null {
               ))}
             </div>
           </div>
-          <div className="workshop__row" role="group" aria-label="Default avatar ghost">
-            <span className="workshop__label">DEFAULT AVATAR GHOST</span>
-            <div className="workshop__modes">
-              <button className={`workshop__mode ${showAvatar ? 'is-on' : ''}`} aria-pressed={showAvatar} onClick={() => w().setShowAvatar(true)} title="Show the to-scale avatar at the grid's centre">SHOW</button>
-              <button className={`workshop__mode ${!showAvatar ? 'is-on' : ''}`} aria-pressed={!showAvatar} onClick={() => w().setShowAvatar(false)} title="Hide it">HIDE</button>
-            </div>
+          {/* A switch, as the avatar trail, hX and region key settings are,
+              in the workshop's own green (arkinox, 2026-10-10). */}
+          <div className="workshop__row">
+            <Field id="ws-avatar-ghost" label="Default avatar ghost" hint="The to-scale avatar at the grid's center, for size">
+              <Switch id="ws-avatar-ghost" className="ui-switch--ok" checked={showAvatar} onCheckedChange={(v) => w().setShowAvatar(v)} />
+            </Field>
           </div>
           {/* The shape others see for you: this shard, published as kind 11333,
               drawn in the dodecahedron's cell wherever you are drawn. */}

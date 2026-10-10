@@ -7795,6 +7795,14 @@ kbd {
   transform: translateX(2px);
   transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
+/* The workshop's switches in its own green, the DEPLOY button's (arkinox,
+   2026-10-10). Two classes, to outrank the accent rules below. */
+.ui-switch.ui-switch--ok[data-state='checked'] {
+  background: rgba(82, 227, 159, 0.22);
+  border-color: var(--ok, #52e39f);
+  box-shadow: 0 0 10px rgba(82, 227, 159, 0.35);
+}
+.ui-switch.ui-switch--ok[data-state='checked'] .ui-switch__thumb { background: var(--ok, #52e39f); }
 .ui-switch[data-state='checked'] .ui-switch__thumb {
   background: var(--accent);
   transform: translateX(18px);

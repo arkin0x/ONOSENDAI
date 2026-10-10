@@ -3272,6 +3272,22 @@ kbd {
 .ws__panel--up {
   max-height: calc(100vh - 140px);
 }
+/* The bottom row of the column: the tool chip and the orbit ball, the chip on
+   the ball's baseline. The ball lives here so it holds the bottom of the
+   screen whatever opens above it (arkinox, 2026-10-10). */
+.ws__bottomrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+/* The one selected point's readout, top right under DEPLOY and the way out. */
+.ws__at--top {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  z-index: 3;
+  pointer-events: none;
+}
 /* TOOLS with a tool in hand: the chip and, joined to its right, the X that
  * puts the tool down. */
 .ws__toolchips { display: inline-flex; }

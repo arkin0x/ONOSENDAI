@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -885,6 +885,15 @@ export function Workshop(): JSX.Element | null {
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>
       </div>
+      {/* Where the one selected point is: top right under DEPLOY (arkinox,
+          2026-10-10; it stood in the bottom-left column before, where every
+          row it shared is busy). A readout, so taps go through to the bench.
+          Not in VIEW, where the compass has that corner. */}
+      {one && tool !== 'view' && (
+        <span className="ws__at ws__at--top" role="status" aria-label="Selected point">
+          at ({ticksOf(one).map(unitsLabel).join(', ')})
+        </span>
+      )}
 
       {/* Top right, under DEPLOY and the way out: the compass while VIEW is in
           hand, the grid pad under it when tapped. */}
@@ -901,14 +910,6 @@ export function Workshop(): JSX.Element | null {
         {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || selectedFace !== null || facePick.length > 0} />}
         {tool === 'face' && <FaceRow face={selectedFace} picks={facePick.length} faces={shard?.faces.length ?? 0} />}
         <ClipRow points={selectedPoints} objects={partSel.length} verts={tool === 'select' ? shard?.vertices.length ?? 0 : 0} />
-        {/* Where the one selected point is, over the turn keys: beside TOOLS it
-            met the dropper on a phone (arkinox, 2026-09-27). A readout, so taps
-            go through to the bench. */}
-        {one && (
-          <span className="ws__at" role="status" aria-label="Selected point">
-            at ({ticksOf(one).map(unitsLabel).join(', ')})
-          </span>
-        )}
         {(selection.length > 0 || partSel.length > 0) && (
           <div className="benchturn" role="group" aria-label="Turn the selection">
             <button className="touchpad__key" title="A quarter turn left, in the working plane (Q)" aria-label="Turn left" {...noCallout} onClick={() => w().rotateSelected(-1)}>
@@ -925,7 +926,6 @@ export function Workshop(): JSX.Element | null {
             absent), so the orbit ball beside it never moves. */}
         <div className="benchrow">
           <ControlsPad points={selectedPoints} objects={partSel.length} />
-          <OrbitSphere />
         </div>
       {panel === 'tools' && (
         <div className="ws__panel ws__panel--up" role="region" aria-label="Tools">
@@ -988,15 +988,24 @@ export function Workshop(): JSX.Element | null {
 
         {/* The tool in hand, and an X joined to the chip that puts it down: VIEW,
             the tool that builds nothing. */}
-        <div className="ws__toolchips">
-          <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')}>
-            <Wrench size={12} strokeWidth={2.25} aria-hidden />TOOLS · <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
-          </button>
-          {tool !== 'view' && (
-            <button className="chip ws__chip ws__chip--x" onClick={() => w().setTool('view')} title="Put the tool down (1)" aria-label="Put the tool down">
-              <X size={13} strokeWidth={2.25} aria-hidden />
+        {/* The bottom row: the tool chip, shorter now (the TOOLS word and the
+            wrench went, arkinox 2026-10-10), and the orbit ball beside it. The
+            ball lives here, not beside the pad, so it stays at the bottom of
+            the screen whatever opens above: the panel, the pad, the rows. It
+            flew up the screen when the panel opened and sank when nothing was
+            selected ("Orbit flies away when you tap stamp"). */}
+        <div className="ws__bottomrow">
+          <div className="ws__toolchips">
+            <button className={`chip ws__chip ${panel === 'tools' ? 'is-on' : ''}`} aria-pressed={panel === 'tools'} onClick={() => toggle('tools')} title="Tools: pick what a tap does">
+              <ToolIcon size={12} strokeWidth={2.25} aria-hidden />{tool.toUpperCase()}
             </button>
-          )}
+            {tool !== 'view' && (
+              <button className="chip ws__chip ws__chip--x" onClick={() => w().setTool('view')} title="Put the tool down (1)" aria-label="Put the tool down">
+                <X size={13} strokeWidth={2.25} aria-hidden />
+              </button>
+            )}
+          </div>
+          <OrbitSphere />
         </div>
       </div>
 
@@ -1020,6 +1029,15 @@ export function Workshop(): JSX.Element | null {
             wrapped around the only part worth keeping. */}
         {(tool !== 'face' || selectedFace !== null) && (
           <div className="ws__acts" role="group" aria-label="Apply the color">
+            {/* The dropper, over the globe while one point or one face is in
+                hand (arkinox, 2026-10-10; it stood beside the chip before):
+                that color, a face's as the average of its corners, into the
+                chip and onto the front of the recent row. */}
+            {(selection.length === 1 || (selection.length === 0 && selectedFace !== null)) && (
+              <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={selection.length === 1 ? 'Take this point\'s color' : 'Take this face\'s color, the average of its corners'} aria-label="Take the selected color" {...noCallout}>
+                <Pipette size={17} strokeWidth={2.25} aria-hidden />
+              </button>
+            )}
             <button className="workshop__color ws__act" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="The color onto every vertex in the object" aria-label="Color everything" style={{ borderColor: hex }} {...noCallout}>
               <Globe size={17} strokeWidth={2.25} aria-hidden />
             </button>
@@ -1044,15 +1062,7 @@ export function Workshop(): JSX.Element | null {
           put it on is the obvious order to work in. Hiding it meant selecting
           a face you did not want yet just to reach the palette.
         */}
-        {/* The dropper, left of the chip while one point or one face is in
-            hand: that color, a face's as the average of its corners, into the
-            chip and onto the front of the recent row (arkinox, 2026-09-27). */}
         <div className="ws__chiprow">
-        {(selection.length === 1 || (selection.length === 0 && selectedFace !== null)) && (
-          <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={selection.length === 1 ? 'Take this point\'s color' : 'Take this face\'s color, the average of its corners'} aria-label="Take the selected color" {...noCallout}>
-            <Pipette size={17} strokeWidth={2.25} aria-hidden />
-          </button>
-        )}
         <button
           className="chip ws__colorchip"
           style={{ background: hex }}

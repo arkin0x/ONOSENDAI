@@ -24,6 +24,11 @@ describe('attributed', () => {
     for (const kind of [22242, 24242, 27235]) expect(attributed(template(kind)).tags).toEqual([])
   })
 
+  it('never attributes a NIP-17 seal or gift wrap: the seal must carry no tags and the wrap must reveal nothing', () => {
+    expect(attributed(template(13)).tags).toEqual([])
+    expect(attributed(template(1059, [['p', 'ab'.repeat(32)]])).tags).toEqual([['p', 'ab'.repeat(32)]])
+  })
+
   it('does not change the template it is given', () => {
     const t = template(1)
     attributed(t)
@@ -36,6 +41,12 @@ describe('signing', () => {
     const signed = await localSigner(generateSecretKey()).signEvent(template(3333, [['A', 'spawn']]))
     expect(signed.tags).toContainEqual(CLIENT_TAG)
     expect(verifyEvent(signed as Parameters<typeof verifyEvent>[0])).toBe(true)
+  })
+
+  it('a local signer signs a seal with empty tags and a wrap with only its p tag', async () => {
+    const signer = localSigner(generateSecretKey())
+    expect((await signer.signEvent(template(13))).tags).toEqual([])
+    expect((await signer.signEvent(template(1059, [['p', 'cd'.repeat(32)]]))).tags).toEqual([['p', 'cd'.repeat(32)]])
   })
 
   it('an avatar carries the tag in its template, before any work is mined over it', () => {

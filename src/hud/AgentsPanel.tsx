@@ -13,15 +13,23 @@
  * bot: true and a p tag naming you as operator (ruling 9), with the npub
  * copyable and SPECTATE as the Avatars panel has it (ruling 4), kept to
  * the ones you also follow (arkinox, 2026-10-10).
+ *
+ * TALK opens the private conversation with that agent (AgentTalk.tsx;
+ * arkinox, 2026-10-10, operator and agent DMs): NIP-17 DMs only, the
+ * STRATEGY line, and quick orders. The invitation and the EXPLAIN text tell
+ * the same story: traversal is the default playbook, and the operator talks
+ * to the agent only by private DM.
  */
 
 import { useState } from 'react'
+import { MessageSquare } from 'lucide-react'
 import { useMyAgents } from '../hooks/useMyAgents'
 import { invitationText, meetingCode } from '../lib/agentInvite'
 import { safeNpub } from '../lib/npub'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { AgentTalk } from './AgentTalk'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 
@@ -35,6 +43,8 @@ export function AgentsPanel(): JSX.Element {
   // 'invite', or the pubkey whose npub was copied last.
   const [copied, setCopied] = useState<string | null>(null)
   const [code, setCode] = useState<string | null>(null)
+  // The agent whose conversation is open, if any.
+  const [talking, setTalking] = useState<string | null>(null)
 
   const copy = (key: string, text: string): void => {
     navigator.clipboard?.writeText(text).then(
@@ -78,6 +88,9 @@ export function AgentsPanel(): JSX.Element {
               <button className="copy agents__npub" onClick={() => copy(pubkey, npub)} title={`${npub}\nTap to copy`}>
                 {copied === pubkey ? 'COPIED' : shortHex(npub, 12, 6)}
               </button>
+              <button className="avatars__spectate agents__talk" onClick={() => setTalking(pubkey)} title="Talk privately with this agent">
+                <MessageSquare size={10} /> TALK
+              </button>
               <button className="avatars__spectate" onClick={() => void spectate(pubkey)}>SPECTATE</button>
             </li>
           )
@@ -87,6 +100,7 @@ export function AgentsPanel(): JSX.Element {
         )}
       </ul>
       {status === 'error' && <p className="notice">Could not reach the relays.</p>}
+      {talking && <AgentTalk agent={talking} onClose={() => setTalking(null)} />}
 
       <Explanation>
         An agent is a program with a nostr key of its own that moves, talks,
@@ -98,9 +112,13 @@ export function AgentsPanel(): JSX.Element {
         budget. Paste it to the agent. An agent is listed under MY AGENTS
         when its profile names you as operator and you follow it from your
         own account; a profile that names you without your follow is never
-        shown. In this version nobody can travel to
-        anybody, so the agent hides a message at your coordinate and you find
-        it from where you stand.
+        shown. The agent first hides a message with the meeting code at your
+        coordinate, which you find from where you stand. Then it travels the
+        way everyone does: it boards the hyperspace line at its station,
+        rides to a stop, and meets you there. TALK is the only way you give
+        it orders: private NIP-17 messages, which it reads with its inbox
+        tool and answers with message_operator, and it obeys only you. A
+        STRATEGY is standing orders it rereads every turn.
       </Explanation>
     </section>
   )

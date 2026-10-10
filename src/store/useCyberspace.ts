@@ -35,6 +35,7 @@ import {
   nip07Signer,
   nip46Signer,
   NIP44_UNAVAILABLE,
+  NIP44_ENCRYPT_UNAVAILABLE,
   prefOf,
   loadSignerPref,
   saveSignerPref,
@@ -885,6 +886,12 @@ export interface CyberspaceState {
    * signer truly offers no NIP-44 decrypt (lib/signers.ts).
    */
   decryptSealed: (senderPubkey: string, payload: string) => Promise<string>
+  /**
+   * NIP-44 encrypt `plaintext` from this identity to `recipientPubkey`: what
+   * seals a private message to an agent (lib/dm.ts; arkinox, 2026-10-10).
+   * Rejects, in words, only when the signer truly offers no NIP-44 encrypt.
+   */
+  encryptSealed: (recipientPubkey: string, plaintext: string) => Promise<string>
 
   /** HOSAKA cloud compute: the flow in progress and its pending job. */
   cloud: CloudState
@@ -3802,6 +3809,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   decryptSealed: (senderPubkey, payload) => {
     const open = currentSigner.nip44Decrypt
     return open ? open(senderPubkey, payload) : Promise.reject(new Error(NIP44_UNAVAILABLE))
+  },
+  encryptSealed: (recipientPubkey, plaintext) => {
+    const seal = currentSigner.nip44Encrypt
+    return seal ? seal(recipientPubkey, plaintext) : Promise.reject(new Error(NIP44_ENCRYPT_UNAVAILABLE))
   },
   useNsec: async (nsec) => {
     try { await switchTo(signerFromNsec(nsec)) }

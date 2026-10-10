@@ -90,8 +90,74 @@ describe('NIP-44 decrypt on each signer', () => {
     await expect(without.nip44Decrypt!(sender, payload)).rejects.toThrow(NIP44_UNAVAILABLE)
   })
 
-  it('the Nostr Connect QR asks for nip44_decrypt', async () => {
+  it('the Nostr Connect QR asks for nip44_decrypt and nip44_encrypt', async () => {
     const { createNostrConnectSession } = await signers()
     expect(createNostrConnectSession().uri).toContain('nip44_decrypt')
+    expect(createNostrConnectSession().uri).toContain('nip44_encrypt')
+  })
+})
+
+/**
+ * NIP-44 encrypt seals a private message to an agent (arkinox, 2026-10-10,
+ * operator and agent DMs): what one signer encrypts, the recipient's key
+ * opens.
+ */
+describe('NIP-44 encrypt on each signer', () => {
+  const opens = (sk: Uint8Array, from: string, payload: string): string => nip44.decrypt(payload, nip44.utils.getConversationKey(sk, from))
+
+  it('a local key encrypts what the recipient opens', async () => {
+    const { localSigner } = await signers()
+    const me = localSigner(generateSecretKey())
+    const them = generateSecretKey()
+    const payload = await me.nip44Encrypt!(getPublicKey(them), 'to you')
+    expect(opens(them, me.pubkey, payload)).toBe('to you')
+  })
+
+  it('an extension encrypts through window.nostr.nip44.encrypt, and offers none without it', async () => {
+    const { nip07Signer } = await signers()
+    const sk = generateSecretKey()
+    const pubkey = getPublicKey(sk)
+    const them = generateSecretKey()
+    const calls: string[][] = []
+    g.window = {
+      nostr: {
+        getPublicKey: async () => pubkey,
+        signEvent: async (e: unknown) => e,
+        nip44: {
+          decrypt: async () => '',
+          encrypt: async (pk: string, pt: string) => { calls.push([pk, pt]); return nip44.encrypt(pt, nip44.utils.getConversationKey(sk, pk)) },
+        },
+      },
+    }
+    const ext = await nip07Signer()
+    const payload = await ext.nip44Encrypt!(getPublicKey(them), 'through the extension')
+    expect(opens(them, pubkey, payload)).toBe('through the extension')
+    expect(calls).toEqual([[getPublicKey(them), 'through the extension']])
+
+    // Decrypt alone is not encrypt: each half is offered only when present.
+    g.window = { nostr: { getPublicKey: async () => pubkey, signEvent: async (e: unknown) => e, nip44: { decrypt: async () => '' } } }
+    const half = await nip07Signer()
+    expect(half.nip44Decrypt).toBeDefined()
+    expect(half.nip44Encrypt).toBeUndefined()
+  })
+
+  it('a deferred extension encrypts once it is up, or says that it cannot', async () => {
+    const { deferredReconnect, NIP44_ENCRYPT_UNAVAILABLE } = await signers()
+    const sk = generateSecretKey()
+    const pubkey = getPublicKey(sk)
+    const them = generateSecretKey()
+    g.window = {
+      nostr: {
+        getPublicKey: async () => pubkey,
+        signEvent: async (e: unknown) => e,
+        nip44: { decrypt: async () => '', encrypt: async (pk: string, pt: string) => nip44.encrypt(pt, nip44.utils.getConversationKey(sk, pk)) },
+      },
+    }
+    const deferred = deferredReconnect({ kind: 'nip07', pubkey }, () => undefined)
+    expect(opens(them, pubkey, await deferred.nip44Encrypt!(getPublicKey(them), 'later'))).toBe('later')
+
+    g.window = { nostr: { getPublicKey: async () => pubkey, signEvent: async (e: unknown) => e } }
+    const without = deferredReconnect({ kind: 'nip07', pubkey }, () => undefined)
+    await expect(without.nip44Encrypt!(getPublicKey(them), 'x')).rejects.toThrow(NIP44_ENCRYPT_UNAVAILABLE)
   })
 })

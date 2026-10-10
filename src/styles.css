@@ -3272,14 +3272,9 @@ kbd {
 .ws__panel--up {
   max-height: calc(100vh - 140px);
 }
-/* The bottom row of the column: the tool chip and the orbit ball, the chip on
-   the ball's baseline. The ball lives here so it holds the bottom of the
-   screen whatever opens above it (arkinox, 2026-10-10). */
-.ws__bottomrow {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
+/* A panel open at the top left stands over every button below it (arkinox,
+   2026-10-10: MENU and GRID ended up behind them). */
+.ws__top--open { z-index: 5; }
 /* The one selected point's readout, top right under DEPLOY and the way out. */
 .ws__at--top {
   position: absolute;
@@ -3371,7 +3366,13 @@ kbd {
    leaves it (pointer capture); a tap sends the view home. Drawn as a lit
    globe with a meridian and an equator, so it reads as something that turns. */
 .benchorb {
-  position: relative;
+  /* Docked at the bottom right beside the color column (right 14px, 38px
+     wide), out of every column, so no row has to clear it (arkinox,
+     2026-10-10: "right aligned, not left"). */
+  position: absolute;
+  right: 64px;
+  bottom: 14px;
+  z-index: 3;
   width: 152px;
   height: 152px;
   display: flex;

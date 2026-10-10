@@ -23,6 +23,7 @@
  */
 
 import { findCashuToken } from '../lib/cashu'
+import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLoot } from '../hooks/useLoot'
@@ -102,7 +103,9 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     return () => window.clearInterval(t)
   }, [])
   const relayName = CYBERSPACE_RELAY.replace('wss://', '')
-  const title = mode === 'discovered' ? 'Discovered' : 'Hidden'
+  // "Bags" in the title (arkinox, 2026-10-10): every row is a bag, and the
+  // word says so before the explanation does.
+  const title = mode === 'discovered' ? 'Discovered bags' : 'Hidden bags'
   const count = status === 'loading'
     ? 'LOADING'
     : mode === 'discovered' ? `${shown.length} OPENED` : `${shown.length} HIDDEN`
@@ -122,7 +125,14 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
             : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>
-        <div className="loot__meta">{regionLabel(it.height)} · {formatBytes(it.bytes)}</div>
+        {/* A cube first when the hider named the sector, then the height as
+            hN, the region's size (the same height as a length), and the bytes
+            (arkinox, 2026-10-10). */}
+        <div className="loot__meta">
+          {it.sector !== null && <Box className="loot__sector" size={12} strokeWidth={2.25} aria-label="The hider named the sector" />}
+          {it.height !== null && <>h{it.height} · </>}
+          {regionLabel(it.height)} · {formatBytes(it.bytes)}
+        </div>
         {it.riddle && <div className="loot__riddle" title={it.riddle}>“{messagePreview(it.riddle, 90)}”</div>}
       </button>
     </li>
@@ -174,9 +184,9 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
         )
         : (
           <Explanation>
-            Bags your keys have opened, where they stand. Tap one for what was in
-            it: messages, shards, coins, keys and chests. A chest opens here with a
-            key from your LOOT, and TAKE moves what you want into LOOT.
+            Bags your keys have opened. Tap one for what was in it: messages,
+            shards, coins, keys and chests. A chest opens here with a key from
+            your LOOT, and TAKE moves what you want into LOOT.
           </Explanation>
         )}
 

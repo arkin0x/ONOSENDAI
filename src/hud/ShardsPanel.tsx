@@ -42,7 +42,9 @@ export function ShardsPanel(): JSX.Element {
   return (
     <section className="panel panel--shards">
       <header className="panel__head">
-        <h2>Stash</h2>
+        {/* CREATE (arkinox, 2026-10-10): the panel is where things are made and
+            placed; the bags themselves are listed under VIEW ALL STASHED BAGS. */}
+        <h2>Create</h2>
         <span className={`tag ${scanning ? 'tag--scan' : ''}`} title="What you have placed in cyberspace from this stash">{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING PLACED' : `${hiddenCount} PLACED`}</span>
       </header>
 

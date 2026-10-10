@@ -15,9 +15,9 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, sealEntries, sizeRefusal, revealedIn } from '../chests'
+  NIP44_MAX_PLAINTEXT, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sizeRefusal, revealedIn } from '../chests'
 import {
-  CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, unbag, type ChestItem, type KeyItem,
+  CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
 
 // signers imports the relay layer, which imports the store, which reads
@@ -270,12 +270,58 @@ describe('a door: what a chest reveals stands in the world (B1, the gate)', () =
     const far = finalizeEvent(messageInnerTemplate('too far to be in this region', { ...at, x: at.x + 1_000_000n }, 0, 9), hider)
     const c = chest('Door', lock.itemPubkey, [room, far], 'Room Key')
     const contents = readContents(openWithSecret(c.item, lock.secretHex))
-    const door = { bagId: 'bag', lookupId: 'look', author: hiderPk, at, plane: 0 as const, height: 6 }
+    const door = { eventId: c.event.id, bagId: 'bag', lookupId: 'look', author: hiderPk, at, plane: 0 as const, height: 6 }
     const found = revealedIn(door, contents)
     expect(found.map((f) => f.text)).toEqual(['the room behind the door', 'too far to be in this region'])
     expect(found[0].at).toEqual(inside)
     expect(found[1].at).toEqual(at)
     expect(found.every((f) => f.bagId === 'bag' && f.lookupId === 'look' && f.height === 6 && f.author === hiderPk)).toBe(true)
     expect(found[0].eventId).toBe(room.id)
+    // Each remembers the chest it came out of, so its hider can take it out again.
+    expect(found.every((f) => f.chestId === c.event.id)).toBe(true)
+  })
+})
+
+describe('taking a content out of a chest (resealWithout)', () => {
+  const lock = forge('Room Key')
+  const keep = finalizeEvent(messageInnerTemplate('stays inside', at, 0, 8), hider)
+  const drop = finalizeEvent(messageInnerTemplate('comes out', at, 0, 9), hider)
+
+  it('seals the chest again without the one content, to the same lock, and the key still opens it', () => {
+    const c = chest('Door', lock.itemPubkey, [keep, drop], 'Room Key')
+    const raw = openWithSecret(c.item, lock.secretHex)
+    const out = resealWithout(c.item, raw, drop.id)
+    expect(out).not.toBeNull()
+    expect(out!.left.map((e) => (e as { id: string }).id)).toEqual([keep.id])
+    expect(out!.chest.lockPubkey).toBe(lock.itemPubkey)
+    expect(out!.chest.name).toBe('Door')
+    expect(out!.chest.requires).toBe('Room Key')
+    // A fresh one-time sender: the old payload and sender are not reused.
+    expect(out!.chest.senderPubkey).not.toBe(c.item.senderPubkey)
+    expect(out!.chest.payload).not.toBe(c.item.payload)
+    const reopened = readContents(openWithSecret(out!.chest, lock.secretHex))
+    expect(reopened.map((e) => e.body.type === 'message' ? e.body.text : '')).toEqual(['stays inside'])
+  })
+
+  it('keeps what this client cannot read, since it works on the raw list', () => {
+    const c = chest('Door', lock.itemPubkey, [keep, drop])
+    const oddId = 'f'.repeat(64)
+    const odd = { id: oddId, kind: 1, pubkey: hiderPk, created_at: 1, tags: [], content: 'a kind no bag reads', sig: '' } as unknown as BagEntry
+    const raw: BagEntry[] = [...openWithSecret(c.item, lock.secretHex), odd]
+    const out = resealWithout(c.item, raw, drop.id)
+    expect(out!.left.length).toBe(2)
+    const reopened = openWithSecret(out!.chest, lock.secretHex)
+    expect(reopened.length).toBe(2)
+    expect(reopened.some((e) => (e as { id: string }).id === oddId)).toBe(true)
+    expect(reopened.some((e) => (e as { id: string }).id === drop.id)).toBe(false)
+  })
+
+  it('is null when nothing inside has that id, and seals an emptied chest as empty', () => {
+    const c = chest('Door', lock.itemPubkey, [keep])
+    const raw = openWithSecret(c.item, lock.secretHex)
+    expect(resealWithout(c.item, raw, drop.id)).toBeNull()
+    const emptied = resealWithout(c.item, raw, keep.id)
+    expect(emptied!.left).toEqual([])
+    expect(openWithSecret(emptied!.chest, lock.secretHex)).toEqual([])
   })
 })

@@ -69,7 +69,7 @@ import {
   type HiddenType,
   type KeyItem,
 } from '../lib/hidden'
-import { openWithSecret, openerFor, readContents, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -141,6 +141,8 @@ export interface WorldItem {
   bagId?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
+  /** The chest this was revealed from, when it came out of one: its hider takes it out with removeFromChest, not DELETE. */
+  chestId?: string
 }
 
 /** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
@@ -430,6 +432,13 @@ interface ShardsState {
   /** Hide the pending thing at the cursor. `confirmed` is the yes to a HOSAKA ask. */
   deploy: (confirmed?: boolean) => Promise<void>
   deleteInstance: (eventId: string) => Promise<void>
+  /**
+   * Take one content out of a chest of yours that this device opened: the
+   * chest is sealed again without it and the bag rewritten with the new chest
+   * in the old one's place. Resolves to null when done, else the sentence
+   * that says why not (not your chest, no key to open it, already gone).
+   */
+  removeFromChest: (eventId: string) => Promise<string | null>
   /** Send a region's bag to the relays now: what LOCAL deferred. */
   broadcast: (lookupId: string) => Promise<boolean>
   /**
@@ -1254,6 +1263,68 @@ export const useShards = create<ShardsState>((set, get) => {
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
+    removeFromChest: async (eventId) => {
+      // A thing revealed from a chest is not a bag entry but part of the
+      // chest's sealed contents, so DELETE's rewrite of the bag's entries
+      // could never reach it (arkinox, 2026-10-10: "delete just does
+      // nothing"). Taking it out means opening the chest, sealing it again
+      // without that content, and rewriting the bag with the new chest where
+      // the old one was. Only the chest's hider can sign that, and only with
+      // a key that opens the chest: a chest is sealed with a one-time sender
+      // key, so even its hider has no other way in.
+      const found = get().discovered[eventId]
+      if (!found?.chestId) return 'This was not revealed from a chest.'
+      const chest = get().mine.find((d) => d.eventId === found.chestId && d.type === 'chest')
+      if (!chest?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
+      const cs = cyber()
+      const me = cs.identity.pubkey
+      const opener = openerFor(chest.chest, openingKeys(useInventory.getState().items), me)
+      if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
+      let raw: BagEntry[]
+      try {
+        raw = opener.by === 'key' ? openWithSecret(chest.chest, opener.key.secretHex) : await openWithSigner(chest.chest, cs.decryptSealed)
+      } catch (err) {
+        return `The chest did not open: ${err instanceof Error ? err.message : String(err)}`
+      }
+      const resealed = resealWithout(chest.chest, raw, eventId)
+      if (!resealed) return 'That is no longer inside this chest.'
+      const at = positionOf(chest)
+      const createdAt = Math.floor(Date.now() / 1000)
+      const inner = await cs.signEvent(chestInnerTemplate(resealed.chest, at, chest.plane, createdAt))
+      const key = hexToBytes(chest.keyHex)
+      const wasPublic = get().mine.some((d) => d.lookupId === chest.lookupId && d.published)
+      // The bag as it really is (gatherInners, as deleteInstance explains),
+      // with the new chest in the old one's place; a bag that somehow lacked
+      // the chest gets it added rather than lost.
+      const gathered = await gatherInners(chest.lookupId, key, wasPublic, chest.height)
+      const was = entryKey(entryOf(chest))
+      const entries = gathered.entries.some((e) => entryKey(e) === was)
+        ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
+        : [...gathered.entries, inner]
+      const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
+      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane })
+      // The chest is a new inner event now: the deployment, its record among
+      // the finds and everything revealed from it follow the new id, and the
+      // whole region's items follow the new envelope.
+      const mine = get().mine.map((d) => {
+        if (d.eventId === chest.eventId) return { ...d, eventId: inner.id, inner, chest: resealed.chest, createdAt, bagId: event.id, published, bag: settings }
+        return d.lookupId === chest.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d
+      })
+      const deleted = { ...get().deleted, [eventId]: true as const }
+      const discovered: Record<string, Hidden> = {}
+      for (const h of Object.values(get().discovered)) {
+        if (h.eventId === eventId) continue
+        if (h.eventId === chest.eventId) { discovered[inner.id] = { ...h, eventId: inner.id, inner, chest: resealed.chest, createdAt, bagId: event.id }; continue }
+        if (h.chestId === chest.eventId) { discovered[h.eventId] = { ...h, chestId: inner.id, bagId: event.id }; continue }
+        discovered[h.eventId] = h.author === me && h.lookupId === chest.lookupId ? { ...h, bagId: event.id } : h
+      }
+      // Seen already: the next scan finds the rewritten chest without a ceremony.
+      remember([inner.id])
+      set({ mine, deleted, discovered, selectedSecret: get().selectedSecret === eventId ? null : get().selectedSecret })
+      saveMine(mine); saveDeleted(deleted)
+      return null
+    },
+
     inspect: (eventId) => set({ inspecting: eventId }),
 
     selectSecret: (eventId) => set({ selectedSecret: eventId }),
@@ -1349,7 +1420,7 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       for (const h of Object.values(get().discovered)) {
         if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref) })
+        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId })
       }
       return out
     },

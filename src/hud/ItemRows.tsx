@@ -89,7 +89,7 @@ export function ChestBlock({ id, chest, author, verified, place }: { id: string;
       // What the chest held is found in place: the room behind the door is
       // drawn where the door stands, as a scan's finds are.
       if (place) {
-        const door = { bagId: place.bagId, lookupId: place.lookupId, author, at: positionOf(place), plane: place.plane, height: place.height }
+        const door = { eventId: id, bagId: place.bagId, lookupId: place.lookupId, author, at: positionOf(place), plane: place.plane, height: place.height }
         useShards.getState().addDiscovered(revealedIn(door, contents))
       }
       if (contents.length === 0) setStatus('Opened: nothing inside this client can read.')

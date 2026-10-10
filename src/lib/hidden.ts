@@ -366,6 +366,13 @@ export interface Hidden {
    * the key that placed it (spec §7.6).
    */
   ref?: Reference
+  /**
+   * Set when this was revealed from inside a chest: that chest's inner event
+   * id. It is then not a bag entry but part of the chest's sealed contents,
+   * so taking it out means sealing the chest again without it (useShards
+   * removeFromChest), never rewriting the bag's entries directly.
+   */
+  chestId?: string
 }
 
 /**

@@ -313,6 +313,15 @@ export interface WorkshopState {
   togglePart: (index: number) => void
   /** Replace the placed-object selection, as the box does. */
   setPartSelection: (indices: number[]) => void
+  /**
+   * INVERT (arkinox, 2026-10-10): while on, a tap on a point, a face or a
+   * placed object, and a box, take out of the selection and never add. On a
+   * phone it is far easier to gather too much with a few boxes and take the
+   * extras away than to tap each point exactly. Off again when the tool
+   * changes, so a mode nobody can see never follows you to the next tool.
+   */
+  invert: boolean
+  setInvert: (on: boolean) => void
   /** STAMP places a built-in shape, or a published object by reference (DECK-0003 §1.10). */
   stampMode: 'shape' | 'object'
   /** The object OBJECT stamps, chosen in the picker. */
@@ -537,6 +546,21 @@ function savePalette(palette: string[]): void {
   try { localStorage.setItem(PALETTE_STORAGE, JSON.stringify(palette)) } catch { /* quota or private mode */ }
 }
 
+/**
+ * The selection after a tap or a box: `inside` added to `base`, or taken out
+ * of it under INVERT. Sorted and deduped, so a selection built by five little
+ * boxes reads the same as one built by hand. Pure, and the same arithmetic for
+ * points and for placed objects (arkinox, 2026-10-10, decision A: boxes add,
+ * and INVERT makes taps and boxes take away).
+ */
+export function nextSelection(base: number[], inside: number[], invert: boolean): number[] {
+  if (invert) {
+    const gone = new Set(inside)
+    return [...new Set(base.filter((i) => !gone.has(i)))].sort((a, b) => a - b)
+  }
+  return [...new Set([...base, ...inside])].sort((a, b) => a - b)
+}
+
 /** Every vertex on the same point as vertex `index`, itself included. */
 function group(s: ShardModel, index: number): number[] {
   const v = s.vertices[index]
@@ -712,6 +736,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     open: false,
     tool: 'view',
     selection: [], partSel: [],
+    invert: false,
     facePick: [],
     selectedFace: null,
     clip: null,
@@ -776,7 +801,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind
     // it and the tool looked broken. Taking the tool clears the selection.
-    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
+    // INVERT goes off with the tool too: it is a mode of SELECT and FACE, and
+    // the key that shows it is only drawn there.
+    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null, invert: false, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
+    setInvert: (on) => set({ invert: on }),
     setExtent: (extent) => {
       const s = get().current()
       if (!s) return
@@ -855,8 +883,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     togglePart: (index) => {
       const s = get().current()
       if (!s?.parts?.[index]) return
-      const has = get().partSel.includes(index)
-      set({ partSel: has ? get().partSel.filter((i) => i !== index) : [...get().partSel, index].sort((a, b) => a - b), selectedFace: null })
+      const { partSel, invert } = get()
+      // Under INVERT a tap only takes an object out; one not in hand is left alone.
+      set({ partSel: nextSelection(partSel, [index], invert || partSel.includes(index)), selectedFace: null })
     },
 
     setPartSelection: (indices) => {
@@ -868,8 +897,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       if (!s || !s.vertices[index]) return
       const g = group(s, index)
-      const has = get().selection.includes(index)
-      set({ selection: has ? get().selection.filter((i) => !g.includes(i)) : [...get().selection, ...g], selectedFace: null })
+      const { selection, invert } = get()
+      // The whole point goes in or out, every vertex on it. Under INVERT a tap
+      // only takes a point out; one not in hand is left alone, never added.
+      set({ selection: nextSelection(selection, g, invert || selection.includes(index)), selectedFace: null })
     },
 
     setSelection: (indices) => {
@@ -898,13 +929,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // vertex on each corner's point, as a point tap does), so the pad moves
       // and turns the face as one thing. Picking a face whose corners are all
       // in hand already takes them back out (arkinox, 2026-10-10: selecting a
-      // face should let you move it; before, it emptied the selection).
+      // face should let you move it; before, it emptied the selection). Under
+      // INVERT a tap on a face takes its corners out whatever was held, and
+      // selects no face: it is taking away, not picking.
       const corners = [...new Set(f.flatMap((v) => group(s, v)))]
-      const sel = get().selection
-      const held = corners.every((i) => sel.includes(i))
+      const { selection: sel, invert } = get()
+      const release = invert || corners.every((i) => sel.includes(i))
       set({
-        selectedFace: held ? null : index,
-        selection: held ? sel.filter((i) => !corners.includes(i)) : [...new Set([...sel, ...corners])].sort((a, b) => a - b),
+        selectedFace: release ? null : index,
+        selection: nextSelection(sel, corners, release),
       })
     },
 

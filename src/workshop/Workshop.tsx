@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eye, FlipVertical2, Globe, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -52,12 +52,13 @@ const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus
 
 const TOAST_MS = 4000
 
-/** One line under the tool row. SELECT needs none: the pad appears when something is selected. */
+/** One line under the tool row. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
   view: 'Look around: one finger orbits, two pan, pinch zooms. The compass turns the view a quarter at a time. Pick a tool to build.',
   stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
   add: 'Tap the grid to place a vertex at the current level.',
-  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it. A dark face shows its back: FLIP turns it round, AUTO turns every face outward.',
+  select: 'Tap points, or drag boxes, to gather them. INVERT makes taps and boxes take points out; DESELECT lets go. Drag the ORBIT ball to turn the view.',
+  face: 'Tap corners in order, then the first again or FILL. Tap a face to select it; drag a box to gather points. A dark face shows its back: FLIP turns it round, AUTO turns every face outward. Drag the ORBIT ball to turn the view.',
 }
 
 type Panel = 'menu' | 'tools' | 'grid'
@@ -73,7 +74,7 @@ function Intro(): JSX.Element | null {
       <h3 className="workshop__intro-title">MAKE A SHARD</h3>
       <ol className="workshop__intro-steps">
         <li><b>STAMP</b> a shape: pick one under TOOLS, tap the grid where the ghost shows.</li>
-        <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball; two fingers <b>pan</b>. GRID raises the level to stack things.</li>
+        <li>One finger <b>orbits</b>, or drag the <b>ORBIT</b> ball (in SELECT and FACE one finger draws a box); two fingers <b>pan</b>. GRID raises the level to stack things.</li>
         <li><b>DEPLOY</b> hides it in the world at a place you choose.</li>
       </ol>
       <button className="workshop__btn workshop__intro-ok" onClick={done}>GOT IT</button>
@@ -132,8 +133,8 @@ function LevelStack(): JSX.Element {
  * being able to orbit hurts"). A drag on it turns the view about the shard,
  * and pointer capture keeps the drag alive after the finger leaves the ball,
  * until it lifts. A tap, no drag, sends the view home. It works with any
- * tool, which is the point: in SELECT a one-finger drag on the bench is the
- * box, and this is how you orbit meanwhile.
+ * tool, which is the point: in SELECT and FACE a one-finger drag on the bench
+ * is the box (decision A, the same day), and this is how you orbit meanwhile.
  */
 function OrbitSphere(): JSX.Element {
   const last = useRef<{ x: number; y: number } | null>(null)
@@ -223,6 +224,38 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
 }
 
 /**
+ * The selection row, first in the bottom-left column under SELECT and FACE
+ * (arkinox, 2026-10-10: "maybe eliminate tap-to-deselect and have a deselect
+ * button appear above on its own row above the other bottom left button
+ * rows. then we can draw multiple little boxes to select. An Invert mode
+ * could make taps and box selects deselect instead."). INVERT is always
+ * there, since it changes what the next tap does even with nothing in hand,
+ * and lit while on; DESELECT joins it to its right while anything is in
+ * hand: points, placed objects, a selected face or a half-built face pick.
+ * INVERT stands first so neither key moves when the other comes and goes.
+ * Nothing on the bench deselects by itself any more, so this row, the pad's
+ * hub and Esc are the three ways to let go.
+ */
+function SelectRow({ inHand }: { inHand: boolean }): JSX.Element {
+  const invert = useWorkshop((s) => s.invert)
+  const w = useWorkshop.getState
+  return (
+    <div className="benchclip" role="group" aria-label="Selection">
+      <button className={`touchpad__key ${invert ? 'is-on' : ''}`} aria-pressed={invert} title="Taps and boxes take points out of the selection instead of adding" aria-label="Invert: taps and boxes take points out" {...noCallout} onClick={() => w().setInvert(!w().invert)}>
+        <Eraser size={15} strokeWidth={2.25} aria-hidden />
+        <span className="touchpad__sub">INVERT</span>
+      </button>
+      {inHand && (
+        <button className="touchpad__key" title="Let everything go (Esc)" aria-label="Deselect everything" {...noCallout} onClick={() => { w().selectVertex(null); w().clearFacePick() }}>
+          <X size={15} strokeWidth={2.25} aria-hidden />
+          <span className="touchpad__sub">DESELECT</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
  * The clipboard row: FILL while three or more points are in hand, CUT and
  * COPY while any are, PASTE whenever something is held, on every tool. It
  * stands first in the bottom-left column so nothing else there or in the
@@ -303,9 +336,9 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
  * 2026-09-25). AUTO always, since it needs no face: every face in the shard
  * turned to look outward by the bench's guess. FLIP, SEAM and DELETE while a
  * face is in hand; FLIP asks how much before it turns anything, the way PASTE
- * asks where. FILL once corners are picked. No CANCEL: a tap on empty space
- * lets go of the face and the picks, as it does everywhere on the bench, and
- * so does Esc.
+ * asks where. FILL once corners are picked. No CANCEL: DESELECT in the row
+ * above lets go of the face and the picks, and so does Esc. (A tap on empty
+ * space used to; it no longer does anything, arkinox, 2026-10-10.)
  */
 function FaceRow({ face, picks, faces }: { face: number | null; picks: number; faces: number }): JSX.Element | null {
   const w = useWorkshop.getState
@@ -856,6 +889,7 @@ export function Workshop(): JSX.Element | null {
       {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
+        {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || selectedFace !== null || facePick.length > 0} />}
         {tool === 'face' && <FaceRow face={selectedFace} picks={facePick.length} faces={shard?.faces.length ?? 0} />}
         <ClipRow points={selectedPoints} objects={partSel.length} verts={tool === 'select' ? shard?.vertices.length ?? 0 : 0} />
         {/* Where the one selected point is, over the turn keys: beside TOOLS it

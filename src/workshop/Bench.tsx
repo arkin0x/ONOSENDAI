@@ -6,7 +6,12 @@
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
  * and its corners, so the pad moves and turns it and DELETE can take it.
- * Dragging orbits, and so does the orbit ball beside the pad. R3F
+ * Dragging orbits in VIEW, STAMP and ADD, and the orbit ball beside the pad
+ * orbits on every tool. In SELECT and FACE a drag is the box instead
+ * (arkinox, 2026-10-10, decision A): each box adds the points inside it, so
+ * several little boxes build a selection, and INVERT makes taps and boxes
+ * take away. Nothing on the bench deselects by itself: a tap on empty space
+ * is nothing, and DESELECT, the pad's hub and Esc let go. R3F
  * reports how far the pointer travelled between down and up, and the bench
  * compares that with a dead zone that depends on what pressed (deadZone.ts):
  * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
@@ -29,7 +34,7 @@ import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRen
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
-import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
@@ -151,8 +156,9 @@ function Grid(): JSX.Element {
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
         grid plane must not sit in front of the vertex handles and swallow the
-        taps meant for them, and an empty-space tap should reach onPointerMissed
-        to deselect rather than being caught here.
+        taps meant for them. A tap on empty space there is nothing at all
+        (arkinox, 2026-10-10: it used to deselect, and on a phone it kept doing
+        so by accident).
       */}
       {places && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} onClick={onClick} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => useWorkshop.getState().setAim(null)}>
@@ -291,7 +297,11 @@ function Handles(): JSX.Element | null {
       // The dot's drawn radius in world units: its pixels times the group's own scale.
       const drawn = DOT_ON_R * (e.object.parent?.scale.x ?? 1)
       if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
-      w.pickForFace(first)
+      // Under INVERT a corner tap takes the point out of the selection, as the
+      // key promises of every tap; it picks no corner for a face. Off INVERT
+      // and the tap is the pick it always was.
+      if (w.invert) w.toggleVertex(first)
+      else w.pickForFace(first)
     }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
@@ -455,21 +465,26 @@ function Aim(): null {
   return null
 }
 
-/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
 /**
- * A box dragged on the bench in SELECT: every point whose projection falls
- * inside is selected, live as the box grows; shift keeps what was selected.
- * The box is a plain element over the canvas, drawn here without React. A
- * tap (no drag) is left to the handles and to onPointerMissed; orbit is off
- * in SELECT (Bench), so a one-finger drag is the box's alone. A second
- * finger means a pan: the box cancels and the selection is put back.
+ * A box dragged on the bench in SELECT and in FACE: every point whose
+ * projection falls inside is added to the selection, live as the box grows,
+ * and the box's own additions shrink back as it does. Each box adds to what
+ * was in hand when the finger touched, so several little boxes build a
+ * selection (arkinox, 2026-10-10, decision A); under INVERT a box takes
+ * away instead. Shift does nothing any more, and is harmless. The box is a
+ * plain element over the canvas, drawn here without React. A tap (no drag)
+ * is left to the handles; orbit is off in SELECT and FACE (Bench), so a
+ * one-finger drag is the box's alone, and the orbit ball beside the pad turns
+ * the view meanwhile. In FACE the box gathers points, as in SELECT, and
+ * leaves the face pick (FILL's corners) alone. A second finger means a pan:
+ * the box cancels and the selection is put back.
  */
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
   const camera = useThree((s) => s.camera)
   const tool = useWorkshop((s) => s.tool)
   useEffect(() => {
-    if (tool !== 'select') return
+    if (tool !== 'select' && tool !== 'face') return
     const canvas = gl.domElement
     const host = canvas.parentElement
     if (!host) return
@@ -481,8 +496,11 @@ function Marquee(): null {
     let base: number[] = []
     let baseParts: number[] = []
     let partsIn: number[] = []
-    let shift = false
+    let invert = false
     let active = false
+    // Written only when the box changes something: the store re-renders every
+    // handle on each write, and a box over empty space wrote on every move.
+    const same = (a: number[], b: number[]): boolean => a.length === b.length && a.every((n, i) => n === b[i])
     const local = (e: PointerEvent): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect()
       return { x: e.clientX - r.left, y: e.clientY - r.top }
@@ -524,9 +542,11 @@ function Marquee(): null {
       if (!e.isPrimary) { cancel(); return }
       if (e.button !== 0) return
       start = local(e)
-      base = useWorkshop.getState().selection
-      baseParts = useWorkshop.getState().partSel
-      shift = e.shiftKey
+      const w = useWorkshop.getState()
+      base = w.selection
+      baseParts = w.partSel
+      // Read at the press: INVERT toggled mid-drag applies to the next box.
+      invert = w.invert
       active = false
     }
     const move = (e: PointerEvent): void => {
@@ -537,8 +557,11 @@ function Marquee(): null {
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
       box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
-      useWorkshop.getState().setSelection([...(shift ? base : []), ...inside(x0, y0, x1, y1)])
-      useWorkshop.getState().setPartSelection([...(shift ? baseParts : []), ...partsIn])
+      const points = nextSelection(base, inside(x0, y0, x1, y1), invert)
+      const parts = nextSelection(baseParts, partsIn, invert)
+      const w = useWorkshop.getState()
+      if (!same(points, w.selection)) w.setSelection(points)
+      if (!same(parts, w.partSel)) w.setPartSelection(parts)
     }
     const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
     canvas.addEventListener('pointerdown', down)
@@ -556,6 +579,7 @@ function Marquee(): null {
   return null
 }
 
+/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
 function Keys(): null {
   const camera = useThree((s) => s.camera)
   useEffect(() => {
@@ -681,32 +705,29 @@ export function Bench(): JSX.Element {
     useWorkshop.getState().selectFace(face)
   }
 
+  // No onPointerMissed: a tap that hits nothing is nothing. It used to deselect
+  // and drop a half-built face, and on a phone a thumb that missed a point by a
+  // hair lost the whole selection (arkinox, 2026-10-10). DESELECT in the
+  // bottom-left column, the pad's hub and Esc are how you let go now.
   return (
     <Canvas
       camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       style={{ background: BG }}
-      // A click that hits nothing deselects and drops a half-built face. In the
-      // placing tools the grid plane catches the click first, so this fires only
-      // on true empty space; in select and face mode there is no plane, so a tap
-      // off any handle lands here.
-      onPointerMissed={(e) => {
-        if ((e as PointerEvent).button !== 0) return
-        const w = useWorkshop.getState()
-        if (w.selection.length || w.partSel.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
-      }}
     >
       {/* A key light high and to one side, a dim fill from behind: faces read by
           their tilt, and the dark backs (ShardMesh lit) show through any hole. */}
       <ambientLight intensity={0.4} />
       <directionalLight position={[8, 12, 6]} intensity={0.9} />
       <directionalLight position={[-9, 2, -3]} intensity={0.6} />
-      {/* One finger or left drag orbits, except in SELECT where that drag is the
-          marquee's. Two fingers, or the right button, pan the view in the screen
-          plane; pinch or the wheel dollies, in to 0.6 of a gibson so a fifth-gibson
-          step fills a good share of a phone's screen. These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+      {/* One finger or left drag orbits, except in SELECT and FACE where that
+          drag is the marquee's and the orbit ball beside the pad turns the view
+          (arkinox, 2026-10-10, decision A). Two fingers, or the right button, pan
+          the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
+          gibson so a fifth-gibson step fills a good share of a phone's screen.
+          These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select' && tool !== 'face'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
       <OrbitHold />
       <Marquee />
       <Aim />

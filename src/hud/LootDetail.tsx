@@ -1,5 +1,5 @@
 /**
- * LootDetail.tsx: one bag, opened from the DISCOVERED list.
+ * LootDetail.tsx: one bag, opened from the HIDDEN BAGS or DISCOVERED BAGS list.
  *
  * Everything a seeker can know about a bag without opening it: who hid it and
  * when, the size of the region it is encrypted to, how much is inside, the
@@ -174,7 +174,11 @@ export function LootDetail(): JSX.Element | null {
     <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden bag" onPointerDown={close}>
       <div className="modal__card secret lootd" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
-          <span className="secret__badge">◈ DISCOVERED</span>
+          {/* The same rule as the panels (DiscoveredPanel `opened`): a bag is
+              DISCOVERED once a key of this client has read it, else it is
+              still HIDDEN, whichever list it was opened from (arkinox,
+              2026-10-10: a bag from HIDDEN BAGS said DISCOVERED). */}
+          <span className="secret__badge">◈ {reading !== undefined || opened.length > 0 ? 'DISCOVERED BAG' : 'HIDDEN BAG'}</span>
           {opened.length > 0 && <span className="tag tag--live">{yours ? 'YOURS' : 'FOUND'}</span>}
           {yours && opened.length === 0 && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>

@@ -50,6 +50,8 @@ export function SecretModal(): JSX.Element | null {
   // The confirmation card over this modal, for DELETE or REMOVE FROM CHEST
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
+  // Whether this device hid it (it is among `mine`): only then is there a wire record to show.
+  const deployed = useShards((s) => !!item && s.mine.some((d) => d.eventId === item.key))
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId
@@ -179,6 +181,13 @@ export function SecretModal(): JSX.Element | null {
               2026-10-10). */}
           {/* Both destructive buttons open the confirmation card below first;
               the work itself runs from the card's confirm. */}
+          {/* The wire record (DeploymentDetail): relays, the publish switch
+              and TEST DISCOVERY, for a thing this device hid. One tap further
+              from here, now that tapping an item in a bag opens this modal
+              instead of the record (arkinox, 2026-10-10). */}
+          {mine && !item.chestId && deployed && (
+            <button className="secret__act" title="Relays, publishing and a discovery test for this item" onClick={() => { close(); useShards.getState().inspect(item.key) }}>WIRE RECORD</button>
+          )}
           {mine && !item.chestId && (
             <button
               className="secret__act secret__act--danger"

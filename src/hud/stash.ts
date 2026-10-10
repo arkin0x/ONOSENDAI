@@ -57,11 +57,19 @@ export function depName(d: MyDeployment): string {
   return d.type === 'shard' ? d.shard?.name ?? 'object' : hiddenLabel(d, 24)
 }
 
-/** Fly the scene to one deployment and open its record: what tapping one has always done. */
+/**
+ * Fly the scene to one deployment and open it as a tap on it in the scene
+ * would: the item modal (SecretModal), which names its kind correctly and
+ * stands at the top of the screen (arkinox, 2026-10-10: the record called a
+ * key a shard and sat at the bottom). The wire record (DeploymentDetail) is
+ * one tap further, WIRE RECORD in that modal. The bag modal closes so the
+ * item modal is what is seen.
+ */
 export function goToDeployment(d: MyDeployment): void {
-  useShards.getState().inspect(d.eventId)
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
+  useStash.setState(NONE_OPEN)
   useCyberspace.getState().focusItem({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
+  useShards.getState().selectSecret(d.eventId)
 }
 
 interface StashModals {

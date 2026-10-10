@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, Wrench, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -272,6 +272,7 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
   const inHand = points + objects
   const w = useWorkshop.getState
   const clip = useWorkshop((s) => s.clip)
+  const tool = useWorkshop((s) => s.tool)
   const [asking, setAsking] = useState(false)
   useEffect(() => { if (clip === null) setAsking(false) }, [clip])
   if (inHand === 0 && clip === null && verts === 0) return null
@@ -296,6 +297,14 @@ function ClipRow({ points, objects = 0, verts = 0 }: { points: number; objects?:
         <button className="touchpad__key" title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)" aria-label="Fill the selection" {...noCallout} onClick={() => w().fillSelection()}>
           <Triangle size={15} strokeWidth={2.25} aria-hidden />
           <span className="touchpad__sub">FILL</span>
+        </button>
+      )}
+      {/* SUBDIVIDE after FILL, under SELECT and FACE, from two points up: two
+          ends cut an edge, a whole face is cut into four (arkinox, 2026-10-10). */}
+      {points >= 2 && (tool === 'select' || tool === 'face') && (
+        <button className="touchpad__key touchpad__key--long" title="Cut each fully selected face into four, or a selected edge in two" aria-label="Subdivide the selection" {...noCallout} onClick={() => w().subdivideSelection()}>
+          <Grid2x2Plus size={15} strokeWidth={2.25} aria-hidden />
+          <span className="touchpad__sub">SUBDIVIDE</span>
         </button>
       )}
       {inHand > 0 && (

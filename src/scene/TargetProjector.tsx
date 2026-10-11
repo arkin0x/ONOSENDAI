@@ -13,10 +13,11 @@
 
 import { useFrame } from '@react-three/fiber'
 import { useMemo } from 'react'
-import { Vector3 } from 'three'
+import { Box3, Vector3 } from 'three'
 
 import { cellDelta, stepFor, type ViewAxes } from '../lib/space'
-import { targetScreens, type CyberTarget } from '../lib/targets'
+import { drawnAvatars, targetScreens, type CyberTarget } from '../lib/targets'
+import { labelAnchor, type LabelAnchor } from '../lib/avatarLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
@@ -28,6 +29,8 @@ export function TargetProjector({ axes, targets }: Props): null {
   const scratch = useMemo(() => new Vector3(), [])
   const forward = useMemo(() => new Vector3(), [])
   const toTarget = useMemo(() => new Vector3(), [])
+  const box = useMemo(() => new Box3(), [])
+  const corner = useMemo(() => new Vector3(), [])
 
   useFrame((state) => {
     const s = useCyberspace.getState()
@@ -76,7 +79,29 @@ export function TargetProjector({ axes, targets }: Props): null {
       const dx = dist('x'), dy = dist('y'), dz = dist('z')
       const distance = dx > dy ? (dx > dz ? dx : dz) : (dy > dz ? dy : dz)
 
+      // The avatar as drawn, when the scene draws one for this target: the
+      // label goes under its lowest point, centered on it (lib/avatarLabel;
+      // arkinox, 2026-10-11), not at its cell's corner, which is where the
+      // raw coordinate above lands.
+      let avatar: LabelAnchor | undefined
+      const drawn = drawnAvatars[t.id]
+      if (drawn) {
+        box.setFromObject(drawn)
+        if (!box.isEmpty()) {
+          avatar = labelAnchor(
+            { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] },
+            (p) => {
+              corner.set(p[0], p[1], p[2]).applyMatrix4(state.camera.matrixWorldInverse)
+              if (corner.z >= 0) return null
+              corner.applyMatrix4(state.camera.projectionMatrix)
+              return [corner.x, corner.y]
+            },
+          ) ?? undefined
+        }
+      }
+
       targetScreens[t.id] = {
+        ...(avatar ? { avatar } : {}),
         x: sx,
         y: sy,
         onScreen: !behind && Math.abs(sx) <= 1 && Math.abs(sy) <= 1,

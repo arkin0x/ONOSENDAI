@@ -11,9 +11,8 @@
 import { useMemo } from 'react'
 import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { AvatarShape } from './AvatarShape'
 import { avatarTurn } from '../lib/facing'
-import { WorldLabel } from './WorldLabel'
+import { OtherAvatar } from './OtherAvatar'
 
 /** Same cull as Earth and the spawn marker. */
 const REACH = GRID_RADIUS * 8
@@ -59,12 +58,7 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   return (
     <>
       {near.map((t) => (
-        <group key={t.id} position={t.centre}>
-          <group quaternion={turn}>
-            <AvatarShape pubkey={t.id} color={t.color} />
-          </group>
-          <WorldLabel text={t.label} color={t.color} at={[0, 0.9, 0]} align="center" px={11} opacity={0.9} />
-        </group>
+        <OtherAvatar key={t.id} pubkey={t.id} color={t.color} center={t.centre} turn={turn} label={t.label} labelOpacity={0.9} />
       ))}
     </>
   )

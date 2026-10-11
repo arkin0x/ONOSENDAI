@@ -19,6 +19,8 @@
  * does.
  */
 
+import type { Object3D } from 'three'
+import type { LabelAnchor } from './avatarLabel'
 import type { Position } from './space'
 
 export interface CyberTarget {
@@ -43,10 +45,25 @@ export interface TargetScreen {
   distance: bigint
   /** On-screen radius in pixels, 0 when the target has no extent to show. */
   px: number
+  /**
+   * The avatar as drawn, when it is drawn: the middle of its bounds and their
+   * lowest point on screen, so the name and picture sit under the avatar
+   * itself rather than at its cell's corner (lib/avatarLabel; arkinox,
+   * 2026-10-11). Absent while no avatar is drawn for the target.
+   */
+  avatar?: LabelAnchor
 }
 
 /** Written per frame inside the Canvas, read per frame by the HUD. */
 export const targetScreens: Record<string, TargetScreen> = {}
+
+/**
+ * The avatars of other people drawn in the scene right now, by pubkey: the
+ * group that holds the shape, so the projector can measure what is actually
+ * drawn (arkinox, 2026-10-11). Put here by the scene while one is mounted and
+ * taken out when it unmounts.
+ */
+export const drawnAvatars: Record<string, Object3D> = {}
 
 /**
  * A color for a pubkey, from its own bits, so a target keeps its color

@@ -9,22 +9,22 @@
  */
 
 import { useMemo } from 'react'
+import type { Quaternion } from 'three'
 import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { targetColor } from '../lib/targets'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { usePresence } from '../store/usePresence'
 import { useProfile } from '../hooks/useProfile'
-import { AvatarShape } from './AvatarShape'
 import { avatarTurn } from '../lib/facing'
-import { WorldLabel } from './WorldLabel'
+import { OtherAvatar } from './OtherAvatar'
 
 const REACH = GRID_RADIUS * 8
 const AVATAR_SCALE_LIMIT = 10
 
-function PersonLabel({ pubkey, color }: { pubkey: string; color: string }): JSX.Element {
+function Person({ pubkey, center, turn }: { pubkey: string; center: [number, number, number]; turn: Quaternion }): JSX.Element {
   const profile = useProfile(pubkey)
   const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
-  return <WorldLabel text={text} color={color} at={[0, 0.9, 0]} align="center" px={11} opacity={0.6} />
+  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={center} turn={turn} label={text} labelOpacity={0.6} />
 }
 
 export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -53,12 +53,7 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
   return (
     <>
       {near.map((p) => (
-        <group key={p.pubkey} position={p.centre}>
-          <group quaternion={turn}>
-            <AvatarShape pubkey={p.pubkey} color={targetColor(p.pubkey)} />
-          </group>
-          <PersonLabel pubkey={p.pubkey} color={targetColor(p.pubkey)} />
-        </group>
+        <Person key={p.pubkey} pubkey={p.pubkey} center={p.centre} turn={turn} />
       ))}
     </>
   )

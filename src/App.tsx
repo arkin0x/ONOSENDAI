@@ -34,6 +34,7 @@ import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
+import { PersonModal } from './hud/PersonModal'
 import { TouchControls } from './hud/TouchControls'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -303,6 +304,7 @@ export default function App(): JSX.Element {
         <LootDetail />
         <NearbyLootModal />
         <StarredPlaceCard />
+        <PersonModal />
       </CrashNote>
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}

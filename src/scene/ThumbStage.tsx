@@ -55,6 +55,11 @@ export async function frameOf(shard: ShardModel): Promise<ThumbFrame> {
   return frameOfBounds(placedBounds(shard, placed ?? []))
 }
 
+/** How far a camera with this field of view stands for a sphere of `reach` to fit with a little room. */
+export function framedDistance(reach: number, fovDeg: number): number {
+  return (reach / Math.sin((fovDeg / 2) * (Math.PI / 180))) * 1.08
+}
+
 function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   const { gl, camera } = useThree()
   const frames = useRef(0)
@@ -74,7 +79,7 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   useEffect(() => {
     if (!frame) return
     frames.current = 0
-    const d = (frame.reach / Math.sin((FOV / 2) * (Math.PI / 180))) * 1.08
+    const d = framedDistance(frame.reach, FOV)
     // The direction (0.62, 0.48, 0.62) normalized, times the distance.
     const n = Math.hypot(0.62, 0.48, 0.62)
     camera.position.set((d * 0.62) / n, (d * 0.48) / n, (d * 0.62) / n)

@@ -68,8 +68,12 @@ const DEFAULT_JOB_WAIT_MS = 60 * 60 * 1000
  */
 export const LOST_ANSWER_DELAYS_MS: readonly number[] = [1_500, 4_000]
 
-/** What a job computes: a move's proof, or a region key bought on its own. */
-export type HosakaAction = 'hop' | 'sidestep' | 'region_key'
+/**
+ * What a job computes: a move's proof, a region key bought on its own, or a
+ * hyperjump's ride proof (DECK-0001 v3 §5; hosaka-api #22, arkinox,
+ * 2026-10-11).
+ */
+export type HosakaAction = 'hop' | 'sidestep' | 'region_key' | 'ride'
 
 /** A coordinate as the API takes it: per-axis integers plus the plane. */
 export interface HosakaCoord {
@@ -91,7 +95,12 @@ export interface HosakaProvider {
   homepage?: string
   /** A URL or data URI for the mark shown at the head of the cloud panel, in toasts and as the pulse. */
   logo?: string
-  services?: Array<{ type: string; max_height: number; min_msats?: number }>
+  /**
+   * What the provider sells. A hop or sidestep names its `max_height`; a
+   * ride names `max_blocks` (the most blocks one ride may pass) and
+   * `max_block_height` (the newest block HOSAKA can verify headers up to).
+   */
+  services?: Array<{ type: string; max_height?: number; max_blocks?: number; max_block_height?: number; min_msats?: number }>
   pricing?: { reference?: boolean; hop?: Array<{ max_height: number; sats: number; est_time: string }>; sidestep?: Array<{ max_height: number; sats: number; est_time: string }> }
   payments?: { methods?: string[]; deposit_min_msats?: number; deposit_max_msats?: number; invoice_ttl_seconds?: number }
   /**
@@ -243,6 +252,47 @@ export interface HosakaRegionKeyResult {
   lookup_id: string
   height: number
   base: { x: number | string; y: number | string; z: number | string }
+}
+
+/**
+ * POST /api/v1/ride/quote (public, hosaka-api #22): what a ride would cost
+ * and how long HOSAKA would take, without buying it. `cost_msats` is null and
+ * `refusal` set when HOSAKA would not take the ride.
+ */
+export interface HosakaRideQuote {
+  action?: 'ride'
+  from_height?: number
+  to_height?: number
+  blocks: number
+  attempts?: number
+  cost_msats: number | null
+  within_cap: boolean
+  max_blocks?: number
+  max_block_height?: number
+  est_seconds?: number | null
+  /** A human reading of est_seconds, such as "~10 min". */
+  est_time?: string | null
+  refusal?: { error?: string; hint?: string } | null
+}
+
+/**
+ * `result` of a completed ride job: the hyperjump's `proof`, `mp` and `mn`
+ * tags as they are, and the ride they were computed for. Checked here at
+ * Level 1 before anything is signed (lib/cloudRide.ts), whatever HOSAKA
+ * says it checked.
+ */
+export interface CloudRideResult {
+  root: string
+  mp: string
+  mn: string
+  previous_event_id: string
+  from_height: number
+  to_height: number
+  blocks?: number
+  attempts?: number
+  openings_version?: number
+  proof_type?: string
+  compute_msats?: number
 }
 
 export interface HosakaJob {
@@ -422,6 +472,16 @@ export function moveIdentity(v1: HosakaCoord, v2: HosakaCoord, previousEventId: 
   return moveBody(v1, v2, previousEventId)
 }
 
+/**
+ * The body of a ride submit, before its key is added: the chain head every
+ * leaf is seeded by (§5.3) and the two blocks. It is also the ride's
+ * identity: the same ride from the same head is one job and one charge, and
+ * hosaka-api derives its own key from exactly these three fields.
+ */
+export function rideBody(previousEventId: string, fromHeight: number, toHeight: number): Record<string, unknown> {
+  return { previous_event_id: previousEventId, from_height: fromHeight, to_height: toHeight }
+}
+
 /** The body of a region key submit, before its key is added. */
 export function regionKeyBody(at: { x: bigint; y: bigint; z: bigint }, height: number): Record<string, unknown> {
   return { x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), height }
@@ -530,6 +590,13 @@ export interface HosakaClient {
    * the cube, which is what actually opens anything.
    */
   submitRegionKey: (at: { x: bigint; y: bigint; z: bigint }, height: number, signal?: AbortSignal) => Promise<HosakaJob>
+  /** Prices a ride without buying it; public, so no signer prompt. */
+  rideQuote: (fromHeight: number, toHeight: number, signal?: AbortSignal) => Promise<HosakaRideQuote>
+  /**
+   * Buys a ride's proof: signed, priced, keyed by rideBody, so a lost answer
+   * and a second tap on the same ride name the job the first one made.
+   */
+  submitRide: (previousEventId: string, fromHeight: number, toHeight: number, signal?: AbortSignal) => Promise<HosakaJob>
   /** Reads with the poll token; no signature, so a bunker is never prompted per poll. */
   getJob: (jobId: string, pollToken: string, signal?: AbortSignal) => Promise<HosakaJob>
   startJob: (jobId: string, signal?: AbortSignal) => Promise<HosakaJob>
@@ -756,6 +823,9 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     submitHop: (v1, v2, previousEventId, signal, wants) => submit('hop', v1, v2, previousEventId, signal, wants),
     submitSidestep: (v1, v2, previousEventId, signal) => submit('sidestep', v1, v2, previousEventId, signal),
     submitRegionKey: (at, height, signal) => submitPriced('region_key', regionKeyBody(at, height), signal, regionKeyIdentity(at, height)),
+    rideQuote: (fromHeight, toHeight, signal) =>
+      request<HosakaRideQuote>('/api/v1/ride/quote', { method: 'POST', body: { from_height: fromHeight, to_height: toHeight }, signal }),
+    submitRide: (previousEventId, fromHeight, toHeight, signal) => submitPriced('ride', rideBody(previousEventId, fromHeight, toHeight), signal),
     getJob,
     startJob: (jobId, signal) => request<HosakaJob>(`/api/v1/jobs/${jobId}/start`, { method: 'POST', auth: true, signal }),
     claimDeposit,

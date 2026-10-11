@@ -20,6 +20,7 @@ import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } fr
 import { localKeyCeiling } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
+import { verifyCloudRide } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -109,6 +110,7 @@ import {
   type CloudHopResult,
   type HosakaAction,
   type HosakaRegionKeyResult,
+  type CloudRideResult,
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
@@ -451,6 +453,12 @@ export interface CloudState {
   /** A route deposit paid while the tab was away and claimed at startup:
    * the sats now on the balance, announced once, then dismissed. */
   credited: { msats: number; at: number } | null
+  /**
+   * Why the last ride bought from HOSAKA did not land, for the Hyperspace
+   * panel, where the ride was asked for (arkinox, 2026-10-11). Cleared when
+   * the next one starts or lands.
+   */
+  rideError: string | null
 }
 
 const IDLE_CLOUD: CloudState = {
@@ -471,6 +479,7 @@ const IDLE_CLOUD: CloudState = {
   balanceChecking: false,
   balanceError: null,
   credited: null,
+  rideError: null,
 }
 
 /**
@@ -516,6 +525,21 @@ export interface CompletedRide {
   mp: string
   /** The re-roll nonce (§5.5), the `mn` tag. */
   mnHex: string
+}
+
+/**
+ * A ride to buy from HOSAKA (arkinox, 2026-10-11): everything the hyperjump
+ * needs except the proof, planned exactly as a local ride is (the Hyperspace
+ * panel's prepareRide), plus HOSAKA's own estimate of the wait.
+ */
+export interface CloudRideAsk {
+  previousId: string
+  fromHeight: number
+  toHeight: number
+  asOf?: number
+  toCoordHex: string
+  /** HOSAKA's quoted seconds; how patiently the job is polled. */
+  estSeconds: number | null
 }
 
 /** What the camera is looking at, when it is not looking at your own head. */
@@ -923,6 +947,15 @@ export interface CyberspaceState {
    * the reason it did not.
    */
   buyRegionKey: (at: Position, plane: Plane, height: number) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
+  /**
+   * Buy a ride's proof from HOSAKA and sign the hyperjump (onosendai-launch
+   * #35 P5; arkinox, 2026-10-11): submit with the ride's idempotency key,
+   * pay through the invoice modal or the balance, poll, check the proof here
+   * at Level 1, then sign it as a local ride is signed. The head is held for
+   * the whole wait, as a computing move holds it. Resolves true when the
+   * hyperjump was signed; every other ending says why in `cloud.rideError`.
+   */
+  rideViaHosaka: (ask: CloudRideAsk) => Promise<boolean>
   /**
    * Pick up the persisted job (on load, after an identity switch, or from the
    * panel) when its chain head is still ours; drop it when the head moved or
@@ -1729,6 +1762,11 @@ function claimIntervalFor(kind: SignerKind): number {
 
 /** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
 let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+/** Installed by the store below: how a HOSAKA ride record is run to a hyperjump (runCloudRide). */
+let cloudRideRunner: ((record: PendingCloudJob, id: number) => Promise<boolean>) | null = null
+/** How long a finished HOSAKA ride waits for the line to hold a sampled block before it is kept for RESUME. */
+const LINE_WAIT_MS = 3 * 60_000
+const LINE_POLL_MS = 1_000
 
 /**
  * A job's action as a proof mode. A region-key purchase is a job too, but it
@@ -2321,6 +2359,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         ...IDLE_CLOUD,
         balance: get().cloud.balance,
         limits: get().cloud.limits,
+        // Per API URL like the limits: kept, or the ride offer and the
+        // crossover lose it until a reload (arkinox, 2026-10-11).
+        provider: get().cloud.provider,
         // A route in progress keeps its funded status visible.
         status: get().plan ? 'paid' : 'idle',
         message: get().plan ? 'Route funded.' : null,
@@ -2336,6 +2377,178 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   }
 
   cloudStepStarter = startCloudStep
+
+  /**
+   * A HOSAKA ride that ended without a hyperjump. The head is let go (the
+   * deferred relay events fold), the reason goes to the Hyperspace panel and
+   * the Cloud panel, and the record stays for RESUME only when `keep`: a
+   * paid job that can still be finished or signed.
+   */
+  const rideFail = (message: string, keep: boolean): void => {
+    const cloud = get().cloud
+    set({
+      pendingTarget: null,
+      proof: IDLE_PROOF,
+      cloud: { ...cloud, status: 'error', message, rideError: message, quote: null, invoice: null, invoiceOpen: false, progress: null, job: keep ? cloud.job : null },
+    })
+  }
+
+  /**
+   * A sampled block's hash from the line this client synced. The stop index
+   * fills while the line syncs, so right after a reload a finished job may
+   * be checked before the block is there: wait for it a while, then give up
+   * WITHOUT judging the proof (verifyCloudRide rejects), so the paid proof is
+   * kept for RESUME. Lazy import: useHyperspace imports this store.
+   */
+  const rideBlockHash = (id: number) => async (height: number): Promise<string> => {
+    const { getStopByHeight } = await import('./useHyperspace')
+    for (let waited = 0; ; waited += LINE_POLL_MS) {
+      const hash = getStopByHeight(height)?.blockHash
+      if (hash) return hash
+      if (id !== requestId) throw new Error('canceled')
+      if (waited >= LINE_WAIT_MS) throw new Error(`block ${height} is not on this device's line yet`)
+      await new Promise((resolve) => setTimeout(resolve, LINE_POLL_MS))
+    }
+  }
+
+  /**
+   * From a persisted ride record to a signed hyperjump: pay if the job asks,
+   * poll (lib/cloud.ts driveCloudJob, as for hops), check the proof at Level
+   * 1 (lib/cloudRide.ts), refuse a moved head, then sign through completeRide,
+   * the one path a local ride takes. A proof that fails the check is never
+   * signed. Resolves true when the hyperjump was signed.
+   */
+  const runCloudRide = async (record: PendingCloudJob, id: number): Promise<boolean> => {
+    const ride = record.ride
+    if (!ride) return false
+    const client = cloudClient(get().cloudPrefs.apiUrl)
+    stopCloud()
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    let outcome: { job: HosakaJob; record: PendingCloudJob }
+    try {
+      outcome = await driveCloudJob(client, record, {
+        claimIntervalMs: claimIntervalFor(currentSigner.kind),
+        onRecord: (r) => {
+          saveCloudJob(r)
+          if (id === requestId) set({ cloud: { ...get().cloud, job: r } })
+        },
+        onDepositPoll: (d) => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } })
+        },
+        onDepositPollError: () => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false } })
+        },
+        onStage: (stage, d) => {
+          if (id !== requestId) return
+          const cloud = get().cloud
+          set({
+            cloud: {
+              ...cloud,
+              status: stage,
+              invoice: d.invoice === undefined ? cloud.invoice : d.invoice,
+              invoiceOpen: stage === 'awaiting_payment' ? (d.invoice ? true : cloud.invoiceOpen) : false,
+              progress: d.progress === undefined ? cloud.progress : d.progress,
+              message: d.message === undefined ? cloud.message : d.message,
+            },
+            ...(d.progress !== undefined && d.progress !== null ? { proof: { ...get().proof, progress: d.progress } } : {}),
+          })
+        },
+      }, abort.signal, waker)
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return false
+      const keep = retainsRecord(err)
+      if (!keep) clearCloudJob()
+      rideFail(describeCloudError(err), keep)
+      return false
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
+    if (id !== requestId) return false
+    const { job } = outcome
+    const final = outcome.record
+    const after = job.new_balance_msats ?? job.current_balance_msats
+    if (typeof after === 'number') get().noteBalance(after)
+    if (job.status !== 'completed') {
+      // HOSAKA refunds a failed job to the balance; the same ride asked
+      // again names a new job under the same key, paid from that refund.
+      clearCloudJob()
+      rideFail(`HOSAKA could not finish the ride: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
+      return false
+    }
+
+    set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: 'Checking HOSAKA\'s ride proof on this device.' } })
+    let failed: string[]
+    try {
+      failed = await verifyCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
+    } catch (err) {
+      // Not judged (the line has not synced a sampled block, the verifier
+      // broke): kept, never signed unchecked and never thrown away paid.
+      if (id !== requestId) return false
+      rideFail(`HOSAKA's ride proof could not be checked yet (${err instanceof Error ? err.message : String(err)}). It is kept: RESUME in the Cloud compute panel checks it and signs it once the line has synced.`, true)
+      return false
+    }
+    if (id !== requestId) return false
+    if (failed.length > 0) {
+      clearCloudJob()
+      rideFail(`HOSAKA's ride proof failed this device's check (${failed.join('; ')}), so nothing was signed and you did not move. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, false)
+      return false
+    }
+    // Bound to the head it was computed from (§5.3): a head that moved
+    // makes it worthless, so it is refused, not signed.
+    if (get().prevEventId !== final.prevEventId) {
+      clearCloudJob()
+      rideFail('Your chain moved while HOSAKA was computing the ride, and the proof is bound to where it started, so it was discarded.', false)
+      return false
+    }
+
+    const r = job.result as CloudRideResult
+    // The head is let go here: completeRide confirms it afresh with the
+    // relays and refuses a moved one, as for a ride computed here.
+    set({ proof: IDLE_PROOF, cloud: { ...get().cloud, message: 'Signing the hyperjump.' } })
+    const before = get().events.length
+    let refusal: string | null = null
+    try {
+      await get().completeRide({
+        previousId: final.prevEventId,
+        toCoordHex: ride.toCoordHex,
+        fromHeight: ride.fromHeight,
+        toHeight: ride.toHeight,
+        asOf: ride.asOf,
+        rootHex: r.root,
+        mp: r.mp,
+        mnHex: r.mn,
+      })
+    } catch (err) {
+      refusal = err instanceof Error ? err.message : String(err)
+    }
+    if (get().events.length === before) {
+      if (id !== requestId) return false
+      // Not signed. A moved head makes the proof worthless; anything else
+      // (the signer declined, the relays did not answer) keeps it for RESUME.
+      const moved = get().prevEventId !== final.prevEventId
+      if (moved) clearCloudJob()
+      rideFail(`${refusal ?? 'The hyperjump was not signed.'}${moved ? '' : ' The checked ride proof is kept: RESUME in the Cloud compute panel signs it.'}`, !moved)
+      return false
+    }
+    clearCloudJob()
+    const cost = typeof job.cost_msats === 'number' ? job.cost_msats : final.costMsats
+    set({ spentMsats: addSpent(get().genesisId, cost) })
+    set({
+      cloud: {
+        ...IDLE_CLOUD,
+        balance: get().cloud.balance,
+        limits: get().cloud.limits,
+        provider: get().cloud.provider,
+        last: { jobId: final.jobId, action: 'ride', costMsats: cost, lookupId: null, at: Date.now() },
+      },
+    })
+    useToast.getState().show({ label: `HOSAKA RIDE COMPLETE - ${final.jobId.slice(0, 8)}`, meta: 'Checked on this device and signed. Thanks for using HOSAKA!', mark: 'hosaka' })
+    return true
+  }
+  cloudRideRunner = runCloudRide
 
   const switchTo = async (signer: Signer): Promise<void> => {
     // Whatever was waiting to sign as the old identity ends without a word.
@@ -2370,7 +2583,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       spectate: null,
       focus: null,
       transit: null,
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: loadBalance(signer.pubkey) },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, provider: get().cloud.provider, balance: loadBalance(signer.pubkey) },
       // A new identity, a new question: the old one's answer and its prompt
       // say nothing about this one (selfSync.ts asks again on the switch).
       selfCheck: { pubkey: signer.pubkey, status: 'checking' },
@@ -3129,7 +3342,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       publishError: null,
       spentMsats: loadSpent(fresh.genesisId),
       respawns: addRespawn(get().identity.pubkey),
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, provider: get().cloud.provider, balance: get().cloud.balance },
     })
     saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
   },
@@ -4018,6 +4231,98 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
   },
 
+  rideViaHosaka: async (ask) => {
+    const { cloud, cloudPrefs, plan, proof, prevEventId, identity } = get()
+    const refuse = (message: string): false => {
+      set({ cloud: { ...get().cloud, rideError: message } })
+      return false
+    }
+    if (cloudPrefs.mode === 'off') return refuse('Cloud compute is off in the Cloud compute panel.')
+    // One cloud flow and one computing move at a time: the invoice modal and
+    // the persisted job are single, and the head is held by one move.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+      return refuse('Finish or cancel the move in progress first.')
+    }
+    // A kept job is paid work; a new record would overwrite it.
+    if (cloud.job !== null) return refuse('A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.')
+    if (ask.previousId !== prevEventId) return refuse('Your chain moved since this ride was planned. Ride again from here.')
+    if (whyNoMove(get().actions())) return refuse(whyNoMove(get().actions())!)
+
+    const client = cloudClient(cloudPrefs.apiUrl)
+    stopCloud()
+    const id = ++requestId
+    const abort = new AbortController()
+    cloudAbort = abort
+    // The head is held from here until the hyperjump is signed or the ride
+    // ends: a computing move blocks every commit, BOARD and local ride, and
+    // the relays' copies of this chain fold only when it ends (foldDeferred).
+    set({
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'computing', source: 'cloud', message: 'HOSAKA is computing your ride.' },
+      cloud: {
+        ...get().cloud,
+        status: 'quoting',
+        quote: null,
+        invoice: null,
+        invoiceOpen: false,
+        job: null,
+        progress: null,
+        rideError: null,
+        message: currentSigner.kind === 'local' ? 'Submitting the ride to HOSAKA.' : 'Waiting for your signer to approve the HOSAKA request.',
+        startedAt: Date.now(),
+      },
+    })
+    let job: HosakaJob
+    try {
+      // Keyed by the ride itself (lib/hosaka.ts rideBody): a lost answer is
+      // asked again with the same key, and so is a second tap on the same
+      // ride from the same head, so HOSAKA hands back the job it already
+      // made instead of charging twice.
+      job = await client.submitRide(ask.previousId, ask.fromHeight, ask.toHeight, abort.signal)
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return false
+      rideFail(describeCloudError(err), false)
+      return false
+    } finally {
+      if (cloudAbort === abort) cloudAbort = null
+    }
+    if (id !== requestId || abort.signal.aborted) return false
+    const balanceNow = job.new_balance_msats ?? job.current_balance_msats
+    if (typeof balanceNow === 'number') get().noteBalance(balanceNow)
+    if (!job.poll_token) {
+      rideFail('HOSAKA took the ride but gave no way to follow it. Ride again: the same ride names the same job.', false)
+      return false
+    }
+    const paying = job.payment_required === true && job.deposit !== undefined
+    if (job.payment_required === true && !paying) {
+      rideFail(`HOSAKA wants ${satsOf(job.amount_due_msats ?? job.cost_msats)} sats more than your balance holds and issued no invoice.`, false)
+      return false
+    }
+    const dest = coordToXyz(hexToCoord(ask.toCoordHex))
+    const record: PendingCloudJob = {
+      version: 1,
+      jobId: job.id,
+      pollToken: job.poll_token,
+      action: 'ride',
+      pubkey: identity.pubkey,
+      from: wirePosition(get().position),
+      to: wirePosition({ x: dest.x, y: dest.y, z: dest.z }),
+      plane: dest.plane,
+      prevEventId: ask.previousId,
+      costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0,
+      createdAt: Date.now(),
+      stage: paying ? 'awaiting_payment' : 'computing',
+      deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+      ...(ask.estSeconds !== null ? { estSeconds: ask.estSeconds } : {}),
+      ride: { fromHeight: ask.fromHeight, toHeight: ask.toHeight, toCoordHex: ask.toCoordHex, ...(ask.asOf !== undefined ? { asOf: ask.asOf } : {}) },
+    }
+    // On disk before the invoice is on screen: a reload after paying, or
+    // while HOSAKA computes, picks the same job up (resumeCloudJob).
+    saveCloudJob(record)
+    set({ cloud: { ...get().cloud, job: record, message: null } })
+    return cloudRideRunner ? cloudRideRunner(record, id) : false
+  },
+
   refreshBalance: async () => {
     const { cloud, cloudPrefs } = get()
     if (cloud.balanceChecking) return
@@ -4054,6 +4359,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       cloud: {
         ...IDLE_CLOUD,
         limits: cloud.limits,
+        provider: cloud.provider,
         balance: cloud.balance,
         last: cloud.last,
         job: keep ? cloud.job : null,
@@ -4139,6 +4445,28 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     const id = ++requestId
+    if (record.action === 'ride') {
+      // A ride bought before a reload: the head is held again at once, and
+      // the same job is followed to its end by its id and poll token.
+      set({
+        pendingTarget: null,
+        proof: { ...IDLE_PROOF, status: 'computing', source: 'cloud', message: 'HOSAKA is computing your ride.' },
+        cloud: {
+          ...get().cloud,
+          status: record.stage,
+          quote: null,
+          invoice: record.deposit,
+          invoiceOpen: record.stage === 'awaiting_payment',
+          job: record,
+          progress: null,
+          message: null,
+          rideError: null,
+          startedAt: record.createdAt,
+        },
+      })
+      if (cloudRideRunner) await cloudRideRunner(record, id)
+      return
+    }
     set({
       pendingTarget: positionFromWire(record.to),
       proof: { ...IDLE_PROOF, status: 'computing', mode: moveAction(record.action), source: 'cloud' },

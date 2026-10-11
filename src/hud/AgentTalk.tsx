@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ClipboardList, FastForward, Hand, MapPin, Send, Target, X } from 'lucide-react'
+import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Volume2, X } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
 import { formatAgo, formatStamp } from '../lib/time'
@@ -63,6 +63,52 @@ export function quickOrders(coordHex: string): { label: string; title: string; t
 
 const ORDER_ICONS = [MapPin, ClipboardList, Hand, FastForward]
 
+/** How long a tapped COPY says COPIED. */
+const COPIED_MS = 1200
+
+/** Whether this browser can speak (Web Speech API); the button is left out where it cannot. */
+export function canSpeak(): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined'
+}
+
+/**
+ * COPY and SPEAK under one of the agent's messages (arkinox, 2026-10-11).
+ * SPEAK reads it aloud with the browser's own voice; tapped again, or when
+ * another message starts speaking, it stops. Nothing leaves the device.
+ */
+function MessageActions({ id, text, speaking, setSpeaking }: { id: string; text: string; speaking: string | null; setSpeaking: (id: string | null) => void }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const copy = (): void => {
+    navigator.clipboard?.writeText(text).then(
+      () => { setCopied(true); window.setTimeout(() => setCopied(false), COPIED_MS) },
+      () => { /* no clipboard here */ },
+    )
+  }
+  const on = speaking === id
+  const speak = (): void => {
+    const synth = window.speechSynthesis
+    synth.cancel()
+    if (on) { setSpeaking(null); return }
+    const u = new SpeechSynthesisUtterance(text)
+    u.onend = () => setSpeaking(null)
+    u.onerror = () => setSpeaking(null)
+    setSpeaking(id)
+    synth.speak(u)
+  }
+  return (
+    <span className="talk__acts">
+      <button className="talk__act" onClick={copy} title="Copy this message">
+        <Copy size={10} aria-hidden /> {copied ? 'COPIED' : 'COPY'}
+      </button>
+      {canSpeak() && (
+        <button className={`talk__act ${on ? 'is-on' : ''}`} onClick={speak} title={on ? 'Stop reading aloud' : 'Read this message aloud'} aria-pressed={on}>
+          {on ? <Square size={10} aria-hidden /> : <Volume2 size={10} aria-hidden />} {on ? 'STOP' : 'SPEAK'}
+        </button>
+      )}
+    </span>
+  )
+}
+
 /** Long enough for real orders, short enough to stay one message. */
 const MAX_DM = 4000
 
@@ -73,6 +119,9 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
   // Set by KEEP GOING: the draft goes out with the marker. Cleared when the
   // draft empties or another order replaces it.
   const [keepGoing, setKeepGoing] = useState(false)
+  // The message being read aloud, if any; speech stops when TALK closes.
+  const [speaking, setSpeaking] = useState<string | null>(null)
+  useEffect(() => () => { if (canSpeak()) window.speechSynthesis.cancel() }, [])
   // null while the STRATEGY line only shows; text while it is being set.
   const [strategyDraft, setStrategyDraft] = useState<string | null>(null)
   // The NO DM INBOX tip, opened by a tap: a title alone never shows on a phone.
@@ -161,6 +210,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
                   {mine ? 'YOU' : 'AGENT'}{m.strategy ? ' · STRATEGY' : ''}{m.keepGoing ? ' · KEEP GOING' : ''} · {formatAgo(m.at)}
                 </span>
                 <span className="talk__text">{m.text}</span>
+                {!mine && <MessageActions id={m.id} text={m.text} speaking={speaking} setSpeaking={setSpeaking} />}
               </li>
             )
           })}

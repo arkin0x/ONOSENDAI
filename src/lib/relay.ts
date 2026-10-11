@@ -624,7 +624,14 @@ export function subscribe(
  */
 export function resumeLive(): void {
   live.resumeAll(() => dropRelays(relaySet()))
-  for (const fn of resumeListeners) {
+  // A snapshot, not the live set (arkinox, 2026-10-11): a Set's iteration
+  // visits what is added during it, and a listener that restarts its work by
+  // unsubscribing and subscribing again (the agent DM reading does) would be
+  // run again in this same pass, forever. That froze the tab on return from
+  // the background and ended in Aw, Snap. One removed by an earlier listener
+  // in this pass is still skipped, as the live set would skip it.
+  for (const fn of [...resumeListeners]) {
+    if (!resumeListeners.has(fn)) continue
     try { fn() } catch { /* one listener's failure is not the others' */ }
   }
 }

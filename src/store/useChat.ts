@@ -22,6 +22,7 @@ import { chime } from '../lib/chime'
 import { useCyberspace } from './useCyberspace'
 import { useSecrets } from './useSecrets'
 import { SCAN_MAX_HEIGHT } from './useShards'
+import { encodeMentions, pTagged, type Mention } from '../lib/mentions'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -35,6 +36,11 @@ export interface ChatLine {
   /** The cube's height; how far the words carried. */
   height: number
   mine: boolean
+  /**
+   * Who the line's p tags name: the people it is addressed to (arkinox,
+   * 2026-10-11). Absent on lines kept before mentions existed.
+   */
+  mentions?: string[]
 }
 
 const STORAGE_KEY = 'onosendai:chat'
@@ -71,6 +77,8 @@ interface ChatState {
   unread: number
   muted: boolean
   draft: string
+  /** People picked from the @ list for this draft; resolved to NIP-27 on send. */
+  picked: Mention[]
   /** Set by the `/` key: unfold and put the caret in the line. */
   focusOnOpen: boolean
   sendStatus: SendStatus
@@ -78,6 +86,8 @@ interface ChatState {
   setOpen: (open: boolean) => void
   toggleMuted: () => void
   setDraft: (draft: string) => void
+  /** Remember someone picked from the @ list, so send can turn their @Name into nostr:npub. */
+  pick: (mention: Mention) => void
   /** Say the draft into the region you are standing in. */
   send: () => Promise<void>
   /** An ephemeral envelope from the relay: open it with what you have. */
@@ -123,6 +133,7 @@ export const useChat = create<ChatState>((set, get) => ({
   unread: 0,
   muted: loadMuted(),
   draft: '',
+  picked: [],
   focusOnOpen: false,
   sendStatus: 'idle',
   sendError: null,
@@ -135,7 +146,10 @@ export const useChat = create<ChatState>((set, get) => ({
     set({ muted })
   },
 
-  setDraft: (draft) => set({ draft: draft.slice(0, MAX_CHAT_LENGTH) }),
+  // An emptied draft forgets its picks, so a later "@Al" typed by hand is not taken for one.
+  setDraft: (draft) => set({ draft: draft.slice(0, MAX_CHAT_LENGTH), picked: draft.trim() === '' ? [] : get().picked }),
+
+  pick: (mention) => set({ picked: [...get().picked.filter((m) => m.pubkey !== mention.pubkey), mention] }),
 
   send: async () => {
     const text = get().draft.trim()
@@ -145,11 +159,18 @@ export const useChat = create<ChatState>((set, get) => ({
       set({ sendStatus: 'error', sendError: 'No region key yet: the scan of where you stand has not finished.' })
       return
     }
+    // Each @Name picked from the list goes out as nostr:npub (NIP-27), and the
+    // people it names as p tags (arkinox, 2026-10-11).
+    const wire = encodeMentions(text, get().picked)
+    if (wire.text.length > MAX_CHAT_LENGTH) {
+      set({ sendStatus: 'error', sendError: 'Too long once the mentions are written out. Shorten the line.' })
+      return
+    }
     const cyber = useCyberspace.getState()
     const now = Math.floor(Date.now() / 1000)
     try {
       set({ sendStatus: 'signing', sendError: null })
-      const inner = await cyber.signEvent(chatInnerTemplate(text, cyber.position, cyber.plane, now, key.lookupId))
+      const inner = await cyber.signEvent(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys))
       set({ sendStatus: 'sending' })
       const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
       const result = await publishMany(relaySet(), outer)
@@ -159,10 +180,10 @@ export const useChat = create<ChatState>((set, get) => ({
       }
       // Your own line goes straight in: an ephemeral event is not echoed back
       // by every relay, and a line you said should not depend on that.
-      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true }
+      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true, mentions: pTagged(inner.tags) }
       const lines = mergeLines(get().lines, [line])
       saveLines(lines)
-      set({ lines, draft: '', sendStatus: 'idle', sendError: null })
+      set({ lines, draft: '', picked: [], sendStatus: 'idle', sendError: null })
     } catch (err) {
       set({ sendStatus: 'error', sendError: err instanceof Error ? err.message : String(err) })
     }
@@ -178,7 +199,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const inners = await chatInners(outer, hexToBytes(key.keyHex))
     if (inners.length === 0) return
     const me = useCyberspace.getState().identity.pubkey
-    const add = inners.map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me }))
+    const add = inners.map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags) }))
     const before = get().lines
     const lines = mergeLines(before, add)
     if (lines === before) return

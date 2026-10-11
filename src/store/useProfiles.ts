@@ -37,6 +37,11 @@ export interface Profile {
   at: number
   /** The kind:0's id, for NIP-01's tie rule; absent on a profile cached before it was kept. */
   id?: string
+  /**
+   * The kind:0 says `bot: true`: an agent (lib/agentInvite.ts isBotProfile).
+   * Present only when true, so the chat's @ list can badge it (arkinox, 2026-10-11).
+   */
+  bot?: true
 }
 
 interface ProfilesState {
@@ -125,6 +130,7 @@ export function parseProfile(ev: NostrEvent): Profile | null {
       nip05: str(meta.nip05),
       at: ev.created_at,
       id: ev.id,
+      ...(meta.bot === true ? { bot: true as const } : {}),
     }
   } catch { return null }
 }

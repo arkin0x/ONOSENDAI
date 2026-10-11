@@ -45,6 +45,7 @@ import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
 import type { Position } from './space'
+import { mentionTags } from './mentions'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -464,14 +465,16 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
  * keyed to the region it was said in, so a relay sees ciphertext and the
  * people standing in that region see the words.
  */
-export function chatInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number, lookupId: string): EventTemplate {
+export function chatInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number, lookupId: string, mentions: readonly string[] = []): EventTemplate {
   return {
     kind: CHAT_KIND,
     created_at: createdAt,
     content: text.slice(0, MAX_CHAT_LENGTH),
     // `d` names the room the way other ephemeral-chat clients do, and the room
-    // is the region: its lookup id. `C` is where the speaker stood.
-    tags: [['d', lookupId], ['C', positionHex(at, plane)]],
+    // is the region: its lookup id. `C` is where the speaker stood. A `p` per
+    // person mentioned follows, after both, so a line with no mentions is
+    // exactly what it was before mentions existed (arkinox, 2026-10-11).
+    tags: [['d', lookupId], ['C', positionHex(at, plane)], ...mentionTags(mentions)],
   }
 }
 

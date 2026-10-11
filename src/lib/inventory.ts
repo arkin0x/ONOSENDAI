@@ -18,7 +18,7 @@
 
 import type { Plane } from 'cyberspace-core'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
-import type { ShardModel } from 'sno-core/shards'
+import { toPayload, type ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
 import { KEY_KIND, hiddenLabel, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
@@ -70,6 +70,12 @@ export interface HeldItem {
   chest?: ChestItem
   text?: string
   shard?: ShardModel
+  /**
+   * Unix seconds when it left the TAKEN list: moved into the workshop, or
+   * cleared (arkinox, 2026-10-11). The row is kept, hidden, so the chest it
+   * came out of still says TAKEN and it cannot be taken a second time.
+   */
+  cleared?: number
 }
 
 export function rowKeyOf(owner: string, id: string): string {
@@ -247,7 +253,28 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
     discovered: grouped,
     loot: {
       keys: held.filter((it) => it.type === 'key').sort(newestFirst),
-      taken: held.filter((it) => it.type !== 'key').sort(newestFirst),
+      taken: held.filter((it) => it.type !== 'key' && !it.cleared).sort(newestFirst),
     },
   }
+}
+
+/**
+ * A shard's model with its name and id set aside: two contents with the same
+ * geometry are the same model, whatever they are called (arkinox,
+ * 2026-10-11: a chest's two identical Columns are one shard to take).
+ */
+export function modelPrint(shard: ShardModel): string {
+  return JSON.stringify(toPayload({ ...shard, id: '', name: '' }))
+}
+
+/** Whether a shard with this model is already held, cleared or not: taking it again would only duplicate it. */
+export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {
+  const print = modelPrint(shard)
+  for (const it of Object.values(items)) if (it.shard && modelPrint(it.shard) === print) return true
+  return false
+}
+
+/** Whether a TAKEN row may be cleared by CLEAR ALL: anything but a coin, which is money and is cleared one at a time once redeemed. */
+export function clearsWithAll(item: Pick<HeldItem, 'type' | 'text'>, isCoin: (text: string | undefined) => boolean): boolean {
+  return !(item.type === 'message' && isCoin(item.text))
 }

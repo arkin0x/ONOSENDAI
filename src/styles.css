@@ -8685,3 +8685,10 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .talk__compose { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
 .talk__compose .shards__textarea { resize: none; }
 .talk__send { height: 36px; }
+
+/* TAKEN: CLEAR ALL beside the heading, an X per row, and the moved notice (arkinox, 2026-10-11). */
+.held__takenhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.held__clear { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; opacity: 0.75; cursor: pointer; }
+.held__clear:hover, .held__clear:focus-visible { opacity: 1; }
+.held__row--moved { grid-template-columns: 1fr; }
+.held__moved { color: var(--ok); letter-spacing: 0.14em; font-size: 10px; padding: 8px 0; }

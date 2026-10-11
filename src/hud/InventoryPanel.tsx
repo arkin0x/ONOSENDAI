@@ -9,7 +9,7 @@
  * its picture when it has one (ItemFace), its name, who forged it, where it
  * was found and when, and which DISCOVERED chests it opens, computed from the
  * lock tags of chests seen. Then what was taken out of chests: coins with the
- * Cashu card and its mint state, shards with COPY TO WORKSHOP, messages, and
+ * Cashu card and its mint state, shards with MOVE TO WORKSHOP, messages, and
  * chests, which open here as they do where they were found. COPY puts an item
  * on the clipboard as text (`cyberspace-key:` and its event) and PASTE reads
  * one back, so an item crosses devices. Nothing here is destructive; BURN
@@ -17,10 +17,11 @@
  */
 
 import { useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { ItemFace, ItemIcon } from './ItemIcon'
-import { chestsOpenedBy, keyText, splitPanels, type HeldItem } from '../lib/inventory'
+import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -111,18 +112,40 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   )
 }
 
-/** Something taken out of a chest: a coin, a shard, a message or a chest, with what each can do. */
+/** How long MOVED INTO WORKSHOP stays in a row's place before the row leaves the list (arkinox, 2026-10-11). */
+export const MOVED_NOTICE_MS = 5000
+
+/** Whether a message's text is a Cashu coin: money, so it is never cleared with the rest. */
+const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? null).raw !== null
+
+/**
+ * Something taken out of a chest: a coin, a shard, a message or a chest,
+ * with what each can do. A shard MOVES into the workshop: the row turns
+ * into MOVED INTO WORKSHOP for five seconds and then leaves the list
+ * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
+ * only once redeemed, since a cleared coin's card is out of reach.
+ */
 function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [moved, setMoved] = useState(false)
   const { raw, token } = readCashuToken(item.type === 'message' ? item.text : null)
   const cashu = useCashu(raw ? item.text : null)
   const coin = raw !== null
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
-  const toStash = (): void => {
-    if (item.shard) useWorkshop.getState().importShard(item.shard)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
+  const moveToWorkshop = (): void => {
+    if (!item.shard || moved) return
+    useWorkshop.getState().importShard(item.shard)
+    setMoved(true)
+    // Held by the store, not this row: the row leaves the list even when the menu closes first.
+    window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)
+  }
+  const clearable = !coin || cashu.state === 'redeemed'
+  if (moved) {
+    return (
+      <li className="secrets__row held__row held__row--moved" role="status">
+        <span className="held__moved">MOVED INTO WORKSHOP</span>
+      </li>
+    )
   }
   return (
     <li className="secrets__row held__row">
@@ -140,8 +163,13 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           </span>
         )}
       <span className="held__acts">
-        {item.type === 'shard' && <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={toStash} title="Copy this model into your workshop">{copied ? 'COPIED' : 'COPY TO WORKSHOP'}</button>}
+        {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
         {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin ? 'CARD' : 'READ'}</button>}
+        {clearable && (
+          <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
+            <X size={14} aria-hidden />
+          </button>
+        )}
       </span>
       {open && item.type === 'message' && (
         <div className="held__details">
@@ -192,7 +220,10 @@ export function InventoryPanel(): JSX.Element {
 
       {taken.length > 0 && (
         <div className="shards__section">
-          <span className="legend__label">Taken</span>
+          <span className="held__takenhead">
+            <span className="legend__label">Taken</span>
+            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, isCoin)).map((t) => t.id))} title="Clear everything from TAKEN except coins, which are cleared one at a time once redeemed">CLEAR ALL</button>
+          </span>
           <ul className="secrets__list held__list">
             {taken.map((t) => <TakenRow key={t.id} item={t} />)}
           </ul>

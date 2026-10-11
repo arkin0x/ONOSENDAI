@@ -19,7 +19,7 @@
  * phone. Hooks stay above any return (hookOrder.test.ts).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Volume2, X } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
@@ -109,6 +109,19 @@ function MessageActions({ id, text, speaking, setSpeaking }: { id: string; text:
   )
 }
 
+/** Within this many pixels of the bottom, the list follows new messages. */
+const STICK_PX = 48
+
+/** The first message at least partly in view, and its offset from the list's top edge. */
+function topVisible(list: HTMLElement): { id: string; offset: number } | null {
+  const top = list.getBoundingClientRect().top
+  for (const item of list.querySelectorAll<HTMLElement>('[data-msg]')) {
+    const r = item.getBoundingClientRect()
+    if (r.bottom > top) return { id: item.dataset.msg!, offset: r.top - top }
+  }
+  return null
+}
+
 /** Long enough for real orders, short enough to stay one message. */
 const MAX_DM = 4000
 
@@ -128,11 +141,29 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
   const [tip, setTip] = useState(false)
   const listRef = useRef<HTMLOListElement>(null)
   useEscape('modal', true, onClose)
-  // The newest message in view whenever one arrives.
-  useEffect(() => {
+  // Where the reader is (arkinox, 2026-10-11: "the conversation box keeps
+  // resetting and shifting as messages are decrypted in the history"). The
+  // history decrypts a message at a time and sorts each one in by time, so
+  // older messages land above what is being read. The list follows the
+  // newest message only while the reader is at the bottom; otherwise the
+  // message at the top of the view stays exactly where it was.
+  const stick = useRef(true)
+  const anchor = useRef<{ id: string; offset: number } | null>(null)
+  const onListScroll = (): void => {
     const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [talk.messages.length])
+    if (!el) return
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
+    anchor.current = topVisible(el)
+  }
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    if (stick.current) { el.scrollTop = el.scrollHeight; return }
+    const a = anchor.current
+    const item = a ? el.querySelector<HTMLElement>(`[data-msg="${a.id}"]`) : null
+    if (a && item) el.scrollTop += (item.getBoundingClientRect().top - el.getBoundingClientRect().top) - a.offset
+    anchor.current = topVisible(el)
+  }, [talk.messages])
 
   const canSend = !talk.blocked && !talk.sending
   const send = (): void => {
@@ -201,11 +232,11 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           )}
         </div>
 
-        <ol className="talk__list" ref={listRef} aria-label="Messages">
+        <ol className="talk__list" ref={listRef} aria-label="Messages" onScroll={onListScroll}>
           {talk.messages.map((m) => {
             const mine = m.from === talk.me
             return (
-              <li key={m.id} className={`talk__msg ${mine ? 'talk__msg--mine' : ''}`}>
+              <li key={m.id} data-msg={m.id} className={`talk__msg ${mine ? 'talk__msg--mine' : ''}`}>
                 <span className="talk__meta" title={formatStamp(m.at)}>
                   {mine ? 'YOU' : 'AGENT'}{m.strategy ? ' · STRATEGY' : ''}{m.keepGoing ? ' · KEEP GOING' : ''} · {formatAgo(m.at)}
                 </span>

@@ -20,12 +20,34 @@ import { useEscape } from '../hooks/useEscape'
 export function HyperspaceBar(): JSX.Element | null {
   const transit = useCyberspace((s) => s.transit)
   const progress = useRideRun((s) => s.progress)
+  // A ride HOSAKA is computing (arkinox, 2026-10-11): ten minutes with the
+  // panels folded on a phone, so the bar says so and offers the way out.
+  const cloudStatus = useCyberspace((s) => s.cloud.status)
+  const cloudProgress = useCyberspace((s) => s.cloud.progress)
+  const hosakaRide = useCyberspace((s) => s.cloud.job?.action === 'ride')
   const viewOwned = useHyperspace((s) => s.viewOwned)
   const focusLabel = useCyberspace((s) => s.focus?.label ?? null)
   // Viewing a stop, EARTH or your station: Escape is RETURN, a chip on the
   // Escape stack (arkinox, 2026-10-01). Boarding and riding are chain states,
   // not views, and Escape never touched them; it still does not.
   useEscape('chip', viewOwned, exitHyperspaceView)
+  if (hosakaRide && cloudStatus !== 'idle' && cloudStatus !== 'error') {
+    const meta = cloudStatus === 'awaiting_payment' ? 'AWAITING PAYMENT'
+      : cloudStatus === 'verifying' ? 'CHECKING THE PROOF HERE'
+        : cloudStatus === 'computing' ? 'HOSAKA IS COMPUTING THE PROOF'
+          : 'STARTING'
+    const pct = cloudStatus === 'computing' && cloudProgress !== null ? ` ${Math.round(cloudProgress * 100)}%` : ''
+    return (
+      <div className="hyperbar" role="status">
+        <span className="hyperbar__glyph" aria-hidden="true">◆</span>
+        <span className="hyperbar__text">
+          <span className="hyperbar__label">RIDING VIA HOSAKA{pct}</span>
+          <span className="hyperbar__meta">{meta}</span>
+        </span>
+        <button className="hyperbar__end" title="Unpaid, nothing is charged; paid, the job is kept for RESUME" onClick={() => useCyberspace.getState().cancelCloud()}>CANCEL</button>
+      </div>
+    )
+  }
   if (transit === null && progress === null) {
     // Just looking: the bar is the always-visible way home from VIEW, EARTH,
     // or a scrubbed stop, since the panel column may be folded away.

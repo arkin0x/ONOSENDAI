@@ -5501,6 +5501,38 @@ kbd {
   background: #ffb04d;
 }
 
+/* RIDE HERE or RIDE VIA HOSAKA (arkinox, 2026-10-11): two full-width
+   choices, each with its price and wait; the profile's pick is filled. */
+.hyper__choice {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hyper__choicebtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  height: auto;
+  text-align: left;
+}
+
+.hyper__choicelabel {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.hyper__choicemeta {
+  flex: 0 1 auto;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hyper__btn--abort {
   color: #05070d;
   background: var(--danger);

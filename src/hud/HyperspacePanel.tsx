@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Earth } from 'lucide-react'
+import { Cloud, Cpu, Earth } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
@@ -26,6 +26,11 @@ import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RidePr
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
+import { rideChoice, type RideOffer } from '../lib/cloudRide'
+import { PAYMENT_SECONDS } from '../lib/crossover'
+import { satsLabel } from '../lib/cloud'
+import { useNow } from '../hooks/useNow'
+import { useRideQuote } from './useRideQuote'
 
 /** Ride estimates run to hours and days; raw seconds read as noise. */
 function formatDuration(ms: number): string {
@@ -69,13 +74,19 @@ export function formatLatLon(stop: Stop): string {
 interface RideRun {
   /** Non-null while the worker pool is computing a ride proof. */
   progress: RideProgress | null
+  /**
+   * True while a ride via HOSAKA is being planned and submitted from this
+   * panel, before the store holds its job (arkinox, 2026-10-11). After that
+   * the store's cloud state says where it is.
+   */
+  hosaka: boolean
   /** The endpoints of the ride being proven, for the scene's transit ghost. */
   path: { fromHeight: number; toHeight: number } | null
   /** Why the last attempt did not produce a signed hyperjump. */
   error: string | null
 }
 
-export const useRideRun = create<RideRun>(() => ({ progress: null, path: null, error: null }))
+export const useRideRun = create<RideRun>(() => ({ progress: null, hosaka: false, path: null, error: null }))
 
 let riding = false
 let rideAbort: AbortController | null = null
@@ -94,15 +105,33 @@ export function abortRide(): void {
   rideAbort?.abort()
 }
 
+/** A ride planned and ready to prove: everything but the proof. */
+interface PlannedRide {
+  previousId: string
+  fromHeight: number
+  /** The station set bound (as_of); absent on a ride chained from a stop. */
+  asOf: number | undefined
+  destination: number
+  destStop: Stop
+  blocks: Array<{ height: number; blockHash: string }>
+}
+
 /**
- * Build the job and run the proof. Module-level rather than a handler so the
- * guard against a second concurrent ride is global: two pools racing
- * completeRide against the same boarding would fork the chain.
+ * Everything a ride needs before its proof, refusing in words on the panel:
+ * the head confirmed, no game or broken chain, on the line, the station,
+ * never a zero-length ride, and every passed block's hash in the index.
+ * Shared by RIDE HERE and RIDE VIA HOSAKA (arkinox, 2026-10-11), so the two
+ * can never plan different rides from the same screen.
  */
-export async function startRide(): Promise<void> {
-  if (riding) return
+async function planRide(): Promise<PlannedRide | null> {
   const destination = useHyperspace.getState().destination
-  if (destination === null) return
+  if (destination === null) return null
+  // A computing move holds the head (a hop, or a ride HOSAKA is computing):
+  // a ride signed meanwhile would move it from under that proof.
+  if (useCyberspace.getState().proof.status === 'computing') {
+    useRideRun.setState({ error: 'A move is computing. Let it finish or cancel it first.' })
+    return null
+  }
   // The head is confirmed before any work, not only when the ride is
   // signed: a ride computed from a head another device or tab has moved
   // past is minutes of work nobody can sign (confirmHead).
@@ -110,10 +139,10 @@ export async function startRide(): Promise<void> {
   let refusal: string | null | typeof STALE_CONFIRMATION
   try { refusal = await useCyberspace.getState().confirmHeadNow() } finally { riding = false }
   // A respawn or an identity switch landed while it asked: this ride was for a chain that is gone.
-  if (refusal === STALE_CONFIRMATION) return
+  if (refusal === STALE_CONFIRMATION) return null
   if (refusal) {
     useRideRun.setState({ error: refusal, progress: null })
-    return
+    return null
   }
   // The chain head decides everything: an enter-hyperspace head is a boarding
   // (this session's or one from before a reload), a hyperjump head is standing
@@ -128,22 +157,21 @@ export async function startRide(): Promise<void> {
   const noRide = whyNoMove(useCyberspace.getState().actions())
   if (noRide) {
     useRideRun.setState({ error: noRide })
-    return
+    return null
   }
   const line = lineStateOf(useCyberspace.getState().actions())
   if (line === null) {
     if (useCyberspace.getState().transit !== null) {
       useRideRun.setState({ error: 'Your chain moved off the line since boarding. Board again to ride.' })
     }
-    return
+    return null
   }
   const previousId = line.previousId
   const destStop = getStopByHeight(destination)
   if (destStop === undefined) {
     useRideRun.setState({ error: `Block ${destination} is not in the stop index yet` })
-    return
+    return null
   }
-  const { plane } = useCyberspace.getState()
   // Chained from a stop: the ride starts where the last one ended, and the
   // station set bound is not declared, because no station is computed (§5.2).
   let fromHeight: number
@@ -168,12 +196,12 @@ export async function startRide(): Promise<void> {
     const tip = useHyperspace.getState().tipHeight
     if (tip === null || tip < destination) {
       useRideRun.setState({ error: 'The line is not synced past the destination yet.', progress: null })
-      return
+      return null
     }
     const station = findStation(getStopIndex(), here, tip)
     if (station === null) {
       useRideRun.setState({ error: 'No station: no stop at or below the destination height' })
-      return
+      return null
     }
     fromHeight = station.stop.height
     asOf = tip
@@ -183,22 +211,39 @@ export async function startRide(): Promise<void> {
   const zero = zeroLengthRideRefusal(fromHeight, destination, line.fromHeight !== null)
   if (zero) {
     useRideRun.setState({ error: zero, progress: null })
-    return
+    return null
   }
   // Every passed block's hash seeds its leaf work (§5.3); a gap means the
-  // sync has not covered that stretch of the line yet.
+  // sync has not covered that stretch of the line yet. A ride via HOSAKA
+  // needs them too: its proof is checked here against these hashes.
   const blocks: Array<{ height: number; blockHash: string }> = []
   for (const height of rideBlocks(fromHeight, destination)) {
     const blockHash = getStopByHeight(height)?.blockHash
     if (!blockHash) {
       useRideRun.setState({ error: `Block ${height} has no hash in the index yet; let the sync finish` })
-      return
+      return null
     }
     blocks.push({ height, blockHash })
   }
+  return { previousId, fromHeight, asOf, destination, destStop, blocks }
+}
+
+/**
+ * Build the job and run the proof. Module-level rather than a handler so the
+ * guard against a second concurrent ride is global: two pools racing
+ * completeRide against the same boarding would fork the chain.
+ */
+export async function startRide(): Promise<void> {
+  if (riding || useRideRun.getState().hosaka) return
+  const planned = await planRide()
+  if (planned === null) return
+  const { previousId, fromHeight, asOf, destination, destStop, blocks } = planned
+  const { plane } = useCyberspace.getState()
   riding = true
   const controller = new AbortController()
   rideAbort = controller
+  // A HOSAKA ride's old refusal is not about this ride.
+  if (useCyberspace.getState().cloud.rideError !== null) useCyberspace.setState({ cloud: { ...useCyberspace.getState().cloud, rideError: null } })
   useRideRun.setState({
     error: null,
     progress: { done: 0, total: blocks.length, etaMs: null, price: null },
@@ -247,6 +292,52 @@ export async function startRide(): Promise<void> {
   }
 }
 
+/**
+ * RIDE VIA HOSAKA (onosendai-launch #35 P5; arkinox, 2026-10-11): the same
+ * ride RIDE HERE would compute, planned by the same planRide, bought from
+ * HOSAKA at the price on the button. The store takes it from the submit to
+ * the signed hyperjump (rideViaHosaka): the invoice or the balance, the poll,
+ * this device's own Level 1 check, the head confirmed, the signature. A
+ * quote for a ride other than the one planned now is refused, so the price
+ * tapped is the price of the ride bought.
+ */
+export async function startHosakaRide(offer: RideOffer): Promise<void> {
+  if (riding || useRideRun.getState().hosaka) return
+  useRideRun.setState({ hosaka: true, error: null })
+  try {
+    const planned = await planRide()
+    if (planned === null) return
+    if (planned.fromHeight !== offer.fromHeight || planned.destination !== offer.toHeight) {
+      useRideRun.setState({ error: `The ride changed since HOSAKA priced it (it now runs from block ${planned.fromHeight} to block ${planned.destination}). Check the new price and ride again.` })
+      return
+    }
+    const signed = await useCyberspace.getState().rideViaHosaka({
+      previousId: planned.previousId,
+      fromHeight: planned.fromHeight,
+      toHeight: planned.destination,
+      asOf: planned.asOf,
+      toCoordHex: coordToHex(stopCoordExact(planned.destStop)),
+      estSeconds: offer.estSeconds,
+    })
+    if (signed) useHyperspace.getState().setDestination(null)
+  } finally {
+    useRideRun.setState({ hosaka: false })
+  }
+}
+
+/** Where a ride via HOSAKA stands, in the panel's one-line voice. */
+function hosakaRideLabel(status: string, progress: number | null, submitting: boolean): string {
+  if (submitting) return 'HOSAKA: PLANNING THE RIDE'
+  switch (status) {
+    case 'quoting': return 'HOSAKA: SUBMITTING'
+    case 'awaiting_payment': return 'HOSAKA: AWAITING PAYMENT'
+    case 'paid': return 'HOSAKA: PAID, STARTING'
+    case 'computing': return `HOSAKA: COMPUTING${progress !== null ? ` ${Math.round(progress * 100)}%` : ''}`
+    case 'verifying': return 'HOSAKA: CHECKING AND SIGNING'
+    default: return 'HOSAKA'
+  }
+}
+
 const kindLabel = (stop: Stop): string => (stop.kind === 'port' ? 'PORT' : 'LANDFALL')
 
 export function HyperspacePanel(): JSX.Element {
@@ -273,7 +364,17 @@ export function HyperspacePanel(): JSX.Element {
   const onLine = transit !== null || line !== null
   const progress = useRideRun((s) => s.progress)
   const rideError = useRideRun((s) => s.error)
+  const hosakaPlanning = useRideRun((s) => s.hosaka)
+  const cloud = useCyberspace((s) => s.cloud)
+  const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const ready = sync.status === 'ready'
+  // A ride HOSAKA is computing (arkinox, 2026-10-11): the store's job record
+  // says so from the submit's answer on, across a reload too; before that,
+  // this panel's own flag covers the plan and the submit.
+  const hosakaJob = cloud.job?.action === 'ride' ? cloud.job : null
+  const cloudBusy = cloud.status !== 'idle' && cloud.status !== 'error'
+  const hosakaRiding = hosakaPlanning || (hosakaJob !== null && cloudBusy)
+  const now = useNow(hosakaRiding ? 1000 : 0)
 
   // The per-leaf benchmark prices a ride in wall-clock time before you commit
   // to it. Calibrated once; until the number exists the estimate says so
@@ -317,6 +418,22 @@ export function HyperspacePanel(): JSX.Element {
   // A destination that is where the ride would start: refused before RIDE
   // is pressed, with the way to get there (ride elsewhere and back).
   const zeroRide = estimate && destination !== null ? zeroLengthRideRefusal(estimate.from, destination, atStop) : null
+
+  // This device's own wait for the ride, as the Est. time row shows it.
+  const localMs = estimate && benchMs !== null
+    ? (estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs
+    : null
+  // HOSAKA's price beside it, when the provider sells rides and this one
+  // fits (useRideQuote); hidden otherwise, and never for a zero-length ride.
+  const quote = useRideQuote(estimate && !zeroRide ? estimate.from : null, estimate && !zeroRide ? destination : null)
+  const offer = quote.status === 'ready' ? quote.offer : null
+  // The highlighted choice follows the cloud profile; it is only a highlight.
+  const best = rideChoice(profile, localMs === null ? null : localMs / 1000, offer, PAYMENT_SECONDS)
+  const rideDisabled = inGame || !onLine || destination === null || zeroRide !== null || !ready || (transit === null && !atHead)
+  // Why RIDE VIA HOSAKA is dark although the price is shown.
+  const hosakaHeld = cloudBusy || cloud.job !== null
+    ? 'Another HOSAKA job is in progress or kept in the Cloud compute panel'
+    : null
 
   const destStop = destination !== null ? getStopByHeight(destination) : undefined
   // DRAWING while the stop field is still chipping its rebuild out across
@@ -413,8 +530,18 @@ export function HyperspacePanel(): JSX.Element {
                   <div>
                     <dt>Est. time</dt>
                     {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
-                    <dd>{benchMs === null ? 'CALIBRATING' : formatDuration((estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs)}</dd>
+                    <dd>{localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
                   </div>
+                  {quote.status !== 'hidden' && (
+                    <div title="What HOSAKA charges to compute this ride's proof, and how long it expects to take">
+                      <dt>HOSAKA</dt>
+                      <dd>
+                        {quote.status === 'loading' ? 'ASKING'
+                          : quote.status === 'unavailable' ? 'UNAVAILABLE'
+                            : `${satsLabel(quote.offer.costMsats).toUpperCase()}${quote.offer.estSeconds !== null ? ` · ${formatDuration(quote.offer.estSeconds * 1000)}` : ''}`}
+                      </dd>
+                    </div>
+                  )}
                 </>
               )}
             </dl>
@@ -425,10 +552,37 @@ export function HyperspacePanel(): JSX.Element {
               and resumes if interrupted. A re-roll price of about one
               thirty-second more follows the blocks, so a proof that skipped
               some cannot cheaply retry its samples.
+              {quote.status !== 'hidden' && (
+                <>
+                  {' '}RIDE VIA HOSAKA buys the same proof from HOSAKA, computed on
+                  many machines at once, for the price shown. This device checks
+                  it the way every reader checks a hyperjump before signing it; a
+                  proof that fails is never signed, and a job HOSAKA cannot finish
+                  is refunded to your HOSAKA balance. Nothing is paid until you
+                  choose it. The highlighted choice follows your Cloud compute
+                  profile: COST rides here, TIME and LOOT take the faster one.
+                </>
+              )}
             </Explanation>
           </>
         )}
       </div>
+
+      {hosakaRiding && (
+        <>
+          <p className="hyper__progress">
+            {hosakaRideLabel(cloud.status, cloud.progress, hosakaPlanning && hosakaJob === null && !cloudBusy)}
+            {cloud.status === 'computing' && hosakaJob?.estSeconds !== undefined && hosakaJob.computingAt !== undefined
+              && ` · ETA ${formatDuration(Math.max(0, hosakaJob.computingAt + hosakaJob.estSeconds * 1000 - now))}`}
+          </p>
+          <div className="bar">
+            <div
+              className="bar__fill bar__fill--cloud"
+              style={{ width: `${Math.round((cloud.status === 'computing' ? cloud.progress ?? 0 : cloud.status === 'verifying' ? 1 : 0) * 100)}%` }}
+            />
+          </div>
+        </>
+      )}
 
       {progress !== null && (
         <>
@@ -447,28 +601,71 @@ export function HyperspacePanel(): JSX.Element {
         </>
       )}
 
-      <div className="hyper__actions">
-        {/* BOARD only when the chain head is off the line. After a ride you
-            stand at a stop and the next ride chains from it (§4.3); a second
-            enter-hyperspace there is a needless event, and the panel used to
-            demand one. */}
-        {!onLine && (
+      {/* Nothing left in the row when the two ways to ride replace RIDE on the line. */}
+      {(!onLine || hosakaRiding || progress !== null || offer === null) && (
+        <div className="hyper__actions">
+          {/* BOARD only when the chain head is off the line. After a ride you
+              stand at a stop and the next ride chains from it (§4.3); a second
+              enter-hyperspace there is a needless event, and the panel used to
+              demand one. */}
+          {!onLine && (
+            <button
+              className="hyper__btn"
+              disabled={inGame || !atHead || !ready || destination === null}
+              onClick={() => void useCyberspace.getState().boardHyperspace()}
+            >BOARD</button>
+          )}
+          {hosakaRiding ? (
+            <>
+              {cloud.status === 'awaiting_payment' && !cloud.invoiceOpen && (
+                <button className="hyper__btn" onClick={() => useCyberspace.getState().setInvoiceOpen(true)}>SHOW INVOICE</button>
+              )}
+              <button
+                className="hyper__btn hyper__btn--abort"
+                title="Stop following the HOSAKA job. Unpaid, nothing is charged; paid, the job is kept in the Cloud compute panel for RESUME"
+                disabled={hosakaJob === null && !cloudBusy}
+                onClick={() => useCyberspace.getState().cancelCloud()}
+              >CANCEL</button>
+            </>
+          ) : progress !== null ? (
+            <button className="hyper__btn hyper__btn--abort" onClick={abortRide}>ABORT</button>
+          ) : offer === null ? (
+            <button
+              className="hyper__btn hyper__btn--ride"
+              disabled={rideDisabled}
+              onClick={() => void startRide()}
+            >RIDE</button>
+          ) : null}
+        </div>
+      )}
+      {/* Two ways to ride once HOSAKA has priced it: here for free, or bought.
+          The profile's choice is lit; neither ever runs without a tap. */}
+      {offer !== null && progress === null && !hosakaRiding && (
+        <div className="hyper__choice">
           <button
-            className="hyper__btn"
-            disabled={inGame || !atHead || !ready || destination === null}
-            onClick={() => void useCyberspace.getState().boardHyperspace()}
-          >BOARD</button>
-        )}
-        {progress === null ? (
-          <button
-            className="hyper__btn hyper__btn--ride"
-            disabled={inGame || !onLine || destination === null || zeroRide !== null || !ready || (transit === null && !atHead)}
+            className={`hyper__btn hyper__choicebtn ${best === 'local' ? 'hyper__btn--ride' : ''}`}
+            title="Compute the ride's proof on this device. Free; it resumes if interrupted"
+            disabled={rideDisabled}
             onClick={() => void startRide()}
-          >RIDE</button>
-        ) : (
-          <button className="hyper__btn hyper__btn--abort" onClick={abortRide}>ABORT</button>
-        )}
-      </div>
+          >
+            <Cpu size={12} strokeWidth={2.25} aria-hidden />
+            <span className="hyper__choicelabel">RIDE HERE</span>
+            <span className="hyper__choicemeta">FREE{localMs !== null ? ` · ${formatDuration(localMs).toUpperCase()}` : ''}</span>
+          </button>
+          <button
+            className={`hyper__btn hyper__choicebtn ${best === 'hosaka' ? 'hyper__btn--ride' : ''}`}
+            title={hosakaHeld ?? 'HOSAKA computes the proof; this device checks it before signing. You pay the price shown, by invoice or from your HOSAKA balance'}
+            disabled={rideDisabled || hosakaHeld !== null}
+            onClick={() => void startHosakaRide(offer)}
+          >
+            <Cloud size={12} strokeWidth={2.25} aria-hidden />
+            <span className="hyper__choicelabel">RIDE VIA HOSAKA</span>
+            <span className="hyper__choicemeta">
+              {satsLabel(offer.costMsats).toUpperCase()}{offer.estSeconds !== null ? ` · ${formatDuration(offer.estSeconds * 1000).toUpperCase()}` : ''}
+            </span>
+          </button>
+        </div>
+      )}
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
@@ -497,6 +694,7 @@ export function HyperspacePanel(): JSX.Element {
       ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
+      {!hosakaRiding && cloud.rideError && <p className="notice">{cloud.rideError}</p>}
 
       <Explanation>
         Each block in the bitcoin blockchain is a railway station in cyberspace.

@@ -11,11 +11,12 @@
 import { useEffect, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { usePresence, type Person } from '../store/usePresence'
+import { sectorKey, usePresence, type Person } from '../store/usePresence'
 import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 import { formatDistance } from 'sno-core/scale'
+import type { Position } from '../lib/space'
 import { useEscape } from '../hooks/useEscape'
 
 function ageLabel(at: number, now: number): string {
@@ -44,6 +45,11 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   )
 }
 
+/** Whether the view is somewhere other than your own sector: spectating someone, or the cursor in another sector than your position. */
+export function awayFromOwnSector(s: { spectate: unknown; cursor: Position; position: Position }): boolean {
+  return s.spectate !== null || sectorKey(s.cursor) !== sectorKey(s.position)
+}
+
 /** How long the chip stays lit after someone arrives. */
 const ARRIVAL_MS = 4000
 
@@ -54,7 +60,13 @@ export function PresenceChip(): JSX.Element | null {
   const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity.pubkey)
   const muted = useChat((s) => s.muted)
+  // "In this sector" means yours, where you stand and are looking (arkinox,
+  // 2026-10-11): while spectating someone else, or with the cursor in another
+  // sector than your own position, the count is about somewhere you are not,
+  // so the chip steps aside.
+  const away = useCyberspace(awayFromOwnSector)
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (away) setOpen(false) }, [away])
   // The open list is a chip on the Escape stack (arkinox, 2026-10-01).
   useEscape('chip', open, () => setOpen(false))
   // Lit for a few seconds after an arrival, then back to plain.
@@ -68,6 +80,7 @@ export function PresenceChip(): JSX.Element | null {
   const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey]).sort((a, b) => b.lastActive - a.lastActive)
   // Gone when there is nothing to say and nobody is reading it. Open, it
   // stays until closed, whatever the scan does meanwhile.
+  if (away) return null
   if (others.length === 0 && !loading && !open) return null
   const now = Math.floor(Date.now() / 1000)
   const label = others.length > 0 ? `${others.length} IN THIS SECTOR` : loading ? 'SCANNING' : 'NOBODY IN THIS SECTOR'

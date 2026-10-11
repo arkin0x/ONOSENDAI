@@ -8682,6 +8682,11 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 }
 .talk__meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
 .talk__text { font-size: 11px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* COPY and SPEAK under an agent's message (arkinox, 2026-10-11). */
+.talk__acts { display: flex; gap: 6px; margin-top: 4px; }
+.talk__act { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-family: inherit; font-size: 8px; letter-spacing: 0.14em; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; cursor: pointer; }
+.talk__act:hover { background: rgba(0, 229, 255, 0.16); }
+.talk__act.is-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .talk__orders { display: flex; flex-wrap: wrap; gap: 6px; }
 .talk__orders .avatars__go,
 .talk__strategy .avatars__go,

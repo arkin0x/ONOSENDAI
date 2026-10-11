@@ -29,3 +29,10 @@ describe('quick orders', () => {
     for (const t of [DM_INBOX_TIP, ...orders.flatMap((o) => [o.text, o.title])]) expect(t).not.toMatch(/[\u2013\u2014]/)
   })
 })
+
+describe('SPEAK (arkinox, 2026-10-11)', () => {
+  it('is left out where the browser cannot speak', async () => {
+    const { canSpeak } = await import('../AgentTalk')
+    expect(canSpeak()).toBe(false)
+  })
+})

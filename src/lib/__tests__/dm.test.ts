@@ -224,11 +224,24 @@ describe('conversations', () => {
 
   it('a rumor becomes a message with its marker', () => {
     const rumor = createRumor(me, agent, 'go', { strategy: true, now: 5 })
-    expect(toMessage(rumor)).toEqual({ id: rumor.id, from: me, text: 'go', at: 5, strategy: true })
+    expect(toMessage(rumor)).toEqual({ id: rumor.id, from: me, text: 'go', at: 5, strategy: true, keepGoing: false })
   })
 })
 
 it('the fresh wrapping key comes from signers.ts and is a real key', () => {
   const k = fresh()
   expect(k.pubkey).toBe(getPublicKey((k as unknown as { sk: Uint8Array }).sk))
+})
+
+describe('KEEP GOING marker (arkinox, 2026-10-11)', () => {
+  it('rides on the rumor only when asked, and reads back as keepGoing', async () => {
+    const { createRumor, isContinue, toMessage, CONTINUE_TAG } = await import('../dm')
+    const a = 'a'.repeat(64), b = 'b'.repeat(64)
+    const plain = createRumor(a, b, 'go')
+    const marked = createRumor(a, b, 'KEEP GOING.', { keepGoing: true })
+    expect(isContinue(plain)).toBe(false)
+    expect(marked.tags).toContainEqual([...CONTINUE_TAG])
+    expect(toMessage(marked).keepGoing).toBe(true)
+    expect(toMessage(marked).strategy).toBe(false)
+  })
 })

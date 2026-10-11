@@ -29,7 +29,7 @@ export interface AgentConversation {
   sending: boolean
   sendError: string | null
   /** Send a message, or a STRATEGY; resolves true once the agent's copy was accepted. */
-  send: (text: string, strategy?: boolean) => Promise<boolean>
+  send: (text: string, strategy?: boolean, keepGoing?: boolean) => Promise<boolean>
 }
 
 const NONE: DmMessage[] = []
@@ -56,6 +56,6 @@ export function useAgentConversation(agent: string): AgentConversation {
     readError,
     sending,
     sendError,
-    send: (text, strategy = false) => sendToAgent(agent, text, strategy),
+    send: (text, strategy = false, keepGoing = false) => sendToAgent(agent, text, strategy, keepGoing),
   }
 }

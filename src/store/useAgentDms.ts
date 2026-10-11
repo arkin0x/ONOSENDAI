@@ -580,11 +580,11 @@ export function cannotSend(s: Pick<AgentDmsState, 'myInbox' | 'inboxes'>, agent:
 }
 
 /**
- * Send `text` to `agent`, as a STRATEGY when `strategy`. Wrapped to the
+ * Send `text` to `agent`, as a STRATEGY when `strategy`, as a KEEP GOING order when `keepGoing`. Wrapped to the
  * agent's 10050 relays, with the self-copy to mine; refused without both.
  * Resolves true when the agent's copy was accepted by at least one relay.
  */
-export async function sendToAgent(agent: string, text: string, strategy = false): Promise<boolean> {
+export async function sendToAgent(agent: string, text: string, strategy = false, keepGoing = false): Promise<boolean> {
   const s = useAgentDms.getState()
   const setError = (e: string | null): void => useAgentDms.setState((st) => ({ sendError: { ...st.sendError, [agent]: e } }))
   const blocked = cannotSend(s, agent)
@@ -595,7 +595,7 @@ export async function sendToAgent(agent: string, text: string, strategy = false)
   if (dmDeps.keys.pubkey() !== me) { setError('Your identity changed; open the conversation again.'); return false }
   useAgentDms.setState((st) => ({ sending: { ...st.sending, [agent]: true }, sendError: { ...st.sendError, [agent]: null } }))
   try {
-    const wrapped = await wrapMessage(dmDeps.keys.sender(), agent, text.trim(), dmDeps.keys.fresh, { strategy })
+    const wrapped = await wrapMessage(dmDeps.keys.sender(), agent, text.trim(), dmDeps.keys.fresh, { strategy, keepGoing })
     const [theirs, mine] = await Promise.all([
       dmDeps.transport.publish(s.inboxes[agent].relays, wrapped.toRecipient),
       dmDeps.transport.publish(s.myInbox.relays, wrapped.toSelf),

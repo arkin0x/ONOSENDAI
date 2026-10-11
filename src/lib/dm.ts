@@ -39,6 +39,15 @@ export const WRAP_KIND = 1059
 /** The marker that makes a message the agent's standing orders (contract ruling 3). */
 export const STRATEGY_TAG: readonly [string, string] = ['agent', 'strategy']
 
+/**
+ * The marker of a KEEP GOING order (arkinox, 2026-10-11: "if XOR runs out of
+ * time budget, I want to be able to tell him keep going"). The agent's server
+ * reads it, not its model: a marked DM from the operator renews the agent's
+ * session budget once, so neither the model nor text read in cyberspace can
+ * grant compute by saying "keep going".
+ */
+export const CONTINUE_TAG: readonly [string, string] = ['agent', 'continue']
+
 /** How far into the past a seal's or a wrap's created_at may be moved: two days, as NIP-59 suggests. */
 export const MAX_BACKDATE_S = 2 * 24 * 60 * 60
 
@@ -87,15 +96,21 @@ export function isStrategy(rumor: Pick<Rumor, 'tags'>): boolean {
   return rumor.tags.some((t) => t[0] === STRATEGY_TAG[0] && t[1] === STRATEGY_TAG[1])
 }
 
+/** Whether a rumor carries the KEEP GOING marker. */
+export function isContinue(rumor: Pick<Rumor, 'tags'>): boolean {
+  return rumor.tags.some((t) => t[0] === CONTINUE_TAG[0] && t[1] === CONTINUE_TAG[1])
+}
+
 /** The pubkeys a rumor's p tags name. */
 export function recipientsOf(rumor: Pick<Rumor, 'tags'>): string[] {
   return rumor.tags.filter((t) => t[0] === 'p' && HEX.test(t[1] ?? '')).map((t) => t[1])
 }
 
 /** The kind 14 from `sender` to `recipient`: one p tag, plus the marker for a STRATEGY. */
-export function createRumor(sender: string, recipient: string, text: string, opts: { strategy?: boolean; now?: number } = {}): Rumor {
+export function createRumor(sender: string, recipient: string, text: string, opts: { strategy?: boolean; keepGoing?: boolean; now?: number } = {}): Rumor {
   const tags: string[][] = [['p', recipient]]
   if (opts.strategy) tags.push([...STRATEGY_TAG])
+  if (opts.keepGoing) tags.push([...CONTINUE_TAG])
   const unsigned = { pubkey: sender, created_at: opts.now ?? nowS(), kind: DM_KIND, tags, content: text }
   return { ...unsigned, id: getEventHash(unsigned) }
 }
@@ -140,7 +155,7 @@ export async function wrapMessage(
   recipient: string,
   text: string,
   freshKey: () => DmSender,
-  opts: { strategy?: boolean; now?: number; random?: () => number } = {},
+  opts: { strategy?: boolean; keepGoing?: boolean; now?: number; random?: () => number } = {},
 ): Promise<Wrapped> {
   if (!HEX.test(recipient)) throw new Error('The recipient is not a public key.')
   if (!text.trim()) throw new Error('An empty message is not sent.')
@@ -195,6 +210,8 @@ export interface DmMessage {
   /** The rumor's own created_at: the real time it was written. */
   at: number
   strategy: boolean
+  /** A KEEP GOING order (CONTINUE_TAG). */
+  keepGoing?: boolean
 }
 
 /**
@@ -214,7 +231,7 @@ export function counterpartOf(rumor: Pick<Rumor, 'pubkey' | 'tags'>, me: string)
 
 /** A rumor as a conversation message. */
 export function toMessage(rumor: Rumor): DmMessage {
-  return { id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at, strategy: isStrategy(rumor) }
+  return { id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at, strategy: isStrategy(rumor), keepGoing: isContinue(rumor) }
 }
 
 /** Messages oldest first, each id once (the self-copy and an optimistic add share the rumor id). */

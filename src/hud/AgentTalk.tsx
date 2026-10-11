@@ -4,9 +4,12 @@
  *
  * Top to bottom: the STRATEGY line (the newest standing orders you sent, set
  * or replaced here), the history, the quick orders, and the composer. The
- * quick orders (COME TO ME, REPORT, HOLD) are not commands of any protocol:
+ * quick orders (COME TO ME, REPORT, HOLD, KEEP GOING) are not commands of any protocol:
  * each only writes a message into the composer, which you read and SEND, so
  * nothing goes out on one stray tap. COME TO ME carries your coordinate.
+ * KEEP GOING is the one with a marker (lib/dm.ts CONTINUE_TAG, arkinox
+ * 2026-10-11): sent, it renews the agent's spent session budget, read by the
+ * agent's server rather than its model, so the work under way resumes.
  *
  * Everything is a NIP-17 DM (lib/dm.ts, store/useAgentDms.ts). Without a DM
  * inbox (kind 10050) on either side the conversation says "NO DM INBOX" with
@@ -18,7 +21,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ClipboardList, Hand, MapPin, Send, Target, X } from 'lucide-react'
+import { ClipboardList, FastForward, Hand, MapPin, Send, Target, X } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
 import { formatAgo, formatStamp } from '../lib/time'
@@ -32,7 +35,7 @@ export const DM_INBOX_TIP =
   'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Publish yours from a client that manages DM relays; this app never publishes it for you.'
 
 /** The quick orders: plain messages, written into the composer. */
-export function quickOrders(coordHex: string): { label: string; title: string; text: string }[] {
+export function quickOrders(coordHex: string): { label: string; title: string; text: string; keepGoing?: boolean }[] {
   return [
     {
       label: 'COME TO ME',
@@ -49,10 +52,16 @@ export function quickOrders(coordHex: string): { label: string; title: string; t
       title: 'Write an order to hold',
       text: 'HOLD. Stop where you are. Make no move and spend nothing until I say so.',
     },
+    {
+      label: 'KEEP GOING',
+      title: 'Write an order that renews your agent\'s spent compute budget, so the work under way resumes',
+      text: 'KEEP GOING. Your budget is renewed: resume the work under way where it stopped.',
+      keepGoing: true,
+    },
   ]
 }
 
-const ORDER_ICONS = [MapPin, ClipboardList, Hand]
+const ORDER_ICONS = [MapPin, ClipboardList, Hand, FastForward]
 
 /** Long enough for real orders, short enough to stay one message. */
 const MAX_DM = 4000
@@ -61,6 +70,9 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
   const talk = useAgentConversation(agent)
   const coordHex = useCyberspace((s) => s.coordHex())
   const [draft, setDraft] = useState('')
+  // Set by KEEP GOING: the draft goes out with the marker. Cleared when the
+  // draft empties or another order replaces it.
+  const [keepGoing, setKeepGoing] = useState(false)
   // null while the STRATEGY line only shows; text while it is being set.
   const [strategyDraft, setStrategyDraft] = useState<string | null>(null)
   // The NO DM INBOX tip, opened by a tap: a title alone never shows on a phone.
@@ -77,7 +89,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
   const send = (): void => {
     const text = draft.trim()
     if (!text || !canSend) return
-    void talk.send(text).then((ok) => { if (ok) setDraft('') })
+    void talk.send(text, false, keepGoing).then((ok) => { if (ok) { setDraft(''); setKeepGoing(false) } })
   }
   const sendStrategy = (): void => {
     const text = strategyDraft?.trim()
@@ -146,7 +158,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
             return (
               <li key={m.id} className={`talk__msg ${mine ? 'talk__msg--mine' : ''}`}>
                 <span className="talk__meta" title={formatStamp(m.at)}>
-                  {mine ? 'YOU' : 'AGENT'}{m.strategy ? ' · STRATEGY' : ''} · {formatAgo(m.at)}
+                  {mine ? 'YOU' : 'AGENT'}{m.strategy ? ' · STRATEGY' : ''}{m.keepGoing ? ' · KEEP GOING' : ''} · {formatAgo(m.at)}
                 </span>
                 <span className="talk__text">{m.text}</span>
               </li>
@@ -161,7 +173,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           {quickOrders(coordHex).map((o, i) => {
             const Icon = ORDER_ICONS[i]
             return (
-              <button key={o.label} className="avatars__go" title={o.title} onClick={() => setDraft(o.text)} disabled={!!talk.blocked}>
+              <button key={o.label} className="avatars__go" title={o.title} onClick={() => { setDraft(o.text); setKeepGoing(!!o.keepGoing) }} disabled={!!talk.blocked}>
                 <Icon size={10} /> {o.label}
               </button>
             )
@@ -172,14 +184,14 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           <textarea
             className="shards__textarea"
             value={draft}
-            onChange={(e) => setDraft(e.target.value.slice(0, MAX_DM))}
+            onChange={(e) => { const v = e.target.value.slice(0, MAX_DM); setDraft(v); if (!v.trim()) setKeepGoing(false) }}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send() }}
             placeholder="A private message to your agent"
             rows={2}
             disabled={!!talk.blocked}
           />
           <button className="avatars__go talk__send" onClick={send} disabled={!canSend || !draft.trim()} title="Send as a private NIP-17 message">
-            <Send size={10} /> {talk.sending ? 'SENDING' : 'SEND'}
+            <Send size={10} /> {talk.sending ? 'SENDING' : keepGoing ? 'SEND KEEP GOING' : 'SEND'}
           </button>
         </div>
         {talk.sendError && <p className="notice talk__notice" role="status">{talk.sendError}</p>}
@@ -192,6 +204,8 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           answers with message_operator, and obeys only you. STRATEGY is
           standing orders: the agent keeps the newest one and rereads it every
           turn. The quick orders only write a message for you to send.
+          KEEP GOING also renews your agent&apos;s spent compute budget once,
+          so a ride that stopped for its budget resumes.
         </Explanation>
       </div>
     </div>,

@@ -23,6 +23,7 @@ import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { setTalking, useAgentDms } from '../store/useAgentDms'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 
@@ -196,4 +197,15 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
     </div>,
     document.body,
   )
+}
+
+/**
+ * The TALK modal, wherever it was asked for: TALK on an agent's row, or the
+ * notifications toast with the menu shut (arkinox, 2026-10-11). Mounted once,
+ * from App, so it does not depend on the AGENTS panel being on screen.
+ */
+export function AgentTalkHost(): JSX.Element | null {
+  const talking = useAgentDms((s) => s.talking)
+  if (!talking) return null
+  return <AgentTalk key={talking} agent={talking} onClose={() => setTalking(null)} />
 }

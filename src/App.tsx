@@ -15,6 +15,8 @@ import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
 import { ActionModal } from './hud/ActionModal'
 import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
+import { AgentTalkHost } from './hud/AgentTalk'
+import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { ToastChip } from './hud/ToastChip'
@@ -69,6 +71,9 @@ import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePa
 export default function App(): JSX.Element {
   // Reactions and comments that tag you: the first page per identity, then a poll.
   useNotificationsLoop()
+  // New private messages from your agents, for the dot on AGENTS and the
+  // toast; only while you have an agent (arkinox, 2026-10-11).
+  useAgentDmWatch()
   // The keyboard is unconditional. The on-screen controls are a second way in,
   // not a replacement: both call the same store actions, so WASD and the pad
   // cannot drift apart, and nothing about having a pointer takes the keys away.
@@ -294,6 +299,7 @@ export default function App(): JSX.Element {
         <SecretModal />
         <ActionModal />
         <NotificationsModal />
+        <AgentTalkHost />
         <LootDetail />
         <NearbyLootModal />
         <StarredPlaceCard />

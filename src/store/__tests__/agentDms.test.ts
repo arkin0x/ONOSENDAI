@@ -62,9 +62,11 @@ beforeEach(() => {
   me = key()
   agent = key()
   fake = fakeRelays()
-  const keys: DmKeys = { pubkey: () => me.pubkey, sender: () => me.sender, reader: () => me.reader, fresh: () => key().sender, agents: () => [agent.pubkey] }
+  const keys: DmKeys = { pubkey: () => me.pubkey, sender: () => me.sender, reader: () => me.reader, fresh: () => key().sender, agents: () => [agent.pubkey], promptFree: () => true }
   dmDeps.transport = fake.transport
   dmDeps.keys = keys
+  const mem = new Map<string, string>()
+  dmDeps.storage = { get: (k) => mem.get(k) ?? null, set: (k, v) => { mem.set(k, v) } }
   resetAgentDms()
 })
 
@@ -72,6 +74,7 @@ afterEach(() => {
   resetAgentDms()
   dmDeps.transport = saved.transport
   dmDeps.keys = saved.keys
+  dmDeps.storage = saved.storage
 })
 
 describe('no DM inbox', () => {

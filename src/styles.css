@@ -8613,7 +8613,11 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .agents__row { grid-template-columns: 1fr auto auto auto; }
 .agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
 .agents__npub:hover { color: var(--accent); }
-.agents__talk { display: inline-flex; align-items: center; gap: 4px; }
+.agents__talk { display: inline-flex; align-items: center; gap: 4px; position: relative; }
+/* The dot on the AGENTS title line sits in the line, after the word, so it
+ * shows with the panel folded and never covers the fold chevron or the grip
+ * (arkinox, 2026-10-11). The one on TALK keeps the corner NOTIFICATIONS uses. */
+.notif__dot.agents__dot { position: static; flex: 0 0 auto; width: 7px; height: 7px; }
 
 /* AGENTS TALK: one agent's private conversation (arkinox, 2026-10-10). A
  * column that fits a phone: the STRATEGY line, the history (the one part

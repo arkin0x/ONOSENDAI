@@ -10,11 +10,17 @@
  *   as you scroll, each saying who, what, and what it was on, with a button
  *   that goes there (the move's modal, your deployment, or the thread a
  *   reply was in).
+ *
+ * The toast also says when one of your agents sent you a private message you
+ * have not opened (arkinox, 2026-10-11: "or just use the existing
+ * notification toast"). That comes first, since an agent may be waiting on
+ * an answer, and a tap opens that agent's conversation. Only who sent it is
+ * shown, never the words: they are private, and on a shared screen.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MessageCircle } from 'lucide-react'
+import { MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import type { Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
@@ -33,6 +39,8 @@ import { useShards } from '../store/useShards'
 import { useSocialUi } from '../store/useSocialUi'
 import { ProfilePic } from './ProfileBadge'
 import { useEscape } from '../hooks/useEscape'
+import { useAgentUnread } from '../hooks/useAgentDmWatch'
+import { setTalking } from '../store/useAgentDms'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -81,11 +89,24 @@ export function NotificationsButton(): JSX.Element {
   )
 }
 
-/** Under XOR BITS while anything is unread. */
+/** Under XOR BITS while anything is unread: a message from one of your agents first, then reactions and comments. */
 export function NotificationsToast(): JSX.Element | null {
   const unread = useUnread()
   const latest = useNotifications((s) => s.items.find((n) => n.createdAt > s.lastSeen) ?? null)
-  const profile = useProfile(latest?.from ?? null)
+  const agentUnread = useAgentUnread()
+  const agent = agentUnread.latest
+  const profile = useProfile(agent ?? latest?.from ?? null)
+  if (agent) {
+    const who = profileLabel(profile, nip19.npubEncode(agent))
+    const more = agentUnread.total - 1
+    return (
+      <button className="hyperbar notif__toast" onClick={() => setTalking(agent)} aria-label={`${agentUnread.total} unread from your agents. Tap to read.`}>
+        <MessageSquare className="notif__toast-glyph notif__icon" size={16} strokeWidth={2.25} aria-hidden />
+        <ProfilePic pubkey={agent} size={22} />
+        <span className="notif__toast-text">{more > 0 ? `${who} messaged you, and ${more} more…` : `${who} messaged you`}</span>
+      </button>
+    )
+  }
   if (!latest || unread === 0) return null
   const who = profileLabel(profile, nip19.npubEncode(latest.from))
   return (

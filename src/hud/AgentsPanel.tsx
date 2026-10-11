@@ -19,17 +19,24 @@
  * STRATEGY line, and quick orders. The invitation and the EXPLAIN text tell
  * the same story: traversal is the default playbook, and the operator talks
  * to the agent only by private DM.
+ *
+ * A red dot on the title line (seen even with the panel folded) and on an
+ * agent's TALK says that agent sent you a message you have not opened yet;
+ * opening the conversation puts it out (arkinox, 2026-10-11). The watch that
+ * notices is useAgentDmWatch.ts; the TALK modal itself is mounted from App
+ * (AgentTalkHost), so the notifications toast can open it with the menu shut.
  */
 
 import { useState } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { useMyAgents } from '../hooks/useMyAgents'
+import { useAgentUnread } from '../hooks/useAgentDmWatch'
 import { invitationText, meetingCode } from '../lib/agentInvite'
 import { safeNpub } from '../lib/npub'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
-import { AgentTalk } from './AgentTalk'
+import { setTalking } from '../store/useAgentDms'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 
@@ -43,8 +50,7 @@ export function AgentsPanel(): JSX.Element {
   // 'invite', or the pubkey whose npub was copied last.
   const [copied, setCopied] = useState<string | null>(null)
   const [code, setCode] = useState<string | null>(null)
-  // The agent whose conversation is open, if any.
-  const [talking, setTalking] = useState<string | null>(null)
+  const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
     navigator.clipboard?.writeText(text).then(
@@ -62,7 +68,10 @@ export function AgentsPanel(): JSX.Element {
   return (
     <section className="panel panel--agents">
       <header className="panel__head">
-        <h2>Agents</h2>
+        <h2 title={unread.total > 0 ? `${unread.total} new from your agents` : undefined}>
+          Agents
+          {unread.total > 0 && <span className="notif__dot agents__dot" aria-hidden="true" />}
+        </h2>
         {status === 'loading' ? (
           <span className="tag">LOADING</span>
         ) : (
@@ -82,14 +91,21 @@ export function AgentsPanel(): JSX.Element {
       <ul className="avatars__list">
         {agents.map((pubkey) => {
           const npub = safeNpub(pubkey)
+          const fresh = unread.byAgent[pubkey] ?? 0
           return (
             <li key={pubkey} className="avatars__row agents__row">
               <ProfileBadge pubkey={pubkey} />
               <button className="copy agents__npub" onClick={() => copy(pubkey, npub)} title={`${npub}\nTap to copy`}>
                 {copied === pubkey ? 'COPIED' : shortHex(npub, 12, 6)}
               </button>
-              <button className="avatars__spectate agents__talk" onClick={() => setTalking(pubkey)} title="Talk privately with this agent">
+              <button
+                className="avatars__spectate agents__talk"
+                onClick={() => setTalking(pubkey)}
+                title={fresh > 0 ? `${fresh} new from this agent. Tap to read.` : 'Talk privately with this agent'}
+                aria-label={fresh > 0 ? `Talk, ${fresh} unread` : undefined}
+              >
                 <MessageSquare size={10} /> TALK
+                {fresh > 0 && <span className="notif__dot" aria-hidden="true" />}
               </button>
               <button className="avatars__spectate" onClick={() => void spectate(pubkey)}>SPECTATE</button>
             </li>
@@ -100,7 +116,6 @@ export function AgentsPanel(): JSX.Element {
         )}
       </ul>
       {status === 'error' && <p className="notice">Could not reach the relays.</p>}
-      {talking && <AgentTalk agent={talking} onClose={() => setTalking(null)} />}
 
       <Explanation>
         An agent is a program with a nostr key of its own that moves, talks,

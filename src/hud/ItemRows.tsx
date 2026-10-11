@@ -26,7 +26,7 @@ import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel,
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
-import { openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
+import { holdsModel, openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -131,7 +131,8 @@ export function ChestBlock({ id, chest, author, verified, place }: { id: string;
 
 /** One thing inside an opened chest, with TAKE. */
 function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
-  const held = useInventory((s) => !!s.items[entry.id])
+  // One shard per model (arkinox, 2026-10-11): a model already held, under any name, reads TAKEN too.
+  const held = useInventory((s) => !!s.items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(s.items, entry.body.shard)))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
   const take = (): void => { useInventory.getState().take([entry], from, place) }

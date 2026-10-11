@@ -22,7 +22,7 @@ import { create } from 'zustand'
 import type { NostrEvent } from '../lib/events'
 import type { ChestEntry } from '../lib/chests'
 import type { Hidden, KeyItem } from '../lib/hidden'
-import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, holdsModel, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { describeError } from '../lib/secrets/db'
 import { openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
 import { useCyberspace } from './useCyberspace'
@@ -56,6 +56,8 @@ interface InventoryState {
   holdForged: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   /** TAKE: hold contents out of an opened chest. */
   take: (entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null) => HeldItem[]
+  /** Take these rows off the TAKEN list, keeping them held (moved into the workshop, or cleared). */
+  clearTaken: (ids: string[]) => void
   /** PASTE: hold a key from its text. */
   paste: (text: string) => PasteResult
   has: (id: string) => boolean
@@ -168,7 +170,25 @@ export const useInventory = create<InventoryState>((set, get) => {
   take: (entries, from, place) => {
     const owner = ownerNow()
     const at = now()
-    return get().add(entries.map((e) => heldFromEntry(owner, e, from, place, at)))
+    // One shard per model (arkinox, 2026-10-11): a content whose geometry is
+    // already held, under any name, is not taken again.
+    const fresh = entries.filter((e) => !(e.body.type === 'shard' && e.body.shard && holdsModel(get().items, e.body.shard)))
+    return get().add(fresh.map((e) => heldFromEntry(owner, e, from, place, at)))
+  },
+
+  clearTaken: (ids) => {
+    const at = now()
+    const items = { ...get().items }
+    const changed: HeldItem[] = []
+    for (const id of ids) {
+      const it = items[id]
+      if (!it || it.type === 'key' || it.cleared) continue
+      items[id] = { ...it, cleared: at }
+      changed.push(items[id])
+    }
+    if (changed.length === 0) return
+    set({ items })
+    void persist(changed)
   },
 
   paste: (text) => {

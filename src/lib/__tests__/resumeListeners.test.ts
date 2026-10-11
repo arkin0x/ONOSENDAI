@@ -98,6 +98,7 @@ describe('agent DMs on resume', () => {
       reader: () => ({ pubkey: me.pubkey, nip44Decrypt: me.nip44Decrypt! }),
       fresh: () => { const s = localSigner(generateSecretKey()); return { pubkey: s.pubkey, signEvent: s.signEvent, nip44Encrypt: s.nip44Encrypt! } },
       agents: () => [agent.pubkey],
+      promptFree: () => true,
     }
     resetAgentDms()
     const close = openConversation(agent.pubkey)

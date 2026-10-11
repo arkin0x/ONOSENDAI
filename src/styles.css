@@ -7095,6 +7095,64 @@ kbd {
 .chat__error { margin: 0; font-size: 9px; color: var(--danger); }
 .chat__status { margin: 0; font-size: 8px; letter-spacing: 0.14em; color: var(--dim); }
 
+/* Mentions (arkinox, 2026-10-11). A reference in a line reads as @Name in the
+ * accent; one naming you is brighter. A line that mentions you gets a faint
+ * tint and an accent rule on its left, no more. */
+.chat__mention { color: var(--accent, #00e5ff); }
+.chat__mention.is-me { font-weight: 600; }
+.chat__line.is-for-me {
+  margin: 0 -4px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.07);
+  box-shadow: inset 2px 0 0 var(--accent, #00e5ff);
+}
+
+/* The @ list: above the line, a few rows tall, big enough to tap. */
+.chat__picker {
+  list-style: none;
+  margin: 0;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  overscroll-behavior: contain;
+}
+.chat__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chat__pick:hover, .chat__pick.is-active { background: rgba(0, 229, 255, 0.12); }
+.chat__pickname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat__pickbot { flex: none; color: var(--accent, #00e5ff); }
+.chat__picktag { flex: none; font-size: 8px; letter-spacing: 0.14em; color: var(--dim); }
+.chat__pickempty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
 /* Under 1100px the pad column is the same width, but the menu button and the
  * dock fight for the bottom on a narrow phone: the dock takes the width and
  * sits above the button row. */

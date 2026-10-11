@@ -1357,6 +1357,7 @@ export function actionLabel(a: Pick<ActionEvent, 'type' | 'name' | 'role' | 'bre
     case 'skipped': return `SKIPPED · ${name.toUpperCase()}`
     // An event with no A tag has no name to show (§8.8).
     case 'broken': return name ? `BROKEN · ${name.toUpperCase()}` : 'BROKEN'
-    default: return a.type === 'enter-hyperspace' ? 'ENTER' : a.type.toUpperCase()
+    // The action's own name, enter-hyperspace included (arkinox, 2026-10-11: it read ENTER).
+    default: return a.type.toUpperCase()
   }
 }

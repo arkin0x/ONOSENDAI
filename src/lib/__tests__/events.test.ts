@@ -307,3 +307,10 @@ describe('buildChain (§8.7.3: the newest spawn wins)', () => {
     expect(chain.map((e) => e.role)).toEqual(['base', 'broken', 'base'])
   })
 })
+
+describe('actionLabel names enter-hyperspace in full (arkinox, 2026-10-11)', () => {
+  it('reads ENTER-HYPERSPACE, not ENTER', async () => {
+    const { actionLabel } = await import('../events')
+    expect(actionLabel({ type: 'enter-hyperspace', name: 'enter-hyperspace', role: 'base', breaks: undefined } as never)).toBe('ENTER-HYPERSPACE')
+  })
+})

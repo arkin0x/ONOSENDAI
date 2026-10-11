@@ -15,6 +15,7 @@
 import { useEffect, useRef } from 'react'
 import { formatDistance } from 'sno-core/scale'
 import { targetScreens, type CyberTarget } from '../lib/targets'
+import { labelDrop } from '../lib/avatarLabel'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 
@@ -46,12 +47,19 @@ export function Targets({ targets }: Props): JSX.Element {
         const s = targetScreens[t.id]
         if (!el || !s) continue
 
+        // The avatar as drawn, when it is drawn and on screen: the marker sits
+        // on its middle and the name and picture hang under its lowest point
+        // (lib/avatarLabel; arkinox, 2026-10-11). Otherwise the marker is the
+        // raw coordinate, as for Earth or a target out of the field.
+        const a = s.avatar
+        const under = !!a && Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1
+
         // Normalised device coords are +y up; screen pixels are +y down.
-        let px = ((s.x + 1) / 2) * w
-        let py = ((1 - s.y) / 2) * h
+        let px = ((under && a ? a.x : s.x) + 1) / 2 * w
+        let py = ((1 - (under && a ? a.y : s.y)) / 2) * h
         let angle = 0
 
-        if (!s.onScreen) {
+        if (!s.onScreen && !under) {
           // Slide along the true bearing until it meets the frame, rather than
           // clamping x and y separately. Independent clamps pull anything far
           // off-screen into a corner, so two targets in quite different
@@ -71,7 +79,10 @@ export function Targets({ targets }: Props): JSX.Element {
         }
 
         el.style.transform = `translate(${px}px, ${py}px)`
-        el.dataset.mode = s.onScreen ? 'on' : 'off'
+        el.dataset.mode = s.onScreen || under ? 'on' : 'off'
+        el.dataset.under = under ? 'yes' : 'no'
+        const body = el.querySelector<HTMLElement>('.target__body')
+        if (body) body.style.top = under && a ? `${labelDrop(a, h, RING_MIN / 2)}px` : ''
         const arrow = el.querySelector<HTMLElement>('.target__arrow')
         if (arrow) arrow.style.transform = `rotate(${angle}rad)`
         const ring = el.querySelector<HTMLElement>('.target__ring')

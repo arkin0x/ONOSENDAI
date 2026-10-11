@@ -42,6 +42,13 @@ export interface Profile {
    * Present only when true, so the chat's @ list can badge it (arkinox, 2026-10-11).
    */
   bot?: true
+  /**
+   * For a bot, the pubkey its kind:0 names as operator: a `p` tag marked
+   * `operator` in its last place (lib/agentInvite.ts isOperatorTag). Shown on
+   * the avatar's profile card; a one-sided claim, so it says who the agent
+   * names, nothing more (arkinox, 2026-10-11).
+   */
+  operator?: string
 }
 
 interface ProfilesState {
@@ -117,6 +124,12 @@ export function newerProfile(have: Profile | null | undefined, incoming: Profile
   return incoming.id < have.id
 }
 
+/** The pubkey a kind:0's `p` tag marked `operator` names, if any. */
+export function operatorOf(tags: readonly string[][] | undefined): string | null {
+  const t = (tags ?? []).find((tag) => tag.length >= 3 && tag[0] === 'p' && /^[0-9a-f]{64}$/.test(tag[1] ?? '') && tag[tag.length - 1] === 'operator')
+  return t ? t[1] : null
+}
+
 /** Parse a kind:0 into a Profile; null if the content is not usable JSON. */
 export function parseProfile(ev: NostrEvent): Profile | null {
   try {
@@ -131,6 +144,7 @@ export function parseProfile(ev: NostrEvent): Profile | null {
       at: ev.created_at,
       id: ev.id,
       ...(meta.bot === true ? { bot: true as const } : {}),
+      ...(meta.bot === true && operatorOf(ev.tags) ? { operator: operatorOf(ev.tags) as string } : {}),
     }
   } catch { return null }
 }

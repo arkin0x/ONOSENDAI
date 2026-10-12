@@ -30,9 +30,14 @@ vi.mock('../../lib/chains', async (importOriginal) => ({
 }))
 /** What the sweep's "newest action" question answers. */
 let newestOnRelay: NostrEvent | null = null
+/** Whether a relay answers the sweep at all (false: every relay unreachable, as right after a resume). */
+let relayAnswers = true
 vi.mock('../../lib/relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/relay')>()),
   query: async () => (newestOnRelay ? [newestOnRelay] : []),
+  queryEach: async () => (relayAnswers
+    ? [{ url: 'wss://relay.test/', outcome: 'answered' as const, events: newestOnRelay ? [newestOnRelay] : [] }]
+    : [{ url: 'wss://relay.test/', outcome: 'unreachable' as const, reason: 'connection closed', events: [] }]),
 }))
 
 if (typeof localStorage === 'undefined') {
@@ -110,6 +115,21 @@ describe('item 1: a frozen neighbor is read again, and unfrozen when they respaw
     await sweep()
     expect(pendingChainChecks()).toEqual([[n.pk, n.later.id]])
     expect(person(n.pk).frozen).toBe(true)
+  })
+
+  it('a sweep no relay answers keeps the person; one that answers with nothing drops them (arkinox, 2026-10-12)', async () => {
+    const n = await frozenNeighbor()
+    usePresence.setState((s) => ({ people: { ...s.people, [n.pk]: { ...s.people[n.pk], checkedAt: 0 } } }))
+    newestOnRelay = null
+    relayAnswers = false
+    try {
+      await sweep()
+      expect(usePresence.getState().people[n.pk]).toBeDefined()
+    } finally {
+      relayAnswers = true
+    }
+    await sweep()
+    expect(usePresence.getState().people[n.pk]).toBeUndefined()
   })
 
   it('a read that finds the chain valid clears frozen and places them at its head', async () => {

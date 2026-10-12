@@ -40,7 +40,7 @@ import { ACTION_KIND, parseAction, type NostrEvent, type ActionType, type Action
 import type { Plane } from 'cyberspace-core'
 import { PLACING_ACTIONS } from '../lib/chains'
 import { cachedVerdict, forgetNeighborChains, forgetNeighborEvents, readChain, type ChainVerdict } from '../lib/neighborChains'
-import { query, subscribe } from '../lib/relay'
+import { query, queryEach, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
 import { useChat } from './useChat'
@@ -370,8 +370,15 @@ export async function sweep(): Promise<void> {
   const quiet = Object.values(usePresence.getState().people).filter((p) => now - p.checkedAt >= CONFIRM_AFTER_S)
   for (const person of quiet) {
     try {
-      const newest = (await query({ kinds: [ACTION_KIND], authors: [person.pubkey], '#A': PLACING_ACTIONS, limit: 1 }))
-        .sort((a, b) => b.created_at - a.created_at)[0]
+      // Only an answer can say someone has gone (arkinox, 2026-10-12: XOR
+      // vanished after the app came back from the background and returned
+      // only while spectated). Right after a resume the sockets are still
+      // reconnecting, and query() hands back an empty list for "nobody
+      // answered", which read as "no actions" and dropped him; idle, he
+      // never came back. With no relay answering, he is kept for the next sweep.
+      const answers = await queryEach({ kinds: [ACTION_KIND], authors: [person.pubkey], '#A': PLACING_ACTIONS, limit: 1 })
+      if (!answers.some((a) => a.outcome === 'answered')) continue
+      const newest = answers.flatMap((a) => a.events).sort((a, b) => b.created_at - a.created_at)[0]
       const action = newest ? parseAction(newest) : null
       if (!action) { usePresence.getState().forget(person.pubkey); continue }
       // Frozen on a broken chain: still there until a spawn says otherwise,

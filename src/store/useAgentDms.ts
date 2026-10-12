@@ -36,11 +36,26 @@
  *   every time, and which of those prompts cannot be told from here, so with
  *   either the watch opens at most WATCH_CAP wraps a session.
  *
- * Messages live in memory for the session only, never in storage: they are
- * private, and the relays hold them for the next session. What the watch
- * keeps on this device is only ids and times (which wraps were opened, which
- * messages are unread, when each conversation was last opened), never a
- * word of any message. A change of identity clears everything in memory.
+ * - Reactions (arkinox, 2026-10-12). The agent answers each of your messages
+ *   it sees with a private kind 7 (lib/dm.ts REACTION_KIND), wrapped like a
+ *   message. It is kept under the conversation of its two parties only, and
+ *   shown under the message its e tag names once that message is loaded.
+ *   A reaction is never unread: it lights no dot and raises no toast.
+ *
+ * - Keeping (arkinox, 2026-10-12: "We shouldn't have to decrypt messages ever
+ *   again once they're decrypted once"). Every message and reaction decrypted
+ *   or sent here is kept in IndexedDB per identity (lib/agentDmDb.ts), with
+ *   every wrap this identity decrypted, so opening TALK shows the history at
+ *   once and only wraps never opened on this device are decrypted. THE
+ *   TRADE-OFF: the plaintext of these private messages now rests on the
+ *   device; anyone with the unlocked device or a copy of the browser's data
+ *   can read it. CLEAR HISTORY deletes one conversation's stored messages.
+ *   The watch's own record (below, in localStorage) stays ids and times: it
+ *   also notes wraps it never decrypted (its first run), so it is not the
+ *   set of opened wraps, which lives in IndexedDB beside what they held.
+ *   Without IndexedDB (a private window that refuses it) the conversation
+ *   lasts the session, as it did before. A change of identity clears
+ *   everything in memory, and another identity's rows are never read.
  *
  * The relays and the keys come in through `dmDeps`, so the tests stand in
  * fake ones and nothing here can reach a real relay from a test.
@@ -49,9 +64,13 @@
 import { create } from 'zustand'
 import { generateSecretKey } from 'nostr-tools/pure'
 import {
-  counterpartOf, currentStrategy, MAX_BACKDATE_S, mergeMessages, toMessage, unwrapMessage, wrapMessage,
-  WRAP_KIND, type DmMessage, type DmReader, type DmSender, type Rumor,
+  counterpartOf, currentStrategy, MAX_BACKDATE_S, mergeMessages, mergeReactions, REACTION_KIND, toMessage, toReaction, unwrapRumor,
+  wrapMessage, WRAP_KIND, type DmMessage, type DmReaction, type DmReader, type DmSender, type Rumor,
 } from '../lib/dm'
+import {
+  deleteConversation, messageRow, openAgentDmDb, openedRow, reactionRow, readStored, writeStored,
+  type ItemRow, type OpenedRow,
+} from '../lib/agentDmDb'
 import { dmInboxOf, type DmInbox } from '../lib/inbox'
 import { authForRead, onResume, publishMany, subscribeOne, type PublishResult } from '../lib/relay'
 import { localSigner, NIP44_UNAVAILABLE } from '../lib/signers'
@@ -172,8 +191,12 @@ const realKeys: DmKeys = {
   promptFree: () => useCyberspace.getState().signerKind === 'local',
 }
 
-/** The relays, keys and storage in use; exported so a test can stand in fakes. */
-export const dmDeps: { transport: DmTransport; keys: DmKeys; storage: DmStorage } = { transport: realTransport, keys: realKeys, storage: realStorage }
+function openRealDb(): Promise<IDBDatabase> { return openAgentDmDb() }
+
+/** The relays, keys, storage and database in use; exported so a test can stand in fakes. */
+export const dmDeps: { transport: DmTransport; keys: DmKeys; storage: DmStorage; openDb: () => Promise<IDBDatabase> } = {
+  transport: realTransport, keys: realKeys, storage: realStorage, openDb: openRealDb,
+}
 
 /** Unread messages from one agent: the rumor ids and the newest one's time. Never their words. */
 export interface Unread { ids: string[]; at: number }
@@ -186,6 +209,10 @@ export interface AgentDmsState {
   inboxes: Record<string, InboxState>
   /** Each agent's conversation, oldest first. */
   messages: Record<string, DmMessage[]>
+  /** Each agent's conversation's reactions, oldest first; shown under the message each names, once it is loaded. */
+  reactions: Record<string, DmReaction[]>
+  /** Whether what this device keeps for this identity has been read (or found unavailable). */
+  historyLoaded: boolean
   reading: ReadingStatus
   /** Why reading failed or a wrap could not be opened, in words. */
   readError: string | null
@@ -202,7 +229,7 @@ export interface AgentDmsState {
 const LOADING: InboxState = { status: 'loading', relays: [] }
 
 function initial(me: string): AgentDmsState {
-  return { me, myInbox: LOADING, inboxes: {}, messages: {}, reading: 'idle', readError: null, sending: {}, sendError: {}, unread: {}, talking: null }
+  return { me, myInbox: LOADING, inboxes: {}, messages: {}, reactions: {}, historyLoaded: false, reading: 'idle', readError: null, sending: {}, sendError: {}, unread: {}, talking: null }
 }
 
 export const useAgentDms = create<AgentDmsState>(() => initial(''))
@@ -212,8 +239,75 @@ export const useAgentDms = create<AgentDmsState>(() => initial(''))
 
 /** Open conversations, by agent, counted (a re-render may open one twice). */
 const open = new Map<string, number>()
-/** Wraps already opened (or dropped) for this identity: never decrypted twice. */
+/** Wraps already taken this session for this identity: never queued twice. */
 let seen = new Set<string>()
+/** Wraps this identity decrypted on this device, from IndexedDB and this session: never decrypted again. */
+let opened = new Set<string>()
+/** Bumped per identity, so a late read of the database for another identity is dropped. */
+let loadGen = 0
+
+/** The conversation database, opened once; null when this browser will not have it (the session then keeps all in memory). */
+let db: Promise<IDBDatabase | null> | null = null
+function database(): Promise<IDBDatabase | null> {
+  if (!db) {
+    // No IndexedDB at all (a test without one): memory only, said nowhere.
+    if (dmDeps.openDb === openRealDb && typeof indexedDB === 'undefined') return (db = Promise.resolve(null))
+    db = dmDeps.openDb().catch((err: unknown) => {
+      console.warn(`[agent-dms] IndexedDB unavailable, conversations last this session only: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    })
+  }
+  return db
+}
+
+/** The database writes so far, one after another, so a test can wait for them. */
+let writes: Promise<void> = Promise.resolve()
+
+/** Keep opened wraps and items, off the frame; a failed write is said and the session keeps them in memory. */
+function persist(openedRows: OpenedRow[], items: ItemRow[]): void {
+  writes = writes
+    .then(() => database())
+    .then((d) => (d ? writeStored(d, openedRows, items) : undefined))
+    .catch((err: unknown) => { console.warn(`[agent-dms] could not keep a message: ${err instanceof Error ? err.message : String(err)}`) })
+}
+
+/** Show a message or a reaction in its conversation. */
+function showItem(agent: string, item: { message?: DmMessage; reaction?: DmReaction }): void {
+  const s = useAgentDms.getState()
+  if (item.message) useAgentDms.setState({ messages: { ...s.messages, [agent]: mergeMessages(s.messages[agent] ?? [], [item.message]) } })
+  if (item.reaction) useAgentDms.setState({ reactions: { ...s.reactions, [agent]: mergeReactions(s.reactions[agent] ?? [], [item.reaction]) } })
+}
+
+/**
+ * Read what this device keeps for `me` and show it at once, merged with
+ * anything already in memory. Every wrap noted opened joins `opened`, so the
+ * relays' copies of it are skipped without a decrypt.
+ */
+async function loadStored(me: string): Promise<void> {
+  const gen = ++loadGen
+  if (!me) return
+  try {
+    const d = await database()
+    const stored = d ? await readStored(d, me) : { opened: [], items: [] }
+    if (gen !== loadGen || useAgentDms.getState().me !== me) return
+    for (const id of stored.opened) opened.add(id)
+    const msgs: Record<string, DmMessage[]> = {}
+    const reacts: Record<string, DmReaction[]> = {}
+    for (const it of stored.items) {
+      if (it.kind === 'message') (msgs[it.agent] ??= []).push(it.message)
+      else (reacts[it.agent] ??= []).push(it.reaction)
+    }
+    const s = useAgentDms.getState()
+    const messages = { ...s.messages }
+    for (const [a, list] of Object.entries(msgs)) messages[a] = mergeMessages(messages[a] ?? [], list)
+    const reactions = { ...s.reactions }
+    for (const [a, list] of Object.entries(reacts)) reactions[a] = mergeReactions(reactions[a] ?? [], list)
+    useAgentDms.setState({ messages, reactions, historyLoaded: true })
+  } catch (err) {
+    console.warn(`[agent-dms] could not read kept conversations: ${err instanceof Error ? err.message : String(err)}`)
+    if (gen === loadGen && useAgentDms.getState().me === me) useAgentDms.setState({ historyLoaded: true })
+  }
+}
 /** The decrypt queue: one wrap at a time through the signer. */
 let queue: Promise<void> = Promise.resolve()
 /** The reading's closers, and the resume listener. */
@@ -296,12 +390,15 @@ function resetFor(me: string): void {
   closeWatch()
   epoch += 1
   seen = new Set()
-  queue = Promise.resolve()
+  opened = new Set()
   record = loadRecord(me)
   watchOpened = 0
   capped = false
   noDecrypt = false
   useAgentDms.setState({ ...initial(me), unread: record.unread }, true)
+  // Every wrap waits for the kept history to be read, so one opened in an
+  // earlier session is skipped even when the relay answers first.
+  queue = loadStored(me)
 }
 
 function stopReading(): void {
@@ -319,7 +416,7 @@ function stopReading(): void {
  * cap applies to a signer that may ask (arkinox, 2026-10-11).
  */
 function take(wrap: NostrEvent, alive: () => boolean, fromWatch = false): void {
-  if (wrap.kind !== WRAP_KIND || seen.has(wrap.id)) return
+  if (wrap.kind !== WRAP_KIND || seen.has(wrap.id) || opened.has(wrap.id)) return
   if (fromWatch) {
     if (noDecrypt || wrap.id in record.watched) return
     if (!dmDeps.keys.promptFree()) {
@@ -331,11 +428,13 @@ function take(wrap: NostrEvent, alive: () => boolean, fromWatch = false): void {
   const me = useAgentDms.getState().me
   queue = queue.then(async () => {
     if (!alive()) { seen.delete(wrap.id); return }
+    // Decrypted on this device before (found once the kept history was read): never again.
+    if (opened.has(wrap.id)) return
     const reader = dmDeps.keys.reader()
-    // unwrapMessage drops a wrap that will not open, rightly, but a signer
+    // unwrapRumor drops a wrap that will not open, rightly, but a signer
     // with no NIP-44 decrypt at all opens none, and that is said in words.
     let unavailable = false
-    const rumor = await unwrapMessage(wrap, {
+    const rumor = await unwrapRumor(wrap, {
       pubkey: reader.pubkey,
       nip44Decrypt: (pk, ct) => reader.nip44Decrypt(pk, ct).catch((err: unknown) => {
         if (err instanceof Error && err.message === NIP44_UNAVAILABLE) {
@@ -350,11 +449,22 @@ function take(wrap: NostrEvent, alive: () => boolean, fromWatch = false): void {
     // Opened (or found not to open): never decrypted again on this device.
     record.watched[wrap.id] = wrap.created_at
     saveRecord()
-    if (!rumor) return
-    const agent = counterpartOf(rumor, me)
-    if (!agent || !(open.has(agent) || dmDeps.keys.agents().includes(agent))) return
-    const s = useAgentDms.getState()
-    useAgentDms.setState({ messages: { ...s.messages, [agent]: mergeMessages(s.messages[agent] ?? [], [toMessage(rumor)]) } })
+    opened.add(wrap.id)
+    const noted = [openedRow(me, wrap.id, wrap.created_at)]
+    // counterpartOf keeps only a rumor between me and exactly one other, so a
+    // reaction from a third party, or one naming a third party, is dropped.
+    const agent = rumor ? counterpartOf(rumor, me) : null
+    if (!rumor || !agent || !(open.has(agent) || dmDeps.keys.agents().includes(agent))) { persist(noted, []); return }
+    if (rumor.kind === REACTION_KIND) {
+      // A reaction is shown, kept, and never unread (arkinox, 2026-10-12).
+      const reaction = toReaction(rumor)
+      if (reaction) showItem(agent, { reaction })
+      persist(noted, reaction ? [reactionRow(me, agent, reaction)] : [])
+      return
+    }
+    const message = toMessage(rumor)
+    showItem(agent, { message })
+    persist(noted, [messageRow(me, agent, message)])
     noteUnread(rumor, agent, me)
   })
 }
@@ -365,7 +475,7 @@ function take(wrap: NostrEvent, alive: () => boolean, fromWatch = false): void {
  * unless the conversation is on screen. My own self-copies never are.
  */
 function noteUnread(rumor: Rumor, agent: string, me: string): void {
-  if (rumor.pubkey === me || rumor.pubkey !== agent) return
+  if (rumor.kind === REACTION_KIND || rumor.pubkey === me || rumor.pubkey !== agent) return
   if (!dmDeps.keys.agents().includes(agent) || open.has(agent)) return
   if (rumor.created_at <= Math.max(record.baseline, record.readAt[agent] ?? 0)) return
   const s = useAgentDms.getState()
@@ -602,9 +712,13 @@ export async function sendToAgent(agent: string, text: string, strategy = false,
     ])
     if (useAgentDms.getState().me !== me) return false
     if (!theirs.ok) { setError(`Not delivered: ${theirs.reason}`); return false }
-    // Shown at once; the self-copy, when it arrives, has the same rumor id.
-    useAgentDms.setState((st) => ({ messages: { ...st.messages, [agent]: mergeMessages(st.messages[agent] ?? [], [toMessage(wrapped.rumor)]) } }))
+    // Shown at once and kept; the self-copy, when it arrives, has the same
+    // rumor id and is never decrypted (arkinox, 2026-10-12).
+    const message = toMessage(wrapped.rumor)
+    showItem(agent, { message })
     seen.add(wrapped.toSelf.id)
+    opened.add(wrapped.toSelf.id)
+    persist([openedRow(me, wrapped.toSelf.id, wrapped.toSelf.created_at)], [messageRow(me, agent, message)])
     if (!mine.ok) setError(`Delivered, but your own copy was not saved to your inbox: ${mine.reason}`)
     return true
   } catch (err) {
@@ -620,10 +734,55 @@ export function strategyWith(s: Pick<AgentDmsState, 'me' | 'messages'>, agent: s
   return currentStrategy(s.messages[agent] ?? [], s.me)
 }
 
-/** For tests: forget everything, as a fresh page would. */
+/** One conversation, out of memory. */
+function forget(agent: string): void {
+  useAgentDms.setState((s) => {
+    const messages = { ...s.messages }
+    const reactions = { ...s.reactions }
+    delete messages[agent]
+    delete reactions[agent]
+    return { messages, reactions }
+  })
+}
+
+/**
+ * CLEAR HISTORY (arkinox, 2026-10-12): delete this identity's stored messages
+ * and reactions with `agent`, here and in IndexedDB. The wraps stay noted as
+ * opened (ids only), so the relays' copies are not decrypted and kept again
+ * on this device; they remain on the relays and on any other device.
+ */
+export async function clearHistory(agent: string): Promise<void> {
+  const me = useAgentDms.getState().me
+  if (!me) return
+  forget(agent)
+  // After any write queued for this conversation, so none lands after the delete.
+  await queue
+  writes = writes
+    .then(() => database())
+    .then((d) => (d ? deleteConversation(d, me, agent) : undefined))
+    .catch((err: unknown) => { console.warn(`[agent-dms] could not clear the history: ${err instanceof Error ? err.message : String(err)}`) })
+  await writes
+  if (useAgentDms.getState().me !== me) return
+  // Anything that landed in memory while the queue drained goes too.
+  forget(agent)
+}
+
+/** For tests: every decrypt queued and every write to IndexedDB done. */
+export async function settledAgentDms(): Promise<void> {
+  await queue
+  await writes
+}
+
+/** For tests: forget everything, as a fresh page would (the database is closed and opened again on next use). */
 export function resetAgentDms(): void {
   open.clear()
   watching = false
   lastReopen = 0
+  // The old connection closes once the writes already asked of it are done.
+  const was = db
+  const pending = writes
+  db = null
+  writes = Promise.resolve()
+  void was?.then((d) => pending.then(() => d?.close()))
   resetFor('')
 }

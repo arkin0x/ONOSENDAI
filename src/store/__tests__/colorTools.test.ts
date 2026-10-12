@@ -76,6 +76,14 @@ describe('the dropper', () => {
     expect(w().palette[0]).toBe(GREEN)
   })
 
+  it('in FACE, samples the selected face (its seam) even though its corners are selected with it (arkinox, 2026-10-12)', () => {
+    const s = w().current()!
+    const GREEN = hexAt(BUILT_IN, 246)
+    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], tool: 'face', selectedFace: 0, selection: [0, 1, 2] })
+    w().sampleColor()
+    expect(rgbToHex(w().color)).toBe(GREEN)
+  })
+
   it('does nothing with several points, or none, in hand, and paints nothing ever', () => {
     const before = w().current()!.vertices
     useWorkshop.setState({ selection: [0, 1] })

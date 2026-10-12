@@ -1112,8 +1112,8 @@ export function Workshop(): JSX.Element | null {
                 hand (arkinox, 2026-10-10; it stood beside the chip before):
                 that color, a face's as the average of its corners, into the
                 chip and onto the front of the recent row. */}
-            {(selection.length === 1 || (selection.length === 0 && selectedFace !== null)) && (
-              <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={selection.length === 1 ? 'Take this point\'s color' : 'Take this face\'s color, the average of its corners'} aria-label="Take the selected color" {...noCallout}>
+            {(selection.length === 1 || (selectedFace !== null && (selection.length === 0 || tool === 'face'))) && (
+              <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={selectedFace !== null && (selection.length === 0 || tool === 'face') ? 'Take this face\'s color: its seam color, else the average of its corners' : 'Take this point\'s color'} aria-label="Take the selected color" {...noCallout}>
                 <Pipette size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}

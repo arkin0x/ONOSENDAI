@@ -1124,14 +1124,19 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     sampleColor: () => {
-      const { selection, selectedFace } = get()
+      const { selection, selectedFace, tool } = get()
       const s = get().current()
       if (!s) return
-      const corners = selection.length === 1 ? selection : selection.length === 0 && selectedFace !== null ? s.faces[selectedFace] ?? [] : []
+      // A selected face is sampled as a face whenever it is in hand: in FACE
+      // its corners are selected with it, so the selection is never empty
+      // there (arkinox, 2026-10-12: "the face tool has no sample dropper for
+      // the selected face; if I have a face with a seam I will want to sample it").
+      const asFace = selectedFace !== null && (selection.length === 0 || tool === 'face')
+      const corners = asFace ? s.faces[selectedFace!] ?? [] : selection.length === 1 ? selection : []
       // A face with a hard color (SEAM) shows that color, so that is what the
       // dropper takes. Face colors are all or none (sno-core shards): once one
       // face has a seam, every face carries its own.
-      const seam = selection.length === 0 && selectedFace !== null && s.facecolors?.length === s.faces.length ? s.facecolors[selectedFace] : undefined
+      const seam = asFace && s.facecolors?.length === s.faces.length ? s.facecolors[selectedFace!] : undefined
       const cs = seam ? [seam] : corners.map((i) => s.vertices[i]?.c).filter((c): c is P3 => !!c)
       if (cs.length === 0) return
       const mean = [0, 1, 2].map((k) => cs.reduce((t, c) => t + c[k], 0) / cs.length) as P3

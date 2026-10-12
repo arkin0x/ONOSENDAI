@@ -40,6 +40,7 @@ import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { orientShard } from 'sno-core/orient'
 import { faceEdges } from 'sno-core/outline'
+import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
 
 interface Props {
@@ -49,8 +50,9 @@ interface Props {
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
   /**
-   * Lit, as on the bench: faces shaded flat by the scene's lights, each one's
-   * front as its winding gives it (DECK-0003 §1.4) and its back painted dark,
+   * Lit, as on the bench: faces shaded flat by the canvas's ShardLights
+   * (shardLight.tsx, anchored at the world's full color), each one's
+   * front as its winding gives it (DECK-0003 §1.4) and its back painted darker,
    * so a face that looks the wrong way is plain to see and FLIP can turn it.
    * Nothing is guessed here: the winding is the author's. The world draws
    * unlit under its bloom instead.
@@ -295,13 +297,14 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
         <group>
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
             {lit
-              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
-              : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
+              : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} {...pick}>
-              {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside. */}
-              <meshLambertMaterial vertexColors flatShading color="#6a6a6a" side={FrontSide} transparent opacity={opacity} />
+              {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside.
+                  The multiplier and the light are shardLight's (arkinox, 2026-10-12). */}
+              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
             </mesh>
           )}
         </group>

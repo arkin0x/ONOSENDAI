@@ -5,7 +5,7 @@
  *
  * Framed the way the feed's pictures are (ThumbStage frameOf, framedDistance):
  * on the bounds of the shard and everything it places, from a three-quarter
- * view a little above, lit as on the bench so its faces read. It turns about
+ * view a little above, lit as on the bench (shardLight.tsx) so its faces read. It turns about
  * the vertical through the middle of those bounds. The canvas takes no
  * pointer events (r3f writes pointer-events inline on its wrapper, so it is
  * set on the Canvas itself), so the card under it scrolls and closes as
@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Group } from 'three'
 import type { ShardModel } from 'sno-core/shards'
 import { ShardMesh } from './ShardMesh'
+import { ShardLights } from './shardLight'
 import { frameOf, framedDistance, type ThumbFrame } from './ThumbStage'
 
 /** The camera's field of view, in degrees, as for the feed's pictures. */
@@ -63,8 +64,8 @@ export function ShardSpin({ shard, size = 160 }: { shard: ShardModel; size?: num
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: size, height: size, pointerEvents: 'none' }}
       >
-        <ambientLight intensity={0.9} />
-        <directionalLight position={[3, 5, 4]} intensity={1.2} />
+        {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
+        <ShardLights />
         <Spinning shard={shard} />
       </Canvas>
     </div>

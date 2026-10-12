@@ -16,6 +16,7 @@ import type { ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { fetchRef } from '../lib/parts'
 import { ShardMesh } from './ShardMesh'
+import { ShardLights } from './shardLight'
 import { useThumbs, type ThumbJob } from '../store/useThumbs'
 
 /** The picture's size in pixels; tiles show it at about half that, so it stays sharp on a phone. */
@@ -117,8 +118,8 @@ export function ThumbStage(): JSX.Element {
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: THUMB_PX, height: THUMB_PX }}
       >
-        <ambientLight intensity={0.9} />
-        <directionalLight position={[3, 5, 4]} intensity={1.2} />
+        {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
+        <ShardLights />
         {job && <Capture job={job} />}
       </Canvas>
     </div>

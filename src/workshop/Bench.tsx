@@ -36,6 +36,7 @@ import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRen
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
 import { useCyberspace } from '../store/useCyberspace'
@@ -724,11 +725,12 @@ export function Bench(): JSX.Element {
       }}
       style={{ background: BG }}
     >
-      {/* A key light high and to one side, a dim fill from behind: faces read by
-          their tilt, and the dark backs (ShardMesh lit) show through any hole. */}
-      <ambientLight intensity={0.4} />
-      <directionalLight position={[8, 12, 6]} intensity={0.9} />
-      <directionalLight position={[-9, 2, -3]} intensity={0.6} />
+      {/* A key light high and to one side, a fill from behind, over a strong
+          ambient: faces read by their tilt yet stay near the world's full
+          color, and the darker backs (ShardMesh lit) show through any hole.
+          One rig for the bench, the avatar preview and the thumbnails
+          (shardLight.tsx; arkinox, 2026-10-12). */}
+      <ShardLights />
       {/* One finger or left drag orbits, except in SELECT where that drag is
           the marquee's and the orbit ball turns the view (arkinox,
           2026-10-10). Two fingers, or the right button, pan

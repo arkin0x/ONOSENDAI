@@ -277,7 +277,10 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       <div hidden={modalUp}>
         {showPad && !offerUp && <TouchControls />}
-        {showPad && !offerUp && <RouteOverlay />}
+        {/* Not while placing: the deploy bar docks in this same corner
+            (arkinox, 2026-10-12), and placing moves no avatar, so there is
+            no route to show. */}
+        {showPad && !offerUp && !deploying && <RouteOverlay />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
@@ -291,7 +294,9 @@ export default function App(): JSX.Element {
       )}
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
-      <DeployBar />
+      {/* Docked in the lower left, a gap short of the pad while the pad is on
+          screen (arkinox, 2026-10-12). */}
+      <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
       <CrashNote where="a modal">

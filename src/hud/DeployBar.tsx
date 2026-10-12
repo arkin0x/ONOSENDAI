@@ -38,10 +38,15 @@
  * When the cursor's region already holds your bag, they start at that bag's
  * settings and the bar says they apply to everything you hid there.
  *
- * On a phone the bar is capped at a quarter of the screen's height so what is
- * being hidden stays in view at the centre (arkinox's rule, 2026-10-01). The
- * title and the deploy button are pinned and everything between them scrolls,
- * so the button is always one tap away however many rows are open.
+ * The bar is docked in the lower left, where the route overlay docks: over
+ * the menu button, a gap short of the controls when the pad is open, and
+ * growing upward to 35% of the screen, so the center, where the ghost shows
+ * what is being placed, stays clear on every screen (arkinox, 2026-10-12: it
+ * sat at the top and covered the model). The title and the deploy button are
+ * pinned and everything under them scrolls, so the button is always one tap
+ * away however many rows are open. Each row's green note sits on its own line
+ * under the row's controls (DeployRow), so the controls get the bar's width
+ * at the phone-narrow span beside the pad.
  *
  * A shard aimed into a chest (useShards `intoChest`, arkinox 2026-10-10) is
  * the same bar with the chest's rows gone: STEP, SCALE, TURN and the snap are
@@ -59,7 +64,7 @@
  * by hand below that, the row's tooltip says what will stand at the chest.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
@@ -82,7 +87,34 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, w
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
 
-export function DeployBar(): JSX.Element | null {
+/**
+ * The bar's classes. `pad` is whether the controls pad is on screen: with it,
+ * the bar stops a gap short of the controls, as the route overlay does; with
+ * it closed, the bar has the bottom left up to the screen's right gutter
+ * (styles.css, "Route overlay") (arkinox, 2026-10-12).
+ */
+export function deployBarClass(pad: boolean): string {
+  return pad ? 'deploybar deploybar--pad' : 'deploybar'
+}
+
+/**
+ * One row of the bar: its label and controls on a line, and its green note,
+ * when it has one, on the next line under them, so the controls have the
+ * whole width of the docked bar (arkinox, 2026-10-12).
+ */
+export function DeployRow({ kind, label, hint, hintTitle, children }: { kind: string; label: string; hint?: ReactNode; hintTitle?: string; children: ReactNode }): JSX.Element {
+  return (
+    <>
+      <div className={`deploybar__row deploybar__row--${kind}`}>
+        <span className="deploybar__label">{label}</span>
+        {children}
+      </div>
+      {hint ? <div className={`deploybar__radius deploybar__hint deploybar__hint--${kind}`} title={hintTitle}>{hint}</div> : null}
+    </>
+  )
+}
+
+export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   // A shard being aimed into a chest: signed where it stands, not hidden.
@@ -211,7 +243,7 @@ export function DeployBar(): JSX.Element | null {
         : undefined
 
   return (
-    <div className="deploybar" role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
+    <div className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
       {/* The title row carries the action, left of CANCEL, so the rest of the
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}
@@ -247,20 +279,18 @@ export function DeployBar(): JSX.Element | null {
         </div>
       )}
 
-      {/* Everything between the title and the button scrolls inside the bar,
-          which a phone caps at a quarter of the screen (styles.css). */}
+      {/* Everything under the title scrolls inside the bar, which stops at
+          35% of the screen's height (styles.css, "Route overlay"). */}
       <div className="deploybar__body">
 
       {/* STEP: finer placement than the zoom, with the camera left where it
           is (arkinox, 2026-10-08). The small white box in the cube is the
           cell it snaps to. Comma and period on a keyboard. */}
-      <div className="deploybar__row deploybar__row--step">
-        <span className="deploybar__label">STEP</span>
+      <DeployRow kind="step" label="STEP" hint={formatCellSize(step)}>
         <button className="deploybar__btn" {...bind(() => stepBuild(-1))} disabled={!stepOpen || step <= 0} aria-label="Finer step (comma)" title="Finer step (,)">−</button>
         <span className="deploybar__value">2^{step}</span>
         <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
-        <span className="deploybar__radius">{formatCellSize(step)}</span>
-      </div>
+      </DeployRow>
 
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while
@@ -268,19 +298,19 @@ export function DeployBar(): JSX.Element | null {
           again and again and a held button would move exactly one step. */}
       {/* The height is the chest's, not a content's: an aim has none to show. */}
       {!intoChest && (
-        <div className="deploybar__row deploybar__row--height">
-          <span className="deploybar__label">HIDE AT HEIGHT</span>
+        <DeployRow
+          kind="height"
+          label="HIDE AT HEIGHT"
+          hintTitle={heightTip}
+          hint={`${height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}${fit.auto && fit.height !== null && fit.cause === 'contents' && height > 0 ? ' · raised to hold what is inside' : ''}`}
+        >
           <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= 0} aria-label="Lower height">−</button>
           <span className="deploybar__value">{height}</span>
           <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
           {/* Why an automatic height rose is a tooltip only (arkinox, 2026-10-08),
               except a chest raised for what is aimed inside, which says so in
-              a few words (arkinox, 2026-10-10). */}
-          <span className="deploybar__radius" title={heightTip}>
-            {height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}
-            {fit.auto && fit.height !== null && fit.cause === 'contents' && height > 0 ? ' · raised to hold what is inside' : ''}
-          </span>
-        </div>
+              a few words in the note (arkinox, 2026-10-10). */}
+        </DeployRow>
       )}
       {!intoChest && fit.auto && fit.height === null && (
         <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
@@ -295,8 +325,7 @@ export function DeployBar(): JSX.Element | null {
           object that follows their edits (spec §7.6). Linked, the size and
           turns are theirs, so those rows step aside. */}
       {fromFeed && (
-        <div className="deploybar__row deploybar__row--link">
-          <span className="deploybar__label">LIVE LINK</span>
+        <DeployRow kind="link" label="LIVE LINK" hint={link ? "follows the author's edits" : 'a copy, credited to its author'}>
           <button
             className={`deploybar__toggle ${link ? 'is-on' : ''}`}
             aria-pressed={link}
@@ -305,54 +334,47 @@ export function DeployBar(): JSX.Element | null {
             onClick={() => useShards.getState().setDeployLink(!useShards.getState().deployLink)}
             {...noCallout}
           >{link ? 'ON' : 'OFF'}</button>
-          <span className="deploybar__radius">{link ? "follows the author's edits" : 'a copy, credited to its author'}</span>
-        </div>
+        </DeployRow>
       )}
 
       {/* How big the thing itself is, for this deployment only. The workshop's
           model keeps its own unit whatever is chosen here. */}
       {!isMessage && !link && (
-        <div className="deploybar__row deploybar__row--unit">
-          <span className="deploybar__label">SCALE</span>
+        <DeployRow kind="unit" label="SCALE" hint={`one unit = ${formatCellSize(unit)}`}>
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit - 1))} disabled={unit <= 0} aria-label="Smaller scale">−</button>
           <span className="deploybar__value">2^{unit}</span>
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeployUnit(useShards.getState().deployUnit + 1))} disabled={unit >= MAX_UNIT} aria-label="Larger scale">+</button>
-          <span className="deploybar__radius">one unit = {formatCellSize(unit)}</span>
-        </div>
+        </DeployRow>
       )}
 
       {/* Quarter turns about the object's own origin, for this deployment only:
           exact on the lattice, and every reader draws them (lib/turn.ts). */}
       {!isMessage && !link && (
-        <div className="deploybar__row deploybar__row--turn">
-          <span className="deploybar__label">TURN</span>
+        <DeployRow kind="turn" label="TURN">
           {(['X', 'Y', 'Z'] as const).map((name, axis) => (
             <button key={name} className={`deploybar__btn deploybar__turn ${turn[axis] ? 'is-on' : ''}`} onClick={() => useShards.getState().turnDeploy(axis as 0 | 1 | 2)} aria-label={`Turn a quarter about ${name}, now ${turn[axis] * 90} degrees`} {...noCallout}>
               ↻{name} {turn[axis] * 90}°
             </button>
           ))}
           <button className="deploybar__btn deploybar__turn" disabled={turn.every((t) => t === 0)} onClick={() => useShards.getState().resetDeployTurn()} aria-label="Turn back to how it was built" {...noCallout}>RESET</button>
-        </div>
+        </DeployRow>
       )}
 
       {/* Standing on the ground, where there is ground: dataspace, and big
           enough that an orientation could ever be seen. */}
       {!isMessage && !link && snapOffered(plane, height) && (
-        <div className="deploybar__row deploybar__row--snap">
-          <span className="deploybar__label">SNAP TO EARTH</span>
+        <DeployRow kind="snap" label="SNAP TO EARTH" hint={up ? 'bottom to Earth' : null}>
           <button
             className={`deploybar__toggle ${up ? 'is-on' : ''}`}
             aria-pressed={up}
             onClick={() => useShards.getState().setDeployUp(!useShards.getState().deployUp)}
             {...noCallout}
           >{up ? 'ON' : 'OFF'}</button>
-          {up && <span className="deploybar__radius">bottom to Earth</span>}
-        </div>
+        </DeployRow>
       )}
 
       {!isMessage && !link && snapOffered(plane, height) && up && (
-        <div className="deploybar__row deploybar__row--spin">
-          <span className="deploybar__label">FINE ROTATION</span>
+        <DeployRow kind="spin" label="FINE ROTATION" hint={follow ? 'orbit to aim' : null}>
           <button
             className={`deploybar__toggle ${follow ? 'is-on' : ''}`}
             aria-pressed={follow}
@@ -362,8 +384,7 @@ export function DeployBar(): JSX.Element | null {
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeploySpin(useShards.getState().deploySpin - 1))} disabled={follow} aria-label="Turn counterclockwise">−</button>
           <span className="deploybar__value">SPIN {spin}°</span>
           <button className="deploybar__btn" {...bind(() => useShards.getState().setDeploySpin(useShards.getState().deploySpin + 1))} disabled={follow} aria-label="Turn clockwise">+</button>
-          {follow && <span className="deploybar__radius">orbit to aim</span>}
-        </div>
+        </DeployRow>
       )}
 
       {/* No paragraph here (arkinox, 2026-10-08: "these controls need to be

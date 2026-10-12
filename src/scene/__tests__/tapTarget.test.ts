@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { MAX_EXTENT } from 'sno-core/shards'
-import { MAX_SCREENS, MAX_VIEWPORT_PX, MIN_TARGET_PX, MIN_VISIBLE_PX, farCullDoublings, pxPerUnit, targetSpan } from '../TapTarget'
+import { MAX_SCREENS, MAX_VIEWPORT_PX, MIN_TARGET_PX, MIN_VISIBLE_PX, farCullDoublings, pxPerUnit, targetSpan, yieldsTap } from '../TapTarget'
 import { CAMERA_NEAR, FOV } from '../camera'
 
 describe('pxPerUnit', () => {
@@ -61,5 +61,16 @@ describe('too big to tap', () => {
     const viewport = 844
     expect(targetSpan([3, 1, 1], 1000, viewport)).toBeNull()
     expect(targetSpan([MAX_SCREENS * viewport / 1000 - 0.01, 1, 1], 1000, viewport)).not.toBeNull()
+  })
+})
+
+describe('yieldsTap: your own avatar takes only the taps nothing else wants (arkinox, 2026-10-12)', () => {
+  const self = { name: 'own avatar target' }
+  it('takes a tap that hit only it', () => {
+    expect(yieldsTap([{ object: self }], self)).toBe(false)
+  })
+  it('leaves a tap to a shard, a stop, the planet or another avatar under the same ray, nearer or farther', () => {
+    expect(yieldsTap([{ object: self }, { object: { name: 'shard' } }], self)).toBe(true)
+    expect(yieldsTap([{ object: { name: 'stop cube' } }, { object: self }], self)).toBe(true)
   })
 })

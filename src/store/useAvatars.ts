@@ -29,6 +29,48 @@ import { useCyberspace } from './useCyberspace'
 const MINE_KEY = 'onosendai:avatar'
 const REFRESH_MS = 5 * 60_000
 
+/**
+ * Everyone else's avatar events, kept on the device so a reload draws the
+ * people around you in their own shapes at once, not as dodecahedra until
+ * the relay answers (arkinox, 2026-10-12: "when I refresh the page XOR
+ * disappears until it loads"). Read synchronously as the store is made;
+ * `ensure` still asks the relay, which replaces a kept shape with a newer one.
+ * The whole event is kept and its work checked again on load (paidShard), so
+ * the cache cannot draw a shape the relay copy would not.
+ */
+export const AVATARS_CACHE_KEY = 'onosendai:avatars'
+/** The most avatars kept, the most recently fetched first: shards can be large, and localStorage is a few megabytes. */
+export const AVATARS_KEPT = 60
+/** An avatar fetched longer ago than this is not drawn from the cache. */
+export const AVATARS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+interface KeptAvatar { event: NostrEvent; at: number }
+
+/** The kept avatars still fresh at `now`, as shards by pubkey. */
+export function loadAvatarCache(now = Date.now()): Record<string, ShardModel | null> {
+  try {
+    const raw = localStorage.getItem(AVATARS_CACHE_KEY)
+    const kept = raw ? (JSON.parse(raw) as Record<string, KeptAvatar>) : {}
+    const out: Record<string, ShardModel | null> = {}
+    for (const [pubkey, k] of Object.entries(kept ?? {})) {
+      if (!k?.event || k.event.pubkey !== pubkey || !(now - k.at <= AVATARS_CACHE_MAX_AGE_MS)) continue
+      const shard = paidShard(k.event)
+      if (shard) out[pubkey] = shard
+    }
+    return out
+  } catch { return {} }
+}
+
+/** Keep `event` as its author's avatar, fetched at `now`; the oldest fall off past AVATARS_KEPT. */
+export function keepAvatar(event: NostrEvent, now = Date.now()): void {
+  try {
+    const raw = localStorage.getItem(AVATARS_CACHE_KEY)
+    const kept = { ...(raw ? (JSON.parse(raw) as Record<string, KeptAvatar>) : {}), [event.pubkey]: { event, at: now } }
+    const trimmed = Object.fromEntries(Object.entries(kept).sort((a, b) => b[1].at - a[1].at).slice(0, AVATARS_KEPT))
+    localStorage.setItem(AVATARS_CACHE_KEY, JSON.stringify(trimmed))
+  } catch { /* quota or private mode */ }
+}
+
 /** How the work is done; tests swap in an inline loop. */
 let miner: AvatarMiner = mineInWorker
 export function setAvatarMiner(m: AvatarMiner): void { miner = m }
@@ -78,7 +120,8 @@ interface AvatarsState {
 }
 
 export const useAvatars = create<AvatarsState>((set, get) => ({
-  shards: {},
+  // Kept shapes first; `asked` stays empty, so each is still refreshed.
+  shards: loadAvatarCache(),
   asked: {},
   mining: null,
   mineEvent: null,
@@ -103,7 +146,11 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
         }
         const shard = paidShard(newest)
         set({ shards: { ...get().shards, [pubkey]: shard } })
-        if (pubkey === useCyberspace.getState().identity.pubkey) {
+        const mine = pubkey === useCyberspace.getState().identity.pubkey
+        // Yours is kept whole under MINE_KEY; everyone else's here, a
+        // dodecahedron included, so a dropped shape is not drawn from the cache.
+        if (!mine) keepAvatar(newest)
+        if (mine) {
           // The relay has it, so it is published, whatever this device thought.
           set({ minePublished: true })
           remember(shard, get().mineEvent, true)

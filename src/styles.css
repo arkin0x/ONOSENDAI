@@ -2379,17 +2379,19 @@ kbd {
 
 /* ---------- Deploy bar ----------
  *
- * Up while you are placing a shard. A floating card at the top left, capped
- * in height so the centre of the screen, where the build cursor and the ghost
- * are, stays clear (the rules below); on a desktop it moves right, clear of
- * the panel column.
+ * Up while you are placing a shard. Docked in the lower left exactly where the
+ * route overlay docks, from the same corner numbers (arkinox, 2026-10-12: at
+ * the top it covered the model being placed): its left edge on the menu
+ * button's, its bottom a gap above that button, growing upward to 35% of the
+ * screen. Its left, bottom, width cap and height cap are the route overlay's
+ * own rules (see "Route overlay"). With the pad on screen its right edge stops
+ * the same gap short of the controls (.deploybar--pad, also there); with the
+ * pad closed it runs to the controls' gutter, here.
  */
 .deploybar {
   position: fixed;
-  left: 14px;
-  top: 14px;
+  right: var(--controls-right);
   z-index: 101;
-  width: min(360px, calc(100vw - 28px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2505,49 +2507,23 @@ kbd {
   cursor: default;
 }
 
-/* Clear of the panel columns on a desktop. */
-@media (min-width: 1101px) {
-  .deploybar {
-    left: 332px;
-  }
-}
-
 /*
- * The bar never covers the centre of the screen, where the ghost shows what is
- * being hidden: the title and the deploy button are pinned and the rows
- * between them scroll inside the bar. On a phone, and anywhere this client
- * lays out for touch, the bar takes at most a quarter of the screen's height
- * (arkinox's rule, 2026-10-01). On a desktop it stops above the middle. dvh is
- * the height actually visible, browser bars and all; vh stands in where dvh
- * is not known.
+ * The bar never covers the center of the screen, where the ghost shows what is
+ * being hidden: it grows up from the bottom left to the route overlay's 35%
+ * cap, which ends well below the middle on a phone, a wide tablet and a
+ * desktop alike, so the separate phone and tablet caps it had at the top of
+ * the screen (#263) are gone. The title and the deploy button are pinned and
+ * the rows under them scroll inside the bar.
  */
 .deploybar {
-  max-height: calc(50vh - 24px);
-  max-height: calc(50dvh - 24px);
+  padding-bottom: 12px;
 }
-@media (max-width: 1100px) {
-  /* A little taller than the quarter it was (arkinox, 2026-10-08: "maybe
-     make the box a little taller"), still well clear of the center. */
-  .deploybar {
-    max-height: 30vh;
-    max-height: 30dvh;
-    padding-bottom: 12px;
-  }
-}
-/*
- * On a wide tablet or a small desktop window the same cap applies. From 1101px
- * the bar stands 332px in and 360px wide, so its right edge is at 692px, and
- * a screen narrower than about 1660px has its centre inside that span: let
- * down to the middle, the bar's lower edge sat on the build cursor and the
- * ghost (arkinox, 2026-10-10, on a tablet). This is the compass's own overlap
- * rule (the 1660px breakpoint above): only where the bar ends well short of
- * the centre may it grow to the middle.
- */
-@media (min-width: 1101px) and (max-width: 1659px) {
-  .deploybar {
-    max-height: 30vh;
-    max-height: 30dvh;
-  }
+/* A row's green note on its own line under the row's controls (DeployRow),
+   tucked up to the row it belongs to (arkinox, 2026-10-12). */
+.deploybar__hint {
+  margin-top: -3px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .deploybar__head,
 .deploybar__foot {
@@ -4029,6 +4005,9 @@ kbd {
   /* The pad's three 38px columns and two 4px gaps; the commit block below it
      is set to the same width. */
   --controls-width: 122px;
+  /* The gap the docked overlays (the route overlay and the deploy bar) keep
+     from the menu button and from the controls. */
+  --routeov-gap: 10px;
 }
 
 .hamburger-menu {
@@ -4296,15 +4275,8 @@ kbd {
  * act on, this is only read, so when the chat is unfolded over it the chat
  * wins. Taps pass through it until the list overflows (RouteOverlay.tsx). */
 .routeov {
-  --routeov-gap: 10px;
   position: fixed;
-  left: var(--menu-left);
-  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap));
-  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
   z-index: 100;
-  max-width: 360px;
-  max-height: 35vh;
-  max-height: 35dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4318,6 +4290,22 @@ kbd {
   font-size: 9px;
   letter-spacing: 0.1em;
 }
+/* The dock, shared with the deploy bar (arkinox, 2026-10-12): the same corner,
+ * the same gaps, the same width and height caps. The deploy bar stops short of
+ * the controls only while the pad is on screen (DeployBar deployBarClass);
+ * the route overlay is only ever up beside the pad. */
+.routeov,
+.deploybar {
+  left: var(--menu-left);
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  max-width: 360px;
+  max-height: 35vh;
+  max-height: 35dvh;
+}
+.routeov,
+.deploybar--pad {
+  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap));
+}
 .routeov--cloud { border-color: rgba(47, 129, 247, 0.6); }
 .routeov--blocked { border-color: rgba(255, 59, 107, 0.6); }
 /* Only while the list overflows: then a finger, a wheel or a click lands on
@@ -4326,7 +4314,8 @@ kbd {
 /* The HOSAKA mark breathes in the same spot over the menu button while a job
  * computes (HosakaPulse.tsx, the menu button's width at the logo's 308:334
  * aspect). While it is mounted the overlay stands a gap above it. */
-.app:has(.hosaka-pulse) .routeov {
+.app:has(.hosaka-pulse) .routeov,
+.app:has(.hosaka-pulse) .deploybar {
   bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
 }
 /* The summary drops under ROUTE rather than being cut off when the overlay is

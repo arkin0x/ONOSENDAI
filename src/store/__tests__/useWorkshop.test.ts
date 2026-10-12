@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
-import { DEFAULT_PALETTE, nextSelection, useWorkshop } from '../useWorkshop'
+import { DEFAULT_PALETTE, nextSelection, settleSelection, tapSelection, useWorkshop } from '../useWorkshop'
+import { stackedCount } from '../../lib/weld'
 import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
 
 const w = () => useWorkshop.getState()
@@ -879,5 +880,99 @@ describe('face colors and palettes', () => {
     expect(w().palettes[0].name).toBe('sunset')
     w().renamePalette(id, '   ')
     expect(w().palettes[0].name).toBe('sunset')
+  })
+})
+
+/**
+ * arkinox's screenshot sequence (2026-10-12): a lone rectangle above a cube,
+ * moved down until its bottom corners stand on the cube's top corners. The
+ * selection stayed the rectangle's own four vertices, but the next write to
+ * it (a box growing, a two-finger pan putting the box back, a tap on a lit
+ * stacked spot) widened it to everything on those spots, and the next nudge
+ * tore the cube's corners off with the rectangle. Stacked is not welded.
+ */
+describe('stacked by a move is not welded (2026-10-12)', () => {
+  // Cube: vertices 0..7, the unit cube. Top corners: 2 (0,1,0), 3 (1,1,0), 6 (0,1,1), 7 (1,1,1).
+  // Rectangle: vertices 8..11, standing in z = 0 from y = 3 to y = 4.
+  const SCENE = JSON.stringify({
+    v: 1, type: 'shard', name: 'stack', unit: 0, extent: 15, mode: 'solid',
+    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1], [0, 3, 0], [1, 3, 0], [1, 4, 0], [0, 4, 0]],
+    ticks: Array.from({ length: 12 }, () => [0, 0, 0]),
+    colors: Array.from({ length: 12 }, () => [1, 1, 1]),
+    faces: [[0, 1, 3], [0, 3, 2], [4, 6, 7], [4, 7, 5], [2, 3, 7], [2, 7, 6], [8, 9, 10], [8, 10, 11]],
+  })
+  const RECT = [8, 9, 10, 11]
+  const CUBE = [0, 1, 2, 3, 4, 5, 6, 7]
+  beforeEach(() => {
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFace: null, facePick: [], invert: false, past: [], future: [], aim: null, notice: null, tool: 'select', division: 1 })
+    const id = w().importText(SCENE)
+    expect(id).not.toBeNull()
+    w().select(id!)
+  })
+  const at = (): string[] => w().current()!.vertices.map((v) => ticksOf(v).join())
+  /** The rectangle picked and nudged down two units, onto the cube's top edge. */
+  const land = (): string[] => {
+    w().setSelection(RECT)
+    expect(w().selection).toEqual(RECT)
+    const start = at()
+    w().moveSelected(1, -w().step()); w().moveSelected(1, -w().step())
+    expect(stackedCount(w().current()!)).toBe(2)
+    return start
+  }
+
+  it('settleSelection widens only what is new, never what is held', () => {
+    const s = { vertices: [vertexAt([0, 0, 0], [1, 1, 1]), vertexAt([0, 0, 0], [1, 1, 1]), vertexAt([T, 0, 0], [1, 1, 1])] }
+    // Nothing held: a pick takes the whole spot.
+    expect(settleSelection(s, [], [0])).toEqual([0, 1])
+    // Held: kept exactly, even with a stack on its spot.
+    expect(settleSelection(s, [1], [1])).toEqual([1])
+    expect(settleSelection(s, [1], [1, 2])).toEqual([1, 2])
+    // Not a vertex: dropped.
+    expect(settleSelection(s, [], [9])).toEqual([])
+  })
+
+  it('the selection stays the rectangle after it lands on the cube, through a box rewrite and a pan cancel', () => {
+    land()
+    // The box writes base plus what it holds on every move, and a pan puts the base back: both are this call.
+    w().setSelection([...w().selection])
+    expect(w().selection).toEqual(RECT)
+    w().setSelection(nextSelection(w().selection, [], false))
+    expect(w().selection).toEqual(RECT)
+  })
+
+  it('moving on down leaves the cube whole', () => {
+    land()
+    const cube = at().slice(0, 8)
+    w().setSelection([...w().selection])
+    w().moveSelected(1, -w().step())
+    expect(at().slice(0, 8)).toEqual(cube)
+    // The rectangle passes into the cube: its four corners on the cube's four front corners, stacked, not joined.
+    expect(at().slice(8)).toEqual([`0,0,0`, `${T},0,0`, `${T},${T},0`, `0,${T},0`])
+    expect(stackedCount(w().current()!)).toBe(4)
+  })
+
+  it('a tap on a lit stacked spot lets go of what is held there and never adds the cube corner', () => {
+    land()
+    // The bench sends the first vertex on the spot, the cube's 2, which is not held; the rectangle's 8 is.
+    expect(tapSelection(w().current()!, w().selection, 2, false)).toEqual([9, 10, 11])
+    w().toggleVertex(2)
+    expect(w().selection).toEqual([9, 10, 11])
+    // Tapped again, the spot is not lit: picking it takes everything standing there.
+    w().toggleVertex(2)
+    expect(w().selection).toEqual([2, 8, 9, 10, 11])
+  })
+
+  it('JOINED is asked for: pressed, it reaches across the shared spots into the cube', () => {
+    land()
+    w().selectConnected()
+    expect(w().selection).toEqual([...CUBE, ...RECT])
+  })
+
+  it('undo puts every point back exactly', () => {
+    const start = land()
+    w().moveSelected(1, -w().step())
+    w().undo(); w().undo(); w().undo()
+    expect(at()).toEqual(start)
+    expect(w().selection).toEqual([])
   })
 })

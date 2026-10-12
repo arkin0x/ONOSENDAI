@@ -22,7 +22,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -228,6 +228,30 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
       </button>
     </>)}
 
+    </div>
+  )
+}
+
+/**
+ * The weld row, its own row at the top of the bottom-left column (arkinox,
+ * 2026-10-12: "weld ui overlay disables the orbit button. I don't like this.
+ * let's move it to the left side stack and make it a row. if nothing is below
+ * it, it should sit above the tools button."). It stood in the color corner
+ * at the bottom right, where it rose over the orbit ball and took its drags.
+ * First in the column, so the selection rows, the pad and the chip under it
+ * never move when it comes and goes; with none of them up it stands directly
+ * on the chip. The count is the readout, WELD the act: never automatic, since
+ * a paste lands on its original on purpose, to be moved.
+ */
+export function WeldRow({ stacked, selected }: { stacked: number; selected: number }): JSX.Element | null {
+  if (stacked <= 0) return null
+  return (
+    <div className="benchclip benchweld" role="group" aria-label="Weld stacked points">
+      <span className="benchweld__count" role="status">{stacked} STACKED</span>
+      <button className="touchpad__key" title={selected >= 2 ? 'Fold the selected points that stand on one spot into one' : 'Fold every point standing on another into one; faces that disagree on color keep their own'} aria-label={selected >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'} {...noCallout} onClick={() => useWorkshop.getState().weld()}>
+        <Merge size={15} strokeWidth={2.25} aria-hidden />
+        <span className="touchpad__sub">WELD</span>
+      </button>
     </div>
   )
 }
@@ -978,6 +1002,7 @@ export function Workshop(): JSX.Element | null {
       {/* Bottom left: TURN and the pad while points are selected, over TOOLS and
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
+        <WeldRow stacked={stacked} selected={selection.length} />
         {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || selectedFace !== null || facePick.length > 0} />}
         <ActionRow points={selectedPoints} verts={shard?.vertices.length ?? 0} parts={shard?.parts?.length ?? 0} tool={tool} face={selectedFace} picks={facePick.length} faces={shard?.faces.length ?? 0} />
         <TurnRow inHand={selection.length + partSel.length} />
@@ -1074,14 +1099,6 @@ export function Workshop(): JSX.Element | null {
       {/* Bottom right: the color column. FILL for a set of points is on the
           clipboard row, and the FACE tool's actions on its own row there. */}
       <div className="ws__corner">
-        {stacked > 0 && (
-          <div className="benchops" role="group" aria-label="Weld stacked points">
-            <span className="workshop__value workshop__value--wide">{stacked} stacked</span>
-            {/* Never automatic: a paste lands on its original on purpose, to be
-                moved. This is the deliberate act once the shape is settled. */}
-            <button className="workshop__btn" onClick={() => w().weld()} title={selection.length >= 2 ? 'Fold the selected points that stand on one spot into one' : 'Fold every point standing on another into one; faces that disagree on color keep their own'}>WELD</button>
-          </div>
-        )}
         {/* What an action reaches, a column over the chip, widest at the top:
             the whole object, the piece the points in hand are joined to, the
             points themselves, nearest the chip (arkinox, 2026-09-24). These used to sit inside

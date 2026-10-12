@@ -3682,12 +3682,22 @@ kbd {
   gap: 4px;
 }
 .benchturn .touchpad__key { width: 48px; height: 48px; }
-.benchops {
+/* The weld row (arkinox, 2026-10-12): the stack count as a readout cell the
+   height of a key, then WELD, at the top of the bottom-left column. It stood
+   in the color corner and covered the orbit ball. The readout lets taps
+   through to nothing; only the key acts. */
+.benchweld { align-items: stretch; }
+.benchweld__count {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  height: 48px;
+  padding: 0 10px;
+  box-sizing: border-box;
   border-radius: 9px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: var(--dim, #7fa3b3);
   background: rgba(6, 14, 22, 0.85);
   border: 1px solid var(--border);
   backdrop-filter: blur(8px);

@@ -26,6 +26,17 @@
  * so you can build near it: yours at your true head, always, and a
  * spectated one at the action the CHAIN chip last aimed at, or its head
  * (lib/buildCursor.ts avatarInBuild).
+ *
+ * A tap on it opens its card, as a tap on anyone else's does (arkinox,
+ * 2026-10-12: "let's make the avatar tap work on the current user too! it
+ * will be cool to see our own avatar spin"): PersonModal with the avatar
+ * turning, COPY TO WORKSHOP without credit, and no TARGET or SPECTATE, since
+ * it is you. While spectating, the avatar drawn here is theirs, and so is
+ * the card. Your avatar stands where the cursor, the shard you are in, the
+ * stop you board from and the planet you landed on all are, so its target
+ * yields (TapTarget `yields`): any of those under the same tap keeps it, and
+ * the avatar takes only the taps that would otherwise have toggled the
+ * controls.
  */
 
 import { useMemo, useRef } from 'react'
@@ -37,13 +48,17 @@ import { travelOffset } from '../lib/travel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
+import { usePersonCard } from '../store/usePersonCard'
 import { AvatarShape } from './AvatarShape'
+import { TapTarget } from './TapTarget'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
 const REACH = GRID_RADIUS * 8
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
+  // What is drawn, measured for the tap (TapTarget), as OtherAvatar does.
+  const drawn = useRef<Group>(null)
   // Looking at a shard means the origin is that shard, not you: drawing your
   // marker there would say you are standing on it. Spectating keeps the marker,
   // where it stands in for the avatar being watched.
@@ -102,15 +117,18 @@ export function Avatar(): JSX.Element | null {
 
   useFrame((_, dt) => {
     const g = group.current
-    if (!g) return
+    const d = drawn.current
+    if (!g || !d) return
     g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    // The turn is on the drawn shape alone, so the tap target, which is
+    // measured in world space and sized in its parent's, stays unturned.
     if (turnedFor.current !== view) {
-      g.quaternion.copy(facing)
+      d.quaternion.copy(facing)
       turnedFor.current = view
       return
     }
     // Eases into the new heading over the same beat the travel animation takes.
-    g.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
+    d.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
   if (focus && !placed) return null
@@ -125,7 +143,10 @@ export function Avatar(): JSX.Element | null {
           cell, the icosahedron inscribes it exactly, and standing on your
           own destination erased you; now the red edges composite on top of
           whatever shares your gibson. */}
-      <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} />
+      <group ref={drawn}>
+        <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} />
+      </group>
+      <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />
     </group>
   )
 }

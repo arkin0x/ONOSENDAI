@@ -65,6 +65,28 @@ describe('the card a tap on an avatar opens', () => {
   })
 })
 
+describe('the card a tap on your own avatar opens (arkinox, 2026-10-12)', () => {
+  it('shows your avatar turning and COPY TO WORKSHOP, marked YOU, with no TARGET or SPECTATE', async () => {
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const me = useCyberspace.getState().identity.pubkey
+    const html = renderToStaticMarkup(<PersonCard pubkey={me} shard={{ ...octangula(), id: `avatar:${me}` }} onClose={close} Preview={Stub} />)
+    expect(html).toContain('stub-preview')
+    expect(html).toContain('COPY TO WORKSHOP')
+    expect(html).toContain('YOU')
+    expect(html).not.toContain('TARGET')
+    expect(html).not.toContain('SPECTATE')
+  })
+
+  it('is what a tap on your avatar opens: the card store, with your pubkey', async () => {
+    const { usePersonCard } = await import('../../store/usePersonCard')
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const me = useCyberspace.getState().identity.pubkey
+    usePersonCard.getState().open(me)
+    expect(usePersonCard.getState().pubkey).toBe(me)
+    usePersonCard.getState().close()
+  })
+})
+
 describe('copying an avatar', () => {
   beforeEach(() => { useWorkshop.setState({ shards: [] }) })
 

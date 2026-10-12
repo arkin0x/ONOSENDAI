@@ -128,9 +128,27 @@ interface Props {
   /** A fixed on-screen size instead, in pixels, centred at `at` (a message's mark). */
   px?: number
   at?: [number, number, number]
+  /**
+   * Take the tap only when nothing else under it wants it: your own avatar
+   * (arkinox, 2026-10-12). It stands where you are, which is where the
+   * cursor, the shard you stand in, the stop you board from and the planet
+   * you landed on all are, so it must never take a tap that one of those
+   * would have had; it gets the taps that would otherwise have only toggled
+   * the controls.
+   */
+  yields?: boolean
 }
 
-export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
+/**
+ * Whether a yielding target leaves the tap to something else the same ray
+ * hit: anything else in the scene with a tap handler (R3F's intersections
+ * hold only objects that have one). `self` is the yielding target's own mesh.
+ */
+export function yieldsTap(intersections: ReadonlyArray<{ object: unknown }>, self: unknown): boolean {
+  return intersections.some((i) => i.object !== self)
+}
+
+export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JSX.Element {
   const hit = useRef<Mesh>(null)
   const box = useRef(new Box3())
   const centre = useRef(new Vector3())
@@ -194,6 +212,9 @@ export function TapTarget({ onTap, measure, px, at }: Props): JSX.Element {
 
   const tap = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP_PX) return
+    // Not stopping propagation is how R3F lets the tap travel on to the
+    // next thing the ray hit, nearer or farther.
+    if (yields && yieldsTap(e.intersections, hit.current)) return
     if (measure) {
       // A coin or message under the same tap takes it: leave the event to
       // travel on to it (not stopping propagation is how R3F does that).

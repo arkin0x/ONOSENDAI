@@ -105,6 +105,79 @@ export function inNeighborhood(p: Position, of: Position): boolean {
   return near(a.sx, b.sx) && near(a.sy, b.sy) && near(a.sz, b.sz)
 }
 
+/**
+ * The people PresenceAvatars draws: everyone here in your plane except the
+ * avatars something else already draws. You are scene/Avatar's; a target is
+ * TargetAvatars'; and the avatar you spectate is scene/Avatar's too, since
+ * spectating draws them in your place (useCyberspace focusPubkey).
+ *
+ * That last one was missing (arkinox, 2026-10-12: "if I spectate XOR while
+ * he's sweeping an area, when his new move lands, his avatar appears at the
+ * new coordinate AND the previous coordinate, and the previous coordinate
+ * LERPS to the new coordinate"). An untargeted XOR was drawn twice: once by
+ * Avatar, gliding from his old place, and once here, from the presence feed,
+ * which had already put him at his new one. At rest the two sat on the same
+ * cell and looked like one; every move pulled them apart.
+ */
+export function presenceDrawn(
+  people: Record<string, Person>,
+  skip: { me: string; focus: string; targets: Record<string, unknown>; plane: Plane },
+): Person[] {
+  return Object.values(people).filter((p) =>
+    p.pubkey !== skip.me && p.pubkey !== skip.focus && !skip.targets[p.pubkey] && p.plane === skip.plane)
+}
+
+/**
+ * The people last seen here, kept on the device per identity, so a reload
+ * draws them at once where they last stood instead of after the relay
+ * answers (arkinox, 2026-10-12: "when I refresh the page XOR disappears until
+ * it loads. then he's next to me again. his should be cached. shouldn't need
+ * to reload every time"). localStorage, as the profile cache is: it is read
+ * synchronously when the neighborhood is entered, so the first frame has
+ * them. The relay then refreshes them as before; a newer position glides
+ * there (lib/avatarLerp.ts), and anyone gone is dropped by the sweep, which
+ * runs on the seeded people as soon as the backfill is in.
+ */
+export const PRESENCE_CACHE_PREFIX = 'onosendai:presence:'
+/** Someone the relay has not confirmed for this long is not drawn from the cache. */
+export const PRESENCE_CACHE_MAX_AGE_S = 24 * 60 * 60
+/** The most people kept per identity, the most recently confirmed first. */
+export const PRESENCE_CACHE_KEPT = 200
+
+interface KeptPerson extends Omit<Person, 'position'> { position: { x: string; y: string; z: string } }
+
+/** Keep `people` as `me`'s neighbors; quota and private mode are not errors. */
+export function savePresenceCache(me: string, people: Record<string, Person>): void {
+  if (!me) return
+  const kept: KeptPerson[] = Object.values(people)
+    .sort((a, b) => b.checkedAt - a.checkedAt)
+    .slice(0, PRESENCE_CACHE_KEPT)
+    .map((p) => ({ ...p, position: { x: p.position.x.toString(), y: p.position.y.toString(), z: p.position.z.toString() } }))
+  try { localStorage.setItem(PRESENCE_CACHE_PREFIX + me, JSON.stringify(kept)) } catch { /* quota or private mode */ }
+}
+
+/**
+ * `me`'s kept neighbors who can still be here: confirmed within
+ * PRESENCE_CACHE_MAX_AGE_S of `nowS`, inside the 27 sectors around `at`,
+ * and not `me`.
+ */
+export function loadPresenceCache(me: string, at: Position, nowS = Math.floor(Date.now() / 1000)): Record<string, Person> {
+  if (!me) return {}
+  try {
+    const raw = localStorage.getItem(PRESENCE_CACHE_PREFIX + me)
+    const list = raw ? (JSON.parse(raw) as KeptPerson[]) : []
+    const out: Record<string, Person> = {}
+    for (const k of Array.isArray(list) ? list : []) {
+      if (!k || typeof k.pubkey !== 'string' || k.pubkey === me || !k.position) continue
+      if (!(nowS - k.checkedAt <= PRESENCE_CACHE_MAX_AGE_S)) continue
+      const position = { x: BigInt(k.position.x), y: BigInt(k.position.y), z: BigInt(k.position.z) }
+      if (!inNeighborhood(position, at)) continue
+      out[k.pubkey] = { ...k, position }
+    }
+    return out
+  } catch { return {} }
+}
+
 interface PresenceState {
   people: Record<string, Person>
   /** The sector the feed is anchored to, or null before the first. */
@@ -259,7 +332,10 @@ async function enter(at: Position): Promise<void> {
   if (usePresence.getState().sector === key) return
   stopLive?.()
   stopLive = null
-  usePresence.setState({ sector: key, people: {}, loading: true })
+  // Seeded from the device, so the people last seen here are drawn before
+  // the relay answers; the backfill and the live feed refresh them.
+  const seeded = loadPresenceCache(useCyberspace.getState().identity.pubkey, at)
+  usePresence.setState({ sector: key, people: seeded, loading: true })
   const filter = neighborhoodFilter(at)
   // Listen from a minute back before the fetch, so nothing lands in the gap.
   const since = Math.floor(Date.now() / 1000) - 60
@@ -276,6 +352,10 @@ async function enter(at: Position): Promise<void> {
   } finally {
     if (usePresence.getState().sector === key) usePresence.setState({ loading: false })
   }
+  // Someone seeded from the device whose newest action is older than the
+  // backfill reached is confirmed now rather than at the next sweep, so a
+  // person who has left is not kept for minutes on the strength of a cache.
+  if (Object.keys(seeded).length > 0 && usePresence.getState().sector === key) void sweep()
 }
 
 /**
@@ -317,13 +397,29 @@ export function startPresence(): void {
     if (s.position !== prev.position) void enter(s.position)
   })
   sweepHandle = setInterval(() => { void sweep() }, SWEEP_EVERY_MS)
+  // Kept on the device a moment after each change, not on every ingest.
+  stopSaving = usePresence.subscribe((st, prev) => {
+    if (st.people === prev.people || saveHandle !== null) return
+    saveHandle = setTimeout(() => {
+      saveHandle = null
+      savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
+    }, SAVE_AFTER_MS)
+  })
 }
+
+/** How long after a change the neighbors are written to the device. */
+const SAVE_AFTER_MS = 1000
+let saveHandle: ReturnType<typeof setTimeout> | null = null
+let stopSaving: (() => void) | null = null
 
 /** For tests: forget everything and stop listening. */
 export function stopPresence(): void {
   stopLive?.()
   stopLive = null
   if (sweepHandle) { clearInterval(sweepHandle); sweepHandle = null }
+  stopSaving?.()
+  stopSaving = null
+  if (saveHandle) { clearTimeout(saveHandle); saveHandle = null }
   started = false
   chainChecks.clear()
   forgetNeighborChains()

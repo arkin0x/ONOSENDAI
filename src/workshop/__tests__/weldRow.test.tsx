@@ -23,11 +23,14 @@ function block(cls: string): string {
 
 describe('WeldRow', () => {
   it('is a row with the count and WELD while points are stacked, and nothing otherwise', () => {
-    const html = renderToStaticMarkup(<WeldRow stacked={2} selected={4} />)
+    // The stairs arkinox built: two boxes sharing an edge, 4 points on 2 spots (2026-10-12).
+    const html = renderToStaticMarkup(<WeldRow stacked={{ spots: 2, points: 4 }} selected={4} />)
     expect(html).toContain('benchclip')
-    expect(html).toContain('2 STACKED')
+    expect(html).toContain('2 SPOTS STACKED')
+    expect(html).toContain('4 points share 2 spots')
+    expect(renderToStaticMarkup(<WeldRow stacked={{ spots: 1, points: 3 }} selected={0} />)).toContain('1 SPOT STACKED')
     expect(html).toContain('WELD')
-    expect(renderToStaticMarkup(<WeldRow stacked={0} selected={4} />)).toBe('')
+    expect(renderToStaticMarkup(<WeldRow stacked={{ spots: 0, points: 0 }} selected={4} />)).toBe('')
   })
 
   it('stands first in the bottom-left column, so the chip is the next thing under it when no row is up', () => {

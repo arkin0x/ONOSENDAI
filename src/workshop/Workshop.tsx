@@ -47,7 +47,7 @@ import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } fr
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
-import { stackedCount } from '../lib/weld'
+import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
 import { useEscape } from '../hooks/useEscape'
 
@@ -243,11 +243,11 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
  * on the chip. The count is the readout, WELD the act: never automatic, since
  * a paste lands on its original on purpose, to be moved.
  */
-export function WeldRow({ stacked, selected }: { stacked: number; selected: number }): JSX.Element | null {
-  if (stacked <= 0) return null
+export function WeldRow({ stacked, selected }: { stacked: { spots: number; points: number }; selected: number }): JSX.Element | null {
+  if (stacked.spots <= 0) return null
   return (
     <div className="benchclip benchweld" role="group" aria-label="Weld stacked points">
-      <span className="benchweld__count" role="status">{stacked} STACKED</span>
+      <span className="benchweld__count" role="status" title={`${stacked.points} points share ${stacked.spots} spot${stacked.spots === 1 ? '' : 's'}; WELD folds each spot into one point`}>{stacked.spots} SPOT{stacked.spots === 1 ? '' : 'S'} STACKED</span>
       <button className="touchpad__key" title={selected >= 2 ? 'Fold the selected points that stand on one spot into one' : 'Fold every point standing on another into one; faces that disagree on color keep their own'} aria-label={selected >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'} {...noCallout} onClick={() => useWorkshop.getState().weld()}>
         <Merge size={15} strokeWidth={2.25} aria-hidden />
         <span className="touchpad__sub">WELD</span>
@@ -578,7 +578,7 @@ export function Workshop(): JSX.Element | null {
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
-  const stacked = useMemo(() => (shard ? stackedCount(shard) : 0), [shard])
+  const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
   // The workshop is a modal over the scene, with arkinox's order inside it
   // (2026-10-01): its own modals (the palette sheet, the object picker, every
   // confirmation) open later and so close first; then the open panel, the

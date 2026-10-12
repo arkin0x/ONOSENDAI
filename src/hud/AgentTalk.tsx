@@ -17,16 +17,25 @@
  * published for you. House rules: no standing paragraphs (the EXPLAIN pill
  * holds the prose), lucide icons, uppercase labels, and a card that fits a
  * phone. Hooks stay above any return (hookOrder.test.ts).
+ *
+ * Under each message, the reactions to it (arkinox, 2026-10-12: "show the
+ * reaction in the agent chat. then I'll know XOR has seen my messages"): a
+ * small chip per emoji, 👀 titled "<agent> has seen this" with its time.
+ * The history is kept on this device (lib/agentDmDb.ts), so it shows at once
+ * when TALK opens; CLEAR HISTORY, behind a confirm, deletes it here.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Volume2, X } from 'lucide-react'
+import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Trash2, Volume2, X } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
+import { useProfile } from '../hooks/useProfile'
+import type { DmReaction } from '../lib/dm'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { setTalking, useAgentDms } from '../store/useAgentDms'
+import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 
@@ -109,6 +118,28 @@ function MessageActions({ id, text, speaking, setSpeaking }: { id: string; text:
   )
 }
 
+/** The emoji the agent sends on seeing a message (arkinox, 2026-10-12). */
+export const SEEN_EMOJI = '👀'
+
+/** A reaction's tooltip: "XOR has seen this" for the seen emoji, with the time. */
+export function reactionTitle(r: Pick<DmReaction, 'content' | 'at'>, who: string): string {
+  const what = r.content === SEEN_EMOJI ? `${who} has seen this` : `${who} reacted ${r.content || '+'}`
+  return `${what} · ${formatStamp(r.at)}`
+}
+
+/** The reaction chips under one message: one per emoji per person, the earliest of each. */
+function Reactions({ list, me, agentName }: { list: DmReaction[]; me: string; agentName: string }): JSX.Element {
+  const shown = new Map<string, DmReaction>()
+  for (const r of list) { const k = `${r.from}:${r.content}`; if (!shown.has(k)) shown.set(k, r) }
+  return (
+    <span className="talk__reacts">
+      {[...shown.values()].map((r) => (
+        <span key={r.id} className="talk__react" title={reactionTitle(r, r.from === me ? 'You' : agentName)} aria-label={reactionTitle(r, r.from === me ? 'You' : agentName)}>{r.content || '+'}</span>
+      ))}
+    </span>
+  )
+}
+
 /** Within this many pixels of the bottom, the list follows new messages. */
 const STICK_PX = 48
 
@@ -127,6 +158,10 @@ const MAX_DM = 4000
 
 export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => void }): JSX.Element {
   const talk = useAgentConversation(agent)
+  const agentProfile = useProfile(agent)
+  const agentName = agentProfile?.name || 'Your agent'
+  // CLEAR HISTORY asks first: it deletes what this device keeps.
+  const [confirmClear, setConfirmClear] = useState(false)
   const coordHex = useCyberspace((s) => s.coordHex())
   const [draft, setDraft] = useState('')
   // Set by KEEP GOING: the draft goes out with the marker. Cleared when the
@@ -163,7 +198,9 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
     const item = a ? el.querySelector<HTMLElement>(`[data-msg="${a.id}"]`) : null
     if (a && item) el.scrollTop += (item.getBoundingClientRect().top - el.getBoundingClientRect().top) - a.offset
     anchor.current = topVisible(el)
-  }, [talk.messages])
+    // Reactions grow a message too, and the history kept on this device lands
+    // in one batch before the relays answer: both go through the same anchor.
+  }, [talk.messages, talk.reactions])
 
   const canSend = !talk.blocked && !talk.sending
   const send = (): void => {
@@ -186,6 +223,9 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
       <div className="modal__card login talk" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title talk__title">TALK <ProfileBadge pubkey={agent} /></h2>
+          <button className="avatars__go talk__clear" onClick={() => setConfirmClear(true)} disabled={talk.messages.length === 0} title="Delete this conversation's messages kept on this device">
+            <Trash2 size={10} aria-hidden /> CLEAR HISTORY
+          </button>
           <button className="secret__close" onClick={onClose} aria-label="Close"><X size={14} /></button>
         </div>
 
@@ -241,12 +281,13 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
                   {mine ? 'YOU' : 'AGENT'}{m.strategy ? ' · STRATEGY' : ''}{m.keepGoing ? ' · KEEP GOING' : ''} · {formatAgo(m.at)}
                 </span>
                 <span className="talk__text">{m.text}</span>
+                {talk.reactions[m.id] && <Reactions list={talk.reactions[m.id]} me={talk.me} agentName={agentName} />}
                 {!mine && <MessageActions id={m.id} text={m.text} speaking={speaking} setSpeaking={setSpeaking} />}
               </li>
             )
           })}
           {talk.messages.length === 0 && (
-            <li className="avatars__empty">{talk.myInbox.status === 'loading' ? 'Reading your DM inbox…' : talk.myInbox.status === 'ready' ? 'No messages yet.' : 'No messages to show.'}</li>
+            <li className="avatars__empty">{!talk.historyLoaded ? 'Loading history…' : talk.myInbox.status === 'loading' ? 'Reading your DM inbox…' : talk.myInbox.status === 'ready' ? 'No messages yet.' : 'No messages to show.'}</li>
           )}
         </ol>
 
@@ -286,8 +327,21 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           standing orders: the agent keeps the newest one and rereads it every
           turn. The quick orders only write a message for you to send.
           KEEP GOING also renews your agent&apos;s spent compute budget once,
-          so a ride that stopped for its budget resumes.
+          so a ride that stopped for its budget resumes. Your agent marks each
+          message it has seen with a private 👀 reaction. Every message here
+          is kept decrypted on this device so it opens at once, which means
+          anyone with this unlocked device or a copy of its browser data can
+          read them; CLEAR HISTORY deletes them from this device.
         </Explanation>
+        {confirmClear && (
+          <ConfirmModal
+            title="CLEAR HISTORY"
+            body="Delete this conversation's messages kept on this device. They stay on the relays and on your other devices, and are not decrypted here again."
+            confirmLabel="CLEAR HISTORY"
+            onConfirm={() => { setConfirmClear(false); void talk.clear() }}
+            onCancel={() => setConfirmClear(false)}
+          />
+        )}
       </div>
     </div>,
     document.body,

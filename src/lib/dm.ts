@@ -33,6 +33,15 @@ import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { EventTemplate, NostrEvent } from './events'
 
 export const DM_KIND = 14
+/**
+ * A private reaction (arkinox, 2026-10-12: "when I send my agent a message,
+ * can we have him ALWAYS react to the message with an 👀 emoji immediately
+ * when he sees it?"). A kind 7 rumor, as NIP-25 shapes it (an e tag naming the
+ * rumor id it reacts to, a p tag naming that rumor's author), sealed and
+ * gift-wrapped exactly as a kind 14 is, to the other side's 10050 relays with
+ * a self-copy. Nothing about it is public.
+ */
+export const REACTION_KIND = 7
 export const SEAL_KIND = 13
 export const WRAP_KIND = 1059
 
@@ -115,6 +124,15 @@ export function createRumor(sender: string, recipient: string, text: string, opt
   return { ...unsigned, id: getEventHash(unsigned) }
 }
 
+/**
+ * The kind 7 from `sender` reacting with `content` to the rumor `target`,
+ * written by `recipient`: an e tag and a p tag, as the agent's side sends it.
+ */
+export function createReactionRumor(sender: string, recipient: string, target: string, content: string, opts: { now?: number } = {}): Rumor {
+  const unsigned = { pubkey: sender, created_at: opts.now ?? nowS(), kind: REACTION_KIND, tags: [['e', target], ['p', recipient]], content }
+  return { ...unsigned, id: getEventHash(unsigned) }
+}
+
 /** The rumor sealed by its sender to `recipient`: kind 13, no tags, signed. */
 export async function sealRumor(rumor: Rumor, sender: DmSender, recipient: string, random?: () => number): Promise<NostrEvent> {
   if (rumor.pubkey !== sender.pubkey) throw new Error('A rumor can only be sealed by its own author.')
@@ -177,12 +195,13 @@ function isTags(v: unknown): v is string[][] {
 }
 
 /**
- * Open a gift wrap addressed to `me`. Null for anything that is not a sound
- * NIP-17 message: not a wrap, a seal whose signature fails, a rumor whose
- * pubkey is not the seal's, a rumor whose id is not its own hash, or a
- * payload that does not decrypt. Such a wrap is dropped, never shown.
+ * Open a gift wrap addressed to `me`, keeping a rumor of one of `kinds`. Null
+ * for anything that is not sound NIP-17: not a wrap, a seal whose signature
+ * fails, a rumor whose pubkey is not the seal's, a rumor whose id is not its
+ * own hash, a rumor of another kind, or a payload that does not decrypt.
+ * Such a wrap is dropped, never shown.
  */
-export async function unwrapMessage(wrap: NostrEvent, me: DmReader): Promise<Rumor | null> {
+export async function unwrapRumor(wrap: NostrEvent, me: DmReader, kinds: readonly number[] = [DM_KIND, REACTION_KIND]): Promise<Rumor | null> {
   if (wrap.kind !== WRAP_KIND) return null
   let sealJson: string
   try { sealJson = await me.nip44Decrypt(wrap.pubkey, wrap.content) } catch { return null }
@@ -193,12 +212,17 @@ export async function unwrapMessage(wrap: NostrEvent, me: DmReader): Promise<Rum
   let rumorJson: string
   try { rumorJson = await me.nip44Decrypt(seal.pubkey, seal.content) } catch { return null }
   const r = parse(rumorJson)
-  if (!r || r.kind !== DM_KIND || typeof r.content !== 'string' || typeof r.created_at !== 'number' || !isTags(r.tags)) return null
+  if (!r || typeof r.kind !== 'number' || !kinds.includes(r.kind) || typeof r.content !== 'string' || typeof r.created_at !== 'number' || !isTags(r.tags)) return null
   if (r.pubkey !== seal.pubkey) return null
-  const unsigned = { pubkey: r.pubkey, created_at: r.created_at, kind: DM_KIND, tags: r.tags, content: r.content }
+  const unsigned = { pubkey: r.pubkey, created_at: r.created_at, kind: r.kind, tags: r.tags, content: r.content }
   const id = getEventHash(unsigned)
   if (r.id !== undefined && r.id !== id) return null
   return { ...unsigned, id }
+}
+
+/** Open a gift wrap addressed to `me`, keeping only a kind 14 message (unwrapRumor). */
+export function unwrapMessage(wrap: NostrEvent, me: DmReader): Promise<Rumor | null> {
+  return unwrapRumor(wrap, me, [DM_KIND])
 }
 
 /** A message in one conversation, as the conversation shows it. */
@@ -232,6 +256,52 @@ export function counterpartOf(rumor: Pick<Rumor, 'pubkey' | 'tags'>, me: string)
 /** A rumor as a conversation message. */
 export function toMessage(rumor: Rumor): DmMessage {
   return { id: rumor.id, from: rumor.pubkey, text: rumor.content, at: rumor.created_at, strategy: isStrategy(rumor), keepGoing: isContinue(rumor) }
+}
+
+/** A reaction in one conversation: who reacted, with what, to which message, and when. */
+export interface DmReaction {
+  /** The reaction rumor's own id. */
+  id: string
+  from: string
+  /** The rumor id of the message reacted to. */
+  target: string
+  /** The emoji, as sent (NIP-25: "+" is a like, "" counts as one too). */
+  content: string
+  at: number
+}
+
+/**
+ * A kind 7 rumor as a reaction, or null when it names no message. NIP-25
+ * reads the last e tag as the target.
+ */
+export function toReaction(rumor: Rumor): DmReaction | null {
+  if (rumor.kind !== REACTION_KIND) return null
+  const es = rumor.tags.filter((t) => t[0] === 'e' && HEX.test(t[1] ?? ''))
+  const target = es[es.length - 1]?.[1]
+  return target ? { id: rumor.id, from: rumor.pubkey, target, content: rumor.content, at: rumor.created_at } : null
+}
+
+/** Reactions oldest first, each id once (the self-copy shares the rumor id). */
+export function mergeReactions(have: readonly DmReaction[], more: readonly DmReaction[]): DmReaction[] {
+  const byId = new Map<string, DmReaction>()
+  for (const r of [...have, ...more]) if (!byId.has(r.id)) byId.set(r.id, r)
+  return [...byId.values()].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1))
+}
+
+/**
+ * The reactions to show under each message of one conversation, by the
+ * message's rumor id: only those from its two parties (`me` and `agent`), and
+ * only on messages that are loaded. A reaction to a message not yet loaded is
+ * kept and shows once the message is (arkinox, 2026-10-12).
+ */
+export function reactionsByMessage(reactions: readonly DmReaction[], messages: readonly DmMessage[], me: string, agent: string): Record<string, DmReaction[]> {
+  const ids = new Set(messages.map((m) => m.id))
+  const out: Record<string, DmReaction[]> = {}
+  for (const r of reactions) {
+    if ((r.from !== me && r.from !== agent) || !ids.has(r.target)) continue
+    ;(out[r.target] ??= []).push(r)
+  }
+  return out
 }
 
 /** Messages oldest first, each id once (the self-copy and an optimistic add share the rumor id). */

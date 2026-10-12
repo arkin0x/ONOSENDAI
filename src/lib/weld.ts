@@ -102,3 +102,20 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
 export function stackedCount(s: Pick<ShardModel, 'vertices'>): number {
   return s.vertices.length - new Set(s.vertices.map((v) => pointKey(ticksOf(v)))).size
 }
+
+/**
+ * The stacked spots and the points standing on them (arkinox, 2026-10-12:
+ * "2 stacked" read as either two spots or two points). A spot is stacked
+ * when two or more points stand on it; WELD folds each spot into one point.
+ */
+export function stackedSpots(s: Pick<ShardModel, 'vertices'>): { spots: number; points: number } {
+  const counts = new Map<string, number>()
+  for (const v of s.vertices) {
+    const k = pointKey(ticksOf(v))
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  let spots = 0
+  let points = 0
+  for (const n of counts.values()) if (n > 1) { spots++; points += n }
+  return { spots, points }
+}

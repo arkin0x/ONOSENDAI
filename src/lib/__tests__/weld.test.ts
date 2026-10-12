@@ -1,3 +1,4 @@
+import { TICKS_PER_UNIT, vertexAt } from 'sno-core/shards'
 /**
  * weld.test.ts - stacked points become one, and nothing changes how the
  * object looks: faces that disagreed on colour keep their own, faces that
@@ -8,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { BUILT_IN, hexAt } from 'sno-core/snoPalette'
 import { fromPayload, hexToRgb, newShard, toPayload, unpackTicks, type ShardModel, type ShardPayload } from 'sno-core/shards'
-import { stackedCount, weld } from '../weld'
+import { stackedCount, stackedSpots, weld } from '../weld'
 import floorPayload from '../../store/fixtures/disco-floor-516.json'
 
 type P3 = [number, number, number]
@@ -123,5 +124,14 @@ describe('weld', () => {
     expect(back).not.toBeNull()
     expect(back!.vertices).toHaveLength(291)
     expect(back!.faces).toHaveLength(258)
+  })
+})
+
+describe('stackedSpots (arkinox, 2026-10-12)', () => {
+  it('counts spots and the points on them, not the extra points', () => {
+    const v = (x: number) => vertexAt([x * TICKS_PER_UNIT, 0, 0], [255, 255, 255])
+    expect(stackedSpots({ vertices: [v(0), v(0), v(1), v(1), v(2)] })).toEqual({ spots: 2, points: 4 })
+    expect(stackedSpots({ vertices: [v(0), v(0), v(0)] })).toEqual({ spots: 1, points: 3 })
+    expect(stackedSpots({ vertices: [v(0), v(1)] })).toEqual({ spots: 0, points: 0 })
   })
 })

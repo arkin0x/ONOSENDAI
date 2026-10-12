@@ -30,6 +30,7 @@ import {
   Line,
   LineBasicMaterial,
   Matrix4,
+  ReplaceStencilOp,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
@@ -124,10 +125,27 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
 }
 
 /**
- * Colour written opaque, alpha written as 0: the tag. (Blending needs the
- * material transparent, which the face already is for its opacity.)
+ * The stencil value a tagged face leaves under every texel it draws.
+ *
+ * The tag lives in alpha, and anything translucent drawn over a face with
+ * ordinary blending adds its own alpha and so erases it: the face then reads
+ * to the bloom as bright light and blows out. The covering box did exactly
+ * that to a white avatar inside it. Alpha alone cannot tell a tagged face
+ * from the empty background (both are 0), so the face also marks the stencil,
+ * and an overlay can draw over the mark without touching alpha (CoveringBox)
+ * (arkinox, 2026-10-12).
  */
-const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
+export const FACE_TAG_STENCIL = 1
+
+/**
+ * Colour written opaque, alpha written as 0: the tag. (Blending needs the
+ * material transparent, which the face already is for its opacity.) The
+ * stencil mark is the tag's second copy, for overlays (arkinox, 2026-10-12).
+ */
+const TAG_BLEND = {
+  blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor,
+  stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
+} as const
 
 export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts }: Props): JSX.Element | null {
   // The objects this one places, fetched once for the whole app; a part's own

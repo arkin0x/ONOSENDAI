@@ -19,13 +19,17 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, DoubleSide, FrontSide, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
+import {
+  AddEquation, BoxGeometry, CustomBlending, DoubleSide, EqualStencilFunc, FrontSide, Group, MeshBasicMaterial,
+  NotEqualStencilFunc, OneFactor, OneMinusSrcAlphaFactor, PlaneGeometry, SrcAlphaFactor, ZeroFactor,
+} from 'three'
 import { GRID_RADIUS, formatOps, placeCentre, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { ACCENT, DANGER } from '../lib/palette'
 import { MAX_COMPUTE_HEIGHT, alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
+import { FACE_TAG_STENCIL } from './ShardMesh'
 import { useUiHints } from '../store/useUiHints'
 
 /** Clamp on the drawn extent; the reported cost is never clamped. */
@@ -41,6 +45,27 @@ const WALL_CYCLE = 1.6
  * strength it would read as a rendering artifact rather than a signal.
  */
 const WALL_OPACITY = 0.25
+
+/**
+ * The box's translucent planes, drawn in two halves split by the stencil.
+ *
+ * Off the shard faces: exactly as before, ordinary blending, so the box reads
+ * the same against the dark and the lattice and blooms as it always has.
+ *
+ * Over a shard face: the same color blend, but the alpha under it is left as
+ * it was. The face's alpha is its tag, the thing that keeps the bloom off it
+ * (Scene.tsx WorldBloom), and ordinary blending overwrote it with the box's
+ * own opacity: the bloom then saw a white face as light and blew it out into
+ * a glowing blob wherever the box covered it, which is exactly where your own
+ * avatar always sits (arkinox, 2026-10-12). The face still takes the box's
+ * tint; it just stays a face.
+ */
+const OFF_FACES = { stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilFunc: NotEqualStencilFunc } as const
+const OVER_FACES = {
+  stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilFunc: EqualStencilFunc,
+  blending: CustomBlending, blendEquation: AddEquation,
+  blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor,
+} as const
 
 /** One face of the drawn box that the true region extends beyond. */
 interface Wall {
@@ -209,21 +234,23 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
   useEffect(() => () => { for (const w of walls) w.geometry.dispose() }, [walls])
 
   // One material for all walls: every wall shares one phase, so they share one
-  // opacity, and the frame loop then touches a single object. DoubleSide,
+  // opacity, and the frame loop then touches a single object (a pair, now, one
+  // per half of the stencil split; see OFF_FACES, arkinox, 2026-10-12). DoubleSide,
   // unlike the fill, because a breath that carries a wall past the camera
   // still has to be readable from behind; depthWrite off, like the fill, so a
   // translucent plane never punches a hole in what sits behind it.
-  const wallMaterial = useMemo(() => new MeshBasicMaterial({
+  const wallMaterials = useMemo(() => [OFF_FACES, OVER_FACES].map((split) => new MeshBasicMaterial({
     color: ACCENT,
     transparent: true,
     opacity: WALL_OPACITY,
     side: DoubleSide,
     depthWrite: false,
     toneMapped: false,
-  }), [])
-  useEffect(() => () => wallMaterial.dispose(), [wallMaterial])
+    ...split,
+  })), [])
+  useEffect(() => () => { for (const m of wallMaterials) m.dispose() }, [wallMaterials])
 
-  const wallMeshes = useRef<Array<Mesh | null>>([])
+  const wallMeshes = useRef<Array<Group | null>>([])
 
   useFrame((state) => {
     if (walls.length === 0) return
@@ -233,7 +260,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     // Ease-out: the wall departs briskly and decelerates as it fades, which
     // reads as emanating from the box rather than drifting off it.
     const eased = 1 - (1 - t) ** 3
-    wallMaterial.opacity = WALL_OPACITY * (1 - eased)
+    for (const m of wallMaterials) m.opacity = WALL_OPACITY * (1 - eased)
     for (let i = 0; i < walls.length; i++) {
       const mesh = wallMeshes.current[i]
       if (!mesh) continue
@@ -255,16 +282,20 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           camera orbits 26 back, so it sits inside. Culling back faces means the
           fill simply stops once you are within it, which is also when the
           outline and the lattice are doing the work anyway. */}
-      <mesh geometry={box.fill} position={box.centre} frustumCulled={false}>
-        <meshBasicMaterial
-          color={box.color}
-          toneMapped={false}
-          transparent
-          opacity={box.fillOpacity}
-          side={FrontSide}
-          depthWrite={false}
-        />
-      </mesh>
+      {/* Twice, split by the stencil: see OFF_FACES (arkinox, 2026-10-12). */}
+      {[OFF_FACES, OVER_FACES].map((split, i) => (
+        <mesh key={i} geometry={box.fill} position={box.centre} frustumCulled={false}>
+          <meshBasicMaterial
+            color={box.color}
+            toneMapped={false}
+            transparent
+            opacity={box.fillOpacity}
+            side={FrontSide}
+            depthWrite={false}
+            {...split}
+          />
+        </mesh>
+      ))}
       <lineSegments geometry={box.geometry} frustumCulled={false}>
         <lineBasicMaterial
           color={box.color}
@@ -275,14 +306,11 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
       </lineSegments>
       {walls.map((w, i) => (
         <group key={`${w.slot}${w.sign}`}>
-          <mesh
-            ref={(m) => { wallMeshes.current[i] = m }}
-            geometry={w.geometry}
-            material={wallMaterial}
-            rotation={w.rotation}
-            position={w.base}
-            frustumCulled={false}
-          />
+          <group ref={(g) => { wallMeshes.current[i] = g }} position={w.base}>
+            {wallMaterials.map((m, k) => (
+              <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} />
+            ))}
+          </group>
           {/* The remedy, written on the thing asking for it. Small and the
               box's own blue: an instruction, not an alert. */}
           <WorldLabel text="ZOOM OUT" color={ACCENT} at={w.base} px={11} align="center" />

@@ -664,8 +664,11 @@ export function Scene(): JSX.Element {
         at full resolution against 49fps with the pass removed entirely. Halving
         its resolution and cutting the mip levels buys nearly all of that back,
         and is invisible because the effect is a blur to begin with.
+
+        A stencil on the composer's buffers carries the shard faces' tag past
+        translucent overlays (ShardMesh FACE_TAG_STENCIL) (arkinox, 2026-10-12).
       */}
-      <EffectComposer resolutionScale={0.25}>
+      <EffectComposer resolutionScale={0.25} stencilBuffer>
         <WorldBloom />
       </EffectComposer>
     </Canvas>

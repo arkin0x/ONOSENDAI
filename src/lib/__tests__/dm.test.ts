@@ -245,3 +245,51 @@ describe('KEEP GOING marker (arkinox, 2026-10-11)', () => {
     expect(toMessage(marked).strategy).toBe(false)
   })
 })
+
+describe('private reactions (arkinox, 2026-10-12)', () => {
+  /** A kind 7 rumor from `from`, sealed and wrapped to `to` exactly as a message is. */
+  async function reactionWrap(from: ReturnType<typeof who>, to: string, target: string, content = '👀'): Promise<{ wrap: NostrEvent; id: string }> {
+    const { createReactionRumor } = await import('../dm')
+    const rumor = createReactionRumor(from.pubkey, to, target, content)
+    return { wrap: await wrapSeal(await sealRumor(rumor, from, to), to, fresh()), id: rumor.id }
+  }
+
+  it('a kind 7 rumor unwraps, with the same seal checks, and becomes a reaction to the message its e tag names', async () => {
+    const { unwrapRumor, toReaction, REACTION_KIND } = await import('../dm')
+    const op = who()
+    const agent = who()
+    const sent = await wrapMessage(op, agent.pubkey, 'REPORT.', fresh)
+    const { wrap, id } = await reactionWrap(agent, op.pubkey, sent.rumor.id)
+    const rumor = await unwrapRumor(wrap, op)
+    expect(rumor).toMatchObject({ id, kind: REACTION_KIND, pubkey: agent.pubkey, content: '👀', tags: [['e', sent.rumor.id], ['p', op.pubkey]] })
+    expect(counterpartOf(rumor!, op.pubkey)).toBe(agent.pubkey)
+    expect(toReaction(rumor!)).toMatchObject({ id, from: agent.pubkey, target: sent.rumor.id, content: '👀' })
+    // unwrapMessage stays kind 14 only.
+    expect(await unwrapMessage(wrap, op)).toBeNull()
+  })
+
+  it('a reaction rumor claiming another author than its seal is dropped', async () => {
+    const { unwrapRumor, createReactionRumor } = await import('../dm')
+    const op = who()
+    const agent = who()
+    const liar = who()
+    const forged = { ...createReactionRumor(agent.pubkey, op.pubkey, 'ab'.repeat(32), '👀') }
+    const content = await liar.nip44Encrypt(op.pubkey, JSON.stringify(forged))
+    const seal = await liar.signEvent({ kind: SEAL_KIND, created_at: 1, tags: [], content })
+    const wrap = await wrapSeal(seal, op.pubkey, fresh())
+    expect(await unwrapRumor(wrap, op)).toBeNull()
+  })
+
+  it('reactions show only from the two parties, and only under loaded messages', async () => {
+    const { reactionsByMessage } = await import('../dm')
+    const me = 'a'.repeat(64), agent = 'b'.repeat(64), stranger = 'c'.repeat(64)
+    const msgs: DmMessage[] = [{ id: 'm1', from: me, text: 'x', at: 1, strategy: false }]
+    const r = (id: string, from: string, target: string): { id: string; from: string; target: string; content: string; at: number } => ({ id, from, target, content: '👀', at: 2 })
+    const out = reactionsByMessage([r('r1', agent, 'm1'), r('r2', stranger, 'm1'), r('r3', agent, 'm2')], msgs, me, agent)
+    expect(Object.keys(out)).toEqual(['m1'])
+    expect(out.m1.map((x) => x.id)).toEqual(['r1'])
+    // Once m2 loads, its waiting reaction shows.
+    const later = reactionsByMessage([r('r3', agent, 'm2')], [...msgs, { id: 'm2', from: me, text: 'y', at: 3, strategy: false }], me, agent)
+    expect(later.m2.map((x) => x.id)).toEqual(['r3'])
+  })
+})

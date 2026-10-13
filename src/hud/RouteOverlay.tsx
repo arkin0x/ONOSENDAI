@@ -12,7 +12,8 @@
  * grows upward with the number of steps until it is 35% of the screen tall,
  * and past that the list scrolls with no visible bar. Taps pass through it to
  * the scene while everything fits; only once the list overflows does it take
- * the pointer, so a finger, a wheel or the arrow keys can scroll it.
+ * the pointer, so a finger, a wheel or the arrow keys can scroll it. Never in
+ * WALK, where there is no route to line up: every press is already a move.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react'
@@ -31,7 +32,13 @@ export function RouteOverlay(): JSX.Element | null {
   const plan = useCyberspace((s) => s.plan)
   const computing = useCyberspace((s) => s.proof.status === 'computing')
   const preview = useRoutePreview()
-  const shown = atHead && plan === null && !computing && preview !== null
+  // Not in WALK. There the cursor is the walk's predicted head, out ahead of
+  // the chain, so between two steps' proofs (no plan, nothing computing) it
+  // read as a route lined up and the list flashed up, vanished as the next
+  // proof started, and came back after it (arkinox, 2026-10-13). A walk's
+  // feedback is the LOSING SYNC warning and a stop's reason, nothing else.
+  const walking = useCyberspace((s) => s.walking)
+  const shown = atHead && !walking && plan === null && !computing && preview !== null
   // Whether the list is taller than the cap allows, measured after layout so
   // the class is right before paint. Re-measured whenever the route changes
   // (a new preview) and whenever the list box itself resizes (the viewport).

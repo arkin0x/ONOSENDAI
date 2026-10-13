@@ -5,8 +5,11 @@
  * terrain dots (the terrain K field, scene/ShaderPointField.tsx) and the hX
  * concentric boxes (the nested aligned-subtree cells around the anchor,
  * scene/Rooms.tsx). Both default on, which is the look the scene has
- * always had. This is a view preference only: nothing about the proof, the
- * movement, the cursor or the chain reads it.
+ * always had. A third, walkAvatarHidden, hides your own avatar while WALK
+ * puts the camera inside it (arkinox, 2026-10-13); it defaults off, so a
+ * walk shows what sticks out of you until you say otherwise. These are view
+ * preferences only: nothing about the proof, the movement, the cursor or the
+ * chain reads them.
  *
  * Kept in localStorage so the choice survives a reload on this device. Every
  * read and write is guarded: with storage blocked (private mode, an odd
@@ -16,15 +19,15 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false }
 
-/** The stored choice, or both on when there is none or it cannot be read. */
+/** The stored choice, or the defaults when there is none or it cannot be read. */
 export function loadLayers(): SceneLayers {
   try {
     const raw = localStorage.getItem(LAYERS_KEY)
@@ -34,6 +37,8 @@ export function loadLayers(): SceneLayers {
       // Only an explicit false turns a layer off; anything else is the default.
       dots: p?.dots !== false,
       boxes: p?.boxes !== false,
+      // Off unless explicitly on.
+      walkAvatarHidden: p?.walkAvatarHidden === true,
     }
   } catch {
     return { ...DEFAULT_LAYERS }
@@ -51,7 +56,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }

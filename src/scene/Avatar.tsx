@@ -58,6 +58,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
 import { usePersonCard } from '../store/usePersonCard'
+import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
 import { TapTarget } from './TapTarget'
 
@@ -69,6 +70,9 @@ export function Avatar(): JSX.Element | null {
   // Where you really stand while WALK runs ahead of the chain.
   const proven = useRef<Group>(null)
   const walking = useCyberspace((s) => s.walking)
+  // The View panel's "Hide avatar in WALK": the camera is inside you, and
+  // with it on nothing of you is drawn around it.
+  const hiddenInWalk = useLayers((s) => s.walkAvatarHidden)
   const behind = useCyberspace((s) => s.walking && (s.cursor.x !== s.position.x || s.cursor.y !== s.position.y || s.cursor.z !== s.position.z))
   // What is drawn, measured for the tap (TapTarget), as OtherAvatar does.
   const drawn = useRef<Group>(null)
@@ -128,7 +132,7 @@ export function Avatar(): JSX.Element | null {
       : placeCentre(shownPosition, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }, [anchor, scaleExp, view, shownPosition])
 
-  useFrame((_, dt) => {
+  useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
@@ -137,6 +141,17 @@ export function Avatar(): JSX.Element | null {
       proven.current?.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
     } else {
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    }
+    // In WALK you face where you look, live as you turn (arkinox,
+    // 2026-10-13), not the way your last move went. The model's nose (+Z)
+    // draws as render -Z and its top as render +Y (pose.ts renderPose), which
+    // are exactly the camera's forward and up in its own frame, so the turn
+    // is the camera's own. Local only: everyone else sees the heading your
+    // chain gives. Leaving WALK eases back to that heading below.
+    if (walking) {
+      d.quaternion.copy(camera.quaternion)
+      turnedFor.current = view
+      return
     }
     // The turn is on the drawn shape alone, so the tap target, which is
     // measured in world space and sized in its parent's, stays unturned.
@@ -168,7 +183,7 @@ export function Avatar(): JSX.Element | null {
           own destination erased you; now the red edges composite on top of
           whatever shares your gibson. */}
       <group ref={drawn}>
-        <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} firstPerson={walking} />
+        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} firstPerson={walking} />}
       </group>
       {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>

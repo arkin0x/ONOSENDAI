@@ -126,9 +126,12 @@ export function TouchControls(): JSX.Element {
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away') },
-    { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
+    //
+    // The keys in the titles are the mode's own: WALK's are first person
+    // (lib/walkKeys.ts).
+    { cell: 'away', glyph: '⊗', sub: 'FAR', title: walking ? 'Forward (W)' : 'Away from camera (R)', act: move('away') },
+    { cell: 'up', glyph: '▲', title: walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
+    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: walking ? 'Back (S)' : 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.
@@ -144,7 +147,7 @@ export function TouchControls(): JSX.Element {
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
+    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down') },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
@@ -246,7 +249,7 @@ export function TouchControls(): JSX.Element {
           <button
             className="touchops__commit is-walk is-on"
             aria-pressed
-            title="Walking: every press is a step, proved behind you. Press to go back to HOP"
+            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R up, C or F down. Press to go back to HOP"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().exit() }}
           >WALK</button>

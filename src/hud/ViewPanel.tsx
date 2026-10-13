@@ -30,6 +30,7 @@ interface ViewRow {
 export function ViewPanel(): JSX.Element {
   const dots = useLayers((s) => s.dots)
   const boxes = useLayers((s) => s.boxes)
+  const walkAvatarHidden = useLayers((s) => s.walkAvatarHidden)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
 
@@ -53,6 +54,15 @@ export function ViewPanel(): JSX.Element {
       hint: 'The math barriers where moving costs increase.',
       on: boxes,
       set: (v) => useLayers.getState().setLayer('boxes', v),
+    },
+    // On means hidden: the camera is inside your avatar in WALK, and some
+    // shapes are more in the way than they are worth seeing.
+    {
+      id: 'view-walk-avatar',
+      title: 'Hide avatar in WALK',
+      hint: 'Walk without your own avatar around the camera.',
+      on: walkAvatarHidden,
+      set: (v) => useLayers.getState().setLayer('walkAvatarHidden', v),
     },
     {
       id: 'view-chain-trail',

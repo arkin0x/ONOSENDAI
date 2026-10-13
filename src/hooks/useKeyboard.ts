@@ -5,6 +5,10 @@
  * resolved to world axes through the current view, so W is always "away from
  * you" in any of the 24 axis-aligned orientations. Nothing costs a proof
  * until Space commits the hop.
+ *
+ * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
+ * S back, A and D sideways, Space or R up, C or F down, every press a step. They are answered before anything else, so in WALK Space never
+ * commits, scrolls or presses a focused button.
  */
 
 import { useEffect } from 'react'
@@ -20,6 +24,7 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
+import { walkMove } from '../lib/walkKeys'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -51,11 +56,24 @@ export function setMenuCovering(covering: boolean): void {
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      // Let the browser keep its own shortcuts.
-      if (event.metaKey || event.ctrlKey || event.altKey) return
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // WALK's keys first, so Space and the letters it takes over never reach
+      // their HOP meanings below.
+      if (useCyberspace.getState().walking && !menuCovering && !useWorkshop.getState().open) {
+        const step = walkMove(event)
+        if (step) {
+          event.preventDefault()
+          useWalk.getState().press(step)
+          return
+        }
+        // Space is WALK's up even when it is not a step (a modifier held):
+        // never a commit, a scroll or a press of whatever has focus.
+        if (event.code === 'Space') { event.preventDefault(); return }
+      }
+      // Let the browser keep its own shortcuts.
+      if (event.metaKey || event.ctrlKey || event.altKey) return
       // Escape closes one thing: the topmost modal, else the menu, else the
       // most recent chip (useEscape; arkinox, 2026-10-01). It comes before
       // the menu and workshop checks below because both of those are things
@@ -135,8 +153,6 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
-        // WALK commits on every press already: there is nothing lined up.
-        if (store.walking) return
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
@@ -168,6 +184,7 @@ export function useKeyboard(): void {
       }
 
       // The spec-canonical "facing the black sun" orientation (section 11.3).
+      // In WALK, C is down (answered above).
       if (event.code === 'KeyC') {
         event.preventDefault()
         store.canonicalView()
@@ -210,7 +227,8 @@ export function useKeyboard(): void {
       // otherwise unreachable without rotating the view first.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
-        if (store.walking) { useWalk.getState().press(MOVE_KEYS[event.code]); return }
+        // In WALK R and F are up and down, answered above.
+        if (store.walking) return
         store.moveCursor(moveDirection(axes, MOVE_KEYS[event.code]))
         return
       }
@@ -226,12 +244,21 @@ export function useKeyboard(): void {
       const screenDir = MOVE_KEYS[event.code]
       if (!screenDir) return
       event.preventDefault()
-      // WALK: the same keys, each press a step committed now.
-      if (store.walking) { useWalk.getState().press(screenDir); return }
+      // WALK's own letters were answered above; nothing else moves a walk.
+      if (store.walking) return
       store.moveCursor(moveDirection(axes, screenDir))
     }
 
+    const onKeyUp = (event: KeyboardEvent) => {
+      // A button with focus activates on Space's keyup: in WALK that Space
+      // was a step up, not a press of the button.
+      if (event.code === 'Space' && useCyberspace.getState().walking) event.preventDefault()
+    }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
   }, [])
 }

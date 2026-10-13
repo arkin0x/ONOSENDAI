@@ -107,8 +107,9 @@ interface Props {
   /**
    * Fronts only, for an avatar seen from inside it (WALK's first person):
    * the faces' backs are culled, so what sticks out of the body still shows
-   * and the inside of its own walls does not. The world otherwise draws both
-   * sides of an unlit face.
+   * and the inside of its own walls does not. The points and lines are not
+   * drawn at all then, having no back to cull. The world otherwise draws
+   * both sides of an unlit face.
    */
   cull?: boolean
 }
@@ -336,13 +337,17 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
       )}
       {/* Faces as outlines. A shard with no faces has no edges to draw, so it
           keeps the old single line through its points, which is all there is. */}
-      {shard.mode === 'lines' && outline && (
+      {/* Seen from inside (cull, WALK's first person) only the faces' fronts
+          are drawn. The points and lines have no back to cull: every vertex
+          dot and edge of your own body would sit across the view, which is
+          what arkinox still saw with the backs culled (2026-10-13). */}
+      {shard.mode === 'lines' && outline && !cull && (
         <lineSegments geometry={outline} frustumCulled={false}>
           <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} />
         </lineSegments>
       )}
-      {shard.mode === 'lines' && !outline && shard.vertices.length > 1 && <primitive object={line} />}
-      {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
+      {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
+      {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} />
       )}
     </group>

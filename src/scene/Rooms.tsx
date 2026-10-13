@@ -32,14 +32,25 @@
  * glow to every stripe on top of its own alpha, and at 20% a room's walls
  * were a purple wash that hid the room. They say where the walls are
  * without hiding what is behind them.
+ *
+ * Only one box is striped at a time, the one most relevant to where you are
+ * walking (lib/walkWall.ts pickWall): you are inside every box of the nest at
+ * once, and three sets of walls on top of each other said nothing. The
+ * stripes also move: they scroll slowly down each upright wall, which gives
+ * the eye something to fix the wall's place by, and the whole wall breathes,
+ * fading to nothing and back to its ceiling on a slow cycle, so it never
+ * settles into a fixed screen in front of the room (arkinox, 2026-10-13).
  */
 
-import { useEffect, useMemo } from 'react'
-import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, ShaderMaterial } from 'three'
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Mesh, ShaderMaterial } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { AXIS_BITS } from 'cyberspace-core'
 import { latticeShade } from '../lib/palette'
+import { pickWall } from '../lib/walkWall'
+import { walkEye } from '../lib/walkEye'
 
 import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -91,12 +102,23 @@ export function stripePeriod(height: number): number {
   return STRIPE_SPAN_CELLS / Math.max(1, height)
 }
 
+/** Seconds for the stripes to scroll down one stripe pitch. */
+export const STRIPE_SCROLL_SECONDS = 2.5
+/** Seconds for one breath of a wall: from nothing up to its ceiling and back. */
+export const WALL_BREATH_SECONDS = 7
+
 /**
  * One shader for every striped wall. The stripe runs along the diagonal of
  * whichever face a fragment is on (the two coordinates in its plane, summed),
  * measured from the box's own corner, so a wall's stripes sit still on it and
  * meet at its edges. Antialiased with the derivative, so a dense wall at a
  * glancing angle greys out rather than shimmering.
+ *
+ * `time` drives both motions. The scroll adds to the up coordinate (render y
+ * is the view's up), so on an upright wall the stripes slide down; a floor or
+ * ceiling has no up in its plane and holds still. The breath scales the
+ * opacity by a raised cosine, 0 at the start of a cycle and the full ceiling
+ * at its middle.
  */
 const STRIPE_VERTEX = `
 varying vec3 vLocal;
@@ -114,16 +136,28 @@ uniform vec3 color;
 uniform float opacity;
 uniform float period;
 uniform float width;
+uniform float time;
 void main() {
   vec3 n = abs(vNormal);
-  float s = n.x > 0.5 ? vLocal.y + vLocal.z : (n.y > 0.5 ? vLocal.x + vLocal.z : vLocal.x + vLocal.y);
+  float up = vLocal.y + time * period / ${STRIPE_SCROLL_SECONDS.toFixed(4)};
+  float s = n.x > 0.5 ? up + vLocal.z : (n.y > 0.5 ? vLocal.x + vLocal.z : vLocal.x + up);
   float f = fract(s / period);
   float d = min(f, 1.0 - f) * period;
   float aa = fwidth(s);
   float a = 1.0 - smoothstep(width * 0.5 - aa, width * 0.5 + aa, d);
   if (a <= 0.0) discard;
-  gl_FragColor = vec4(color, opacity * a);
+  float breath = 0.5 - 0.5 * cos(6.2831853 * time / ${WALL_BREATH_SECONDS.toFixed(4)});
+  gl_FragColor = vec4(color, opacity * breath * a);
 }`
+
+/**
+ * The walls' clock, in seconds, written once a frame while walking. It wraps
+ * at the least common multiple of the two cycles, so both motions stay
+ * continuous across the wrap and the float never grows past what a phone's
+ * shader holds precisely.
+ */
+const WALL_CLOCK_WRAP = 35
+const WALL_TIME = { value: 0 }
 
 function stripeMaterial(color: string, opacity: number, height: number, corner: [number, number, number]): ShaderMaterial {
   const period = stripePeriod(height)
@@ -137,6 +171,8 @@ function stripeMaterial(color: string, opacity: number, height: number, corner: 
       // Thin lines on an easy wall, closing up on a hard one but never solid.
       width: { value: Math.min(0.2, period * 0.3) },
       corner: { value: corner },
+      // Shared by every wall, so one write a frame moves them all.
+      time: WALL_TIME,
     },
     transparent: true,
     depthWrite: false,
@@ -303,16 +339,28 @@ export function Rooms({ axes }: Props): JSX.Element {
       const { min, size } = l.walls
       const geometry = new BoxGeometry(size[0], size[1], size[2])
       geometry.translate(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
-      return { height: l.height, geometry, material: stripeMaterial(l.color, l.wall, l.height, min) }
+      return { height: l.height, box: l.walls, geometry, material: stripeMaterial(l.color, l.wall, l.height, min) }
     })
   }, [walking, levels])
   useEffect(() => () => { for (const w of walls) { w.geometry.dispose(); w.material.dispose() } }, [walls])
 
+  // One wall at a time (lib/walkWall.ts), chosen against the eye every frame
+  // and shown by visibility alone, so walking re-renders nothing.
+  const wallMeshes = useRef<Array<Mesh | null>>([])
+  const shownWall = useRef<number | null>(null)
+  useFrame(() => {
+    if (walls.length === 0) { shownWall.current = null; return }
+    WALL_TIME.value = (performance.now() / 1000) % WALL_CLOCK_WRAP
+    const pick = pickWall(walls.map((w) => ({ height: w.height, ...w.box })), [walkEye.x, walkEye.y, walkEye.z], shownWall.current)
+    shownWall.current = pick
+    walls.forEach((w, i) => { const m = wallMeshes.current[i]; if (m) m.visible = w.height === pick })
+  })
+
   return (
     // Named so the browser harness can tell the boxes are mounted.
     <group name="rooms">
-      {walls.map((w) => (
-        <mesh key={`wall-${w.height}`} geometry={w.geometry} material={w.material} frustumCulled={false} renderOrder={-1} />
+      {walls.map((w, i) => (
+        <mesh key={`wall-${w.height}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={w.geometry} material={w.material} frustumCulled={false} renderOrder={-1} />
       ))}
       {levels.map((l) => (
         <group key={l.height}>

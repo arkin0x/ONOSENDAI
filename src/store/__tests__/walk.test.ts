@@ -30,6 +30,7 @@ vi.mock('../../lib/calibration', async (orig) => {
 
 import { useCyberspace } from '../useCyberspace'
 import { losingSync, SYNC_WARN_AT, useWalk } from '../useWalk'
+import { useToast } from '../useToast'
 
 function done(req: (typeof posted)[number]) {
   return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
@@ -120,6 +121,9 @@ describe('WALK', () => {
     expect(s.cursor).toEqual(landed)                   // the view comes home to it
     expect(s.proof.message).toContain('declined')
     expect(posted).toHaveLength(2)                     // the third step never started
+    // And the reason is on screen, not only in the menu.
+    expect(useToast.getState().toast).toMatchObject({ label: 'WALK STOPPED', mark: 'walk' })
+    expect(useToast.getState().toast?.meta).toContain('declined')
   })
 
   it('STOP drops the queue and cancels the step in flight', async () => {
@@ -127,7 +131,10 @@ describe('WALK', () => {
     useWalk.getState().press('up')
     useWalk.getState().press('up')
     await vi.waitFor(() => expect(posted).toHaveLength(1))
+    useToast.getState().dismiss()
     useWalk.getState().stop()
+    // A STOP of your own needs no word.
+    expect(useToast.getState().toast).toBeNull()
     expect(useWalk.getState().queue).toEqual([])
     expect(useCyberspace.getState().proof.status).not.toBe('computing')
     expect(useCyberspace.getState().cursor).toEqual(start)

@@ -20,7 +20,7 @@ import { ItemIcon, distinctKinds } from './ItemIcon'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
-import { GitFork, Wrench } from 'lucide-react'
+import { GitFork, Pencil, Sparkles } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { useWorkshop } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
@@ -94,7 +94,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
 const ICON = 12
 
 /**
- * USE IN BUILDER and REMIX on a feed tile. ADD TO LIST arrives with SNO
+ * DEPLOY AN INSTANCE and OPEN IN WORKSHOP (REMIX on someone else's) on a feed tile. ADD TO LIST arrives with SNO
  * lists (PR 4); a disabled button until then would only be noise.
  */
 function FeedActions({ object }: { object: FeedObject }): JSX.Element {
@@ -121,8 +121,8 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
   }
   return (
     <>
-      <button className="feed__act" onClick={use} title="Place it at the build cursor, as a copy that credits its author"><Wrench size={ICON} strokeWidth={2.25} aria-hidden />USE IN BUILDER</button>
-      <button className="feed__act" onClick={remix} title={own ? 'Open it in your workshop under its own address, so PUBLISH edits it in place' : 'Copy it into your workshop as your own, still credited'}><GitFork size={ICON} strokeWidth={2.25} aria-hidden />{own ? 'EDIT' : 'REMIX'}</button>
+      <button className="feed__act" onClick={use} title="Place it at the build cursor, as a copy that credits its author"><Sparkles size={ICON} strokeWidth={2.25} aria-hidden />DEPLOY AN INSTANCE</button>
+      <button className="feed__act" onClick={remix} title={own ? 'Open it in your workshop under its own address, so PUBLISH edits it in place' : 'Copy it into your workshop as your own, still credited'}>{own ? <Pencil size={ICON} strokeWidth={2.25} aria-hidden /> : <GitFork size={ICON} strokeWidth={2.25} aria-hidden />}{own ? 'OPEN IN WORKSHOP' : 'REMIX'}</button>
     </>
   )
 }
@@ -165,7 +165,7 @@ export function StashModals(): JSX.Element | null {
       <Shell title="Shard Feed" onClose={close}>
         <FeedList actions={(o) => <FeedActions object={o} />} />
         <Explanation>
-          Everyone&apos;s published objects, newest first. USE IN BUILDER puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited.
+          Everyone&apos;s published objects, newest first. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited.
         </Explanation>
       </Shell>
     )

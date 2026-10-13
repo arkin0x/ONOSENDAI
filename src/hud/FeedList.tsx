@@ -5,7 +5,7 @@
  *
  * Shared by the two places the feed is shown: the FEED tab of PLACE OBJECT,
  * where a tap lines the object up at the build cursor, and the SHARD FEED
- * window, where each tile carries USE IN BUILDER and REMIX. The data is
+ * window, where each tile carries DEPLOY AN INSTANCE and REMIX. The data is
  * useFeed's (sno-core's read); the pictures are useThumbs', drawn by the one
  * ThumbStage mounted here.
  */

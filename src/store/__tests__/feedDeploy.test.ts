@@ -172,7 +172,7 @@ describe('cancelling a deploy picked from the feed', () => {
     useStash.getState().close()
   })
 
-  it('from the SHARD FEED window (USE IN BUILDER): back to the window', () => {
+  it('from the SHARD FEED window (DEPLOY AN INSTANCE): back to the window', () => {
     useStash.getState().openFeed()
     useStash.getState().useFromFeed(published('Bench'))
     expect(useStash.getState().feed).toBe(false)

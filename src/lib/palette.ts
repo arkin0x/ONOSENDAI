@@ -32,6 +32,13 @@ export const BUILD = '#f2f7ff'
  */
 export const GAME = '#ff7ad9'
 /**
+ * A region named by a /C/ link's coordinate prefix (lib/coordRoute.ts):
+ * yellow, as arkinox asked (2026-10-13). A clear lemon rather than WARN's
+ * amber or SECTOR's orange, so a shared region never reads as a warning or
+ * as the sector cage.
+ */
+export const PREFIX = '#ffe14d'
+/**
  * Sector lattice. Its own color rather than WARN, which is amber and means
  * cost: a sector boundary is a fact about where you are, not a warning.
  *

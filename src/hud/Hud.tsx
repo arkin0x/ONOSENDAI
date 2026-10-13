@@ -10,6 +10,7 @@ import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
 import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { coordLink, placeHex } from '../lib/coordRoute'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { shortHex } from '../lib/time'
@@ -149,6 +150,9 @@ export function PositionPanel(): JSX.Element {
   // Decimals go to the plane on show: yours at your head, the view's in a view.
   const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const coordHex = useCyberspace((s) => s.coordHex())
+  // The place a /C/ link shares (lib/coordRoute.ts): yours at your head;
+  // in a view, the view's cursor when it drives, else what it looks at.
+  const linkHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(s.focus?.drive ? s.cursor : s.anchor, s.anchorPlane)))
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
   const viewText = useViewDraft((s) => s.text)
@@ -235,6 +239,10 @@ export function PositionPanel(): JSX.Element {
       <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
         <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
         <code>{coordHex}</code>
+      </button>
+      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
+        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
+        <code>/C/{linkHex}</code>
       </button>
 
       {/* The free view: look at any place without walking there. Three axis

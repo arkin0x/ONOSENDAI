@@ -17,12 +17,22 @@
  * The heights are per axis and genuinely independent, so the box is not a cube.
  * A move that is expensive on z and free on x and y flashes a slab, which is the
  * honest shape of what was computed.
+ *
+ * The box is a place, not a picture: it is built against the origin of the
+ * cell it landed in and kept there as later landings re-anchor the scene. In
+ * WALK, landings come one after another, and a box left in render space rode
+ * along with you one step ahead. And in WALK the landing that catches the
+ * chain up does not strike a new box at the eye, where it would sit in front
+ * of you: the box already lit round your proven head fades out where it is,
+ * over the same beat as the outline there (lib/walkGhost.ts GHOST_FADE_MS;
+ * arkinox, 2026-10-13).
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, Color, LineBasicMaterial } from 'three'
-import { GRID_RADIUS, type Position, type ViewAxes } from '../lib/space'
+import { BufferGeometry, Color, LineBasicMaterial, LineSegments } from 'three'
+import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
+import { GHOST_FADE_MS } from '../lib/walkGhost'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { boundaryColor } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -50,6 +60,9 @@ interface Flash {
   color: Color
   /** Heights crossed per screen axis, for the record. */
   heights: [number, number, number]
+  /** The origin the geometry was built against, and its zoom: where the box is in cyberspace. */
+  origin: Position
+  scaleExp: number
 }
 
 function buildFlash(
@@ -62,6 +75,8 @@ function buildFlash(
     geometry: boxEdges(c.centre, c.size),
     color: boundaryColor(c.peak).clone(),
     heights: c.heights,
+    origin,
+    scaleExp,
   }
 }
 
@@ -73,6 +88,9 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
   const previous = useRef<Position>(position)
   const started = useRef(0)
   const material = useRef<LineBasicMaterial>(null)
+  const lines = useRef<LineSegments>(null)
+  // WALK caught up: the lit box fades out from where its fade had got to.
+  const fadeOut = useRef<{ t0: number; from: number } | null>(null)
 
   useEffect(() => {
     const from = previous.current
@@ -81,7 +99,13 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     // A commit that lands while you are looking at history would flash in a
     // frame anchored somewhere else entirely.
     if (!useCyberspace.getState().atHead()) return
+    const s = useCyberspace.getState()
+    if (s.walking && s.cursor.x === position.x && s.cursor.y === position.y && s.cursor.z === position.z) {
+      if (material.current && fadeOut.current === null) fadeOut.current = { t0: -1, from: material.current.opacity }
+      return
+    }
 
+    fadeOut.current = null
     const next = buildFlash(from, position, scaleExp, axes)
     setFlash((old) => {
       old?.geometry.dispose()
@@ -98,6 +122,32 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
   useFrame((state) => {
     if (!flash || !material.current) return
     if (started.current === 0) started.current = state.clock.elapsedTime
+
+    // Where the box's origin is in the frame the scene is drawn in now.
+    const s = useCyberspace.getState()
+    if (lines.current && s.scaleExp === flash.scaleExp) {
+      const axes2 = s.axes()
+      const now = alignedOrigin(s.anchor, s.scaleExp)
+      const a = placeCentre(flash.origin, now, s.scaleExp, axes2)
+      const b = placeCentre(flash.origin, flash.origin, s.scaleExp, axes2)
+      lines.current.position.set(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+    }
+
+    const f = fadeOut.current
+    if (f) {
+      if (f.t0 < 0) f.t0 = state.clock.elapsedTime
+      const u = (state.clock.elapsedTime - f.t0) * 1000 / GHOST_FADE_MS
+      if (u >= 1) {
+        fadeOut.current = null
+        setFlash((old) => {
+          old?.geometry.dispose()
+          return null
+        })
+        return
+      }
+      material.current.opacity = f.from * (1 - u)
+      return
+    }
 
     const t = (state.clock.elapsedTime - started.current) / DURATION
     if (t >= 1) {
@@ -122,7 +172,7 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
   if (!flash) return null
 
   return (
-    <lineSegments geometry={flash.geometry} frustumCulled={false} renderOrder={11}>
+    <lineSegments ref={lines} geometry={flash.geometry} frustumCulled={false} renderOrder={11}>
       <lineBasicMaterial
         ref={material}
         color={WHITE}

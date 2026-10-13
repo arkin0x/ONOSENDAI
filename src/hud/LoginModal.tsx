@@ -157,12 +157,6 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
                 <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
               </div>
             </div>
-            {/* Switching signs nothing (useCyberspace switchTo): a new identity's
-                spawn waits for its first move (arkinox, 2026-09-28). */}
-            <p className="login__note">
-              Switching signs nothing. An identity you have moved before returns to its own chain;
-              a new one waits at its spawn point until you first move it.
-            </p>
           </>
         )}
 

@@ -45,15 +45,26 @@
  * plain icosahedron, which is all inside, is not drawn. While the proofs are
  * behind, a faint outline stands where you really are. No tap target: the
  * camera is in it.
+ *
+ * The outline never comes to you (arkinox, 2026-10-13). It eases from one
+ * proven step to the next while the chain is behind, which keeps it behind
+ * the eye, but the step that catches the chain up lands where the camera is,
+ * and gliding there put it across the view, in front of you. So that last
+ * landing leaves it where it stood, one step back, and it fades out there
+ * (GHOST_FADE_MS). The next step pressed brings it back at your proven head
+ * at once, with no glide from wherever it last was. Driven per frame from
+ * the store (lib/walkGhost.ts), not from React, so a landing cannot draw
+ * one frame of it at the new head before a re-render hides it.
  */
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Group, type Quaternion } from 'three'
+import { Group, Material, type Quaternion } from 'three'
 import { avatarTurn, facingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { walkEye } from '../lib/walkEye'
+import { WalkGhost } from '../lib/walkGhost'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
@@ -64,6 +75,8 @@ import { TapTarget } from './TapTarget'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
 const REACH = GRID_RADIUS * 8
+/** The proven-head outline's opacity at full strength, as AvatarShape's outline draws it. */
+const GHOST_OPACITY = 0.3
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -73,7 +86,7 @@ export function Avatar(): JSX.Element | null {
   // The View panel's "Hide avatar in WALK": the camera is inside you, and
   // with it on nothing of you is drawn around it.
   const hiddenInWalk = useLayers((s) => s.walkAvatarHidden)
-  const behind = useCyberspace((s) => s.walking && (s.cursor.x !== s.position.x || s.cursor.y !== s.position.y || s.cursor.z !== s.position.z))
+  const ghost = useRef(new WalkGhost())
   // What is drawn, measured for the tap (TapTarget), as OtherAvatar does.
   const drawn = useRef<Group>(null)
   // Looking at a shard means the origin is that shard, not you: drawing your
@@ -138,8 +151,21 @@ export function Avatar(): JSX.Element | null {
     if (!g || !d) return
     if (walking) {
       g.position.copy(walkEye)
-      proven.current?.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+      const p = proven.current
+      if (p) {
+        const s = useCyberspace.getState()
+        const shown = ghost.current.frame(s, performance.now(), dt)
+        p.visible = shown !== null
+        if (shown) {
+          p.position.set(shown.at[0], shown.at[1], shown.at[2])
+          p.traverse((o) => {
+            const m = (o as { material?: Material }).material
+            if (m) { m.transparent = true; m.opacity = GHOST_OPACITY * shown.fade }
+          })
+        }
+      }
     } else {
+      ghost.current.reset()
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
     }
     // In WALK you face where you look, live as you turn (arkinox,
@@ -171,8 +197,8 @@ export function Avatar(): JSX.Element | null {
 
   return (
     <>
-    {walking && behind && (
-      <group ref={proven}>
+    {walking && (
+      <group ref={proven} visible={false}>
         <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} outline />
       </group>
     )}

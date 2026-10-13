@@ -174,7 +174,7 @@ export function useKeyboard(): void {
         // WALK: stop the steps still to prove, or with none, back to HOP.
         if (store.walking) {
           const walk = useWalk.getState()
-          if (walk.behind > 0 || store.proof.status === 'computing') walk.stop()
+          if (walk.behind > 0 || walk.open !== null || store.proof.status === 'computing') walk.stop()
           else walk.exit()
           return
         }

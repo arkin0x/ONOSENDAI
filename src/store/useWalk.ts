@@ -8,11 +8,21 @@
  * set to where the step will land, so the press feels like a step and not
  * like a wait.
  *
- * Steps queue. Each is proved from where the one before it landed, in the
- * order pressed, through the store's own commit (walkTo), so a WALK step is
- * checked, signed and published exactly like a COMMIT. A step past this
+ * Presses in one direction make one move, not one each (arkinox,
+ * 2026-10-13). While you keep walking the same way, each press extends one
+ * open segment and the view goes to its new end at once; the segment closes,
+ * and is queued to be proved, when you turn, when you have been still for
+ * WALK_SETTLE_MS, or when one more step would make it cost more than about
+ * WALK_SEGMENT_BUDGET_MS of this machine's compute (segmentAffordable). A
+ * hop's cost is path-independent (the per-axis LCA of its two ends), so the
+ * one straight hop is never dearer than the steps it replaces, and a long
+ * straight walk is a few hops instead of a proof per press.
+ *
+ * Closed segments queue. Each is proved from where the one before it landed,
+ * in order, through the store's own commit (walkTo), so a WALK move is
+ * checked, signed and published exactly like a COMMIT. One past this
  * machine's ceiling runs as its route (hops to the wall, the sidestep, hops
- * on), still as one press.
+ * on), still as one move.
  *
  * The walk stops, all of it, the moment a step does not land: refused,
  * infeasible, a signature declined, a step only HOSAKA could sell (a walk
@@ -20,25 +30,79 @@
  * comes back to where you really stand, so the view eases back with it.
  * Steps already signed stay on the chain: they are real moves.
  *
- * `behind` is the walk's lag, the steps pressed and not yet proven, the one
- * computing included. It is what the LOSING SYNC warning counts.
+ * `behind` is the walk's lag: the closed segments not yet proven, the one
+ * computing included, and never the open one, which is still being walked.
+ * It is what the LOSING SYNC warning counts, so the warning comes up only for
+ * turns made faster than they can be proved. Leaving WALK or STOP drops the
+ * open segment with the queue.
  */
 
 import { create } from 'zustand'
+import { estimateHopCost } from 'cyberspace-core'
+import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibration } from '../lib/calibration'
 import { moveDirection, type MoveName } from '../lib/moves'
-import { clampAxis, stepFor, type Position } from '../lib/space'
-import { samePosition, useCyberspace } from './useCyberspace'
+import { clampAxis, stepFor, type AxisName, type Position } from '../lib/space'
+import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 
-/** What the LOSING SYNC warning waits for: this many steps not yet proven. */
+/** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
 
+/** Still this long, in ms, and the open segment closes and goes to be proved. */
+export const WALK_SETTLE_MS = 600
+
+/**
+ * The most one segment may cost to prove, in ms of this machine's compute: a
+ * fifth of the budget the hop ceiling is measured against (lib/calibration.ts
+ * HOP_AXIS_BUDGET_MS), about a second. Past it the segment closes and the
+ * next press starts another, so a long straight walk at a large scale never
+ * waits on one huge proof.
+ */
+export const WALK_SEGMENT_BUDGET_MS = HOP_AXIS_BUDGET_MS / 5
+
+/** The open segment: still being walked, not yet queued. */
+export interface WalkSegment {
+  axis: AxisName
+  dir: 1 | -1
+  /** Where it starts: the end of the move before it, or your head. */
+  from: Position
+  /** Where it ends now: the view is here. */
+  end: Position
+}
+
+/**
+ * Whether a straight hop from `from` to `to` costs no more than
+ * WALK_SEGMENT_BUDGET_MS here. The cost is set by the highest per-axis LCA of
+ * the two ends, the Cantor tree a proof has to compute; measured times
+ * project it when calibration has run, and before that each height is taken
+ * to double the time of the one under it from the conservative hop ceiling.
+ */
+export function segmentAffordable(from: Position, to: Position, plane: number): boolean {
+  const est = estimateHopCost(from.x, from.y, from.z, to.x, to.y, to.z, plane as 0 | 1, MAX_COMPUTE_HEIGHT)
+  const h = Math.max(est.lcaX, est.lcaY, est.lcaZ)
+  const measured = useCalibration.getState().cantorMsByHeight
+  if (measured && Object.keys(measured).length > 0) {
+    const ms = projectCantorMs(measured, h)
+    if (Number.isFinite(ms)) return ms <= WALK_SEGMENT_BUDGET_MS
+  }
+  return h <= recommendedHopHeight() - Math.log2(HOP_AXIS_BUDGET_MS / WALK_SEGMENT_BUDGET_MS)
+}
+
+/** The stillness timer that closes the open segment. */
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+function clearSettle(): void {
+  if (settleTimer !== null) clearTimeout(settleTimer)
+  settleTimer = null
+}
+
 interface WalkState {
-  /** Steps pressed and not yet landed, oldest first. The first is the one in flight. */
+  /** Closed segments not yet landed, by their ends, oldest first. The first is the one in flight. */
   queue: Position[]
+  /** The segment still being walked, or null. */
+  open: WalkSegment | null
   /** The step handed to the store, until it lands or the walk stops. */
   running: Position | null
-  /** Steps not yet proven, the one in flight included. */
+  /** Closed segments not yet proven, the one in flight included. */
   behind: number
   /** Turn WALK on. Only at your own head; a VIEW in progress ends first. */
   enter: () => void
@@ -46,8 +110,10 @@ interface WalkState {
   exit: () => void
   /** Stop the walk where the chain is now, and stay in WALK. */
   stop: (message?: string | null) => void
-  /** A direction press: queue one step that way and show it at once. */
+  /** A direction press: one step that way, shown at once, added to the open segment or starting one. */
   press: (name: MoveName) => void
+  /** Close the open segment and queue it to be proved (stillness, a turn, the cost cap). */
+  settle: () => void
 }
 
 /** Something of the store's is still working on a move: a proof, a route, a cloud job. */
@@ -58,6 +124,7 @@ function moveBusy(): boolean {
 
 export const useWalk = create<WalkState>((set, get) => ({
   queue: [],
+  open: null,
   running: null,
   behind: 0,
 
@@ -70,7 +137,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (!useCyberspace.getState().atHead()) return
     const { position } = useCyberspace.getState()
     useCyberspace.setState({ walking: true, cursor: { ...position } })
-    set({ queue: [], running: null, behind: 0 })
+    clearSettle()
+    set({ queue: [], open: null, running: null, behind: 0 })
   },
 
   exit: () => {
@@ -81,7 +149,8 @@ export const useWalk = create<WalkState>((set, get) => ({
 
   stop: (message = null) => {
     const cs = useCyberspace.getState()
-    set({ queue: [], running: null, behind: 0 })
+    clearSettle()
+    set({ queue: [], open: null, running: null, behind: 0 })
     // Whatever is in flight goes too: a proof is killed, a route abandoned,
     // a cloud flow ended the way X ends it (cancel). What was signed stays.
     if (moveBusy() || cs.plan) cs.cancel()
@@ -102,18 +171,44 @@ export const useWalk = create<WalkState>((set, get) => ({
     const cs = useCyberspace.getState()
     if (!cs.walking || !cs.atHead()) return
     const dir = moveDirection(cs.screenAxes ?? cs.axes(), name)
-    const { queue } = get()
-    const from = queue[queue.length - 1] ?? cs.position
+    const { queue, open } = get()
+    const from = open?.end ?? queue[queue.length - 1] ?? cs.position
     const next: Position = { ...from }
     next[dir.axis] = clampAxis(from[dir.axis] + stepFor(cs.scaleExp) * BigInt(dir.dir))
     // Against the axis wall: nowhere to step.
     if (next[dir.axis] === from[dir.axis]) return
-    set({ queue: [...queue, next], behind: queue.length + 1 })
+    const sign = dir.dir > 0 ? 1 : -1
+    if (open && open.axis === dir.axis && open.dir === sign && segmentAffordable(open.from, next, cs.plane)) {
+      // On the same way: the open segment grows.
+      set({ open: { ...open, end: next } })
+    } else {
+      // A turn, or one step more than a segment may cost: the open one goes to
+      // be proved and this step starts the next.
+      if (open) closeOpen()
+      set({ open: { axis: dir.axis, dir: sign, from, end: next } })
+      if (open) pump()
+    }
     // The view and the avatar go now; the proof catches up.
     useCyberspace.setState({ cursor: { ...next } })
+    clearSettle()
+    settleTimer = setTimeout(() => { settleTimer = null; get().settle() }, WALK_SETTLE_MS)
+  },
+
+  settle: () => {
+    clearSettle()
+    if (!get().open) return
+    closeOpen()
     pump()
   },
 }))
+
+/** The open segment onto the queue. */
+function closeOpen(): void {
+  const { open, queue } = useWalk.getState()
+  if (!open) return
+  const next = [...queue, open.end]
+  useWalk.setState({ open: null, queue: next, behind: next.length })
+}
 
 /**
  * A walkTo that has not returned: its checks are still waiting on the relays
@@ -180,7 +275,8 @@ useCyberspace.subscribe((s, prev) => {
     // and a step in flight is cancelled, but the cursor is left alone: it
     // belongs to whatever took the scene (a VIEW, a spectation, BUILD).
     useCyberspace.setState({ walking: false })
-    useWalk.setState({ queue: [], running: null, behind: 0 })
+    clearSettle()
+    useWalk.setState({ queue: [], open: null, running: null, behind: 0 })
     if (moveBusy() || useCyberspace.getState().plan) useCyberspace.getState().cancelPlan()
     return
   }
@@ -194,7 +290,7 @@ useCyberspace.subscribe((s, prev) => {
   // Your head moved with nothing of the walk's queued: another device's move
   // folded in (the fold leaves a walk's cursor alone). The eye goes to it.
   const w = useWalk.getState()
-  if (s.position !== prev.position && w.queue.length === 0 && w.running === null && !samePosition(s.cursor, s.position)) {
+  if (s.position !== prev.position && w.queue.length === 0 && w.open === null && w.running === null && !samePosition(s.cursor, s.position)) {
     useCyberspace.setState({ cursor: { ...s.position } })
     return
   }

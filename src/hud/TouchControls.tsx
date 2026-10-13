@@ -92,8 +92,9 @@ export function TouchControls(): JSX.Element {
   const home = useCyberspace((s) => s.atHead())
   const viewing = useCyberspace((s) => s.viewing())
   const walking = useCyberspace((s) => s.walking)
-  // Steps pressed in WALK and not yet proven: STOP has something to stop.
-  const behind = useWalk((s) => s.behind)
+  // Steps pressed in WALK and not yet proven, queued or still being walked:
+  // STOP has something to stop.
+  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0))
   const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
 
   const computing = proof.status === 'computing'

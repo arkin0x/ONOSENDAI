@@ -1,7 +1,8 @@
 /**
- * walk.test.ts - WALK commits a step per press, shows it at once, proves the
- * steps in the order pressed, each from where the last one landed, and stops
- * the whole walk, back at the real head, the moment a step does not land.
+ * walk.test.ts - WALK shows every press at once, makes one move of presses in
+ * one direction (a segment closed by a turn, by stillness or by its cost),
+ * proves the segments in order, each from where the last one landed, and
+ * stops the whole walk, back at the real head, the moment one does not land.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -29,7 +30,8 @@ vi.mock('../../lib/calibration', async (orig) => {
 })
 
 import { useCyberspace } from '../useCyberspace'
-import { losingSync, SYNC_WARN_AT, useWalk } from '../useWalk'
+import { losingSync, segmentAffordable, SYNC_WARN_AT, WALK_SETTLE_MS, useWalk } from '../useWalk'
+import { useCalibration } from '../../lib/calibration'
 import { useToast } from '../useToast'
 
 function done(req: (typeof posted)[number]) {
@@ -56,53 +58,124 @@ describe('WALK', () => {
     useCyberspace.setState({ cloudPrefs: { ...useCyberspace.getState().cloudPrefs, mode: 'off' } })
     await useCyberspace.getState().respawn()
     useCyberspace.getState().cancel()
+    useCalibration.setState({ cantorMsByHeight: undefined })
     useWalk.getState().enter()
   })
 
-  it('shows every press at once and proves the steps in order, each from the last landing', async () => {
+  it('makes one hop of presses in one direction, shown at once and proved when the walker stops', async () => {
+    const start = { ...useCyberspace.getState().position }
+    useWalk.getState().press('right')
+    useWalk.getState().press('right')
+    useWalk.getState().press('right')
+    const w = useWalk.getState()
+    // Still being walked: nothing queued, nothing behind.
+    expect(w.queue).toEqual([])
+    expect(w.behind).toBe(0)
+    expect(w.open).not.toBeNull()
+    expect(Math.abs(Number(stepped(start, w.open!.end)))).toBe(3)
+    // The view is already at the end: the cursor, which WALK's camera follows.
+    expect(useCyberspace.getState().cursor).toEqual(w.open!.end)
+    expect(posted).toHaveLength(0)
+
+    useWalk.getState().settle()
+    expect(useWalk.getState().behind).toBe(1)
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0].from).toEqual(start)
+    expect(posted[0].to).toEqual(w.open!.end)
+    await land()
+    expect(useCyberspace.getState().position).toEqual(w.open!.end)
+    expect(useWalk.getState().behind).toBe(0)
+    // spawn, then ONE hop for three presses
+    expect(useCyberspace.getState().events).toHaveLength(2)
+  })
+
+  it('a turn closes the segment: it goes to be proved and the new direction starts the next', async () => {
     const start = { ...useCyberspace.getState().position }
     useWalk.getState().press('right')
     useWalk.getState().press('right')
     useWalk.getState().press('up')
-    const { queue, behind } = useWalk.getState()
-    expect(behind).toBe(3)
-    expect(queue).toHaveLength(3)
-    // The view is already at the last step: the cursor, which WALK's camera follows.
-    expect(useCyberspace.getState().cursor).toEqual(queue[2])
-    expect(useCyberspace.getState().position).toEqual(start)
+    const { queue, open, behind } = useWalk.getState()
+    expect(queue).toHaveLength(1)
+    expect(behind).toBe(1)
+    expect(Math.abs(Number(stepped(start, queue[0])))).toBe(2)
+    expect(open!.from).toEqual(queue[0])
+    expect(useCyberspace.getState().cursor).toEqual(open!.end)
 
     await vi.waitFor(() => expect(posted).toHaveLength(1))
     expect(posted[0].from).toEqual(start)
     expect(posted[0].to).toEqual(queue[0])
-    expect(Math.abs(Number(stepped(start, queue[0])))).toBe(1)
-
     await land()
-    expect(useCyberspace.getState().position).toEqual(queue[0])
-    expect(useWalk.getState().behind).toBe(2)
+    useWalk.getState().settle()
+    await vi.waitFor(() => expect(posted).toHaveLength(2))
     expect(posted[1].from).toEqual(queue[0])
-    expect(posted[1].to).toEqual(queue[1])
+    expect(posted[1].to).toEqual(open!.end)
+    await land()
+    expect(useCyberspace.getState().position).toEqual(open!.end)
+    expect(useCyberspace.getState().events).toHaveLength(3)
+  })
 
-    await land()
-    expect(posted[2].from).toEqual(queue[1])
-    expect(posted[2].to).toEqual(queue[2])
-    await land()
-    expect(useCyberspace.getState().position).toEqual(queue[2])
+  it('stillness closes the open segment after WALK_SETTLE_MS, and every press restarts the wait', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useWalk.getState().press('right')
+      vi.advanceTimersByTime(WALK_SETTLE_MS - 100)
+      useWalk.getState().press('right')
+      vi.advanceTimersByTime(WALK_SETTLE_MS - 1)
+      expect(useWalk.getState().queue).toHaveLength(0)
+      expect(useWalk.getState().open).not.toBeNull()
+      vi.advanceTimersByTime(1)
+      expect(useWalk.getState().open).toBeNull()
+      expect(useWalk.getState().queue).toHaveLength(1)
+      expect(useWalk.getState().behind).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a segment closes before it would cost more than its budget, so a long straight walk is a few hops', () => {
+    // Height 3 and up projects past a second here: a segment may only cross walls up to h2.
+    useCyberspace.setState({ scaleExp: 0 })
+    useCalibration.setState({ cantorMsByHeight: { 1: 10, 2: 100, 3: 2000 } })
+    const start = { ...useCyberspace.getState().position }
+    for (let i = 0; i < 20; i++) useWalk.getState().press('right')
+    const { queue, open } = useWalk.getState()
+    const ends = [...queue, open!.end]
+    expect(ends.length).toBeGreaterThan(1)
+    expect(Math.abs(Number(stepped(start, ends[ends.length - 1])))).toBe(20)
+    // Each segment is affordable, unless it is a single step, which is the least a press can be.
+    let from = start
+    for (const end of ends) {
+      const one = Math.abs(Number(stepped(from, end))) === 1
+      expect(one || segmentAffordable(from, end, useCyberspace.getState().plane)).toBe(true)
+      from = end
+    }
+  })
+
+  it('counts only closed segments for LOSING SYNC: a long straight walk never warns, quick turns do', () => {
+    for (let i = 0; i < 6; i++) useWalk.getState().press('right')
     expect(useWalk.getState().behind).toBe(0)
-    // spawn, then one hop per press
-    expect(useCyberspace.getState().events).toHaveLength(4)
+    expect(losingSync(useWalk.getState().behind)).toBe(false)
+    useWalk.getState().press('up')
+    useWalk.getState().press('right')
+    useWalk.getState().press('up')
+    useWalk.getState().press('right')
+    // Four closed (the first one computing), one open.
+    expect(useWalk.getState().behind).toBe(4)
+    expect(losingSync(useWalk.getState().behind)).toBe(true)
   })
 
   it('steps the zoom: one press is 2^scaleExp gibsons', async () => {
     useCyberspace.setState({ scaleExp: 4 })
     const start = { ...useCyberspace.getState().position }
     useWalk.getState().press('left')
-    expect(Math.abs(Number(stepped(start, useWalk.getState().queue[0])))).toBe(16)
+    expect(Math.abs(Number(stepped(start, useWalk.getState().open!.end)))).toBe(16)
   })
 
-  it('a step that does not land stops the walk and brings the view back to the real head, keeping what was signed', async () => {
+  it('a move that does not land stops the walk and brings the view back to the real head, keeping what was signed', async () => {
     useWalk.getState().press('right')
+    useWalk.getState().press('up')
     useWalk.getState().press('right')
-    useWalk.getState().press('right')
+    useWalk.getState().settle()
     await vi.waitFor(() => expect(posted).toHaveLength(1))
     await land()
     const landed = { ...useCyberspace.getState().position }
@@ -126,17 +199,31 @@ describe('WALK', () => {
     expect(useToast.getState().toast?.meta).toContain('declined')
   })
 
-  it('STOP drops the queue and cancels the step in flight', async () => {
+  it('STOP drops the queue and the open segment and cancels the move in flight', async () => {
     const start = { ...useCyberspace.getState().position }
     useWalk.getState().press('up')
-    useWalk.getState().press('up')
+    useWalk.getState().press('right')
     await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(useWalk.getState().open).not.toBeNull()
     useToast.getState().dismiss()
     useWalk.getState().stop()
     // A STOP of your own needs no word.
     expect(useToast.getState().toast).toBeNull()
     expect(useWalk.getState().queue).toEqual([])
+    expect(useWalk.getState().open).toBeNull()
     expect(useCyberspace.getState().proof.status).not.toBe('computing')
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    expect(useCyberspace.getState().position).toEqual(start)
+  })
+
+  it('leaving WALK drops a segment still being walked: nothing is proved and the view comes home', () => {
+    const start = { ...useCyberspace.getState().position }
+    useWalk.getState().press('right')
+    useWalk.getState().press('right')
+    useWalk.getState().exit()
+    expect(useWalk.getState().open).toBeNull()
+    expect(useWalk.getState().queue).toEqual([])
+    expect(posted).toHaveLength(0)
     expect(useCyberspace.getState().cursor).toEqual(start)
     expect(useCyberspace.getState().position).toEqual(start)
   })

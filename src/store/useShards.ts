@@ -37,6 +37,7 @@ import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
+import { unbagRemembered } from '../lib/foundCache'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
@@ -1286,7 +1287,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const cube = held && (!held.heights || (held.heights.x === held.heights.y && held.heights.y === held.heights.z)) ? held.height : undefined
         const height = cube ?? get().mine.find((d) => d.lookupId === lookupId)?.height
         const found: Hidden[] = []
-        for (const ev of events) found.push(...await unbag(ev, hexToBytes(keyHex), resolveReference, undefined, height))
+        for (const ev of events) found.push(...await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, undefined, height))
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)

@@ -14,7 +14,8 @@
 
 import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
-import { unbag, HIDDEN_KIND } from '../lib/hidden'
+import { HIDDEN_KIND } from '../lib/hidden'
+import { unbagRemembered } from '../lib/foundCache'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -125,7 +126,7 @@ export function useDiscovery(): void {
         const height = heights.get(region) ?? 0
         const h = BigInt(height)
         const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
-        const items = await unbag(ev, hexToBytes(keyHex), resolveReference, origin, height)
+        const items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
         if (items.length > 0) opened.push(region)
         found.push(...items)
       }

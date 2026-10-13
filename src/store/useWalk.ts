@@ -28,6 +28,7 @@ import { create } from 'zustand'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { clampAxis, stepFor, type Position } from '../lib/space'
 import { samePosition, useCyberspace } from './useCyberspace'
+import { BRIEF_TOAST_MS, useToast } from './useToast'
 
 /** What the LOSING SYNC warning waits for: this many steps not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -90,6 +91,11 @@ export const useWalk = create<WalkState>((set, get) => ({
       pendingTarget: null,
       ...(message ? { proof: { ...now.proof, status: 'infeasible' as const, message } } : {}),
     })
+    // The reason on screen, not only in the menu's proof panel: on a phone
+    // that panel is behind the menu, and a walk that stops for no visible
+    // reason reads as the pad breaking. A STOP of your own has no message
+    // and needs no word.
+    if (message) useToast.getState().show({ label: 'WALK STOPPED', meta: message, mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   },
 
   press: (name) => {

@@ -8199,6 +8199,11 @@ kbd {
   flex: none;
   color: var(--build);
 }
+/* WALK's stop: the walk's red, on the Builder's chip. */
+.hyperbar--walktoast .hyperbar__label,
+.toast__walk {
+  color: var(--danger);
+}
 .hyperbar--buildtoast .hyperbar__meta {
   white-space: normal;
   max-width: 320px;

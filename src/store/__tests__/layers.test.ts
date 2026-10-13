@@ -63,7 +63,7 @@ describe('scene layer switches', () => {
     useLayers.getState().toggleLayer('dots')
     expect(useLayers.getState().dots).toBe(false)
     expect(useLayers.getState().boxes).toBe(true)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false })
 
     // A reload: the store is created again from what was stored.
     const reloaded = await freshStore(storage)
@@ -73,7 +73,16 @@ describe('scene layer switches', () => {
     reloaded.useLayers.getState().toggleLayer('boxes')
     reloaded.useLayers.getState().toggleLayer('dots')
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false })
+  })
+
+  it('keep WALK\'s avatar shown unless it is explicitly hidden', async () => {
+    const { loadLayers, LAYERS_KEY } = await freshStore(memoryStorage())
+    expect(loadLayers().walkAvatarHidden).toBe(false)
+    const stored = await freshStore(memoryStorage({ [LAYERS_KEY]: JSON.stringify({ walkAvatarHidden: true }) }))
+    expect(stored.useLayers.getState()).toMatchObject({ dots: true, boxes: true, walkAvatarHidden: true })
+    const odd = await freshStore(memoryStorage({ [LAYERS_KEY]: JSON.stringify({ walkAvatarHidden: 'yes' }) }))
+    expect(odd.useLayers.getState().walkAvatarHidden).toBe(false)
   })
 
   it('read both on, and still toggle, when storage throws', async () => {
@@ -81,7 +90,7 @@ describe('scene layer switches', () => {
     expect(useLayers.getState().dots).toBe(true)
     expect(useLayers.getState().boxes).toBe(true)
     expect(() => loadLayers()).not.toThrow()
-    expect(() => saveLayers({ dots: false, boxes: false })).not.toThrow()
+    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false })).not.toThrow()
     expect(() => useLayers.getState().toggleLayer('boxes')).not.toThrow()
     // Kept in memory for the visit.
     expect(useLayers.getState().boxes).toBe(false)

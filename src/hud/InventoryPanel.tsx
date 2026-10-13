@@ -13,10 +13,15 @@
  * chests, which open here as they do where they were found. COPY puts an item
  * on the clipboard as text (`cyberspace-key:` and its event) and PASTE reads
  * one back, so an item crosses devices. Nothing here is destructive; BURN
- * comes later.
+ * comes later. An item you forged can be PUBLISHED to the ITEM FEED (a kind
+ * 33340 listing, lib/itemListing.ts): its name, picture and public key, never
+ * its private key, so anyone can seal a chest to it (arkinox, 2026-10-13).
+ * The confirmation says it cannot be taken back.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ConfirmModal } from './ConfirmModal'
+import { useItemFeed } from '../store/useItemFeed'
 import { X } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
@@ -67,6 +72,15 @@ function FoundAt({ item }: { item: HeldItem }): JSX.Element | null {
   )
 }
 
+/** The PUBLISH confirmation (arkinox, 2026-10-13: "appropriate warnings about irreversibility"). */
+const LISTING_WARNING = [
+  'Publishing lists this item in the ITEM FEED: its name, picture, description and public key go to your relays, and anyone can then seal a chest to it.',
+  '',
+  'The item itself stays secret. Its private key is not published, and only people who hold the item can open what is sealed to it.',
+  '',
+  'This cannot be undone. You can ask relays to delete the listing later, but relays and other people may already have kept copies, and chests sealed to this item stay sealed to it. Treat it as permanent.',
+].join('\n')
+
 /** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS and COPY. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -81,6 +95,20 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     })
   }
   const pubkey = item.key?.itemPubkey ?? ''
+  // PUBLISH TO ITEM FEED: only on an item you forged, signed as yours.
+  const mine = item.author === me && item.verified && !!item.key
+  useItemFeed((s) => s.listings)
+  const listed = mine && useItemFeed.getState().listedBy(pubkey, me)
+  const busy = useItemFeed((s) => s.publishing === pubkey)
+  const [confirming, setConfirming] = useState(false)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const list = async (): Promise<void> => {
+    if (!item.key) return
+    setRefusal(null)
+    const why = await useItemFeed.getState().publish(item.key)
+    setConfirming(false)
+    if (why) setRefusal(why)
+  }
   return (
     <li className="secrets__row held__row">
       <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
@@ -95,7 +123,23 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
       <span className="held__acts">
         <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
         <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
+        {mine && (
+          <button className={`chest__act ${listed ? 'is-on' : ''}`} disabled={listed || busy} onClick={() => setConfirming(true)} title={listed ? 'Listed in the ITEM FEED: anyone can seal a chest to it' : 'Publish this item to the ITEM FEED so anyone can seal a chest to it'}>{busy ? 'LISTING…' : listed ? 'LISTED' : 'PUBLISH'}</button>
+        )}
       </span>
+      {refusal && <span className="held__refusal" role="status">{refusal}</span>}
+      {confirming && (
+        <ConfirmModal
+          title={`Publish “${item.name}” to the ITEM FEED?`}
+          body={<span className="modal__pre">{LISTING_WARNING}</span>}
+          confirmLabel="PUBLISH ITEM"
+          cancelLabel="CANCEL"
+          danger
+          busy={busy}
+          onConfirm={() => void list()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       {open && (
         <div className="held__details">
           <dl>
@@ -189,6 +233,11 @@ export function InventoryPanel(): JSX.Element {
   const chests = useMemo(() => Object.values(discovered).filter((h) => h.type === 'chest' && h.chest).map((h) => ({ id: h.eventId, chest: h.chest! })), [discovered])
   const [paste, setPaste] = useState('')
   const [note, setNote] = useState<string | null>(null)
+  // Whether your forged items are already listed is read from the ITEM FEED,
+  // once a session, and only when you hold something you forged.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const forgedAny = keys.some((k) => k.author === me && k.verified)
+  useEffect(() => { if (forgedAny && useItemFeed.getState().readAt === 0) void useItemFeed.getState().load() }, [forgedAny])
   const doPaste = (): void => {
     const r = useInventory.getState().paste(paste)
     setNote(r.ok ? (r.already ? `Already in your ITEMS: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not an item.')

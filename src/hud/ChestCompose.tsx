@@ -3,8 +3,9 @@
  *
  * A chest has a name, a lock and contents. The lock is one of the keypair
  * items in your ITEMS (so you can seal to an item you forged, or to one you
- * found that someone else forged), or a pasted item public key or npub, which
- * seals it to a person. The contents are a message (which may hold a Cashu
+ * found that someone else forged), an item chosen from the ITEM FEED (a listed
+ * item you have never held; arkinox, 2026-10-13), or a pasted item public key
+ * or npub, which seals it to a person. The contents are a message (which may hold a Cashu
  * token, checked at the mint as a hidden message is), one of your workshop
  * models, or a new item forged here, for chaining. The lock select is text
  * only: an <option> cannot hold an item's picture, so none is drawn there. Nothing is signed or sealed in the composer: the
@@ -29,6 +30,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Explanation } from './Explanation'
+import { ItemFeedPicker } from './ItemFeedPicker'
+import { lockFromListing } from '../lib/itemListing'
 import { ItemIcon } from './ItemIcon'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
@@ -93,7 +96,11 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   // its lock; one parked by AIM before a lock was chosen has none yet.
   const kept = draft?.lock ?? null
   const [lockKeyId, setLockKeyId] = useState<string>(() => (kept ? keys.find((k) => k.key?.itemPubkey === kept.pubkey)?.id ?? '' : keys[0]?.id ?? ''))
-  const [pasted, setPasted] = useState(kept && kept.label !== 'a person' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
+  // A lock chosen from the ITEM FEED: a listed item, held or not. A restored
+  // draft's lock that is neither held, a person nor pasted came from there.
+  const [feedLock, setFeedLock] = useState<ChestLock | null>(() => (kept && kept.label !== 'a person' && kept.label !== 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept : null))
+  const [picking, setPicking] = useState(false)
+  const [pasted, setPasted] = useState(kept && kept.label === 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
   const [contents, setContents] = useState<ChestContent[]>(draft?.contents ?? [])
   // What is being added: one editor open at a time.
   const [adding, setAdding] = useState<'message' | 'shard' | 'key' | null>(null)
@@ -102,12 +109,12 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const [keyName, setKeyName] = useState('')
 
   const heldLock = keys.find((k) => k.id === lockKeyId)
-  const lock: ChestLock | null = heldLock?.key ? { pubkey: heldLock.key.itemPubkey, label: heldLock.name } : parseLock(pasted)
+  const lock: ChestLock | null = heldLock?.key ? { pubkey: heldLock.key.itemPubkey, label: heldLock.name } : feedLock ?? parseLock(pasted)
   // The hider's label of what opens it starts as the lock's own name until typed over.
   useEffect(() => {
     if (requiresTouched) return
-    setRequires(heldLock ? `the ${heldLock.name}` : lock?.label === 'a person' ? 'being the one it was sealed for' : '')
-  }, [heldLock, lock?.label, requiresTouched])
+    setRequires(heldLock ? `the ${heldLock.name}` : feedLock ? `the ${feedLock.label}` : lock?.label === 'a person' ? 'being the one it was sealed for' : '')
+  }, [heldLock, feedLock, lock?.label, requiresTouched])
 
   // A Cashu token in a message is read, and its mint asked, once the text holds still.
   const settled = useSettled(text, SETTLE_MS) === text
@@ -157,13 +164,32 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
       {/* The lock: an item you hold, or a pasted public key. */}
       <div className="compose__row">
         <span className="legend__label">Lock</span>
-        <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => setLockKeyId(e.target.value)} aria-label="Seal to an item you hold" title="An item in your ITEMS: whoever holds it opens the chest">
+        <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold" title="An item in your ITEMS: whoever holds it opens the chest">
           <option value="">{keys.length === 0 ? 'no items in your ITEMS' : 'paste a public key below'}</option>
           {/* No icon or picture on an option: a select's options are text only, and the select says these are your items. */}
           {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
         </select>
+        <button className="chest__act" onClick={() => setPicking(true)} title="Choose a listed item from the ITEM FEED, even one you have never held">ITEM FEED</button>
       </div>
-      {!heldLock && (
+      {!heldLock && feedLock && (
+        <div className="compose__row">
+          <span className="item__name" title={feedLock.pubkey}>sealed to {feedLock.label}, from the item feed</span>
+          <button className="chest__act" onClick={() => setFeedLock(null)} aria-label="Clear the item feed lock" title="Clear this lock">×</button>
+        </div>
+      )}
+      {picking && (
+        <ItemFeedPicker
+          onClose={() => setPicking(false)}
+          onPick={(l) => {
+            // A listed item you also hold is the same lock: pick it in the select.
+            const held = keys.find((k) => k.key?.itemPubkey === l.itemPubkey)
+            if (held) { setLockKeyId(held.id); setFeedLock(null) } else { setLockKeyId(''); setFeedLock(lockFromListing(l)) }
+            setPasted('')
+            setPicking(false)
+          }}
+        />
+      )}
+      {!heldLock && !feedLock && (
         <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex) or an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="An item’s public key seals it to that item; an npub seals it to that person" />
       )}
       <input className="avatars__input" value={requires} onChange={(e) => { setRequires(e.target.value.slice(0, MAX_ITEM_NAME)); setRequiresTouched(true) }} placeholder="What opens it, for those who cannot" maxLength={MAX_ITEM_NAME} aria-label="Requires" title="Shown to anyone who finds the chest without its key" />
@@ -227,7 +253,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
       </div>
       <Explanation>
-        A chest is sealed to an item from your ITEMS (forge one first) or to a person&apos;s npub. Put a message, a cashu token, a shard or a new item inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that item, or that person, can open it and TAKE what is inside.
+        A chest is sealed to an item from your ITEMS (forge one first), to a listed item from the ITEM FEED, or to a person&apos;s npub. Put a message, a cashu token, a shard or a new item inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that item, or that person, can open it and TAKE what is inside.
       </Explanation>
     </div>
   )

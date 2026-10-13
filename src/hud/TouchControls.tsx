@@ -20,6 +20,14 @@
  * decision that the next thing you do is seen, and it carries everything
  * already signed out with it (see lib/release.ts). Cancelling leaves the
  * switch exactly where it was, on LOCAL.
+ *
+ * The commit slot is also the pad's mode switch, three states in a ring
+ * (arkinox, 2026-10-13): HOP, the resting state, where the pad lines up a
+ * move and COMMIT sends it; VIEW, a free look from your head; WALK, first
+ * person, where every press is a step (store/useWalk.ts). HOP turns VIEW
+ * on, VIEW turns WALK on, WALK goes back to HOP, and RECALL goes back to HOP
+ * from either. Each mode tints the pad's keys its own color, blue, yellow,
+ * red, so the hand knows what a press will do before it presses.
  */
 
 import { useState } from 'react'
@@ -35,6 +43,7 @@ import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
+import { useWalk } from '../store/useWalk'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -82,6 +91,10 @@ export function TouchControls(): JSX.Element {
   // the pad's VIEW is on, where it holds RECALL and the lit VIEW.
   const home = useCyberspace((s) => s.atHead())
   const viewing = useCyberspace((s) => s.viewing())
+  const walking = useCyberspace((s) => s.walking)
+  // Steps pressed in WALK and not yet proven: STOP has something to stop.
+  const behind = useWalk((s) => s.behind)
+  const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -96,6 +109,8 @@ export function TouchControls(): JSX.Element {
 
   const move = (name: MoveName) => () => {
     const s = useCyberspace.getState()
+    // In WALK a press is a step, committed now (store/useWalk.ts).
+    if (s.walking) { useWalk.getState().press(name); return }
     s.moveCursor(moveDirection(s.screenAxes ?? s.axes(), name))
   }
   const scale = (delta: number) => () => useCyberspace.getState().adjustScale(delta)
@@ -135,7 +150,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label="Move cursor and change scale">
+      <div className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -203,34 +218,53 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {(home || viewing) && <div className={`touchops${chainStatus ? ' touchops--status' : ''}`}>
+      {(home || viewing) && <div className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
-          title={computing ? 'Cancel proof (X)' : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
+          title={walking
+            ? (computing || behind > 0 ? 'Stop the walk where the chain is now (X)' : 'End WALK and go back to HOP (X)')
+            : computing ? 'Cancel proof (X)' : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
+            if (walking) {
+              if (computing || behind > 0) useWalk.getState().stop()
+              else useWalk.getState().exit()
+              return
+            }
             useCyberspace.getState().cancel()
           }}
         >
-          {computing ? 'STOP' : 'RECALL'}
+          {computing || (walking && behind > 0) ? 'STOP' : 'RECALL'}
         </button>
-        {/* VIEW in the commit slot while there is nothing to commit (arkinox,
-            2026-10-10): a free view from your head, so the pad moves the
-            cursor to look around without planning a hop. Lit while it is on;
-            pressing it again, or RECALL, ends it. */}
-        {(viewing || (!armed && !deploying && !computing)) ? (
+        {/* The mode switch, in the commit slot while there is nothing to
+            commit: HOP to VIEW to WALK and back to HOP. VIEW (arkinox,
+            2026-10-10) is a free view from your head, the pad moving the
+            cursor to look around without planning a hop; WALK (2026-10-13)
+            is first person, every press a step. */}
+        {walking ? (
           <button
-            className={`touchops__commit is-view ${viewing ? 'is-on' : ''}`}
-            aria-pressed={viewing}
-            title={viewing ? 'Viewing: the pad moves the cursor without planning a hop. Press again, or RECALL, to end it' : 'Move the cursor around without planning a hop; RECALL brings it back'}
+            className="touchops__commit is-walk is-on"
+            aria-pressed
+            title="Walking: every press is a step, proved behind you. Press to go back to HOP"
             {...noCallout}
-            onPointerDown={(e) => {
-              e.preventDefault(); e.stopPropagation()
-              const s = useCyberspace.getState()
-              if (s.viewing()) s.cancel(); else s.viewHere()
-            }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().exit() }}
+          >WALK</button>
+        ) : viewing ? (
+          <button
+            className="touchops__commit is-view is-on"
+            aria-pressed
+            title="Viewing: the pad moves the cursor without planning a hop. Press for WALK, or RECALL to end it"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}
           >VIEW</button>
+        ) : (!armed && !deploying && !computing) ? (
+          <button
+            className="touchops__commit is-hop"
+            title="Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}
+          >HOP</button>
         ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}

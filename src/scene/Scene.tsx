@@ -30,6 +30,8 @@ import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
+import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
+import { walkEye } from '../lib/walkEye'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -268,6 +270,17 @@ function CellMetric(): null {
  * axis-aligned view once you have finished looking. So changing `view` does not
  * merely remap the axes, it also returns the camera to straight-on.
  */
+/** The orbit's closest approach outside WALK, in render cells. */
+const ORBIT_MIN_DISTANCE = 2
+/**
+ * The WALK eye's distance from the avatar's centre, in render cells: as good
+ * as at it, and far enough off it that the orbit still has a direction to
+ * turn about.
+ */
+const WALK_EYE = 0.001
+/** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
+const walkDir = new Vector3()
+
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
@@ -280,6 +293,15 @@ function Rig(): JSX.Element {
   // was looking from, which is what made scrubbing a spectated chain snap.
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const prevDeps = useRef<{ view: unknown; genesisId: unknown; focusPubkey: unknown; focusPoint: string; exploreIndex: number | null } | null>(null)
+  // Whether the last change of focus also moved the anchor, read off the
+  // store change itself (the subscription below), which is the one place
+  // that can tell "VIEW began where you stand" from "VIEW began somewhere
+  // else and a frame has already rendered it".
+  const focusMovedAnchor = useRef(true)
+  useEffect(() => useCyberspace.subscribe((st, prev) => {
+    if (st.focus === prev.focus) return
+    focusMovedAnchor.current = !(st.anchor.x === prev.anchor.x && st.anchor.y === prev.anchor.y && st.anchor.z === prev.anchor.z && st.anchorPlane === prev.anchorPlane)
+  }), [])
   // What the last rendered frame was anchored on. A chain step is judged
   // against this, not against the last effect run: a spectated chain arriving
   // moves the anchor (and can change plane) without any effect firing.
@@ -292,7 +314,16 @@ function Rig(): JSX.Element {
     object: { position: Vector3 }
     target: Vector3
     update: () => void
+    minDistance: number
+    enableZoom: boolean
   } | null>(null)
+  // WALK's first person (store/useWalk.ts): whether the last frame was
+  // walking, and the eye's glide into the avatar or back out of it, as
+  // distances from the target. `outTo` is the orbit distance WALK was
+  // entered from, which is where leaving it puts the camera back.
+  const walkWas = useRef(false)
+  const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
+  const outTo = useRef(START_DISTANCE)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -392,6 +423,17 @@ function Rig(): JSX.Element {
     // SPECTATE and RETURN re-frame straight on, as boot does.
     const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
       before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
+    // A focus that begins or ends where the scene already stands: VIEW
+    // turned on or off at your head, which anchors the view exactly where you
+    // are. Nothing moved, so the camera stays exactly as it was, orbit and
+    // all; a zoom VIEW's end restores is carried by the frame loop below
+    // like any other zoom. It used to fall through to the re-frame whenever
+    // no move had been seen yet, snapping the camera straight on (arkinox,
+    // 2026-10-13: "when I activate the View button, it switches my camera").
+    if (focusOnly && !focusMovedAnchor.current) {
+      trace('focus-in-place')
+      return
+    }
     if (focusOnly && seen !== null && seen.scaleExp === s.scaleExp) {
       const cells = Math.max(
         Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
@@ -536,6 +578,30 @@ function Rig(): JSX.Element {
     smooth.current.y += dy
     smooth.current.z += dz
 
+    // WALK: the eye glides into the avatar on the way in and back out to the
+    // orbit it came from on the way out, along the line it is looking down,
+    // so the view never turns. While walking it is held there every frame: a
+    // drag turns the camera about its own eye (an orbit this small IS turning
+    // your head), and a re-frame above is undone on the next frame.
+    if (s.walking !== walkWas.current) {
+      walkWas.current = s.walking
+      const from = c.object.position.distanceTo(smooth.current)
+      if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
+      eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
+      c.enableZoom = !s.walking
+    }
+    if (eye.current) {
+      const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS
+      const d = eye.current.to + (eye.current.from - eye.current.to) * lerpRemaining(t)
+      const along = walkDir.copy(c.object.position).sub(smooth.current)
+      if (along.lengthSq() === 0) along.set(0, 0, 1)
+      c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
+      c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
+      locked.current = true
+      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE }
+    }
+    walkEye.copy(smooth.current)
+
     c.target.copy(smooth.current)
     c.update()
   })
@@ -545,7 +611,7 @@ function Rig(): JSX.Element {
       ref={controls as never}
       makeDefault
       enablePan={false}
-      minDistance={2}
+      minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
       onStart={() => { locked.current = false }}

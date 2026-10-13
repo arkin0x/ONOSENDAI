@@ -104,6 +104,13 @@ interface Props {
   onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
   /** Placements drawn with the selection's box around them. */
   selectedParts?: number[]
+  /**
+   * Fronts only, for an avatar seen from inside it (WALK's first person):
+   * the faces' backs are culled, so what sticks out of the body still shows
+   * and the inside of its own walls does not. The world otherwise draws both
+   * sides of an unlit face.
+   */
+  cull?: boolean
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -147,7 +154,7 @@ const TAG_BLEND = {
   stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
 } as const
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
@@ -300,7 +307,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -316,7 +323,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
-              : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} {...pick}>
@@ -353,7 +360,7 @@ const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
-function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected, cull }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -363,6 +370,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
   pose?: Pose
   onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
   selected?: number[]
+  cull: boolean
 }): JSX.Element | null {
   const list: Array<{ part: Part; r: Resolved | undefined }> = nested
     ? nested.map((p) => ({ part: p.part, r: p }))
@@ -374,7 +382,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
-    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} />
+    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} cull={cull} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

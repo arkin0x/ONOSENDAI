@@ -4441,16 +4441,18 @@ kbd {
   padding: 0;
 }
 
+/* COMMIT is HOP's: the mode's blue, not VIEW's yellow (arkinox, 2026-10-13:
+   "Commit should be the Hop color"). */
 .touchops__commit.is-armed {
   color: #05070d;
-  background: var(--warn, #ffb020);
-  border-color: var(--warn, #ffb020);
+  background: var(--accent, #00e5ff);
+  border-color: var(--accent, #00e5ff);
   font-weight: 700;
 }
 
 .touchops__commit.is-busy {
-  color: var(--warn, #ffb020);
-  border-color: var(--warn, #ffb020);
+  color: var(--accent, #00e5ff);
+  border-color: var(--accent, #00e5ff);
 }
 
 /* The move needs HOSAKA: the button says so in Earth blue (palette EARTH) and
@@ -4479,6 +4481,16 @@ kbd {
 /* VIEW in the commit slot while there is nothing to commit (arkinox,
    2026-10-10): yellow words on the resting button, and the armed yellow fill
    while the free view is on. */
+/* HOP, the resting mode: blue words on the dark button, and nothing to do
+   but turn VIEW on. */
+.touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
+/* WALK: first person, every press a step. Red, lit, while it is on. */
+.touchops__commit.is-walk.is-on {
+  color: #05070d;
+  background: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  font-weight: 700;
+}
 .touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
 .touchops__commit.is-view.is-on {
   color: #05070d;
@@ -8862,3 +8874,62 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .tag--beta { margin-left: 6px; color: #ffbf3c; border-color: rgba(255, 191, 60, 0.6); cursor: help; font-size: 9px; vertical-align: middle; }
 .agents__login { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .agents__login .notice { margin: 0; }
+
+/* ---------- Pad mode tint ----------
+ *
+ * The keys wear the mode they are in (arkinox, 2026-10-13): HOP blue, VIEW
+ * yellow, WALK red, over the same dark ground, so what a press will do is
+ * readable before it is pressed. A tint layered as an image over the key's
+ * own background, and not while pressed, so the pressed flash is unchanged. */
+.touchpad--mode-hop .touchpad__key:not(:active),
+.touchops--mode-hop .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(0, 229, 255, 0.09), rgba(0, 229, 255, 0.09));
+}
+.touchpad--mode-view .touchpad__key:not(:active),
+.touchops--mode-view .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
+  border-color: rgba(255, 176, 32, 0.35);
+}
+.touchpad--mode-walk .touchpad__key:not(:active),
+.touchops--mode-walk .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
+  border-color: rgba(255, 59, 107, 0.4);
+}
+
+/* ---------- LOSING SYNC ----------
+ *
+ * WALK three or more steps ahead of its proofs (hud/SyncWarning.tsx). Dead
+ * centre, over the scene and under nothing a finger needs: it takes no
+ * pointer events at all. In at a quarter second, out in a tenth, so catching
+ * up clears it at once. */
+.syncwarn {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  pointer-events: none;
+  text-align: center;
+  color: var(--danger, #ff3b6b);
+  font-family: var(--mono);
+  text-shadow: 0 0 12px rgba(255, 59, 107, 0.55);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  max-width: calc(100vw - 32px);
+}
+.syncwarn.is-on {
+  opacity: 1;
+  transition: opacity 250ms ease-in;
+}
+.syncwarn__title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.syncwarn__sub {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  opacity: 0.85;
+}

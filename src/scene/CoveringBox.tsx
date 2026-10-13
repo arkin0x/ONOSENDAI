@@ -96,6 +96,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const plane = useCyberspace((s) => s.plane)
   const atHead = useCyberspace((s) => s.atHead())
+  const walking = useCyberspace((s) => s.walking)
 
   const target = pendingTarget ?? cursor
 
@@ -272,7 +273,9 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     }
   })
 
-  if (!box) return null
+  // WALK has no cursor to line up: each press is its own step, and the
+  // walls you would pay for are striped on the rooms instead (Rooms.tsx).
+  if (!box || walking) return null
 
   return (
     <group>

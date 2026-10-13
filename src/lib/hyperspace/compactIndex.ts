@@ -130,6 +130,26 @@ export function rowByHeight(index: StopIndex, height: number): number {
   return index.byHeight[height] - 1
 }
 
+/**
+ * The row whose merkle root or block hash is these 32 bytes, or -1. One pass
+ * over the columns, allocation-free: the /C/ route asks this once per load
+ * (lib/coordRoute.ts), so an explorer's root or hash finds its stop without
+ * an index of its own. A block hash is only known for rows that carry one.
+ */
+export function rowByRootOrHash(index: StopIndex, bytes: Uint8Array): number {
+  const { merkles, hashes, kinds } = index
+  outer: for (let row = 0; row < index.size; row++) {
+    const off = row * 32
+    for (let i = 0; i < 32; i++) if (merkles[off + i] !== bytes[i]) {
+      if ((kinds[row] & HAS_HASH) === 0) continue outer
+      for (let j = 0; j < 32; j++) if (hashes[off + j] !== bytes[j]) continue outer
+      return row
+    }
+    return row
+  }
+  return -1
+}
+
 export function heightAt(index: StopIndex, row: number): number {
   return index.heights[row]
 }

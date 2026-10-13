@@ -19,6 +19,7 @@ import { AgentTalkHost } from './hud/AgentTalk'
 import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
+import { startCoordRoute } from './store/useCoordRoute'
 import { ToastChip } from './hud/ToastChip'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
@@ -87,6 +88,8 @@ export default function App(): JSX.Element {
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
   useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
+  useEffect(() => startCoordRoute(), [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.

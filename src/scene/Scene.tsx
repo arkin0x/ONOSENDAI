@@ -61,6 +61,7 @@ import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
 import { GameRegionBox } from './GameRegionBox'
+import { PrefixRegionBox } from './PrefixRegionBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
@@ -175,6 +176,7 @@ function World(): JSX.Element {
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <GameRegionBox axes={axes} />
+      <PrefixRegionBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />

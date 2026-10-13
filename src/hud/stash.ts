@@ -87,7 +87,7 @@ interface StashModals {
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
   returnToModels: boolean
-  /** A deploy was started from the SHARD FEED window (USE IN BUILDER): cancelling it reopens the window. */
+  /** A deploy was started from the SHARD FEED window (DEPLOY AN INSTANCE): cancelling it reopens the window. */
   returnToFeed: boolean
   /**
    * A shard is being aimed into a chest from the SEAL A CHEST composer
@@ -97,7 +97,7 @@ interface StashModals {
   returnToChest: boolean
   /** The PLACE OBJECT tab last picked from, so a cancelled deploy comes back to it. */
   pickTab: 'mine' | 'feed' | null
-  /** USE IN BUILDER from the SHARD FEED window: the object lined up, the window back on a cancel. */
+  /** DEPLOY AN INSTANCE from the SHARD FEED window: the object lined up, the window back on a cancel. */
   useFromFeed: (object: FeedObject) => void
   /** AIM on a shard in the chest composer: the composer closes, the shard is lined up, the composer comes back after. */
   aimIntoChest: (draft: ChestDraft, contentIndex: number) => void

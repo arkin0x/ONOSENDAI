@@ -8557,10 +8557,14 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 }
 .feed__acts {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
+/* Half the row each, stacking to full width when the tile is too narrow
+   for both labels on one line (arkinox, 2026-10-13). */
 .feed__act {
-  flex: 1 1 auto;
+  flex: 1 1 calc(50% - 3px);
+  min-width: 140px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

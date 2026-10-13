@@ -24,22 +24,27 @@
  * be drawn.
  *
  * In WALK the boxes are walls as well as edges (arkinox, 2026-10-13): you are
- * inside them in first person, so each face carries diagonal stripes in its
- * own ramp color, as dense as the wall is hard. A box of height h has h
- * stripes in every 10 cells along its edges (10 gibsons at 2^0), evenly
- * spaced, so an h5 wall is visibly five times as busy as an h1 wall. Faint,
- * never above 20% opacity, and well under it in practice: the bloom adds a
- * glow to every stripe on top of its own alpha, and at 20% a room's walls
- * were a purple wash that hid the room. They say where the walls are
- * without hiding what is behind them.
+ * inside them in first person, so the six faces of one box carry a grid in
+ * its own ramp color, as dense as the wall is hard, in the look of the h84
+ * cyberspace lattice. A box of height h has h lines in every 10 cells along
+ * each direction of each face (10 gibsons at 2^0), evenly spaced, so an h5
+ * wall is visibly five times as busy as an h1 wall. Faint, never above 20%
+ * opacity. The grid sits still: diagonal stripes that scrolled down the
+ * walls came first, and they did not hold a place on the floor or ceiling,
+ * which a grid on all six faces does (arkinox, 2026-10-13).
  *
- * Only one box is striped at a time, the one most relevant to where you are
+ * Only one box is drawn at a time, the one most relevant to where you are
  * walking (lib/walkWall.ts pickWall): you are inside every box of the nest at
- * once, and three sets of walls on top of each other said nothing. The
- * stripes also move: they scroll slowly down each upright wall, which gives
- * the eye something to fix the wall's place by, and the whole wall breathes,
- * fading to nothing and back to its ceiling on a slow cycle, so it never
- * settles into a fixed screen in front of the room (arkinox, 2026-10-13).
+ * once, and three sets of walls on top of each other said nothing. The wall
+ * breathes, fading to nothing and back to its ceiling on a slow cycle, so it
+ * never settles into a fixed screen in front of the room; WALL_BREATHES turns
+ * that off.
+ *
+ * Drawn after the shards (WALL_RENDER_ORDER): shard faces are transparent
+ * too, so both are sorted in the same list, and a wall drawn before them,
+ * writing no depth, was painted over by every shard whatever its depth. Every
+ * shard looked in front of every wall, which is the opposite of what a wall
+ * is for.
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
@@ -91,93 +96,123 @@ const LEVELS: Array<{ d: number; span: number; opacity: number; wall: number }> 
   { d: 5, span: 0, opacity: 0.36, wall: 0.12 },
 ]
 
-/** How many cells the stripe count is given per: h stripes in every this many. */
-export const STRIPE_SPAN_CELLS = 10
+/** How many cells the line count is given per: h lines in every this many. */
+export const GRID_SPAN_CELLS = 10
 
 /**
- * The stripe pitch for a wall of height `height`, in cells along a box edge:
- * `height` stripes in every STRIPE_SPAN_CELLS, evenly spaced.
+ * The grid pitch for a wall of height `height`, in cells along a face:
+ * `height` lines in every GRID_SPAN_CELLS, evenly spaced.
  */
-export function stripePeriod(height: number): number {
-  return STRIPE_SPAN_CELLS / Math.max(1, height)
+export function gridPeriod(height: number): number {
+  return GRID_SPAN_CELLS / Math.max(1, height)
 }
 
-/** Seconds for the stripes to scroll down one stripe pitch. */
-export const STRIPE_SCROLL_SECONDS = 2.5
+/** Closer than this many pixels, a wall's lines thin out instead of filling in. */
+export const GRID_MIN_PX = 3
+
+/**
+ * How a grid of `spacingPx` pixels between lines is drawn: lines every
+ * `every` pitches at full strength, and the lines halfway between those at
+ * `between`. At GRID_MIN_PX or wider every line is drawn. Closer, every other
+ * line fades out as the spacing halves, then every other of the rest, so a
+ * hard wall seen from far off stays a grid rather than a solid sheet. The
+ * fragment shader computes exactly this.
+ */
+export function gridLod(spacingPx: number): { every: number; between: number } {
+  if (!(spacingPx > 0)) return { every: Infinity, between: 0 }
+  const level = Math.log2(GRID_MIN_PX / spacingPx)
+  if (level <= 0) return { every: 1, between: 1 }
+  const k = 2 ** Math.floor(level)
+  return { every: 2 * k, between: 1 - (level - Math.floor(level)) }
+}
+
+/** Whether a wall breathes (fades to nothing and back). False holds it at its ceiling. */
+export const WALL_BREATHES = true
 /** Seconds for one breath of a wall: from nothing up to its ceiling and back. */
 export const WALL_BREATH_SECONDS = 7
 
 /**
- * One shader for every striped wall. The stripe runs along the diagonal of
- * whichever face a fragment is on (the two coordinates in its plane, summed),
- * measured from the box's own corner, so a wall's stripes sit still on it and
- * meet at its edges. Antialiased with the derivative, so a dense wall at a
- * glancing angle greys out rather than shimmering.
- *
- * `time` drives both motions. The scroll adds to the up coordinate (render y
- * is the view's up), so on an upright wall the stripes slide down; a floor or
- * ceiling has no up in its plane and holds still. The breath scales the
- * opacity by a raised cosine, 0 at the start of a cycle and the full ceiling
- * at its middle.
+ * Walls draw after everything at the default order, the shards included,
+ * which are transparent and so sorted in the same list. Depth-tested and
+ * writing no depth: a shard in front of a wall hides it, a wall in front of
+ * a shard tints over it, and walls never hide each other.
  */
-const STRIPE_VERTEX = `
+export const WALL_RENDER_ORDER = 10
+
+/**
+ * One shader for every wall. On each face the two coordinates in its plane
+ * are measured from the box's own corner, so a wall's lines sit still on it
+ * and meet at its edges. Lines are about a pixel wide whatever the distance
+ * (the derivative sizes them) and thin out by gridLod's rule where they
+ * crowd. `time` drives only the breath, a raised cosine: 0 at the start of a
+ * cycle and the full ceiling at its middle.
+ */
+const GRID_VERTEX = `
 varying vec3 vLocal;
 varying vec3 vNormal;
 uniform vec3 corner;
 void main() {
-  // The box is one unit cube scaled and placed by its mesh, so the stripes
+  // The box is one unit cube scaled and placed by its mesh, so the lines
   // are measured in the render frame, from the box's own corner.
   vLocal = (modelMatrix * vec4(position, 1.0)).xyz - corner;
   vNormal = normal;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`
-const STRIPE_FRAGMENT = `
+const GRID_FRAGMENT = `
 varying vec3 vLocal;
 varying vec3 vNormal;
 uniform vec3 color;
 uniform float opacity;
 uniform float period;
-uniform float width;
 uniform float time;
+// One pixel-wide line at every multiple of p along u, or 0.
+float lineAt(float u, float p, float px) {
+  float f = fract(u / p);
+  float d = min(f, 1.0 - f) * p / px;
+  return 1.0 - smoothstep(0.5, 1.5, d);
+}
+// The lines along one in-plane coordinate, thinned as gridLod says.
+float axisLines(float u) {
+  float px = max(fwidth(u), 1e-6);
+  float level = log2(${GRID_MIN_PX.toFixed(1)} * px / period);
+  if (level <= 0.0) return lineAt(u, period, px);
+  float k = exp2(floor(level));
+  float between = 1.0 - fract(level);
+  return max(lineAt(u, period * 2.0 * k, px), between * lineAt(u, period * k, px));
+}
 void main() {
   vec3 n = abs(vNormal);
-  float up = vLocal.y + time * period / ${STRIPE_SCROLL_SECONDS.toFixed(4)};
-  float s = n.x > 0.5 ? up + vLocal.z : (n.y > 0.5 ? vLocal.x + vLocal.z : vLocal.x + up);
-  float f = fract(s / period);
-  float d = min(f, 1.0 - f) * period;
-  float aa = fwidth(s);
-  float a = 1.0 - smoothstep(width * 0.5 - aa, width * 0.5 + aa, d);
+  vec2 uv = n.x > 0.5 ? vLocal.yz : (n.y > 0.5 ? vLocal.xz : vLocal.xy);
+  float a = max(axisLines(uv.x), axisLines(uv.y));
   if (a <= 0.0) discard;
-  float breath = 0.5 - 0.5 * cos(6.2831853 * time / ${WALL_BREATH_SECONDS.toFixed(4)});
+  float breath = ${WALL_BREATHES ? `0.5 - 0.5 * cos(6.2831853 * time / ${WALL_BREATH_SECONDS.toFixed(4)})` : '1.0'};
   gl_FragColor = vec4(color, opacity * breath * a);
 }`
 
 /**
  * The walls' clock, in seconds, written once a frame while walking. It wraps
- * at the least common multiple of the two cycles, so both motions stay
- * continuous across the wrap and the float never grows past what a phone's
- * shader holds precisely.
+ * at a whole number of breaths, so the breath stays continuous across the
+ * wrap and the float never grows past what a phone's shader holds precisely.
  */
-const WALL_CLOCK_WRAP = 35
+const WALL_CLOCK_WRAP = WALL_BREATH_SECONDS * 5
 const WALL_TIME = { value: 0 }
 
 /**
  * One wall's material, made once per walk and kept: a landing moves the box
- * and changes its numbers, and both are written in place (setStripe). Built
+ * and changes its numbers, and both are written in place (setGrid). Built
  * fresh on every landing, the old one's disposal released the program and
  * the new one compiled it again, a shader link on the main thread at every
  * step of a walk, which is what the walk's hitch at each landing measured
  * as (2026-10-13).
  */
-function stripeMaterial(): ShaderMaterial {
+function gridMaterial(): ShaderMaterial {
   return new ShaderMaterial({
-    vertexShader: STRIPE_VERTEX,
-    fragmentShader: STRIPE_FRAGMENT,
+    vertexShader: GRID_VERTEX,
+    fragmentShader: GRID_FRAGMENT,
     uniforms: {
       color: { value: new Color() },
       opacity: { value: 0 },
       period: { value: 1 },
-      width: { value: 0.2 },
       corner: { value: new Vector3() },
       // Shared by every wall, so one write a frame moves them all.
       time: WALL_TIME,
@@ -189,14 +224,11 @@ function stripeMaterial(): ShaderMaterial {
   })
 }
 
-/** A wall's numbers for its box: its ramp color, ceiling and stripe pitch. */
-function setStripe(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
-  const period = stripePeriod(height)
+/** A wall's numbers for its box: its ramp color, ceiling and grid pitch. */
+function setGrid(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
   ;(m.uniforms.color.value as Color).set(color)
   m.uniforms.opacity.value = Math.min(0.2, opacity)
-  m.uniforms.period.value = period
-  // Thin lines on an easy wall, closing up on a hard one but never solid.
-  m.uniforms.width.value = Math.min(0.2, period * 0.3)
+  m.uniforms.period.value = gridPeriod(height)
   ;(m.uniforms.corner.value as Vector3).set(corner[0], corner[1], corner[2])
 }
 
@@ -296,7 +328,7 @@ export function Rooms({ axes }: Props): JSX.Element {
         height,
         geometry: gridGeometry(right, up, out, axes),
         wall,
-        // The same box as a solid, for WALK's striped walls: its extent on
+        // The same box as a solid, for WALK's walls: its extent on
         // each render axis, signs applied the way gridGeometry applies them.
         walls: (() => {
           const ext = (arr: number[], a: AxisDirection): [number, number] => {
@@ -357,7 +389,7 @@ export function Rooms({ axes }: Props): JSX.Element {
   // WALK's walls: one material per level slot, made when the walk starts and
   // disposed when it ends. A landing re-anchors the boxes and rewrites their
   // numbers in place below; nothing is built or compiled per step.
-  const materials = useMemo(() => (walking ? LEVELS.map(() => stripeMaterial()) : []), [walking])
+  const materials = useMemo(() => (walking ? LEVELS.map(() => gridMaterial()) : []), [walking])
   useEffect(() => () => { for (const m of materials) m.dispose() }, [materials])
   const wallMeshes = useRef<Array<Mesh | null>>([])
   useLayoutEffect(() => {
@@ -368,7 +400,7 @@ export function Rooms({ axes }: Props): JSX.Element {
       const { min, size } = l.walls
       mesh.scale.set(size[0], size[1], size[2])
       mesh.position.set(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
-      setStripe(m, l.color, l.wall, l.height, min)
+      setGrid(m, l.color, l.wall, l.height, min)
     })
   }, [levels, materials])
 
@@ -387,10 +419,10 @@ export function Rooms({ axes }: Props): JSX.Element {
     // Named so the browser harness can tell the boxes are mounted.
     <group name="rooms">
       {materials.length > 0 && levels.map((_, i) => (
-        <mesh key={`wall-${i}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={UNIT_BOX} material={materials[i]} frustumCulled={false} renderOrder={-1} />
+        <mesh key={`wall-${i}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={UNIT_BOX} material={materials[i]} frustumCulled={false} renderOrder={WALL_RENDER_ORDER} />
       ))}
       {/* The nest's outlines and captions stand down in WALK, where the one
-          striped wall is the box on show and the outlines around it clashed
+          walled box is the one on show and the outlines around it clashed
           with it (arkinox, 2026-10-13). HOP and VIEW keep them. */}
       {!walking && levels.map((l) => (
         <group key={l.height}>

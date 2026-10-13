@@ -19,6 +19,7 @@ import { nextAction, useOffer } from '../store/useOffer'
 import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
+import { useWalk } from '../store/useWalk'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -134,6 +135,8 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
+        // WALK commits on every press already: there is nothing lined up.
+        if (store.walking) return
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
@@ -152,6 +155,13 @@ export function useKeyboard(): void {
       // own recall.
       if (event.code === 'KeyX') {
         event.preventDefault()
+        // WALK: stop the steps still to prove, or with none, back to HOP.
+        if (store.walking) {
+          const walk = useWalk.getState()
+          if (walk.behind > 0 || store.proof.status === 'computing') walk.stop()
+          else walk.exit()
+          return
+        }
         if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
         else store.cancel()
         return
@@ -200,6 +210,7 @@ export function useKeyboard(): void {
       // otherwise unreachable without rotating the view first.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
+        if (store.walking) { useWalk.getState().press(MOVE_KEYS[event.code]); return }
         store.moveCursor(moveDirection(axes, MOVE_KEYS[event.code]))
         return
       }
@@ -215,6 +226,8 @@ export function useKeyboard(): void {
       const screenDir = MOVE_KEYS[event.code]
       if (!screenDir) return
       event.preventDefault()
+      // WALK: the same keys, each press a step committed now.
+      if (store.walking) { useWalk.getState().press(screenDir); return }
       store.moveCursor(moveDirection(axes, screenDir))
     }
 

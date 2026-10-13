@@ -25,25 +25,35 @@ interface Props {
   color: string
   renderOrder?: number
   depthTest?: boolean
+  /**
+   * Seen from inside, in WALK: a shard's faces have their backs culled, and
+   * the plain icosahedron, a cage of edges with nothing sticking out of it,
+   * is not drawn at all, since from its centre it is only lines across the
+   * view.
+   */
+  firstPerson?: boolean
+  /** A faint outline of the icosahedron whatever the avatar is: where you really stand while WALK runs ahead. */
+  outline?: boolean
 }
 
-export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true }: Props): JSX.Element {
+export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false }: Props): JSX.Element | null {
   const shard = useAvatarShard(pubkey)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
   const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
-  if (shard && shard.vertices.length > 0) {
+  if (!outline && shard && shard.vertices.length > 0) {
     const k = avatarScale(shard) * spectator
     return (
       <group scale={[k, k, k]}>
-        <ShardMesh shard={shard} world />
+        <ShardMesh shard={shard} world cull={firstPerson} />
       </group>
     )
   }
+  if (firstPerson) return null
   return (
     <group scale={[spectator, spectator, spectator]}>
       <lineSegments geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-        <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} />
+        <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} {...(outline ? { transparent: true, opacity: 0.3 } : {})} />
       </lineSegments>
     </group>
   )

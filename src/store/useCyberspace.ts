@@ -228,6 +228,8 @@ const CHOOSE_FIRST_MESSAGE = 'Another version of your chain arrived while this p
 /** A commit whose wait ended with you no longer at your head (BUILD mode, a VIEW): nothing was sent. */
 export const LEFT_HEAD_MESSAGE = 'This move was not sent: you left your avatar (BUILD mode or a VIEW) while it was being checked, and a move is only ever taken from where you stand to where you aimed it. Return to your avatar and commit again.'
 /** A commit whose cursor or plane changed while it waited: nothing was sent. */
+/** Why a WALK step stopped short: it needs HOSAKA, and a walk never pays on its own. */
+export const WALK_NEEDS_HOSAKA_MESSAGE = 'WALK stopped: this step crosses a boundary only HOSAKA computes. Switch to HOP to see the offer.'
 export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the plane changed while it was being checked. Commit again to go where the cursor is now.'
 
 /**
@@ -747,6 +749,22 @@ export interface CyberspaceState {
   setBuildStep: (step: number | null) => void
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
+  /**
+   * WALK's commit (store/useWalk.ts): one step to `target` from where you
+   * stand, aimed at `target` rather than at the cursor, which in WALK is
+   * already out ahead at the last queued step. `stillAimed` replaces the
+   * cursor check: the walk is still on and this is still its next step. A
+   * step that needs HOSAKA is refused rather than quoted, since nothing in a
+   * walk ever pays on its own, and a step past the ceiling runs as a route
+   * to `target` whatever the move mode is.
+   */
+  walkTo: (target: Position, stillAimed: () => boolean) => Promise<void>
+  /**
+   * WALK is on (store/useWalk.ts owns the queue). The cursor is the walk's
+   * predicted head then, so nothing else may move it: the pad and the keys
+   * go through the walk, and a tap on a cell does nothing.
+   */
+  walking: boolean
   /** Whether COMMIT runs one step of the route or all of them in order. */
   moveMode: MoveMode
   setMoveMode: (mode: MoveMode) => void
@@ -2611,92 +2629,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (far) set({ anchor: { ...next }, focus: { ...focus, position: { ...next } } })
   }
 
-  return {
-  identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
-  ...initial,
-  spectate: null,
-  focus: null,
-  focusReturnScale: null,
-  transit: null,
-  targets: loadTargets(),
-  cursor: initial.position,
-  pendingTarget: null,
-  plan: null,
-  spentMsats: loadSpent(initial.genesisId),
-  respawns: loadRespawns(pubkeyHex),
-  scaleExp: 0,
-  buildStep: null,
-  buildSettle: null,
-  // Facing the black sun, the section 11.3 canonical orientation, the same
-  // one the SUN button restores. The spec's left/right/above/below language
-  // is defined against it, so it is what a first look should agree with; the
-  // map view is one TOP away and does not need to be where everyone starts.
-  view: canonicalQuaternion(),
-  viewHistory: [],
-  proof: IDLE_PROOF,
-  publishError: null,
-  canonicalLate: 0,
-  live: loadLive(),
-  forkNotice: null,
-  selfCheck: { pubkey: pubkeyHex, status: 'checking' },
-  chainConflict: null,
-  publishRequest: 0,
-  signerKind: currentSigner.kind,
-  loginError: null,
-
-  moveCursor: (dir) => {
-    const { cursor, scaleExp } = get()
-    if (!get().canDrive()) return
-    // One cell of the zoom, or one build STEP while a deploy is lined up in
-    // BUILD mode. Never a STEP at your head, where the cursor is a move's.
-    const step = stepFor(get().atHead() ? scaleExp : buildStepOf(get())) * BigInt(dir.dir)
-
-    const next: Position = { ...cursor }
-    next[dir.axis] = clampAxis(cursor[dir.axis] + step)
-
-    // Clamped against the axis wall: nowhere to go.
-    if (next[dir.axis] === cursor[dir.axis]) return
-    set({ cursor: next })
-    rideView(next)
-  },
-
-  setBuildStep: (step) => {
-    const next = step === null || step >= get().scaleExp ? null : Math.max(0, Math.round(step))
-    if (next !== null) { if (next !== get().buildStep) set({ buildStep: next }); return }
-    const { buildStep, buildSettle, cursor } = get()
-    if (buildStep === null && buildSettle === null) return
-    // Back on the zoom, the snap is the cube's center wherever the cursor is
-    // in it, so STEP's re-centering is undone if nothing has moved it since.
-    const back = buildSettle && samePosition(cursor, buildSettle.at) ? { cursor: { ...buildSettle.from } } : {}
-    set({ buildStep: null, buildSettle: null, ...back })
-  },
-
-  setCursorAtCell: (row, col) => {
-    const { scaleExp, view } = get()
-    const focus = get().focus
-    const viewing = !get().atHead() && focus?.drive === true
-    // Cells are counted from the field's origin: your head, or the view's anchor.
-    const position = viewing ? get().anchor : get().position
-    const axes = viewAxes(view)
-    const origin = alignedOrigin(position, scaleExp)
-    const step = stepFor(scaleExp)
-
-    // Grid row/col are in screen space (row=0 is top, col=0 is left).
-    // Convert to world position by applying offsets along the screen axes.
-    const next: Position = { ...position }
-    next[axes.right.axis] = clampAxis(
-      origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
-    )
-    next[axes.up.axis] = clampAxis(
-      origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
-    )
-    // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
-
-    set({ cursor: next })
-    if (viewing) rideView(next)
-  },
-
-  commit: async () => {
+  /**
+   * COMMIT, toward the cursor (`walk` null) or toward one WALK step. Both
+   * share every check below; WALK differs only in what it aims at, what
+   * counts as still aimed, and that it never asks HOSAKA for a quote.
+   */
+  const commitToward = async (walk: { target: Position; stillAimed: () => boolean } | null): Promise<void> => {
     // One proof at a time. X cancels a commit you regret.
     if (get().proof.status === 'computing') return
     // Looking at history: nothing here is a place you can move from.
@@ -2730,11 +2668,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // reading the cursor after the wait flew to wherever it had gone (found
     // in review, 2026-10-07). So the move goes where it was aimed when it was
     // pressed, from your head, or not at all.
-    const aimedCursor = { ...get().cursor }
+    // A WALK step is aimed at its own target, not at the cursor, which by
+    // then is out at the last step queued; it stays aimed while the walk
+    // still has it next.
+    const aimedCursor = { ...(walk ? walk.target : get().cursor) }
     const aimedPlane = get().plane
     const lostAim = (): boolean => {
       const now = get()
-      if (now.atHead() && samePosition(now.cursor, aimedCursor) && now.plane === aimedPlane) return false
+      if (now.atHead() && (walk ? walk.stillAimed() : samePosition(now.cursor, aimedCursor)) && now.plane === aimedPlane) return false
       set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: now.atHead() ? AIM_CHANGED_MESSAGE : LEFT_HEAD_MESSAGE } })
       return true
     }
@@ -2793,7 +2734,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // | unknown, or no answer in time | sign the spawn, and HOLD the chain on this device |
     if (get().events.length === 0) {
       // Nothing lined up is no reason to sign a spawn.
-      if (samePosition(get().position, get().cursor) && get().plane === get().headPlane) return
+      if (samePosition(get().position, aimedCursor) && get().plane === get().headPlane) return
       if (firstMoveInFlight) return
       firstMoveInFlight = true
       try {
@@ -2839,7 +2780,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }
     }
 
-    const { position, cursor, plane, headPlane, prevEventId, proof } = get()
+    const { position, plane, headPlane, prevEventId, proof } = get()
+    const cursor = aimedCursor
     if (proof.status === 'computing') return
     // Nothing lined up: same cell, same plane.
     if (samePosition(position, cursor) && plane === headPlane) return
@@ -2918,9 +2860,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // AUTOMATIC: the whole route, its steps run in order, pausing only for a
     // declined signature or a step that fails. A long walk is dozens of
     // identical presses otherwise, which is what this is for.
-    const target = get().moveMode === 'auto' ? { ...cursor } : { ...step.to }
+    // A WALK step is one press, so its route is the whole of it.
+    const target = walk || get().moveMode === 'auto' ? { ...cursor } : { ...step.to }
     const one = planSummary(position, target, ceilings)
     const funded = one.cloudSteps === 0
+    // WALK never pays on its own: a step HOSAKA would have to sell stops the
+    // walk here, and HOP is where the offer is made.
+    if (walk && !funded) {
+      set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: WALK_NEEDS_HOSAKA_MESSAGE } })
+      return
+    }
     set({
       plan: {
         target,
@@ -2936,7 +2885,101 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     if (funded) startPlanStep()
     else await quoteRoute(++requestId)
+  }
+
+  return {
+  identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
+  ...initial,
+  spectate: null,
+  focus: null,
+  focusReturnScale: null,
+  transit: null,
+  targets: loadTargets(),
+  cursor: initial.position,
+  pendingTarget: null,
+  plan: null,
+  spentMsats: loadSpent(initial.genesisId),
+  respawns: loadRespawns(pubkeyHex),
+  scaleExp: 0,
+  buildStep: null,
+  buildSettle: null,
+  // Facing the black sun, the section 11.3 canonical orientation, the same
+  // one the SUN button restores. The spec's left/right/above/below language
+  // is defined against it, so it is what a first look should agree with; the
+  // map view is one TOP away and does not need to be where everyone starts.
+  view: canonicalQuaternion(),
+  viewHistory: [],
+  proof: IDLE_PROOF,
+  publishError: null,
+  canonicalLate: 0,
+  live: loadLive(),
+  forkNotice: null,
+  selfCheck: { pubkey: pubkeyHex, status: 'checking' },
+  chainConflict: null,
+  publishRequest: 0,
+  signerKind: currentSigner.kind,
+  loginError: null,
+
+  moveCursor: (dir) => {
+    const { cursor, scaleExp } = get()
+    if (!get().canDrive()) return
+    // WALK's cursor is its predicted head, moved only by a step (useWalk).
+    if (get().walking) return
+    // One cell of the zoom, or one build STEP while a deploy is lined up in
+    // BUILD mode. Never a STEP at your head, where the cursor is a move's.
+    const step = stepFor(get().atHead() ? scaleExp : buildStepOf(get())) * BigInt(dir.dir)
+
+    const next: Position = { ...cursor }
+    next[dir.axis] = clampAxis(cursor[dir.axis] + step)
+
+    // Clamped against the axis wall: nowhere to go.
+    if (next[dir.axis] === cursor[dir.axis]) return
+    set({ cursor: next })
+    rideView(next)
   },
+
+  setBuildStep: (step) => {
+    const next = step === null || step >= get().scaleExp ? null : Math.max(0, Math.round(step))
+    if (next !== null) { if (next !== get().buildStep) set({ buildStep: next }); return }
+    const { buildStep, buildSettle, cursor } = get()
+    if (buildStep === null && buildSettle === null) return
+    // Back on the zoom, the snap is the cube's center wherever the cursor is
+    // in it, so STEP's re-centering is undone if nothing has moved it since.
+    const back = buildSettle && samePosition(cursor, buildSettle.at) ? { cursor: { ...buildSettle.from } } : {}
+    set({ buildStep: null, buildSettle: null, ...back })
+  },
+
+  setCursorAtCell: (row, col) => {
+    if (get().walking) return
+    const { scaleExp, view } = get()
+    const focus = get().focus
+    const viewing = !get().atHead() && focus?.drive === true
+    // Cells are counted from the field's origin: your head, or the view's anchor.
+    const position = viewing ? get().anchor : get().position
+    const axes = viewAxes(view)
+    const origin = alignedOrigin(position, scaleExp)
+    const step = stepFor(scaleExp)
+
+    // Grid row/col are in screen space (row=0 is top, col=0 is left).
+    // Convert to world position by applying offsets along the screen axes.
+    const next: Position = { ...position }
+    next[axes.right.axis] = clampAxis(
+      origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
+    )
+    next[axes.up.axis] = clampAxis(
+      origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
+    )
+    // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
+
+    set({ cursor: next })
+    if (viewing) rideView(next)
+  },
+
+  commit: () => commitToward(null),
+
+  walkTo: (target, stillAimed) => commitToward({ target, stillAimed }),
+
+  walking: false,
 
   setShowSecrets: (show) => {
     if (show === get().showSecrets) return

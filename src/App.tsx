@@ -36,6 +36,7 @@ import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { PersonModal } from './hud/PersonModal'
 import { TouchControls } from './hud/TouchControls'
+import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
@@ -292,6 +293,8 @@ export default function App(): JSX.Element {
           aria-label="Show controls"
         >CONTROLS</button>
       )}
+      {/* WALK's lag, centered over everything and touching nothing. */}
+      <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
       {/* Docked in the lower left, a gap short of the pad while the pad is on

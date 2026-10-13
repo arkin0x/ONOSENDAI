@@ -156,6 +156,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const atHead = useCyberspace((s) => s.canDrive())
   const home = useCyberspace((s) => s.atHead())
+  const walking = useCyberspace((s) => s.walking)
   // Looking at a focus the cursor cannot be used, so its size label would
   // just hang in the middle of the view.
   const focused = useCyberspace((s) => s.focus !== null)
@@ -299,6 +300,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // grid it stands on, against the covering box drawn on that same grid, and
   // it is not needed against z-fighting: everything here draws without a
   // depth test (arkinox, 2026-10-01: "it should fit exactly").
+  // In WALK the cursor is the eye itself (store/useWalk.ts): a cube drawn
+  // round the camera would only be lines across the view.
+  if (walking) return null
   return (
     <group>
       {/*

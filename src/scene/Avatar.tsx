@@ -37,6 +37,14 @@
  * yields (TapTarget `yields`): any of those under the same tap keeps it, and
  * the avatar takes only the taps that would otherwise have toggled the
  * controls.
+ *
+ * WALK is first person (arkinox, 2026-10-13): the camera is inside the
+ * avatar, so the avatar is drawn at the eye (lib/walkEye.ts), out ahead of
+ * the chain with the steps you have pressed, and seen from within: a shard's
+ * backs are culled, so its appendages show and its inside does not, and the
+ * plain icosahedron, which is all inside, is not drawn. While the proofs are
+ * behind, a faint outline stands where you really are. No tap target: the
+ * camera is in it.
  */
 
 import { useMemo, useRef } from 'react'
@@ -45,6 +53,7 @@ import { Group, type Quaternion } from 'three'
 import { avatarTurn, facingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
 import { travelOffset } from '../lib/travel'
+import { walkEye } from '../lib/walkEye'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
@@ -57,6 +66,10 @@ const REACH = GRID_RADIUS * 8
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
+  // Where you really stand while WALK runs ahead of the chain.
+  const proven = useRef<Group>(null)
+  const walking = useCyberspace((s) => s.walking)
+  const behind = useCyberspace((s) => s.walking && (s.cursor.x !== s.position.x || s.cursor.y !== s.position.y || s.cursor.z !== s.position.z))
   // What is drawn, measured for the tap (TapTarget), as OtherAvatar does.
   const drawn = useRef<Group>(null)
   // Looking at a shard means the origin is that shard, not you: drawing your
@@ -119,7 +132,12 @@ export function Avatar(): JSX.Element | null {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
-    g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    if (walking) {
+      g.position.copy(walkEye)
+      proven.current?.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    } else {
+      g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    }
     // The turn is on the drawn shape alone, so the tap target, which is
     // measured in world space and sized in its parent's, stays unturned.
     if (turnedFor.current !== view) {
@@ -137,6 +155,12 @@ export function Avatar(): JSX.Element | null {
   if (placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH)) return null
 
   return (
+    <>
+    {walking && behind && (
+      <group ref={proven}>
+        <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} outline />
+      </group>
+    )}
     <group ref={group} position={[0, 0, 0]}>
       {/* No depth test, drawn after the opaque pass: you must always be able
           to find yourself. The selected block's solid cube is exactly one
@@ -144,9 +168,10 @@ export function Avatar(): JSX.Element | null {
           own destination erased you; now the red edges composite on top of
           whatever shares your gibson. */}
       <group ref={drawn}>
-        <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} />
+        <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} firstPerson={walking} />
       </group>
-      <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />
+      {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>
+    </>
   )
 }

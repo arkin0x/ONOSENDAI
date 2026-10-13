@@ -22,10 +22,20 @@
  * Both are measured from the scale floor: at scaleExp s the cheapest possible
  * crossing is already height s+1, so anything below that is sub-cell and cannot
  * be drawn.
+ *
+ * In WALK the boxes are walls as well as edges (arkinox, 2026-10-13): you are
+ * inside them in first person, so each face carries diagonal stripes in its
+ * own ramp color, as dense as the wall is hard. A box of height h has h
+ * stripes in every 10 cells along its edges (10 gibsons at 2^0), evenly
+ * spaced, so an h5 wall is visibly five times as busy as an h1 wall. Faint,
+ * never above 20% opacity, and well under it in practice: the bloom adds a
+ * glow to every stripe on top of its own alpha, and at 20% a room's walls
+ * were a purple wash that hid the room. They say where the walls are
+ * without hiding what is behind them.
  */
 
 import { useEffect, useMemo } from 'react'
-import { BufferGeometry, Float32BufferAttribute } from 'three'
+import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, ShaderMaterial } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { AXIS_BITS } from 'cyberspace-core'
@@ -64,11 +74,76 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
  * avatar visibly travels, so a box changing is explained by three other things
  * on screen rather than being an unexplained jump.
  */
-const LEVELS: Array<{ d: number; span: number; opacity: number }> = [
-  { d: 3, span: 0, opacity: 0.22 },
-  { d: 4, span: 0, opacity: 0.28 },
-  { d: 5, span: 0, opacity: 0.36 },
+const LEVELS: Array<{ d: number; span: number; opacity: number; wall: number }> = [
+  { d: 3, span: 0, opacity: 0.22, wall: 0.08 },
+  { d: 4, span: 0, opacity: 0.28, wall: 0.1 },
+  { d: 5, span: 0, opacity: 0.36, wall: 0.12 },
 ]
+
+/** How many cells the stripe count is given per: h stripes in every this many. */
+export const STRIPE_SPAN_CELLS = 10
+
+/**
+ * The stripe pitch for a wall of height `height`, in cells along a box edge:
+ * `height` stripes in every STRIPE_SPAN_CELLS, evenly spaced.
+ */
+export function stripePeriod(height: number): number {
+  return STRIPE_SPAN_CELLS / Math.max(1, height)
+}
+
+/**
+ * One shader for every striped wall. The stripe runs along the diagonal of
+ * whichever face a fragment is on (the two coordinates in its plane, summed),
+ * measured from the box's own corner, so a wall's stripes sit still on it and
+ * meet at its edges. Antialiased with the derivative, so a dense wall at a
+ * glancing angle greys out rather than shimmering.
+ */
+const STRIPE_VERTEX = `
+varying vec3 vLocal;
+varying vec3 vNormal;
+uniform vec3 corner;
+void main() {
+  vLocal = position - corner;
+  vNormal = normal;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+const STRIPE_FRAGMENT = `
+varying vec3 vLocal;
+varying vec3 vNormal;
+uniform vec3 color;
+uniform float opacity;
+uniform float period;
+uniform float width;
+void main() {
+  vec3 n = abs(vNormal);
+  float s = n.x > 0.5 ? vLocal.y + vLocal.z : (n.y > 0.5 ? vLocal.x + vLocal.z : vLocal.x + vLocal.y);
+  float f = fract(s / period);
+  float d = min(f, 1.0 - f) * period;
+  float aa = fwidth(s);
+  float a = 1.0 - smoothstep(width * 0.5 - aa, width * 0.5 + aa, d);
+  if (a <= 0.0) discard;
+  gl_FragColor = vec4(color, opacity * a);
+}`
+
+function stripeMaterial(color: string, opacity: number, height: number, corner: [number, number, number]): ShaderMaterial {
+  const period = stripePeriod(height)
+  return new ShaderMaterial({
+    vertexShader: STRIPE_VERTEX,
+    fragmentShader: STRIPE_FRAGMENT,
+    uniforms: {
+      color: { value: new Color(color) },
+      opacity: { value: Math.min(0.2, opacity) },
+      period: { value: period },
+      // Thin lines on an easy wall, closing up on a hard one but never solid.
+      width: { value: Math.min(0.2, period * 0.3) },
+      corner: { value: corner },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    toneMapped: false,
+  })
+}
 
 interface Props {
   axes: ViewAxes
@@ -147,19 +222,32 @@ function gridGeometry(
 export function Rooms({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const walking = useCyberspace((s) => s.walking)
 
   const levels = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
     // Nothing above the axis width exists to be drawn. At scaleExp 84 the three
     // levels would be h87, h88 and h89, which are not boundaries of an 85-bit
     // axis; the whole space is one cell by then and the nest has run out.
-    return LEVELS.filter(({ d }) => scaleExp + d <= AXIS_BITS).map(({ d, span, opacity }, i) => {
+    return LEVELS.filter(({ d }) => scaleExp + d <= AXIS_BITS).map(({ d, span, opacity, wall }, i) => {
       const height = scaleExp + d
       const offs = (a: AxisDirection): number[] =>
         latticeOffsets(position[a.axis], origin[a.axis], scaleExp, height, span)
+      const [right, up, out] = [offs(axes.right), offs(axes.up), offs(axes.out)]
       return {
         height,
-        geometry: gridGeometry(offs(axes.right), offs(axes.up), offs(axes.out), axes),
+        geometry: gridGeometry(right, up, out, axes),
+        wall,
+        // The same box as a solid, for WALK's striped walls: its extent on
+        // each render axis, signs applied the way gridGeometry applies them.
+        walls: (() => {
+          const ext = (arr: number[], a: AxisDirection): [number, number] => {
+            const p = arr[0] * a.dir, q = arr[arr.length - 1] * a.dir
+            return [Math.min(p, q), Math.max(p, q)]
+          }
+          const [x, y, z] = [ext(right, axes.right), ext(up, axes.up), ext(out, axes.out)]
+          return { min: [x[0], y[0], z[0]] as [number, number, number], size: [x[1] - x[0], y[1] - y[0], z[1] - z[0]] as [number, number, number] }
+        })(),
         // Hue from the crossing height, lightness from the level. The walls of
         // this grid ARE crossings, so the grid climbs the same ramp the legend
         // documents as you zoom out.
@@ -208,9 +296,24 @@ export function Rooms({ axes }: Props): JSX.Element {
   // loss. Every anchor change and zoom leaked three of them.
   useEffect(() => () => { for (const l of levels) l.geometry.dispose() }, [levels])
 
+  // WALK's walls: built only while walking, and thrown away with the walk.
+  const walls = useMemo(() => {
+    if (!walking) return []
+    return levels.map((l) => {
+      const { min, size } = l.walls
+      const geometry = new BoxGeometry(size[0], size[1], size[2])
+      geometry.translate(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
+      return { height: l.height, geometry, material: stripeMaterial(l.color, l.wall, l.height, min) }
+    })
+  }, [walking, levels])
+  useEffect(() => () => { for (const w of walls) { w.geometry.dispose(); w.material.dispose() } }, [walls])
+
   return (
     // Named so the browser harness can tell the boxes are mounted.
     <group name="rooms">
+      {walls.map((w) => (
+        <mesh key={`wall-${w.height}`} geometry={w.geometry} material={w.material} frustumCulled={false} renderOrder={-1} />
+      ))}
       {levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>

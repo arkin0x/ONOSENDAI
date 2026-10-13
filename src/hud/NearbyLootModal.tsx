@@ -3,7 +3,8 @@
  *
  * The green box is the region your keys open; this is the list of what is in
  * it: every shard, message, key and chest this client has opened or placed
- * whose region holds the anchor, nearest first. Reached from the found chip,
+ * whose region holds the anchor, newest first (arkinox, 2026-10-13), nearest
+ * first among things made in the same second, undated things last. Reached from the found chip,
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row says it is held; a
  * chest row opens here when you hold what opens it (ItemRows).
@@ -73,7 +74,8 @@ export function NearbyLootModal(): JSX.Element | null {
   const open = useShards((s) => s.nearbyOpen)
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useNearbyLoot()
-  const list = useMemo(() => items, [items])
+  // Newest first; sort is stable, so the hook's nearest-first order breaks ties.
+  const list = useMemo(() => [...items].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items])
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
   if (!open) return null

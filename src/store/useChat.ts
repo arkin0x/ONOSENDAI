@@ -15,7 +15,7 @@
  */
 
 import { create } from 'zustand'
-import { chatInnerTemplate, chatInners, bagTemplate, CHAT_BAG_KIND, MAX_CHAT_LENGTH } from '../lib/hidden'
+import { chatInnerTemplate, chatInners, chatRumor, bagTemplate, CHAT_BAG_KIND, MAX_CHAT_LENGTH } from '../lib/hidden'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { publishMany, relaySet } from '../lib/relay'
 import { chime } from '../lib/chime'
@@ -211,7 +211,8 @@ export const useChat = create<ChatState>((set, get) => ({
     const now = Math.floor(Date.now() / 1000)
     try {
       set({ sendStatus: 'signing', sendError: null })
-      const inner = await cyber.signEvent(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys))
+      // The line is a rumor, never signed: only the envelope is (chatRumor).
+      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
       set({ sendStatus: 'sending' })
       const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
       const result = await publishMany(relaySet(), outer)

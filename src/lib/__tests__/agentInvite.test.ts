@@ -25,13 +25,13 @@ describe('the invitation (arkinox, 2026-10-13)', () => {
 
   it('carries the setup commands and URLs exactly as the packaged server takes them', () => {
     expect(INIT_COMMAND).toBe('npx github:arkin0x/cyberspace-mcp init')
-    expect(SERVE_COMMAND).toBe('cyberspace-mcp serve')
-    expect(DOCTOR_COMMAND).toBe('cyberspace-mcp doctor')
+    expect(SERVE_COMMAND).toBe('npx github:arkin0x/cyberspace-mcp serve')
+    expect(DOCTOR_COMMAND).toBe('npx github:arkin0x/cyberspace-mcp doctor')
     expect(MCP_URL).toBe('http://127.0.0.1:7777/mcp')
     expect(QUICKSTART_URL).toBe('https://github.com/arkin0x/cyberspace-mcp/blob/master/QUICKSTART.md')
     expect(AGENTS_MD_URL).toBe('https://github.com/arkin0x/cyberspace/blob/master/docs/agents.md')
     // Numbered, in order: init, serve, doctor, connect, follow.
-    expect(text).toContain(`  1. Run: ${INIT_COMMAND}\n`)
+    expect(text).toContain(`  1. Run: ${INIT_COMMAND} --operator `)
     expect(text).toContain(`  2. Run: ${SERVE_COMMAND}\n`)
     expect(text).toContain(`  3. Run: ${DOCTOR_COMMAND}\n`)
     expect(text).toContain(`  4. Connect your AI client to the MCP server at ${MCP_URL}\n`)
@@ -43,7 +43,7 @@ describe('the invitation (arkinox, 2026-10-13)', () => {
 
   it('names the operator by npub, for init and for the profile', () => {
     expect(text).toContain(`OPERATOR\n  ${npub}`)
-    expect(text).toMatch(/asks for your operator's npub \(give the one above\)/)
+    expect(text).toContain(`${INIT_COMMAND} --operator `)
     expect(text).toContain(`an agent operated by ${npub}`)
   })
 

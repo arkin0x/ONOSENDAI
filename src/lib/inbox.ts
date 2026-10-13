@@ -102,3 +102,44 @@ export async function dmInboxOf(pubkey: string, extra: readonly string[] = []): 
     .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))[0]
   return { relays: dmRelaysOf(newest), answered: answers.some((a) => a.outcome === 'answered') }
 }
+
+/**
+ * The DM relays SET UP DM INBOX offers (arkinox, 2026-10-13: the panel goes
+ * public, and an operator without a 10050 could not talk to an agent at
+ * all). Chosen 2026-10-13 from what NIP-17 clients default to, kept to
+ * relays that are free, take gift wraps, and refuse to hand out kind 1059
+ * to a reader who has not authenticated (NIP-42), so nobody can list who
+ * is being written to:
+ *
+ * - wss://auth.nostr1.com: the default DM relay in Amethyst, 0xchat and
+ *   Flotilla. NIP-11: strfry, supported_nips include 17 and 42,
+ *   auth_required true, payment_required false. An unauthenticated REQ for
+ *   kind 1059 is answered CLOSED auth-required.
+ * - wss://nip17.com: a relay that accepts only kind 1059. NIP-11: supported
+ *   NIPs include 17, 42, 44 and 59, no fees. An unauthenticated REQ for kind
+ *   1059 is answered CLOSED auth-required, and an authenticated one for
+ *   someone else's wraps CLOSED "you can only read your own messages".
+ *
+ * Passed over: relay.0xchat.com (an Amethyst and 0xchat default) did not
+ * resolve that day; inbox.nostr.wine and relay.keychat.io charge; nos.lol
+ * and relay.ditto.pub (Amethyst's and Flotilla's third picks) serve kind
+ * 1059 without AUTH. Coracle ships no default: its user marks relays for
+ * messaging by hand.
+ */
+export const DEFAULT_DM_RELAYS: readonly string[] = ['wss://auth.nostr1.com', 'wss://nip17.com']
+
+/**
+ * The kind 10050 that SET UP DM INBOX signs: one `relay` tag per relay and
+ * nothing else, empty content. It is public metadata: where you read DMs,
+ * never what they say. The signer adds the client tag (lib/signers.ts).
+ */
+export function dmInboxTemplate(relays: readonly string[], now: number = Math.floor(Date.now() / 1000)): { kind: number; created_at: number; tags: string[][]; content: string } {
+  const clean = dmRelaysOf({ tags: relays.map((r) => ['relay', r]) })
+  if (clean.length === 0) throw new Error('A DM inbox needs at least one wss:// relay.')
+  return { kind: DM_RELAYS_KIND, created_at: now, tags: clean.map((r) => ['relay', r]), content: '' }
+}
+
+/** Where a new 10050 is published: where dmInboxOf looks for it (the general and configured relays), and the inbox relays themselves. */
+export function dmInboxAnnounceRelays(relays: readonly string[]): string[] {
+  return [...new Set([...GENERAL_RELAYS, ...relaySet(), ...relays])]
+}

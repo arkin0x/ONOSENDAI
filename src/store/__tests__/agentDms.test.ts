@@ -3,20 +3,23 @@
  * (arkinox, 2026-10-10: nothing goes to a real relay until a live test is
  * called for). Each side's kind 10050 decides where a message goes and
  * whether it goes at all; the inbox is read for kind 1059 `#p` me on my DM
- * relays alone; only messages between me and my agent are kept; and nothing
- * here ever publishes a 10050.
+ * relays alone; only messages between me and my agent are kept; and a 10050
+ * is published only by setUpDmInbox, the PUBLISH of SET UP DM INBOX's
+ * confirmation (arkinox, 2026-10-13), never on its own. Every relay here is
+ * a fake: nothing is published anywhere.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../useCyberspace'
 import { generateSecretKey } from 'nostr-tools/pure'
 import * as nip17 from 'nostr-tools/nip17'
 import { localSigner } from '../../lib/signers'
 import type { NostrEvent } from '../../lib/events'
-import type { DmInbox } from '../../lib/inbox'
+import { DEFAULT_DM_RELAYS, type DmInbox } from '../../lib/inbox'
+import { GENERAL_RELAYS } from '../../lib/contacts'
 import { unwrapMessage, type DmReader, type DmSender } from '../../lib/dm'
 import {
-  cannotSend, dmDeps, openConversation, resetAgentDms, sendToAgent, strategyWith, useAgentDms,
+  cannotSend, checkMyInbox, dmDeps, openConversation, resetAgentDms, sendToAgent, setUpDmInbox, strategyWith, useAgentDms,
   type DmKeys, type DmTransport,
 } from '../useAgentDms'
 
@@ -184,5 +187,88 @@ describe('with both inboxes', () => {
     const again = openConversation(agent.pubkey)
     expect(useAgentDms.getState().messages).toEqual({})
     again()
+  })
+})
+
+describe('SET UP DM INBOX (arkinox, 2026-10-13)', () => {
+  /** My signer, watched: what it was asked to sign, and whether it signs. */
+  function watchedSigner(refuse = false) {
+    const sign = vi.fn(async (t: Parameters<typeof me.sender.signEvent>[0]) => {
+      if (refuse) throw new Error('The signer declined.')
+      return me.sender.signEvent(t)
+    })
+    dmDeps.keys = { ...dmDeps.keys, sender: () => ({ ...me.sender, signEvent: sign }) }
+    return sign
+  }
+
+  it('nothing is signed or published by finding the inbox missing; PUBLISH signs one 10050 and sends it where it is looked for', async () => {
+    const sign = watchedSigner()
+    fake.inboxes.set(agent.pubkey, { relays: [AGENT_RELAY], answered: true })
+    checkMyInbox(me.pubkey)
+    const close = openConversation(agent.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('none')
+    expect(sign).not.toHaveBeenCalled()
+    expect(fake.published).toEqual([])
+
+    expect(await setUpDmInbox()).toBe(true)
+    expect(sign).toHaveBeenCalledTimes(1)
+    const template = sign.mock.calls[0][0]
+    expect(template.kind).toBe(10050)
+    expect(template.content).toBe('')
+    expect(template.tags).toEqual(DEFAULT_DM_RELAYS.map((r) => ['relay', r]))
+    expect(fake.published).toHaveLength(1)
+    const [{ relays, ev }] = fake.published
+    expect(ev.kind).toBe(10050)
+    expect(ev.pubkey).toBe(me.pubkey)
+    expect(ev.content).toBe('')
+    for (const r of [...DEFAULT_DM_RELAYS, ...GENERAL_RELAYS]) expect(relays).toContain(r)
+    // The inbox is ready at once, and the open conversation reads it.
+    const s = useAgentDms.getState()
+    expect(s.myInbox).toEqual({ status: 'ready', relays: [...DEFAULT_DM_RELAYS] })
+    expect(s.inboxSetup.status).toBe('idle')
+    expect(cannotSend(s, agent.pubkey)).toBeNull()
+    expect(fake.subs.filter((x) => !x.closed).map((x) => x.relay).sort()).toEqual([...DEFAULT_DM_RELAYS].sort())
+    close()
+  })
+
+  it('never replaces a list: refused when an inbox exists or no relay answered', async () => {
+    const sign = watchedSigner()
+    fake.inboxes.set(me.pubkey, { relays: [MY_RELAY], answered: true })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('ready')
+    expect(await setUpDmInbox()).toBe(false)
+
+    resetAgentDms()
+    fake.transport.inboxOf = async () => ({ relays: [], answered: false })
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(useAgentDms.getState().myInbox.status).toBe('unknown')
+    expect(await setUpDmInbox()).toBe(false)
+    expect(sign).not.toHaveBeenCalled()
+    expect(fake.published).toEqual([])
+  })
+
+  it('a declined signature publishes nothing and says why; the inbox stays missing', async () => {
+    watchedSigner(true)
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(await setUpDmInbox()).toBe(false)
+    expect(fake.published).toEqual([])
+    const s = useAgentDms.getState()
+    expect(s.myInbox.status).toBe('none')
+    expect(s.inboxSetup).toEqual({ status: 'failed', error: 'The signer declined.' })
+  })
+
+  it('a refusal by every relay is said, and the inbox stays missing', async () => {
+    watchedSigner()
+    fake.transport.publish = async (relays, ev) => { fake.published.push({ relays, ev }); return { ok: false, reason: 'blocked: no' } }
+    checkMyInbox(me.pubkey)
+    await settle()
+    expect(await setUpDmInbox()).toBe(false)
+    const s = useAgentDms.getState()
+    expect(s.myInbox.status).toBe('none')
+    expect(s.inboxSetup).toEqual({ status: 'failed', error: 'Not published: blocked: no' })
   })
 })

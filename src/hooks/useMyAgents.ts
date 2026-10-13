@@ -13,9 +13,11 @@
  * beside the profiles and only pubkeys on both sides are kept
  * (lib/agentInvite.ts followedAgents).
  *
- * The answer is shared (arkinox, 2026-10-10): the Hud reads it to decide
- * whether the AGENTS panel is shown at all, and the panel reads it for its
- * rows, so both ask once between them. Asked again when the pubkey changes
+ * The answer is shared (arkinox, 2026-10-10): the app-wide DM watch reads
+ * it to decide whether to watch at all, and the panel reads it for its rows,
+ * so both ask once between them. (The Hud read it too, to draw the panel
+ * only for someone with an agent, until the panel went public on
+ * 2026-10-13.) Asked again when the pubkey changes
  * and on refresh(): the list is small and an agent's profile is published
  * once, so there is nothing to keep live.
  */

@@ -8,8 +8,11 @@
  * - Inboxes. Each side's kind 10050 names its DM relays (lib/inbox.ts
  *   dmInboxOf). A message goes to the agent's 10050 relays and its self-copy
  *   to yours. Either side without one: nothing is sent, and the conversation
- *   says "No DM inbox". Your 10050 is never published for you: what your DM
- *   relays are is yours to choose, in a client that manages them.
+ *   says "No DM inbox". Your 10050 is published only on an explicit tap of
+ *   SET UP DM INBOX with a confirmation (arkinox, 2026-10-13: the panel goes
+ *   public, and "never published for you" left a new operator with no way
+ *   to talk to an agent): setUpDmInbox, offered only when the relays
+ *   answered that you have none, so it never replaces a list you chose.
  * - Reading. One subscription per relay of your 10050, for kind 1059 `#p`
  *   you, opened while a conversation is on screen. Inbox relays gate these
  *   reads behind NIP-42 AUTH (wheat.oslim.dev answers CLOSED auth-required
@@ -71,7 +74,7 @@ import {
   deleteConversation, messageRow, openAgentDmDb, openedRow, reactionRow, readStored, writeStored,
   type ItemRow, type OpenedRow,
 } from '../lib/agentDmDb'
-import { dmInboxOf, type DmInbox } from '../lib/inbox'
+import { DEFAULT_DM_RELAYS, dmInboxAnnounceRelays, dmInboxOf, dmInboxTemplate, type DmInbox } from '../lib/inbox'
 import { authForRead, onResume, publishMany, subscribeOne, type PublishResult } from '../lib/relay'
 import { localSigner, NIP44_UNAVAILABLE } from '../lib/signers'
 import type { NostrEvent } from '../lib/events'
@@ -224,12 +227,18 @@ export interface AgentDmsState {
   unread: Record<string, Unread>
   /** The agent whose TALK modal is up, if any: here, so the toast can open it with the menu closed. */
   talking: string | null
+  /** SET UP DM INBOX (arkinox, 2026-10-13): publishing your 10050, or why it failed. */
+  inboxSetup: InboxSetup
 }
+
+/** Where SET UP DM INBOX stands. */
+export interface InboxSetup { status: 'idle' | 'publishing' | 'failed'; error: string | null }
+const SETUP_IDLE: InboxSetup = { status: 'idle', error: null }
 
 const LOADING: InboxState = { status: 'loading', relays: [] }
 
 function initial(me: string): AgentDmsState {
-  return { me, myInbox: LOADING, inboxes: {}, messages: {}, reactions: {}, historyLoaded: false, reading: 'idle', readError: null, sending: {}, sendError: {}, unread: {}, talking: null }
+  return { me, myInbox: LOADING, inboxes: {}, messages: {}, reactions: {}, historyLoaded: false, reading: 'idle', readError: null, sending: {}, sendError: {}, unread: {}, talking: null, inboxSetup: SETUP_IDLE }
 }
 
 export const useAgentDms = create<AgentDmsState>(() => initial(''))
@@ -245,6 +254,8 @@ let seen = new Set<string>()
 let opened = new Set<string>()
 /** Bumped per identity, so a late read of the database for another identity is dropped. */
 let loadGen = 0
+/** The lookup of my 10050 under way from checkMyInbox, so the panel asks once. */
+let mineLookup: Promise<void> | null = null
 
 /** The conversation database, opened once; null when this browser will not have it (the session then keeps all in memory). */
 let db: Promise<IDBDatabase | null> | null = null
@@ -386,6 +397,7 @@ function inboxState(found: DmInbox): InboxState {
 
 /** Start over for a new identity: nothing of the old one survives. */
 function resetFor(me: string): void {
+  mineLookup = null
   stopReading()
   closeWatch()
   epoch += 1
@@ -677,6 +689,59 @@ export function openConversation(agent: string): () => void {
       stopReading()
       useAgentDms.setState({ reading: 'idle' })
     }
+  }
+}
+
+/**
+ * Make sure my DM inbox is known for `me` (the AGENTS panel offers SET UP
+ * DM INBOX when it is not there, arkinox, 2026-10-13). Asks once; a
+ * conversation opening later reuses the answer.
+ */
+export function checkMyInbox(me: string): void {
+  if (!me) return
+  if (useAgentDms.getState().me !== me) resetFor(me)
+  if (useAgentDms.getState().myInbox.status !== 'loading' || mineLookup) return
+  const lookup = lookUpMine().finally(() => { if (mineLookup === lookup) mineLookup = null })
+  mineLookup = lookup
+}
+
+/**
+ * SET UP DM INBOX, after the confirmation (arkinox, 2026-10-13): sign a kind
+ * 10050 naming `relays` with your own signer and publish it where it is
+ * looked for. Only when the relays answered that you have none (status
+ * `none`): an unknown inbox may exist, and a 10050 is replaceable, so
+ * publishing then could overwrite the one you chose. Resolves true once a
+ * relay accepted it; the inbox is then ready, and an open conversation
+ * starts reading it.
+ */
+export async function setUpDmInbox(relays: readonly string[] = DEFAULT_DM_RELAYS): Promise<boolean> {
+  const s = useAgentDms.getState()
+  const me = s.me
+  if (!me || dmDeps.keys.pubkey() !== me) return false
+  if (s.myInbox.status !== 'none' || s.inboxSetup.status === 'publishing') return false
+  const fail = (error: string): false => {
+    if (useAgentDms.getState().me === me) useAgentDms.setState({ inboxSetup: { status: 'failed', error } })
+    return false
+  }
+  useAgentDms.setState({ inboxSetup: { status: 'publishing', error: null } })
+  try {
+    const template = dmInboxTemplate(relays)
+    const signed = await dmDeps.keys.sender().signEvent(template)
+    if (useAgentDms.getState().me !== me) return false
+    const result = await dmDeps.transport.publish(dmInboxAnnounceRelays(relays), signed)
+    if (useAgentDms.getState().me !== me) return false
+    if (!result.ok) return fail(`Not published: ${result.reason}`)
+    const chosen = template.tags.map((t) => t[1])
+    useAgentDms.setState({ myInbox: { status: 'ready', relays: chosen }, inboxSetup: SETUP_IDLE })
+    if (open.size) {
+      startReading()
+      // An agent copies its operator's DM relays, so its inbox is asked again there.
+      for (const agent of open.keys()) void lookUpAgent(agent)
+    }
+    openWatch()
+    return true
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err))
   }
 }
 

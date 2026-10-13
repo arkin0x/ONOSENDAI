@@ -12,6 +12,7 @@
  */
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { schnorr } from '@noble/curves/secp256k1.js'
 import { nip19 } from 'nostr-tools'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip46 from 'nostr-tools/nip46'
@@ -408,4 +409,16 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     }),
     reconnect: ensure,
   }
+}
+
+/**
+ * A BIP-340 signature over a 32-byte message hash with a raw key: never an
+ * event, so there is no client tag to carry. The one use is an item
+ * listing's proof (lib/itemListing.ts), signed by the item's own key to show
+ * the lister holds it. Kept here so this file stays the only place a raw
+ * key signs anything (clientTagGuard.test.ts).
+ */
+export function signHashWithKey(hash: Uint8Array, secretKey: Uint8Array): Uint8Array {
+  if (hash.length !== 32) throw new Error('signHashWithKey signs a 32-byte hash')
+  return schnorr.sign(hash, secretKey)
 }

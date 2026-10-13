@@ -89,6 +89,33 @@ describe('a live subscription', () => {
     expect(opens).toHaveLength(4)
   })
 
+  it('keeps backing off when a reopen only hands back what was already seen', async () => {
+    const { transport, opens } = fakeTransport()
+    const reg = new LiveRegistry(transport)
+    reg.subscribe({ kinds: [1] }, { onEvent: () => {} })
+    await vi.runAllTicks()
+    opens[0].emit(ev(500))
+    opens[0].end('auth-required')
+    await vi.advanceTimersByTimeAsync(1_000)   // 1 s
+    expect(opens).toHaveLength(2)
+    opens[1].emit(ev(500))                     // the overlap, again: not life
+    opens[1].end('auth-required')
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(opens).toHaveLength(2)              // still backing off: 2 s
+    await vi.advanceTimersByTimeAsync(1)
+    expect(opens).toHaveLength(3)
+    opens[2].emit(ev(500))
+    opens[2].end('auth-required')
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(opens).toHaveLength(3)              // 5 s now
+    await vi.advanceTimersByTimeAsync(1)
+    expect(opens).toHaveLength(4)
+    opens[3].emit(ev(501))                     // something new: the count resets
+    opens[3].end('x')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(opens).toHaveLength(5)
+  })
+
   it('a failed open is retried too', async () => {
     const { transport, opens, failNext } = fakeTransport()
     failNext()

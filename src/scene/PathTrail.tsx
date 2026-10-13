@@ -172,10 +172,18 @@ export function PathTrail({ axes, scaleExp }: Props): JSX.Element | null {
     const arr = attr.array as Float32Array
     const n = arr.length
     if (n < 3) return
-    if (lastVertex.current !== arr) lastVertex.current = arr
-    arr[n - 3] = head[0] + travelOffset.x
-    arr[n - 2] = head[1] + travelOffset.y
-    arr[n - 1] = head[2] + travelOffset.z
+    // As float32, as the array stores them, so an unmoved vertex compares equal.
+    const x = Math.fround(head[0] + travelOffset.x), y = Math.fround(head[1] + travelOffset.y), z = Math.fround(head[2] + travelOffset.z)
+    // Only when the riding vertex moved. Rewritten every frame, the dashed
+    // trail was re-measured every frame too, and three's
+    // computeLineDistances allocates a new array the length of the line each
+    // time: 30 MB a minute of garbage on a 2,000-action LOCAL trail with the
+    // avatar standing still (measured 2026-10-13).
+    if (lastVertex.current === arr && arr[n - 3] === x && arr[n - 2] === y && arr[n - 1] === z) return
+    lastVertex.current = arr
+    arr[n - 3] = x
+    arr[n - 2] = y
+    arr[n - 1] = z
     attr.needsUpdate = true
     if (geometry?.lastLocal) walkedLocalLine.current?.computeLineDistances()
   })

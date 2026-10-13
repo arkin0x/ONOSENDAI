@@ -132,7 +132,7 @@ export function Avatar(): JSX.Element | null {
       : placeCentre(shownPosition, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }, [anchor, scaleExp, view, shownPosition])
 
-  useFrame((_, dt) => {
+  useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
@@ -141,6 +141,17 @@ export function Avatar(): JSX.Element | null {
       proven.current?.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
     } else {
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+    }
+    // In WALK you face where you look, live as you turn (arkinox,
+    // 2026-10-13), not the way your last move went. The model's nose (+Z)
+    // draws as render -Z and its top as render +Y (pose.ts renderPose), which
+    // are exactly the camera's forward and up in its own frame, so the turn
+    // is the camera's own. Local only: everyone else sees the heading your
+    // chain gives. Leaving WALK eases back to that heading below.
+    if (walking) {
+      d.quaternion.copy(camera.quaternion)
+      turnedFor.current = view
+      return
     }
     // The turn is on the drawn shape alone, so the tap target, which is
     // measured in world space and sized in its parent's, stays unturned.

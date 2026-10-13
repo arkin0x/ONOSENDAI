@@ -76,24 +76,56 @@ export function spectatorScale(scaleExp: number): number {
 }
 
 /**
- * Widest an avatar may reach from its centre, in cells: a shard built beyond
- * this is shrunk to it, so nobody's avatar blots out the field.
+ * Widest an avatar may reach from its centre, in gibsons (cells at 2^0): a
+ * shard built beyond this is shrunk to it, so nobody's avatar blots out the
+ * field.
  */
 export const MAX_AVATAR_RADIUS = 4
 
-/**
- * Render units per model unit: true scale. A model unit is 2^unit gibsons,
- * and the dodecahedron's cell is one gibson at 2^0, so a shard built to the
- * white avatar on the bench comes out exactly that size. The avatar keeps
- * that size at every zoom, as the dodecahedron does.
- */
-export function avatarScale(shard: ShardModel): number {
-  const perUnit = 2 ** shard.unit
+/** How far a shard reaches from its centre, in gibsons, before the cap. */
+function shardRadius(shard: ShardModel): number {
   let reach = 0
   for (const v of shard.vertices) {
     const t = ticksOf(v)
     reach = Math.max(reach, Math.abs(t[0]), Math.abs(t[1]), Math.abs(t[2]))
   }
-  const radius = (reach / TICKS_PER_UNIT) * perUnit
+  return (reach / TICKS_PER_UNIT) * 2 ** shard.unit
+}
+
+/**
+ * Render units per model unit at 2^0: true scale. A model unit is 2^unit
+ * gibsons, and the dodecahedron's cell is one gibson at 2^0, so a shard built
+ * to the white avatar on the bench comes out exactly that size there. What
+ * the zoom does to it is avatarDraw's.
+ */
+export function avatarScale(shard: ShardModel): number {
+  const perUnit = 2 ** shard.unit
+  const radius = shardRadius(shard)
   return radius > MAX_AVATAR_RADIUS ? perUnit * (MAX_AVATAR_RADIUS / radius) : perUnit
+}
+
+/** The marker's half-extent in cells: the wireframe icosahedron, one cell across. */
+export const AVATAR_MARKER_HALF = 0.5
+
+/**
+ * How a shard avatar is drawn at zoom 2^scaleExp: its mesh, scaled like
+ * everything else, or the marker once the mesh is too small to read.
+ *
+ * At 2^s a cell is 2^s gibsons, so an avatar whose true half-extent is E
+ * gibsons is E / 2^s cells. It used to be drawn at its 2^0 size at every
+ * zoom, which was harmless for the one-cell dodecahedron and wrong for a
+ * shard: up to eight cells across at any zoom, so zooming out with a big
+ * avatar following you put it over the whole screen while the room shrank
+ * around it (arkinox, 2026-10-13, XOR following him).
+ *
+ * Once zooming has shrunk the mesh under the marker's size it becomes the
+ * marker, the one-cell icosahedron every plain avatar is, rather than a
+ * speck or a mesh inflated past its real size. At 2^0 a shard is always its
+ * mesh, however small it was built.
+ */
+export function avatarDraw(shard: ShardModel, scaleExp: number): { mesh: number } | 'marker' {
+  const zoom = 2 ** -scaleExp
+  const half = Math.min(shardRadius(shard), MAX_AVATAR_RADIUS) * zoom
+  if (scaleExp > 0 && half < AVATAR_MARKER_HALF) return 'marker'
+  return { mesh: avatarScale(shard) * zoom }
 }

@@ -9,6 +9,9 @@
  * in once the walk is back to two, so catching up reads as relief rather
  * than as another flash.
  *
+ * Dressed as v1's derezz warning: a black panel in a red and black hazard
+ * frame, the words in red Krypton (styles.css, .syncwarn).
+ *
  * pointer-events: none from the stylesheet, and nothing in it is a control:
  * it sits over the scene and the pad and never takes a touch from either.
  * The count it shows is the last one worth warning about, so the words do
@@ -27,8 +30,10 @@ export function SyncWarning(): JSX.Element {
   if (on) shown.current = behind
   return (
     <div className={`syncwarn${on ? ' is-on' : ''}`} role="status" aria-live="polite" aria-hidden={!on}>
-      <div className="syncwarn__title">WARNING: LOSING SYNC</div>
-      <div className="syncwarn__sub">PROOF CHAIN {shown.current} BEHIND</div>
+      <div className="syncwarn__panel">
+        <div className="syncwarn__title">WARNING: LOSING SYNC</div>
+        <div className="syncwarn__sub">PROOF CHAIN {shown.current} BEHIND</div>
+      </div>
     </div>
   )
 }

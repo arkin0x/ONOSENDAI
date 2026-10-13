@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AVATAR_KIND, SPECTATOR_SCALE_MIN_EXP, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from '../avatar'
+import { AVATAR_KIND, AVATAR_MARKER_HALF, SPECTATOR_SCALE_MIN_EXP, avatarDraw, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from '../avatar'
 import { newShard, ticksOf } from 'sno-core/shards'
 
 const built = () => {
@@ -43,6 +43,47 @@ describe('avatar events (kind 11333)', () => {
     const shard = built()
     shard.vertices.push({ p: [16, 0, 0], c: [1, 1, 1] })
     expect(avatarScale(shard)).toBe(0.25)
+  })
+})
+
+describe('avatarDraw', () => {
+  // Reaches 4 gibsons from its centre at unit 2: the cap exactly.
+  const big = () => { const s = built(); s.unit = 2; return s }
+
+  it('scales with the zoom: E gibsons are E / 2^s cells', () => {
+    expect(avatarDraw(big(), 0)).toEqual({ mesh: 4 })
+    expect(avatarDraw(big(), 1)).toEqual({ mesh: 2 })
+    expect(avatarDraw(big(), 3)).toEqual({ mesh: 0.5 })
+  })
+
+  it('never grows past its true size on zooming out', () => {
+    for (let s = 1; s <= 3; s++) {
+      const d = avatarDraw(big(), s)
+      expect(d).not.toBe('marker')
+      expect((d as { mesh: number }).mesh).toBeLessThan((avatarDraw(big(), s - 1) as { mesh: number }).mesh)
+    }
+  })
+
+  it('becomes the marker once zooming shrinks it under the marker size', () => {
+    // 4 gibsons is half a cell at 2^3, the marker's own half-extent: still the mesh.
+    expect(4 / 2 ** 3).toBe(AVATAR_MARKER_HALF)
+    expect(avatarDraw(big(), 3)).not.toBe('marker')
+    expect(avatarDraw(big(), 4)).toBe('marker')
+    expect(avatarDraw(big(), 40)).toBe('marker')
+  })
+
+  it('keeps a capped shard to the cap at every zoom', () => {
+    const huge = built()
+    huge.vertices.push({ p: [16, 0, 0], c: [1, 1, 1] })
+    expect(avatarDraw(huge, 0)).toEqual({ mesh: 0.25 })
+    expect(avatarDraw(huge, 2)).toEqual({ mesh: 0.0625 })
+  })
+
+  it('is always the mesh at 2^0, however small it was built', () => {
+    const tiny = built()
+    tiny.unit = -3
+    expect(avatarDraw(tiny, 0)).toEqual({ mesh: 0.125 })
+    expect(avatarDraw(tiny, 1)).toBe('marker')
   })
 })
 

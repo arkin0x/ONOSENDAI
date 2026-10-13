@@ -8908,33 +8908,61 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
  * pointer events at all. In at a quarter second, out in a tenth, so catching
  * up clears it at once. */
 .syncwarn {
+  /* After v1's derezz warning (ONOSENDAI v1 109540f, DerezzWarning.tsx):
+     a 16:9 black panel in a thick hazard frame of 45 degree red and black
+     stripes, the text centered in red Krypton. Built from gradients rather
+     than v1's PNG so it is crisp at any size, and compact so it covers
+     little of the scene. The frame is about 1/13 of the width, the stripes
+     as wide as the gaps, and they crawl slowly, like WALK's walls. */
+  --syncwarn-w: min(360px, 80vw);
+  --syncwarn-band: calc(var(--syncwarn-w) * 0.05);
   position: fixed;
   left: 50%;
   top: 42%;
   transform: translate(-50%, -50%);
   z-index: 40;
   pointer-events: none;
-  text-align: center;
-  color: var(--danger, #ff3b6b);
-  font-family: var(--mono);
-  text-shadow: 0 0 12px rgba(255, 59, 107, 0.55);
+  box-sizing: border-box;
+  width: var(--syncwarn-w);
+  aspect-ratio: 16 / 9;
+  padding: calc(var(--syncwarn-w) / 13);
+  background: repeating-linear-gradient(135deg, #ff2323 0 var(--syncwarn-band), #000 var(--syncwarn-band) calc(var(--syncwarn-band) * 2));
   opacity: 0;
   transition: opacity 120ms ease-out;
-  max-width: calc(100vw - 32px);
 }
 .syncwarn.is-on {
   opacity: 1;
   transition: opacity 250ms ease-in;
+  /* One stripe period along x is the band pair over sin 45: the loop is seamless. */
+  animation: syncwarn-crawl 4s linear infinite;
+}
+@keyframes syncwarn-crawl {
+  to { background-position: calc(var(--syncwarn-band) * 2 * 1.41421356) 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .syncwarn.is-on { animation: none; }
+}
+.syncwarn__panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: #ff2323;
+  font-family: 'Monaspace Krypton', var(--mono);
+  text-align: center;
+  text-shadow: 0 0 10px rgba(255, 35, 35, 0.5);
 }
 .syncwarn__title {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: calc(var(--syncwarn-w) * 0.05);
+  letter-spacing: 0.08em;
   white-space: nowrap;
 }
 .syncwarn__sub {
-  margin-top: 6px;
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: calc(var(--syncwarn-w) * 0.032);
+  letter-spacing: 0.16em;
   opacity: 0.85;
 }

@@ -24,7 +24,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
@@ -254,8 +254,10 @@ function CellMetric(): null {
     if (import.meta.env.DEV) {
       // R3F 8 keeps no handle on the canvas node, so the browser harness has no
       // other way to inspect what is actually in the scene.
-      const w = window as unknown as { __scene?: unknown; __camera?: unknown }
+      const w = window as unknown as { __scene?: unknown; __camera?: unknown; __gl?: unknown }
       w.__scene = state.scene
+      // The renderer, for renderer.info: what a memory soak counts.
+      w.__gl = state.gl
       // The camera is not a child of the scene in R3F, so traversal cannot find
       // it and the harness has no other route to the view basis.
       w.__camera = state.camera
@@ -734,11 +736,24 @@ function WorldBloom(): JSX.Element {
   )
 }
 
-export function Scene(): JSX.Element {
+/**
+ * The canvas, rendered only when what it reads changes (memo): it takes no
+ * props, so a render of App, which happens on every store change it reads,
+ * has nothing to say to it.
+ */
+export const Scene = memo(function Scene(): JSX.Element {
   // The workshop is an opaque, full-screen bench with its own canvas. Drawing
   // the world under it is pure cost, and on a phone it was most of the frame:
   // the bench measured 3 fps with the world running behind it.
   const covered = useWorkshop((s) => s.open)
+  if (import.meta.env.DEV) { const w = window as unknown as { __sceneRenders?: number }; w.__sceneRenders = (w.__sceneRenders ?? 0) + 1 }
+  // The composer's children, made once. EffectComposer rebuilds its passes
+  // whenever its `children` prop is a new element, and it only removes the
+  // old ones, never disposes them: each EffectPass listens to its effects,
+  // which live for the session, so every old pass stayed reachable, two per
+  // render of this component, with their scenes, cameras and materials
+  // (measured 2026-10-13: 406 EffectMaterials kept over 200 hops).
+  const bloom = useMemo(() => <WorldBloom />, [])
   return (
     <Canvas
       camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
@@ -772,10 +787,10 @@ export function Scene(): JSX.Element {
         translucent overlays (ShardMesh FACE_TAG_STENCIL) (arkinox, 2026-10-12).
       */}
       <EffectComposer resolutionScale={0.25} stencilBuffer>
-        <WorldBloom />
+        {bloom}
       </EffectComposer>
     </Canvas>
   )
-}
+})
 
 export { GRID_RADIUS }

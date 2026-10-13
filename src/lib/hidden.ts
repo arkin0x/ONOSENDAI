@@ -36,7 +36,7 @@
  * and finished events only.
  */
 
-import { getPublicKey, verifyEvent } from 'nostr-tools/pure'
+import { getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
@@ -459,7 +459,8 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
 }
 
 /**
- * The inner chat event template (kind 23333), signed by the author.
+ * The inner chat event template (kind 23333). It goes out as a rumor
+ * (chatRumor): an id and no signature.
  *
  * Never published bare: it only ever travels inside a CHAT_BAG_KIND envelope
  * keyed to the region it was said in, so a relay sees ciphertext and the
@@ -476,6 +477,23 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
     // exactly what it was before mentions existed (arkinox, 2026-10-11).
     tags: [['d', lookupId], ['C', positionHex(at, plane)], ...mentionTags(mentions)],
   }
+}
+
+/**
+ * A chat line as it is sealed: an unsigned rumor, the way NIP-17 carries a
+ * kind 14 (arkinox, 2026-10-13). Its id is computed, so replies, mentions
+ * and the history still name it, but it has no signature: a signed line
+ * could be lifted out of the envelope and shown anywhere as standalone proof
+ * of who said it, and a rumor cannot be republished as a valid event. Who
+ * said it is vouched for by the envelope, which the speaker does sign
+ * (chatInners requires the two pubkeys to match).
+ */
+export type ChatRumor = Omit<NostrEvent, 'sig'> & { sig?: string }
+
+/** Seal-ready rumor of a chat template, said by `pubkey`. */
+export function chatRumor(template: EventTemplate, pubkey: string): ChatRumor {
+  const unsigned = { kind: template.kind, created_at: template.created_at, tags: template.tags, content: template.content, pubkey }
+  return { ...unsigned, id: getEventHash(unsigned) }
 }
 
 /**
@@ -570,7 +588,7 @@ export interface BagPlace { at: Position; plane: Plane }
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: BagEntry[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
+export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
   const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, await encryptForRegion(regionKey, JSON.stringify(inners))], ['version', '2']]
   if (settings.heightTag) tags.push(['h', String(height)])
   if (settings.hint) {
@@ -777,13 +795,35 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
 
 /**
  * The chat lines in an ephemeral envelope: every inner that is a CHAT_KIND,
- * verifies, and was signed by the same key that wrapped it. Anything else in
- * the bag is not chat and is left where it is.
+ * is said by the key that signed the envelope, and whose id is its own hash.
+ * A line is a rumor (chatRumor) and carries no signature; a line from an
+ * older client that does carry one must verify (accepted both ways while
+ * clients catch up). Anything else in the bag is not chat and is left where
+ * it is.
  */
-export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Promise<NostrEvent[]> {
+export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Promise<ChatRumor[]> {
   if (outer.kind !== CHAT_BAG_KIND) return []
-  const inners = await bagInners(outer, regionKey)
-  return inners.filter((e) => e.kind === CHAT_KIND && typeof e.content === 'string' && e.content.length > 0)
+  const ct = ciphertextOf(outer)
+  if (!ct) return []
+  const json = await decryptForRegion(regionKey, ct)
+  if (!json) return []
+  let arr: unknown
+  try { arr = JSON.parse(json) } catch { return [] }
+  if (!Array.isArray(arr)) return []
+  return arr.filter((e): e is ChatRumor => isChatLine(e, outer.pubkey))
+}
+
+/** One sealed chat line, checked as chatInners describes. */
+function isChatLine(e: unknown, speaker: string): boolean {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return false
+  const ev = e as ChatRumor
+  if (ev.kind !== CHAT_KIND || ev.pubkey !== speaker) return false
+  if (typeof ev.content !== 'string' || ev.content.length === 0) return false
+  if (typeof ev.created_at !== 'number' || !Array.isArray(ev.tags) || typeof ev.id !== 'string') return false
+  try {
+    if (getEventHash({ kind: ev.kind, created_at: ev.created_at, tags: ev.tags, content: ev.content, pubkey: ev.pubkey }) !== ev.id) return false
+  } catch { return false }
+  return ev.sig === undefined || verifyEvent(ev as NostrEvent)
 }
 
 /**

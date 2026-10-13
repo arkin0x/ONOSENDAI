@@ -33,6 +33,8 @@ import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Color, LineBasicMaterial, LineSegments } from 'three'
 import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { GHOST_FADE_MS } from '../lib/walkGhost'
+import { boxDistance, nearGate } from '../lib/walkGate'
+import { committedAnchor } from '../lib/renderFrame'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { boundaryColor } from '../lib/palette'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -63,6 +65,9 @@ interface Flash {
   /** The origin the geometry was built against, and its zoom: where the box is in cyberspace. */
   origin: Position
   scaleExp: number
+  /** The box in the frame it was built in, for the WALK gate. */
+  centre: [number, number, number]
+  size: [number, number, number]
 }
 
 function buildFlash(
@@ -77,6 +82,8 @@ function buildFlash(
     heights: c.heights,
     origin,
     scaleExp,
+    centre: [c.centre[0], c.centre[1], c.centre[2]],
+    size: [c.size[0], c.size[1], c.size[2]],
   }
 }
 
@@ -119,6 +126,16 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
 
   useEffect(() => () => flash?.geometry.dispose(), [flash])
 
+  // In WALK the box is never drawn at or around the eye: a crossing's box
+  // can be many cells across and hold the eye, which is how it ended up in
+  // front of you as the chain caught up (lib/walkGate.ts). Measured to its
+  // nearest point, in the frame it is drawn in now.
+  const walkGate = (eye: { x: number; y: number; z: number }): number => {
+    if (!flash || !lines.current || !useCyberspace.getState().walking) return 1
+    const o = lines.current.position
+    return nearGate(boxDistance([eye.x, eye.y, eye.z], [flash.centre[0] + o.x, flash.centre[1] + o.y, flash.centre[2] + o.z], flash.size))
+  }
+
   useFrame((state) => {
     if (!flash || !material.current) return
     if (started.current === 0) started.current = state.clock.elapsedTime
@@ -127,7 +144,8 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     const s = useCyberspace.getState()
     if (lines.current && s.scaleExp === flash.scaleExp) {
       const axes2 = s.axes()
-      const now = alignedOrigin(s.anchor, s.scaleExp)
+      // The frame the scene on screen is drawn in (lib/renderFrame.ts).
+      const now = alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
       const a = placeCentre(flash.origin, now, s.scaleExp, axes2)
       const b = placeCentre(flash.origin, flash.origin, s.scaleExp, axes2)
       lines.current.position.set(a[0] - b[0], a[1] - b[1], a[2] - b[2])
@@ -145,7 +163,7 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
         })
         return
       }
-      material.current.opacity = f.from * (1 - u)
+      material.current.opacity = f.from * (1 - u) * walkGate(state.camera.position)
       return
     }
 
@@ -159,7 +177,7 @@ export function CrossingFlash({ axes }: Props): JSX.Element | null {
     }
     // Ease out: bright on arrival, then a long tail rather than a linear wipe.
     const k = 1 - t
-    material.current.opacity = k * k
+    material.current.opacity = k * k * walkGate(state.camera.position)
 
     // Strikes white, then resolves into its cost color over the first third.
     // The lattice and the covering box now hold fixed hues so they can be told

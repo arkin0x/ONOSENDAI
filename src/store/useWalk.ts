@@ -191,10 +191,24 @@ useCyberspace.subscribe((s, prev) => {
     useWalk.getState().stop()
     return
   }
+  // Your head moved with nothing of the walk's queued: another device's move
+  // folded in (the fold leaves a walk's cursor alone). The eye goes to it.
+  const w = useWalk.getState()
+  if (s.position !== prev.position && w.queue.length === 0 && w.running === null && !samePosition(s.cursor, s.position)) {
+    useCyberspace.setState({ cursor: { ...s.position } })
+    return
+  }
   pump()
 })
 
 /** Whether the walk is far enough behind for the LOSING SYNC warning. */
 export function losingSync(behind: number): boolean {
   return behind >= SYNC_WARN_AT
+}
+
+// DEV window handle, the house pattern (__store): how far behind the walk
+// is, for the headless measurement of WALK (scene/WalkProbe.tsx).
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __walkBehind?: () => number; __walk?: unknown }).__walkBehind = () => useWalk.getState().behind
+  ;(window as unknown as { __walk?: unknown }).__walk = useWalk
 }

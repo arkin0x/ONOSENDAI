@@ -4005,7 +4005,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       positionHistory: d.positionHistory,
       // Follow to the new head only if you were living at it; browsing history
       // or spectating keeps its view while the chain updates underneath.
-      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, cursor: d.position, exploreIndex: null } : {}),
+      // In WALK the cursor is the walk's predicted head (store/useWalk.ts),
+      // which a fold must not pull back to the proven one: the eye would
+      // glide back a step. A fold that moves the head stops the walk itself.
+      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, ...(cur.walking ? {} : { cursor: d.position }), exploreIndex: null } : {}),
       // A drop is kept until it is read; an adoption is just an explanation
       // for the movement and fades on its own. A fold that changed nothing
       // says nothing.

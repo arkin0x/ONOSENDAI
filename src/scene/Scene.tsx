@@ -24,7 +24,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
@@ -32,6 +32,8 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } f
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { walkEye } from '../lib/walkEye'
+import { WalkProbe } from './WalkProbe'
+import { commitAnchor, committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -116,6 +118,17 @@ const GLIDE_TAU = 0.45
 const GLIDE_SECONDS = 1.6
 const GLIDE_MAX_CELLS = 300
 
+/**
+ * Records the anchor the scene is being drawn against, in the commit that
+ * draws it (lib/renderFrame.ts). First in World, so its layout effect runs
+ * in the same commit as every mesh placed against the anchor.
+ */
+function FrameCommit(): null {
+  const anchor = useCyberspace((s) => s.anchor)
+  useLayoutEffect(() => { commitAnchor(anchor) }, [anchor])
+  return null
+}
+
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -137,6 +150,7 @@ function World(): JSX.Element {
 
   return (
     <group>
+      <FrameCommit />
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
       <TargetProjector axes={axes} targets={targets} />
@@ -174,6 +188,7 @@ function World(): JSX.Element {
       <SecretRegions axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
+      {import.meta.env.DEV && <WalkProbe axes={axes} />}
     </group>
   )
 }
@@ -322,6 +337,9 @@ function Rig(): JSX.Element {
   // distances from the target. `outTo` is the orbit distance WALK was
   // entered from, which is where leaving it puts the camera back.
   const walkWas = useRef(false)
+  // WALK's look direction, from the eye outward to the camera: kept between
+  // frames so only the walker's own turning changes it.
+  const walkLook = useRef<Vector3 | null>(null)
   const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
 
@@ -486,7 +504,11 @@ function Rig(): JSX.Element {
     // The anchor, not the position: in history the scene is drawn from the
     // action being looked at, and the camera has to ride that the same way it
     // rides a commit.
-    const origin = alignedOrigin(s.anchor, s.scaleExp)
+    // The anchor the meshes on screen were placed against, which a landing
+    // moves a commit after the store (lib/renderFrame.ts). The frame change
+    // is absorbed when the scene makes it, not before.
+    const drawnAnchor = committedAnchor() ?? s.anchor
+    const origin = alignedOrigin(drawnAnchor, s.scaleExp)
     const cur = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp }
     const was = lastSeen.current
     if (was !== null && (was.anchor.x !== cur.anchor.x || was.anchor.y !== cur.anchor.y || was.anchor.z !== cur.anchor.z || was.plane !== cur.plane || was.scaleExp !== cur.scaleExp)) {
@@ -503,7 +525,13 @@ function Rig(): JSX.Element {
     //
     // It also must not be eased. Easing a frame change would slide the world
     // under a camera that is looking at something stationary.
-    const [tx, ty, tz] = s.cursorOffset()
+    // The target in the drawn frame: cursorOffset works against the store's
+    // anchor, so it is carried back by however far that is ahead.
+    const live = s.cursorOffset()
+    const lag = drawnAnchor === s.anchor ? null : originShift(alignedOrigin(s.anchor, s.scaleExp), origin, s.scaleExp, s.axes())
+    const tx = live[0] + (lag ? lag[0] : 0)
+    const ty = live[1] + (lag ? lag[1] : 0)
+    const tz = live[2] + (lag ? lag[2] : 0)
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
       if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
@@ -589,11 +617,19 @@ function Rig(): JSX.Element {
       if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
       eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
       c.enableZoom = !s.walking
+      walkLook.current = null
     }
     if (eye.current) {
       const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS
       const d = eye.current.to + (eye.current.from - eye.current.to) * lerpRemaining(t)
-      const along = walkDir.copy(c.object.position).sub(smooth.current)
+      // In WALK the direction you look is yours alone: the one the last frame
+      // ended on, which only your own turning (the controls' update below)
+      // changes. Read off the camera instead, anything that moved the camera
+      // between frames turned your head with it: a reframe or a cut puts the
+      // camera straight on at an orbit distance, and from inside the avatar
+      // that read as the view snapping to the chain's frame as a step landed
+      // (arkinox, 2026-10-13).
+      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current)
       if (along.lengthSq() === 0) along.set(0, 0, 1)
       c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
@@ -604,6 +640,7 @@ function Rig(): JSX.Element {
 
     c.target.copy(smooth.current)
     c.update()
+    if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
 
   return (

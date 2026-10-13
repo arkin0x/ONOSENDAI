@@ -119,9 +119,28 @@ export function signerFromNcryptsec(ncryptsec: string, password: string): Signer
   return localSigner(sk)
 }
 
-/** The browser extension. Throws if none is present or it refuses. */
-export async function nip07Signer(): Promise<Signer> {
-  const ext = windowNostr()
+/**
+ * How long a reconnect waits for an extension to appear. Extensions inject
+ * `window.nostr` from a content script some time after the page starts, and
+ * a reload asks for a signature at once (the relay's NIP-42 AUTH challenge
+ * arrives with the first socket), so asking only once found no extension
+ * and the whole session signed nothing (arkinox, 2026-10-13).
+ */
+export const NIP07_WAIT_MS = 4000
+
+/** `window.nostr`, once it appears, or null after `waitMs`. */
+async function waitForWindowNostr(waitMs: number): Promise<WindowNostr | null> {
+  const start = Date.now()
+  for (;;) {
+    const ext = windowNostr()
+    if (ext || Date.now() - start >= waitMs) return ext
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
+/** The browser extension. Throws if none appears within `waitMs` or it refuses. */
+export async function nip07Signer(waitMs = 0): Promise<Signer> {
+  const ext = await waitForWindowNostr(waitMs)
   if (!ext) throw new Error('No NIP-07 extension found')
   const pubkey = await ext.getPublicKey()
   // NIP-44 is optional in NIP-07: offered only when the extension has it.
@@ -312,7 +331,13 @@ export function prefOf(signer: Signer): SignerPref {
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
 export async function signerFromPref(pref: SignerPref): Promise<Signer> {
   if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
-  if (pref.kind === 'nip07') return nip07Signer()
+  if (pref.kind === 'nip07') {
+    const signer = await nip07Signer(NIP07_WAIT_MS)
+    // Same guard as a bunker's: an extension switched to another account
+    // must not sign this pubkey's chain.
+    if (signer.pubkey !== pref.pubkey) throw new Error('Your extension is now on a different account than the one logged in here. Switch it back, or log in again.')
+    return signer
+  }
   if (pref.kind === 'nip46' && pref.bunkerUri) {
     const clientSk = pref.clientNsec ? (nip19.decode(pref.clientNsec).data as Uint8Array) : undefined
     if (pref.nostrConnectSession && clientSk) return nostrConnectSessionSigner(pref.bunkerUri, clientSk, pref.pubkey)
@@ -358,7 +383,14 @@ export function saveSignerPref(pref: SignerPref): void {
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
   let pending: Promise<Signer> | null = null
   const ensure = (): Promise<Signer> => {
-    if (!pending) pending = signerFromPref(pref).then((s) => { onReady(s); return s })
+    // A failed reconnect is not kept: the next signature tries again. Kept,
+    // one early failure (an extension not injected yet, a bunker relay
+    // down) refused every signature until the page was reloaded.
+    if (!pending) {
+      const attempt = signerFromPref(pref).then((s) => { onReady(s); return s })
+      pending = attempt
+      attempt.catch(() => { if (pending === attempt) pending = null })
+    }
     return pending
   }
   return {

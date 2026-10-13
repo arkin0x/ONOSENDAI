@@ -1815,6 +1815,11 @@ kbd {
 }
 
 .secret__shard-name { font-size: 14px; color: var(--fg); }
+.secret__spin {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
 
 .secret__creator {

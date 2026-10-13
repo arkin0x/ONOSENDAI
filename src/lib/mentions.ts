@@ -170,3 +170,56 @@ export function buildCandidates(
   }
   return out
 }
+
+/**
+ * The draft with `@label ` put at its start, for CHAT on someone's avatar card
+ * (arkinox, 2026-10-13: "opens the local chat and inserts the @tag for them at
+ * the beginning of the message"). The person joins `picked`, exactly as a pick
+ * from the @ list does, so send turns the name into nostr:npub and a p tag. A
+ * draft that already mentions them is left as it is, with the caret at its end.
+ */
+export function prependMention(
+  draft: string,
+  picked: readonly Mention[],
+  mention: Mention,
+  maxLength = Infinity,
+): { draft: string; picked: Mention[]; caret: number } {
+  const tag = `@${mention.label}`
+  const already = picked.some((m) => m.pubkey === mention.pubkey) && draft.includes(tag)
+  if (already) return { draft, picked: [...picked], caret: draft.length }
+  const next = `${tag} ${draft.replace(/^\s+/, '')}`.slice(0, maxLength)
+  return {
+    draft: next,
+    picked: [...picked.filter((m) => m.pubkey !== mention.pubkey), mention],
+    caret: Math.min(tag.length + 1, next.length),
+  }
+}
+
+/** How old a line may be and still count as just arrived: older ones are a relay replaying the room. */
+export const MENTION_FRESH_S = 600
+
+/**
+ * The lines of `add` that tag `me` and have just arrived (arkinox, 2026-10-13:
+ * "a tag should probably do something more significant"): not your own, not
+ * a line this device already holds, and said within MENTION_FRESH_S of now,
+ * so a room replayed on load or on reconnect raises nothing.
+ */
+export function freshMentions<L extends { id: string; text: string; from: string; at: number; mentions?: readonly string[] }>(
+  add: readonly L[],
+  have: ReadonlySet<string>,
+  me: string,
+  now: number,
+): L[] {
+  const seen = new Set<string>()
+  return add.filter((l) => {
+    if (have.has(l.id) || seen.has(l.id)) return false
+    seen.add(l.id)
+    return now - l.at <= MENTION_FRESH_S && mentionsMe(l, me)
+  })
+}
+
+/** A line as words, every reference shown as @Name, cut to `max` characters with an ellipsis. */
+export function previewText(text: string, labelOf: (pubkey: string, npub: string) => string, max = 60): string {
+  const words = segments(text).map((s) => ('pubkey' in s ? `@${labelOf(s.pubkey, s.npub)}` : s.text)).join('').replace(/\s+/g, ' ').trim()
+  return words.length > max ? `${words.slice(0, max - 1).trimEnd()}…` : words
+}

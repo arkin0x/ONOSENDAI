@@ -16,11 +16,17 @@
  * notification toast"). That comes first, since an agent may be waiting on
  * an answer, and a tap opens that agent's conversation. Only who sent it is
  * shown, never the words: they are private, and on a shared screen.
+ *
+ * A local chat line that tags you is one too (arkinox, 2026-10-13: "a tag
+ * should probably do something more significant"): "<name> tagged you: <the
+ * line>", the line's own words since everyone standing there heard them, and
+ * a tap opens the chat at that line. Chat is ephemeral, so these are made on
+ * this device as the line arrives and kept there (useNotifications).
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MessageCircle, MessageSquare } from 'lucide-react'
+import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import type { Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
@@ -41,6 +47,9 @@ import { ProfilePic } from './ProfileBadge'
 import { useEscape } from '../hooks/useEscape'
 import { useAgentUnread } from '../hooks/useAgentDmWatch'
 import { setTalking } from '../store/useAgentDms'
+import { useChat } from '../store/useChat'
+import { useProfiles } from '../store/useProfiles'
+import { previewText } from '../lib/mentions'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -49,10 +58,18 @@ import { setTalking } from '../store/useAgentDms'
  */
 function glyphOf(n: Notification): JSX.Element {
   if (n.what === 'comment') return <MessageCircle className="notif__icon" size={16} strokeWidth={2.25} aria-hidden />
+  if (n.what === 'mention') return <AtSign className="notif__icon" size={16} strokeWidth={2.25} aria-hidden />
   return n.image ? <img className="reactions__img" src={n.image} alt={n.content} /> : <>{reactionGlyph(n.content)}</>
 }
 
+/** A tag's chat line as words, every reference as @Name, cut for a toast or a row. */
+function mentionWords(n: Notification, max = 60): string {
+  const profiles = useProfiles.getState().profiles
+  return previewText(n.content, (pk, npub) => profileLabel(profiles[pk], npub), max)
+}
+
 function verbOf(n: Notification): string {
+  if (n.what === 'mention') return 'tagged you in local chat'
   // A target found nowhere is kept rather than missed, and said as a possibility.
   const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
@@ -109,11 +126,21 @@ export function NotificationsToast(): JSX.Element | null {
   }
   if (!latest || unread === 0) return null
   const who = profileLabel(profile, nip19.npubEncode(latest.from))
+  // A tag on its own goes straight to its line in chat; with more unread,
+  // the list, as for anything else.
+  const tag = latest.what === 'mention' && latest.on.type === 'chat' ? latest.on.id : null
+  const open = (): void => {
+    if (tag && unread === 1) { useNotifications.getState().markSeen(); useChat.getState().reveal(tag); return }
+    useNotifications.getState().setOpen(true)
+  }
+  const text = unread > 1
+    ? (tag ? `${who} tagged you, and ${unread - 1} more…` : `and ${unread - 1} more…`)
+    : tag ? `${who} tagged you: ${mentionWords(latest)}` : `${who} ${verbOf(latest)}`
   return (
-    <button className="hyperbar notif__toast" onClick={() => useNotifications.getState().setOpen(true)} aria-label={`${unread} unread notifications. Tap to see.`}>
+    <button className="hyperbar notif__toast" onClick={open} aria-label={`${unread} unread notifications. Tap to see.`}>
       <span className="notif__toast-glyph" aria-hidden="true">{glyphOf(latest)}</span>
       <ProfilePic pubkey={latest.from} size={22} />
-      <span className="notif__toast-text">{unread > 1 ? `and ${unread - 1} more…` : `${who} ${verbOf(latest)}`}</span>
+      <span className="notif__toast-text">{text}</span>
     </button>
   )
 }
@@ -156,6 +183,8 @@ function openItem(id: string | null, lookupId?: string): string | null {
 
 /** Go to what a notification is about. Resolves to a reason when it cannot. */
 async function view(n: Notification): Promise<string | null> {
+  // A tag in local chat: the dock, scrolled to that line.
+  if (n.on.type === 'chat') { useChat.getState().reveal(n.on.id); return null }
   if (n.on.type === 'action') return openMove(n.on.id)
   if (n.on.type === 'item') return openItem(n.on.id, n.on.lookupId)
   // A reply or a reaction to your comment: go where that comment was made.
@@ -193,13 +222,14 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
           <span className="notif__when" title={formatStamp(n.createdAt)}>{formatAgo(n.createdAt)}</span>
         </div>
         <p className="notif__verb">{verbOf(n)}</p>
+        {n.what === 'mention' && <p className="notif__words">{mentionWords(n, 280)}</p>}
         {n.what === 'comment' && (
           text
             ? <p className="notif__words">{text}</p>
             : <p className="notif__words notif__words--sealed">{n.sealed ? 'Sealed to the place it answers: go there to read it.' : PLACEHOLDER}</p>
         )}
         <button className="secret__act notif__view" disabled={busy} onClick={() => void go()}>
-          {busy ? 'OPENING…' : n.on.type === 'action' ? 'VIEW MOVE' : n.on.type === 'item' ? 'VIEW ITEM' : 'VIEW THREAD'}
+          {busy ? 'OPENING…' : n.on.type === 'action' ? 'VIEW MOVE' : n.on.type === 'item' ? 'VIEW ITEM' : n.on.type === 'chat' ? 'VIEW IN CHAT' : 'VIEW THREAD'}
         </button>
         {problem && <p className="comments__error">{problem}</p>}
       </div>
@@ -238,7 +268,7 @@ export function NotificationsModal(): JSX.Element | null {
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
         <div className="notif__scroll" ref={list}>
-          {items.length === 0 && !loading && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items land here.</p>}
+          {items.length === 0 && !loading && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
           <ul className="notif__list">
             {items.map((n) => <Row key={n.id} n={n} words={opened[n.id]} />)}
           </ul>

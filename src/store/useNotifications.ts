@@ -21,7 +21,7 @@
 import { create } from 'zustand'
 import { COMMENT_KIND } from '../lib/comments'
 import { relaysFor } from '../lib/inbox'
-import { classify, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
+import { classify, fromRelays, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import { queryAny } from '../lib/relay'
 import { decryptForRegion, regionKeyAt } from '../lib/shardCrypto'
@@ -40,6 +40,28 @@ function loadSeen(me: string): number {
   try { return Number(localStorage.getItem(SEEN_KEY(me))) || 0 } catch { return 0 }
 }
 
+/**
+ * Chat lines that tagged you (arkinox, 2026-10-13). Chat is ephemeral and no
+ * relay keeps it, so these are the one kind of notification made on this
+ * device, and kept here per identity, newest MENTIONS_KEPT.
+ */
+const MENTIONS_KEY = (me: string): string => `onosendai:notif-mentions:${me}`
+export const MENTIONS_KEPT = 100
+
+function loadMentions(me: string): Notification[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(MENTIONS_KEY(me)) ?? '[]') as unknown
+    return Array.isArray(list) ? (list as Notification[]).filter((n) => n && n.what === 'mention' && typeof n.id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function saveMentions(me: string, items: readonly Notification[]): void {
+  const kept = items.filter((n) => n.what === 'mention').slice(0, MENTIONS_KEPT)
+  try { localStorage.setItem(MENTIONS_KEY(me), JSON.stringify(kept)) } catch { /* private mode: kept for this session */ }
+}
+
 interface NotificationsState {
   me: string | null
   items: Notification[]
@@ -56,6 +78,8 @@ interface NotificationsState {
   loadMore: () => Promise<void>
   setOpen: (open: boolean) => void
   markSeen: () => void
+  /** A chat line that tagged `me`, made on this device and kept with the rest. */
+  addMention: (me: string, n: Notification) => void
 }
 
 /** Your moves and your hidden items, as this device knows them. */
@@ -120,7 +144,7 @@ export const useNotifications = create<NotificationsState>((set, get) => {
 
     start: async (me) => {
       if (get().me === me) return
-      set({ me, items: [], opened: {}, lastSeen: loadSeen(me), loading: true, done: false })
+      set({ me, items: mergeNotifications([], loadMentions(me)), opened: {}, lastSeen: loadSeen(me), loading: true, done: false })
       try {
         const page = await fetchPage(me, {})
         await take(me, page)
@@ -131,14 +155,18 @@ export const useNotifications = create<NotificationsState>((set, get) => {
     },
 
     poll: async () => {
-      const { me, items } = get()
+      const { me } = get()
       if (!me) return
+      // Paged by what the relays hold: a chat mention newer than every
+      // reaction would otherwise move `since` past ones not fetched yet.
+      const items = fromRelays(get().items)
       try { await take(me, await fetchPage(me, items.length ? { since: items[0].createdAt } : {})) } catch { /* next time */ }
     },
 
     loadMore: async () => {
-      const { me, items, loading, done } = get()
+      const { me, loading, done } = get()
       if (!me || loading || done) return
+      const items = fromRelays(get().items)
       set({ loading: true })
       try {
         // Inclusive, so events sharing the oldest second are not skipped; the
@@ -162,6 +190,16 @@ export const useNotifications = create<NotificationsState>((set, get) => {
       const lastSeen = Math.max(get().lastSeen, items[0].createdAt)
       set({ lastSeen })
       try { localStorage.setItem(SEEN_KEY(me), String(lastSeen)) } catch { /* private mode */ }
+    },
+
+    addMention: (me, n) => {
+      // Not the identity on show (it switched while the line was opened): kept
+      // for when that identity's list next loads.
+      if (get().me !== me) { saveMentions(me, mergeNotifications(loadMentions(me), [n])); return }
+      if (get().items.some((x) => x.id === n.id)) return
+      const items = mergeNotifications(get().items, [n])
+      set({ items })
+      saveMentions(me, items)
     },
   }
 })

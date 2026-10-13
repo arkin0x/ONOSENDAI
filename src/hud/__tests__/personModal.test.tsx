@@ -53,6 +53,8 @@ describe('the card a tap on an avatar opens', () => {
     expect(html).toContain('arkinox')
     expect(html).toContain('npub1')
     expect(html).toContain('SPECTATE')
+    expect(html).toContain('>CHAT<')
+    expect(html).toContain('person__actions')
   })
 
   it('shows the profile without COPY for a default avatar', () => {
@@ -75,6 +77,7 @@ describe('the card a tap on your own avatar opens (arkinox, 2026-10-12)', () => 
     expect(html).toContain('YOU')
     expect(html).not.toContain('TARGET')
     expect(html).not.toContain('SPECTATE')
+    expect(html).not.toContain('>CHAT<')
   })
 
   it('is what a tap on your avatar opens: the card store, with your pubkey', async () => {

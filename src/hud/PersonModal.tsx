@@ -13,11 +13,17 @@
  * says COPIED on the button, as the other copies do. Someone still drawn as
  * the default dodecahedron has no shard to show or copy, so the card is the
  * profile alone. TARGET and SPECTATE are here too, as on a hidden item's card.
+ *
+ * CHAT (arkinox, 2026-10-13: "opens the local chat and inserts the @tag for
+ * them at the beginning of the message") closes the card and unfolds the dock
+ * with "@Name " at the start of the line, picked as the @ list picks, so the
+ * line goes out tagging them. It says why when chat cannot be used from here.
+ * The actions sit two to a row.
  */
 
 import { useState, type ComponentType } from 'react'
 import { nip19 } from 'nostr-tools'
-import { Bot, Copy, Crosshair, Eye, Box } from 'lucide-react'
+import { Bot, Copy, Crosshair, Eye, Box, MessageSquare } from 'lucide-react'
 import type { ShardModel } from 'sno-core/shards'
 import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
@@ -29,6 +35,8 @@ import { copyAvatarToWorkshop, usePersonCard } from '../store/usePersonCard'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
 import { ShardSpin } from '../scene/ShardSpin'
+import { sendKey, useChat } from '../store/useChat'
+import { useSecrets } from '../store/useSecrets'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -66,6 +74,10 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
   const me = useCyberspace((s) => s.identity.pubkey)
   const targeted = useCyberspace((s) => !!s.targets[pubkey])
   const [copied, setCopied] = useState<'npub' | 'shard' | null>(null)
+  // Why a line cannot be said from here, in the chat line's own words; null when it can.
+  const atHead = useCyberspace((s) => s.atHead())
+  const hasKey = useSecrets((s) => s.current) && sendKey() !== null
+  const noChat = chatUnavailable(atHead, hasKey)
 
   const npub = nip19.npubEncode(pubkey)
   const name = profileLabel(profile, npub)
@@ -82,6 +94,11 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
   }
   const target = (): void => useCyberspace.getState().toggleTarget(pubkey, profile?.name ?? null)
   const watch = (): void => { onClose(); void spectate(pubkey) }
+  const chat = (): void => {
+    if (noChat) return
+    onClose()
+    useChat.getState().startTo({ pubkey, label: name })
+  }
   const hasShard = !!shard && shard.vertices.length > 0
 
   return (
@@ -125,7 +142,7 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
           </div>
         )}
 
-        <div className="secret__actions">
+        <div className="secret__actions person__actions">
           {hasShard && (
             <button className="secret__act" onClick={copyShard} title="Copy this avatar into your workshop, credited to its author">
               <Box size={ICON} strokeWidth={2.25} aria-hidden />{copied === 'shard' ? 'COPIED' : 'COPY TO WORKSHOP'}
@@ -137,10 +154,20 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
                 <Crosshair size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'}
               </button>
               <button className="secret__act" onClick={watch}><Eye size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
+              <button className="secret__act" onClick={chat} disabled={noChat !== null} title={noChat ?? `Talk to ${name} in local chat, tagged`}>
+                <MessageSquare size={ICON} strokeWidth={2.25} aria-hidden />CHAT
+              </button>
             </>
           )}
         </div>
       </div>
     </div>
   )
+}
+
+/** Why CHAT cannot open a line from here, in the chat line's own words, or null when it can. */
+export function chatUnavailable(atHead: boolean, hasKey: boolean): string | null {
+  if (!atHead) return 'Come back to your head to talk'
+  if (!hasKey) return 'Waiting for the scan of where you stand'
+  return null
 }

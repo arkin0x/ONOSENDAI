@@ -29,13 +29,15 @@ export type NotifOn =
   | { type: 'action'; id: string }
   | { type: 'item'; id: string; lookupId?: string }
   | { type: 'comment'; id: string }
+  /** A local chat line that tagged you: its inner event id (arkinox, 2026-10-13). */
+  | { type: 'chat'; id: string }
 
 export interface Notification {
   id: string
   from: string
   createdAt: number
-  what: 'reaction' | 'comment'
-  /** The reaction as written, or the comment's words (the placeholder while sealed). */
+  what: 'reaction' | 'comment' | 'mention'
+  /** The reaction as written, the comment's words (the placeholder while sealed), or the chat line that tagged you. */
   content: string
   /** A NIP-30 custom emoji's image. */
   image?: string
@@ -168,6 +170,20 @@ export function mergeNotifications(a: Notification[], b: Notification[]): Notifi
   const byId = new Map<string, Notification>()
   for (const n of [...a, ...b]) if (!byId.has(n.id)) byId.set(n.id, n)
   return [...byId.values()].sort((x, y) => y.createdAt - x.createdAt || x.id.localeCompare(y.id))
+}
+
+/**
+ * A chat line that tagged you, as a notification (arkinox, 2026-10-13). Chat
+ * is ephemeral, so no relay will ever hand these back: they are made here,
+ * when the line arrives, and kept on this device (useNotifications).
+ */
+export function mentionNotification(line: { id: string; from: string; at: number; text: string }): Notification {
+  return { id: line.id, from: line.from, createdAt: line.at, what: 'mention', content: line.text, sealed: false, ciphertext: null, bag: null, on: { type: 'chat', id: line.id } }
+}
+
+/** The notifications a relay can be asked about again: everything but chat mentions, which no relay keeps. */
+export function fromRelays(list: readonly Notification[]): Notification[] {
+  return list.filter((n) => n.what !== 'mention')
 }
 
 /** How many arrived after you last looked. */

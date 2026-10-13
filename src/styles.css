@@ -1895,6 +1895,15 @@ kbd {
 }
 
 .secret__act:hover { background: rgba(0, 229, 255, 0.16); }
+/* The avatar card's actions, two to a row (arkinox, 2026-10-13). */
+.person__actions .secret__act {
+  flex: 1 1 calc(50% - 3px);
+}
+.secret__act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 
 .secret__act.is-on {
   color: #05070d;
@@ -6724,6 +6733,37 @@ kbd {
   background: var(--danger);
   box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 6px rgba(255, 59, 107, 0.6);
   pointer-events: none;
+}
+
+/* A line that tags you, waiting (arkinox, 2026-10-13): an accent @ with the
+   count, where the plain dot sits, so a tag reads louder than chatter. */
+.chatdock__at {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #05070d;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 8px rgba(0, 229, 255, 0.7);
+  pointer-events: none;
+}
+
+/* The line a tag's notification brought into view, lit for a moment. */
+.chat__line.is-revealed {
+  animation: chat-reveal 1.6s ease-out;
+}
+@keyframes chat-reveal {
+  0%, 30% { background: rgba(0, 229, 255, 0.22); }
+  100% { background: transparent; }
 }
 
 .chatdock__badge {

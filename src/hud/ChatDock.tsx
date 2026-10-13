@@ -73,13 +73,13 @@ export function LineText({ text, me }: { text: string; me: string }): JSX.Elemen
   )
 }
 
-function Line({ line, now, here }: { line: ChatLine; now: number; here: boolean }): JSX.Element {
+function Line({ line, now, here, revealed }: { line: ChatLine; now: number; here: boolean; revealed: boolean }): JSX.Element {
   const profile = useProfile(line.from)
   const me = useCyberspace((s) => s.identity.pubkey)
   const name = line.mine ? 'you' : (profile?.name ?? line.from.slice(0, 8))
   const forMe = mentionsMe(line, me)
   return (
-    <li className={`chat__line ${line.mine ? 'is-mine' : ''} ${here ? '' : 'is-elsewhere'} ${forMe ? 'is-for-me' : ''}`} title={forMe ? 'Mentions you' : undefined}>
+    <li data-line={line.id} className={`chat__line ${line.mine ? 'is-mine' : ''} ${here ? '' : 'is-elsewhere'} ${forMe ? 'is-for-me' : ''} ${revealed ? 'is-revealed' : ''}`} title={forMe ? 'Mentions you' : undefined}>
       <ProfilePic pubkey={line.from} size={22} />
       <div className="chat__body">
         <span className="chat__meta">
@@ -119,6 +119,11 @@ export function ChatDock(): JSX.Element {
   const open = useChat((s) => s.open)
   const lines = useChat((s) => s.lines)
   const unread = useChat((s) => s.unread)
+  const mentionsUnread = useChat((s) => s.mentionsUnread)
+  const revealId = useChat((s) => s.revealId)
+  const focusOnOpen = useChat((s) => s.focusOnOpen)
+  // The line a tag's notification brought into view, lit for a moment.
+  const [flashed, setFlashed] = useState<string | null>(null)
   const muted = useChat((s) => s.muted)
   const draft = useChat((s) => s.draft)
   const sendStatus = useChat((s) => s.sendStatus)
@@ -168,12 +173,32 @@ export function ChatDock(): JSX.Element {
     if (el) el.scrollTop = el.scrollHeight
   }, [open, lines.length])
 
+  // Also when already open: CHAT on an avatar card asks for the caret with
+  // the dock up, and the caret goes after the tag it put at the start.
   useEffect(() => {
-    if (open && useChat.getState().focusOnOpen) {
-      input.current?.focus()
-      useChat.setState({ focusOnOpen: false })
-    }
-  }, [open])
+    if (!open || !focusOnOpen) return
+    const at = useChat.getState().caretOnOpen
+    useChat.setState({ focusOnOpen: false, caretOnOpen: null })
+    requestAnimationFrame(() => {
+      const el = input.current
+      if (!el) return
+      el.focus()
+      if (at !== null) { el.setSelectionRange(at, at); setCaret(at) }
+    })
+  }, [open, focusOnOpen])
+
+  // A tag's notification, tapped: that line in view, after the scroll to the
+  // newest above has run, and lit briefly so the eye finds it.
+  useEffect(() => {
+    if (!open || !revealId) return
+    useChat.setState({ revealId: null })
+    const row = list.current?.querySelector<HTMLElement>(`[data-line="${CSS.escape(revealId)}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: 'center' })
+    setFlashed(revealId)
+    const t = window.setTimeout(() => setFlashed((f) => (f === revealId ? null : f)), 1600)
+    return () => window.clearTimeout(t)
+  }, [open, revealId])
   // Unfolded, the dock is a chip on the Escape stack: Escape folds it when the
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
@@ -184,12 +209,15 @@ export function ChatDock(): JSX.Element {
       <button
         className="chip chatdock__chip"
         onPointerDown={(e) => chipPress.press(e.timeStamp)}
-        onClick={(e) => { if (chipPress.real(e.detail, e.timeStamp)) useChat.setState({ open: true, unread: 0, focusOnOpen: false }) }}
-        aria-label={unread > 0 ? `Open chat, ${unread} new` : 'Open chat'}
+        onClick={(e) => { if (chipPress.real(e.detail, e.timeStamp)) useChat.setState({ open: true, unread: 0, mentionsUnread: 0, focusOnOpen: false }) }}
+        aria-label={mentionsUnread > 0 ? `Open chat, ${mentionsUnread} ${mentionsUnread === 1 ? 'line tags' : 'lines tag'} you` : unread > 0 ? `Open chat, ${unread} new` : 'Open chat'}
         title="Chat with whoever is standing here (/)"
       >
         <MessageSquare size={11} strokeWidth={2.25} aria-hidden /> CHAT
-        {unread > 0 && <span className="chatdock__dot" aria-hidden="true" />}
+        {/* A tag outranks a plain line: the @ with how many, in place of the dot. */}
+        {mentionsUnread > 0
+          ? <span className="chatdock__at" aria-hidden="true">@{mentionsUnread > 1 ? mentionsUnread : ''}</span>
+          : unread > 0 && <span className="chatdock__dot" aria-hidden="true" />}
       </button>
     )
   }
@@ -244,7 +272,7 @@ export function ChatDock(): JSX.Element {
             {(i === 0 || shown[i - 1].region !== l.region) && shown.length > 0 && (i > 0 || (key && l.region !== key.lookupId)) && (
               <li className="chat__divider" aria-hidden="true"><span>{l.region === key?.lookupId ? 'HERE' : `ANOTHER 2^${l.height}`}</span></li>
             )}
-            <Line line={l} now={now} here={!key || l.region === key.lookupId} />
+            <Line line={l} now={now} here={!key || l.region === key.lookupId} revealed={l.id === flashed} />
           </Fragment>
         ))}
       </ul>

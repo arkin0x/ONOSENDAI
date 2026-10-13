@@ -362,7 +362,10 @@ export function Rooms({ axes }: Props): JSX.Element {
       {walls.map((w, i) => (
         <mesh key={`wall-${w.height}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={w.geometry} material={w.material} frustumCulled={false} renderOrder={-1} />
       ))}
-      {levels.map((l) => (
+      {/* The nest's outlines and captions stand down in WALK, where the one
+          striped wall is the box on show and the outlines around it clashed
+          with it (arkinox, 2026-10-13). HOP and VIEW keep them. */}
+      {!walking && levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>
             <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />

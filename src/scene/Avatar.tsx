@@ -62,6 +62,8 @@ import { useFrame } from '@react-three/fiber'
 import { Group, Material, type Quaternion } from 'three'
 import { avatarTurn, facingPair } from '../lib/facing'
 import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
+import { nearGate } from '../lib/walkGate'
+import { committedAnchor } from '../lib/renderFrame'
 import { travelOffset } from '../lib/travel'
 import { walkEye } from '../lib/walkEye'
 import { WalkGhost } from '../lib/walkGhost'
@@ -154,13 +156,18 @@ export function Avatar(): JSX.Element | null {
       const p = proven.current
       if (p) {
         const s = useCyberspace.getState()
-        const shown = ghost.current.frame(s, performance.now(), dt)
-        p.visible = shown !== null
-        if (shown) {
+        // Placed in the frame the scene on screen is drawn in (lib/renderFrame.ts).
+        const shown = ghost.current.frame({ ...s, axes: s.axes, anchor: committedAnchor() ?? s.anchor }, performance.now(), dt)
+        // Never at the eye: the step pressed glides the eye out of the cell
+        // the outline stands in, and catching up glides it back past it
+        // (lib/walkGate.ts).
+        const gate = shown ? nearGate(Math.hypot(shown.at[0] - camera.position.x, shown.at[1] - camera.position.y, shown.at[2] - camera.position.z)) : 0
+        p.visible = shown !== null && gate > 0
+        if (shown && gate > 0) {
           p.position.set(shown.at[0], shown.at[1], shown.at[2])
           p.traverse((o) => {
             const m = (o as { material?: Material }).material
-            if (m) { m.transparent = true; m.opacity = GHOST_OPACITY * shown.fade }
+            if (m) { m.transparent = true; m.opacity = GHOST_OPACITY * shown.fade * gate }
           })
         }
       }

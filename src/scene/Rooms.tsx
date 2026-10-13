@@ -42,9 +42,9 @@
  * settles into a fixed screen in front of the room (arkinox, 2026-10-13).
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Mesh, ShaderMaterial } from 'three'
+import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Mesh, ShaderMaterial, Vector3 } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { AXIS_BITS } from 'cyberspace-core'
@@ -125,7 +125,9 @@ varying vec3 vLocal;
 varying vec3 vNormal;
 uniform vec3 corner;
 void main() {
-  vLocal = position - corner;
+  // The box is one unit cube scaled and placed by its mesh, so the stripes
+  // are measured in the render frame, from the box's own corner.
+  vLocal = (modelMatrix * vec4(position, 1.0)).xyz - corner;
   vNormal = normal;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`
@@ -159,18 +161,24 @@ void main() {
 const WALL_CLOCK_WRAP = 35
 const WALL_TIME = { value: 0 }
 
-function stripeMaterial(color: string, opacity: number, height: number, corner: [number, number, number]): ShaderMaterial {
-  const period = stripePeriod(height)
+/**
+ * One wall's material, made once per walk and kept: a landing moves the box
+ * and changes its numbers, and both are written in place (setStripe). Built
+ * fresh on every landing, the old one's disposal released the program and
+ * the new one compiled it again, a shader link on the main thread at every
+ * step of a walk, which is what the walk's hitch at each landing measured
+ * as (2026-10-13).
+ */
+function stripeMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader: STRIPE_VERTEX,
     fragmentShader: STRIPE_FRAGMENT,
     uniforms: {
-      color: { value: new Color(color) },
-      opacity: { value: Math.min(0.2, opacity) },
-      period: { value: period },
-      // Thin lines on an easy wall, closing up on a hard one but never solid.
-      width: { value: Math.min(0.2, period * 0.3) },
-      corner: { value: corner },
+      color: { value: new Color() },
+      opacity: { value: 0 },
+      period: { value: 1 },
+      width: { value: 0.2 },
+      corner: { value: new Vector3() },
       // Shared by every wall, so one write a frame moves them all.
       time: WALL_TIME,
     },
@@ -180,6 +188,20 @@ function stripeMaterial(color: string, opacity: number, height: number, corner: 
     toneMapped: false,
   })
 }
+
+/** A wall's numbers for its box: its ramp color, ceiling and stripe pitch. */
+function setStripe(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
+  const period = stripePeriod(height)
+  ;(m.uniforms.color.value as Color).set(color)
+  m.uniforms.opacity.value = Math.min(0.2, opacity)
+  m.uniforms.period.value = period
+  // Thin lines on an easy wall, closing up on a hard one but never solid.
+  m.uniforms.width.value = Math.min(0.2, period * 0.3)
+  ;(m.uniforms.corner.value as Vector3).set(corner[0], corner[1], corner[2])
+}
+
+/** The one box every wall is drawn from, scaled and placed by its mesh. */
+const UNIT_BOX = new BoxGeometry(1, 1, 1)
 
 interface Props {
   axes: ViewAxes
@@ -332,35 +354,40 @@ export function Rooms({ axes }: Props): JSX.Element {
   // loss. Every anchor change and zoom leaked three of them.
   useEffect(() => () => { for (const l of levels) l.geometry.dispose() }, [levels])
 
-  // WALK's walls: built only while walking, and thrown away with the walk.
-  const walls = useMemo(() => {
-    if (!walking) return []
-    return levels.map((l) => {
+  // WALK's walls: one material per level slot, made when the walk starts and
+  // disposed when it ends. A landing re-anchors the boxes and rewrites their
+  // numbers in place below; nothing is built or compiled per step.
+  const materials = useMemo(() => (walking ? LEVELS.map(() => stripeMaterial()) : []), [walking])
+  useEffect(() => () => { for (const m of materials) m.dispose() }, [materials])
+  const wallMeshes = useRef<Array<Mesh | null>>([])
+  useLayoutEffect(() => {
+    levels.forEach((l, i) => {
+      const m = materials[i]
+      const mesh = wallMeshes.current[i]
+      if (!m || !mesh) return
       const { min, size } = l.walls
-      const geometry = new BoxGeometry(size[0], size[1], size[2])
-      geometry.translate(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
-      return { height: l.height, box: l.walls, geometry, material: stripeMaterial(l.color, l.wall, l.height, min) }
+      mesh.scale.set(size[0], size[1], size[2])
+      mesh.position.set(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
+      setStripe(m, l.color, l.wall, l.height, min)
     })
-  }, [walking, levels])
-  useEffect(() => () => { for (const w of walls) { w.geometry.dispose(); w.material.dispose() } }, [walls])
+  }, [levels, materials])
 
   // One wall at a time (lib/walkWall.ts), chosen against the eye every frame
   // and shown by visibility alone, so walking re-renders nothing.
-  const wallMeshes = useRef<Array<Mesh | null>>([])
   const shownWall = useRef<number | null>(null)
   useFrame(() => {
-    if (walls.length === 0) { shownWall.current = null; return }
+    if (materials.length === 0) { shownWall.current = null; return }
     WALL_TIME.value = (performance.now() / 1000) % WALL_CLOCK_WRAP
-    const pick = pickWall(walls.map((w) => ({ height: w.height, ...w.box })), [walkEye.x, walkEye.y, walkEye.z], shownWall.current)
+    const pick = pickWall(levels.map((l) => ({ height: l.height, ...l.walls })), [walkEye.x, walkEye.y, walkEye.z], shownWall.current)
     shownWall.current = pick
-    walls.forEach((w, i) => { const m = wallMeshes.current[i]; if (m) m.visible = w.height === pick })
+    levels.forEach((l, i) => { const m = wallMeshes.current[i]; if (m) m.visible = l.height === pick })
   })
 
   return (
     // Named so the browser harness can tell the boxes are mounted.
     <group name="rooms">
-      {walls.map((w, i) => (
-        <mesh key={`wall-${w.height}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={w.geometry} material={w.material} frustumCulled={false} renderOrder={-1} />
+      {materials.length > 0 && levels.map((_, i) => (
+        <mesh key={`wall-${i}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={UNIT_BOX} material={materials[i]} frustumCulled={false} renderOrder={-1} />
       ))}
       {/* The nest's outlines and captions stand down in WALK, where the one
           striped wall is the box on show and the outlines around it clashed

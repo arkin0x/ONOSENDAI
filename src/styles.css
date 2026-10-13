@@ -8693,20 +8693,9 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   overflow-wrap: anywhere;
 }
 
-/* AGENTS: a labeled COPY with the last meeting code beside it, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
+/* AGENTS: a labeled COPY, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
 .agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
-.agents__code {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  padding: 0 6px;
-  height: 26px;
-  line-height: 24px;
-  border: 1px dashed rgba(0, 229, 255, 0.4);
-  border-radius: 3px;
-  white-space: nowrap;
-}
 .agents__row { grid-template-columns: 1fr auto auto auto; }
 .agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
 .agents__npub:hover { color: var(--accent); }
@@ -8862,3 +8851,14 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   border-radius: 6px;
 }
 .shardspin { max-width: 100%; }
+
+/* SET UP DM INBOX (arkinox, 2026-10-13): the button under NO DM INBOX in
+   TALK and on the AGENTS panel, and the relay list in its confirmation. */
+.talk__setup { display: flex; }
+.dminbox__relays { margin: 4px 0 8px; padding-left: 16px; overflow-wrap: anywhere; }
+.dminbox__relays code { font-size: 11px; }
+.agents__inbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+/* BETA beside the AGENTS title: an amber tag, so it reads as a status, not a control. */
+.tag--beta { margin-left: 6px; color: #ffbf3c; border-color: rgba(255, 191, 60, 0.6); cursor: help; font-size: 9px; vertical-align: middle; }
+.agents__login { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agents__login .notice { margin: 0; }

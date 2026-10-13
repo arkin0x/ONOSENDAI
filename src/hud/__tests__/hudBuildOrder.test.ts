@@ -201,20 +201,20 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
-    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'DiscoveredPanel', 'InventoryPanel', 'ShardsPanel', 'AvatarsPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'DiscoveredPanel', 'InventoryPanel', 'ShardsPanel', 'AvatarsPanel', 'TargetsPanel', 'LinksPanel'])
     expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
   })
 
-  it('AGENTS is drawn only for someone a bot profile names as operator, in its saved place', () => {
-    expect(columns().left).not.toContain('AgentsPanel')
-    const me = useCyberspace.getState().identity.pubkey
-    useMyAgentsAnswer.setState({ me, agents: ['d4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4'], status: 'ready' })
+  it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
+    useMyAgentsAnswer.setState({ me: useCyberspace.getState().identity.pubkey, agents: [], status: 'ready' })
     try {
       expect(columns().left.slice(0, 4)).toEqual(['Brand', 'IdentityPanel', 'AgentsPanel', 'HiddenPanel'])
+      usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'agents', null, 'right') })
+      expect(columns().left).not.toContain('AgentsPanel')
+      expect(columns().right.at(-1)).toBe('AgentsPanel')
     } finally {
       useMyAgentsAnswer.setState({ me: '', agents: [], status: 'loading' })
     }
-    expect(usePanelLayout.getState().order.left).toContain('agents')
   })
 
   it('a priority state draws its panel first without writing to the saved order, which applies again when it ends', () => {

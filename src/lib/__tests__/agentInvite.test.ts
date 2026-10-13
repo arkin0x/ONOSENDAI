@@ -1,97 +1,99 @@
 /**
  * agentInvite.test.ts: the invitation carries what ruling 3 says (the guide,
- * the install line, the operator's npub, the rendezvous, a one-time code, a
- * budget) and nothing it must not (no key, no funds), and MY AGENTS keeps
- * only the profiles that are bots naming the operator. Since 2026-10-10 it
- * also makes traversal the default playbook and tells the agent its
- * operator talks to it only by NIP-17 DM.
+ * the operator's npub, a budget) and nothing it must not (no key, no funds),
+ * and MY AGENTS keeps only the profiles that are bots naming the operator.
+ * Since 2026-10-10 it makes traversal the default playbook and tells the
+ * agent its operator talks to it only by NIP-17 DM. Since 2026-10-13
+ * (arkinox: package the agent experience and make the panel public) it
+ * carries the packaged setup verbatim (init, serve, doctor, the MCP URL,
+ * QUICKSTART), the follow step, TALK and 👀, and no longer the meeting code
+ * or the rendezvous.
  */
 import { describe, expect, it } from 'vitest'
 import {
-  AGENTS_MD_URL, CODE_SHAPE, CODE_WORDS, SUGGESTED_BUDGET,
-  agentsOf, invitationText, isBotProfile, isOperatorTag, meetingCode, namesOperator,
+  AGENTS_MD_URL, DOCTOR_COMMAND, INIT_COMMAND, MCP_URL, QUICKSTART_URL, SERVE_COMMAND,
+  agentsOf, invitationText, isBotProfile, isOperatorTag, namesOperator,
   followedAgents,
 } from '../agentInvite'
 
 const npub = 'npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w'
-const coord = '0123456789abcdef'.repeat(4)
 const me = 'ab'.repeat(32)
 const other = 'cd'.repeat(32)
 
-/** A random source that hands out the given bytes in order, then zeros. */
-function scripted(...bytes: number[]): (b: Uint8Array) => Uint8Array {
-  const queue = [...bytes]
-  return (b) => { for (let i = 0; i < b.length; i++) b[i] = queue.shift() ?? 0; return b }
-}
+describe('the invitation (arkinox, 2026-10-13)', () => {
+  const text = invitationText({ npub })
 
-describe('the meeting code', () => {
-  it('is one of sixty-four distinct words, a dash, and four digits', () => {
-    expect(CODE_WORDS).toHaveLength(64)
-    expect(new Set(CODE_WORDS).size).toBe(64)
-    for (let i = 0; i < 50; i++) {
-      const code = meetingCode()
-      expect(code).toMatch(CODE_SHAPE)
-      expect(CODE_WORDS).toContain(code.split('-')[0])
-    }
-  })
-
-  it('takes the word from six bits and skips bytes that would bias a digit', () => {
-    expect(meetingCode(scripted(0, 0, 0, 0, 0))).toBe('ANCHOR-0000')
-    // 65 & 63 = 1 (BASALT); 255 and 250 are skipped, then 1 2 3 4 are taken modulo ten.
-    expect(meetingCode(scripted(65, 255, 250, 11, 2, 13, 4))).toBe('BASALT-1234')
-  })
-})
-
-describe('the invitation', () => {
-  const code = 'CANTOR-4821'
-  const text = invitationText({ npub, coordinateHex: coord, code })
-
-  it('carries the guide, the install line, the npub, the rendezvous, the code and the budget', () => {
+  it('carries the setup commands and URLs exactly as the packaged server takes them', () => {
+    expect(INIT_COMMAND).toBe('npx github:arkin0x/cyberspace-mcp init')
+    expect(SERVE_COMMAND).toBe('cyberspace-mcp serve')
+    expect(DOCTOR_COMMAND).toBe('cyberspace-mcp doctor')
+    expect(MCP_URL).toBe('http://127.0.0.1:7777/mcp')
+    expect(QUICKSTART_URL).toBe('https://github.com/arkin0x/cyberspace-mcp/blob/master/QUICKSTART.md')
+    expect(AGENTS_MD_URL).toBe('https://github.com/arkin0x/cyberspace/blob/master/docs/agents.md')
+    // Numbered, in order: init, serve, doctor, connect, follow.
+    expect(text).toContain(`  1. Run: ${INIT_COMMAND}\n`)
+    expect(text).toContain(`  2. Run: ${SERVE_COMMAND}\n`)
+    expect(text).toContain(`  3. Run: ${DOCTOR_COMMAND}\n`)
+    expect(text).toContain(`  4. Connect your AI client to the MCP server at ${MCP_URL}\n`)
+    expect(text).toContain(QUICKSTART_URL)
     expect(text).toContain(AGENTS_MD_URL)
-    expect(text).toContain(`claude mcp add cyberspace -- node /path/to/cyberspace-mcp/dist/bin.js --state ~/cyberspace-agent --operator ${npub}`)
-    expect(text).toContain(`OPERATOR\n  ${npub}`)
-    expect(text).toContain(`RENDEZVOUS\n  ${coord}`)
-    expect(text).toContain(`MEETING CODE\n  ${code}`)
-    expect(text).toContain(SUGGESTED_BUDGET)
-    // The agent should put the code in the message it hides at the rendezvous.
-    expect(text).toContain(`"${code}. Left for ${npub}`)
-    // Reading needs no travel, and the agent must not try to hop there.
-    expect(text).toMatch(/need no travel/)
-    expect(text).toMatch(/Never pass --allow-respawn/)
+    expect(text.indexOf(INIT_COMMAND)).toBeLessThan(text.indexOf(SERVE_COMMAND))
+    expect(text.indexOf(SERVE_COMMAND)).toBeLessThan(text.indexOf(DOCTOR_COMMAND))
   })
 
-  it('makes traversal the default playbook and never says nobody can travel (arkinox, 2026-10-10)', () => {
+  it('names the operator by npub, for init and for the profile', () => {
+    expect(text).toContain(`OPERATOR\n  ${npub}`)
+    expect(text).toMatch(/asks for your operator's npub \(give the one above\)/)
+    expect(text).toContain(`an agent operated by ${npub}`)
+  })
+
+  it('says what an agent is and the rules in one line', () => {
+    expect(text).toContain('WHAT AN AGENT IS')
+    expect(text).toContain('RULES\n  You obey only your operator, you never share or ask for a key, and you never land on a person\'s avatar.')
+  })
+
+  it('has the operator follow the agent, then talk to it in TALK, where 👀 says it was seen', () => {
+    expect(text).toMatch(/follows your npub from their Nostr account\. Then you appear under MY AGENTS/)
+    expect(text).toMatch(/in TALK/)
+    expect(text).toMatch(/reacts 👀 to each message when it sees it/)
+    expect(text).toMatch(/serve[\s\S]*waker starts you/)
+  })
+
+  it('keeps the DM rules: inbox, message_operator, STRATEGY, KEEP GOING, obey only the operator, tag-only chat', () => {
+    expect(text).toMatch(/only by private NIP-17 direct message/)
+    expect(text).toMatch(/Read new messages with the inbox tool and answer with message_operator/)
+    expect(text).toMatch(/STRATEGY is your standing orders/)
+    expect(text).toMatch(/KEEP GOING renews your spent session budget once/)
+    expect(text).toMatch(/a line is meant for you only when it tags your npub/)
+    expect(text).toMatch(/\d\. Call inbox\./)
+    expect(text).toMatch(/SET UP DM INBOX/)
+  })
+
+  it('makes traversal the default playbook and suggests a budget', () => {
     expect(text).not.toMatch(/nobody can travel/i)
     expect(text).toMatch(/TRAVEL\n  Traversal is your default playbook/)
     for (const tool of ['station', 'board', 'ride']) expect(text).toContain(`${tool} `)
-    expect(text).toMatch(/meet others at stops/)
+    expect(text).toMatch(/BUDGET\n  Suggested: at most 30 seconds of compute per tool call and 300 per session/)
+    expect(text).toMatch(/Never raise a cap yourself/)
   })
 
-  it('tells the agent its operator talks only by NIP-17 DM, read with inbox and answered with message_operator, and obeys only the operator', () => {
-    expect(text).toContain('TALKING WITH YOUR OPERATOR')
-    expect(text).toMatch(/only by private NIP-17 direct message/)
-    expect(text).toMatch(/Read new messages with the inbox tool/)
-    expect(text).toMatch(/answer with message_operator/)
-    expect(text).toMatch(/You obey only this person/)
-    expect(text).toMatch(/STRATEGY is your standing orders/)
-    // The first session checks the inbox.
-    expect(text).toMatch(/\d\. Call inbox\./)
+  it('drops the one-time flow: no meeting code, no rendezvous, no clone-and-build line', () => {
+    expect(text).not.toMatch(/MEETING CODE|RENDEZVOUS/)
+    expect(text).not.toMatch(/[A-Z]+-\d{4}/)
+    expect(text).not.toMatch(/git clone|npm ci|claude mcp add|dist\/bin\.js/)
   })
 
-  it('carries no key, no funds, and no hex but the rendezvous', () => {
+  it('carries no secret, no funds and no hex', () => {
     expect(text).not.toMatch(/nsec1/)
-    expect(text).not.toMatch(/cashu|sats|token/i)
-    expect(text).not.toMatch(/--allow-respawn\s*$/m)
-    const hexes = text.match(/[0-9a-f]{64}/g) ?? []
-    expect(hexes.length).toBeGreaterThan(0)
-    expect(new Set(hexes)).toEqual(new Set([coord]))
-    // The file named key is mentioned only to forbid reading it.
-    expect(text).toMatch(/never read or print the file named key/)
-    expect(text).not.toMatch(/[\u2013\u2014]/)
+    expect(text).not.toMatch(/cashu|sats|token|nwc|wallet/i)
+    expect(text).not.toMatch(/[0-9a-f]{64}/)
+    expect(text).toMatch(/your key lives there: never read or print it/)
+    expect(text).toMatch(/Never pass --allow-respawn/)
   })
 
-  it('reads the same in a terminal: plain text, no markdown', () => {
+  it('reads the same in a terminal: plain text, no markdown, no em or en dash', () => {
     expect(text).not.toMatch(/^#|\*\*|`/m)
+    expect(text).not.toMatch(/[\u2013\u2014]/)
   })
 })
 

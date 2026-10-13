@@ -13,10 +13,12 @@
  *
  * Everything is a NIP-17 DM (lib/dm.ts, store/useAgentDms.ts). Without a DM
  * inbox (kind 10050) on either side the conversation says "NO DM INBOX" with
- * a tooltip on what that is, and nothing is sent; your 10050 is never
- * published for you. House rules: no standing paragraphs (the EXPLAIN pill
- * holds the prose), lucide icons, uppercase labels, and a card that fits a
- * phone. Hooks stay above any return (hookOrder.test.ts).
+ * a tooltip on what that is, and nothing is sent. When the one missing is
+ * yours, SET UP DM INBOX publishes it, only on that explicit tap and after a
+ * confirmation (DmInboxSetup.tsx; arkinox, 2026-10-13, replacing the old
+ * rule that this app never publishes your 10050). House rules: no standing
+ * paragraphs (the EXPLAIN pill holds the prose), lucide icons, uppercase
+ * labels, and a card that fits a phone. Hooks stay above any return (hookOrder.test.ts).
  *
  * Under each message, the reactions to it (arkinox, 2026-10-12: "show the
  * reaction in the agent chat. then I'll know XOR has seen my messages"): a
@@ -36,12 +38,13 @@ import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { setTalking, useAgentDms } from '../store/useAgentDms'
 import { ConfirmModal } from './ConfirmModal'
+import { DmInboxSetup } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 
 /** What a DM inbox is, for the tooltip on NO DM INBOX. */
 export const DM_INBOX_TIP =
-  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Publish yours from a client that manages DM relays; this app never publishes it for you.'
+  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Without yours, SET UP DM INBOX publishes one, only when you tap it and confirm. Your agent copies yours by itself.'
 
 /** The quick orders: plain messages, written into the composer. */
 export function quickOrders(coordHex: string): { label: string; title: string; text: string; keepGoing?: boolean }[] {
@@ -240,6 +243,7 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
           </p>
         )}
         {noInbox && tip && <div className="explain__well legend__note">{DM_INBOX_TIP}</div>}
+        {talk.myInbox.status === 'none' && <div className="talk__setup"><DmInboxSetup /></div>}
         {talk.reading === 'failed' && <p className="notice talk__notice" title={talk.readError ?? undefined}>Could not read your DM inbox.</p>}
         {talk.reading !== 'failed' && talk.readError && <p className="notice talk__notice">{talk.readError}</p>}
 
@@ -320,18 +324,14 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
 
         <Explanation>
           Everything here is a private NIP-17 message between you and your
-          agent: sealed, wrapped under a one-time key, and sent only to the
-          agent&apos;s DM inbox, with a copy to yours so your history follows
-          you to any device. Your agent reads them with its inbox tool and
-          answers with message_operator, and obeys only you. STRATEGY is
-          standing orders: the agent keeps the newest one and rereads it every
-          turn. The quick orders only write a message for you to send.
-          KEEP GOING also renews your agent&apos;s spent compute budget once,
-          so a ride that stopped for its budget resumes. Your agent marks each
-          message it has seen with a private 👀 reaction. Every message here
-          is kept decrypted on this device so it opens at once, which means
-          anyone with this unlocked device or a copy of its browser data can
-          read them; CLEAR HISTORY deletes them from this device.
+          agent, sent only to its DM inbox, with a copy to yours. Its
+          server&apos;s waker starts your AI when a message arrives, and a 👀
+          under your message means the agent has seen it. STRATEGY is standing
+          orders, reread every turn. The quick orders only write a message for
+          you to send; KEEP GOING also renews a spent compute budget once.
+          No DM inbox? SET UP DM INBOX publishes yours after you confirm.
+          Messages are kept decrypted on this device so they open at once;
+          CLEAR HISTORY deletes them here.
         </Explanation>
         {confirmClear && (
           <ConfirmModal

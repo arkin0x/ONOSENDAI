@@ -21,7 +21,6 @@ import { NotificationsButton } from './Notifications'
 import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
 import { AgentsPanel } from './AgentsPanel'
-import { useMyAgents } from '../hooks/useMyAgents'
 import { DiscoveredPanel, HiddenPanel } from './DiscoveredPanel'
 import { InventoryPanel } from './InventoryPanel'
 import { ChainPanel } from './ChainPanel'
@@ -517,14 +516,12 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   if (proofLeads) leads.push('proof')
   if (cloudLeads) leads.push('cloud')
   if (rideSet) leads.push('hyperspace')
-  // AGENTS is shown only to someone who has an agent (arkinox, 2026-10-10):
-  // the panel is not ready for everyone yet (no way to talk to or command
-  // an agent, and the operator tag is a one-sided claim), so until then it
-  // appears only when a bot profile names you as operator. Its saved place
-  // is kept, so it returns there.
-  const myPubkey = useCyberspace((s) => s.identity.pubkey)
-  const hasAgents = useMyAgents(myPubkey).agents.length > 0
-  const hidden = (id: PanelId): boolean => leads.includes(id) || (id === 'agents' && !hasAgents)
+  // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it
+  // so that we can make the agent panel public"). From 2026-10-10 it was
+  // drawn only for someone a bot profile named as operator, while TALK and
+  // the follow rule were missing; both have shipped. It sits in its saved
+  // place, which the hidden days kept.
+  const hidden = (id: PanelId): boolean => leads.includes(id)
   const left = [...leads, ...order.left.filter((id) => !hidden(id))]
   const right = order.right.filter((id) => !hidden(id))
 

@@ -30,7 +30,8 @@
  */
 
 import type { NostrEvent } from 'nostr-tools'
-import { HIDDEN_KIND, unbag, type Hidden, type RegionOrigin } from '../hidden'
+import { HIDDEN_KIND, type Hidden, type RegionOrigin } from '../hidden'
+import { unbagRemembered } from '../foundCache'
 import { hexToBytes } from '../events'
 import { queryEach } from '../relay'
 import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
@@ -319,7 +320,7 @@ const askRelays: Ask = (ids, { until, limit }) =>
 /** A held box key has no height of its own; your own deployment there may say it. */
 const openEntry = (ev: NostrEvent, entry: RescanEntry): Promise<Hidden[]> => {
   const height = entry.height ?? useShards.getState().mine.find((d) => d.lookupId === entry.lookupId)?.height
-  return unbag(ev, hexToBytes(entry.keyHex), resolveReference, entry.origin, height)
+  return unbagRemembered(ev, hexToBytes(entry.keyHex), resolveReference, entry.origin, height)
 }
 
 /**

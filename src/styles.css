@@ -8910,6 +8910,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   margin-top: 8px;
   min-width: 0;
 }
+.person__talk { margin-left: auto; flex: 0 0 auto; }
 .person__operator-name {
   font-size: 11px;
   color: var(--fg);

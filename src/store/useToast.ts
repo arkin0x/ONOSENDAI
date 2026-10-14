@@ -16,6 +16,11 @@ export interface Toast {
   mark: 'hosaka' | 'star' | 'build' | 'walk' | 'place'
   /** How long it stays up once on screen; TOAST_MS when not given. */
   ms?: number
+  /**
+   * Stays until tapped, with no clock at all (arkinox, 2026-10-14: the
+   * block a /C/ link named should not vanish before it is read).
+   */
+  sticky?: boolean
   at: number
 }
 
@@ -30,6 +35,11 @@ export const TOAST_MS = 10_000
 
 /** A brief one: long enough to read a sentence, short enough not to linger. */
 export const BRIEF_TOAST_MS = 4_000
+
+/** How long a toast stays once on screen, or null when it waits for a tap (sticky). */
+export function toastClockMs(toast: Pick<Toast, 'ms' | 'sticky'>): number | null {
+  return toast.sticky ? null : toast.ms ?? TOAST_MS
+}
 
 export const useToast = create<ToastState>((set) => ({
   toast: null,

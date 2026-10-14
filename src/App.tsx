@@ -21,6 +21,9 @@ import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
+import { DemoCoach } from './hud/DemoCoach'
+import { parseDemoRoute } from './lib/demoRoute'
+import { useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
@@ -91,6 +94,11 @@ export default function App(): JSX.Element {
   useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
   useEffect(() => startCoordRoute(), [])
+  // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
+  useEffect(() => {
+    const step = parseDemoRoute(window.location.pathname)
+    if (step !== null) useDemo.getState().start(step || undefined)
+  }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
@@ -304,6 +312,8 @@ export default function App(): JSX.Element {
           aria-label="Show controls"
         >CONTROLS</button>
       )}
+      {/* The /demo tour's caption panel, only while the tour runs. */}
+      <DemoCoach />
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}

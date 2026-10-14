@@ -806,6 +806,16 @@ body {
   align-items: flex-start;
   gap: 8px;
 }
+/* The stack's three groups (InstrumentStack.tsx) take no box of their own:
+   the stack's gap and alignment run across them as one list. */
+.instruments__group { display: contents; }
+/* A sticky toast's way out: the whole chip dismisses, the ✕ says so. */
+.toast__dismiss {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--dim);
+  align-self: center;
+}
 
 .bits {
   pointer-events: none;

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { CrashNote } from './hud/CrashNote'
 import { ChainExplorer } from './hud/ChainExplorer'
-import { HyperspaceBar } from './hud/HyperspaceBar'
+import { HyperspaceBar, HyperspaceViewBar } from './hud/HyperspaceBar'
+import { InstrumentStack } from './hud/InstrumentStack'
 import { LineScrubber } from './hud/LineScrubber'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
@@ -241,33 +242,39 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && <Targets targets={targets} />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
-          {/* Ordered by how often each is reached for right now: hyperspace
-              on top with its status bar, the chain under it, the XOR readout
-              last. */}
-          {/* A broken chain first: nothing else moves you until you respawn.
-              It stays in BUILD mode too; building is not moving. */}
-          <BrokenChainChip />
-          {/* BUILD mode keeps the stack to what building needs (arkinox,
-              2026-10-08): the hyperspace chip and XOR BITS step aside and
-              come back on exit. */}
-          {!building && <LineScrubber />}
-          <HyperspaceBar />
-          <FocusBar />
-          {/* BUILD mode, where the free view's bar would be: it rides that view. */}
-          <BuildBar />
-          <ToastChip />
-          {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
-              yours or a spectated avatar's, aims the build cursor at the
-              action instead of going into history (useBuilder walkChain). */}
-          <ChainExplorer />
-          {!building && <BitReadout />}
-          {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
-          <NotificationsToast />
-          {/* Under XOR BITS, spaced as the rest are: what was just found, what
-              is open to you here, then the scan. */}
-          <KeyFoundChip />
-          <NearbyChip />
-          <PresenceChip />
+          {/* Grouped, not ordered by hand (InstrumentStack.tsx): chips with a
+              RETURN on top, what is true right now in the middle, toasts at
+              the bottom (arkinox, 2026-10-14). */}
+          <InstrumentStack groups={{
+            return: <>
+              <HyperspaceViewBar />
+              <FocusBar />
+              {/* BUILD mode, where the free view's bar would be: it rides that view. */}
+              <BuildBar />
+            </>,
+            status: <>
+              {/* A broken chain first: nothing else moves you until you respawn.
+                  It stays in BUILD mode too; building is not moving. */}
+              <BrokenChainChip />
+              {/* BUILD mode keeps the stack to what building needs (arkinox,
+                  2026-10-08): the line and XOR BITS step aside and come back
+                  on exit. */}
+              {!building && <LineScrubber />}
+              <HyperspaceBar />
+              {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
+                  yours or a spectated avatar's, aims the build cursor at the
+                  action instead of going into history (useBuilder walkChain). */}
+              <ChainExplorer />
+              {!building && <BitReadout />}
+              {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
+              <NotificationsToast />
+              {/* What was just found, what is open to you here, then the scan. */}
+              <KeyFoundChip />
+              <NearbyChip />
+              <PresenceChip />
+            </>,
+            toast: <ToastChip />,
+          }} />
         </div>
       )}
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}

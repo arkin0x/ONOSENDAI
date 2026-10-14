@@ -24,7 +24,7 @@
 import { create } from 'zustand'
 import { coordToXyz, type Plane } from 'cyberspace-core'
 import { coordPlace, frameScale, parseCoordRoute, prefixRegion, type PrefixRegion } from '../lib/coordRoute'
-import { rowByRootOrHash, stopAt } from '../lib/hyperspace/compactIndex'
+import { rowByLandfallCoord, rowByRootOrHash, stopAt } from '../lib/hyperspace/compactIndex'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { hexToBytes } from '../lib/events'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
@@ -52,10 +52,6 @@ const BLOCK_LOOKUP_MS = 2_000
 function stopPlace(stop: Stop): { position: Position; plane: Plane } {
   const { x, y, z } = coordToXyz(stopCoordExact(stop))
   return { position: { x, y, z }, plane: coordToXyz(stop.coordApprox).plane }
-}
-
-function samePlace(a: Position, b: Position): boolean {
-  return a.x === b.x && a.y === b.y && a.z === b.z
 }
 
 /**
@@ -94,7 +90,7 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
     const label = `C/${route.hex.slice(0, 8)}…${route.hex.slice(-4)}`
     useCoordRoute.setState({ region: null, label })
     cs.focusOn(position, plane, label, undefined, true)
-    stops.push(watchForBlock(route.hex, position, plane))
+    stops.push(watchForBlock(route.hex))
   }
 
   // The link's view ended: anything that replaced its focus, or cleared it.
@@ -109,7 +105,7 @@ export function startCoordRoute(loc: Pick<Location, 'pathname' | 'search' | 'has
  * Look for a block whose merkle root or hash is `hex` among the anchors, now
  * and as more load, until one matches or the link's view ends.
  */
-function watchForBlock(hex: string, position: Position, plane: Plane): () => void {
+function watchForBlock(hex: string): () => void {
   const bytes = hexToBytes(hex)
   let timer: ReturnType<typeof setTimeout> | null = null
   let last = 0
@@ -119,11 +115,14 @@ function watchForBlock(hex: string, position: Position, plane: Plane): () => voi
     if (done) return
     last = Date.now()
     const index = getStopIndex()
-    const row = rowByRootOrHash(index, bytes)
+    // A merkle root or block hash first (a port's root is its own stop);
+    // then a landfall's own stop coordinate, its anchor's C tag.
+    let row = rowByRootOrHash(index, bytes)
+    if (row === -1) row = rowByLandfallCoord(index, bytes)
     if (row === -1) return
     done = true
     unsub()
-    landOnStop(stopAt(index, row), hex, position, plane)
+    landOnStop(stopAt(index, row))
   }
   const schedule = (): void => {
     if (done || timer !== null) return
@@ -135,13 +134,12 @@ function watchForBlock(hex: string, position: Position, plane: Plane): () => voi
 }
 
 /** The link named a block: show its stop, under the block's name. */
-function landOnStop(stop: Stop, hex: string, position: Position, plane: Plane): void {
+function landOnStop(stop: Stop): void {
   const cs = useCyberspace.getState()
   const linkLabel = useCoordRoute.getState().label
   if (linkLabel === null || cs.focus?.label !== linkLabel) return
   const at = stopPlace(stop)
   const label = `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`
-  const what = hex === stop.merkleRoot ? 'merkle root' : 'block hash'
   // The view is the stop's now, as a block picked in the scene is
   // (HyperspacePanel selectStopInScene); RETURN goes home, not back to the
   // raw coordinate the link held.
@@ -150,15 +148,15 @@ function landOnStop(stop: Stop, hex: string, position: Position, plane: Plane): 
   useHyperspace.setState({ returnFocus: null })
   markViewedStop(stop.height)
   cs.focusOn(at.position, at.plane, label)
-  const here = at.plane === plane && samePlace(at.position, position)
-  useToast.getState().show({
-    label: `Block ${stop.height.toLocaleString('en-US')}`,
-    meta: here
-      ? `Its ${what}: the port is right here.`
-      : stop.kind === 'port'
-        ? `Its ${what}. The view went to its port.`
-        : `Its ${what}. Its stop is a landfall on Earth, so the view went there.`,
-    mark: 'place',
-    ms: BRIEF_TOAST_MS,
-  })
+  // arkinox's words (2026-10-14). The title names the kind of stop, which
+  // also says where the view is, whether or not it had to move there.
+  useToast.getState().show(blockToast(stop))
+}
+
+/** What the toast for a block a /C/ link named says. */
+export function blockToast(stop: Pick<Stop, 'height' | 'kind'>): { label: string; meta: string; mark: 'place'; sticky: true } {
+  const height = stop.height.toLocaleString('en-US')
+  return stop.kind === 'port'
+    ? { label: `Block ${height} · port`, meta: "A hyperspace port is a bitcoin block's merkle root read as a cyberspace coordinate.", mark: 'place', sticky: true }
+    : { label: `Block ${height} · landfall`, meta: "A hyperspace landfall is a bitcoin block's hash read as a point on Earth's surface.", mark: 'place', sticky: true }
 }

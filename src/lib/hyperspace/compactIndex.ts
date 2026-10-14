@@ -28,6 +28,7 @@
 import { coordToXyz, type Xyz } from 'cyberspace-core'
 import { bytesToHex, hexToBytes } from '../events'
 import { bigToBytes32, bytesToBigAt, type BlobColumns } from './headers'
+import { landfallCoord } from './landfall'
 import type { Stop } from './stops'
 
 /** kinds column bits. */
@@ -146,6 +147,41 @@ export function rowByRootOrHash(index: StopIndex, bytes: Uint8Array): number {
       return row
     }
     return row
+  }
+  return -1
+}
+
+/**
+ * How many leading bytes a landfall's indexed (approximate) coordinate is
+ * compared on before the exact coordinate is derived. The index keeps a
+ * landfall at about 2^33 G of error per axis (landfallCoordApprox), and the
+ * coordinate interleaves the axes from the top, so the approximation and the
+ * exact point share their leading bytes unless they straddle a boundary.
+ * 14 bytes is 112 bits, about 37 per axis: a cell some 2^48 G (about 30 km)
+ * across, which holds a handful of landfalls at most, and a straddle chance
+ * near 2^-14 per axis. The candidates are then checked exactly.
+ */
+const LANDFALL_PREFIX_BYTES = 14
+
+/**
+ * The row of the landfall whose exact stop coordinate (the C tag of a plane 0
+ * anchor, DECK-0001 §1.2) is these 32 bytes, or -1. A port's coordinate is
+ * its merkle root and is found by rowByRootOrHash; this is the other half of
+ * "a /C/ link naming a stop lands on it" (arkinox, 2026-10-14). One pass over
+ * the coordinate column on a short prefix, then the exact derivation from the
+ * block hash for the few candidates, so a near miss is never taken for it.
+ */
+export function rowByLandfallCoord(index: StopIndex, bytes: Uint8Array): number {
+  const { coords, hashes, kinds } = index
+  // A landfall is in dataspace: the plane bit (the lowest bit) is 0.
+  if ((bytes[31] & 1) !== 0) return -1
+  const want = bytesToBigAt(bytes, 0)
+  outer: for (let row = 0; row < index.size; row++) {
+    const k = kinds[row]
+    if ((k & KIND_PORT) !== 0 || (k & HAS_HASH) === 0) continue
+    const off = row * 32
+    for (let i = 0; i < LANDFALL_PREFIX_BYTES; i++) if (coords[off + i] !== bytes[i]) continue outer
+    if (landfallCoord(bytesToHex(hashes.subarray(off, off + 32))) === want) return row
   }
   return -1
 }

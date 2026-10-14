@@ -6,27 +6,29 @@
  * something other than EXIT ended it, and WALK's, with footprints, on why a
  * walk stopped short, and a /C/ link's, with a pin, on what the link named.
  * Its clock starts when it is on screen, so a job finishing behind the menu
- * is still announced when the scene comes back. Tap to dismiss.
+ * is still announced when the scene comes back. Tap to dismiss. A sticky
+ * one (a /C/ link's block) has no clock and shows its ✕.
  */
 
 import { useCyberspace } from '../store/useCyberspace'
 import { useEffect } from 'react'
 import { Footprints, MapPin, Star, Wrench } from 'lucide-react'
-import { TOAST_MS, useToast } from '../store/useToast'
+import { toastClockMs, useToast } from '../store/useToast'
 
 export function ToastChip(): JSX.Element | null {
   const provider = useCyberspace((s) => s.cloud.provider)
   const toast = useToast((s) => s.toast)
 
   useEffect(() => {
-    if (!toast) return
-    const timer = window.setTimeout(() => useToast.getState().dismiss(), toast.ms ?? TOAST_MS)
+    const ms = toast ? toastClockMs(toast) : null
+    if (ms === null) return
+    const timer = window.setTimeout(() => useToast.getState().dismiss(), ms)
     return () => window.clearTimeout(timer)
   }, [toast])
 
   if (!toast) return null
   return (
-    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' ? ' hyperbar--buildtoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()}>
+    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' ? ' hyperbar--buildtoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()} title="Tap to dismiss">
       {toast.mark === 'build'
         ? <Wrench className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'walk'
@@ -40,6 +42,7 @@ export function ToastChip(): JSX.Element | null {
         <span className="hyperbar__label">{toast.label}</span>
         <span className="hyperbar__meta">{toast.meta}</span>
       </span>
+      {toast.sticky && <span className="toast__dismiss" aria-hidden="true">✕</span>}
     </div>
   )
 }

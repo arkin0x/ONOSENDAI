@@ -714,6 +714,8 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
         console.warn(
           `[hyperspace] header blob ${startHeight}..${startHeight + count - 1} discarded: ${reason}; falling back to relay sync for that range`,
         )
+        // Progress counted the discarded blob's verified rows; none of them landed.
+        cb.onLoaded(anchorIndex.size)
       },
     }, syncStats.cacheCovered)
     blobCovered = result.covered

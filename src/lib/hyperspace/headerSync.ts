@@ -15,6 +15,7 @@
  */
 
 import type { BlobColumns } from './headers'
+import { fetchBytes, type DownloadLimits } from './download'
 import type { HeadersRequest, HeadersResponse } from '../../workers/headers.worker'
 
 // raw.githubusercontent, not a release asset: release downloads send no
@@ -120,17 +121,24 @@ export function parseManifest(raw: unknown): HeadersManifest | null {
 }
 
 /**
- * Fetch and validate the manifest, or null on any failure. Null is the
- * degrade-to-relay signal, so this logs its one warning here and never
- * throws.
+ * The manifest is a few kilobytes. These are generous for a slow mobile link
+ * (DNS and TLS included) and short enough that a stalled request hands the
+ * sync to the relay within half a minute rather than holding the chip at
+ * LOADING until a reload.
+ */
+export const MANIFEST_LIMITS: DownloadLimits = { deadlineMs: 30_000, stallMs: 15_000 }
+
+/**
+ * Fetch and validate the manifest, or null on any failure, a timeout
+ * included. Null is the degrade-to-relay signal, so this logs its one
+ * warning here and never throws.
  */
 export async function fetchManifest(): Promise<{ manifest: HeadersManifest; url: string } | null> {
   if (typeof fetch === 'undefined') return null
   const url = manifestUrl()
   try {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const manifest = parseManifest(await res.json())
+    const bytes = await fetchBytes(url, MANIFEST_LIMITS)
+    const manifest = parseManifest(JSON.parse(new TextDecoder().decode(bytes)))
     if (!manifest) throw new Error('malformed manifest')
     return { manifest, url }
   } catch (e) {

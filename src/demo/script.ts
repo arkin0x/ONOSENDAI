@@ -260,7 +260,9 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
       caption: 'When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 0, Bitcoin\'s genesis block.',
-      scene: { target: { block: PORT_ROOT }, scale: 0 },
+      // Block 0's port is the district's own coordinate, so the port step
+      // draws only the curators' things too (review of #364, 2026-10-15).
+      scene: { target: { block: PORT_ROOT }, scale: 0, curated: true },
     },
     {
       id: 'landfall', chapter: 'hyperspace', title: 'A landfall',

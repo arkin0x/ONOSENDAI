@@ -671,6 +671,11 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
     }
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'line'))
     expect(authors()).toHaveLength(3)
+    // The port step stands on block 0's port, the district's coordinate.
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'port'))
+    expect(authors(), 'port').toEqual([...DEMO_CURATORS].sort())
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'landfall'))
+    expect(authors(), 'landfall').toHaveLength(3)
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'found'))
     useDemo.getState().exit()
     expect(authors()).toHaveLength(3)

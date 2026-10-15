@@ -76,8 +76,10 @@ describe('portCube', () => {
   })
   it('labels the count honestly', () => {
     expect(portCubeLabel(1000, 8214, 80)).toBe('1,000 of 8,214 hyperjumps in this h80 box')
-    expect(portCubeLabel(1, 1, 77)).toBe('1 of 1 hyperjump in this h77 box')
-    expect(portCubeLabel(0, 0, 74)).toBe('0 of 0 hyperjumps in this h74 box')
+    expect(portCubeLabel(2, 2, 78)).toBe('2 of 2 hyperjumps in this h78 box')
+    // No label until there are two to choose between (arkinox, 2026-10-15).
+    expect(portCubeLabel(1, 1, 77)).toBeNull()
+    expect(portCubeLabel(0, 0, 74)).toBeNull()
   })
 })
 

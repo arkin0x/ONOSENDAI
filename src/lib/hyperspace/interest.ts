@@ -308,9 +308,12 @@ export function portCube(anchor: Position, plane: Plane, scaleExp: number): Port
 }
 
 /** What the cube says about itself: "1,000 of 8,214 hyperjumps in this h80 box". */
-export function portCubeLabel(drawn: number, inside: number, height: number): string {
+export function portCubeLabel(drawn: number, inside: number, height: number): string | null {
+  // A count only says something once there is a choice: with one port or
+  // none, the box itself is the whole story (arkinox, 2026-10-15).
+  if (inside < 2) return null
   const n = (v: number): string => v.toLocaleString('en-US')
-  return `${n(drawn)} of ${n(inside)} hyperjump${inside === 1 ? '' : 's'} in this h${height} box`
+  return `${n(drawn)} of ${n(inside)} hyperjumps in this h${height} box`
 }
 
 /**

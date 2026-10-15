@@ -592,7 +592,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
         const half = cube.height >= 85 ? 1n << 84n : 1n << BigInt(cube.height - 1)
         const mid = pointCentre({ x: cube.base.x + half, y: cube.base.y + half, z: cube.base.z + half }, origin, scaleExp, axes)
         const halfCells = 2 ** (Math.min(85, cube.height) - 1 - scaleExp)
-        cubeLabel = { text: portCubeLabel(cubeDrawn, cubeTotal, cube.height), at: [mid[0], mid[1] - halfCells - 0.6, mid[2]] }
+        const text = portCubeLabel(cubeDrawn, cubeTotal, cube.height)
+        if (text) cubeLabel = { text, at: [mid[0], mid[1] - halfCells - 0.6, mid[2]] }
       }
       commit({
         geometry,

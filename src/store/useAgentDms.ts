@@ -76,7 +76,7 @@ import {
 } from '../lib/agentDmDb'
 import { DEFAULT_DM_RELAYS, dmInboxAnnounceRelays, dmInboxOf, dmInboxTemplate, type DmInbox } from '../lib/inbox'
 import { authForRead, onResume, publishMany, subscribeOne, type PublishResult } from '../lib/relay'
-import { localSigner, NIP44_UNAVAILABLE } from '../lib/signers'
+import { localSigner, NIP44_UNAVAILABLE, signerCannotJudge } from '../lib/signers'
 import type { NostrEvent } from '../lib/events'
 import { useCyberspace } from './useCyberspace'
 import { useMyAgentsAnswer } from '../hooks/useMyAgents'
@@ -446,18 +446,27 @@ function take(wrap: NostrEvent, alive: () => boolean, fromWatch = false): void {
     // unwrapRumor drops a wrap that will not open, rightly, but a signer
     // with no NIP-44 decrypt at all opens none, and that is said in words.
     let unavailable = false
+    // Nor is a wrap kept as unopenable when the signer, not the wrap, is why:
+    // a signer on another account opens nothing sealed to me, and once it is
+    // switched back the same wrap opens (signerCannotJudge). It is left to be
+    // opened when it comes again, this session or the next.
+    let signerAway = false
     const rumor = await unwrapRumor(wrap, {
       pubkey: reader.pubkey,
       nip44Decrypt: (pk, ct) => reader.nip44Decrypt(pk, ct).catch((err: unknown) => {
         if (err instanceof Error && err.message === NIP44_UNAVAILABLE) {
           unavailable = true
           if (!fromWatch) useAgentDms.setState({ readError: NO_DECRYPT })
+        } else if (signerCannotJudge(err)) {
+          signerAway = true
+          if (!fromWatch) useAgentDms.setState({ readError: (err as Error).message })
         }
         throw err
       }),
     })
     if (useAgentDms.getState().me !== me) return
     if (unavailable) { if (fromWatch) noDecrypt = true; seen.delete(wrap.id); return }
+    if (signerAway) { seen.delete(wrap.id); return }
     // Opened (or found not to open): never decrypted again on this device.
     record.watched[wrap.id] = wrap.created_at
     saveRecord()

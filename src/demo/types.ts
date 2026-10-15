@@ -44,6 +44,12 @@ export interface DemoScene {
    * (.demo-pulse) while the step is on screen. Nothing is clicked or opened.
    */
   highlight?: string
+  /**
+   * Draw only the hidden things the tour's curators placed (DEMO_CURATORS in
+   * script.ts) while the step is on screen; the rest of the world comes back
+   * on the first step without it, and when the tour ends.
+   */
+  curated?: boolean
 }
 
 /** Something the visitor does that a step waits for, detected from the stores. */
@@ -102,6 +108,12 @@ export interface DemoStep {
   captionWaiting?: string
   /** The one-line instruction shown while waiting. */
   hint?: string
+  /**
+   * For an 'open-item' wait: shown instead when the scan has finished and
+   * there is nothing here to open, and the step counts as done, so it never
+   * waits on an empty place.
+   */
+  emptyHint?: string
   /**
    * NEXT (and the keys that present the tour) stay off until the `wait` has
    * happened; without it, waiting is an invitation and NEXT reads SKIP.

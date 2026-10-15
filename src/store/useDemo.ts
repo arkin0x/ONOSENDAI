@@ -20,7 +20,7 @@
 
 import { create } from 'zustand'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
-import { DEMO_DISTRICT, DEMO_SCRIPT } from '../demo/script'
+import { DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT } from '../demo/script'
 import type { DemoAction, DemoScene, DemoScript, DemoStep } from '../demo/types'
 import { stopSpeaking } from '../demo/voice'
 import { coordPlace } from '../lib/coordRoute'
@@ -41,6 +41,8 @@ interface DemoState {
   index: number
   /** Whether the current step's `wait` has happened (true for a step with none). */
   done: boolean
+  /** The step's 'open-item' wait found nothing to open once the scan was done (DemoStep.emptyHint). */
+  empty: boolean
   /** Folded to a one-line bar; NEXT and BACK still work from the keys. */
   minimized: boolean
   /** The publishing switch before the tour, put back on exit. */
@@ -405,8 +407,25 @@ export const useDemo = create<DemoState>((set, get) => {
     stopSpeaking()
     const step = stepAt(get(), index)
     if (!step) return
-    set({ index, done: !step.wait || (step.gate === true && gatesPassed.has(step.id)) })
+    set({ index, empty: false, done: !step.wait || (step.gate === true && gatesPassed.has(step.id)) })
+    // The district's steps show only the curators' things; every other step the whole world.
+    useShards.getState().setCurated(step.scene.curated ? DEMO_CURATORS : null)
     applyScene(step.scene, step.wait === 'walk')
+    // Nothing to open here (the place is empty, or nothing the curators
+    // placed): once the scan is done the step says so and counts as done,
+    // rather than waiting on a tap that cannot come. Something arriving
+    // later makes it a wait again.
+    if (step.wait === 'open-item' && step.emptyHint) {
+      const check = (): void => {
+        if (get().index !== index || !get().active) return
+        const sh = useShards.getState()
+        const nothing = !sh.scanning && sh.worldItems().length === 0
+        if (nothing && !get().done) set({ done: true, empty: true })
+        else if (!nothing && get().empty) set({ done: false, empty: false })
+      }
+      check()
+      stepCleanups.push(useShards.subscribe(check))
+    }
     if (step.wait && !get().done) {
       stepCleanups.push(watchAction(step.wait, () => {
         if (get().index !== index || !get().active) return
@@ -422,6 +441,7 @@ export const useDemo = create<DemoState>((set, get) => {
     active: false,
     index: 0,
     done: true,
+    empty: false,
     minimized: false,
     prevLive: false,
     script: DEMO_SCRIPT,
@@ -485,6 +505,7 @@ export const useDemo = create<DemoState>((set, get) => {
       if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus()
       homeCursor()
       dismissBlockToast()
+      useShards.getState().setCurated(null)
       const session = readSession()
       if (session) restoreSession(session)
       writeSession(null)

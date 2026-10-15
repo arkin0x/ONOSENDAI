@@ -185,6 +185,7 @@ export function DemoCoach(): JSX.Element | null {
   const index = useDemo((s) => s.index)
   const done = useDemo((s) => s.done)
   const minimized = useDemo((s) => s.minimized)
+  const empty = useDemo((s) => s.empty)
   const script = useDemo((s) => s.script)
   const hasChain = useCyberspace((s) => s.events.length > 0)
   // An avatar of your own rather than the default shape (useAvatars).
@@ -329,7 +330,7 @@ export function DemoCoach(): JSX.Element | null {
       </div>
       {step.wait && (
         <div className={`demo__wait ${done ? 'is-done' : ''}`}>
-          <span>{done ? '✓ Done' : spawning === 'failed' ? 'Not signed. Try SPAWN again.' : step.hint ?? 'Your turn.'}</span>
+          <span>{done ? (empty && step.emptyHint ? step.emptyHint : '✓ Done') : spawning === 'failed' ? 'Not signed. Try SPAWN again.' : step.hint ?? 'Your turn.'}</span>
           {offerSpawn && (
             <button className="demo__btn demo__btn--spawn" onClick={onSpawn} disabled={spawning === 'signing'}>
               {spawning === 'signing' ? 'SIGNING' : 'SPAWN'}

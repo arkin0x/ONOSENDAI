@@ -140,6 +140,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const mine = useShards((s) => s.mine)
   const discovered = useShards((s) => s.discovered)
+  // The tour's district shows only its curators' things (DemoScene.curated).
+  const curated = useShards((s) => s.curated)
   const births = useCeremony((s) => s.births)
 
   const placed = useMemo(() => {
@@ -165,7 +167,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
 
   if (placed.length === 0) return null
 

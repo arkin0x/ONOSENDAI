@@ -80,6 +80,8 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   // Subscribed so the set re-renders when a deploy or a discovery lands.
   const mine = useShards((s) => s.mine)
   const discovered = useShards((s) => s.discovered)
+  // The tour's district shows only its curators' things (DemoScene.curated).
+  const curated = useShards((s) => s.curated)
   const births = useCeremony((s) => s.births)
 
   const placed = useMemo(() => {
@@ -93,7 +95,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
       .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
 
   if (placed.length === 0) return null
 

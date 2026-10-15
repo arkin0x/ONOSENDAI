@@ -20,11 +20,13 @@ export function useNearbyLoot(): NearbyItem[] {
   const plane = useCyberspace((s) => s.anchorPlane)
   const discovered = useShards((s) => s.discovered)
   const mine = useShards((s) => s.mine)
+  // The tour's district shows only its curators' things (DemoScene.curated).
+  const curated = useShards((s) => s.curated)
   const keys = useSecrets((s) => s.keys)
   return useMemo(() => {
     const held = Object.values(keys)
     return nearbyItems(useShards.getState().worldItems(), held, anchor, plane)
     // discovered and mine are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, plane, discovered, mine, keys])
+  }, [anchor, plane, discovered, mine, keys, curated])
 }

@@ -23,6 +23,7 @@ import { VOLUME_RADIUS, VOLUME_SIZE, type TerrainVolume } from '../hooks/useTerr
 import { UNKNOWN } from '../workers/terrain.worker'
 import { useCyberspace } from '../store/useCyberspace'
 import type { ViewWindow } from '../hooks/useViewWindow'
+import { stepFor, type Position, type ViewAxes } from '../lib/space'
 
 interface Props {
   volume: TerrainVolume
@@ -209,7 +210,16 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
+/**
+ * Where birth times are keyed from: a cell of cyberspace fixed for as long as
+ * the zoom and the view hold, so a point keeps its birth across landings and
+ * recentring, both of which move the render frame and not the world. Keyed
+ * on render coordinates, every point was reborn at each landing and the
+ * whole field faded in again behind a walk (2026-10-13).
+ */
+let birthRef: { origin: Position; scaleExp: number; axes: ViewAxes } | null = null
+
+function buildGeometry(volume: TerrainVolume): BufferGeometry {
   const R = volume.radius
   const N = VOLUME_SIZE
   const { values } = volume
@@ -224,6 +234,13 @@ function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
   // On the same clock the uNow uniform runs on, so ages line up exactly.
   const now = performance.now() / 1000
   const nextBirths = new Map<string, number>()
+  if (!birthRef || birthRef.scaleExp !== volume.scaleExp || birthRef.axes !== volume.axes) {
+    birthRef = { origin: volume.centre, scaleExp: volume.scaleExp, axes: volume.axes }
+  }
+  const step = stepFor(volume.scaleExp)
+  const [br, bu, bo] = [volume.axes.right, volume.axes.up, volume.axes.out].map(
+    (a) => Number((volume.centre[a.axis] - birthRef!.origin[a.axis]) / step) * a.dir,
+  )
 
   let v = 0
   for (let depth = 0; depth < N; depth++) {
@@ -233,16 +250,18 @@ function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
         const k = values[slice + col]
         if (k === UNKNOWN) continue
 
-        const x = win.right + (col - R)
-        const y = win.up + (row - R)
-        const z = win.out + (depth - R)
+        // Around the volume's own centre; the points object is placed at
+        // the window, so a landing moves the object and rebuilds nothing.
+        const x = col - R
+        const y = row - R
+        const z = depth - R
         positions[v * 3] = x
         positions[v * 3 + 1] = y
         positions[v * 3 + 2] = z
         kValues[v] = k
 
         // First seen now, or however long ago the registry remembers.
-        const key = `${x},${y},${z}`
+        const key = `${br + x},${bu + y},${bo + z}`
         const born = births.get(key) ?? now
         nextBirths.set(key, born)
         birthValues[v] = born
@@ -268,10 +287,7 @@ function buildGeometry(volume: TerrainVolume, win: ViewWindow): BufferGeometry {
 export function ShaderPointField({ volume, win }: Props): JSX.Element {
   const pointsRef = useRef<Points>(null)
 
-  const geometry = useMemo(
-    () => buildGeometry(volume, win),
-    [volume, win.right, win.up, win.out],
-  )
+  const geometry = useMemo(() => buildGeometry(volume), [volume])
 
   // GPU buffers are not garbage collected; release each one when replaced.
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -323,16 +339,17 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
 
     // Focus is what the camera orbits: the cursor. Live, so the magnification
     // under the cursor keeps up with the keypress.
+    // The geometry is local to the window, so the focus is too.
     const [fx, fy, fz] = useCyberspace.getState().cursorOffset()
-    mat.uniforms.uFocus.value.set(fx, fy, fz)
+    mat.uniforms.uFocus.value.set(fx - pts.position.x, fy - pts.position.y, fz - pts.position.z)
 
-    // The volume's own centre, which is where the geometry was built around.
-    mat.uniforms.uCentre.value.set(win.right, win.up, win.out)
+    // The volume's own centre, which the geometry is built around.
+    mat.uniforms.uCentre.value.set(0, 0, 0)
 
     mat.uniforms.uDpr.value = state.gl.getPixelRatio()
   })
 
   return (
-    <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} />
+    <points ref={pointsRef} position={[win.right, win.up, win.out]} geometry={geometry} material={material} frustumCulled={false} />
   )
 }

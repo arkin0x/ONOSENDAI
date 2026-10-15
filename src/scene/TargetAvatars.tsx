@@ -5,14 +5,16 @@
  * itself when it is inside the drawn world: the same wireframe icosahedron you
  * are drawn as, in the target's own color, with its name over it. The
  * position is the chain head the tracker keeps current, so a target that hops
- * while you watch moves here the same frame its marker does.
+ * while you watch moves here as soon as the hop lands, gliding from where it
+ * was over AVATAR_LERP_MS as every avatar does (OtherAvatar; arkinox,
+ * 2026-10-12).
  */
 
 import { useMemo } from 'react'
-import { GRID_RADIUS, cellCentre, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { AvatarShape } from './AvatarShape'
-import { WorldLabel } from './WorldLabel'
+import { avatarTurn } from '../lib/facing'
+import { OtherAvatar } from './OtherAvatar'
 
 /** Same cull as Earth and the spawn marker. */
 const REACH = GRID_RADIUS * 8
@@ -36,28 +38,35 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const focus = useCyberspace((s) => s.focusPubkey())
 
+  // Where a position is drawn in this render frame; OtherAvatar asks it where
+  // a target was, to glide it from there (lib/avatarLerp.ts).
+  const place = useMemo(() => {
+    const origin = alignedOrigin(anchor, scaleExp)
+    return (p: Position) => placeCentre(p, origin, scaleExp, axes)
+  }, [anchor, scaleExp, axes])
+
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
-    const origin = alignedOrigin(anchor, scaleExp)
     const list = useCyberspace.getState().targetList()
     return list
       // Someone standing in the other plane is not here (§2.4).
       .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane)
-      .map((t) => ({ ...t, centre: cellCentre(t.at, origin, scaleExp, axes) }))
+      .map((t) => ({ ...t, centre: place(t.at) }))
       .filter((t) => Math.hypot(...t.centre) <= REACH)
     // targets is what targetList reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, anchor, anchorPlane, scaleExp, axes, focus])
+  }, [targets, anchorPlane, scaleExp, focus, place])
+
+  // Turned with the view like every shard and your own avatar, so a compass
+  // turn that puts the world upside down puts them upside down with it.
+  const turn = useMemo(() => avatarTurn(axes, null), [axes])
 
   if (near.length === 0) return null
 
   return (
     <>
       {near.map((t) => (
-        <group key={t.id} position={t.centre}>
-          <AvatarShape pubkey={t.id} color={t.color} />
-          <WorldLabel text={t.label} color={t.color} at={[0, 0.9, 0]} align="center" px={11} opacity={0.9} />
-        </group>
+        <OtherAvatar key={t.id} pubkey={t.id} color={t.color} center={t.centre} position={t.at} place={place} turn={turn} label={t.label} labelOpacity={0.9} />
       ))}
     </>
   )

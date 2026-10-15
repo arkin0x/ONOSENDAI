@@ -9,28 +9,77 @@
  * Open state IS scrubHeight in the store, so the H key and the chip drive
  * one mechanism and cannot disagree. No per-height ticks: the line is
  * hundreds of thousands of blocks, only the fill and the mark are drawn.
+ *
+ * While spectating, the station is the spectated avatar's, measured from the
+ * head of their chain, with SET DESTINATION beside it so you can ride to where
+ * they are; TO BLOCK is hidden, since the rail belongs to your own trip
+ * (arkinox, 2026-10-01).
+ *
+ * # beside the rail takes a block number typed in and goes straight to it
+ * (arkinox, 2026-09-28): at this length, scrubbing to one exact block is
+ * guesswork.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Hash, X } from 'lucide-react'
 import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { closeScrubber, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
+import { useEscape } from '../hooks/useEscape'
+import { clearRideDestination, setRideDestination } from '../store/destination'
 
-/** The coarse step: the line is ~900k blocks, single steps are the last few. */
-const JUMP = 1000
+/**
+ * The whole percent the chip shows, floored and held at 99. Multiplied before
+ * dividing: (29 / 100) * 100 is 28.999999999999996 in floating point, which
+ * floored to 28, so the chip skipped from 56% to 58% and showed 28% at 29%.
+ */
+export function syncPercentOf(loaded: number, total: number): number {
+  return total > 0 ? Math.min(99, Math.floor((loaded * 100) / total)) : 0
+}
+
+/**
+ * The chip's words for the sync (2026-10-15). A whole percent is floored
+ * and held at 99 until the line is ready: rounded, it read 100% from 99.5%
+ * on, so a sync with its last few hundred heights still to come (or one
+ * stalled there) looked finished and stuck. An error was also worded as
+ * SYNCING with its last percentage, frozen while the pipeline waits 30 s
+ * to retry; it says RETRYING now.
+ */
+export function syncChipLabel(status: string, loaded: number, total: number, ready: boolean, destination: number | null): string {
+  if (ready) return destination !== null ? `HYPERSPACE ${destination}` : 'HYPERSPACE READY'
+  if (status === 'error') return 'HYPERSPACE RETRYING'
+  const pct = syncPercentOf(loaded, total)
+  return status === 'loading-cache' ? `HYPERSPACE LOADING ${pct}%` : `HYPERSPACE SYNCING ${pct}%`
+}
+
+/** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
+const JUMP = 100
 
 export function LineScrubber(): JSX.Element {
-  const sync = useHyperspace((s) => s.sync)
+  // Only what is shown: the status and a whole percent, so a progress
+  // report that moves neither does not re-render the scrubber.
+  const syncStatus = useHyperspace((s) => s.sync.status)
+  const syncPercent = useHyperspace((s) => syncPercentOf(s.sync.loaded, s.sync.total))
   const tipHeight = useHyperspace((s) => s.tipHeight)
   const scrubHeight = useHyperspace((s) => s.scrubHeight)
   const destination = useHyperspace((s) => s.destination)
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const bind = useRepeatable()
-  const position = useCyberspace((s) => s.position)
-  const plane = useCyberspace((s) => s.plane)
+  // The typed block number, open while # is pressed.
+  const [typing, setTyping] = useState<string | null>(null)
+  const ownPosition = useCyberspace((s) => s.position)
+  const ownPlane = useCyberspace((s) => s.plane)
+  // Spectating: the station is theirs, from the head of their chain.
+  const spectateHead = useCyberspace((s) => {
+    const a = s.spectate?.actions
+    return a && a.length ? a[a.length - 1] : null
+  })
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const position = spectateHead?.position ?? ownPosition
+  const plane = spectateHead?.plane ?? ownPlane
 
   // Your station: the block boarding sets you down at, recomputed as blocks
   // sync in. findStation, not a plain nearest query: §4.2 breaks distance
@@ -57,8 +106,12 @@ export function LineScrubber(): JSX.Element {
     )
   }
 
-  const ready = sync.status === 'ready' && tipHeight !== null
+  const ready = syncStatus === 'ready' && tipHeight !== null
   const open = scrubHeight !== null
+  // Open, the scrubber is a chip on the Escape stack, closed the way H and
+  // the chip close it (arkinox, 2026-10-01). The # box's own Escape, in the
+  // field, still only closes the box.
+  useEscape('chip', open, closeScrubber)
 
   // The focus side effect lives here rather than in the keyboard hook, so the
   // chip, the rail, the buttons and the H key all pass through one place.
@@ -76,10 +129,9 @@ export function LineScrubber(): JSX.Element {
     const was = prev.current
     prev.current = scrubHeight
     if (scrubHeight === null) {
+      // Closing the chip leaves the view alone: a block on screen stays until
+      // RETURN on the viewing bar (closeScrubber, arkinox 2026-10-15).
       armed.current = false
-      // Closed by any path that skipped exitHyperspaceView: settle through it
-      // so an owned focus clears and a foreign one (a spectate) survives.
-      if (was !== null) exitHyperspaceView()
       return
     }
     if (was === null) return
@@ -102,7 +154,7 @@ export function LineScrubber(): JSX.Element {
   const toggle = (): void => {
     const hs = useHyperspace.getState()
     if (hs.scrubHeight === null) hs.setScrubHeight(hs.destination ?? hs.tipHeight ?? 0)
-    else exitHyperspaceView()
+    else closeScrubber()
   }
 
   const step = (d: number) => (): void => {
@@ -123,9 +175,15 @@ export function LineScrubber(): JSX.Element {
   }
 
   const tip = tipHeight ?? 0
+  const typedHeight = typing !== null && /^\d+$/.test(typing.trim()) ? Number(typing.trim()) : null
+  const typedOk = typedHeight !== null && typedHeight <= tip
+  const goTyped = (): void => {
+    if (!typedOk || typedHeight === null) return
+    useHyperspace.getState().setScrubHeight(typedHeight)
+    setTyping(null)
+  }
   const fraction = tip <= 0 ? 0 : (scrubHeight ?? tip) / tip
   const stop = scrubHeight !== null ? getStopByHeight(scrubHeight) : undefined
-  const syncPercent = sync.total > 0 ? Math.round((sync.loaded / sync.total) * 100) : 0
 
   return (
     <div className="explorer linescrub">
@@ -137,18 +195,12 @@ export function LineScrubber(): JSX.Element {
         aria-label={open ? 'Hide line scrubber' : 'Show line scrubber'}
         aria-pressed={open}
       >
-        {ready
-          ? destination !== null
-            ? `HYPERSPACE ${destination}`
-            : 'HYPERSPACE READY'
-          : sync.status === 'loading-cache'
-            ? `HYPERSPACE LOADING ${syncPercent}%`
-            : `HYPERSPACE SYNCING ${syncPercent}%`}
+        {syncChipLabel(syncStatus, syncPercent, 100, ready, destination)}
       </button>
 
       {open && ready && (
         <div className="explorer__body">
-          <span className="linescrub__headline">FROM YOUR STATION</span>
+          <span className="linescrub__headline">{spectating ? 'THEIR STATION' : 'FROM YOUR STATION'}</span>
           <div className="linescrub__fromrow">
             <span className="explorer__type">{station ? `BLOCK ${station.height}` : 'NO BLOCKS YET'}</span>
             {station && (
@@ -162,8 +214,13 @@ export function LineScrubber(): JSX.Element {
               {...noCallout}
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); viewStation() }}
             >VIEW</button>
+            {/* Ride to where the spectated avatar boards: their station as your destination. */}
+            {spectating && station && (
+              <DestinationButton destination={destination} height={station.height} />
+            )}
           </div>
 
+          {!spectating && (<>
           <hr className="linescrub__hr" />
           <span className="linescrub__headline linescrub__headline--to">TO BLOCK</span>
           <div className="explorer__row">
@@ -196,7 +253,33 @@ export function LineScrubber(): JSX.Element {
 
             <button className="explorer__btn" title="Forward one block (hold to repeat)" aria-label="Forward one block" disabled={scrubHeight === tip} {...bind(step(1))}>▶</button>
             <button className="explorer__btn" title={`Forward ${JUMP} blocks (hold to repeat)`} aria-label={`Forward ${JUMP} blocks`} disabled={scrubHeight === tip} {...bind(step(JUMP))}>»</button>
+            <button
+              className={`explorer__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
+              title="Go to a block number"
+              aria-label="Type a block number to go to"
+              aria-expanded={typing !== null}
+              {...noCallout}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setTyping((t) => (t === null ? '' : null)) }}
+            ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
           </div>
+
+          {typing !== null && (
+            <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>
+              <input
+                className="linescrub__goto-input"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoFocus
+                placeholder={`block 0 to ${tip}`}
+                aria-label="Block number"
+                value={typing}
+                onChange={(e) => setTyping(e.target.value.replace(/[^\d]/g, ''))}
+                onKeyDown={(e) => { if (e.key === 'Escape') setTyping(null) }}
+              />
+              <button className="linescrub__set" type="submit" disabled={!typedOk}>GO</button>
+              {typedHeight !== null && !typedOk && <span className="linescrub__goto-note">The newest block is {tip}.</span>}
+            </form>
+          )}
 
           <div className="explorer__meta linescrub__meta">
             <div className="linescrub__info">
@@ -213,31 +296,44 @@ export function LineScrubber(): JSX.Element {
               )}
             </div>
             <div className="linescrub__actions">
-            <button
-              className={destination !== null ? 'linescrub__set linescrub__set--attached' : 'linescrub__set'}
-              disabled={!stop}
-              {...noCallout}
-              onPointerDown={(e) => {
-                e.preventDefault(); e.stopPropagation()
-                if (scrubHeight !== null) useHyperspace.getState().setDestination(scrubHeight)
-              }}
-            >{destination !== null && destination === scrubHeight ? 'DESTINATION SET' : 'SET DESTINATION'}</button>
-            {destination !== null && (
-              <button
-                className="linescrub__clear"
-                title="Clear destination"
-                aria-label="Clear destination"
-                {...noCallout}
-                onPointerDown={(e) => {
-                  e.preventDefault(); e.stopPropagation()
-                  useHyperspace.getState().setDestination(null)
-                }}
-              >✕</button>
-            )}
+            <DestinationButton destination={destination} height={stop ? scrubHeight : null} />
             </div>
           </div>
+          </>)}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * SET DESTINATION, or the destination that is set (arkinox, 2026-10-15). With
+ * none set, it sets `height`. With one set, it is a dead label naming that
+ * block, whatever block is scrubbed or viewed, and CLEAR DESTINATION stands
+ * beside it as its own button: a destination changes only by clearing it.
+ */
+export function DestinationButton({ destination, height }: { destination: number | null; height: number | null }): JSX.Element {
+  if (destination !== null) {
+    return (
+      <span className="linescrub__dest">
+        <button className="linescrub__set linescrub__set--attached" disabled title={`Your ride goes to block ${destination}. Clear it to choose another.`}>
+          DESTINATION: BLOCK {destination}
+        </button>
+        <button
+          className="linescrub__clear"
+          title="Clear the destination"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); clearRideDestination() }}
+        ><X size={11} strokeWidth={2.5} aria-hidden /> CLEAR DESTINATION</button>
+      </span>
+    )
+  }
+  return (
+    <button
+      className="linescrub__set"
+      disabled={height === null}
+      {...noCallout}
+      onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (height !== null) setRideDestination(height) }}
+    >SET DESTINATION</button>
   )
 }

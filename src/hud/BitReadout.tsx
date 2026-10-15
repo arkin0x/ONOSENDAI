@@ -30,6 +30,7 @@
 import { useState } from 'react'
 import { WINDOW_BITS, xorReadout } from '../lib/bits'
 import { useCyberspace } from '../store/useCyberspace'
+import { useEscape } from '../hooks/useEscape'
 
 /** The row labels, which double as the palette hook for each row's tone. */
 type Tone = 'pos' | 'trg' | 'xor'
@@ -81,6 +82,8 @@ export function BitReadout(): JSX.Element {
   // Closed by default: screen space in the instrument stack is contested,
   // and the readout is a thing you open when you want it, not a landlord.
   const [open, setOpen] = useState(false)
+  // The open grid is a chip on the Escape stack (arkinox, 2026-10-01).
+  useEscape('chip', open, () => setOpen(false))
   // The window can be read as binary, where the wall is a shape, or as hex,
   // where it is compact. Tapping the open grid flips between them.
   const [hex, setHex] = useState(false)

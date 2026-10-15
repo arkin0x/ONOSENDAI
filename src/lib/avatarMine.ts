@@ -1,7 +1,7 @@
 /**
  * avatarMine.ts - the work an avatar owes, done.
  *
- * Spec 8.10: a kind 33331 avatar is paid for in NIP-13 work on the event
+ * Spec 8.10: a kind 11333 avatar is paid for in NIP-13 work on the event
  * itself, `required = ceil(16 + 6 log2(reach) + 3 log2(detail / 32))` bits,
  * the target committed in the nonce tag before mining. This is the loop
  * that finds the nonce: the NIP-01 serialization is built once around a

@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   AddEquation,
@@ -25,14 +25,23 @@ import {
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
+  BoxGeometry,
+  EdgesGeometry,
   Line,
   LineBasicMaterial,
+  Matrix4,
+  ReplaceStencilOp,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { flatten, ticksOf, toRender, type ShardModel } from '../lib/shards'
+import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
+import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
+import { useResolved, type Resolved } from '../lib/parts'
+import { ACCENT, WARN } from '../lib/palette'
+import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
-import { orientShard } from '../lib/orient'
-import { faceEdges } from '../lib/outline'
+import { orientShard } from 'sno-core/orient'
+import { faceEdges } from 'sno-core/outline'
+import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
 
 interface Props {
@@ -42,10 +51,12 @@ interface Props {
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
   /**
-   * Lit, as on the bench: faces shaded flat by the scene's lights, wound
-   * consistently outward (lib/orient.ts) and their backs painted dark, so an
-   * open shape shows its inside and a missing face is plain to see. The
-   * world draws unlit under its bloom instead.
+   * Lit, as on the bench: faces shaded flat by the canvas's ShardLights
+   * (shardLight.tsx, anchored at the world's full color), each one's
+   * front as its winding gives it (DECK-0003 §1.4) and its back painted darker,
+   * so a face that looks the wrong way is plain to see and FLIP can turn it.
+   * Nothing is guessed here: the winding is the author's. The world draws
+   * unlit under its bloom instead.
    */
   lit?: boolean
   /**
@@ -60,8 +71,12 @@ interface Props {
   world?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
-  /** A tap on a SOLID face (its index is `e.faceIndex`); the workshop's FACE tool. */
-  onFaceClick?: (e: ThreeEvent<MouseEvent>) => void
+  /**
+   * A tap on a SOLID face, with the shard's own index for it; the workshop's
+   * FACE tool. Not `e.faceIndex`, which counts the triangles drawn, and the
+   * bench leaves out the faces buried in a join.
+   */
+  onFaceClick?: (e: ThreeEvent<MouseEvent>, face: number) => void
   /**
    * The region the shard is sealed to, in this frame (lib/clip.ts regionBox).
    * What lies outside it is not drawn: faces are cut at the walls and points
@@ -69,37 +84,106 @@ interface Props {
    * region-encrypted.
    */
   clip?: Box
+  /**
+   * The turn applied to every vertex before the render mapping (lib/pose.ts
+   * placedPose). In the world it is always given, because it carries the
+   * view frame: a shard standing on the Earth where it is hidden, bottom to
+   * the ground and +Z to its spin, or one lying on cyberspace axes as it was
+   * built, and either way turned to the compass's view. Absent on the bench
+   * and for avatars, which are drawn in the render mapping as it is.
+   */
+  pose?: Pose
+  /**
+   * A placed object's own placements, already resolved by the parent's draw
+   * (DECK-0003 §1.10). Given, this mesh is a part: it fetches nothing itself
+   * and follows the chain the parent resolved, which is what bounds the depth
+   * at four and makes a loop a placeholder.
+   */
+  nested?: Placed[]
+  /** A tap on a placed object, with its index in `parts`: the workshop's SELECT takes it whole. */
+  onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
+  /** Placements drawn with the selection's box around them. */
+  selectedParts?: number[]
+  /**
+   * Fronts only, for an avatar seen from inside it (WALK's first person):
+   * the faces' backs are culled, so what sticks out of the body still shows
+   * and the inside of its own walls does not. The points and lines are not
+   * drawn at all then, having no back to cull. The world otherwise draws
+   * both sides of an unlit face.
+   */
+  cull?: boolean
 }
 
 const STATIC = [0, 0.9, 1] as const
 
 /**
- * Colour written opaque, alpha written as 0: the tag. (Blending needs the
- * material transparent, which the face already is for its opacity.)
+ * The shard's own face index for a ray's hit on either side of a face, or
+ * null for a hit on anything else. Both face meshes carry `faceOf`, the map
+ * from a drawn triangle to its face: the bench leaves out faces buried in a
+ * join, so the triangle's index is not the face's. A face must answer a tap
+ * from behind as well as from in front; each mesh is hit only on the
+ * triangles that face the ray, so the outsides alone let a tap pass through
+ * a face seen from behind to the next front beyond it (arkinox's Disco
+ * Floor, 2026-09-25).
  */
-const TAG_BLEND = { blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor } as const
+export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; faceIndex?: number | null }): number | null {
+  const map = i.object.userData.faceOf
+  const k = i.faceIndex
+  return map && k != null && map[k] !== undefined ? map[k] : null
+}
 
-export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip }: Props): JSX.Element | null {
-  const { positions, colors, index, faces } = useMemo(() => {
-    const f = flatten(shard)
-    const oriented = lit
-      // Wound outward, and without the faces buried inside a join, which would
-      // only fight the face they sit against (orient.ts).
-      ? (() => { const o = orientShard(shard.vertices.map((v) => toRender(ticksOf(v))), shard.faces); return { ...f, index: o.faces.filter((_, i) => !o.interior[i]).flat() } })()
-      : f
-    if (!clip || boxContains(clip, oriented.positions)) return { ...oriented, faces: shard.faces as number[][] }
+/**
+ * The stencil value a tagged face leaves under every texel it draws.
+ *
+ * The tag lives in alpha, and anything translucent drawn over a face with
+ * ordinary blending adds its own alpha and so erases it: the face then reads
+ * to the bloom as bright light and blows out. The covering box did exactly
+ * that to a white avatar inside it. Alpha alone cannot tell a tagged face
+ * from the empty background (both are 0), so the face also marks the stencil,
+ * and an overlay can draw over the mark without touching alpha (CoveringBox)
+ * (arkinox, 2026-10-12).
+ */
+export const FACE_TAG_STENCIL = 1
+
+/**
+ * Colour written opaque, alpha written as 0: the tag. (Blending needs the
+ * material transparent, which the face already is for its opacity.) The
+ * stencil mark is the tag's second copy, for overlays (arkinox, 2026-10-12).
+ */
+const TAG_BLEND = {
+  blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor,
+  stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
+} as const
+
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
+  // The objects this one places, fetched once for the whole app; a part's own
+  // parts come resolved from its parent instead.
+  const resolved = useResolved(nested ? null : given)
+  // A face that carries its own colour needs three corners of its own, or the
+  // colour would bleed across every edge it shares. Expanded here and nowhere
+  // else, so the winding pass, the clipper and the face picker below never
+  // learn the feature exists.
+  const shard = useMemo(() => expandFaceColors(given), [given])
+  const { positions, colors, index, faces, drawn } = useMemo(() => {
+    const f = flatten(shard, pose)
+    // On the bench, without the faces buried inside a join, which would only
+    // fight the face they sit against (orient.ts). Their winding is kept.
+    const buried = lit ? orientShard(shard.vertices.map((v) => toRender(posed(ticksOf(v), pose))), shard.faces).interior : null
+    const drawn = shard.faces.map((_, i) => i).filter((i) => !buried?.[i])
+    const oriented = buried ? { ...f, index: drawn.flatMap((i) => shard.faces[i]) } : f
+    if (!clip || boxContains(clip, oriented.positions)) return { ...oriented, faces: shard.faces as number[][], drawn }
     // Cropped to its region: the faces cut at the walls, and the points that
     // are left are the vertices of the cut faces, or, for a shard with no
     // faces, its own points inside the walls.
     if (shard.faces.length === 0) {
       const pts = clipPoints(oriented.positions, oriented.colors, clip)
-      return { positions: pts.positions, colors: pts.colors, index: [] as number[], faces: [] as number[][] }
+      return { positions: pts.positions, colors: pts.colors, index: [] as number[], faces: [] as number[][], drawn: [] as number[] }
     }
     const cut = clipMesh(oriented, clip)
     const faces: number[][] = []
     for (let t = 0; t + 2 < cut.index.length; t += 3) faces.push([cut.index[t], cut.index[t + 1], cut.index[t + 2]])
-    return { ...cut, faces }
-  }, [shard.vertices, shard.faces, lit, clip])
+    return { ...cut, faces, drawn: faces.map((_, i) => i) }
+  }, [shard.vertices, shard.faces, lit, clip, pose])
 
   // Live copies: the decode writes into these, the targets stay untouched.
   const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])
@@ -223,37 +307,113 @@ export function ShardMesh({ shard, scale = 1, ghost = false, birth, onFaceClick,
     if (t >= 1) done.current = true
   })
 
-  if (shard.vertices.length === 0) return null
+  const placements = (given.parts?.length ?? 0) > 0
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} />
+    : null
+  // An object may be nothing but the arrangement of others (§1.9 rule 13).
+  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
   const opacity = ghost ? 0.45 : 1
+  // The nearest hit is on whichever side faces the tap; it answers and stops it there.
+  const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
   return (
     <group scale={scale}>
+      {placements}
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
-          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...(onFaceClick ? { onClick: onFaceClick } : {})}>
+          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
+            {/* forceSinglePass: three draws a transparent DoubleSide material
+                in two passes, back then front, and to do it flips the side
+                and sets needsUpdate twice per object per frame. Each flip is
+                a shader program lookup that allocates (getParameters, a
+                cache key join): ~106 KB of garbage a frame with 150 shards
+                around, which a 144 Hz desktop turns into about a gigabyte a
+                minute, and twice the draw calls. These faces write depth at
+                opacity 1, so one pass draws the same picture. Ghosts (0.45)
+                keep the two passes for cleaner self-overlap: there are few
+                (arkinox's 10 GB Windows tabs, 2026-10-14). */}
             {lit
-              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} transparent opacity={opacity} />
-              : <meshBasicMaterial vertexColors side={DoubleSide} toneMapped={false} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
           {lit && inside && (
-            <mesh geometry={inside} frustumCulled={false}>
-              {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside. */}
-              <meshLambertMaterial vertexColors flatShading color="#6a6a6a" side={FrontSide} transparent opacity={opacity} />
+            <mesh geometry={inside} frustumCulled={false} {...pick}>
+              {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside.
+                  The multiplier and the light are shardLight's (arkinox, 2026-10-12). */}
+              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
             </mesh>
           )}
         </group>
       )}
       {/* Faces as outlines. A shard with no faces has no edges to draw, so it
           keeps the old single line through its points, which is all there is. */}
-      {shard.mode === 'lines' && outline && (
+      {/* Seen from inside (cull, WALK's first person) only the faces' fronts
+          are drawn. The points and lines have no back to cull: every vertex
+          dot and edge of your own body would sit across the view, which is
+          what arkinox still saw with the backs culled (2026-10-13). */}
+      {shard.mode === 'lines' && outline && !cull && (
         <lineSegments geometry={outline} frustumCulled={false}>
           <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} />
         </lineSegments>
       )}
-      {shard.mode === 'lines' && !outline && shard.vertices.length > 1 && <primitive object={line} />}
-      {(shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
+      {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
+      {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
         <points geometry={plain} material={pointMaterial} frustumCulled={false} />
       )}
     </group>
   )
+}
+
+/** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
+const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
+
+/**
+ * Each placed object where its placement stands, or a placeholder there: a
+ * wireframe cube one unit on a side in the accent, for anything not fetched,
+ * not valid, too deep, a loop, or scaled out of range (§1.10). Nothing is
+ * drawn for a reference still being fetched, so opening an object does not
+ * flash cubes before its parts arrive. Parts are not clipped to the region:
+ * a hidden object's parts are its author's to place.
+ */
+function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected, cull }: {
+  shard: ShardModel
+  byRef: Map<string, Resolved>
+  nested?: Placed[]
+  lit: boolean
+  ghost: boolean
+  world: boolean
+  pose?: Pose
+  onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
+  selected?: number[]
+  cull: boolean
+}): JSX.Element | null {
+  const list: Array<{ part: Part; r: Resolved | undefined }> = nested
+    ? nested.map((p) => ({ part: p.part, r: p }))
+    : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
+  const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
+  if (list.length === 0) return null
+  const drawn = list.map(({ part, r }, i) => {
+    if (!r) return null
+    const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
+    const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
+    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} cull={cull} />
+    // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
+    const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
+    return (
+      <group key={i} matrix={matrix} matrixAutoUpdate={false} {...(onPartClick ? { onClick: (e: ThreeEvent<MouseEvent>) => onPartClick(e, i) } : {})}>
+        {body}
+        {box && (
+          <lineSegments
+            geometry={CUBE_EDGES}
+            position={[(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2]}
+            scale={[Math.max(box.max[0] - box.min[0], 0.05) + 0.1, Math.max(box.max[1] - box.min[1], 0.05) + 0.1, Math.max(box.max[2] - box.min[2], 0.05) + 0.1]}
+          >
+            <lineBasicMaterial color={WARN} toneMapped={false} />
+          </lineSegments>
+        )}
+      </group>
+    )
+  })
+  return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}</group> : <>{drawn}</>
 }

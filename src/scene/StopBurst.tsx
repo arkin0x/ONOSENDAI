@@ -54,19 +54,29 @@ const vertexShader = /* glsl */ `
   }
 `
 
-const fragmentShader = /* glsl */ `
-  varying float vSeed;
-  varying float vFade;
-
+/**
+ * The burst's colors: a hue per streak from its seed, at three quarters
+ * brightness. Exported so the /demo hyperspace line (TourLine) wears the
+ * same set; `burstColor(seed)` is the color a streak of that seed has.
+ */
+export const BURST_COLOR_GLSL = /* glsl */ `
   vec3 hue2rgb(float h) {
     vec3 p = abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
     return clamp(p - 1.0, 0.0, 1.0);
   }
+  vec3 burstColor(float seed) {
+    return hue2rgb(fract(seed * 9.31)) * 0.75;
+  }
+`
 
+const fragmentShader = /* glsl */ `
+  varying float vSeed;
+  varying float vFade;
+${BURST_COLOR_GLSL}
   void main() {
     float a = vFade * 0.75;
     if (a < 0.02) discard;
-    gl_FragColor = vec4(hue2rgb(fract(vSeed * 9.31)) * 0.75, a);
+    gl_FragColor = vec4(burstColor(vSeed), a);
   }
 `
 

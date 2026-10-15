@@ -11,9 +11,9 @@
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
-import { messagePreview, type Hidden } from '../lib/hidden'
+import { hiddenLabel, type Hidden } from '../lib/hidden'
 import { regionLabel } from '../lib/loot'
-import { GRID_HALF, type ShardModel } from '../lib/shards'
+import { GRID_HALF, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
 
@@ -56,10 +56,14 @@ function previewShard(unit: number): ShardModel {
     name: 'Tessier-Ashpool construct',
     unit,
     extent: GRID_HALF,
+    // The spawn construct is drawn on cyberspace axes, never stood up.
+    up: false,
+    spin: 0,
     mode: 'lines',
     vertices: path.map((p, i) => ({ p, c: i < 16 ? [0, 0.9, 1] : [0.97, 0.58, 0.1] })),
     faces: [],
-    updatedAt: Math.floor(Date.now() / 1000),
+    // Milliseconds, as every other object's edit time is.
+    updatedAt: Date.now(),
   }
 }
 
@@ -73,7 +77,7 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     const births = { ...get().births }
     for (const h of items) births[h.eventId] = now
     const first = items[0]
-    const label = first.type === 'message' ? messagePreview(first.text ?? '', 40) : first.shard?.name ?? 'shard'
+    const label = hiddenLabel(first, 40)
     // Finds pile onto a chip nobody has tapped yet: the count is everything
     // since the last tap, and the chip stays until it is.
     const count = (get().chip?.count ?? 0) + items.length

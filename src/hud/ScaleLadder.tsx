@@ -15,7 +15,7 @@
  */
 
 import { MAX_SCALE_EXP } from '../lib/space'
-import { formatCellSize } from '../lib/scale'
+import { formatCellSize } from 'sno-core/scale'
 import { useCyberspace } from '../store/useCyberspace'
 
 /**

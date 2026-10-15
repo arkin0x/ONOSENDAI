@@ -8,6 +8,8 @@
   --warn: #ffb020;
   --danger: #ff3b6b;
   --sidestep: #c07dff;
+  /* Play inside a game (lib/palette.ts GAME): never a travel color. */
+  --game: #ff7ad9;
   --ok: #52e39f;
   --panel: rgba(6, 14, 22, 0.82);
   --border: rgba(0, 229, 255, 0.22);
@@ -103,6 +105,30 @@ body {
   width: 300px;
   align-items: stretch;
 }
+/* The build version at the foot of the menu, with room around it so it
+   reads as a signature and not as one more panel. */
+/* The license line sits directly above the build and takes the gap above it. */
+.hud__license {
+  flex: 0 0 auto;
+  padding: 36px 0 0;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+.hud__license a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.hud__license a:hover { color: var(--fg); }
+
+.hud__version {
+  flex: 0 0 auto;
+  padding: 8px 0 44px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
 
 /* ---------- Panels ---------- */
 
@@ -132,6 +158,140 @@ body {
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* ---------- Panel slots: fold and reorder (arkinox, 2026-10-10) ---------- */
+
+/* The slot (PanelSlot.tsx) carries the state, folded or lifted, so a panel's
+   own className stays its own and no panel's markup changes. One rule moved
+   here with the wrapping: the Official links keep to the foot of the column. */
+.slot {
+  position: relative;
+}
+
+.slot[data-panel-id="links"] {
+  margin-top: auto;
+}
+
+/* The title line is the fold control: the whole line taps, the title holds
+   the focus (role=button, set by PanelSlot) and wears the chevron. The title
+   pushes the rest to the right, which is what space-between did with the two
+   children every header has. */
+.slot > .panel > .panel__head {
+  cursor: pointer;
+  justify-content: flex-start;
+}
+
+.slot > .panel > .panel__head > h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+  border-radius: 2px;
+}
+
+.slot > .panel > .panel__head > h2:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The chevron: down while open, right while folded. */
+.slot > .panel > .panel__head > h2::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-top: -2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.slot--collapsed > .panel > .panel__head > h2::before {
+  transform: rotate(-45deg);
+}
+
+/* Folded: the title line alone, the rule under it gone, and room at its right
+   end for the grip. */
+.slot--collapsed > .panel {
+  padding-bottom: 10px;
+}
+
+.slot--collapsed > .panel--links {
+  padding-bottom: 12px;
+}
+
+.slot--collapsed > .panel > .panel__head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  padding-right: 22px;
+  border-bottom: 0;
+}
+
+.slot--collapsed > .panel > :not(.panel__head) {
+  display: none;
+}
+
+/* The grip, on a folded panel only, at the right end of its title line.
+   touch-action: none so a finger on it drags the panel and never scrolls.
+   pointer-events back on: the grip sits beside the panel, not in it, and
+   .hud is pointer-events: none (the first run in a browser pressed the
+   title line through it). */
+.slot__grip {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--dim);
+  cursor: grab;
+  touch-action: none;
+  transform: translateY(-50%);
+}
+
+.slot__grip:hover,
+.slot__grip:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.slot--lifting > .panel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+
+.slot--lifting .slot__grip {
+  color: var(--accent);
+  cursor: grabbing;
+}
+
+/* While a panel is lifted the whole screen is the drop surface. The pointer
+   is captured here (Hud.tsx), so a panel moving in the DOM under the pointer
+   cannot end the drag, and nothing beneath gets a hover or a selection. */
+.hud__grab {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud--dragging {
+  user-select: none;
+}
+
+.hud--dragging .hud__grab {
+  pointer-events: auto;
+  cursor: grabbing;
+  touch-action: none;
 }
 
 /* ---------- Stats ---------- */
@@ -244,6 +404,79 @@ body {
 
 .tag--local {
   color: var(--dim);
+}
+
+/* Mid-flight, and refused. Both mean "still on this device", but a refusal is
+ * not a choice and must not read like one. */
+.tag--sending {
+  color: var(--warn);
+}
+
+.tag--failed {
+  color: var(--danger);
+}
+
+/* One row per action of the chain, under the stats: index, kind, short id and
+ * the compact LIVE/LOCAL tag. Oldest first, which is both the order the chain
+ * is read in and the order the publisher sends in, with the box scrolled to
+ * the newest. Fixed height so a long chain cannot push the genesis and head
+ * lines, or the panels below this one, off the screen. */
+.chainrows {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 132px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.chainrows__row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.1);
+}
+
+.chainrows__row:last-child {
+  border-bottom: none;
+}
+
+.chainrows__n {
+  font-size: 9px;
+  color: var(--dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.chainrows__type {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.chainrows__type--spawn { color: var(--ok); }
+.chainrows__type--sidestep { color: var(--sidestep); }
+/* A game's bracket: the entry, the game's own moves and the exit. Pink, the
+ * color of play inside a game everywhere it is drawn (spec §8.11.7). */
+.chainrows__type--enter,
+.chainrows__type--virtual,
+.chainrows__type--exit { color: var(--game); }
+/* An action this client does not recognize: on the chain and followed, but
+ * it moves nobody, so it reads quieter than every move (spec §8.9). */
+.chainrows__type--skipped { color: var(--dim); font-style: italic; }
+/* Out of place, malformed, or starting from the wrong place: where a
+ * verifier says the chain stops. Red with a warning glyph and a struck-red
+ * row, so it never reads as a game's pink. */
+.chainrows__type--broken { color: var(--danger); font-style: italic; font-weight: 700; }
+.chainrows__row--broken { background: rgba(255, 59, 107, 0.1); box-shadow: inset 2px 0 0 var(--danger); }
+.chainrows__warn { display: inline-block; vertical-align: -1px; margin-right: 4px; color: var(--danger); }
+
+.chainrows__id {
+  font-size: 9px;
+  color: var(--dim);
+  opacity: 0.7;
 }
 
 /* Relay state, inline after the published count. */
@@ -573,6 +806,16 @@ body {
   align-items: flex-start;
   gap: 8px;
 }
+/* The stack's three groups (InstrumentStack.tsx) take no box of their own:
+   the stack's gap and alignment run across them as one list. */
+.instruments__group { display: contents; }
+/* A sticky toast's way out: the whole chip dismisses, the ✕ says so. */
+.toast__dismiss {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--dim);
+  align-self: center;
+}
 
 .bits {
   pointer-events: none;
@@ -819,6 +1062,18 @@ body {
   background: var(--fg);
 }
 
+/* An action inside a game's bracket, entry and exit included. */
+.explorer__tick--game {
+  background: var(--game);
+}
+
+/* Skipped or broken: on the chain, but no move. Shorter, so the rail still
+ * reads as the moves with something between them. */
+.explorer__tick--quiet {
+  top: 10px;
+  height: 4px;
+}
+
 .explorer__mark {
   position: absolute;
   top: 6px;
@@ -855,6 +1110,22 @@ body {
   color: var(--sidestep);
 }
 
+.explorer__type--enter,
+.explorer__type--virtual,
+.explorer__type--exit {
+  color: var(--game);
+}
+
+.explorer__type--skipped {
+  color: var(--dim);
+  font-style: italic;
+}
+
+.explorer__type--broken {
+  color: var(--danger);
+  font-style: italic;
+}
+
 .explorer__when {
   color: var(--dim);
 }
@@ -885,6 +1156,11 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A place inside a game, apart from the coord the identity holds. */
+.explorer__detail--game {
+  color: var(--game);
+}
+
 .explorer__key {
   color: rgba(0, 229, 255, 0.55);
 }
@@ -907,17 +1183,32 @@ body {
 .viewat__recent { display: flex; flex-direction: column; gap: 4px; }
 .viewat__toggle {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
   font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--dim);
   background: none;
   border: 0;
-  padding: 2px 0;
+  padding: 5px 0;
   cursor: pointer;
 }
 .viewat__toggle:hover { color: var(--fg); }
+/* The caret carries the whole message that RECENT opens, so it is drawn at
+   twice the label's size and in the accent, not as a 9px tick beside the
+   word: arkinox used the panel for a week before noticing it was a toggle. */
+.viewat__caret {
+  font-size: 18px;
+  line-height: 1;
+  vertical-align: -3px;
+  margin-left: 6px;
+  color: var(--accent);
+}
+.viewat__toggle:hover .viewat__caret { color: var(--fg); }
 .viewat__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+/* A row is the place and the mark that forgets it, the shard list's shape. */
+.viewat__list li { display: flex; gap: 3px; align-items: stretch; }
 .viewat__item {
   width: 100%;
   text-align: left;
@@ -931,7 +1222,24 @@ body {
   padding: 5px 8px;
   cursor: pointer;
 }
+.viewat__item { flex: 1 1 auto; min-width: 0; }
 .viewat__item:hover { border-color: var(--accent, #00e5ff); }
+/* The shard list's delete: the same glyph at the same weight, on the right of
+   the row it removes, turning to the danger colour only under a pointer. */
+.viewat__forget {
+  flex: none;
+  width: 28px;
+  font-family: var(--mono);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 0 2px;
+  color: var(--dim);
+  background: rgba(6, 14, 22, 0.8);
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.viewat__forget:hover { color: var(--danger); border-color: var(--danger); }
 .viewat__plane { display: inline-block; margin-right: 8px; padding: 1px 5px; font-size: 8px; }
 
 .legend__label {
@@ -1089,6 +1397,17 @@ kbd {
 
 /* ---------- Avatars ---------- */
 
+.avatars__tags {
+  display: flex;
+  gap: 6px;
+}
+
+/* The kept list is showing while the relays are asked for newer moves. */
+.tag--updating {
+  color: var(--dim);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
 .avatars__find {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1174,6 +1493,9 @@ kbd {
 
 .avatars__type--spawn { color: var(--ok); }
 .avatars__type--sidestep { color: var(--sidestep); }
+/* Their newest action is a game's entry or exit (spec §8.11). */
+.avatars__type--enter,
+.avatars__type--exit { color: var(--game); }
 
 .avatars__when {
   font-size: 9px;
@@ -1370,6 +1692,16 @@ kbd {
   color: var(--dim);
 }
 
+/* A body kept exactly as it was written: line breaks and the leading space on
+ * a bullet survive, and long lines still wrap to the card. */
+.modal__pre {
+  white-space: pre-wrap;
+}
+
+/* A body of a few short lines, each on its own, a little apart. */
+.modal__line { display: block; }
+.modal__line + .modal__line { margin-top: 6px; }
+
 .modal__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1429,12 +1761,16 @@ kbd {
 }
 
 .secret__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--accent);
 }
 
 .secret__badge--message { color: #ffd27d; }
+.secret__badge--cashu { color: #f7931a; }
 
 .secret__mine {
   font-size: 8px;
@@ -1489,6 +1825,11 @@ kbd {
 }
 
 .secret__shard-name { font-size: 14px; color: var(--fg); }
+.secret__spin {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
 
 .secret__creator {
@@ -1569,6 +1910,15 @@ kbd {
 }
 
 .secret__act:hover { background: rgba(0, 229, 255, 0.16); }
+/* The avatar card's actions, two to a row (arkinox, 2026-10-13). */
+.person__actions .secret__act {
+  flex: 1 1 calc(50% - 3px);
+}
+.secret__act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 
 .secret__act.is-on {
   color: #05070d;
@@ -1604,15 +1954,34 @@ kbd {
   box-shadow: 0 0 18px rgba(0, 229, 255, 0.15);
   backdrop-filter: blur(10px);
   font-size: 10px;
+  /* Never taller than the screen; the record scrolls inside and EXIT stays put. */
+  max-height: calc(100vh - 28px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
 }
+/*
+ * Nothing in the record shrinks to fit: the panel scrolls instead. A flex
+ * child that scrolls on its own may shrink to nothing, and on a phone's
+ * quarter-screen sheet the message did, to one clipped line (arkinox,
+ * 2026-10-02: "cant read the message because its too small").
+ */
+.detail > * { flex-shrink: 0; }
 
+/* Pinned while the rest scrolls, so EXIT is always where the hand left it.
+   The negative margins run the head's background out to the card's edges. */
 .detail__head {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: -10px -12px 0;
+  padding: 10px 12px 8px;
+  background: rgba(6, 14, 22, 0.97);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.detail__eye { color: var(--accent); font-size: 13px; }
+.detail__eye { color: var(--accent); }
 
 .detail__title {
   flex: 1;
@@ -1652,6 +2021,8 @@ kbd {
 }
 
 .detail__field--relays { align-items: start; }
+
+.detail__field .pubswitch { justify-self: start; }
 
 .detail__key {
   font-size: 8px;
@@ -1705,6 +2076,9 @@ kbd {
     right: 14px;
     bottom: 14px;
     width: auto;
+    /* A sheet, not a wall: the bottom quarter of the screen, scrolling inside. */
+    max-height: 25vh;
+    max-height: 25dvh;
   }
 }
 
@@ -1773,6 +2147,7 @@ kbd {
 .shards__cashu--unclaimed { color: #52e39f; }
 .shards__cashu--redeemed { color: #f7931a; }
 .shards__cashu--pending, .shards__cashu--checking, .shards__cashu--unknown { opacity: 0.7; }
+.shards__cashu--unreadable { color: var(--warn); }
 
 .shards__compose {
   display: flex;
@@ -1798,6 +2173,15 @@ kbd {
   border-color: var(--accent);
 }
 
+/* What the compose box says about a token in the text, under the textarea. */
+.shards__compose-note {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.shards__compose-note--ok { color: #52e39f; }
+.shards__compose-note--warn { color: var(--warn); }
+
 .shards__compose-open {
   width: 100%;
 }
@@ -1813,8 +2197,7 @@ kbd {
   border-left: 2px solid #ffd27d;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 90px;
-  overflow-y: auto;
+  /* No scroll of its own: the panel is the one thing that scrolls. */
 }
 
 .detail__test {
@@ -1838,24 +2221,205 @@ kbd {
   font-weight: 700;
 }
 .detail__test--missing { color: var(--danger); border-color: var(--danger); }
+.detail__test--refused { color: var(--danger); border-color: var(--danger); }
+.detail__refusal {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.detail__eye--cashu { color: #f7931a; }
+
+/* ---------- Cashu card ----------
+ *
+ * A hidden message's Cashu token, in the MESSAGE and VIEWING panels: what it
+ * holds and whether it has been taken, never the token's text. Bitcoin
+ * orange, like every other ₿ mark. REDEEMED turns the card's edge, its status
+ * and its sentence red, so "already taken" cannot be missed at a glance.
+ * Buttons are 44px tall for a thumb, and nothing in the card is wider than
+ * the card, so a phone never scrolls sideways.
+ */
+.cashucard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 10px 12px 12px;
+  color: var(--fg);
+  background: rgba(247, 147, 26, 0.08);
+  border-left: 3px solid #f7931a;
+  border-radius: 3px;
+}
+
+/* The VIEWING panel spaces its children with a gap of its own. */
+.detail .cashucard { margin: 0; }
+
+.cashucard--redeemed {
+  background: rgba(255, 59, 107, 0.07);
+  border-left-color: var(--danger);
+}
+
+.cashucard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+}
+
+.cashucard__title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #f7931a;
+}
+
+
+.cashucard__amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.cashucard--redeemed .cashucard__amount { color: var(--dim); }
+
+.cashucard__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.cashucard__status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+
+.cashucard__status--unclaimed { color: #05070d; background: var(--ok); border-color: var(--ok); }
+.cashucard__status--redeemed { color: #05070d; background: var(--danger); border-color: var(--danger); }
+.cashucard__status--pending, .cashucard__status--unreadable { color: var(--warn); }
+.cashucard__status--unknown { color: var(--fg); border-color: var(--dim); }
+.cashucard__status--checking {
+  color: var(--dim);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+.cashucard__line {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.cashucard--redeemed .cashucard__line { color: var(--danger); }
+
+.cashucard__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.cashucard__facts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cashucard__facts dt {
+  flex: 0 0 34px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.cashucard__facts dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cashucard__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cashucard__act {
+  flex: 1 1 140px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #f7931a;
+  text-decoration: none;
+  background: rgba(247, 147, 26, 0.08);
+  border: 1px solid rgba(247, 147, 26, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cashucard__act:hover { background: rgba(247, 147, 26, 0.18); }
+
+.cashucard__act.is-on {
+  color: #05070d;
+  background: #f7931a;
+  font-weight: 700;
+}
+
+.cashucard__note {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+/* The card's gap spaces the EXPLAIN pill like everything else in it. */
+.cashucard .explain { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cashucard__status--checking { animation: none; }
+}
 
 /* ---------- Deploy bar ----------
 
 /* ---------- Deploy bar ----------
  *
- * Up while you are placing a shard. Bottom of the scene on a phone, above the
- * pad; a floating card on the left on a desktop, clear of both panel columns.
+ * Up while you are placing a shard. Docked in the lower left exactly where the
+ * route overlay docks, from the same corner numbers (arkinox, 2026-10-12: at
+ * the top it covered the model being placed): its left edge on the menu
+ * button's, its bottom a gap above that button, growing upward to 35% of the
+ * screen. Its left, bottom, width cap and height cap are the route overlay's
+ * own rules (see "Route overlay"). With the pad on screen its right edge stops
+ * the same gap short of the controls (.deploybar--pad, also there); with the
+ * pad closed it runs to the controls' gutter, here.
  */
 .deploybar {
   position: fixed;
-  left: 14px;
-  top: 14px;
+  right: var(--controls-right);
   z-index: 101;
-  width: min(360px, calc(100vw - 28px));
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px 12px;
+  gap: 8px;
+  padding: 14px 14px 14px;
   border-radius: 10px;
   color: var(--fg);
   background: rgba(6, 14, 22, 0.9);
@@ -1873,7 +2437,6 @@ kbd {
 
 .deploybar__eye {
   color: var(--ok);
-  font-size: 13px;
 }
 
 .deploybar__title {
@@ -1941,13 +2504,6 @@ kbd {
   letter-spacing: 0.06em;
 }
 
-.deploybar__hint {
-  display: block;
-  font-size: 9px;
-  line-height: 1.5;
-  color: var(--dim);
-}
-
 .deploybar__warn {
   display: block;
   font-size: 9px;
@@ -1975,11 +2531,127 @@ kbd {
   cursor: default;
 }
 
-/* Clear of the panel columns on a desktop. */
-@media (min-width: 1101px) {
-  .deploybar {
-    left: 332px;
-  }
+/*
+ * The bar never covers the center of the screen, where the ghost shows what is
+ * being hidden: it grows up from the bottom left to the route overlay's 35%
+ * cap, which ends well below the middle on a phone, a wide tablet and a
+ * desktop alike, so the separate phone and tablet caps it had at the top of
+ * the screen (#263) are gone. The title and the deploy button are pinned and
+ * the rows under them scroll inside the bar.
+ */
+.deploybar {
+  padding-bottom: 12px;
+}
+/* A row's green note on its own line under the row's controls (DeployRow),
+   tucked up to the row it belongs to (arkinox, 2026-10-12). */
+.deploybar__hint {
+  margin-top: -3px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.deploybar__head,
+.deploybar__foot {
+  flex-shrink: 0;
+}
+.deploybar__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.deploybar__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Room for the scrollbar, and a fade at the bottom edge that says there is
+     more; the padding under the last row keeps it clear of the fade. */
+  padding-right: 4px;
+  margin-right: -4px;
+  padding-bottom: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 255, 0.35) transparent;
+}
+
+/* The bag's settings: its scope, two switches and the riddle (DeployBar BagControls). */
+.deploybar__bag {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 229, 255, 0.12);
+}
+.deploybar__scope {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  color: var(--ok);
+}
+.deploybar__bag .ui-field {
+  margin: 8px 0 0;
+}
+/* The label bold, as arkinox wrote it; the hint under it plain. */
+.deploybar__bag .ui-field__label {
+  font-weight: 700;
+}
+.deploybar__bag .ui-field__hint {
+  font-size: 9px;
+}
+.deploybar__bag sup {
+  font-size: 0.78em;
+  line-height: 0;
+  vertical-align: super;
+}
+.deploybar__riddle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.deploybar__riddle .ui-field__text {
+  cursor: default;
+}
+/* The same field as the comments composer and the login inputs. */
+.deploybar__input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font: inherit;
+  /* The same size as the client's other text inputs (.login__input), as
+     arkinox asked (2026-10-01); iOS Safari zooms on focus below 16px, as it
+     already does for those. */
+  font-size: 11px;
+}
+.deploybar__input:focus {
+  outline: none;
+  border-color: rgba(0, 229, 255, 0.5);
+}
+.deploybar__input::placeholder {
+  color: var(--dim);
+  opacity: 0.7;
+}
+.deploybar__count {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .shards__row--deployed {
@@ -2252,6 +2924,7 @@ kbd {
 
 .workshop__modes {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
 }
 
@@ -2311,6 +2984,9 @@ kbd {
   width: 30px;
   padding: 0;
   color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .workshop__mini--danger:hover {
@@ -2397,33 +3073,6 @@ kbd {
   background: rgba(0, 229, 255, 0.15);
 }
 
-.workshop__swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-/* A swatch is tapped to use and held to delete, so the long press must not
- * select text, raise a callout or scroll. */
-.workshop__swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  cursor: pointer;
-  touch-action: none;
-  -webkit-touch-callout: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* The swatch in use. */
-.workshop__swatch.is-on {
-  outline: 2px solid var(--fg);
-  outline-offset: 1px;
-}
-
 .workshop__swatch--sample {
   display: inline-block;
   vertical-align: middle;
@@ -2465,6 +3114,33 @@ kbd {
   padding: 0 8px;
 }
 
+/* The avatar controls: the name on its own line, the buttons on theirs,
+   sharing the width evenly the way NEW SHARD and PASTE do. They used to sit
+   on the name's line, where a long shard name pushed them off the edge. */
+.workshop__avatar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workshop__avatar .workshop__list-row .workshop__btn { flex: 1 1 0; }
+.workshop__avatar .workshop__value--wide { min-width: 0; overflow-wrap: anywhere; }
+
+/* The avatar's row in the shard list: what you are wearing, which is not one
+   of these shards and cannot be edited or deleted from here. */
+.workshop__list-avatar .workshop__pick--static {
+  cursor: default;
+  opacity: 0.85;
+}
+.workshop__tag {
+  flex: none;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
 .workshop__list-row {
   display: flex;
   gap: 4px;
@@ -2477,6 +3153,23 @@ kbd {
 
 .workshop__paste {
   margin-top: 8px;
+}
+
+/* Files dragged over the workshop: one line, and the bench outlined, nothing to catch a tap. */
+.workshop__drop {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(0, 229, 255, 0.06);
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  pointer-events: none;
 }
 
 .workshop__paste-box {
@@ -2567,6 +3260,22 @@ kbd {
   pointer-events: none;
 }
 .ws__top > * { pointer-events: auto; }
+/* The grid floor's LEVEL under the chip row (Workshop LevelStack, arkinox
+   2026-10-10): up, the level, down, one narrow column so it covers as little
+   of the bench as a chip does. */
+.ws__level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.ws__level-key { width: 38px; height: 34px; }
+.ws__level-value {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim, #7fa3b3);
+  font-variant-numeric: tabular-nums;
+}
 /* Room on the right for DEPLOY and the way out, which share the top edge. */
 .ws__chips {
   display: flex;
@@ -2592,15 +3301,23 @@ kbd {
   display: inline-flex;
   gap: 6px;
 }
-.ws__icon {
-  width: 34px;
-  height: 34px;
+/* .chip.ws__icon, not .ws__icon: .chip sets `padding: 9px 12px` and comes
+   later in the sheet at equal specificity, so it won, and a 34px box with 12px
+   of side padding left the icon about 10px of room. The button looked the
+   right size and its mark was half of one (arkinox, 2026-09-15).
+
+   38px square with a 16px mark, which is the touchpad key, so every round icon
+   button in the app is one size. */
+.chip.ws__icon {
+  width: 38px;
+  height: 38px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
 }
+.chip.ws__icon svg { flex: none; }
 .ws__icon:disabled {
   opacity: 0.3;
   cursor: default;
@@ -2681,6 +3398,17 @@ kbd {
 .ws__panel--up {
   max-height: calc(100vh - 140px);
 }
+/* A panel open at the top left stands over every button below it (arkinox,
+   2026-10-10: MENU and GRID ended up behind them). */
+.ws__top--open { z-index: 5; }
+/* The one selected point's readout, top right under DEPLOY and the way out. */
+.ws__at--top {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  z-index: 3;
+  pointer-events: none;
+}
 /* TOOLS with a tool in hand: the chip and, joined to its right, the X that
  * puts the tool down. */
 .ws__toolchips { display: inline-flex; }
@@ -2741,16 +3469,175 @@ kbd {
 }
 /* The main pad's nine cells, for the selection: CONNECT and DELETE take the
  * corners the scale keys have out there. */
+/* Two cells on the end of the row DELETE sits in: CUT then DUPLICATE, or,
+   with nothing selected, PASTE in the cell CUT had. The container lets taps
+   through, since with nothing selected every cell but that one is empty and
+   the bench is underneath. */
 .benchpad {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, 48px);
   grid-template-rows: repeat(3, 48px);
   gap: 4px;
+  pointer-events: none;
   grid-template-areas:
     "away    up   toward"
     "left    hub  right"
     "connect down delete";
 }
+.benchpad > * { pointer-events: auto; }
+
+/* The orbit ball (arkinox, 2026-10-10): the pad's size, right of it. A drag
+   on it turns the view about the shard and keeps turning after the finger
+   leaves it (pointer capture); a tap sends the view home. Drawn as a lit
+   globe with a meridian and an equator, so it reads as something that turns. */
+.benchorb {
+  /* Docked at the bottom right beside the color column (right 14px, 38px
+     wide, then a 6px gap, halved from 12 to keep clear of the pad on its
+     left), out of every column, so no row has to clear it (arkinox,
+     2026-10-10: "right aligned, not left"). */
+  position: absolute;
+  right: 58px;
+  bottom: 14px;
+  z-index: 3;
+  width: 152px;
+  height: 152px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(82, 227, 159, 0.45);
+  background: radial-gradient(circle at 36% 32%, rgba(82, 227, 159, 0.28), rgba(6, 14, 22, 0.78) 62%, rgba(6, 14, 22, 0.92));
+  box-shadow: 0 0 14px rgba(82, 227, 159, 0.12), inset 0 0 22px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  color: var(--fg, #c8f5ff);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.benchorb:active { cursor: grabbing; }
+.benchorb::before,
+.benchorb::after {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 245, 255, 0.14);
+  pointer-events: none;
+}
+.benchorb::before { transform: scaleX(0.42); }
+.benchorb::after { transform: scaleY(0.42); }
+.benchorb__sub { font-size: 8px; letter-spacing: 0.14em; color: var(--dim, #7fa3b3); }
+/* A narrow phone: the ball gives up a little so the color column in the other
+   corner keeps its room. */
+@media (max-width: 380px) {
+  .benchorb { width: 120px; height: 120px; }
+}
+
+/* The clipboard row: first in the bottom-left column, so the pad, TURN and
+   the color column in the other corner never stand on it. */
+.benchclip {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+.benchclip .touchpad__key { width: 48px; height: 48px; flex-direction: column; gap: 2px; font-size: 17px; }
+.benchclip .touchpad__sub { font-size: 8px; }
+/* A mode key lit while its mode is on (INVERT, arkinox, 2026-10-10), in the
+   same lit treatment as a tool chip, so "on" reads the same everywhere. */
+.benchclip .touchpad__key.is-on {
+  color: #05070d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.benchclip .touchpad__key.is-on .touchpad__sub { opacity: 1; }
+/* SUBDIVIDE is the row's one long word: the pad's JOINED and DELETE size, tighter, so it fits a 48px key. */
+.benchclip .touchpad__key--long .touchpad__sub { font-size: 7px; letter-spacing: 0.04em; }
+/* A key that asks before it acts (PASTE where, FLIP how much) carries a dot
+   in its top right corner, so it reads as two steps before it is pressed.
+   The dot lights while its question is open (arkinox, 2026-09-27). */
+.touchpad__key--two { position: relative; }
+.touchpad__key--two::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+.touchpad__key--two[aria-expanded='true']::after { background: var(--accent); }
+
+/* Where to put the held points. It opens above the clipboard row, and
+   anything outside it is a tap that pastes nothing. */
+.benchpaste {
+  position: absolute;
+  left: 0;
+  bottom: 52px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(6, 14, 22, 0.96);
+}
+/* LOCAL or LIVE for one hidden thing, in the language the big switch uses:
+   both words always on show, the true one lit, and only one of them a
+   button, since nothing can come back from a relay. */
+.pubswitch {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pubswitch__opt {
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  background: transparent;
+  border: 0;
+}
+.pubswitch__opt.is-on { color: var(--bg); background: var(--accent); }
+.pubswitch__go:not(:disabled) { color: var(--accent); cursor: pointer; }
+.pubswitch__go:not(:disabled):hover { background: rgba(0, 229, 255, 0.12); }
+.pubswitch__go.is-on { color: var(--bg); background: #52e39f; }
+
+/* The line under an offload estimate that says how much of the work HOSAKA
+   already had. Green, because it is money and time you are not spending. */
+.modal__reuse {
+  display: inline-block;
+  margin-top: 6px;
+  color: #52e39f;
+}
+
+/* The chain chip when a fold from another device changed this chain. Amber
+   for work that went, since it is a loss and it waits to be read; the accent
+   for work that arrived, since it is only an explanation and it fades. */
+.explorer__toggle--dropped {
+  color: var(--bg);
+  background: var(--warn);
+  border-color: var(--warn);
+}
+.explorer__toggle--adopted {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.benchpaste__away {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+.benchclip .touchpad__key--danger { color: var(--danger); }
 .benchpad .touchpad__key--connect { grid-area: connect; color: var(--accent); }
 .benchpad .touchpad__key--delete { grid-area: delete; color: var(--danger); }
 .benchpad .touchpad__key--connect .touchpad__sub,
@@ -2764,41 +3651,48 @@ kbd {
 }
 .benchpad .touchpad__sub,
 .benchturn .touchpad__sub { font-size: 8px; }
-.benchturn {
-  display: grid;
-  grid-template-columns: repeat(2, 48px);
-  grid-template-rows: 48px;
+/* CUT and DUPLICATE, or PASTE, on top of the turn keys. It stretches to the
+   width of the widest thing in the corner, the nudge pad, and its buttons
+   split that evenly, so every row in the column shares one left and one right
+   edge and the 8px the column already puts between rows is the only gap. */
+.benchclip {
+  align-self: stretch;
+  display: flex;
   gap: 4px;
 }
-.benchops {
+.benchclip .workshop__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px;
+}
+
+/* The turn row: LEFT, RIGHT, then CUT, COPY and PASTE (arkinox, 2026-10-10),
+   a flex row of 48px keys; relative, so PASTE's question anchors to it. */
+.benchturn {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+.benchturn .touchpad__key { width: 48px; height: 48px; }
+/* The weld row (arkinox, 2026-10-12): the stack count as a readout cell the
+   height of a key, then WELD, at the top of the bottom-left column. It stood
+   in the color corner and covered the orbit ball. The readout lets taps
+   through to nothing; only the key acts. */
+.benchweld { align-items: stretch; }
+.benchweld__count {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  height: 48px;
+  padding: 0 10px;
+  box-sizing: border-box;
   border-radius: 9px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: var(--dim, #7fa3b3);
   background: rgba(6, 14, 22, 0.85);
   border: 1px solid var(--border);
   backdrop-filter: blur(8px);
-}
-/* COLOR open: a column rising from the corner, two swatches wide, so it never
- * runs along the bottom into TOOLS. */
-.ws__color {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  max-height: calc(100vh - 140px);
-  overflow: auto;
-  padding: 8px 6px;
-  border-radius: 10px;
-  background: rgba(6, 14, 22, 0.85);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-}
-.ws__color .workshop__label { min-width: 0; }
-.ws__color .workshop__swatches {
-  display: grid;
-  grid-template-columns: repeat(2, 22px);
 }
 /* The mixer rises above the corner stack, clear of the pad on the left. */
 .ws__mixer {
@@ -3114,12 +4008,30 @@ kbd {
 
 /* ---------- Mobile hamburger menu ---------- */
 
+/* Where the two bottom corners' controls stand, as numbers the rest of the
+ * HUD can build on. The route overlay fits itself between the menu button and
+ * the control cluster from these, so moving either one moves the overlay's
+ * edge with it instead of leaving a hard-coded guess behind. The desktop
+ * values are set in "Controls on desktop" below. */
+:root {
+  --menu-left: 12px;
+  --menu-bottom: 12px;
+  --menu-size: 56px;
+  --controls-right: 14px;
+  /* The pad's three 38px columns and two 4px gaps; the commit block below it
+     is set to the same width. */
+  --controls-width: 122px;
+  /* The gap the docked overlays (the route overlay and the deploy bar) keep
+     from the menu button and from the controls. */
+  --routeov-gap: 10px;
+}
+
 .hamburger-menu {
   position: fixed;
-  bottom: 12px;
-  left: 12px;
-  width: 56px;
-  height: 56px;
+  bottom: var(--menu-bottom);
+  left: var(--menu-left);
+  width: var(--menu-size);
+  height: var(--menu-size);
   border-radius: 50%;
   background: rgba(6, 14, 22, 0.85);
   border: 1px solid var(--border);
@@ -3225,7 +4137,7 @@ kbd {
 .touchpad,
 .touchops {
   position: fixed;
-  right: 14px;
+  right: var(--controls-right);
   /* Above the instrument stack (102) and the spectate bar (101). Those grow
      downward while viewing and spectating, which is exactly when the pad is
      the only way to change scale, and a readout briefly overlapped is a
@@ -3248,8 +4160,8 @@ kbd {
   grid-template-areas:
     ".       .    cube"
     "away    up   toward"
-    "left    hub  right"
-    "zoomout down zoomin";
+    "left    down right"
+    "zoomout hub  zoomin";
 }
 /* Off your own head only scale is left to drive, so the pad folds to the
  * scale row with the cube above it. The direction cells leave the grid
@@ -3266,13 +4178,13 @@ kbd {
    key, where a thumb reaching for the pad's edge kept landing on it. It sits
    above NEAR now, in its own row at the top right corner: out of the path to
    every other key, and clear of the chat that lives to the pad's left. */
-.touchpad__key--cube {
-  grid-area: cube;
-  color: #dcc2ff;
-  background: rgba(124, 58, 237, 0.62);
-  border-color: rgba(200, 150, 255, 0.9);
-}
-.touchpad__key--cube:active { background: rgba(160, 100, 255, 0.85); border-color: #f0e6ff; }
+/* Colour deliberately absent. A purple treatment lived here and never once
+   reached the screen: `.touchpad__key` below sets colour, background and
+   border at the same specificity and later in the file, so it won every time.
+   The key has always rendered as a plain key, and the rule was left claiming
+   otherwise, which is how the EARTH key came to be styled to match something
+   that did not exist (arkinox, 2026-09-14). */
+.touchpad__key--cube { grid-area: cube; }
 
 .touchpad__key {
   display: flex;
@@ -3331,6 +4243,11 @@ kbd {
 }
 .touchpad__key--zoomin { grid-area: zoomin; }
 
+/* The same dark plate as every other key, with its cyan tint laid over that
+ * plate rather than standing on its own. A bare 8% cyan let the scene through,
+ * and with a bright shard behind the pad the readout vanished (arkinox,
+ * 2026-10-07). The tint stays, so the hub still reads as the readout and not
+ * as one more arrow; the hover and press tints sit on the same plate. */
 .touchpad__hub {
   grid-area: hub;
   display: flex;
@@ -3340,33 +4257,44 @@ kbd {
   letter-spacing: 0.04em;
   color: var(--accent, #00e5ff);
   border-radius: 9px;
-  background: rgba(0, 229, 255, 0.08);
-  border: 1px solid rgba(0, 229, 255, 0.22);
+  background-color: rgba(6, 14, 22, 0.72);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.08), rgba(0, 229, 255, 0.08));
+  border: 1px solid var(--border, #1d3547);
+  backdrop-filter: blur(6px);
   cursor: pointer;
 }
 
 /* The hub is clickable (it resets to 2^0), so it answers the pointer the way
- * its neighbours do; before this it read as a passive readout. */
+ * its neighbors do; before this it read as a passive readout. */
 .touchpad__hub:hover {
-  background: rgba(0, 229, 255, 0.16);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.16), rgba(0, 229, 255, 0.16));
 }
 
 .touchpad__hub:active {
-  background: rgba(0, 229, 255, 0.3);
+  background-image: linear-gradient(rgba(0, 229, 255, 0.3), rgba(0, 229, 255, 0.3));
   border-color: var(--accent, #00e5ff);
 }
 
-/* ---------- Route overlay: the lined-up route, live, above the pad ----------
+/* ---------- Route overlay: the lined-up route, live, over the menu button ----------
  *
- * The pad's top edge is at 92 + 122 px; the overlay hangs 12 px above it and
- * grows leftward from the pad's right edge. Taps pass through. */
+ * It used to hang over the pad, and covered the cube and Earth keys at its
+ * top. It lives in the lower left now (arkinox, 2026-10-07): its left edge on
+ * the menu button's, its bottom a gap above that button, and its right edge a
+ * gap short of the control cluster, all from the shared corner numbers in
+ * :root, so it can never reach a control at any width. On a phone it fills
+ * that whole span; on a desktop the span is wide, so it stops at a reading
+ * width and stays on the left.
+ *
+ * It grows upward from its bottom edge with the number of steps, to 35% of
+ * the screen's height, and past that the list scrolls with no visible bar.
+ * Beneath the chat (101) and the instrument stack (102): both are things you
+ * act on, this is only read, so when the chat is unfolded over it the chat
+ * wins. Taps pass through it until the list overflows (RouteOverlay.tsx). */
 .routeov {
   position: fixed;
-  right: 14px;
-  bottom: 226px;
-  z-index: 103;
-  width: 282px;
-  max-height: 38vh;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 6px 8px 7px;
   border-radius: 9px;
@@ -3378,27 +4306,89 @@ kbd {
   font-size: 9px;
   letter-spacing: 0.1em;
 }
+/* The dock, shared with the deploy bar (arkinox, 2026-10-12): the same corner,
+ * the same gaps, the same width and height caps. The deploy bar stops short of
+ * the controls only while the pad is on screen (DeployBar deployBarClass);
+ * the route overlay is only ever up beside the pad. */
+.routeov,
+.deploybar {
+  left: var(--menu-left);
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  max-width: 360px;
+  max-height: 35vh;
+  max-height: 35dvh;
+}
+.routeov,
+.deploybar--pad {
+  right: calc(var(--controls-right) + var(--controls-width) + var(--routeov-gap));
+}
 .routeov--cloud { border-color: rgba(47, 129, 247, 0.6); }
 .routeov--blocked { border-color: rgba(255, 59, 107, 0.6); }
+/* Only while the list overflows: then a finger, a wheel or a click lands on
+ * the overlay so it can scroll, instead of passing to the scene. */
+.routeov--scroll { pointer-events: auto; }
+/* The HOSAKA mark breathes in the same spot over the menu button while a job
+ * computes (HosakaPulse.tsx, the menu button's width at the logo's 308:334
+ * aspect). While it is mounted the overlay stands a gap above it. */
+.app:has(.hosaka-pulse) .routeov,
+.app:has(.hosaka-pulse) .deploybar {
+  bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* The summary drops under ROUTE rather than being cut off when the overlay is
+ * phone narrow, and is cut off only past the full width. */
 .routeov__head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 2px 8px;
+  flex: 0 0 auto;
 }
 .routeov__title { color: var(--dim); }
-.routeov__sum { color: var(--accent); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.routeov__sum { color: var(--accent); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; margin-left: auto; }
 .routeov--cloud .routeov__sum { color: #6fa8ff; }
 .routeov--blocked .routeov__sum { color: #ff3b6b; }
+/* The list is the part that scrolls, so ROUTE and the summary stay in view.
+ * No visible bar, the HUD's rule everywhere (see "Invisible scrollbars"). */
 .route--overlay {
   margin-top: 0.3rem;
   font-size: 0.62rem;
   letter-spacing: 0.04em;
+  flex: 0 1 auto;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.route--overlay::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.route--overlay:focus { outline: none; }
+.route--overlay:focus-visible { outline: 1px solid rgba(0, 229, 255, 0.5); outline-offset: 1px; }
 .route--overlay .route__step {
   grid-template-columns: 1.1rem 6.4rem 2.6rem 1fr;
   gap: 0.3rem;
   padding: 0.06rem 0.2rem;
   white-space: nowrap;
+}
+.route--overlay .route__state { overflow: hidden; text-overflow: ellipsis; }
+/* Columns as wide as their widest entry, shared by every row through a
+ * subgrid, so the narrow phone span still fits SIDESTEP and "this machine"
+ * side by side. The fixed columns above stay as the fallback. The gap row's
+ * "N more" runs across the columns after the index. */
+@supports (grid-template-columns: subgrid) {
+  /* Two classes: the generic .route rule further down the file sets gap with
+     one, and would otherwise win. */
+  .routeov .route--overlay {
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    column-gap: 0.45rem;
+  }
+  .route--overlay .route__step {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    column-gap: normal;
+  }
+  .route--overlay .route__step--gap .route__kind { grid-column: 2 / -1; }
 }
 
 /* COMMIT is the only control here that spends anything, so it is the only one
@@ -3410,7 +4400,7 @@ kbd {
   grid-template-columns: 56px 62px;
   grid-template-rows: 40px 26px;
   gap: 4px;
-  width: 122px;
+  width: var(--controls-width);
 }
 
 /* Local / Live, under RECALL and COMMIT. A two-way switch, so the state that
@@ -3467,16 +4457,18 @@ kbd {
   padding: 0;
 }
 
+/* COMMIT is HOP's: the mode's blue, not VIEW's yellow (arkinox, 2026-10-13:
+   "Commit should be the Hop color"). */
 .touchops__commit.is-armed {
   color: #05070d;
-  background: var(--warn, #ffb020);
-  border-color: var(--warn, #ffb020);
+  background: var(--accent, #00e5ff);
+  border-color: var(--accent, #00e5ff);
   font-weight: 700;
 }
 
 .touchops__commit.is-busy {
-  color: var(--warn, #ffb020);
-  border-color: var(--warn, #ffb020);
+  color: var(--accent, #00e5ff);
+  border-color: var(--accent, #00e5ff);
 }
 
 /* The move needs HOSAKA: the button says so in Earth blue (palette EARTH) and
@@ -3501,6 +4493,26 @@ kbd {
 .touchops__cancel:active,
 .touchops__commit:active {
   transform: scale(0.95);
+}
+/* VIEW in the commit slot while there is nothing to commit (arkinox,
+   2026-10-10): yellow words on the resting button, and the armed yellow fill
+   while the free view is on. */
+/* HOP, the resting mode: blue words on the dark button, and nothing to do
+   but turn VIEW on. */
+.touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
+/* WALK: first person, every press a step. Red, lit, while it is on. */
+.touchops__commit.is-walk.is-on {
+  color: #05070d;
+  background: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  font-weight: 700;
+}
+.touchops__commit.is-view { color: var(--warn, #ffb020); border-color: rgba(255, 176, 32, 0.45); }
+.touchops__commit.is-view.is-on {
+  color: #05070d;
+  background: var(--warn, #ffb020);
+  border-color: var(--warn, #ffb020);
+  font-weight: 700;
 }
 
 /* ---------- Zoom-out hint ----------
@@ -3698,10 +4710,15 @@ kbd {
  * underneath them.
  */
 @media (min-width: 1101px) {
-  .touchpad,
-  .touchops,
-  .touchhint,
-  .routeov {
+  /* The pad, the commit block and the route overlay all read these. */
+  :root {
+    --controls-right: 332px;
+    --menu-left: 352px;
+    --menu-bottom: 14px;
+    --menu-size: 46px;
+  }
+
+  .touchhint {
     right: 332px;
   }
 
@@ -3714,12 +4731,6 @@ kbd {
     left: 352px;
   }
 
-  .hamburger-menu {
-    left: 352px;
-    bottom: 14px;
-    width: 46px;
-    height: 46px;
-  }
 
   /* The compass is top-right on every width now (the chat took the bottom
    * centre). Flush right on a desktop is underneath the 300px panel column,
@@ -3737,8 +4748,10 @@ kbd {
   /* The chat sits between the hamburger (352px in, 46px wide) and the pad
    * column (332px in from the right, 122px wide), never under either. The
    * chip centres on the scene, which is 10px right of the viewport's centre
-   * with 320px of panels on the left and 300px on the right. */
-  .chatdock {
+   * with 320px of panels on the left and 300px on the right.
+   * `.app` because the base `.chatdock` rule comes later in this file and
+   * its left and right won on source order, so the dock sat under both. */
+  .app .chatdock {
     left: 424px;
     right: 470px;
   }
@@ -3913,6 +4926,14 @@ kbd {
 
 /* A circle that stays legible over any terrain: its own ring in the target's
  * color and a dark halo. */
+/* Under an avatar drawn in the field: centered on it, just below its lowest
+ * point (Targets.tsx sets the top per frame; arkinox, 2026-10-11). */
+.target[data-under='yes'] .target__body {
+  left: 0;
+  translate: -50% 0;
+}
+.target[data-under='yes'] .target__text { align-items: center; }
+
 .target__body .pfp {
   border: 1px solid currentColor;
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
@@ -4081,6 +5102,139 @@ kbd {
   cursor: not-allowed;
 }
 
+.login__primary,
+.login__options,
+.login__qr-flow,
+.login__relay {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login__options { gap: 11px; }
+
+.login__options .login__act {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+}
+
+.login__act--primary {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.08);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+}
+
+.login__or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.login__or::before,
+.login__or::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: rgba(200, 245, 255, 0.1);
+}
+
+.login__qr-flow {
+  align-items: stretch;
+}
+
+.login__qr-instruction {
+  margin: 0 0 4px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.login__qr-link {
+  align-self: center;
+  display: block;
+  max-width: 100%;
+  padding: 8px;
+  border-radius: 7px;
+  background: #f4fbff;
+  line-height: 0;
+}
+
+.login__qr {
+  display: block;
+  width: min(264px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.login__waiting {
+  margin: 4px 0 6px;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.login__relay {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(200, 245, 255, 0.08);
+}
+
+.login__back {
+  align-self: center;
+  margin-top: 8px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.login__back:hover { color: var(--accent); }
+
+.login__backup-details {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(200, 245, 255, 0.08);
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.login__backup-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.login__backup-details[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login__backup-details[open] summary { margin-bottom: 4px; }
+
+/* In a column, .secret__act's flex: 1 took its height away (USE THIS RELAY,
+   ENCRYPT BACKUP); snocrash #37 fixed the same rule. */
+.login__qr-flow .secret__act,
+.login__backup-details > .secret__act { flex: none; width: 100%; }
+
 /* ---------- Hyperspace ---------- */
 
 /* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,
@@ -4105,7 +5259,15 @@ kbd {
   box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
   font-size: 9px;
   letter-spacing: 0.1em;
-  max-width: calc(100vw - 24px);
+  /* Stops short of the 3D compass, top right (84px at 12px in, plus an 8px
+     gap, from the stack's 8px left edge): a long VIEWING label ran under it
+     and covered its tap target (smoke test, 2026-10-16). */
+  max-width: calc(100vw - 112px);
+}
+@media (min-width: 1101px) {
+  /* Desktop: the stack starts 352px in, the 120px compass sits 332px in
+     from the right. */
+  .hyperbar { max-width: calc(100vw - 812px); }
 }
 
 .hyperbar__glyph {
@@ -4151,10 +5313,12 @@ kbd {
 }
 
 @media (max-width: 1100px) {
-  /* In the instrument stack now; nothing to reposition on a phone. */
-  .hyperbar {
-    margin-top: 6px;
-  }
+  /* No margin here. The bar floated on its own once and needed the nudge;
+     it lives in the instrument stack now, which spaces its children with
+     gap: 8px. The leftover margin added to that gap rather than replacing
+     it, so every .hyperbar chip sat 14px below its neighbour while the
+     chips that are not .hyperbar sat at 8, which is the uneven spacing
+     arkinox kept seeing under XOR BITS (2026-09-15). */
 
   .hyperbar__meta {
     white-space: normal;
@@ -4206,25 +5370,39 @@ kbd {
   white-space: nowrap;
 }
 
-/* The clear X docks onto SET DESTINATION's right edge as an attachment, so
-   the pair reads as one control and the X never floats on its own line. */
+/* A set destination (arkinox, 2026-10-15): the dead label naming the block,
+   and CLEAR DESTINATION as its own button beside it, wrapping under it when
+   the row is narrow. */
+.linescrub__dest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .linescrub__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
   line-height: 1;
   padding: 3px 7px;
-  border-radius: 0 5px 5px 0;
+  border-radius: 5px;
   color: var(--danger);
   background: transparent;
   border: 1px solid var(--danger);
-  border-left: 0;
   cursor: pointer;
   touch-action: none;
 }
 
-.linescrub__set--attached {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+/* Inactive, but a reading, not a faded button. */
+.linescrub__set.linescrub__set--attached:disabled {
+  opacity: 1;
+  color: #f7931a;
+  background: transparent;
 }
 
 /* The overlay reads as a ticket: FROM your station at the top, TO the block
@@ -4385,6 +5563,38 @@ kbd {
   background: #ffb04d;
 }
 
+/* RIDE HERE or RIDE VIA HOSAKA (arkinox, 2026-10-11): two full-width
+   choices, each with its price and wait; the profile's pick is filled. */
+.hyper__choice {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hyper__choicebtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  height: auto;
+  text-align: left;
+}
+
+.hyper__choicelabel {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.hyper__choicemeta {
+  flex: 0 1 auto;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hyper__btn--abort {
   color: #05070d;
   background: var(--danger);
@@ -4478,6 +5688,9 @@ kbd {
 .loot__top .avatars__when {
   margin-left: auto;
 }
+/* The cube before a bag's height and size, when its hider named the sector
+   (DiscoveredPanel row): the meta line's own color, on the baseline. */
+.loot__sector { display: inline-block; vertical-align: -2px; margin-right: 5px; }
 .loot__meta {
   margin-top: 2px;
   font-size: 9px;
@@ -4782,6 +5995,18 @@ kbd {
   border-color: rgba(255, 210, 125, 0.5);
 }
 
+/* Going Live: not a destruction, so not the red card. Green, the same green
+   the LIVE half of the switch lights up in and the same green a published
+   action wears in the chain panel. */
+.modal__card.golive {
+  border-color: rgba(82, 227, 159, 0.5);
+}
+
+.modal__card.golive .modal__confirm {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
 .modal__card.invoice {
   max-width: 360px;
   max-height: calc(100dvh - 32px);
@@ -5005,9 +6230,11 @@ kbd {
   color: var(--cloud, #ffd27d);
 }
 
-/* Loot: what a found bag holds, as glyphs; per-item actions in the record */
+/* Loot: what a found bag holds, one icon per kind; per-item actions in the record */
 .loot__kinds {
-  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .lootd__acts {
   display: flex;
@@ -5118,7 +6345,7 @@ kbd {
   font-size: 12px;
 }
 .comments__row { display: flex; justify-content: flex-end; gap: 6px; }
-.comments__empty, .comments__note { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
+.comments__empty { margin: 4px 0 0; font-size: 10px; letter-spacing: 0.05em; color: var(--dim); line-height: 1.4; }
 .comments__error { margin: 4px 0 0; font-size: 10px; color: #ff6b6b; }
 
 /* The avatar's price and, while it is mined, the progress: one dim line under the row. */
@@ -5248,11 +6475,16 @@ kbd {
   color: var(--dim);
 }
 
-.secrets__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
+/* Everything under the summary scrolls as one: two lists that each scrolled
+   inside the card would put a scroller in a scroller, which eats the drag
+   meant for the other. */
+.secrets__body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .secrets__list {
@@ -5266,6 +6498,59 @@ kbd {
   flex-direction: column;
   gap: 2px;
 }
+
+/* Inside that body the lists grow with their rows and the body scrolls.
+   Nearby Loot uses the same list on its own, where the list is the scroller. */
+.secrets__body .secrets__list {
+  overflow-y: visible;
+  flex: 0 0 auto;
+}
+
+/* Held keys and scanned places: a heading row, a line on what it is, the rows. */
+.secrets__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.secrets__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* RESCAN ALL: the control, what it asks, and what the last run found. */
+.secrets__rescan {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.secrets__rescan-go { flex: 0 0 auto; }
+
+.secrets__result {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #52e39f;
+}
+
+/* Where the keys are kept: green when the browser agreed to keep them. */
+.secrets__storage.is-safe { color: #52e39f; }
+.secrets__storage.is-risk { color: var(--warn); }
+
+/* Why a row's SCAN failed, on its own line under the row. */
+.secrets__row-error { padding: 0 4px 4px; list-style: none; }
+
+/* The next hundred rows of a long list. */
+.secrets__more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secrets__more .secret__act { flex: 0 0 auto; }
 
 .secrets__row {
   display: flex;
@@ -5469,6 +6754,52 @@ kbd {
   padding: 8px 12px;
 }
 
+/* Something was said while the dock stayed folded: a red dot on the chip's
+ * top right corner until the chat is opened (arkinox, 2026-10-07). The ring
+ * in the chip's own dark keeps it a dot over the border, not a blob. */
+.chatdock__dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 6px rgba(255, 59, 107, 0.6);
+  pointer-events: none;
+}
+
+/* A line that tags you, waiting (arkinox, 2026-10-13): an accent @ with the
+   count, where the plain dot sits, so a tag reads louder than chatter. */
+.chatdock__at {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #05070d;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(6, 14, 22, 0.9), 0 0 8px rgba(0, 229, 255, 0.7);
+  pointer-events: none;
+}
+
+/* The line a tag's notification brought into view, lit for a moment. */
+.chat__line.is-revealed {
+  animation: chat-reveal 1.6s ease-out;
+}
+@keyframes chat-reveal {
+  0%, 30% { background: rgba(0, 229, 255, 0.22); }
+  100% { background: transparent; }
+}
+
 .chatdock__badge {
   min-width: 16px;
   padding: 0 5px;
@@ -5480,13 +6811,272 @@ kbd {
   background: var(--accent, #00e5ff);
 }
 
+/* ---------- The star: CHAT's chip, off your avatar (StarChip.tsx) ----------
+ * The same chip in the same place, a star where the word was. Drawn at CHAT's
+ * 29px so it stays level with CONTROLS, but it takes a tap across 45px each
+ * way through the ::after below. Accent while empty (a live control, so not
+ * the dim a folded chip gets under aria-pressed=false); yellow once starred. */
+/* The star and GOAL as one group where the folded CHAT chip sits, centered
+ * together (arkinox, 2026-10-14). The group takes the chip's fixed place;
+ * the two chips inside sit in it like ordinary buttons. */
+.chatdock__chip.goalgroup {
+  padding: 0;
+  gap: 8px;
+  background: none;
+  border: 0;
+}
+.goalgroup > .chatdock__chip {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+}
+.chip.goalchip {
+  color: var(--accent, #00e5ff);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.chip.goalchip.is-set {
+  color: #7dffb0;
+  border-color: rgba(125, 255, 176, 0.6);
+  box-shadow: 0 0 10px rgba(125, 255, 176, 0.22);
+}
+.goalchip::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.goalbar { gap: 8px; }
+.goalbar .hyperbar__meta { white-space: normal; }
+.goalbar__clear { display: inline-flex; align-items: center; }
+
+.chip.starchip,
+.chip.starchip[aria-pressed='false'] {
+  color: var(--accent, #00e5ff);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.starchip::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.chip.starchip.is-starred {
+  color: #ffd84d;
+  border-color: rgba(255, 216, 77, 0.6);
+  box-shadow: 0 0 10px rgba(255, 216, 77, 0.22);
+}
+.starchip__glyph {
+  flex: none;
+  display: block;
+}
+/* Starring it: half a second of neon. The glyph glitches in from cyan to
+ * yellow, a ring pulses out from it, and a scanline sweeps the chip. */
+.starchip__glyph.is-lit {
+  animation: starchip-lit 520ms ease-out both;
+}
+.starchip__flare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.starchip__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  border: 1px solid #ffd84d;
+  box-shadow: 0 0 8px #ffd84d, inset 0 0 6px rgba(255, 216, 77, 0.6);
+  opacity: 0;
+  animation: starchip-ring 520ms ease-out both;
+}
+.starchip__scan {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.starchip__scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -45%;
+  height: 45%;
+  background: linear-gradient(to bottom, transparent, rgba(0, 229, 255, 0.5) 45%, rgba(255, 216, 77, 0.85) 52%, transparent);
+  animation: starchip-scan 420ms linear both;
+}
+@keyframes starchip-lit {
+  0% { transform: scale(0.6); opacity: 0.2; color: #00e5ff; }
+  16% { transform: scale(1.15) translateX(-1.5px); opacity: 1; color: #00e5ff; }
+  28% { transform: scale(1.15) translateX(1.5px); opacity: 0.35; }
+  40% { transform: scale(1.35); opacity: 1; filter: drop-shadow(0 0 6px #ffd84d); }
+  100% { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 3px rgba(255, 216, 77, 0.7)); }
+}
+@keyframes starchip-ring {
+  0% { transform: scale(0.4); opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes starchip-scan {
+  from { top: -45%; }
+  to { top: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .starchip__glyph.is-lit,
+  .starchip__ring,
+  .starchip__scan::before { animation: none; }
+  .starchip__flare { display: none; }
+}
+/* The toast's mark when a place was starred: the star, filled, in yellow. */
+.hyperbar__mark--star {
+  width: 18px;
+  height: 18px;
+  color: #ffd84d;
+}
+
+/* STARRED PLACES under RECENT (StarredPlaces.tsx): RECENT's own rows, the
+ * same classes at the same size, nothing added to their height (arkinox,
+ * 2026-10-07: "the starred places buttons are too fat"). The time floats to
+ * the right end of the first line; a long name wraps as RECENT's does. */
+.starred__empty {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.starred__when {
+  float: right;
+  margin-left: 8px;
+  font-size: 9px;
+  color: var(--dim);
+}
+/* The pencil and the check stand in the ×'s box, centered. */
+.starred__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+/* Renaming: the form is no box of its own, so its field and buttons sit in
+ * the row exactly where the place and its marks were. */
+.starred__rename {
+  display: contents;
+}
+.starred__editing {
+  cursor: text;
+  border-color: var(--accent, #00e5ff);
+}
+/* The name's text, editable: no box of its own, so the line is the row's. */
+.starred__input {
+  width: calc(100% - 36px);
+  height: 1.2em;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+}
+
+/* The nickname field over the star, once its flare is over (StarNickname.tsx).
+ * Centered on the star chip, just above it, over the pad. */
+.starname {
+  position: fixed;
+  bottom: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  width: min(320px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 216, 77, 0.55);
+  background: rgba(6, 14, 22, 0.92);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 16px rgba(255, 216, 77, 0.18);
+  animation: starname-in 160ms ease-out both;
+}
+@media (min-width: 1101px) {
+  .starname { left: calc(50% + 10px); }
+}
+.starname__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ffd84d;
+}
+.starname__row {
+  display: flex;
+  gap: 6px;
+}
+.starname__row .avatars__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.starname__skip {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 0 10px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border, #1d3547);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.starname__skip:hover { color: var(--fg); }
+@keyframes starname-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .starname { animation: none; }
+}
+
+/* The card a scene star opens (StarredPlaceCard.tsx): the modal, in the star's yellow. */
+.starcard {
+  border-color: rgba(255, 216, 77, 0.55);
+}
+.starcard .modal__title {
+  color: #ffd84d;
+}
+.starcard__meta {
+  margin: 0 0 6px;
+}
+.starcard__coord {
+  margin: 0 0 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.starcard__rename {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .chatdock {
   position: fixed;
   bottom: 14px;
   left: 84px;
   right: 152px;
   margin: 0 auto;
-  width: min(480px, 100%);
+  /* A cap, not a width. A width beat left and right whenever the gap between
+     them was under 480px, and the dock ran under the controls and the menu
+     button (from 641px, and on a desktop up to about 1370px). */
+  max-width: 480px;
   max-height: 33vh;
   z-index: 101;
   display: flex;
@@ -5631,6 +7221,64 @@ kbd {
 .chat__error { margin: 0; font-size: 9px; color: var(--danger); }
 .chat__status { margin: 0; font-size: 8px; letter-spacing: 0.14em; color: var(--dim); }
 
+/* Mentions (arkinox, 2026-10-11). A reference in a line reads as @Name in the
+ * accent; one naming you is brighter. A line that mentions you gets a faint
+ * tint and an accent rule on its left, no more. */
+.chat__mention { color: var(--accent, #00e5ff); }
+.chat__mention.is-me { font-weight: 600; }
+.chat__line.is-for-me {
+  margin: 0 -4px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.07);
+  box-shadow: inset 2px 0 0 var(--accent, #00e5ff);
+}
+
+/* The @ list: above the line, a few rows tall, big enough to tap. */
+.chat__picker {
+  list-style: none;
+  margin: 0;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  overscroll-behavior: contain;
+}
+.chat__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chat__pick:hover, .chat__pick.is-active { background: rgba(0, 229, 255, 0.12); }
+.chat__pickname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat__pickbot { flex: none; color: var(--accent, #00e5ff); }
+.chat__picktag { flex: none; font-size: 8px; letter-spacing: 0.14em; color: var(--dim); }
+.chat__pickempty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
 /* Under 1100px the pad column is the same width, but the menu button and the
  * dock fight for the bottom on a narrow phone: the dock takes the width and
  * sits above the button row. */
@@ -5640,6 +7288,7 @@ kbd {
     right: 10px;
     bottom: 80px;
     width: auto;
+    max-width: none;
     max-height: 38vh;
   }
 }
@@ -5692,21 +7341,28 @@ kbd {
 }
 
 /* ---------- Presence: who is in this sector ---------- */
-.presence { pointer-events: auto; flex-direction: column; align-items: stretch; gap: 0; }
+/* The pill's padding lives on the head, not on the pill, so that the whole
+ * pill is the button: with the padding on the pill, its rim looked like part
+ * of the button and did nothing, and only the words took the tap (arkinox,
+ * 2026-10-09). The open list and the explanation carry the same padding as
+ * margins, so nothing moved. The NEARBY chip shares this markup. */
+.presence { pointer-events: auto; flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
 .presence__head {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0;
+  width: 100%;
+  padding: 7px 8px 7px 12px;
   font: inherit;
   color: inherit;
+  text-align: left;
   background: transparent;
   border: 0;
   cursor: pointer;
 }
 .presence__list {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0 8px 7px 12px;
   padding: 6px 0 0;
   border-top: 1px solid var(--border);
   display: flex;
@@ -5751,7 +7407,7 @@ kbd {
 /* SCANNING, opened: what it is doing, in a few lines, and a mark that says
  * tapping the head closes it. */
 .presence__explain {
-  margin: 8px 0 0;
+  margin: 1px 8px 7px 12px;
   padding: 8px 0 0;
   max-width: 34ch;
   border-top: 1px solid var(--border);
@@ -5765,6 +7421,25 @@ kbd {
 
 /* The deploy bar's estimate and its ask: the key's cost, and the yes. */
 .deploybar__est { font-size: 10px; color: var(--dim); }
+
+/* SNAP TO EARTH and FINE ROTATION read the way the publish switch reads: two
+   states, the live one lit, so there is never a doubt which one is on. */
+.deploybar__toggle {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 4px 9px;
+  border-radius: 4px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.deploybar__toggle.is-on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 .deploybar__ask { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
 .deploybar__ask .deploybar__deploy { min-width: 0; }
 .deploybar__decline {
@@ -5786,13 +7461,20 @@ kbd {
 .loot__actions--one { grid-template-columns: 1fr; }
 .loot__actions .avatars__more { margin-top: 0; }
 .nearby__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
-.nearby__glyph { font-size: 14px; color: var(--accent, #00e5ff); }
+.nearby__glyph { color: var(--accent, #00e5ff); }
 .nearby__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .nearby__label { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nearby__meta { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 
 /* NEARBY: a chip that stays while anything decrypted is around you, glowing
  * like the find chip; the way to the list while the menu is locked. */
+/* The mark takes the label's colour, so a chip reads as one thing.
+   .presence__head inherits its colour from .hyperbar, which is the foreground
+   cyan, while .hyperbar__label is the bitcoin orange: the SCANNING chip came
+   out with an orange word and a cyan figure beside it (arkinox, 2026-09-15).
+   The two rules below have equal specificity, so the nearby override must stay
+   second; its chip is accent throughout, label included. */
+.presence .presence__head svg { color: #f7931a; }
 .nearby__chip .presence__head svg { color: var(--accent); }
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
@@ -5800,6 +7482,1695 @@ kbd {
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------------------
+   Sphere of interest follow-ups: the EARTH and REMOVE PIN keys.
+
+   Kept in one block at the end of the file on purpose. styles.css is touched
+   by more than one open branch at a time, and a block appended whole is a
+   trivial conflict to resolve compared with edits threaded through the
+   existing rules.
+
+   The pad's top row had two empty cells beside the cube. They are now the
+   pin key and the Earth key, so no key that a hand already knows the position
+   of has moved, and the pin cell simply stands empty while there is no pin.
+   --------------------------------------------------------------------------- */
+/* DOWN sits under UP, and the scale reads between the two keys that change
+   it. It used to be the other way round, with the scale marooned among the
+   direction keys and DOWN a row away from UP, which is the one pairing on the
+   pad a thumb expects without looking (arkinox, 2026-09-15). */
+.touchpad {
+  grid-template-areas:
+    "pin     earth cube"
+    "away    up    toward"
+    "left    down  right"
+    "zoomout hub   zoomin";
+}
+.touchpad--scale {
+  grid-template-areas:
+    "pin     earth cube"
+    "zoomout hub   zoomin";
+}
+/* No colour of its own, which is what the cube key has always looked like in
+   practice (see the note on --cube): these are the same kind of control, one
+   frames the whole space and the other the planet, and the glyph tells them
+   apart. */
+.touchpad__key--earth { grid-area: earth; }
+/* Amber, the pin's own colour in the scene (palette WARN), so the key and the
+   marker it removes are plainly the same thing. */
+.touchpad__key--pin {
+  grid-area: pin;
+  color: #ffe3b0;
+  background: rgba(255, 176, 32, 0.42);
+  border-color: rgba(255, 200, 110, 0.9);
+}
+.touchpad__key--pin:active { background: rgba(255, 190, 70, 0.8); border-color: #fff4e0; }
+
+
+/* ---------------------------------------------------------------------------
+   Taking a local key with you (LoginModal, lib/keyExport).
+   --------------------------------------------------------------------------- */
+.login__row { display: flex; gap: 6px; flex-wrap: wrap; }
+.login__backup {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--warn);
+  background: rgba(247, 147, 26, 0.06);
+  border: 1px solid rgba(247, 147, 26, 0.4);
+  border-radius: 6px;
+  padding: 8px;
+  resize: vertical;
+  word-break: break-all;
+}
+
+/* The way back out of face colours, in the object's stat line: a button that
+   reads as a sentence, because it is one. */
+.workshop__link {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+
+/* ---------- The palette, full screen ----------
+
+   A colour here is an index into a list of 256, so the thing worth looking at
+   is the list. The old wheel offered every colour a screen can make, which was
+   honest while a colour could be anything and became a lie the moment it could
+   not. This is full screen because 256 swatches large enough to hit with a
+   thumb do not fit anywhere else. */
+.palettes {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  background: rgba(3, 6, 12, 0.96);
+}
+.palettes__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.palettes__title { margin: 0; font-size: 11px; letter-spacing: 0.24em; color: var(--accent); font-weight: 600; }
+.palettes__sub { margin: 5px 0 0; font-size: 10px; line-height: 1.5; color: var(--dim); max-width: 60ch; }
+
+.palettes__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 4px; }
+.palettes__body button { touch-action: manipulation; }
+.palettes__band + .palettes__band { margin-top: 16px; }
+.palettes__band-title {
+  margin: 0 0 7px;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.palettes__band-title span { color: var(--dim); letter-spacing: 0.06em; margin-left: 8px; font-weight: 400; }
+
+/* Eight across, which is one hue ramp per row in the built-in, so the sheet is
+   read as ramps rather than scanned as a wall. */
+.palettes__grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.palettes__sw {
+  aspect-ratio: 1;
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #05070d;
+  -webkit-tap-highlight-color: transparent;
+}
+.palettes__sw.is-on { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+
+.palettes__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+}
+.palettes__label { font-size: 8px; letter-spacing: 0.16em; color: var(--dim); }
+.palettes__one { display: inline-flex; align-items: center; gap: 2px; }
+.palettes__one .workshop__mode em { font-style: normal; color: var(--dim); margin-left: 5px; }
+.palettes__name { flex: 1; min-width: 120px; }
+
+@media (min-width: 720px) {
+  .palettes__grid { grid-template-columns: repeat(16, 1fr); }
+  .palettes__sw { min-height: 34px; }
+}
+
+/* ---------- Profile modal (who you are, to everyone else) ---------- */
+.identity__acts { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+
+.modal__card.profile {
+  border-color: rgba(0, 229, 255, 0.5);
+  max-width: 460px;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.profile__banner {
+  height: 72px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.05) center / cover no-repeat;
+  border: 1px solid rgba(0, 229, 255, 0.18);
+}
+.profile__banner--empty {
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.profile__fields { gap: 10px; }
+.profile__fields .login__label { display: block; margin-bottom: 4px; }
+.profile__server { display: flex; flex-direction: column; gap: 6px; }
+.profile__select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+
+.profile__row { display: flex; align-items: center; gap: 8px; }
+.profile__row .login__input { flex: 1; }
+.profile__upload {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  border-radius: 3px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  cursor: pointer;
+}
+.profile__upload:hover:not(:disabled) { background: rgba(0, 229, 255, 0.16); }
+.profile__upload:disabled { opacity: 0.4; cursor: default; }
+
+.profile__textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 9px;
+  border-radius: 3px;
+  color: var(--fg);
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+}
+.profile__textarea:focus, .profile__select:focus { outline: none; border-color: rgba(0, 229, 255, 0.5); }
+
+.profile__status { margin: 12px 0 0; font-size: 10px; line-height: 1.5; color: var(--dim); overflow-wrap: anywhere; }
+.profile__status--ok { color: var(--ok); }
+.profile__status--err { color: var(--danger); }
+
+/* ---------- Object picker (STAMP > OBJECT) ---------- */
+.modal__card.objpick { border-color: rgba(0, 229, 255, 0.5); max-width: 440px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.objpick__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.objpick__row {
+  width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 8px 10px; border-radius: 5px; font-family: inherit; text-align: left; cursor: pointer;
+  color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.18);
+}
+.objpick__row:hover { border-color: rgba(0, 229, 255, 0.5); }
+.objpick__name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objpick__meta { font-size: 9px; letter-spacing: 0.08em; color: var(--dim); flex-shrink: 0; }
+.ws__slot { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; border-radius: 5px; font-family: inherit; cursor: pointer; color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px dashed rgba(0, 229, 255, 0.35); }
+.ws__slot.is-full { border-style: solid; }
+.ws__slot-name { font-size: 11px; }
+.ws__slot-meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
+
+/* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
+.modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.stash-modal .avatars__list { max-height: 55vh; overflow-y: auto; }
+.shards__type--bag { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; }
+.objpick__row:disabled { opacity: 0.45; cursor: default; }
+
+/* ---- The color corner and palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
+/* The selected point's coordinate, over the turn keys in the bottom-left
+   column (it stood on the end of the TOOLS row until the dropper beside the
+   colour chip needed that width on a phone). The corner is capped short of
+   the colour column, and the readout is the part that gives way, so the two
+   never meet. It takes no taps: the bench is underneath. */
+.ws__at {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* The three reaches, out of the folded column they used to sit in and standing
+   above the colour chip in their own right. Larger than they were, because they
+   are now a first-class control rather than a footer inside a panel. */
+.ws__acts {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+/* The bucket as a two-stage key while a face is in hand (FILL or SEAM): the
+   same dot the two-stage pad keys wear, and its question opens to the left,
+   since the column stands at the right edge. */
+.ws__act--two { position: relative; }
+.ws__act--two::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+.ws__act--two[aria-expanded='true']::after { background: var(--accent); }
+.benchpaste--right { left: auto; right: 0; bottom: 44px; }
+.ws__act {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 9px;
+}
+/* The chip and, to its left while one point or face is in hand, the dropper.
+   The reaches above set their dashed edge to the color in hand inline, so
+   the edge says what a press puts down; the dropper keeps the white edge,
+   since it takes a color rather than applying one. */
+.ws__chiprow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/*
+ * The palette folding back into the color chip that opened it.
+ *
+ * The distance and the scale come in as custom properties, because the chip
+ * sits in a corner that moves with the layout and its offset from the middle
+ * of the screen is not a constant. PaletteModal measures both rectangles and
+ * writes them here; the fallbacks are only so a missing measurement collapses
+ * in place rather than flying somewhere arbitrary.
+ *
+ * Ease-in, not ease-out. A thing being put away should gather speed as it
+ * goes; a thing arriving should shed it. Using the arriving curve to leave is
+ * the usual reason a dismissal feels reluctant.
+ *
+ * The opacity is held back briefly so the motion is read before it is gone. A
+ * fade that starts at once reaches nothing in particular.
+ *
+ * Specificity: 0,2,0 against .palettes and .modal at 0,1,0, so this wins from
+ * wherever it sits in the file.
+ */
+.palettes.is-folding {
+  transform: translate(var(--fold-x, 0px), var(--fold-y, 0px)) scale(var(--fold-scale, 0.08));
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: transform 190ms cubic-bezier(0.4, 0, 1, 1), opacity 150ms linear 40ms;
+}
+
+/* Belt and braces: the modal already closes outright when this is asked for. */
+@media (prefers-reduced-motion: reduce) {
+  .palettes.is-folding { transition: none; }
+}
+
+.palettes__paste {
+  flex: 1;
+  min-width: 140px;
+  resize: vertical;
+  font-family: var(--mono);
+  line-height: 1.45;
+}
+
+/* Its own line inside the wrapping footer, so the palette chips above it stay
+   on one row and the reference is wide enough to read. */
+.palettes__row { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; }
+.palettes__note { flex: 1 0 100%; margin: 0; font-size: 11px; line-height: 1.5; color: var(--dim); }
+
+/* The deploy bar's TURN row: three quarter-turn keys that read their angle, and RESET. */
+.deploybar__row--turn { flex-wrap: wrap; }
+.deploybar__turn { width: auto; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.deploybar__turn.is-on { color: var(--accent); border-color: var(--accent); }
+
+/* Leaving a key that exists only on this device. */
+.login__note--warn { color: var(--warn); }
+
+/* The chain explorer's way into an action's reactions and comments. */
+.explorer__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: none;
+}
+.explorer__comments:active { background: rgba(0, 229, 255, 0.2); }
+
+/* Reactions: one row per emoji and the faces who used it, then one-tap picks. */
+.reactions { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.reactions__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.reactions__row { display: flex; align-items: center; gap: 10px; }
+.reactions__glyph { width: 26px; flex-shrink: 0; text-align: center; font-size: 18px; line-height: 1; }
+.reactions__img { width: 22px; height: 22px; object-fit: contain; }
+.reactions__faces { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.reactions__more { font-size: 10px; color: var(--dim); }
+.reactions__pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.reactions__btn {
+  width: 38px;
+  height: 34px;
+  font-size: 17px;
+  line-height: 1;
+  border-radius: 8px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  cursor: pointer;
+}
+.reactions__btn.is-on { background: rgba(0, 229, 255, 0.2); border-color: var(--accent); }
+.reactions__btn:disabled { opacity: 0.5; cursor: default; }
+
+/* NOTIFICATIONS in the identity panel: a pulsing red dot while anything is unread. */
+.identity__row { display: flex; margin-top: 8px; }
+.identity__notif { position: relative; flex: 1; }
+.notif__dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3b5c;
+  box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.7);
+  animation: notif-pulse 1.6s ease-out infinite;
+}
+@keyframes notif-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.7); }
+  70% { box-shadow: 0 0 0 8px rgba(255, 59, 92, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .notif__dot { animation: none; } }
+
+/* The toast under XOR BITS. */
+.notif__toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+.notif__toast-glyph { font-size: 15px; line-height: 1; display: inline-flex; }
+.notif__icon { color: var(--accent); vertical-align: middle; }
+.notif__toast-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56vw; }
+
+/* The history modal. */
+.modal__card.notif { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+.notif__title { color: var(--accent); }
+.notif__scroll { overflow-y: auto; min-height: 0; flex: 1; }
+.notif__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.notif__row { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(200, 245, 255, 0.08); }
+.notif__glyph { width: 24px; flex-shrink: 0; text-align: center; font-size: 18px; line-height: 1.2; }
+.notif__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.notif__head { display: flex; align-items: center; gap: 6px; }
+.notif__who { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif__when { margin-left: auto; font-size: 9px; color: var(--dim); flex-shrink: 0; }
+.notif__verb { margin: 0; font-size: 10px; color: var(--dim); }
+.notif__words { margin: 0; font-size: 11px; line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
+.notif__words--sealed { color: var(--dim); font-style: italic; }
+.notif__view { align-self: flex-start; }
+.notif__end { padding: 12px 0; text-align: center; font-size: 9px; letter-spacing: 0.14em; color: var(--dim); min-height: 16px; }
+
+/* # beside the block rail, and the block number it asks for. */
+.linescrub__hash { display: inline-flex; align-items: center; justify-content: center; }
+.linescrub__hash.is-on { color: var(--accent); border-color: var(--accent); }
+.linescrub__goto { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.linescrub__goto-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 5px;
+}
+.linescrub__goto-note { flex: 1 0 100%; font-size: 9px; color: var(--warn); }
+
+/* ---------- Chain conflict prompt (a held chain met a chain on the relays) ---------- */
+/* A choice, not a destructive confirm: the accent border, and the lead answer
+ * (KEEP THE RELAY CHAIN) placed first even though it is the modal's confirm. */
+.modal__card.chainconflict {
+  width: min(480px, 100%);
+  border-color: rgba(255, 176, 32, 0.55);
+}
+
+.modal__card.chainconflict .modal__confirm {
+  order: -1;
+}
+
+/* Two chains side by side: a label column and one column per chain. The rows
+ * are display: contents so every cell sits on the one grid. Spans throughout,
+ * because it lives inside the modal's paragraph. */
+.chaincmp {
+  display: grid;
+  gap: 4px 10px;
+  margin: 12px 0;
+  padding: 8px;
+  font-size: 11px;
+  border: 1px solid rgba(200, 245, 255, 0.16);
+  border-radius: 6px;
+}
+
+.chaincmp__row {
+  display: contents;
+}
+
+.chaincmp__head {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--fg);
+}
+
+.chaincmp__label {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.chaincmp__cell {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* The chain panel's Published figure, past LIVE and LOCAL: held on this
+ * device, or LIVE with nothing reachable. Amber, because neither is a choice
+ * the person made and neither is working. */
+.relay--held,
+.relay--offline,
+.relay--norelay { color: var(--warn); }
+
+.notice--held {
+  color: var(--warn);
+  background: rgba(255, 176, 32, 0.08);
+  border-left-color: var(--warn);
+}
+
+/* The chain is broken before its head (ChainPanel): the base notice's red,
+ * with the warning glyph inline. */
+.notice--broken .chainrows__warn { vertical-align: -2px; }
+
+/* A game holds the avatar (store GAME_HOLDS_MESSAGE): not an alarm, a fact. */
+.notice--game {
+  color: var(--game);
+  background: rgba(255, 122, 217, 0.08);
+  border-left-color: var(--game);
+}
+
+.notice .tag--tap {
+  margin-left: 8px;
+}
+
+/* ---------- Chain status, under the LIVE/LOCAL switch (hud/ChainStatus.tsx) ---------- */
+/* The switch never changes; this strip slides in directly under it while
+ * there is something to report, and is not drawn otherwise. The commit block
+ * grows a row upward to hold it, so the pad above is lifted by the same
+ * 24px (the row and its gap) to keep its 8px clearance. */
+.touchops--status {
+  grid-template-rows: 40px 26px 20px;
+}
+
+.touchpad {
+  transition: bottom 160ms ease;
+}
+
+.touchpad.is-lifted {
+  bottom: 116px;
+}
+
+.chainstatus {
+  grid-column: 1 / -1;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 9px;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  animation: chainstatus-in 180ms ease-out;
+}
+
+/* A choice waiting on you is the loudest of them. */
+.chainstatus--conflict,
+.chainstatus--diverged {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+@keyframes chainstatus-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The explanation modals: long on purpose, so they scroll inside the card,
+ * and their paragraphs and lists get the spacing a <p> body never needed. */
+.modal__card.chainexplain {
+  width: min(480px, 100%);
+  border-color: rgba(255, 176, 32, 0.55);
+}
+
+.modal__body--scroll {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.chainexplain .modal__body p,
+.chainconflict .modal__body p {
+  margin: 0 0 10px;
+}
+
+.chainexplain .modal__body ul,
+.chainconflict .modal__body ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.chainexplain .modal__body li,
+.chainconflict .modal__body li {
+  margin-bottom: 4px;
+}
+
+.chainexplain .modal__body b,
+.chainconflict .modal__body b {
+  color: var(--fg);
+}
+
+/* ---- Switch, Checkbox and Field (hud/ui): shadcn's anatomy on Radix
+   primitives, in ONOSENDAI's own neon (arkinox, 2026-10-01). ---- */
+
+/* A control and its label on one row; the label flips the control. */
+.ui-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+.ui-field__text { display: flex; flex-direction: column; gap: 3px; cursor: pointer; padding-top: 1px; }
+.ui-field__label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg); }
+.ui-field__hint { font-size: 10px; line-height: 1.45; color: var(--dim); }
+
+/* The switch: a track with a thumb that slides right and lights when on. */
+.ui-switch {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-switch[data-state='checked'] {
+  background: rgba(0, 229, 255, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.35);
+}
+.ui-switch__thumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dim);
+  transform: translateX(2px);
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+/* The workshop's switches in its own green, the DEPLOY button's (arkinox,
+   2026-10-10). Two classes, to outrank the accent rules below. */
+.ui-switch.ui-switch--ok[data-state='checked'] {
+  background: rgba(82, 227, 159, 0.22);
+  border-color: var(--ok, #52e39f);
+  box-shadow: 0 0 10px rgba(82, 227, 159, 0.35);
+}
+.ui-switch.ui-switch--ok[data-state='checked'] .ui-switch__thumb { background: var(--ok, #52e39f); }
+.ui-switch[data-state='checked'] .ui-switch__thumb {
+  background: var(--accent);
+  transform: translateX(18px);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* The checkbox: a square with the accent check, the same glow when on. */
+.ui-checkbox {
+  all: unset;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(6, 14, 22, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: var(--bg);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-checkbox[data-state='checked'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+}
+.ui-checkbox__mark { display: inline-flex; }
+
+/* Keyboard focus shows; a tap does not leave a ring behind. */
+.ui-switch:focus-visible,
+.ui-checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-switch[data-disabled],
+.ui-checkbox[data-disabled] { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .ui-switch, .ui-switch__thumb, .ui-checkbox { transition: none; }
+}
+
+/* VIEW: what the scene draws, one switch to a row (hud/ViewPanel.tsx). The
+   last row's own margin would double the panel's bottom padding. */
+.panel--view .ui-field:last-child { margin-bottom: 2px; }
+
+/* The h of hX keeps its case under the field label's capitals. */
+.view__hx { text-transform: none; }
+
+/* The action in the title row, beside CANCEL: compact, never wrapping, the
+   title giving way first (arkinox, 2026-10-01). */
+.deploybar__head { gap: 6px; }
+.deploybar__head .deploybar__deploy {
+  flex-shrink: 0;
+  margin-top: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+/* Steppers inside the scrolling bar let the browser pan: a scroll that starts
+   on one stays a scroll (useRepeatable scrollSafe). */
+.deploybar__body .deploybar__btn { touch-action: pan-y; }
+/* The height row's note that the height was chosen to hold the model, and
+   the warning when no region up to the ceiling can. */
+.deploybar__fitnote { font-size: 9px; line-height: 1.45; color: var(--warn); }
+.deploybar__ask, .deploybar > .notice { flex-shrink: 0; }
+
+/* ---------- BUILD mode (hud/BuildBar.tsx, store/useBuilder.ts) ----------
+ * The free view's bar, grown to hold what the Builder needs: where the build
+ * cursor is, the cell size the zoom gives it, the plain statement that
+ * building does not move you, and what to place. White, the build cursor's
+ * color (lib/palette.ts BUILD), so it reads as neither a move nor a ride. */
+:root {
+  --build: #f2f7ff;
+}
+.hyperbar.buildbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 340px;
+  border-color: rgba(242, 247, 255, 0.55);
+  box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
+}
+.buildbar__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.buildbar__head .hyperbar__text {
+  flex: 1;
+}
+/* Three full axis values and a plane do not fit one line beside EXIT. */
+.buildbar .hyperbar__meta {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.buildbar__glyph,
+.buildbar .hyperbar__label {
+  flex: none;
+  color: var(--build);
+}
+.buildbar .hyperbar__end {
+  color: #05070d;
+  background: var(--build);
+  border-color: var(--build);
+}
+.buildbar .hyperbar__end:hover {
+  background: #ffffff;
+}
+.buildbar__warn {
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+}
+.buildbar__stop {
+  margin-left: 8px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: #05070d;
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  cursor: pointer;
+}
+/* The Builder's toast: its own mark and color, not HOSAKA's. */
+.hyperbar--buildtoast {
+  border-color: rgba(242, 247, 255, 0.55);
+  animation: none;
+}
+.hyperbar--buildtoast .hyperbar__label {
+  color: var(--build);
+}
+.toast__build {
+  flex: none;
+  color: var(--build);
+}
+/* WALK's stop: the walk's red, on the Builder's chip. */
+.hyperbar--walktoast .hyperbar__label,
+.toast__walk {
+  color: var(--danger);
+}
+/* The signer on another account: a warning, on the Builder's chip. */
+.hyperbar--signertoast .hyperbar__label,
+.toast__signer {
+  color: var(--warn);
+}
+.hyperbar--buildtoast .hyperbar__meta {
+  white-space: normal;
+  max-width: 320px;
+}
+.buildbar__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.buildbar__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--build);
+  background: transparent;
+  border: 1px solid rgba(242, 247, 255, 0.45);
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* One icon size on all three, at the text's cap height and a hair over. */
+.buildbar__icon {
+  flex: none;
+}
+.buildbar__act:hover:not(:disabled) {
+  background: rgba(242, 247, 255, 0.1);
+}
+.buildbar__act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.buildbar .explain {
+  letter-spacing: 0.04em;
+}
+.buildbar__explain {
+  margin: 0;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+@media (max-width: 1100px) {
+  /* Clear of the compass in the top right corner: the instrument stack sits
+     above it, so a full-width bar would cover it. */
+  .hyperbar.buildbar {
+    width: min(340px, calc(100vw - 112px));
+  }
+  /* EXPLAIN never covers a phone: it scrolls inside a third of the screen. */
+  .buildbar .explain__well {
+    max-height: 35vh;
+    overflow-y: auto;
+  }
+}
+
+/* WORKSHOP and BUILD side by side in the Stash panel. */
+.shards__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.shards__modes .shards__compose-open {
+  flex: 1;
+}
+.shards__build.is-on {
+  color: #05070d;
+  background: var(--build);
+  border-color: var(--build);
+}
+
+/* The wrench inside the Stash panel's BUILD control, on the text's line. */
+/* The icon before a stash button's label: one size for all six, large enough
+ * to read at the label's small type. The four composer buttons used text
+ * glyphs here until 2026-10-09, which drew at the label's size and were too
+ * small to read (arkinox). */
+.shards__build-icon {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+/* The one icon each kind of hidden thing wears in a row, a badge or a button
+ * (ItemIcon.tsx). It sits on the text's line a hair under the baseline, as
+ * the build icons do, and a flex row never squeezes it. Its color is the
+ * text's, through currentColor, so a row's color class is all it needs
+ * (arkinox, 2026-10-10: one lucide icon per kind, everywhere). */
+.item-icon {
+  flex: none;
+  vertical-align: -2px;
+}
+/* An item's own picture in its icon's place (ItemFace): at most 32 pixels a
+   side on the wire, drawn at the icon's size, so it is pixel art and is kept
+   crisp rather than blurred (arkinox, 2026-10-10). */
+.item-pic {
+  flex: none;
+  vertical-align: -2px;
+  image-rendering: pixelated;
+  border-radius: 2px;
+}
+/* The forge composer's PICTURE row: the preview at its own size inside a
+   32 by 32 well, then the buttons. */
+.compose__pic-box {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.18);
+}
+.compose__pic-preview {
+  image-rendering: pixelated;
+  border-radius: 2px;
+}
+
+/* PLACE OBJECT's empty state: the note, then the way to make a model. */
+.objpick__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* .secret__act grows along its row (flex: 1); in this column that squashed
+   its height, so it keeps the height every other action button has. */
+.objpick__workshop {
+  flex: none;
+  height: 34px;
+}
+/* PLACE OBJECT's sources, drawn once there is more than one (the Shard Feed, lists). */
+.objpick__tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.objpick__tab {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.objpick__tab.is-on {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/* ---------- A broken chain (hud/BrokenChain.tsx) ---------- */
+/* arkinox, 2026-10-07: an invalid chain stands frozen at its last valid
+ * position until a respawn. The notice is the loudest thing in the Proof
+ * chain panel, in the danger red, with the apology set apart from the
+ * facts, and RESPAWN as a real button rather than a tag. */
+.brokenchain {
+  margin: 10px 0 0;
+  padding: 10px 10px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: rgba(255, 59, 107, 0.1);
+  border: 1px solid rgba(255, 59, 107, 0.55);
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+}
+.brokenchain__title {
+  margin: 0 0 6px;
+  color: var(--danger);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+.brokenchain__line {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.brokenchain__line b { color: var(--danger); font-weight: 700; }
+.brokenchain__sorry {
+  margin: 8px 0 6px;
+  padding: 7px 8px;
+  color: var(--fg);
+  background: rgba(255, 176, 32, 0.08);
+  border-left: 2px solid var(--warn);
+}
+.brokenchain__sorry b { color: var(--warn); }
+.brokenchain__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.brokenchain__actions .tag--tap { margin-left: 0; }
+.brokenchain__respawn {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  cursor: pointer;
+}
+.brokenchain__respawn:hover { background: #ff5c84; }
+
+/* Inside the modal the notice needs no box of its own: the card is the box. */
+.modal__card.brokenchain__card {
+  width: min(480px, 100%);
+  border-color: rgba(255, 59, 107, 0.6);
+}
+.brokenchain__card .brokenchain {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+.brokenchain__card .modal__body p { margin: 0 0 10px; }
+.brokenchain__card .modal__body ul { margin: 0 0 10px; padding-left: 18px; }
+.brokenchain__card .modal__body li { margin-bottom: 6px; }
+
+/* The chip at the top of the instrument stack: the found chip's pill in red. */
+.hyperbar--broken {
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-color: rgba(255, 59, 107, 0.75);
+  box-shadow: 0 0 16px rgba(255, 59, 107, 0.3);
+}
+.hyperbar--broken .hyperbar__glyph,
+.hyperbar--broken .hyperbar__label { color: var(--danger); }
+.hyperbar--broken .hyperbar__meta { white-space: normal; }
+
+/* What an action claimed, where that is not where you stand (ChainExplorer). */
+.explorer__detail--claimed { color: var(--danger); opacity: 0.8; }
+
+.hyper__whybtn { margin-left: 8px; }
+
+/* An End of Chain entry in RECENT, kept until removed by hand (viewAt pinned). */
+.viewat__kept {
+  margin-left: 8px;
+  padding: 0 4px;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--danger);
+  border: 1px solid rgba(255, 59, 107, 0.55);
+  border-radius: 3px;
+}
+
+/* ---------- The Shard Feed (hud/FeedList.tsx, store/useFeed.ts) ----------
+ * Everyone's published objects: a picture, the name, who made it, and the
+ * buttons. Tight: one line each, the prose behind EXPLAIN. */
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.feed__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 55vh;
+  max-height: 55dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.feed__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid rgba(0, 229, 255, 0.16);
+}
+.feed__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: none;
+}
+button.feed__pick { cursor: pointer; }
+button.feed__pick:hover .feed__name { color: var(--accent); }
+.feed__thumb {
+  flex: none;
+  width: 80px;
+  height: 80px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.feed__thumb img {
+  width: 80px;
+  height: 80px;
+  display: block;
+}
+.feed__thumb-wait {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: feed-spin 0.9s linear infinite;
+}
+@keyframes feed-spin { to { transform: rotate(360deg); } }
+.feed__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.feed__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__by {
+  font-size: 10px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.feed__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Half the row each, stacking to full width when the tile is too narrow
+   for both labels on one line (arkinox, 2026-10-13). */
+.feed__act {
+  flex: 1 1 calc(50% - 3px);
+  min-width: 140px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  border-radius: 6px;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.feed__act:hover { background: rgba(0, 229, 255, 0.14); }
+.feed__end {
+  padding: 8px 4px;
+  font-size: 10px;
+  color: var(--dim);
+  text-align: center;
+  min-height: 12px;
+}
+.feed__refresh {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.feed__refresh:disabled { opacity: 0.4; cursor: default; }
+/* The one hidden canvas that draws every picture: off screen, never in the way. */
+.thumbstage {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 160px;
+  height: 160px;
+  pointer-events: none;
+}
+/* PLACE OBJECT's empty state: FEED and OPEN WORKSHOP side by side. */
+.objpick__emptyacts {
+  display: flex;
+  gap: 6px;
+}
+.objpick__emptyacts .objpick__workshop { flex: 1; }
+/* PLACE OBJECT's FEED EXPLAIN: three short lines. */
+.objpick__explain {
+  margin: 0;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* ---------------------------------------------------------------------------
+   Keys and chests (B1): the key line and chest block wherever found things
+   are listed (ItemRows), the FORGE A KEY and SEAL A CHEST composers, and the
+   LOOT panel's rows (InventoryPanel). Appended whole, per the note above. */
+.item__line { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.item__name { font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item__meta { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.item__held { font-size: 8px; letter-spacing: 0.14em; color: var(--ok); white-space: nowrap; }
+.chest { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.chest__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chest__act {
+  flex: none;
+  padding: 3px 9px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chest__act:hover { background: rgba(0, 229, 255, 0.16); }
+.chest__act:disabled { opacity: 0.45; cursor: default; }
+.chest__act.is-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: transparent; }
+.chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
+/* Why REMOVE FROM CHEST could not, under the item modal's actions. */
+.secret__status { margin: 6px 0 0; font-size: 10px; line-height: 1.4; color: var(--warn); }
+.chest__contents {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chest__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chest__glyph { flex: none; color: var(--accent); }
+.chest__glyph--key { color: #e8c547; }
+.chest__glyph--message { color: #ffd27d; }
+.chest__glyph--cashu { color: #f7931a; }
+.secret__badge--key { color: #e8c547; }
+.lootd__item--chest { align-items: flex-start; }
+/* The composers: a row of controls, the contents list, and the size meter. */
+.compose__row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.compose__row .avatars__input { flex: 1 1 auto; min-width: 0; }
+.compose__select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+.compose__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.compose__list .item__name { flex: 1 1 auto; }
+/* A shard aimed through the deploy bar: where it will stand is signed in. */
+.chest__aimed { flex: none; font-size: 8px; letter-spacing: 0.14em; color: var(--ok); white-space: nowrap; }
+.compose__pubkey { font-size: 9px; color: var(--dim); word-break: break-all; }
+.compose__meter { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
+.compose__meter.is-over { color: var(--warn); }
+/* LOOT: a held row is glyph, line, actions; DETAILS opens under all three. */
+.held__list { max-height: 40vh; overflow-y: auto; }
+.held__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.held__row .chest { grid-column: 2; }
+.held__acts { display: flex; gap: 4px; align-items: center; }
+.held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger, #ff5d5d); padding-left: 22px; }
+.held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
+.held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+.held__details dt { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); align-self: center; }
+.held__details dd { margin: 0; word-break: break-all; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.loot__paste { display: flex; gap: 6px; margin-top: 6px; }
+.loot__paste .avatars__input { flex: 1 1 auto; min-width: 0; }
+
+/* ---------- A render crash, shown where the modal was (CrashNote) ---------- */
+.modal__card.crash { max-width: 520px; }
+.crash__message { margin: 10px 0 0; font-size: 12px; color: var(--fg); overflow-wrap: anywhere; }
+.crash__stack {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 40vh;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--dim);
+  background: rgba(6, 14, 22, 0.6);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* AGENTS: a labeled COPY, then MY AGENTS rows of face, npub, TALK, SPECTATE. */
+.agents__invite { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.agents__invite .legend__label { margin: 0; flex: 1 1 auto; }
+.agents__row { grid-template-columns: 1fr auto auto auto; }
+.agents__npub { font-size: 9px; color: var(--dim); white-space: nowrap; }
+.agents__npub:hover { color: var(--accent); }
+.agents__talk { display: inline-flex; align-items: center; gap: 4px; position: relative; }
+/* The dot on the AGENTS title line sits in the line, after the word, so it
+ * shows with the panel folded and never covers the fold chevron or the grip
+ * (arkinox, 2026-10-11). The one on TALK keeps the corner NOTIFICATIONS uses. */
+.notif__dot.agents__dot { position: static; flex: 0 0 auto; width: 7px; height: 7px; }
+
+/* AGENTS TALK: one agent's private conversation (arkinox, 2026-10-10). A
+ * column that fits a phone: the STRATEGY line, the history (the one part
+ * that scrolls), the quick orders, the composer. */
+.modal__card.talk {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 460px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+.talk .login__head { margin-bottom: 0; }
+.talk__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.talk__title .badge { min-width: 0; }
+.talk__notice { margin: 0; }
+.talk__strategy {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 5px;
+}
+.talk__strategy .legend__label { margin: 0; }
+.talk__strategy-text {
+  font-size: 10px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 72px;
+  overflow-y: auto;
+}
+.talk__strategy-text.is-empty { color: var(--dim); }
+.talk__strategy-edit { grid-column: 1 / -1; }
+.talk__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 80px;
+  max-height: 40dvh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.talk__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 85%;
+  margin: 0 auto 6px 0;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(200, 245, 255, 0.05);
+  border: 1px solid rgba(200, 245, 255, 0.12);
+}
+.talk__msg--mine {
+  margin: 0 0 6px auto;
+  background: rgba(0, 229, 255, 0.07);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.talk__meta { font-size: 8px; letter-spacing: 0.12em; color: var(--dim); }
+.talk__text { font-size: 11px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Reactions under a message, and CLEAR HISTORY in the head (arkinox, 2026-10-12). */
+.talk__reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.talk__react { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 11px; line-height: 1.4; background: rgba(200, 245, 255, 0.06); border: 1px solid rgba(200, 245, 255, 0.18); border-radius: 9px; cursor: default; }
+.talk__clear { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 6px; white-space: nowrap; }
+/* COPY and SPEAK under an agent's message (arkinox, 2026-10-11). */
+.talk__acts { display: flex; gap: 6px; margin-top: 4px; }
+.talk__act { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-family: inherit; font-size: 8px; letter-spacing: 0.14em; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; cursor: pointer; }
+.talk__act:hover { background: rgba(0, 229, 255, 0.16); }
+.talk__act.is-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.talk__orders { display: flex; flex-wrap: wrap; gap: 6px; }
+.talk__orders .avatars__go,
+.talk__strategy .avatars__go,
+.talk__send { display: inline-flex; align-items: center; gap: 4px; }
+.talk__compose { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+.talk__compose .shards__textarea { resize: none; }
+.talk__send { height: 36px; }
+
+/* TAKEN: CLEAR ALL beside the heading, an X per row, and the moved notice (arkinox, 2026-10-11). */
+.held__takenhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.held__clear { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; opacity: 0.75; cursor: pointer; }
+.held__clear:hover, .held__clear:focus-visible { opacity: 1; }
+.held__row--moved { grid-template-columns: 1fr; }
+.held__moved { color: var(--ok); letter-spacing: 0.14em; font-size: 10px; padding: 8px 0; }
+
+/* ---------- A person's card, from a tap on their avatar (PersonModal; arkinox, 2026-10-11) ---------- */
+.person .secret__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.person__bot {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: #05070d;
+  background: var(--accent);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.person__npub { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.person__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  cursor: pointer;
+}
+.person__operator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+.person__talk { margin-left: auto; flex: 0 0 auto; }
+.person__operator-name {
+  font-size: 11px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person__avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 14px;
+  padding: 8px 12px 10px;
+  background: rgba(0, 229, 255, 0.06);
+  border-radius: 6px;
+}
+.shardspin { max-width: 100%; }
+
+/* SET UP DM INBOX (arkinox, 2026-10-13): the button under NO DM INBOX in
+   TALK and on the AGENTS panel, and the relay list in its confirmation. */
+.talk__setup { display: flex; }
+.dminbox__relays { margin: 4px 0 8px; padding-left: 16px; overflow-wrap: anywhere; }
+.dminbox__relays code { font-size: 11px; }
+.agents__inbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+/* BETA beside the AGENTS title: an amber tag, so it reads as a status, not a control. */
+.tag--beta { margin-left: 6px; color: #ffbf3c; border-color: rgba(255, 191, 60, 0.6); cursor: help; font-size: 9px; vertical-align: middle; }
+.agents__login { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agents__login .notice { margin: 0; }
+
+/* ---------- Pad mode tint ----------
+ *
+ * The keys wear the mode they are in (arkinox, 2026-10-13): HOP blue, VIEW
+ * yellow, WALK red, over the same dark ground, so what a press will do is
+ * readable before it is pressed. A tint layered as an image over the key's
+ * own background, and not while pressed, so the pressed flash is unchanged. */
+.touchpad--mode-hop .touchpad__key:not(:active),
+.touchops--mode-hop .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(0, 229, 255, 0.09), rgba(0, 229, 255, 0.09));
+}
+.touchpad--mode-view .touchpad__key:not(:active),
+.touchops--mode-view .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
+  border-color: rgba(255, 176, 32, 0.35);
+}
+.touchpad--mode-walk .touchpad__key:not(:active),
+.touchops--mode-walk .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
+  border-color: rgba(255, 59, 107, 0.4);
+}
+
+/* ---------- LOSING SYNC ----------
+ *
+ * WALK three or more steps ahead of its proofs (hud/SyncWarning.tsx). Dead
+ * centre, over the scene and under nothing a finger needs: it takes no
+ * pointer events at all. In at a quarter second, out in a tenth, so catching
+ * up clears it at once. */
+.syncwarn {
+  /* After v1's derezz warning (ONOSENDAI v1 109540f, DerezzWarning.tsx):
+     a 16:9 black panel in a thick hazard frame of 45 degree red and black
+     stripes, the text centered in red Krypton. Built from gradients rather
+     than v1's PNG so it is crisp at any size, and compact so it covers
+     little of the scene. The frame is about 1/13 of the width, the stripes
+     as wide as the gaps, and they crawl slowly, like WALK's walls. */
+  --syncwarn-w: min(360px, 80vw);
+  --syncwarn-band: calc(var(--syncwarn-w) * 0.05);
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  pointer-events: none;
+  box-sizing: border-box;
+  width: var(--syncwarn-w);
+  aspect-ratio: 16 / 9;
+  padding: calc(var(--syncwarn-w) / 13);
+  background: repeating-linear-gradient(135deg, #ff2323 0 var(--syncwarn-band), #000 var(--syncwarn-band) calc(var(--syncwarn-band) * 2));
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.syncwarn.is-on {
+  opacity: 1;
+  transition: opacity 250ms ease-in;
+  /* One stripe period along x is the band pair over sin 45: the loop is seamless. */
+  animation: syncwarn-crawl 4s linear infinite;
+}
+@keyframes syncwarn-crawl {
+  to { background-position: calc(var(--syncwarn-band) * 2 * 1.41421356) 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .syncwarn.is-on { animation: none; }
+}
+.syncwarn__panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: #ff2323;
+  font-family: 'Monaspace Krypton', var(--mono);
+  text-align: center;
+  text-shadow: 0 0 10px rgba(255, 35, 35, 0.5);
+}
+.syncwarn__title {
+  font-size: calc(var(--syncwarn-w) * 0.05);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.syncwarn__sub {
+  font-size: calc(var(--syncwarn-w) * 0.032);
+  letter-spacing: 0.16em;
+  opacity: 0.85;
+}
+
+/* ---- /demo tour (hud/DemoCoach.tsx, arkinox 2026-10-14) ----
+   The one place with paragraphs on screen, and only under /demo. Top
+   center, above the instrument stack (102) and below modals (300); the
+   stack moves down by the panel's height while the tour runs. */
+:root[style*="--demo-coach-h"] .instruments { top: calc(20px + var(--demo-coach-h)); }
+:root[style*="--demo-coach-c"] .compass-3d { top: calc(20px + var(--demo-coach-c)); }
+.demo {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 16px));
+  /* About a third of the screen (arkinox, 2026-10-15): the body scrolls
+     inside, and the instruction, SPAWN and BACK / NEXT stay pinned below it. */
+  max-height: 35vh;
+  max-height: 35dvh;
+  overflow: hidden;
+  z-index: 150;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  padding: 10px 12px 10px;
+  color: var(--fg);
+  font-family: var(--mono);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.demo__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
+.demo__head, .demo__bar-track, .demo__wait, .demo__foot { flex: 0 0 auto; }
+.demo__mode { color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-size: 9px; letter-spacing: 0.12em; }
+.demo__mode.is-live { color: #ff5470; border-color: #ff5470; }
+/* A step's highlight (DemoScene.highlight): a ring pulsing out of the control. */
+.demo-pulse { animation: demo-pulse 1.4s ease-out infinite; }
+@keyframes demo-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.75); }
+  100% { box-shadow: 0 0 0 16px rgba(0, 229, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-pulse { animation: none; box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.85); }
+}
+.demo--min { flex-direction: row; align-items: center; padding: 6px 8px; gap: 6px; overflow: hidden; }
+.demo__head { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.08em; }
+.demo__tag { color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: 0.12em; font-size: 9px; }
+.demo__chapter { color: var(--accent); text-transform: uppercase; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demo__progress { color: var(--dim); font-variant-numeric: tabular-nums; }
+.demo__icon { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 5px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.demo__icon:disabled { opacity: 0.35; cursor: default; }
+.demo__bar-track { height: 2px; background: rgba(0, 229, 255, 0.12); border-radius: 1px; overflow: hidden; }
+.demo__bar-fill { height: 100%; background: var(--accent); transition: width 0.25s ease; }
+.demo__title { margin: 0; font-size: 15px; font-weight: 600; color: var(--fg); }
+.demo__caption { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg); }
+.demo__wait { font-size: 11px; color: #ffd84d; letter-spacing: 0.04em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.demo__btn.demo__btn--spawn { flex: 0 0 auto; padding: 0 16px; color: var(--bg); background: #ff2323; border-color: #ff5470; }
+.demo__wait.is-done { color: #5ef0a0; }
+.demo__panel { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 11px; }
+.demo__json { margin: 0; overflow-x: auto; font-size: 10px; line-height: 1.45; color: var(--fg); white-space: pre; }
+.demo__note { color: #ffd84d; margin-bottom: 6px; }
+.demo__checks { display: flex; flex-direction: column; gap: 4px; }
+.demo__checks code, .demo__list code, .demo__kinds code { color: var(--accent); }
+.demo .is-ok { color: #5ef0a0; }
+.demo .is-bad { color: #ff5470; }
+.demo__dim { color: var(--dim); }
+.demo__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.demo__kinds { border-collapse: collapse; width: 100%; }
+.demo__kinds td { padding: 3px 6px 3px 0; vertical-align: top; }
+.demo__finish { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.demo__link { color: var(--accent); }
+.demo__foot { display: flex; gap: 6px; }
+.demo__btn {
+  flex: 1 1 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 8px;
+  font-family: inherit; font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--accent); background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 6px; cursor: pointer;
+}
+.demo__btn:disabled { opacity: 0.35; cursor: default; }
+.demo__btn.is-on { background: rgba(0, 229, 255, 0.2); }
+.demo__btn--next { color: var(--bg); background: var(--accent); }
+.demo__btn--next.is-skip { color: var(--accent); background: rgba(0, 229, 255, 0.06); }
+.demo__btn--live { flex: 0 0 auto; color: #fff; background: #c4203a; border-color: #ff5470; padding: 0 14px; }
+.demo__bar { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; background: none; border: none; color: var(--fg); font-family: inherit; font-size: 11px; cursor: pointer; text-align: left; padding: 0; }
+.demo__bartitle { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The question under the wordmark: a face, a bubble, a link to the answers.
  * Left-aligned in the panel, the face on the panel's left edge, where it

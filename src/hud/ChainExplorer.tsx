@@ -12,54 +12,144 @@
  * space, not a fact you look up. Its heading is the chip that folds it away.
  *
  * Off the head the controls are withdrawn, because nothing in history is a
- * place you can move from; LATEST brings them back. It says LATEST, not LIVE,
+ * place you can move from; LATEST brings them back.
+ *
+ * In BUILD mode it aims the build cursor instead (arkinox, 2026-10-08): a
+ * step puts the build cursor on that action's place, in its plane, and the
+ * scene stays on the build cursor rather than going into history, so the
+ * mark is the Builder's `scrub` and nothing is withdrawn (store/useBuilder.ts
+ * walkChain). It says LATEST, not LIVE,
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
+ *
+ * The chip also reports what a fold from another device did to your chain:
+ * actions it brought, actions it dropped, and in its own words the case a
+ * count hides, a chain replaced by a newer spawn (arkinox, 2026-10-01). A
+ * fork is not reported here: it ends the whole chain (spec §8.7.3 rule 4,
+ * arkinox 2026-10-08), and the broken-chain notice says so. They stay
+ * here, on the chain's own chip, rather than under the LIVE/LOCAL switch:
+ * they report something that already happened to the chain, while the
+ * strip there reports a publishing state that is still in force.
+ *
+ * COMMENTS (N), with a speech-bubble icon, opens the reactions and public comments on the action
+ * under the mark (ActionModal; arkinox, 2026-09-28). The count is asked for
+ * once the mark rests, not per step of a scrub.
+ *
+ * A game's bracket is walked like any other stretch of the chain (spec
+ * §8.11): its ticks on the rail are pink, its actions are labelled as the
+ * game's, and the place each one has inside the game is shown apart from
+ * the coord, which stays where the identity entered. An action this client
+ * does not recognize is a short quiet tick, labelled SKIPPED (§8.9).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound } from 'lucide-react'
+import { MessageCircle, TriangleAlert } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
+import { actionKind, actionLabel } from '../lib/events'
+import { nip19 } from 'nostr-tools'
+import { ConfirmModal } from './ConfirmModal'
+import { useActionComments } from '../hooks/useSocial'
+import { countComments } from '../lib/comments'
+import { ACTION_KIND } from '../lib/social'
+import { useSocialUi } from '../store/useSocialUi'
+import { useEscape } from '../hooks/useEscape'
+import { useChainUi } from '../store/useChainUi'
+import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
+
+// Spectating opens the chain explorer: the chain is the thing you came to
+// look at. What you had it set to is put back when the spectation ends, and
+// switching from one avatar to another keeps the first setting.
+let openBefore: boolean | null = null
+useCyberspace.subscribe((s, prev) => {
+  if ((s.spectate === null) === (prev.spectate === null)) return
+  const ui = useChainUi.getState()
+  if (s.spectate) {
+    openBefore = ui.explorerOpen
+    ui.setExplorerOpen(true)
+  } else if (openBefore !== null) {
+    ui.setExplorerOpen(openBefore)
+    openBefore = null
+  }
+})
 
 /** Past this many actions the rail stops drawing a tick per action. */
 const MAX_TICKS = 96
 
+/** How long the mark rests on an action before its comments are counted. */
+const COUNT_AFTER_MS = 450
+
+/** How long an adoption stays on the chip: long enough to explain the move it caused. */
+const ADOPTED_MS = 8000
+
 export function ChainExplorer(): JSX.Element {
   const events = useCyberspace((s) => s.events)
+  const fork = useCyberspace((s) => s.forkNotice)
+  const [showFork, setShowFork] = useState(false)
+  // An adoption explains itself and goes; a drop is work that vanished and
+  // stays on the chip until somebody reads it.
+  const [fresh, setFresh] = useState(true)
+  useEffect(() => {
+    if (!fork || fork.dropped > 0) { setFresh(true); return }
+    setFresh(true)
+    const t = window.setTimeout(() => setFresh(false), ADOPTED_MS)
+    return () => window.clearTimeout(t)
+  }, [fork])
   const spectate = useCyberspace((s) => s.spectate)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
+  // In BUILD mode the mark is the action the build cursor was last aimed at.
+  const building = useBuilder((s) => s.active)
+  const scrub = useBuilder((s) => s.scrub)
   // Parsed once per chain change; the store caches, this just subscribes.
   const actions = useMemo(() => useCyberspace.getState().focusChain(), [events, spectate])
   const last = actions.length - 1
-  const index = exploreIndex ?? last
+  const marked = building ? scrub : exploreIndex
+  const index = marked === null ? last : Math.min(marked, last)
   const action = actions[index]
-  const atHead = exploreIndex === null
+  const atHead = marked === null
   const secretKeys = useSecrets((s) => s.keys)
   const key = useMemo(
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
     [action, actions, index, secretKeys],
   )
 
+  // The action the mark has rested on, and its comment count.
+  const [settled, setSettled] = useState<string | null>(null)
+  useEffect(() => {
+    const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
+    return () => window.clearTimeout(t)
+  }, [action?.id])
+  const counted = useActionComments(action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
+  const commentCount = action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
+  // Counted again when the modal closes: something may have been said there.
+  const modalOpen = useSocialUi((s) => s.action !== null)
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (wasOpen.current && !modalOpen) counted.refresh()
+    wasOpen.current = modalOpen
+    // counted.refresh is a fresh closure each render; the transition is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen])
+
   // Minimized by default: the chip alone reads "CHAIN n/N", and the panel
   // opens on a tap when you actually want to walk the chain.
-  const [open, setOpen] = useState(false)
-  // Spectating opens it: the chain is the thing you came to look at. What you
-  // had it set to is put back when spectation ends.
-  const openBefore = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (spectate) {
-      if (openBefore.current === null) { openBefore.current = open; setOpen(true) }
-    } else if (openBefore.current !== null) {
-      setOpen(openBefore.current)
-      openBefore.current = null
-    }
-    // `open` is read once, at the moment spectation starts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spectate !== null])
+  // In useChainUi, so the Chain panel's ACTIONS tag can open it too.
+  const open = useChainUi((s) => s.explorerOpen)
+  const setOpen = (next: boolean | ((was: boolean) => boolean)): void => {
+    const ui = useChainUi.getState()
+    ui.setExplorerOpen(typeof next === 'function' ? next(ui.explorerOpen) : next)
+  }
+  // The open body is a chip on the Escape stack (arkinox, 2026-10-01). Not
+  // while there are no actions: then nothing but the chip is drawn.
+  useEscape('chip', open && actions.length > 0, () => setOpen(false))
+  // Spectating opens it, and what you had it set to comes back when the
+  // spectation ends: kept at module scope (below the imports), so a remount
+  // of the instrument stack (a deploy, the phone's menu) neither forgets nor
+  // repeats it.
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
@@ -68,8 +158,8 @@ export function ChainExplorer(): JSX.Element {
   }, [])
 
   const bind = useRepeatable()
-  const go = (i: number | null): void => useCyberspace.getState().explore(i)
-  const step = (d: number) => () => useCyberspace.getState().exploreStep(d)
+  const go = walkChain
+  const step = (d: number) => () => stepChain(d)
 
   // The rail: press or drag anywhere on it to land on the nearest action.
   const rail = useRef<HTMLDivElement>(null)
@@ -89,18 +179,95 @@ export function ChainExplorer(): JSX.Element {
 
   return (
     <div className="explorer">
-      <button
-        className="chip explorer__toggle"
-        {...noCallout}
-        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
-        aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
-        aria-pressed={open}
-      >
-        CHAIN {index + 1}/{actions.length}{atHead ? '' : ' HISTORY'}
-      </button>
+      {/* The chain is the thing that forks, so the chain's own chip is where a
+          fork is reported: what another device added, and what it cost. */}
+      {fork && fork.replaced ? (
+        // The case the generic counts used to hide: the whole chain
+        // superseded by a newer spawn (arkinox, 2026-10-01). It stays on the
+        // chip until read, like any drop.
+        <button
+          className="chip explorer__toggle explorer__toggle--dropped"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label="Your chain was replaced by a new spawn from another device. Tap to read why."
+        >
+          CHAIN REPLACED BY A NEW SPAWN
+        </button>
+      ) : fork && fork.dropped > 0 ? (
+        <button
+          className="chip explorer__toggle explorer__toggle--dropped"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
+        >
+          {fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED
+        </button>
+      ) : fork && fork.adopted > 0 && fresh ? (
+        <button
+          className="chip explorer__toggle explorer__toggle--adopted"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
+          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
+        >
+          {fork.adopted} FROM ANOTHER DEVICE
+        </button>
+      ) : (
+        <button
+          className="chip explorer__toggle"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
+          aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          aria-pressed={open}
+        >
+          CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}
+        </button>
+      )}
+
+      {showFork && fork && (fork.replaced ? (
+        <ConfirmModal
+          title="Your chain was replaced by a new spawn from another device"
+          cardClassName="chainexplain"
+          scroll
+          body={<>
+            <p><b>What happened:</b> another device signed in as you published a new spawn. A spawn is the first event of a chain: it places your identity at the coordinate your public key decodes to. The protocol places every identity by its newest spawn (spec §3.2), so the chain that new spawn starts is now your chain, for every reader and on this device. Your avatar moved to where that chain puts you.</p>
+            <p><b>Why the other device did it:</b> usually one of two things. Either it respawned, which starts a new chain on purpose, or it had started a chain before it could confirm whether this identity already had one (offline, or the relays did not answer) and, when it found this chain, its user chose to keep its own chain and publish it.</p>
+            <p><b>What happened to your previous chain:</b> its {fork.dropped} action{fork.dropped === 1 ? '' : 's'} on this device {fork.dropped === 1 ? 'is' : 'are'} no longer part of your chain. The ones that were published stay on the relays as history, but they no longer place you. Anything you paid HOSAKA for on that chain was spent. Region keys those moves found stay in your Secrets.</p>
+            <p><b>What this device did by itself:</b> it adopted the new chain without asking, because a newer spawn from your own identity on a chain this device had already confirmed is a legitimate change made by you on another device.</p>
+            <p><b>What you can do:</b> nothing is required; your next move continues the new chain. If you did not respawn or choose to keep another chain on any of your devices, someone else may be using this identity's key.</p>
+          </>}
+          confirmLabel="UNDERSTOOD"
+          cancelLabel={null}
+          danger={false}
+          onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+          onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+        />
+      ) : (
+        <ConfirmModal
+          title={fork.dropped > 0 ? 'Some of your actions left the chain' : 'Another device moved you'}
+          body={fork.dropped > 0 ? (<>
+            One identity has one chain, however many devices you are signed in
+            on. What another device of yours published left{' '}
+            {fork.dropped} action{fork.dropped === 1 ? '' : 's'} taken on this
+            device out of the chain. Anything you paid HOSAKA for on {fork.dropped === 1 ? 'it' : 'them'} was spent.
+            <br /><br />
+            Two devices acting from the same point would fork the chain, and a
+            fork ends the whole chain for every reader, so act on one device at
+            a time.
+          </>) : (<>
+            {fork.adopted} action{fork.adopted === 1 ? '' : 's'} arrived from
+            another device signed in as you, which is why your avatar moved on
+            its own. Nothing of yours was lost.
+          </>)}
+          confirmLabel="UNDERSTOOD"
+          cancelLabel={null}
+          danger={false}
+          onConfirm={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+          onCancel={() => { setShowFork(false); useCyberspace.getState().clearForkNotice() }}
+        />
+      ))}
 
       {open && action && (
-        <div className={`explorer__body ${atHead ? '' : 'is-history'}`}>
+        <div className={`explorer__body ${atHead || building ? '' : 'is-history'}`}>
           <div className="explorer__row">
             <button className="explorer__btn" title="Spawn (Home)" aria-label="Go to spawn" disabled={index === 0} {...noCallout}
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(0) }}>|◀</button>
@@ -127,9 +294,13 @@ export function ChainExplorer(): JSX.Element {
             >
               <span className="explorer__line" />
               <span className="explorer__walked" style={{ width: `${fraction * 100}%` }} />
-              {ticks.map((t, i) => (
-                <span key={i} className={`explorer__tick ${i === 0 ? 'explorer__tick--spawn' : ''}`} style={{ left: `${t * 100}%` }} />
-              ))}
+              {ticks.map((t, i) => {
+                const role = actions[i]?.role
+                const kind = i === 0 ? 'explorer__tick--spawn'
+                  : role === 'enter' || role === 'virtual' || role === 'exit' ? 'explorer__tick--game'
+                  : role === 'skipped' || role === 'broken' || actions[i]?.breaks !== undefined ? 'explorer__tick--quiet' : ''
+                return <span key={i} className={`explorer__tick ${kind}`} style={{ left: `${t * 100}%` }} />
+              })}
               <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
             </div>
 
@@ -139,7 +310,7 @@ export function ChainExplorer(): JSX.Element {
           </div>
 
           <div className="explorer__meta">
-            <span className={`explorer__type explorer__type--${action.type}`}>{action.type.toUpperCase()}</span>
+            <span className={`explorer__type explorer__type--${actionKind(action)}`} title={action.breaks ?? action.name}>{actionKind(action) === 'broken' && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}{actionLabel(action)}</span>
             <span className="explorer__when" title={formatStamp(action.createdAt)}>{formatAgo(action.createdAt, now)}</span>
             {/* A hop computes the region's Cantor root, which is the key to what
                 is hidden there; a sidestep computes no root at all. */}
@@ -150,7 +321,7 @@ export function ChainExplorer(): JSX.Element {
                   ? `This hop yielded the key to its 2^${key.height} region, and you still hold it.`
                   : `This hop yielded the key to its 2^${key.height} region. It is not in your Secrets list.`}
               >
-                <KeyRound size={11} strokeWidth={2.25} aria-hidden />2^{key.height}
+                <ItemIcon type="key" size={11} />2^{key.height}
               </span>
             )}
             {atHead ? (
@@ -169,11 +340,35 @@ export function ChainExplorer(): JSX.Element {
           <div className="explorer__detail" title={action.sector}>
             <span className="explorer__key">sector </span>{action.sector}
           </div>
+          {/* Inside a game the coord above is where the identity entered from
+              and still is; this is where the action puts it in the game. */}
+          {(action.role === 'enter' || action.role === 'virtual') && action.declared && (
+            <div className="explorer__detail explorer__detail--game" title={action.declared.coordHex}>
+              <span className="explorer__key">in game </span>{shortHex(action.declared.coordHex, 8, 6)}
+            </div>
+          )}
+          {/* Not a game's: what the action itself claimed, where that is not
+              where you stand. A skipped action's C, and every action from the
+              first broken one on, where you are frozen at the last valid
+              position (arkinox, 2026-10-07). */}
+          {action.role !== 'enter' && action.role !== 'virtual' && action.declared && (
+            <div className="explorer__detail explorer__detail--claimed" title={action.declared.coordHex}>
+              <span className="explorer__key">claimed </span>{shortHex(action.declared.coordHex, 8, 6)}
+            </div>
+          )}
+          {action.game && (
+            <div className="explorer__detail explorer__detail--game" title={nip19.npubEncode(action.game.pubkey)}>
+              <span className="explorer__key">game </span>{shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)}
+            </div>
+          )}
           {action.proofHash && (
             <div className="explorer__detail" title={action.proofHash}>
               <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}
             </div>
           )}
+          <button className="explorer__comments" {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useSocialUi.getState().openAction(action) }}
+          ><MessageCircle size={11} strokeWidth={2.25} aria-hidden />Comments{commentCount === null ? '' : ` (${commentCount})`}</button>
         </div>
       )}
     </div>

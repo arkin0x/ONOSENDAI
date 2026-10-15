@@ -7,13 +7,17 @@
  * moved lately or is not on this relay's feed at all. Your own key is listed
  * when it has published, marked YOU, since spectating yourself is just being
  * here. The panel shows the five newest; VIEW MORE opens the whole list in an
- * overlay that scrolls, so the menu column stays short.
+ * overlay that scrolls, so the menu column stays short. The list is kept by
+ * store/useRoster.ts, so closing the menu loses nothing and a reload paints
+ * the kept list at once; UPDATING shows while the relays are being asked for
+ * what is newer.
  */
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRecentAvatars, type RecentAvatars } from '../hooks/useRecentAvatars'
 import { parsePubkey } from '../lib/chains'
+import { actionKind, actionLabel } from '../lib/events'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { spectate } from '../lib/spectator'
 import { ProfileBadge } from './ProfileBadge'
@@ -21,16 +25,19 @@ import { targetColor } from '../lib/targets'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
+import { useEscape } from '../hooks/useEscape'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 5
 
 export function AvatarsPanel(): JSX.Element {
-  const { avatars, status } = useRecentAvatars()
+  const { avatars, status, updating } = useRecentAvatars()
   const me = useCyberspace((s) => s.identity.pubkey)
   const targets = useCyberspace((s) => s.targets)
   const [input, setInput] = useState('')
   const [more, setMore] = useState(false)
+  // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', more, () => setMore(false))
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
@@ -51,7 +58,7 @@ export function AvatarsPanel(): JSX.Element {
     return (
       <li key={a.pubkey} className="avatars__row">
         <ProfileBadge pubkey={a.pubkey} />
-        <span className={`avatars__type avatars__type--${a.type}`}>{a.type.toUpperCase()}</span>
+        <span className={`avatars__type avatars__type--${actionKind(a)}`}>{actionLabel(a)}</span>
         <span className="avatars__when" title={formatStamp(a.createdAt)}>{formatAgo(a.createdAt, now)}</span>
         {you ? (
           <span className="avatars__you">YOU</span>
@@ -75,7 +82,10 @@ export function AvatarsPanel(): JSX.Element {
     <section className="panel panel--avatars">
       <header className="panel__head">
         <h2>Avatars</h2>
-        <span className="tag">{status === 'loading' ? 'LOADING' : `${avatars.length} SEEN`}</span>
+        <span className="avatars__tags">
+          {updating && avatars.length > 0 && <span className="tag tag--updating" title="Asking the relays for newer moves">UPDATING</span>}
+          <span className="tag">{status === 'loading' ? 'LOADING' : `${avatars.length} SEEN`}</span>
+        </span>
       </header>
 
       <form

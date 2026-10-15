@@ -27,6 +27,7 @@ export function SpectateBar(): JSX.Element | null {
     spectate.status === 'loading' ? 'FETCHING CHAIN'
       : spectate.status === 'error' ? 'RELAY UNREACHABLE'
         : spectate.status === 'empty' ? 'NO CHAIN ON RELAY, AT PUBKEY COORDINATE'
+          : spectate.status === 'partial' ? `${spectate.actions.length} ACTION${spectate.actions.length === 1 ? '' : 'S'} SO FAR · A STRETCH IS MISSING ON THE RELAYS`
           : `${spectate.actions.length} ACTION${spectate.actions.length === 1 ? '' : 'S'}`
 
   return (
@@ -39,7 +40,7 @@ export function SpectateBar(): JSX.Element | null {
           {spectate.lastActive !== null && (
             <span title={formatStamp(spectate.lastActive)}>LAST ACTIVE {formatAgo(spectate.lastActive, now).toUpperCase()} · </span>
           )}
-          {status}
+          <span title={spectate.status === 'partial' ? 'The relays are missing part of this chain, so it is drawn up to the gap. Their real head may be further on than what you see here.' : undefined}>{status}</span>
         </span>
       </span>
       <button className="spectate__end" onClick={stopSpectating}>END SPECTATION</button>

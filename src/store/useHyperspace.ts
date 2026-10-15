@@ -16,7 +16,7 @@ import { anchorIndex, runAnchorSync, type SyncSource } from '../lib/hyperspace/a
 import { stopByHeight } from '../lib/hyperspace/compactIndex'
 import type { Stop } from '../lib/hyperspace/stops'
 import type { StopIndex } from '../lib/hyperspace/station'
-import { useCyberspace } from './useCyberspace'
+import { useCyberspace, type CyberFocus } from './useCyberspace'
 
 export interface HyperspaceSync {
   status: 'idle' | 'loading-cache' | 'syncing' | 'ready' | 'error'
@@ -29,8 +29,32 @@ export interface HyperspaceSync {
   source: SyncSource
 }
 
+/**
+ * What the stop field is doing, so the HUD can say so rather than leave the
+ * user guessing whether a thin cloud is the answer or a half-finished one.
+ *
+ * The field rebuilds in 12 ms slices across frames (StopField.SLICE_MS), so a
+ * dense view fills in over several hundred milliseconds with nothing on screen
+ * to say it is still working. `building` is set once when a rebuild starts and
+ * cleared once when it commits: two writes per rebuild, never one per slice.
+ *
+ * `drawn` and `inside` are the last commit's counts. Inside a sphere of
+ * interest the identity prefilter is switched off (StopField.ADMIT_ALL), so
+ * every row in the cover is decoded and tested: `inside` is therefore the
+ * EXACT number of stops in the sphere, not an estimate, and `drawn` is what
+ * survived the thousand-point budget. Outside a sphere there is no sphere to
+ * count, so `inside` is null.
+ */
+export interface FieldStatus {
+  building: boolean
+  drawn: number
+  inside: number | null
+}
+
 interface HyperspaceState {
   sync: HyperspaceSync
+  /** The stop field's own progress and counts; see FieldStatus. */
+  field: FieldStatus
   /** Bumped whenever stops are added to the index. */
   indexVersion: number
   tipHeight: number | null
@@ -41,6 +65,19 @@ interface HyperspaceState {
   /** The zoom to restore when the owned view exits; captured when hyperspace
    * first takes the focus, because its views re-frame at their own scales. */
   returnScaleExp: number | null
+  /**
+   * The focus that was standing when hyperspace took the camera, restored
+   * whole when it gives it back. Null means there was none and the exit goes
+   * home to the avatar, which is what it always did.
+   *
+   * This exists because "give the camera back" and "go home" are not the same
+   * instruction. Tapping a block while looking at a place in the POSITION
+   * panel used to end with the place thrown away and the zoom wound back to
+   * whatever it was before the place was ever typed, because clearFocus
+   * restores the scale remembered at the FIRST focus of the session, not the
+   * one hyperspace borrowed from.
+   */
+  returnFocus: CyberFocus | null
   /** The stop height the owned hyperspace focus is on, or null when the
    * focus is not a stop (EARTH's centre) or hyperspace has no view. */
   viewedStop: number | null
@@ -48,20 +85,36 @@ interface HyperspaceState {
   destination: number | null
   startSync: () => void
   setScrubHeight: (h: number | null) => void
+  /** The stop field starting a rebuild. Idempotent: a second call changes nothing. */
+  fieldBuilding: () => void
+  /** Clear the working flag without touching the counts: a build was abandoned, not finished. */
+  fieldSettled: () => void
+  /** The stop field committing one. `inside` is null when the build had no sphere. */
+  fieldDone: (drawn: number, inside: number | null) => void
   setDestination: (h: number | null) => void
 }
 
 // A module flag rather than store state, the publisher/tracker pattern:
 // React's dev double-mount must not start two sync pipelines.
 let started = false
+/** The sync state with `patch` applied, or `prev` itself when nothing in it changes (so no subscriber is told). */
+export function nextSync(prev: HyperspaceSync, patch: Partial<HyperspaceSync>): HyperspaceSync {
+  const keys = Object.keys(patch) as (keyof HyperspaceSync)[]
+  return keys.every((k) => patch[k] === prev[k]) ? prev : { ...prev, ...patch }
+}
+
+/** How often the anchor sync's loaded count reaches the store: it only feeds a progress readout. */
+const LOADED_EVERY_MS = 1000
 
 export const useHyperspace = create<HyperspaceState>((set) => ({
   sync: { status: 'idle', loaded: 0, total: 0, error: null, source: 'relay' },
+  field: { building: false, drawn: 0, inside: null },
   indexVersion: 0,
   tipHeight: null,
   scrubHeight: null,
   viewOwned: false,
   returnScaleExp: null,
+  returnFocus: null,
   viewedStop: null,
   destination: null,
 
@@ -74,16 +127,45 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
       set((s) => ({ sync: { ...s.sync, status: 'error', error: 'IndexedDB or WebSocket is unavailable in this environment' } }))
       return
     }
+    // The sync reports progress several times a second while a fresh device
+    // loads about a million anchors, and every report re-rendered each panel
+    // that shows it (2026-10-15). A report that changes nothing is dropped,
+    // and the loaded count reaches the store at most once a second; any other
+    // change (status, source, total) carries the latest count with it.
+    let pendingLoaded: number | null = null
+    let loadedTimer: ReturnType<typeof setTimeout> | null = null
+    const patch = (next: Partial<HyperspaceSync>, extra: Partial<HyperspaceState> = {}): void => set((s) => {
+      const sync = nextSync(s.sync, pendingLoaded !== null ? { loaded: pendingLoaded, ...next } : next)
+      pendingLoaded = null
+      return sync === s.sync && Object.keys(extra).length === 0 ? s : { ...extra, sync }
+    })
     void runAnchorSync({
-      onStatus: (status, error) => set((s) => ({ sync: { ...s.sync, status, error: error ?? null } })),
-      onSource: (source) => set((s) => ({ sync: { ...s.sync, source } })),
-      onLoaded: (loaded) => set((s) => ({ sync: { ...s.sync, loaded } })),
-      onTip: (tip) => set((s) => ({ tipHeight: tip, sync: { ...s.sync, total: tip + 1 } })),
+      onStatus: (status, error) => patch({ status, error: error ?? null }),
+      onSource: (source) => patch({ source }),
+      onLoaded: (loaded) => {
+        pendingLoaded = loaded
+        if (loadedTimer !== null) return
+        loadedTimer = setTimeout(() => { loadedTimer = null; if (pendingLoaded !== null) patch({}) }, LOADED_EVERY_MS)
+      },
+      onTip: (tip) => patch({ total: tip + 1 }, useHyperspace.getState().tipHeight === tip ? {} : { tipHeight: tip }),
       onIndexChanged: () => set((s) => ({ indexVersion: s.indexVersion + 1 })),
     })
   },
 
   setScrubHeight: (h) => set({ scrubHeight: h }),
+  // Both guarded against writing an identical value: the field commits on
+  // every anchor nudge, and a no-op set would still notify every subscriber.
+  fieldBuilding: () => set((s) => (s.field.building ? {} : { field: { ...s.field, building: true } })),
+  // A build that is abandoned rather than finished: the counts on screen are
+  // still the last real ones, so only the flag is cleared. Without this a
+  // cancelled rebuild whose successor decides it has nothing to do leaves the
+  // tag reading DRAWING with nobody left to finish it.
+  fieldSettled: () => set((s) => (s.field.building ? { field: { ...s.field, building: false } } : {})),
+  fieldDone: (drawn, inside) => set((s) => (
+    !s.field.building && s.field.drawn === drawn && s.field.inside === inside
+      ? {}
+      : { field: { building: false, drawn, inside } }
+  )),
   setDestination: (h) => set({ destination: h }),
 }))
 
@@ -107,7 +189,8 @@ export function ownHyperspaceView(): void {
   // First ownership: remember the zoom the user was actually at, because the
   // hyperspace views re-frame at their own scales and RETURN must not strand
   // the camera there.
-  useHyperspace.setState({ viewOwned: true, returnScaleExp: useCyberspace.getState().scaleExp })
+  const cs = useCyberspace.getState()
+  useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: cs.focus })
 }
 
 /** Record which stop the owned focus is on (null for a non-stop focus like
@@ -117,16 +200,39 @@ export function markViewedStop(height: number | null): void {
 }
 
 /**
+ * Close the scrubber chip and nothing else (arkinox, 2026-10-15: "I should be
+ * able to close the hyperspace chip without affecting my current view at
+ * all"). A block it was showing stays on screen, owned by hyperspace, until
+ * RETURN on the viewing bar (exitHyperspaceView).
+ */
+export function closeScrubber(): void {
+  if (useHyperspace.getState().scrubHeight !== null) useHyperspace.setState({ scrubHeight: null })
+}
+
+/**
  * Leave the hyperspace view: close the scrubber, and clear the focus only if
  * hyperspace set it (never a shard's focus, never a running spectate).
  */
 export function exitHyperspaceView(): void {
-  const { viewOwned: owned, returnScaleExp } = useHyperspace.getState()
-  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, viewedStop: null })
+  const { viewOwned: owned, returnScaleExp, returnFocus } = useHyperspace.getState()
+  useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
   const cs = useCyberspace.getState()
-  if (owned && cs.spectate === null && cs.focus !== null) cs.clearFocus()
-  // Back at the zoom the user left, not whatever a stop view chose.
-  if (owned && returnScaleExp !== null && returnScaleExp !== cs.scaleExp) {
+  if (!owned || cs.spectate !== null || cs.focus === null) return
+
+  // Hand the camera back to whoever had it, which is not always the avatar.
+  // A place typed into the POSITION panel is a focus of its own, and tapping a
+  // block from it borrows the camera rather than replacing what the person was
+  // doing; closing the overlay is "give it back", not "go home".
+  if (returnFocus !== null) {
+    cs.focusOn(returnFocus.position, returnFocus.plane, returnFocus.label, returnScaleExp ?? undefined, returnFocus.drive)
+    return
+  }
+
+  cs.clearFocus()
+  // Back at the zoom the user left, not whatever a stop view chose. Read the
+  // scale fresh: clearFocus has just written one, and comparing against the
+  // snapshot taken before it ran let the two disagree silently.
+  if (returnScaleExp !== null && returnScaleExp !== useCyberspace.getState().scaleExp) {
     useCyberspace.setState({ scaleExp: returnScaleExp })
   }
 }

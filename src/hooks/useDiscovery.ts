@@ -14,11 +14,13 @@
 
 import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
-import { unbag, HIDDEN_KIND } from '../lib/hidden'
+import { HIDDEN_KIND } from '../lib/hidden'
+import { unbagRemembered } from '../lib/foundCache'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
+import { resolveReference } from '../lib/references'
 import { useSecrets, type CurrentKey } from '../store/useSecrets'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 
@@ -97,6 +99,16 @@ export function useDiscovery(): void {
       for (const [lookupId, keyHex] of keys) current[lookupId] = { keyHex, height: heights.get(lookupId) ?? 0 }
       useSecrets.getState().setCurrent(current)
 
+      // Where you stand, as a scanned place, with these thirteen keys: only at
+      // your own head. A camera view, someone you spectate, your own history
+      // and a hyperspace transit all move the anchor too, and none of them is
+      // somewhere you stood. In the plane you stand in, which at your head can
+      // differ from the one the scene shows after a plane flip.
+      const cs = useCyberspace.getState()
+      if (cs.atHead()) {
+        void useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
+      }
+
       // A superseded scan must not write stale finds.
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
       if (id !== reqId.current) return
@@ -108,7 +120,13 @@ export function useDiscovery(): void {
         const keyHex = region ? keys.get(region) : undefined
         if (!keyHex || !region) continue
         // One envelope holds a bag; unbag flattens it to items.
-        const items = await unbag(ev, hexToBytes(keyHex))
+        // A reference without its own point is drawn at the base of this region.
+        // The height is the key's own, so a bag whose hider left `h` off
+        // (spec §8.6, arkinox 2026-10-01) is read at its true size.
+        const height = heights.get(region) ?? 0
+        const h = BigInt(height)
+        const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
+        const items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
         if (items.length > 0) opened.push(region)
         found.push(...items)
       }
@@ -125,9 +143,15 @@ export function useDiscovery(): void {
        *
        * A key is kept when it opened something. That is the one that means
        * anything: it says there is something here and you can read it. The
-       * rest cost milliseconds to compute again the moment you stand there.
+       * rest cost milliseconds to compute again the moment you stand there,
+       * and the place you stood keeps them for RESCAN ALL.
+       *
+       * Wherever the anchor is (arkinox, 2026-10-04): a key that opened
+       * something while you spectate, explore your history or look around is
+       * as real as one found at your head. What it cannot be is a place, and
+       * places are only recorded at your head, above.
        */
-      if (opened.length > 0 && useCyberspace.getState().atHead()) {
+      if (opened.length > 0) {
         const now = Math.floor(Date.now() / 1000)
         useSecrets.getState().hold(opened.map((region) => ({
           lookupId: region,
@@ -144,8 +168,8 @@ export function useDiscovery(): void {
         })))
       }
       if (id === reqId.current) {
-        const known = useShards.getState().discovered
-        const fresh = found.filter((h) => !known[h.eventId])
+        // Asked before addDiscovered, which records these as seen.
+        const fresh = useShards.getState().freshOf(found)
         useShards.getState().addDiscovered(found)
         useShards.getState().setScanning(false)
         // The ceremony: only for what this scan opened for the first time.

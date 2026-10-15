@@ -116,6 +116,14 @@ export class LiveRegistry {
     if (live.closed || live.opening) return
     live.opening = true
     const generation = live.reopens
+    // What this open had already seen. A reopen asks again from a minute
+    // before it (RESUME_OVERLAP_S), so the relay hands back what was seen
+    // already, at least the newest event; that is no sign of a healthy
+    // subscription. Counted as one, a relay that ends the subscription every
+    // time (refused AUTH, a socket dying) was asked again every second,
+    // forever, with the overlap delivered to every handler each time. Only
+    // an event newer than this resets the backoff.
+    const seenBefore = live.lastSeen
     try {
       const closer = await this.transport.open(
         resumedFilter(live.filter, live.lastSeen),
@@ -123,7 +131,7 @@ export class LiveRegistry {
           onEvent: (ev) => {
             if (live.closed) return
             live.events++
-            live.attempts = 0
+            if (seenBefore === null || ev.created_at > seenBefore) live.attempts = 0
             if (live.lastSeen === null || ev.created_at > live.lastSeen) live.lastSeen = ev.created_at
             live.handlers.onEvent(ev)
           },

@@ -17,6 +17,7 @@ import { type CloudMode } from '../lib/cloud'
 import { useCyberspace } from '../store/useCyberspace'
 import { useOffer, useOfferView } from '../store/useOffer'
 import { CheckPaymentButton } from './InvoiceModal'
+import { useEscape } from '../hooks/useEscape'
 
 const MODES: CloudMode[] = ['auto', 'ask', 'off']
 
@@ -47,6 +48,13 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
   useEffect(() => {
     if (view && !cloudKnown && prefs.mode !== 'off') void fetchCaps()
   }, [view !== null, cloudKnown, prefs.mode, fetchCaps]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape is NOT NOW, and only while NOT NOW is offered: never while an
+  // estimate, a quote or a payment is in flight, where the card's own buttons
+  // are the only way to act on it (arkinox, 2026-10-01).
+  const status = cloud.status
+  const settled = status !== 'quoting' && status !== 'awaiting_payment' && status !== 'confirm' && status !== 'funding'
+  useEscape('modal', view !== null && settled, () => { if (view) dismiss(view.cursorKey) })
 
   if (!view) return null
   const { verdict, cursorKey, machineCeiling: machine } = view

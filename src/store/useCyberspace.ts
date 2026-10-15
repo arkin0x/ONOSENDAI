@@ -16,12 +16,18 @@
  */
 
 import { create } from 'zustand'
-import { lineStateOf, rideStatsOf } from '../lib/hyperspace/ride'
+import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
+import { localKeyCeiling } from '../lib/deployPlan'
+import { experienceRatio, recordJobExperience } from '../lib/experience'
+import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
+import { verifyCloudRide } from '../lib/cloudRide'
 import { Quaternion } from 'three'
-import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
+import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+import { exportNcryptsec } from '../lib/keyExport'
 import {
   deferredReconnect,
+  loginCredentialKind,
   localSigner,
   randomSigner,
   signerFromNcryptsec,
@@ -29,11 +35,16 @@ import {
   signerFromPref,
   nip07Signer,
   nip46Signer,
+  NIP44_UNAVAILABLE,
+  NIP44_ENCRYPT_UNAVAILABLE,
+  SignerAccountMismatch,
+  SignerUnconfirmed,
   prefOf,
   loadSignerPref,
   saveSignerPref,
   type Signer,
   type SignerKind,
+  type NostrConnectSession,
   signWithin,
 } from '../lib/signers'
 import {
@@ -43,7 +54,6 @@ import {
   hexToCoord,
   sectorTag,
   sidestepLanding,
-  xyzToCoord,
   xyzToSectorId,
   type Plane,
 } from 'cyberspace-core'
@@ -52,9 +62,12 @@ import {
   MAX_SCALE_EXP,
   OCCUPANCY_SCALE_MAX,
   alignTo,
+  anchorCentre,
   canonicalQuaternion,
   cellDelta,
   clampAxis,
+  itemCentre,
+  placeCentre,
   rotateView,
   stepFor,
   topDownQuaternion,
@@ -64,10 +77,23 @@ import {
   type RotateDirection,
   type ViewAxes,
 } from '../lib/space'
+import { confirmChainEvents } from '../lib/chains'
+import { checkSignatures } from '../lib/sigCheck'
+import {
+  firstMove,
+  foldHeldConflict,
+  localSupersedes,
+  type CheckVerdict,
+  type HeldConflict,
+  type SelfCheck,
+} from '../lib/chainHold'
+import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
   buildChain,
+  chainHead,
+  firstBreak,
+  openBracket,
   hopTemplate,
-  parseAction,
   positionHex,
   sidestepTemplate,
   spawnTemplate,
@@ -78,7 +104,7 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
-import { offloadFrom } from '../lib/crossover'
+import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
 import {
   createHosaka,
@@ -86,12 +112,16 @@ import {
   type CloudHopResult,
   type HosakaAction,
   type HosakaRegionKeyResult,
+  type CloudRideResult,
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker, type HosakaProvider } from '../lib/hosaka'
+  type Waker, type HosakaProvider, type HopWants, keysPending } from '../lib/hosaka'
 import {
   clearCloudJob,
+  clearKeysTicket,
+  loadKeysTicket,
+  saveKeysTicket,
   cloudProofResponse,
   describeCloudError,
   driveCloudJob,
@@ -124,9 +154,13 @@ import {
 } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
+import { addRecentView } from '../lib/viewAt'
+import { endOfChainLabel } from '../lib/chainBreak'
+import { buildStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
+import { useChainUi } from './useChainUi'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -138,6 +172,76 @@ function parsedChain(events: NostrEvent[]): ActionEvent[] {
   return actionsFor.actions
 }
 
+/**
+ * Why nothing moves while a game holds the avatar. This client never
+ * publishes inside a virtual bracket: every event there belongs to the game,
+ * a hop, sidestep or ride there is invalid and ends the chain for every
+ * verifier (spec §8.11.4 rule 3), and an exit is the game client's to make,
+ * since only the game knows what leaving means to it (§8.11.7). So a chain
+ * with a bracket open at its head refuses every move here, says why, and
+ * shows the game in the Proof chain panel.
+ */
+export const GAME_HOLDS_MESSAGE =
+  'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
+
+/**
+ * THE SWITCH for refusing moves on a broken chain (review of #224, S2), on
+ * since arkinox's ruling of 2026-10-07 (Q3): an invalid chain stands at its
+ * last valid position, frozen until a respawn.
+ *
+ * A chain with a broken event (events.ts firstBreak) is one every verifier
+ * treats as invalid from that event, so a move signed onto it is a move no
+ * verifier counts. Every move (commit, route step, BOARD, RIDE, signing a
+ * finished proof) refuses with BROKEN_CHAIN_MESSAGE; whyNoMove is the one
+ * place that reads this.
+ */
+export const REFUSE_MOVES_ON_BROKEN_CHAIN = true
+
+export const BROKEN_CHAIN_MESSAGE =
+  'Your chain is broken, so you are frozen where it was last valid. One of its actions breaks a chain rule, and every verifier treats your chain as invalid from that action on: you stand at the last valid position before it, and any move added now is a move nobody would count, so ONOSENDAI will not sign one. To move again, respawn: you start a new, valid chain at your spawn point. The red CHAIN BROKEN notice names the action, says why it broke the chain, and has the RESPAWN button.'
+
+/**
+ * Why this client will not sign a base action onto `chain` now, in words, or
+ * null when it may. Every way to move asks this one question. A broken chain
+ * comes first: nothing on it counts, a game included, and a respawn is the
+ * only way on from either.
+ */
+/**
+ * A forked chain refuses every move too, but it stands at the spawn
+ * coordinate, not at a last valid position (spec §3.2, §8.7.3 rule 4).
+ */
+export const FORKED_CHAIN_MESSAGE =
+  'Your chain forked, so it is dead and you stand at your spawn coordinate. Two actions name the same action as the one before them, and every verifier treats a forked chain as invalid from its spawn, so any move added now is a move nobody would count, and ONOSENDAI will not sign one. To move again, respawn. The red CHAIN FORKED notice names both actions and has the RESPAWN button.'
+
+/** The refusal for a chain with a break: the fork's words for a fork, the broken chain's otherwise. */
+export function brokenChainMessage(broken: NonNullable<ReturnType<typeof firstBreak>>): string {
+  return broken.action.fork ? FORKED_CHAIN_MESSAGE : BROKEN_CHAIN_MESSAGE
+}
+
+export function whyNoMove(chain: ActionEvent[]): string | null {
+  const broken = REFUSE_MOVES_ON_BROKEN_CHAIN ? firstBreak(chain) : null
+  if (broken) return brokenChainMessage(broken)
+  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
+  return null
+}
+
+/** Why a finished proof is not signed while a choice between two chains is waiting. */
+const CHOOSE_FIRST_MESSAGE = 'Another version of your chain arrived while this proof was computing. Choose which to keep first; the proof is kept, and RESUME signs it if your chain is still where it was.'
+/** A commit whose wait ended with you no longer at your head (BUILD mode, a VIEW): nothing was sent. */
+export const LEFT_HEAD_MESSAGE = 'This move was not sent: you left your avatar (BUILD mode or a VIEW) while it was being checked, and a move is only ever taken from where you stand to where you aimed it. Return to your avatar and commit again.'
+/** A commit whose cursor or plane changed while it waited: nothing was sent. */
+/** Why a WALK step stopped short: it needs HOSAKA, and a walk never pays on its own. */
+export const WALK_NEEDS_HOSAKA_MESSAGE = 'WALK stopped: this step crosses a boundary only HOSAKA computes. Switch to HOP to see the offer.'
+export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the plane changed while it was being checked. Commit again to go where the cursor is now.'
+
+/**
+ * The message for a proof whose head moved before it was signed: the work is
+ * seeded by the head it started from (spec §5.3), so signed onto any other
+ * head every check of it fails.
+ */
+const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
+
+
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
 export const MAX_COMPUTE_HEIGHT = 20
 
@@ -146,6 +250,16 @@ export const MAX_COMPUTE_HEIGHT = 20
  * the scene anchors on it, the explorer walks it, and the controls stand down
  * because nothing here is yours to move.
  */
+/** A place on Earth left marked in the scene. See `pin` on the store. */
+export interface EarthPin {
+  position: Position
+  plane: Plane
+  /** The zoom it was dropped at, which clicking it returns you to. */
+  scaleExp: number
+  /** What to call it: the same "EARTH · 37.8°N 122.4°W" the focus was given. */
+  label: string
+}
+
 export interface SpectateState {
   pubkey: string
   npub: string
@@ -154,7 +268,12 @@ export interface SpectateState {
   actions: ActionEvent[]
   /** created_at of their newest action; null when the relay has none. */
   lastActive: number | null
-  status: 'loading' | 'live' | 'empty' | 'error'
+  /**
+   * `partial`: the relays hold this chain with a stretch missing (chains.ts
+   * ChainGapError), so it is shown up to the hole, and its head may be later
+   * than what is drawn.
+   */
+  status: 'loading' | 'live' | 'empty' | 'error' | 'partial'
   /** The view you had before spectating, put back when it ends. */
   returnView: Quaternion
 }
@@ -299,6 +418,12 @@ export interface CloudQuote {
   K: number
   /** A whole route's quote: the sum over its cloud steps, paid with one deposit. */
   route?: { steps: number; cloudSteps: number }
+  /**
+   * Work HOSAKA already holds, summed over the route's cloud steps: how many
+   * axis trees it does not have to build, and what that takes off this price
+   * and this wait. Absent when there is none, or when HOSAKA does not say.
+   */
+  reuse?: { axes: number; savedMsats: number; savedSeconds: number }
 }
 
 export interface CloudState {
@@ -332,6 +457,12 @@ export interface CloudState {
   /** A route deposit paid while the tab was away and claimed at startup:
    * the sats now on the balance, announced once, then dismissed. */
   credited: { msats: number; at: number } | null
+  /**
+   * Why the last ride bought from HOSAKA did not land, for the Hyperspace
+   * panel, where the ride was asked for (arkinox, 2026-10-11). Cleared when
+   * the next one starts or lands.
+   */
+  rideError: string | null
 }
 
 const IDLE_CLOUD: CloudState = {
@@ -352,6 +483,7 @@ const IDLE_CLOUD: CloudState = {
   balanceChecking: false,
   balanceError: null,
   credited: null,
+  rideError: null,
 }
 
 /**
@@ -372,7 +504,8 @@ export interface TrackedTarget {
   position: Position
   plane: Plane
   lastActive: number | null
-  status: 'resolving' | 'live' | 'spawn' | 'error'
+  /** `partial`: placed from their chain up to a stretch the relays are missing, which may not be their head. */
+  status: 'resolving' | 'live' | 'spawn' | 'error' | 'partial'
 }
 
 /** Hyperspace transit (DECK-0001 v3): the identity has boarded and not yet arrived. */
@@ -384,6 +517,9 @@ export interface TransitState {
 
 /** A finished ride, as the worker pool hands it back (§5.4 and §5.5). */
 export interface CompletedRide {
+  /** The chain head the ride was computed against: the seed of every leaf,
+   * so it must be the `previous` the event is published under. */
+  previousId: string
   toCoordHex: string
   fromHeight: number
   toHeight: number
@@ -391,6 +527,38 @@ export interface CompletedRide {
   asOf?: number
   rootHex: string
   mp: string
+  /** The re-roll nonce (§5.5), the `mn` tag. */
+  mnHex: string
+}
+
+/**
+ * A ride to buy from HOSAKA (arkinox, 2026-10-11): everything the hyperjump
+ * needs except the proof, planned exactly as a local ride is (the Hyperspace
+ * panel's prepareRide), plus HOSAKA's own estimate of the wait.
+ */
+export interface CloudRideAsk {
+  previousId: string
+  fromHeight: number
+  toHeight: number
+  asOf?: number
+  toCoordHex: string
+  /** HOSAKA's quoted seconds; how patiently the job is polled. */
+  estSeconds: number | null
+}
+
+/** What the camera is looking at, when it is not looking at your own head. */
+export interface CyberFocus {
+  position: Position
+  plane: Plane
+  label: string
+  /** The cursor came along (VIEW): the pad drives it here. */
+  drive?: boolean
+  /**
+   * A hidden item (a shard, a message) is what is being looked at: the camera
+   * frames it where it is drawn, its true place (itemCentre), rather than by
+   * the stop markers' policy.
+   */
+  item?: boolean
 }
 
 export interface CyberspaceState {
@@ -402,6 +570,73 @@ export interface CyberspaceState {
   pendingTarget: Position | null
   /** The route a commit beyond the ceiling is executing; null otherwise. */
   plan: MovePlan | null
+  /**
+   * What the last fold from elsewhere did to this chain.
+   *
+   * One identity has one chain, however many devices are signed in. When two
+   * of them act from the same head the chain forks, and every reader, this
+   * device included, resolves it the same way: follow the oldest child at the
+   * branch, breaking a tie on the smaller event id (events.ts buildChain).
+   * So one branch wins for everybody and the other one's actions are simply
+   * not in the chain any more. That used to happen in silence, and a silent
+   * loss of work you paid HOSAKA for is the worst way to learn about it.
+   *
+   * `adopted` is how many actions came from another device, which explains an
+   * avatar that moved on its own. `dropped` is how many of this device's
+   * actions the fold left out of the chain.
+   *
+   * `replaced` gets its own words, because the generic count hides what
+   * happened (arkinox, 2026-10-01): the adopted chain begins with a newer
+   * spawn, so this device's whole chain was superseded (§3.2: a respawn on
+   * another device, or another device answering the held-chain prompt with
+   * "Keep the local chain"). A fork is never reported here: a fork ends the
+   * whole chain (spec §8.7.3 rule 4, arkinox 2026-10-08), so both branches
+   * are kept and the broken-chain notice says so.
+   */
+  forkNotice: { adopted: number; dropped: number; replaced: boolean; at: number } | null
+  /**
+   * Whether this identity already has a chain on the relays, as last asked
+   * (lib/chainHold.ts, lib/selfSync.ts): `checking`, `found`, `none`, or
+   * `unknown` with the cause. Per identity: reset to `checking` on every
+   * switch and asked again on every load and whenever the connection comes
+   * back while the answer is `unknown`.
+   */
+  selfCheck: SelfCheck
+  /**
+   * The chain is HELD: it was started by a first move the relays could not
+   * vouch for, so it stays on this device whatever LIVE says (arkinox,
+   * 2026-10-01). Lifted silently when the relays answer that there is no
+   * other chain; turned into `chainConflict` when they answer with one.
+   * Persisted with the chain. Bags and messages are not affected.
+   */
+  held: boolean
+  /**
+   * A choice between two versions of this identity's chain, waiting for the
+   * person. `held`: a held chain met a chain on the relays
+   * (resolveHeldConflict). `branch`: this device's unpublished moves fork
+   * against moves another device already published (resolveBranchConflict,
+   * lib/branchConflict.ts). Nothing is chosen automatically; while either is
+   * pending no move is taken, nothing is published and nothing is adopted.
+   */
+  chainConflict: HeldConflict | BranchConflict | null
+  /** Bumped by a deliberate "publish now" that is not an action (lib/release.ts `release`). */
+  publishRequest: number
+  /** The self-check's answer for `pubkey`; ignored when the identity has moved on. */
+  applySelfCheck: (pubkey: string, verdict: CheckVerdict | { status: 'checking' }) => void
+  /**
+   * Answer the held-chain prompt. `relay` deletes the local held chain and
+   * places you at the relay chain's head; `local` lifts the hold so the local
+   * chain publishes (now, while LIVE) and, its spawn being newer, supersedes
+   * the relay chain for every reader. Region keys stay held either way.
+   */
+  resolveHeldConflict: (choice: 'relay' | 'local') => void
+  /**
+   * Answer the diverged-branch prompt. `relay` discards this device's
+   * unpublished moves after the fork and takes the relays' version. `mine`
+   * is refused: publishing them would fork the chain on the relays, and a
+   * fork ends the whole chain (spec §8.7.3 rule 4, arkinox 2026-10-08).
+   */
+  resolveBranchConflict: (choice: 'relay' | 'mine') => void
   /** Sats spent on HOSAKA for the current chain, in msats. Kept on this device only, never published. */
   spentMsats: number
   /** How many times this identity has respawned; each one began a new chain. */
@@ -415,6 +650,25 @@ export interface CyberspaceState {
   /** The plane the chain head is actually in. */
   headPlane: Plane
   scaleExp: number
+  /**
+   * The build STEP: how far each move steps the build cursor while a deploy is
+   * lined up, and the cell the placement snaps to, as an exponent finer than
+   * the zoom (arkinox, 2026-10-08). Null is the zoom itself, which is where
+   * every deploy starts, so nothing changes until STEP is touched. Read it
+   * through buildStepOf (lib/buildCursor.ts), which keeps it at or under the
+   * zoom; zooming in to it or below puts it back on the zoom, by any path
+   * (the subscription at the bottom). Cleared when the deploy ends (useShards)
+   * and when BUILD mode does (store/buildStep.ts).
+   */
+  buildStep: number | null
+  /**
+   * Where lowering STEP last re-centered the build cursor (`at`), and where
+   * you had put it before that (`from`): store/buildStep.ts. While the cursor
+   * still sits at `at`, nothing but STEP has moved it, so it counts as being
+   * at `from` (lib/buildCursor.ts placedCursor), and it goes back there when
+   * STEP returns to following the zoom. Null while STEP has not re-centered.
+   */
+  buildSettle: { at: Position; from: Position } | null
   /** Current view quaternion (camera snaps instantly to this). */
   view: Quaternion
   viewHistory: Quaternion[]
@@ -432,6 +686,12 @@ export interface CyberspaceState {
   published: Record<string, PublishStatus>
   /** The relay's last refusal, for the panel. */
   publishError: string | null
+  /**
+   * How many published actions the canonical relay has not taken after
+   * CANONICAL_LATE_MS, while another relay has (lib/publisher.ts keeps
+   * asking it). Zero almost always; the status strip says so when it is not.
+   */
+  canonicalLate: number
   /** Live publishes the chain as it grows; Local keeps it here. */
   live: boolean
   chain: ChainStats
@@ -450,7 +710,25 @@ export interface CyberspaceState {
    * is somewhere you are not. Exclusive with spectating in practice, because
    * the panel it is reached from is hidden while spectating.
    */
-  focus: { position: Position; plane: Plane; label: string; /** The cursor came along (VIEW): the pad drives it here. */ drive?: boolean } | null
+  focus: CyberFocus | null
+  /**
+   * The pin: the place on Earth you asked to look at, left standing in the
+   * scene so the focal point is visible rather than implied.
+   *
+   * Deliberately NOT derived from `focus`, because it has to outlive a focus
+   * change: clicking a landfall moves the focus to that block and the pin
+   * stays where it was, which is what makes it possible to look around and
+   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
+   * REMOVE PIN. One at a time, so a second drop replaces the first.
+   */
+  pin: EarthPin | null
+  /** Drop the pin at a place on Earth. `scaleExp` defaults to the zoom you are at. */
+  dropPin: (position: Position, label: string, scaleExp?: number) => void
+  /** Take the pin away. */
+  clearPin: () => void
+  /** Look at the pin again, at the zoom it was dropped at. */
+  viewPin: () => void
   /** The zoom before the standing focus began, restored by clearFocus. */
   focusReturnScale: number | null
   /** Pubkeys being pointed at, keyed by pubkey. Persisted. */
@@ -465,14 +743,47 @@ export interface CyberspaceState {
   anchorPlane: Plane
 
   moveCursor: (dir: AxisDirection) => void
+  /**
+   * Set the build STEP; at or above the zoom it goes back to following the
+   * zoom (null), which also undoes STEP's re-centering if nothing has moved
+   * the cursor since.
+   */
+  setBuildStep: (step: number | null) => void
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
+  /**
+   * The /demo tour's SPAWN (arkinox, 2026-10-15): sign this identity's spawn
+   * where it stands, before any move, through the same self-check a first
+   * move waits on. Only for an identity with no chain; true when the spawn
+   * was signed. The tour offers it only for a key it generated itself, and
+   * nothing else calls it: no login, switch or page load signs a spawn.
+   */
+  signSpawn: () => Promise<boolean>
+  /**
+   * WALK's commit (store/useWalk.ts): one step to `target` from where you
+   * stand, aimed at `target` rather than at the cursor, which in WALK is
+   * already out ahead at the last queued step. `stillAimed` replaces the
+   * cursor check: the walk is still on and this is still its next step. A
+   * step that needs HOSAKA is refused rather than quoted, since nothing in a
+   * walk ever pays on its own, and a step past the ceiling runs as a route
+   * to `target` whatever the move mode is.
+   */
+  walkTo: (target: Position, stillAimed: () => boolean) => Promise<void>
+  /**
+   * WALK is on (store/useWalk.ts owns the queue). The cursor is the walk's
+   * predicted head then, so nothing else may move it: the pad and the keys
+   * go through the walk, and a tap on a cell does nothing.
+   */
+  walking: boolean
   /** Whether COMMIT runs one step of the route or all of them in order. */
   moveMode: MoveMode
   setMoveMode: (mode: MoveMode) => void
   /** Whether the regions you hold keys to are drawn in the scene. */
   showSecrets: boolean
   setShowSecrets: (show: boolean) => void
+  /** Whether the chain's trail (the line through its positions) is drawn in the scene. */
+  showTrail: boolean
+  setShowTrail: (show: boolean) => void
   cancel: () => void
   /** Continue a paused route: ask for the pending signature again, or restart the step. */
   resumePlan: () => void
@@ -490,6 +801,17 @@ export interface CyberspaceState {
   setPlane: (plane: Plane) => void
   applyProofMessage: (msg: ProofResponse) => void
   setLive: (live: boolean) => void
+  /**
+   * A deliberate request to publish the waiting chain now, while LIVE: the
+   * same release the held-chain answer gives (release.ts `release`,
+   * `publishRequest`), so the publisher drains as for a new action, with its
+   * relay look first. A held chain or a pending choice still stops it
+   * (maySend), and shows as it always does. Nothing while LOCAL. Used by the
+   * /demo tour's GO LIVE (arkinox, 2026-10-15).
+   */
+  publishNow: () => void
+  /** Put the fork notice away once it has been read. */
+  clearForkNotice: () => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
   /**
    * §3.2: a new spawn event, which by being newer retires every prior action.
@@ -497,35 +819,88 @@ export interface CyberspaceState {
    * because the old chain's events still exist on relays but no longer lead
    * anywhere.
    */
-  respawn: () => void
+  /** Rejects when the signature is refused, or when the identity changed while it was asked for. */
+  respawn: () => Promise<void>
+  /**
+   * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
+   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * and the first eight hex of the last valid event's id (the invalid
+   * spawn's, when no event is valid, Q7), so the place the old chain froze
+   * at is one tap away; then an ordinary respawn.
+   */
+  respawnFromBrokenChain: (forPubkey?: string) => Promise<void>
   /** Anchor the scene on action `index` of the chain; null or past the end is the head. */
   explore: (index: number | null) => void
   /** Step the explored index; clamps at both ends. */
   exploreStep: (delta: number) => void
-  /** Start following a pubkey: anchors on its spawn coordinate until its chain arrives. */
-  beginSpectate: (pubkey: string) => void
+  /**
+   * Start following a pubkey: anchors on its spawn coordinate until its chain
+   * arrives. With `keepView` and a driven view standing (BUILD mode,
+   * store/useBuilder.ts), the view stays and is aimed at them instead: the
+   * build cursor goes to their spawn, then to their head when the chain
+   * arrives, and the pad keeps driving it.
+   */
+  beginSpectate: (pubkey: string, keepView?: boolean) => void
   /** The spectated chain, fetched or updated. Keeps the explored index when it still fits. */
-  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error') => void
-  /** Back to your own head. */
+  setSpectateChain: (pubkey: string, events: NostrEvent[], status?: 'live' | 'empty' | 'error' | 'partial') => void
+  /** Back to your own head; with a driven view standing (BUILD mode), the view stays where it is. */
   endSpectate: () => void
+  /**
+   * Aim the driven view (the free view, and BUILD mode's build cursor) at a
+   * place, in its plane, keeping a spectation: the cursor goes there and the
+   * view follows it as it follows the pad, re-anchoring only when the place
+   * is out of the field's reach. Nothing else changes: not your head, your
+   * chain, or the plane lined up at it. Does nothing without a driven view.
+   */
+  aimView: (position: Position, plane: Plane) => void
+  /**
+   * Turn what is on screen into a driven view: a spectated avatar or an
+   * action of history becomes a free view at that place, the spectation kept
+   * and history left. BUILD mode entered from there starts its build cursor
+   * on what you were looking at.
+   */
+  driveHere: (label: string) => void
+  /**
+   * VIEW from the pad (arkinox, 2026-10-10): a free view from your own head,
+   * so the pad moves the cursor to look around without planning a hop. The
+   * commit row keeps RECALL, which ends it; VIEW again ends it too.
+   */
+  viewHere: () => void
+  /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
+  viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
   /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
   focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
-  /** Stop looking; the scene returns to your avatar. */
-  clearFocus: () => void
+  /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
+  focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
+  /**
+   * Stop looking; the scene returns to your avatar. With `keepScale` the zoom
+   * stays where it is instead of going back to the one the look began at:
+   * the Builder ends a view that already sits on your avatar this way, so
+   * leaving build mode changes nothing on screen (useBuilder `exit`).
+   */
+  clearFocus: (keepScale?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
   transit: TransitState | null
   /** §3: sign and queue an enter-hyperspace event from the current position. */
   boardHyperspace: () => Promise<void>
   /** §5: sign and queue the hyperjump for a computed ride, arriving at the stop. */
   completeRide: (ride: CompletedRide) => Promise<void>
+  /**
+   * Confirm this device holds the live head now (confirmHead), for an action
+   * that will take long to prepare before it is signed, such as a ride's
+   * proof: refused before the work, not after it. Resolves to the words to
+   * refuse with, null when confirmed, or STALE_CONFIRMATION when a respawn or
+   * an identity switch landed meanwhile (nothing to say then).
+   */
+  confirmHeadNow: () => Promise<string | null | typeof STALE_CONFIRMATION>
   /** Forget the boarding locally; the next hop cancels it on the wire (§3.3). */
   cancelTransit: () => void
   addTarget: (pubkey: string, name?: string | null) => void
   removeTarget: (pubkey: string) => void
   toggleTarget: (pubkey: string, name?: string | null) => void
   /** A target's chain, fetched or updated: its head becomes the position. */
-  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error') => void
+  setTargetChain: (pubkey: string, events: NostrEvent[], status?: 'error' | 'partial') => void
   /** Fold relay events for THIS identity into the live chain, adopting a newer
    * one from another machine. The self-sync loop and login both feed this. */
   adoptChain: (events: NostrEvent[]) => void
@@ -548,12 +923,39 @@ export interface CyberspaceState {
   useNsec: (nsec: string) => Promise<void>
   /** Replace the identity from an ncryptsec and its password. */
   useNcryptsec: (ncryptsec: string, password: string) => Promise<void>
+  /** Use the single login field's nsec, ncryptsec, or bunker URI. */
+  useLogin: (credential: string, password?: string) => Promise<void>
   /** Switch to the browser extension (NIP-07). */
   useExtension: () => Promise<void>
   /** Switch to a remote bunker (NIP-46) from its bunker:// URI. */
   useBunker: (uri: string) => Promise<void>
+  /** Wait for and activate a client-initiated Nostr Connect QR session. */
+  useNostrConnect: (session: NostrConnectSession, signal?: AbortSignal, onConnected?: () => void) => Promise<void>
   /** Clear a shown login error. */
   clearLoginError: () => void
+  /**
+   * This device's own key as an encrypted `ncryptsec1…`, or a thrown error.
+   *
+   * Only a local signer has a key to give: an extension and a bunker hold
+   * theirs. The password rule lives in lib/keyExport, not here and not in the
+   * markup, so no caller can offer an unprotected export by forgetting a check.
+   */
+  exportKey: (password: string, again: string) => string
+  /**
+   * Open a NIP-44 payload sealed to this identity by `senderPubkey`: a chest
+   * sealed to a person (lib/chests.ts), a private message (lib/dm.ts).
+   * Rejects, in words, when the signer truly offers no NIP-44 decrypt
+   * (lib/signers.ts), or when a remote signer failed it and holds another
+   * account (SignerAccountMismatch) or would not say (SignerUnconfirmed):
+   * those two are about the signer, not the payload (signerCannotJudge).
+   */
+  decryptSealed: (senderPubkey: string, payload: string) => Promise<string>
+  /**
+   * NIP-44 encrypt `plaintext` from this identity to `recipientPubkey`: what
+   * seals a private message to an agent (lib/dm.ts; arkinox, 2026-10-10).
+   * Rejects, in words, only when the signer truly offers no NIP-44 encrypt.
+   */
+  encryptSealed: (recipientPubkey: string, plaintext: string) => Promise<string>
 
   /** HOSAKA cloud compute: the flow in progress and its pending job. */
   cloud: CloudState
@@ -586,11 +988,22 @@ export interface CyberspaceState {
    */
   buyRegionKey: (at: Position, plane: Plane, height: number) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
   /**
+   * Buy a ride's proof from HOSAKA and sign the hyperjump (onosendai-launch
+   * #35 P5; arkinox, 2026-10-11): submit with the ride's idempotency key,
+   * pay through the invoice modal or the balance, poll, check the proof here
+   * at Level 1, then sign it as a local ride is signed. The head is held for
+   * the whole wait, as a computing move holds it. Resolves true when the
+   * hyperjump was signed; every other ending says why in `cloud.rideError`.
+   */
+  rideViaHosaka: (ask: CloudRideAsk) => Promise<boolean>
+  /**
    * Pick up the persisted job (on load, after an identity switch, or from the
    * panel) when its chain head is still ours; drop it when the head moved or
    * its invoice expired. Also fetches the caps when cloud mode is on.
    */
   resumeCloudJob: () => Promise<void>
+  /** Collect the destination cubes of a staged hop whose move has already landed. */
+  collectCloudKeys: () => Promise<void>
   /** Forget a kept job without finishing it. */
   discardCloudJob: () => void
   /** Ask HOSAKA about the invoice now rather than at the next poll. */
@@ -607,7 +1020,7 @@ export interface CyberspaceState {
   /** Axes as they appear on screen right now, including free orbit. */
   screenAxes: ViewAxes | null
   setScreenAxes: (a: ViewAxes) => void
-  /** The chain head's coordinate, exactly as its event carries it. */
+  /** Where the chain head puts you: the coordinate of the last recognized action, or the one a game holds (events.ts buildChain). */
   coordHex: () => string
   sector: () => string
   /** The chain, parsed. */
@@ -649,9 +1062,18 @@ const CHAIN_KEY = 'onosendai:chain'
 function chainKeyFor(pubkey: string): string {
   return `${CHAIN_KEY}:${pubkey}`
 }
+/** The focus label of the pad's VIEW: what the focus bar says, and how `viewing` tells it from a pin's or a star's view. */
+export const VIEW_FOCUS_LABEL = 'VIEW'
+
 const LIVE_KEY = 'onosendai:live'
 const MOVE_MODE_KEY = 'onosendai:moveMode'
 const SHOW_SECRETS_KEY = 'onosendai:showSecrets'
+
+const SHOW_TRAIL_KEY = 'onosendai:showTrail'
+
+function loadShowTrail(): boolean {
+  try { return localStorage.getItem(SHOW_TRAIL_KEY) !== '0' } catch { return true }
+}
 
 function loadShowSecrets(): boolean {
   try { return localStorage.getItem(SHOW_SECRETS_KEY) !== '0' } catch { return true }
@@ -688,6 +1110,14 @@ interface PersistedChain {
   /** Ids the relay has acknowledged. */
   published: string[]
   stats: ChainStats
+  /**
+   * Held: started before the relays could say whether this identity already
+   * had a chain, so it stays on this device whatever LIVE says until they
+   * answer (lib/chainHold.ts). Stored with the chain so a reload keeps
+   * holding. Absent on every chain saved before holding existed, which were
+   * all ordinary chains.
+   */
+  held?: boolean
 }
 
 function loadOrGenerateKey(): Uint8Array {
@@ -701,10 +1131,70 @@ function loadOrGenerateKey(): Uint8Array {
   const fresh = generateSecretKey()
   const nsec = nip19.nsecEncode(fresh)
   try { localStorage.setItem(STORAGE_KEY, nsec) } catch { /* private mode */ }
+  mintedOnLoad = true
   return fresh
 }
 
-function loadChain(pubkey: string): PersistedChain | null {
+/** Whether this page load generated the local key (no key was stored). */
+let mintedOnLoad = false
+
+/**
+ * Signatures already checked this session, as `id:sig`. A Schnorr check
+ * costs about 2 ms on the main thread, and the same chain is read from
+ * storage more than once in a session (at boot by the signer pick and again
+ * by the store, and again on every switch back to an identity), so each
+ * signature is checked once. Memory only, never written to storage: a flag
+ * on disk would be exactly as trustworthy as the disk.
+ */
+const verifiedSigs = new Set<string>()
+
+/**
+ * Whether an event is authentic (spec §8.2, §8.7.3, Q4): its id is the hash
+ * of its contents and its sig a valid signature of that id. The hash is
+ * recomputed every time, which is cheap, so an event whose contents changed
+ * under a remembered id and sig is still caught; only the Schnorr check is
+ * skipped for an id and sig already checked.
+ */
+function authentic(e: NostrEvent): boolean {
+  const key = `${e.id}:${e.sig}`
+  if (verifiedSigs.has(key)) return getEventHash(e) === e.id
+  if (!verifyEvent(e as unknown as VerifiedEvent)) return false
+  verifiedSigs.add(key)
+  return true
+}
+
+/** The memo key of an event's signature check. */
+const sigKey = (e: NostrEvent): string => `${e.id}:${e.sig}`
+
+/**
+ * The stretch of `events` that still reassembles once every event
+ * `isAuthentic` refuses is discarded (spec §8.2, §8.7.3, Q4): one whose id or
+ * signature does not verify never existed, a branch through it is cut off,
+ * and the chain continues from the event before it. A forked chain is kept
+ * whole: it is dead at the spawn coordinate, and both branches stay so the
+ * notice can name them (2026-10-08 ruling). Null when nothing reassembles
+ * exactly, from this key: a chain that cannot be continued, and pretending
+ * otherwise would sign hops onto a history the relay will reject.
+ */
+function authenticStretch(pubkey: string, events: NostrEvent[], isAuthentic: (e: NostrEvent) => boolean): NostrEvent[] | null {
+  const kept = events.filter((e) => e && e.pubkey === pubkey && isAuthentic(e))
+  const resolved = buildChain(kept, pubkey)
+  const onChain = new Set(resolved.map((a) => a.id))
+  const forked = resolved[0]?.fork !== undefined
+  const out = forked || kept.length === events.length ? kept : kept.filter((e) => onChain.has(e.id))
+  if (resolved.length === 0 || (!forked && resolved.length !== out.length) || resolved[0].pubkey !== pubkey) return null
+  return out
+}
+
+/**
+ * This identity's saved chain. With `later`, its signatures are not checked
+ * here: the chain is returned as stored, so it can be drawn at once, with
+ * the events whose signatures this session has not checked yet in
+ * `unchecked`, for startSignatureCheck to check off the main thread.
+ */
+function loadChain(pubkey: string, later = false): (PersistedChain & { unchecked: NostrEvent[] }) | null {
+  // What is read now is what this tab knows (foldOtherTabs compares the mark).
+  knownMarks.set(pubkey, storedMark(pubkey))
   try {
     let raw = localStorage.getItem(chainKeyFor(pubkey))
     if (!raw) {
@@ -718,22 +1208,40 @@ function loadChain(pubkey: string): PersistedChain | null {
     if (!raw) return null
     const data = JSON.parse(raw) as Partial<PersistedChain>
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
-    // Must reassemble to exactly what was stored, from our own key. Anything
-    // else is a chain that cannot be continued, and pretending otherwise would
-    // sign hops onto a history the relay will reject.
-    const chain = buildChain(data.events)
-    if (chain.length !== data.events.length || chain[0].pubkey !== pubkey) return null
+    // Only authentic events, even from our own storage (authenticStretch);
+    // with `later`, as stored, and checked off the main thread.
+    const events = authenticStretch(pubkey, data.events, later ? () => true : authentic)
+    if (!events) return null
     return {
       version: 2,
-      events: data.events,
+      events,
+      unchecked: later ? events.filter((e) => !verifiedSigs.has(sigKey(e))) : [],
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
+      held: data.held === true,
     }
   } catch { /* corrupt or missing */ }
   return null
 }
 
-function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats): void {
+/**
+ * The hold goes to disk with the chain. Every save is of the current
+ * identity's chain, so by default it is the store's own `held` at the moment
+ * of the save; the few saves that change it pass it explicitly. A default
+ * rather than a required argument, so that no existing save can quietly
+ * write `false` over a held chain by forgetting it.
+ */
+function heldNow(pubkey: string): boolean {
+  try {
+    const s = useCyberspace.getState()
+    return s.identity.pubkey === pubkey && s.held
+  } catch {
+    // Called before the store exists (it never is today): nothing is held yet.
+    return false
+  }
+}
+
+function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats, held?: boolean): void {
   const pubkey = events[0]?.pubkey
   if (!pubkey) return
   try {
@@ -742,9 +1250,28 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
       events,
       published: events.map((e) => e.id).filter((id) => published[id] === 'ok'),
       stats,
+      ...((held ?? heldNow(pubkey)) ? { held: true } : {}),
     }
     localStorage.setItem(chainKeyFor(pubkey), JSON.stringify(data))
+    // A fresh mark beside it, so another tab can tell the chain changed
+    // without reading it (foldOtherTabs), and this tab knows the mark is its own.
+    const mark = `${events.length}:${events[events.length - 1].id.slice(0, 16)}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    localStorage.setItem(chainMarkKeyFor(pubkey), mark)
+    knownMarks.set(pubkey, mark)
   } catch { /* quota exceeded or private mode */ }
+}
+
+/** The small key every save of a chain writes beside it: what foldOtherTabs compares before reading the chain. */
+function chainMarkKeyFor(pubkey: string): string {
+  return `${CHAIN_KEY}-mark:${pubkey}`
+}
+
+/** The mark of each identity's stored chain as this tab last wrote or read it. */
+const knownMarks = new Map<string, string | null>()
+
+/** The stored chain's mark now, or null when there is none (nothing saved, or saved by an older build). */
+function storedMark(pubkey: string): string | null {
+  try { return localStorage.getItem(chainMarkKeyFor(pubkey)) } catch { return null }
 }
 
 /** Only who and what they are called survive a reload; positions are refetched. */
@@ -808,8 +1335,18 @@ function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
   // A stored extension/bunker identity whose chain we already hold: reconnect
   // lazily, keeping its pubkey so the chain loads now.
-  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey)) {
-    return deferredReconnect(pref, (s) => { currentSigner = s })
+  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey, true)) {
+    // The live signer replaces this stand-in only while the stand-in is still
+    // the one in use. A bunker can answer minutes after the first signature
+    // asked for it, and by then the identity may have been switched: its late
+    // answer must not put the old identity back behind a screen that shows
+    // the new one (found in review of snocrash #35, 2026-10-15). A late
+    // answer nobody wants is closed rather than left holding sockets.
+    const standIn: Signer = deferredReconnect(pref, (s) => {
+      if (currentSigner === standIn) currentSigner = s
+      else void s.close?.()
+    })
+    return standIn
   }
   if (pref?.nsec) { try { return signerFromNsec(pref.nsec) } catch { /* corrupt */ } }
   return localSigner(loadOrGenerateKey())
@@ -824,23 +1361,146 @@ function pickInitialSigner(): Signer {
 /** Remote signatures in flight: while one waits, a wake must not drop the sockets its answer arrives on. */
 let pendingSigns = 0
 
-async function signEvent(template: EventTemplate, patienceMs?: number): Promise<NostrEvent> {
-  const signer = currentSigner
-  if (signer.kind === 'local') return signer.signEvent(template)
+/**
+ * The identity whose signer was last found on another account, so that is
+ * said once (otherAccount) and not on every refused signature, of which a
+ * relay's AUTH alone brings one per socket. Cleared when the signer signs as
+ * that identity again, so a later switch away is said again.
+ */
+let otherAccountNoticed: string | null = null
+
+/**
+ * Say, once, that the signer is on another account than `pubkey`, the
+ * identity that asked it: each refusal also says so where it happened, but
+ * a relay's AUTH or a background read has nowhere to say it. Not for an
+ * identity no longer on screen: its late answer is nobody's business now.
+ */
+function otherAccount(pubkey: string): void {
+  if (otherAccountNoticed === pubkey) return
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  otherAccountNoticed = pubkey
+  useToast.getState().show({ label: 'SIGNER ON ANOTHER ACCOUNT', meta: 'Switch your signer back, or log in again.', mark: 'signer', sticky: true })
+}
+
+async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
+  if (signer.kind === 'local') {
+    // The local key computes the id and the signature itself, so its events
+    // are authentic by construction, and are remembered as checked.
+    const own = await signer.signEvent(template)
+    verifiedSigs.add(`${own.id}:${own.sig}`)
+    return own
+  }
   pendingSigns++
+  let signed: NostrEvent
   try {
-    return await signWithin(signer, template, patienceMs)
+    try {
+      signed = await signWithin(signer, template, patienceMs)
+    } catch (err) {
+      // A timeout, or a publish that gave up ("All promises were rejected"):
+      // either way the signer's sockets are presumed dead. Drop them and ask
+      // once more over fresh ones. Not a signer on another account (a
+      // stand-in whose reconnect found one): asking again only asks it again.
+      if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
+      const fresh = await signer.reconnect()
+      if (currentSigner === signer) currentSigner = fresh
+      signed = await signWithin(fresh, template, patienceMs)
+    }
   } catch (err) {
-    // A timeout, or a publish that gave up ("All promises were rejected"):
-    // either way the signer's sockets are presumed dead. Drop them and ask
-    // once more over fresh ones.
-    if (!signer.reconnect) throw err
-    const fresh = await signer.reconnect()
-    if (currentSigner === signer) currentSigner = fresh
-    return await signWithin(fresh, template, patienceMs)
+    if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
+    throw err
   } finally {
     pendingSigns--
   }
+  return checkedAnswer(signed, signer)
+}
+
+/**
+ * A remote signer's answer is checked before anything holds it (spec §8.2,
+ * §8.7.3, Q4): an event whose id or signature does not verify is not
+ * authentic, so it never goes onto a chain, here or on a relay. The local
+ * signer computes both itself; an extension or bunker is trusted to.
+ *
+ * And it must be signed by the identity that asked. A remote signer signs as
+ * whichever account it holds now: an extension or a bunker can be switched
+ * mid-visit, and a Nostr Connect session restored on reload is never asked
+ * which account it holds. Its signature checks out against its own pubkey,
+ * so without this a hop, a relay's AUTH, a HOSAKA request or a profile went
+ * out as somebody else, under this identity's name on screen (found porting
+ * this to snocrash, review of snocrash #37).
+ */
+function checkedAnswer(signed: NostrEvent, signer: Signer): NostrEvent {
+  if (!authentic(signed)) throw new Error('the signer returned an event whose signature does not verify, so it was not used')
+  if (signed.pubkey !== signer.pubkey) {
+    otherAccount(signer.pubkey)
+    throw new SignerAccountMismatch()
+  }
+  signerHome(signer)
+  return signed
+}
+
+/**
+ * `signer` just answered as its own identity (a signature by it, or a payload
+ * sealed to it that opened): it holds this account now. The notice is done
+ * with, and a "not this identity" answer kept by heldBy no longer stands,
+ * or a payload that truly does not open, failing within its window, would
+ * be called the signer's fault and raise the notice again.
+ */
+function signerHome(signer: Signer): void {
+  if (heldAsked?.signer === signer) heldAsked = null
+  if (otherAccountNoticed === signer.pubkey) {
+    otherAccountNoticed = null
+    if (useToast.getState().toast?.mark === 'signer') useToast.getState().dismiss()
+  }
+}
+
+/** How long a decrypt that failed waits for the signer to say which account it holds. */
+const HELD_PATIENCE_MS = 10_000
+/**
+ * How long a "not this identity" answer stands, so a page of wraps that will
+ * not open asks once, not once each. Only that answer is kept: "this
+ * identity" is asked afresh each time, since a signer switched away within
+ * the window would otherwise have its failures kept as unopenable.
+ */
+const HELD_ANSWER_MS = 30_000
+
+/** The last answer to "which account do you hold", per signer object. */
+let heldAsked: { signer: Signer; at: number; answer: Promise<string | null> } | null = null
+
+/** The account `signer` holds now, or null when it could not say in time. */
+function heldBy(signer: Signer): Promise<string | null> {
+  if (heldAsked && heldAsked.signer === signer && Date.now() - heldAsked.at < HELD_ANSWER_MS) return heldAsked.answer
+  const ask = signer.heldPubkey
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const answer = ask
+    ? Promise.race([
+      ask().then((pk) => (typeof pk === 'string' ? pk : null), () => null),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HELD_PATIENCE_MS) }),
+    ]).finally(() => clearTimeout(timer))
+    : Promise.resolve(null)
+  const asked = { signer, at: Date.now(), answer }
+  heldAsked = asked
+  void answer.then((pk) => { if (pk === signer.pubkey && heldAsked === asked) heldAsked = null })
+  return answer
+}
+
+/**
+ * Why a decrypt through `signer` failed, as the error to reject with. A
+ * remote signer on another account cannot open what is sealed to this
+ * identity, and the failure looks exactly like a payload that does not open,
+ * which is kept as such (a private message is never decrypted again). So the
+ * signer is asked which account it holds: this identity's, and the payload
+ * truly does not open; another, and that is said (SignerAccountMismatch);
+ * no answer, and it is left undecided (SignerUnconfirmed).
+ */
+async function decryptRefusal(signer: Signer, err: unknown): Promise<unknown> {
+  if (signer.kind === 'local') return err
+  if (err instanceof SignerAccountMismatch) { otherAccount(signer.pubkey); return err }
+  if (err instanceof Error && err.message === NIP44_UNAVAILABLE) return err
+  const held = await heldBy(signer)
+  if (held === signer.pubkey) return err
+  if (held === null) return new SignerUnconfirmed()
+  otherAccount(signer.pubkey)
+  return new SignerAccountMismatch()
 }
 
 /**
@@ -855,27 +1515,271 @@ function wakeSigner(): void {
   // again, which is the second prompt for the same event. If they really are
   // dead, the pending request's timeout reconnects and asks again itself.
   if (pendingSigns > 0) return
-  void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
+  // The fresh signer is taken only if the one that reconnected is still in
+  // use: a switch of identity while it reconnected wins.
+  const asked = currentSigner
+  void asked.reconnect?.().then((fresh) => { if (currentSigner === asked && fresh !== asked) currentSigner = fresh }).catch(() => { /* the next signature reconnects and says why */ })
+}
+
+/** Said while a move asks the relays again for your latest move. */
+export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
+/** Said when the relays still could not confirm it, and the move is refused. */
+export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
+/** How many times a move asks before it refuses. */
+const HEAD_CONFIRM_TRIES = 2
+
+/**
+ * Another tab of this browser moved you: its saves land in the same storage.
+ * What it signed is folded in, and whatever of it is not yet published stays
+ * queued (adoptChain counts what it folds as already on the relays).
+ */
+function foldOtherTabs(pubkey: string): void {
+  const s = useCyberspace.getState()
+  if (s.events.length === 0) return
+  // Only when another tab has saved since this one last wrote or read the
+  // chain: comparing the mark costs nothing, and reading, hashing and
+  // rebuilding a long saved chain before every move cost about 190 ms on a
+  // 2,000-event chain (review of #236). With no mark (an older build saved
+  // it), the chain is read as before.
+  const mark = storedMark(pubkey)
+  if (mark !== null && knownMarks.get(pubkey) === mark) return
+  knownMarks.set(pubkey, mark)
+  const stored = loadChain(pubkey)
+  if (!stored) return
+  const have = new Set(s.events.map((e) => e.id))
+  const extra = stored.events.filter((e) => !have.has(e.id))
+  if (extra.length === 0) return
+  // Only what another tab can have done: moved on from this tab's head (the
+  // stored chain holds every event this tab holds), or respawned (a newer
+  // spawn). Storage that disagrees in any other way is not taken on trust
+  // here; what was published is on the relays, and confirmHead asks them.
+  const storedIds = new Set(stored.events.map((e) => e.id))
+  const movedOn = s.events.every((e) => storedIds.has(e.id))
+  const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
+  if (!movedOn && !respawned) return
+  foldNow(extra)
+  const now = useCyberspace.getState()
+  const queued = extra.filter((e) => !stored.published.includes(e.id) && now.published[e.id] === 'ok')
+  if (queued.length === 0) return
+  const published = { ...now.published }
+  for (const e of queued) published[e.id] = 'queued'
+  useCyberspace.setState({ published })
+  saveChain(now.events, published, now.chain)
+}
+
+/**
+ * Confirm this device holds the identity's live head before a chain action
+ * is signed (arkinox's ruling of 2026-10-08, normative in the spec): a
+ * client that signs from a stale head forks the chain, and a fork ends it.
+ * Another tab's saves and the relays' answers are folded in first; the
+ * caller then compares the head with the one it meant to extend. Null when
+ * confirmed: the canonical relay answered, and every relay that holds this
+ * chain answered or 2.5 s passed since the requests went out; or, the
+ * canonical relay silent, another configured relay answered holding the
+ * newest event already on the relays (chains.ts confirmChainEvents, option
+ * B and the ruling on the slow-relay grace). The refusal's words when
+ * nothing counted after HEAD_CONFIRM_TRIES asks (`retrying` runs before each
+ * ask after the first), and the move is then refused rather than signed
+ * blind: offline, slow relays, or a chain returned with a hole.
+ * STALE_CONFIRMATION when a respawn or an identity switch landed meanwhile.
+ * A spawn needs none of this, since nothing can follow a spawn signed a
+ * moment ago.
+ */
+/**
+ * What confirmHead returns when a respawn or an identity switch landed while
+ * it waited: the action it was confirming belongs to a chain that is gone,
+ * and its caller ends without a word. It writes nothing to the panel, which
+ * belongs to whatever the new chain is doing now, and it never lifts the one
+ * proof at a time guard of a proof that started since (verification of
+ * #236, finding 5).
+ */
+export const STALE_CONFIRMATION: unique symbol = Symbol('stale confirmation')
+
+/** Bumped by a respawn and an identity switch: an older value marks a waiter from a chain that is gone. */
+let chainEpoch = 0
+
+async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const epoch = chainEpoch
+  // The saved chain's signatures are checked first: nothing is signed onto
+  // a chain until every event of it is known to be authentic.
+  const cut = await signaturesChecked(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  if (cut) return cut
+  foldOtherTabs(pubkey)
+  // No confirmation is reused, however recent (arkinox, 2026-10-08): another
+  // device can move in the second between two looks, and only a fresh answer
+  // makes the relay's silence mean "nothing newer".
+  for (let i = 0; i < HEAD_CONFIRM_TRIES; i++) {
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+    if (i > 0) retrying()
+    const now = useCyberspace.getState()
+    if (now.identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
+    // Only what is new since the newest event the relays already hold, and
+    // on the second ask over a fresh socket: a silent or unauthenticated one
+    // is replaced, not asked again (review of #236).
+    const anchor = newestEventOnRelays(now.events, now.published)
+    const got = await confirmChainEvents(pubkey, now.genesisId || undefined, now.events, { since: anchor?.created_at, anchorId: anchor?.id, reconnect: i > 0 }).catch(() => null)
+    if (chainEpoch !== epoch) return STALE_CONFIRMATION
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
+    if (got) {
+      foldNow(got)
+      return null
+    }
+  }
+  return HEAD_UNCONFIRMED_MESSAGE
+}
+
+/**
+ * The created_at of the newest event of `events` the relays already hold
+ * (published, or adopted from them), or undefined when none is: the second
+ * a confirmation asks from. In the usual case that is the head's. When the
+ * head is not published yet (LOCAL, offline, queued) it is earlier, so a move
+ * another device published meanwhile, from the last shared event on, is
+ * still found.
+ */
+export function newestOnRelays(events: NostrEvent[], published: Record<string, PublishStatus>): number | undefined {
+  return newestEventOnRelays(events, published)?.created_at
+}
+
+/**
+ * The newest event of `events` the relays already hold, itself: what a
+ * confirmation asks from (its created_at) and what an answer must hold to
+ * show the relay really holds this chain (its id; chains.ts
+ * confirmChainEvents `anchorId`).
+ */
+export function newestEventOnRelays(events: NostrEvent[], published: Record<string, PublishStatus>): NostrEvent | undefined {
+  let newest: NostrEvent | undefined
+  for (const e of events) if (published[e.id] === 'ok' && (newest === undefined || e.created_at > newest.created_at)) newest = e
+  return newest
+}
+
+/** Said while a chain action waits for the saved chain's signatures to be checked. */
+export const SIG_CHECK_MESSAGE = 'Checking the signatures of your saved chain.'
+
+/** A performance mark, for measuring boot; nothing where there is no performance API. */
+function mark(name: string): void {
+  try { performance.mark(name) } catch { /* no performance API */ }
+}
+
+/**
+ * The background signature check of a saved chain, while it runs: whose
+ * chain, and the words to refuse a waiting action with if it cut the chain
+ * (null when every signature verified).
+ */
+let sigCheck: { pubkey: string; done: Promise<string | null> } | null = null
+
+/**
+ * Check a saved chain's signatures off the main thread (lib/sigCheck.ts),
+ * after it has been drawn unchecked (loadChain with `later`). Every
+ * signature that verifies joins the memo; at the first one that does not,
+ * the chain is cut there as loadChain would have cut it (cutInauthentic).
+ * Chain actions wait for it (signaturesChecked).
+ */
+function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
+  if (unchecked.length === 0) {
+    sigCheck = null
+    mark('onosendai:chain-verified')
+    return
+  }
+  const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
+  entry.done = checkSignatures(unchecked).then((bad) => {
+    const badKeys = new Set(unchecked.filter((e) => bad.has(e.id)).map(sigKey))
+    for (const e of unchecked) if (!badKeys.has(sigKey(e))) verifiedSigs.add(sigKey(e))
+    if (sigCheck === entry) sigCheck = null
+    mark('onosendai:chain-verified')
+    return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
+  })
+  sigCheck = entry
+}
+
+/**
+ * Wait for the background check of `pubkey`'s saved chain, saying so while
+ * it runs. Resolves to the words a chain action is refused with when the
+ * check cut the chain under it, and null otherwise.
+ */
+async function signaturesChecked(pubkey: string): Promise<string | null> {
+  const check = sigCheck
+  if (!check || check.pubkey !== pubkey) return null
+  useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: SIG_CHECK_MESSAGE } })
+  const cut = await check.done
+  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: null } })
+  return cut
+}
+
+/**
+ * The ids of the actions a cut set aside (cutInauthentic). When the relays
+ * still hold them, correctly signed, the next confirmation restores them,
+ * and the move that finds that says so, not that another device moved you.
+ */
+const setAside = new Set<string>()
+
+/** The words for a head that moved under a move: a restore after a cut, or another device's move. */
+function headMovedWords(events: NostrEvent[], again: string): string {
+  const restored = events.some((e) => setAside.has(e.id))
+  setAside.clear()
+  return restored
+    ? `The relays still hold the actions set aside here, correctly signed, so your chain was restored from them. ${again}`
+    : `Another device moved you. ${again}`
+}
+
+/**
+ * Cut the chain in hand at the events whose signatures failed (`badKeys`),
+ * as loadChain cuts a stored chain (authenticStretch): they never existed,
+ * and the chain continues from the event before the first of them. Redraws,
+ * saves, and says so in the proof notice. Returns those words, or null when
+ * nothing in hand was affected (another identity by now, or already gone).
+ */
+function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey) return null
+  const n = s.events.filter((e) => badKeys.has(sigKey(e))).length
+  if (n === 0) return null
+  const events = authenticStretch(pubkey, s.events, (e) => !badKeys.has(sigKey(e)))
+  if (!events) {
+    // The spawn itself failed: nothing of the chain stands, and the identity
+    // is back at its spawn coordinate, unsigned, as with nothing saved.
+    const words = 'The spawn of your saved chain failed its signature check, so the chain was set aside. You stand at your spawn coordinate.'
+    const base = provisionalChain(pubkey)
+    useCyberspace.setState({ ...base, cursor: base.position, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
+    return words
+  }
+  // Every action set aside counts: the ones that failed, and the ones after
+  // them that the cut takes off with them (review of #242).
+  const removed = s.events.length - events.length
+  for (const e of s.events) if (!events.includes(e)) setAside.add(e.id)
+  const words = removed === 1
+    ? 'One saved action failed the signature check and was set aside. Your chain continues from the action before it.'
+    : `${removed} saved actions were set aside, from the first one that failed the signature check on. Your chain continues from the action before them.`
+  const d = derive({ version: 2, events, published: events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held })
+  useCyberspace.setState({ ...d, cursor: d.position, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
+  saveChain(d.events, d.published, d.chain, s.held)
+  return words
 }
 
 const pubkeyHex = currentSigner.pubkey
+
+/**
+ * The pubkey this page load generated, or null when the key was already on
+ * the device (or came from a login). The /demo tour reads it to tell a key
+ * it generated from one the visitor brought (store/useDemo.ts).
+ */
+export function keyMintedOnLoad(): string | null {
+  return mintedOnLoad ? pubkeyHex : null
+}
 const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
 const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
-/** A fresh spawn signed synchronously: only possible with a local key, which is
- * the only case module init ever needs one (see pickInitialSigner). */
-function freshSpawnSync(signer: Signer): PersistedChain {
-  if (!signer.secretKey) throw new Error('cannot spawn without a local key at init')
-  const createdAt = Math.floor(Date.now() / 1000)
-  const spawn = finalizeEvent(spawnTemplate(signer.pubkey, createdAt), signer.secretKey) as unknown as NostrEvent
-  return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
-}
-
-/** A fresh spawn signed through whatever signer is active (may be remote). */
+/**
+ * A fresh spawn signed through whatever signer is active (may be remote),
+ * by way of signEvent, so a remote signer's answer is checked like every
+ * other: a spawn whose signature does not verify is refused here, never
+ * shown or saved, and never silently dropped by loadChain on the next load.
+ */
 async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<PersistedChain> {
   const now = Math.floor(Date.now() / 1000)
   const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
-  const spawn = await signer.signEvent(spawnTemplate(signer.pubkey, createdAt))
+  const spawn = await signEvent(spawnTemplate(signer.pubkey, createdAt), undefined, signer)
   return { version: 2, events: [spawn], published: [], stats: EMPTY_STATS }
 }
 
@@ -901,6 +1805,7 @@ function provisionalChain(pubkey: string): ReturnType<typeof derive> {
     genesisId: '',
     prevEventId: '',
     published: {},
+    held: false,
     chain: EMPTY_STATS,
     position,
     positionHistory: [position],
@@ -918,10 +1823,11 @@ function provisionalChain(pubkey: string): ReturnType<typeof derive> {
 function statsFromChain(events: NostrEvent[], prev: ChainStats): ChainStats {
   let hops = 0
   let sidesteps = 0
-  for (const e of events) {
-    const a = parseAction(e)
-    if (a?.type === 'hop') hops++
-    else if (a?.type === 'sidestep') sidesteps++
+  // Counted on the resolved chain, so a hop a game client signed inside a
+  // bracket, which moves nobody (spec §8.11.4 rule 3), is not one of yours.
+  for (const a of buildChain(events)) {
+    if (a.type === 'hop') hops++
+    else if (a.type === 'sidestep') sidesteps++
   }
   return { ...prev, hops, sidesteps }
 }
@@ -932,6 +1838,7 @@ function derive(saved: PersistedChain): {
   genesisId: string
   prevEventId: string
   published: Record<string, PublishStatus>
+  held: boolean
   chain: ChainStats
   position: Position
   positionHistory: Position[]
@@ -950,6 +1857,7 @@ function derive(saved: PersistedChain): {
     genesisId: actions[0].id,
     prevEventId: head.id,
     published,
+    held: saved.held === true,
     // Rides are counted from the events, so an adopted chain reads the same
     // as one ridden here; the local measurements stay what was saved.
     chain: { ...saved.stats, ...rideStatsOf(actions) },
@@ -963,12 +1871,54 @@ function derive(saved: PersistedChain): {
   }
 }
 
-const initial = derive(loadChain(pubkeyHex) ?? freshSpawnSync(currentSigner))
+/**
+ * The page never signs a spawn on load (arkinox, 2026-10-01). A saved chain is
+ * picked up as it was; with none, the identity sits unsigned at its spawn
+ * coordinate exactly as a switch leaves it, and the self-check (selfSync.ts)
+ * asks the relays whether it already has a chain before its first move signs
+ * anything. This used to sign a fresh spawn here, and because an identity
+ * switched in is not saved until it moves, switch-then-reload signed a new
+ * spawn for it: newer than its real chain on the relays, so it replaced that
+ * chain and was published on the next move.
+ */
+// Drawn at once, unchecked: the signatures are checked in the background
+// (startSignatureCheck, below the store), and every chain action waits.
+const saved = loadChain(pubkeyHex, true)
+const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
+mark('onosendai:chain-loaded')
 
 let requestId = 0
 
+/**
+ * Relay events for your own chain that arrived while a proof was computing.
+ * Folding them then would move the head under the proof, so they wait here
+ * and are folded the moment the proof is about to be signed or ends
+ * (foldDeferred). Dropping them, as this used to, lost a game's entry that
+ * arrived during a long HOSAKA job: it is never delivered again, and the
+ * finished hop forked against it.
+ */
+let deferred: NostrEvent[] = []
+/** True while foldDeferred or a signing look folds: adoptChain then folds even mid-proof. */
+let folding = false
+
+/** Fold `events` into your chain now, even while a proof is computing. */
+function foldNow(events: NostrEvent[]): void {
+  if (events.length === 0) return
+  folding = true
+  try { useCyberspace.getState().adoptChain(events) } finally { folding = false }
+}
+
+/** Fold whatever arrived while a proof was computing. */
+function foldDeferred(): void {
+  const held = deferred
+  deferred = []
+  foldNow(held)
+}
+
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
+// One collector at a time: the startup call and a just-landed hop can both ask.
+let collectingKeys = false
 let cloudWaker: Waker | null = null
 let hosaka: { url: string; client: HosakaClient } | null = null
 /** The caps request out right now, and the API URL it was sent to. */
@@ -989,6 +1939,11 @@ function claimIntervalFor(kind: SignerKind): number {
 
 /** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
 let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+/** Installed by the store below: how a HOSAKA ride record is run to a hyperjump (runCloudRide). */
+let cloudRideRunner: ((record: PendingCloudJob, id: number) => Promise<boolean>) | null = null
+/** How long a finished HOSAKA ride waits for the line to hold a sampled block before it is kept for RESUME. */
+const LINE_WAIT_MS = 3 * 60_000
+const LINE_POLL_MS = 1_000
 
 /**
  * A job's action as a proof mode. A region-key purchase is a job too, but it
@@ -1010,7 +1965,94 @@ function scanHeldKey(lookupId: string, keyHex: string): void {
   void import('./useShards').then((m) => m.useShards.getState().rescan(lookupId, keyHex)).catch(() => { /* the relay was asked; a miss is a miss */ })
 }
 
-export const useCyberspace = create<CyberspaceState>((set, get) => {
+/**
+ * How long a provisional identity's first move waits for the self-check to
+ * answer before deciding without it. Short, because someone pressed COMMIT;
+ * a check that has not answered by then holds the new chain rather than
+ * publishing a spawn that may rival a real one (lib/chainHold.ts firstMove).
+ */
+const FIRST_MOVE_WAIT_MS = 4000
+
+/** A first move is waiting on the check or the signer: a second press must not sign a second spawn. */
+let firstMoveInFlight = false
+
+
+export const useCyberspace = create<CyberspaceState>((set, get, api) => {
+  /**
+   * The self-check's status for `pubkey` once it is no longer `checking`, or
+   * `checking` when `ms` ran out first. Resolves at once when it has already
+   * answered.
+   */
+  const waitForCheck = (pubkey: string, ms: number): Promise<SelfCheck['status']> => new Promise((resolve) => {
+    const answered = (): SelfCheck['status'] | null => {
+      const c = get().selfCheck
+      return c.pubkey === pubkey && c.status !== 'checking' ? c.status : null
+    }
+    const now = answered()
+    if (now) { resolve(now); return }
+    const timer = setTimeout(() => { unsub(); resolve('checking') }, ms)
+    const unsub = api.subscribe(() => {
+      const st = answered()
+      if (st) { clearTimeout(timer); unsub(); resolve(st) }
+    })
+  })
+
+  /**
+   * Sign the spawn of an identity with no chain yet, after the self-check
+   * has had its short say (lib/chainHold.ts firstMove). True when the spawn
+   * was signed and the chain now holds it; false when nothing was signed
+   * (the relays placed you, the signer refused, `lost` said the reason to
+   * sign has gone, or another first move is already in flight). Only a
+   * deliberate act reaches this: a first move (commit) or the /demo tour's
+   * SPAWN (signSpawn), never a login, a switch or a page load.
+   */
+  const signFirstSpawn = async (lost: () => boolean): Promise<boolean> => {
+    if (firstMoveInFlight) return false
+    firstMoveInFlight = true
+    try {
+      const pubkey = get().identity.pubkey
+      const adoptedMessage = 'This identity already has a chain on the relays, and you are at its head now. Re-aim from here.'
+      if (get().selfCheck.status === 'checking') {
+        set({ proof: { ...IDLE_PROOF, message: 'Asking the relays whether this identity already has a chain.' } })
+      }
+      const status = await waitForCheck(pubkey, FIRST_MOVE_WAIT_MS)
+      if (get().identity.pubkey !== pubkey) return false
+      if (firstMove(status, get().events.length > 0) === 'adopted') {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+        return false
+      }
+      if (lost()) return false
+      set({ proof: IDLE_PROOF })
+      let spawn: NostrEvent
+      try {
+        spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
+      } catch (err) {
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+        return false
+      }
+      if (get().identity.pubkey !== pubkey) return false
+      // The relay chain may have landed while the signer was thinking; if so
+      // it already placed us and this spawn is never used.
+      if (get().events.length > 0) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+        return false
+      }
+      // Left your head while the signer was thinking: the spawn is dropped
+      // unused, never saved or sent, and nothing moves.
+      if (lost()) return false
+      // Decided on the check as it stands now, which the signer's wait may
+      // have settled.
+      const now = get().selfCheck
+      const held = firstMove(now.pubkey === pubkey ? now.status : 'checking', false) === 'spawn-held'
+      const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS, held })
+      set({ ...d })
+      saveChain(d.events, d.published, d.chain, held)
+      return true
+    } finally {
+      firstMoveInFlight = false
+    }
+  }
+
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
    * one spawns where its own bits land (spec §3.1). Either way the scene lets
@@ -1021,6 +2063,71 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     cloudAbort?.abort()
     cloudAbort = null
     cloudWaker = null
+  }
+
+  /**
+   * A finished proof that will not be signed now. A route stops: it fails
+   * outright when nothing can be signed (a game holds the avatar), and is
+   * paused with the proof kept when a choice may yet make it signable
+   * (`keep`). A single move just says why.
+   */
+  const refuseSigning = (msg: ProofResponse, message: string, keep: boolean): void => {
+    const { plan } = get()
+    set({
+      pendingTarget: null,
+      plan: plan ? { ...plan, status: keep ? 'paused' : 'failed', message, awaiting: keep ? msg : null } : null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message },
+    })
+  }
+
+  /**
+   * The head moved under a finished proof (HEAD_MOVED_MESSAGE). A route
+   * computes its step again from where the chain now stands, at once when
+   * this machine computes it, and on RESUME when HOSAKA would, because that
+   * costs sats again. A single move keeps its aim for the next commit.
+   */
+  /**
+   * The live feed brought another device's move while a proof computed: the
+   * proof is bound to a head that is no longer the head, so it stops now,
+   * what arrived is folded, and the reason is said: a game that holds the
+   * avatar, a choice between two chains, or the head that moved.
+   */
+  const stopForNewHead = (beforeHead: string): void => {
+    // The worker is stopped; a finish already on its way is refused by
+    // finishProof itself, whose head no longer matches.
+    cancelProof()
+    set({ proof: { ...IDLE_PROOF } })
+    foldDeferred()
+    const reason = whyNoMove(get().actions()) ?? (get().chainConflict ? CHOOSE_FIRST_MESSAGE : null)
+    if (reason) {
+      const { plan } = get()
+      set({ pendingTarget: null, plan: plan ? { ...plan, status: 'failed', message: reason, awaiting: null } : null, proof: { ...IDLE_PROOF, status: 'infeasible', message: reason } })
+      return
+    }
+    if (get().prevEventId !== beforeHead) headMovedUnder()
+  }
+
+  const headMovedUnder = (): void => {
+    const { plan, position } = get()
+    if (!plan) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      return
+    }
+    const next = nextStep(position, plan.target, plan.ceilings)
+    if (!next) {
+      set({ plan: null, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Where you stand now is already the end of the route.` } })
+      return
+    }
+    if (next.source === 'cloud') {
+      set({
+        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} The next step is one HOSAKA computes, so RESUME pays for it again from where you stand now.` },
+        pendingTarget: null,
+        proof: IDLE_PROOF,
+      })
+      return
+    }
+    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} This step is being computed again from where you stand now.` } })
+    startPlanStep()
   }
 
   /** The cloud flow ended without a proof. The move does not happen; the message stays until X or the next commit. */
@@ -1086,6 +2193,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         signerKind: get().signerKind,
         cantorMsByHeight: useCalibration.getState().cantorMsByHeight,
         sha256PerSec: useCalibration.getState().sha256PerSec,
+        experience: experienceRatio(),
       }),
     }
   }
@@ -1121,9 +2229,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // The steps run one after another, so their waits add, like their prices.
     let seconds = 0
     let secondsKnown = true
+    // What HOSAKA already holds, across every step of the route.
+    let reusedAxes = 0
+    let savedMsats = 0
+    let savedSeconds = 0
     try {
       for (const step of steps) {
-        const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane))
+        // Under LOOT a hop is quoted with the destination's cubes, since that
+        // is what LOOT pays for; the other profiles quote the bare hop.
+        const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane), undefined, hopWants(step.kind))
         if (id !== requestId) return
         if (!q.within_cap || q.cost_msats === null) {
           routeFail(q.hint ?? `HOSAKA does not sell an h${q.max_height} ${step.kind}.`)
@@ -1133,6 +2247,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         if (typeof q.est_seconds === 'number') seconds += q.est_seconds
         else secondsKnown = false
         if (q.max_height > tallest) { tallest = q.max_height; estTime = q.est_time }
+        reusedAxes += q.reused_axes?.length ?? 0
+        savedMsats += q.reuse_saves_msats ?? 0
+        savedSeconds += q.reuse_saves_seconds ?? 0
       }
     } catch (err) {
       if (id !== requestId) return
@@ -1150,6 +2267,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       maxHeight: tallest,
       K: 0,
       route: { steps: plan.summary.steps, cloudSteps: steps.length },
+      ...(reusedAxes > 0 ? { reuse: { axes: reusedAxes, savedMsats, savedSeconds } } : {}),
     }
     if (needsApproval(total, cloudPrefs)) {
       set({ cloud: { ...get().cloud, status: 'confirm', quote, message: null } })
@@ -1234,6 +2352,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
    * so it starts at once), the poll, the verification here, then the same
    * signature step a local proof gets. A short balance (the price moved) is
    * paid through the job's own invoice, as before.
+   *
+   * The submit's idempotency key is a function of the step and the chain head
+   * (lib/hosaka.ts idempotencyKeyFor), so a submit whose answer was lost, and
+   * the same step committed again after the route failed over it, name the
+   * job the first attempt made rather than buying a second.
    */
   const startCloudStep = async (step: PlanStep, id: number): Promise<void> => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
@@ -1253,20 +2376,38 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       },
     })
     let job: HosakaJob
+    // The submit may ask again on its own after a lost answer (lib/hosaka.ts),
+    // so it runs under the cloud flow's abort like every other cloud wait: X
+    // (cancelCloud, cancelPlan) stops the retries, and a step cancelled during
+    // one is never charged by a retry that lands after it.
+    stopCloud()
+    const abort = new AbortController()
+    cloudAbort = abort
     try {
       const v1 = hosakaCoord(step.from, plane)
       const v2 = hosakaCoord(step.to, plane)
       job = step.kind === 'hop'
-        ? await client.submitHop(v1, v2, prevEventId)
-        : await client.submitSidestep(v1, v2, prevEventId)
+        ? await client.submitHop(v1, v2, prevEventId, abort.signal, hopWants('hop'))
+        : await client.submitSidestep(v1, v2, prevEventId, abort.signal)
       const after = job.new_balance_msats ?? job.current_balance_msats
       if (typeof after === 'number') get().noteBalance(after)
+      if (job.followed_existing) {
+        // The same move was already on HOSAKA with the other cube setting:
+        // that job is followed rather than paid for twice (lib/hosaka.ts).
+        useToast.getState().show({
+          label: 'SAME MOVE ALREADY ON HOSAKA',
+          meta: 'Following the job already running, so nothing is charged twice. Your new cube setting applies from your next move.',
+          mark: 'hosaka',
+        })
+      }
     } catch (err) {
-      if (id !== requestId) return
+      if (id !== requestId || abort.signal.aborted) return
       routeFail(describeCloudError(err))
       return
+    } finally {
+      if (cloudAbort === abort) cloudAbort = null
     }
-    if (id !== requestId) return
+    if (id !== requestId || abort.signal.aborted) return
     const paying = job.payment_required === true && job.deposit !== undefined
     const record: PendingCloudJob = {
       version: 1,
@@ -1282,6 +2423,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       createdAt: Date.now(),
       stage: paying ? 'awaiting_payment' : 'computing',
       deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+      estSeconds: cloudSeconds(step.maxHeight, get().cloud.provider?.pricing?.hop ?? null) ?? undefined,
     }
     saveCloudJob(record)
     set({ cloud: { ...get().cloud, job: record, message: null } })
@@ -1346,11 +2488,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
     const { job } = outcome
     const final = outcome.record
-    if (job.status !== 'completed') {
+    // A staged hop is not a finished job and is not a failed one: its own
+    // proof is whole and the destination cubes are still being computed, so
+    // it is verified and signed exactly like a finished one and the cubes are
+    // collected afterwards (collectCloudKeys).
+    if (job.status !== 'completed' && !keysPending(job)) {
       clearCloudJob()
       cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return
     }
+    // What it actually took, against what was estimated: TIME learns from it.
+    recordJobExperience(final, Math.max(findLcaHeight(BigInt(final.from.x), BigInt(final.to.x)), findLcaHeight(BigInt(final.from.y), BigInt(final.to.y)), findLcaHeight(BigInt(final.from.z), BigInt(final.to.z))))
 
     set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: null } })
     const move = { from: positionFromWire(final.from), to: positionFromWire(final.to), plane: final.plane, prevEventId: final.prevEventId }
@@ -1374,6 +2522,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
 
+    // Set by the hop below when HOSAKA is still computing its cubes.
+    let stagedCubes = false
     const msg = cloudProofResponse(id, final, job, Date.now() - (get().cloud.startedAt ?? final.createdAt))
     if (msg.type === 'done' && msg.mode === 'hop' && msg.lookupId) {
       // The region key of the region entered (spec 7.2), which this machine could not derive.
@@ -1402,6 +2552,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.lookupId, r.region_n.secret_key)
+      // LOOT: the cubes around where it landed. HOSAKA's own list when it sent
+      // one; this machine computes what it can either way, up to its ceiling.
+      if (get().cloudPrefs.profile === 'loot') {
+        const sent = r.destination_keys ? holdCloudDestinationKeys(r.destination_keys, move.to, move.plane) : 0
+        const top = sent > 0 ? Math.min(...r.destination_keys!.map((k) => k.height)) - 1 : localKeyCeiling()
+        void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(r.max_height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
+        // Staged delivery: this result is the hop alone and the cubes are
+        // still being computed on the same job. Noted here, taken up once the
+        // move itself has landed, since the cubes are the lesser half.
+        stagedCubes = r.keys_pending === true
+      }
     }
     const before = get().events.length
     await get().finishProof(msg)
@@ -1412,6 +2573,13 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
     useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${final.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
+    // The move is signed and the toast for it has been shown; now the cubes,
+    // which arrive on the same job minutes later. The ticket outlives this
+    // tab, so a phone put away mid job collects them when it comes back.
+    if (stagedCubes) {
+      saveKeysTicket({ version: 1, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
+      void get().collectCloudKeys()
+    }
     // The event landed, and a route may already have moved on to its next
     // step (which bumps the request id): the bookkeeping below is about the
     // step that landed, so it runs regardless.
@@ -1424,6 +2592,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         ...IDLE_CLOUD,
         balance: get().cloud.balance,
         limits: get().cloud.limits,
+        // Per API URL like the limits: kept, or the ride offer and the
+        // crossover lose it until a reload (arkinox, 2026-10-11).
+        provider: get().cloud.provider,
         // A route in progress keeps its funded status visible.
         status: get().plan ? 'paid' : 'idle',
         message: get().plan ? 'Route funded.' : null,
@@ -1440,18 +2611,239 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   cloudStepStarter = startCloudStep
 
+  /**
+   * A HOSAKA ride that ended without a hyperjump. The head is let go (the
+   * deferred relay events fold), the reason goes to the Hyperspace panel and
+   * the Cloud panel, and the record stays for RESUME only when `keep`: a
+   * paid job that can still be finished or signed.
+   */
+  const rideFail = (message: string, keep: boolean): void => {
+    const cloud = get().cloud
+    set({
+      pendingTarget: null,
+      proof: IDLE_PROOF,
+      cloud: { ...cloud, status: 'error', message, rideError: message, quote: null, invoice: null, invoiceOpen: false, progress: null, job: keep ? cloud.job : null },
+    })
+  }
+
+  /**
+   * A sampled block's hash from the line this client synced. The stop index
+   * fills while the line syncs, so right after a reload a finished job may
+   * be checked before the block is there: wait for it a while, then give up
+   * WITHOUT judging the proof (verifyCloudRide rejects), so the paid proof is
+   * kept for RESUME. Lazy import: useHyperspace imports this store.
+   */
+  const rideBlockHash = (id: number) => async (height: number): Promise<string> => {
+    const { getStopByHeight } = await import('./useHyperspace')
+    for (let waited = 0; ; waited += LINE_POLL_MS) {
+      const hash = getStopByHeight(height)?.blockHash
+      if (hash) return hash
+      if (id !== requestId) throw new Error('canceled')
+      if (waited >= LINE_WAIT_MS) throw new Error(`block ${height} is not on this device's line yet`)
+      await new Promise((resolve) => setTimeout(resolve, LINE_POLL_MS))
+    }
+  }
+
+  /**
+   * From a persisted ride record to a signed hyperjump: pay if the job asks,
+   * poll (lib/cloud.ts driveCloudJob, as for hops), check the proof at Level
+   * 1 (lib/cloudRide.ts), refuse a moved head, then sign through completeRide,
+   * the one path a local ride takes. A proof that fails the check is never
+   * signed. Resolves true when the hyperjump was signed.
+   */
+  const runCloudRide = async (record: PendingCloudJob, id: number): Promise<boolean> => {
+    const ride = record.ride
+    if (!ride) return false
+    const client = cloudClient(get().cloudPrefs.apiUrl)
+    stopCloud()
+    const abort = new AbortController()
+    const waker = createWaker()
+    cloudAbort = abort
+    cloudWaker = waker
+    let outcome: { job: HosakaJob; record: PendingCloudJob }
+    try {
+      outcome = await driveCloudJob(client, record, {
+        claimIntervalMs: claimIntervalFor(currentSigner.kind),
+        onRecord: (r) => {
+          saveCloudJob(r)
+          if (id === requestId) set({ cloud: { ...get().cloud, job: r } })
+        },
+        onDepositPoll: (d) => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false, lastCheck: { at: Date.now(), status: d.status } } })
+        },
+        onDepositPollError: () => {
+          if (id === requestId) set({ cloud: { ...get().cloud, checking: false } })
+        },
+        onStage: (stage, d) => {
+          if (id !== requestId) return
+          const cloud = get().cloud
+          set({
+            cloud: {
+              ...cloud,
+              status: stage,
+              invoice: d.invoice === undefined ? cloud.invoice : d.invoice,
+              invoiceOpen: stage === 'awaiting_payment' ? (d.invoice ? true : cloud.invoiceOpen) : false,
+              progress: d.progress === undefined ? cloud.progress : d.progress,
+              message: d.message === undefined ? cloud.message : d.message,
+            },
+            ...(d.progress !== undefined && d.progress !== null ? { proof: { ...get().proof, progress: d.progress } } : {}),
+          })
+        },
+      }, abort.signal, waker)
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return false
+      const keep = retainsRecord(err)
+      if (!keep) clearCloudJob()
+      rideFail(describeCloudError(err), keep)
+      return false
+    } finally {
+      if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
+    }
+    if (id !== requestId) return false
+    const { job } = outcome
+    const final = outcome.record
+    const after = job.new_balance_msats ?? job.current_balance_msats
+    if (typeof after === 'number') get().noteBalance(after)
+    if (job.status !== 'completed') {
+      // HOSAKA refunds a failed job to the balance; the same ride asked
+      // again names a new job under the same key, paid from that refund.
+      clearCloudJob()
+      rideFail(`HOSAKA could not finish the ride: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
+      return false
+    }
+
+    set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: 'Checking HOSAKA\'s ride proof on this device.' } })
+    let failed: string[]
+    try {
+      failed = await verifyCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
+    } catch (err) {
+      // Not judged (the line has not synced a sampled block, the verifier
+      // broke): kept, never signed unchecked and never thrown away paid.
+      if (id !== requestId) return false
+      rideFail(`HOSAKA's ride proof could not be checked yet (${err instanceof Error ? err.message : String(err)}). It is kept: RESUME in the Cloud compute panel checks it and signs it once the line has synced.`, true)
+      return false
+    }
+    if (id !== requestId) return false
+    if (failed.length > 0) {
+      clearCloudJob()
+      rideFail(`HOSAKA's ride proof failed this device's check (${failed.join('; ')}), so nothing was signed and you did not move. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, false)
+      return false
+    }
+    // Bound to the head it was computed from (§5.3): a head that moved
+    // makes it worthless, so it is refused, not signed.
+    if (get().prevEventId !== final.prevEventId) {
+      clearCloudJob()
+      rideFail('Your chain moved while HOSAKA was computing the ride, and the proof is bound to where it started, so it was discarded.', false)
+      return false
+    }
+
+    const r = job.result as CloudRideResult
+    // The head is let go here: completeRide confirms it afresh with the
+    // relays and refuses a moved one, as for a ride computed here.
+    set({ proof: IDLE_PROOF, cloud: { ...get().cloud, message: 'Signing the hyperjump.' } })
+    const before = get().events.length
+    let refusal: string | null = null
+    try {
+      await get().completeRide({
+        previousId: final.prevEventId,
+        toCoordHex: ride.toCoordHex,
+        fromHeight: ride.fromHeight,
+        toHeight: ride.toHeight,
+        asOf: ride.asOf,
+        rootHex: r.root,
+        mp: r.mp,
+        mnHex: r.mn,
+      })
+    } catch (err) {
+      refusal = err instanceof Error ? err.message : String(err)
+    }
+    if (get().events.length === before) {
+      if (id !== requestId) return false
+      // Not signed. A moved head makes the proof worthless; anything else
+      // (the signer declined, the relays did not answer) keeps it for RESUME.
+      const moved = get().prevEventId !== final.prevEventId
+      if (moved) clearCloudJob()
+      rideFail(`${refusal ?? 'The hyperjump was not signed.'}${moved ? '' : ' The checked ride proof is kept: RESUME in the Cloud compute panel signs it.'}`, !moved)
+      return false
+    }
+    clearCloudJob()
+    const cost = typeof job.cost_msats === 'number' ? job.cost_msats : final.costMsats
+    set({ spentMsats: addSpent(get().genesisId, cost) })
+    set({
+      cloud: {
+        ...IDLE_CLOUD,
+        balance: get().cloud.balance,
+        limits: get().cloud.limits,
+        provider: get().cloud.provider,
+        last: { jobId: final.jobId, action: 'ride', costMsats: cost, lookupId: null, at: Date.now() },
+      },
+    })
+    useToast.getState().show({ label: `HOSAKA RIDE COMPLETE - ${final.jobId.slice(0, 8)}`, meta: 'Checked on this device and signed. Thanks for using HOSAKA!', mark: 'hosaka' })
+    return true
+  }
+  cloudRideRunner = runCloudRide
+
+  /**
+   * Every login and every reconnect that ends in a switch goes through here.
+   * Each takes a ticket when it starts; a slow one (a bunker on a sleeping
+   * phone, an extension prompt left open) that finishes after a newer one
+   * started, or after the identity changed some other way, is closed instead
+   * of switched to, and its error is dropped: a late answer never undoes a
+   * newer choice (review of #353, 2026-10-15).
+   */
+  let loginTicket = 0
+  let switchCount = 0
+  const login = async (make: () => Signer | Promise<Signer>, errorPrefix = '', quiet: () => boolean = () => false): Promise<void> => {
+    const ticket = ++loginTicket
+    // Real switches of identity, counted by switchTo. Not the signer object:
+    // the store replaces that in the background for the SAME identity (the
+    // stand-in going live, a retry rebuilding a dead channel), and that must
+    // not drop a login the user is making (review of #353).
+    const switches = switchCount
+    const current = (): boolean => ticket === loginTicket && switches === switchCount
+    const fail = (err: unknown): void => {
+      if (current() && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
+    let signer: Signer
+    try {
+      signer = await make()
+    } catch (err) {
+      fail(err)
+      return
+    }
+    if (!current()) { void signer.close?.(); return }
+    // A signer must name a real key before it becomes the identity.
+    if (!/^[0-9a-f]{64}$/.test(signer.pubkey)) { void signer.close?.(); fail(new Error('The signer gave a key that is not a valid public key.')); return }
+    // switchTo counts the switch before anything in it can throw, so its own
+    // failure is this attempt's to report: judged by the ticket alone.
+    try { await switchTo(signer) } catch (err) {
+      if (ticket === loginTicket && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+
   const switchTo = async (signer: Signer): Promise<void> => {
+    switchCount++
+    // Whatever was waiting to sign as the old identity ends without a word.
+    chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.
     stopCloud()
     requestId++
     currentSigner = signer
+    // A new signer: whether the old one was on another account is old news.
+    otherAccountNoticed = null
+    heldAsked = null
+    if (useToast.getState().toast?.mark === 'signer') useToast.getState().dismiss()
     saveSignerPref(prefOf(signer))
     // No spawn is signed here. A returning identity loads from local storage now
     // and from the relay a moment later (self-sync), and a brand-new one sits at
     // its spawn coordinate until its first move. So switching to a bunker or an
     // extension never makes it sign anything just to log in.
-    const local = loadChain(signer.pubkey)
+    // Drawn at once, its signatures checked in the background (below).
+    const local = loadChain(signer.pubkey, true)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
+    // A broken-chain notice or respawn confirm left open was about the old
+    // identity's chain; it must never respawn the new one.
+    useChainUi.getState().setBrokenView(null)
     set({
       identity: { pubkey: signer.pubkey, npub: nip19.npubEncode(signer.pubkey) },
       signerKind: signer.kind,
@@ -1467,9 +2859,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       spectate: null,
       focus: null,
       transit: null,
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: loadBalance(signer.pubkey) },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, provider: get().cloud.provider, balance: loadBalance(signer.pubkey) },
+      // A new identity, a new question: the old one's answer and its prompt
+      // say nothing about this one (selfSync.ts asks again on the switch).
+      selfCheck: { pubkey: signer.pubkey, status: 'checking' },
+      chainConflict: null,
+      forkNotice: null,
     })
-    if (local) saveChain(base.events, base.published, base.chain)
+    if (local) saveChain(base.events, base.published, base.chain, base.held)
+    startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
     // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
     void get().resumeCloudJob()
   }
@@ -1489,98 +2887,117 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     if (far) set({ anchor: { ...next }, focus: { ...focus, position: { ...next } } })
   }
 
-  return {
-  identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
-  ...initial,
-  spectate: null,
-  focus: null,
-  focusReturnScale: null,
-  transit: null,
-  targets: loadTargets(),
-  cursor: initial.position,
-  pendingTarget: null,
-  plan: null,
-  spentMsats: loadSpent(initial.genesisId),
-  respawns: loadRespawns(pubkeyHex),
-  scaleExp: 0,
-  // Facing the black sun, the section 11.3 canonical orientation, the same
-  // one the SUN button restores. The spec's left/right/above/below language
-  // is defined against it, so it is what a first look should agree with; the
-  // map view is one TOP away and does not need to be where everyone starts.
-  view: canonicalQuaternion(),
-  viewHistory: [],
-  proof: IDLE_PROOF,
-  publishError: null,
-  live: loadLive(),
-  signerKind: currentSigner.kind,
-  loginError: null,
-
-  moveCursor: (dir) => {
-    const { cursor, scaleExp } = get()
-    if (!get().canDrive()) return
-    const step = stepFor(scaleExp) * BigInt(dir.dir)
-
-    const next: Position = { ...cursor }
-    next[dir.axis] = clampAxis(cursor[dir.axis] + step)
-
-    // Clamped against the axis wall: nowhere to go.
-    if (next[dir.axis] === cursor[dir.axis]) return
-    set({ cursor: next })
-    rideView(next)
-  },
-
-  setCursorAtCell: (row, col) => {
-    const { scaleExp, view } = get()
-    const focus = get().focus
-    const viewing = !get().atHead() && focus?.drive === true
-    // Cells are counted from the field's origin: your head, or the view's anchor.
-    const position = viewing ? get().anchor : get().position
-    const axes = viewAxes(view)
-    const origin = alignedOrigin(position, scaleExp)
-    const step = stepFor(scaleExp)
-
-    // Grid row/col are in screen space (row=0 is top, col=0 is left).
-    // Convert to world position by applying offsets along the screen axes.
-    const next: Position = { ...position }
-    next[axes.right.axis] = clampAxis(
-      origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
-    )
-    next[axes.up.axis] = clampAxis(
-      origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
-    )
-    // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
-
-    set({ cursor: next })
-    if (viewing) rideView(next)
-  },
-
-  commit: async () => {
+  /**
+   * COMMIT, toward the cursor (`walk` null) or toward one WALK step. Both
+   * share every check below; WALK differs only in what it aims at, what
+   * counts as still aimed, and that it never asks HOSAKA for a quote.
+   */
+  const commitToward = async (walk: { target: Position; stillAimed: () => boolean } | null): Promise<void> => {
     // One proof at a time. X cancels a commit you regret.
     if (get().proof.status === 'computing') return
     // Looking at history: nothing here is a place you can move from.
     if (!get().atHead()) return
 
-    // A provisional identity (logged in, never placed) has no genesis yet. Sign
-    // its spawn now, on this first deliberate move, rather than at login. This
-    // is the only spawn a switched-in identity ever signs.
-    if (get().events.length === 0) {
-      let spawn: NostrEvent
-      try {
-        spawn = await signEvent(spawnTemplate(get().identity.pubkey, Math.floor(Date.now() / 1000)))
-      } catch (err) {
-        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
-        return
-      }
-      // The relay chain may have landed while the signer was thinking; if so it
-      // already placed us and this spawn is redundant.
-      if (get().events.length === 0) {
-        const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS })
-        set({ ...d })
-        saveChain(d.events, d.published, d.chain)
-      }
+    // A held chain that met a chain on the relays waits for its answer: a
+    // move now would only lengthen one side of a choice not yet made.
+    if (get().chainConflict) {
+      const message = get().chainConflict!.kind === 'held'
+        ? 'This identity has a chain on the relays as well as this one. Choose which to keep first.'
+        : 'Another device published moves from the same point as your unpublished ones. Choose which to keep first.'
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message } })
+      // A prompt that was set aside comes back: the question is why nothing moved.
+      useChainUi.getState().setPromptAside(false)
+      return
     }
 
-    const { position, cursor, plane, headPlane, prevEventId, proof } = get()
+    // A game holds the avatar, or the chain is broken:
+    // nothing here may be signed (whyNoMove).
+    const noMove = whyNoMove(get().actions())
+    if (noMove) {
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove } })
+      return
+    }
+
+    // What this commit was pressed for, held across every wait below. The
+    // look at the relay, the first move's check and its signer, and HOSAKA's
+    // caps can each take seconds, and the cursor is free to move meanwhile:
+    // into BUILD mode or a VIEW, where it is a build cursor or a view's
+    // cursor and never a destination, or simply re-aimed at your head. A move
+    // reading the cursor after the wait flew to wherever it had gone (found
+    // in review, 2026-10-07). So the move goes where it was aimed when it was
+    // pressed, from your head, or not at all.
+    // A WALK step is aimed at its own target, not at the cursor, which by
+    // then is out at the last step queued; it stays aimed while the walk
+    // still has it next.
+    const aimedCursor = { ...(walk ? walk.target : get().cursor) }
+    const aimedPlane = get().plane
+    const lostAim = (): boolean => {
+      const now = get()
+      if (now.atHead() && (walk ? walk.stillAimed() : samePosition(now.cursor, aimedCursor)) && now.plane === aimedPlane) return false
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: now.atHead() ? AIM_CHANGED_MESSAGE : LEFT_HEAD_MESSAGE } })
+      return true
+    }
+
+    // The head is confirmed before anything is computed or signed.
+    //
+    // An action names the one before it, so an action signed from a head
+    // another device or tab has already moved past forks the chain, and a
+    // fork ends the whole chain for every reader (arkinox, 2026-10-08). The
+    // live subscription usually has us up to date; this closes the gap
+    // between an event reaching the relay and reaching us, and refuses to
+    // sign when the relays cannot say (confirmHead). LOCAL changes nothing
+    // here: it decides what this device publishes, not whether it can read.
+    //
+    // Only for a chain that exists. A provisional identity's question is a
+    // different one (does it have a chain at all?) and is answered below.
+    if (get().events.length > 0) {
+      const beforeHead = get().prevEventId
+      const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      if (refusal === STALE_CONFIRMATION) return
+      if (refusal) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } })
+        return
+      }
+      // On a held chain, a relay chain does not move you: it raises the prompt.
+      if (get().chainConflict) return
+      // The look may have brought a game's entry: a game holds the avatar now.
+      const noMoveNow = whyNoMove(get().actions())
+      if (noMoveNow) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: noMoveNow } })
+        return
+      }
+      // Before the aim: adopting another device's move carries the cursor
+      // with it, and that is the reason to give, not "the cursor changed".
+      if (get().prevEventId !== beforeHead) {
+        set({
+          pendingTarget: null,
+          proof: { ...IDLE_PROOF, status: 'infeasible', message: headMovedWords(get().events, 'Re-aim from where you are now.') },
+        })
+        return
+      }
+      if (lostAim()) return
+    }
+
+    // A provisional identity (logged in or loaded, never placed) has no
+    // genesis yet. Its spawn is signed now, on this first deliberate move, and
+    // never at login or on load: this is the only spawn a switched-in
+    // identity ever signs. Before signing, the self-check gets a short wait
+    // to say whether the identity already has a chain (lib/chainHold.ts
+    // firstMove; arkinox, 2026-10-01):
+    //
+    // | Check | First move |
+    // |---|---|
+    // | found | the relay chain has placed you: nothing is signed, re-aim from its head |
+    // | none | sign the spawn: a normal new chain, published per LIVE |
+    // | unknown, or no answer in time | sign the spawn, and HOLD the chain on this device |
+    if (get().events.length === 0) {
+      // Nothing lined up is no reason to sign a spawn.
+      if (samePosition(get().position, aimedCursor) && get().plane === get().headPlane) return
+      if (!(await signFirstSpawn(lostAim))) return
+    }
+
+    const { position, plane, headPlane, prevEventId, proof } = get()
+    const cursor = aimedCursor
     if (proof.status === 'computing') return
     // Nothing lined up: same cell, same plane.
     if (samePosition(position, cursor) && plane === headPlane) return
@@ -1630,6 +3047,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       set({ proof: { ...IDLE_PROOF, status: 'computing', mode: 'hop', message: 'Asking HOSAKA for its caps.' } })
       await ensureCloudLimits()
       set({ proof: IDLE_PROOF })
+      if (lostAim()) return
     }
     // Local first, per step, as the button promised (lib/movePlan.ts): the
     // step is this machine's whenever it has one; HOSAKA's caps enter only
@@ -1658,9 +3076,16 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // AUTOMATIC: the whole route, its steps run in order, pausing only for a
     // declined signature or a step that fails. A long walk is dozens of
     // identical presses otherwise, which is what this is for.
-    const target = get().moveMode === 'auto' ? { ...cursor } : { ...step.to }
+    // A WALK step is one press, so its route is the whole of it.
+    const target = walk || get().moveMode === 'auto' ? { ...cursor } : { ...step.to }
     const one = planSummary(position, target, ceilings)
     const funded = one.cloudSteps === 0
+    // WALK never pays on its own: a step HOSAKA would have to sell stops the
+    // walk here, and HOP is where the offer is made.
+    if (walk && !funded) {
+      set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: WALK_NEEDS_HOSAKA_MESSAGE } })
+      return
+    }
     set({
       plan: {
         target,
@@ -1676,12 +3101,118 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     })
     if (funded) startPlanStep()
     else await quoteRoute(++requestId)
+  }
+
+  return {
+  identity: { pubkey: pubkeyHex, npub: nip19.npubEncode(pubkeyHex) },
+  ...initial,
+  spectate: null,
+  focus: null,
+  focusReturnScale: null,
+  transit: null,
+  targets: loadTargets(),
+  cursor: initial.position,
+  pendingTarget: null,
+  plan: null,
+  spentMsats: loadSpent(initial.genesisId),
+  respawns: loadRespawns(pubkeyHex),
+  scaleExp: 0,
+  buildStep: null,
+  buildSettle: null,
+  // Facing the black sun, the section 11.3 canonical orientation, the same
+  // one the SUN button restores. The spec's left/right/above/below language
+  // is defined against it, so it is what a first look should agree with; the
+  // map view is one TOP away and does not need to be where everyone starts.
+  view: canonicalQuaternion(),
+  viewHistory: [],
+  proof: IDLE_PROOF,
+  publishError: null,
+  canonicalLate: 0,
+  live: loadLive(),
+  forkNotice: null,
+  selfCheck: { pubkey: pubkeyHex, status: 'checking' },
+  chainConflict: null,
+  publishRequest: 0,
+  signerKind: currentSigner.kind,
+  loginError: null,
+
+  signSpawn: async () => {
+    if (get().events.length > 0 || get().chainConflict) return false
+    if (whyNoMove(get().actions())) return false
+    return signFirstSpawn(() => false)
   },
+
+  moveCursor: (dir) => {
+    const { cursor, scaleExp } = get()
+    if (!get().canDrive()) return
+    // WALK's cursor is its predicted head, moved only by a step (useWalk).
+    if (get().walking) return
+    // One cell of the zoom, or one build STEP while a deploy is lined up in
+    // BUILD mode. Never a STEP at your head, where the cursor is a move's.
+    const step = stepFor(get().atHead() ? scaleExp : buildStepOf(get())) * BigInt(dir.dir)
+
+    const next: Position = { ...cursor }
+    next[dir.axis] = clampAxis(cursor[dir.axis] + step)
+
+    // Clamped against the axis wall: nowhere to go.
+    if (next[dir.axis] === cursor[dir.axis]) return
+    set({ cursor: next })
+    rideView(next)
+  },
+
+  setBuildStep: (step) => {
+    const next = step === null || step >= get().scaleExp ? null : Math.max(0, Math.round(step))
+    if (next !== null) { if (next !== get().buildStep) set({ buildStep: next }); return }
+    const { buildStep, buildSettle, cursor } = get()
+    if (buildStep === null && buildSettle === null) return
+    // Back on the zoom, the snap is the cube's center wherever the cursor is
+    // in it, so STEP's re-centering is undone if nothing has moved it since.
+    const back = buildSettle && samePosition(cursor, buildSettle.at) ? { cursor: { ...buildSettle.from } } : {}
+    set({ buildStep: null, buildSettle: null, ...back })
+  },
+
+  setCursorAtCell: (row, col) => {
+    if (get().walking) return
+    const { scaleExp, view } = get()
+    const focus = get().focus
+    const viewing = !get().atHead() && focus?.drive === true
+    // Cells are counted from the field's origin: your head, or the view's anchor.
+    const position = viewing ? get().anchor : get().position
+    const axes = viewAxes(view)
+    const origin = alignedOrigin(position, scaleExp)
+    const step = stepFor(scaleExp)
+
+    // Grid row/col are in screen space (row=0 is top, col=0 is left).
+    // Convert to world position by applying offsets along the screen axes.
+    const next: Position = { ...position }
+    next[axes.right.axis] = clampAxis(
+      origin[axes.right.axis] + BigInt(col) * step * BigInt(axes.right.dir)
+    )
+    next[axes.up.axis] = clampAxis(
+      origin[axes.up.axis] + BigInt(row) * step * BigInt(axes.up.dir)
+    )
+    // Depth axis stays at avatar's position (clicking doesn't move into/out of screen).
+
+    set({ cursor: next })
+    if (viewing) rideView(next)
+  },
+
+  commit: () => commitToward(null),
+
+  walkTo: (target, stillAimed) => commitToward({ target, stillAimed }),
+
+  walking: false,
 
   setShowSecrets: (show) => {
     if (show === get().showSecrets) return
     try { localStorage.setItem(SHOW_SECRETS_KEY, show ? '1' : '0') } catch { /* private mode */ }
     set({ showSecrets: show })
+  },
+
+  setShowTrail: (show) => {
+    if (show === get().showTrail) return
+    try { localStorage.setItem(SHOW_TRAIL_KEY, show ? '1' : '0') } catch { /* private mode */ }
+    set({ showTrail: show })
   },
 
   setMoveMode: (mode) => {
@@ -1727,6 +3258,9 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       set({ pendingTarget: null, proof: IDLE_PROOF })
       return
     }
+    // The pad's VIEW ends here too: the focus goes, and with it the cursor
+    // comes home and the zoom returns (clearFocus).
+    if (get().viewing()) { get().clearFocus(); return }
     // Not computing: recall the cursor, plane included, to where you stand.
     // The view follows the lined-up plane, so at your own head it comes back too.
     const atHead = get().exploreIndex === null && get().focus === null && get().spectate === null
@@ -1768,8 +3302,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   setPlane: (plane) => {
     // A plane flip mid-proof would desync the in-flight terrain K.
     if (get().proof.status === 'computing') return
-    // Someone else's plane is theirs; the terrain follows their chain.
-    if (get().spectate) return
+    const focus = get().focus
+    // Someone else's plane is theirs; the terrain follows their chain. A
+    // driven view kept through a spectation (BUILD mode) is yours, and its
+    // plane is the one you build in.
+    if (get().spectate && !focus?.drive) return
     if (get().plane === plane && get().anchorPlane === plane) return
     // The view follows the lined-up plane the way it follows the cursor: at
     // your own head, or in a focus view such as EARTH, the scene switches
@@ -1778,7 +3315,6 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // plane, because each action there records the plane it was in.
     // In a free view the flip is the view's alone: the plane you have lined
     // up at your head is untouched, and RETURN puts the scene back in it.
-    const focus = get().focus
     if (focus?.drive && get().exploreIndex === null) { set({ anchorPlane: plane, focus: { ...focus, plane } }); return }
     const next: Partial<CyberspaceState> = { plane, proof: IDLE_PROOF }
     if (get().exploreIndex === null) next.anchorPlane = plane
@@ -1819,12 +3355,41 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   finishProof: async (msg) => {
     if (msg.type !== 'done' || msg.id !== requestId) return
+
+    // The chain as it stands now, not as it stood when the proof started:
+    // relay events held back while it computed are folded first. What the
+    // live feed brought already refuses, with no look at the relays needed.
+    foldDeferred()
+    const refusedBefore = whyNoMove(get().actions())
+    if (refusedBefore) { refuseSigning(msg, refusedBefore, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
+    // Then the head is confirmed immediately before signing, every time
+    // (arkinox, 2026-10-08): a silent feed is no proof that nothing moved,
+    // since a half-open socket is silent too.
+    const unconfirmed = await confirmHead(() => set({ proof: { ...get().proof, message: HEAD_RETRYING_MESSAGE } }))
+    if (unconfirmed === STALE_CONFIRMATION || msg.id !== requestId) return
+    if (unconfirmed) { refuseSigning(msg, unconfirmed, true); return }
+    // The live feed kept delivering while the look was out.
+    foldDeferred()
+    // A game entered meanwhile (a hop now would be a base action inside it,
+    // spec §8.11.4 rule 3), a choice between two chains waiting, or a head
+    // that moved: none of them is signed onto.
+    const refusal = whyNoMove(get().actions())
+    if (refusal) { refuseSigning(msg, refusal, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
     const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
     const newPosition = pendingTarget ?? position
     const head = events[events.length - 1]
+    // `previous` is the chain's actual last event, whatever it is, and `c` is
+    // where the identity stands, which after an action this client does not
+    // recognize is the last recognized action's C, not that event's own
+    // (spec §8.9 rule 2).
+    const standing = chainHead(parsedChain(events))
 
     // The proof covers exactly position -> pendingTarget, and this event is
     // its receipt: the hop the next proof will bind to. Signed before the
@@ -1833,7 +3398,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      prevCoordHex: head.tags.find((t) => t[0] === 'C')?.[1] ?? '',
+      prevCoordHex: standing?.coordHex ?? '',
       to: newPosition,
       plane,
       proofHash: msg.proofHash,
@@ -1875,6 +3440,15 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // A remote signer can take seconds; a cancel or respawn may have landed
     // while it was thinking. If so this receipt is for a chain that is gone.
     if (msg.id !== requestId) return
+    // The live feed kept delivering while the signer thought. What arrived is
+    // folded now, before the signed event joins the chain: if it moved the
+    // head or entered a game, the signed event is discarded unpublished, as a
+    // proof refused before signing would have been.
+    foldDeferred()
+    const refusedNow = whyNoMove(get().actions())
+    if (refusedNow) { refuseSigning(msg, refusedNow, false); return }
+    if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
+    if (get().prevEventId !== prevEventId) { headMovedUnder(); return }
 
     const now = get()
     const stats: ChainStats = {
@@ -1934,6 +3508,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         at: Math.floor(Date.now() / 1000),
       }])
       scanHeldKey(msg.region.lookupId, msg.region.keyHex)
+      // LOOT: the cubes around where it landed, up to what this machine computes.
+      if (get().cloudPrefs.profile === 'loot') {
+        const n = Math.max(...msg.region.heights)
+        void holdDestinationCubes(newPosition, plane, destinationHeights(n, localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'hop', event.id)
+      }
     }
 
     // A route continues from where this step landed, or ends here.
@@ -1951,10 +3530,27 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
   },
 
+  clearForkNotice: () => set({ forkNotice: null }),
+
   setLive: (live) => {
     if (live === get().live) return
     saveLive(live)
-    set({ live, publishError: null })
+    // Going Local stops the publisher, and with it every retry, so an event
+    // left reading 'sending' or 'failed' would be describing something that
+    // is no longer happening: the panel would say RETRYING at a publisher
+    // that is not going to try. Both are demoted to what they actually are
+    // now, signed and held here, which is the same reason the last refusal is
+    // cleared off the panel on the line below.
+    const published = live
+      ? get().published
+      : Object.fromEntries(Object.entries(get().published)
+        .map(([id, st]) => [id, st === 'ok' ? st : 'queued' as const]))
+    set({ live, published, publishError: null })
+  },
+
+  publishNow: () => {
+    if (!get().live) return
+    set({ publishRequest: get().publishRequest + 1 })
   },
 
   respawn: async () => {
@@ -1971,19 +3567,175 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       clearCloudJob()
     }
     if (get().plan) set({ plan: null })
-    const { events } = get()
-    const fresh = derive(await freshSpawnAsync(currentSigner, events[events.length - 1]))
+    const { events, held, selfCheck, identity } = get()
+    const signer = currentSigner
+    // A respawn is deliberate, but it is not a decision about a chain on the
+    // relays nobody has seen yet. A held chain stays held through it; so does
+    // a respawn from the provisional state while the check has not said
+    // "none", for the same reason the first move holds (lib/chainHold.ts).
+    const keepHeld = held || (events.length === 0 && !(selfCheck.pubkey === identity.pubkey && selfCheck.status === 'none'))
+    let signed: PersistedChain
+    try {
+      signed = await freshSpawnAsync(signer, events[events.length - 1])
+    } catch (err) {
+      // Refused, timed out, or answered with a signature that does not
+      // verify: nothing is respawned, and it says so where a hop's refusal
+      // is said, as well as to whoever asked for the respawn.
+      const reason = err instanceof Error ? err.message : String(err)
+      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${reason}` } })
+      throw new Error(`signing failed: ${reason}`)
+    }
+    // A remote signer can wait minutes for an approval on a phone. If the
+    // identity changed meanwhile, this spawn is the old identity's: nothing
+    // of it may land in the store, which now holds someone else (final
+    // review of #227). Compared by key, because signEvent may have rebuilt a
+    // dead remote signer's channel and swapped in the rebuilt one for the
+    // same identity.
+    if (get().identity.pubkey !== identity.pubkey || currentSigner.pubkey !== signer.pubkey) {
+      throw new Error('the identity changed while the respawn waited for its signature, so nothing was respawned')
+    }
+    const fresh = derive({ ...signed, held: keepHeld })
+    // The old chain's signature check is about a chain that is gone: nothing
+    // waits on it any more (review of #242), and whatever was waiting on it,
+    // or on a look at the relays, ends without a word (STALE_CONFIRMATION).
+    sigCheck = null
+    chainEpoch++
     set({
       ...fresh,
+      // A choice between two versions of the old chain is about a chain
+      // that is gone too: left set, it refused every move until a reload
+      // (review of #236, item 10).
+      chainConflict: null,
       cursor: fresh.position,
       pendingTarget: null,
       proof: IDLE_PROOF,
       publishError: null,
       spentMsats: loadSpent(fresh.genesisId),
       respawns: addRespawn(get().identity.pubkey),
-      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, balance: get().cloud.balance },
+      cloud: { ...IDLE_CLOUD, limits: get().cloud.limits, provider: get().cloud.provider, balance: get().cloud.balance },
     })
-    saveChain(fresh.events, fresh.published, fresh.chain)
+    saveChain(fresh.events, fresh.published, fresh.chain, keepHeld)
+  },
+
+  respawnFromBrokenChain: async (forPubkey) => {
+    // Confirmed for one identity: never carried out for another.
+    if (forPubkey !== undefined && forPubkey !== get().identity.pubkey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
+    const broken = firstBreak(get().actions())
+    if (broken) {
+      // With no valid event at all (an invalid spawn, Q7), the spawn row
+      // names the entry, and it stands where the identity is frozen: the
+      // spawn coordinate.
+      const at = broken.lastValid ?? broken.action
+      addRecentView({ input: at.coordHex, label: endOfChainLabel(at.id), plane: at.plane, pinned: true })
+    }
+    await get().respawn()
+  },
+
+  applySelfCheck: (pubkey, verdict) => {
+    if (get().identity.pubkey !== pubkey) return
+    const selfCheck: SelfCheck = verdict.status === 'unknown'
+      ? { pubkey, status: 'unknown', cause: verdict.cause }
+      : { pubkey, status: verdict.status }
+    set({ selfCheck })
+    if (verdict.status === 'found') {
+      // A verified or provisional chain adopts it (§3.2, your other device);
+      // a held one raises the prompt instead. adoptChain makes that call.
+      get().adoptChain(verdict.events)
+      return
+    }
+    if (verdict.status === 'none' && get().held && !get().chainConflict) {
+      // The relays answered and there is no other chain: this one is the
+      // identity's. Lifted silently, and from here it publishes as LIVE says.
+      set({ held: false })
+      const { events, published, chain } = get()
+      saveChain(events, published, chain, false)
+    }
+  },
+
+  resolveHeldConflict: (choice) => {
+    const { chainConflict: conflict, events: local } = get()
+    if (!conflict || conflict.kind !== 'held') return
+    if (choice === 'local') {
+      // Only offered when it would actually place you (the prompt checks the
+      // same thing); a relay chain respawned after this one would still win.
+      if (!localSupersedes(local, conflict.relayEvents)) return
+      // The hold lifts and the answer is the deliberate act that opens the
+      // gate, so while LIVE the whole chain goes out now. While LOCAL it
+      // stays here like any other chain until LIVE and an action.
+      set({ held: false, chainConflict: null, publishRequest: get().publishRequest + 1 })
+      const { events, published, chain } = get()
+      saveChain(events, published, chain, false)
+      return
+    }
+    // Keep the relay chain: the held chain is deleted, which is the stored
+    // chain being overwritten by the relay's, and you stand at its head.
+    // Region keys found by the local hops stay in Secrets: a key is
+    // knowledge, not chain state.
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    const order = buildChain(conflict.relayEvents)
+    if (order.length === 0) return
+    const byId = new Map(conflict.relayEvents.map((e) => [e.id, e]))
+    const chainEvents = order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
+    const d = derive({
+      version: 2,
+      events: chainEvents,
+      published: chainEvents.map((e) => e.id),
+      stats: statsFromChain(chainEvents, EMPTY_STATS),
+      held: false,
+    })
+    set({
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      plan: null,
+      proof: IDLE_PROOF,
+      transit: null,
+      spectate: null,
+      focus: null,
+      chainConflict: null,
+      forkNotice: null,
+      spentMsats: loadSpent(d.genesisId),
+    })
+    saveChain(d.events, d.published, d.chain, false)
+  },
+
+  resolveBranchConflict: (choice) => {
+    const { chainConflict: conflict, events, published } = get()
+    if (!conflict || conflict.kind !== 'branch') return
+    const div = findDivergence(events, published, conflict.relayEvents)
+    if (!div) { set({ chainConflict: null }); return }
+    // Publishing this device's side would put a fork on the relays, and a
+    // fork ends the whole chain for every reader (arkinox, 2026-10-08), so
+    // "mine" is never carried out: the prompt stays until the relays'
+    // version is kept.
+    if (choice === 'mine') return
+    // Keep the relays' version: the shared part, then the relays' branch.
+    // This device's moves after the fork are dropped; region keys they found
+    // stay in Secrets, as with any chain that leaves the store.
+    if (get().proof.status === 'computing') cancelProof()
+    requestId++
+    const { events: next, onRelay } = relayVersion(events, conflict.relayEvents, div)
+    if (next.length === 0) return
+    const okIds = new Set([...onRelay, ...events.filter((e) => published[e.id] === 'ok').map((e) => e.id)])
+    const d = derive({
+      version: 2,
+      events: next,
+      published: next.filter((e) => okIds.has(e.id)).map((e) => e.id),
+      stats: statsFromChain(next, get().chain),
+      held: false,
+    })
+    set({
+      ...d,
+      cursor: d.position,
+      pendingTarget: null,
+      plan: null,
+      proof: IDLE_PROOF,
+      transit: null,
+      chainConflict: null,
+      forkNotice: null,
+    })
+    saveChain(d.events, d.published, d.chain, false)
   },
 
   explore: (index) => {
@@ -2009,9 +3761,21 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     get().explore(Math.min(last, Math.max(0, from + delta)))
   },
 
-  beginSpectate: (pubkey) => {
+  beginSpectate: (pubkey, keepView = false) => {
     const spawn = spawnOf(pubkey)
     const { view, viewHistory, spectate } = get()
+    // BUILD mode (arkinox, 2026-10-08): spectating does not end it. The
+    // driven view is the build cursor, so it stays, and is aimed at them, at
+    // their spawn until the chain arrives (setSpectateChain). The angle you
+    // were building from is kept, and nothing is put back at the end.
+    if (keepView && get().focus?.drive) {
+      set({
+        spectate: { pubkey, npub: nip19.npubEncode(pubkey), events: [], actions: [], lastActive: null, status: 'loading', returnView: spectate?.returnView ?? view.clone() },
+        exploreIndex: null,
+      })
+      get().aimView(spawn.position, spawn.plane)
+      return
+    }
     // The view you arrive with is the black sun orientation (section 11.3),
     // the same the C key gives, at the standard distance the rig frames from:
     // a stranger's neighborhood seen from whatever angle you had orbited to
@@ -2034,7 +3798,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   setSpectateChain: (pubkey, events, status) => {
     const prev = get().spectate
     if (!prev || prev.pubkey !== pubkey) return
-    const actions = buildChain(events)
+    const actions = buildChain(events, pubkey)
     const head = actions[actions.length - 1]
     // A chain that grew under an explorer parked in its history leaves the
     // explorer where it was; one that was replaced (a respawn) snaps to head.
@@ -2043,6 +3807,20 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       && actions[get().exploreIndex!]?.id === prev.actions[get().exploreIndex!]?.id
     const at = keep ? actions[get().exploreIndex!] : head
     const spawn = spawnOf(pubkey)
+    // Under a driven view (BUILD mode) the scene stays on the build cursor,
+    // which the chain does not move, with one exception: the first chain to
+    // arrive takes the cursor from their spawn to their head, unless you
+    // already moved it. After that their new actions move their avatar, not
+    // your cursor.
+    if (get().focus?.drive) {
+      set({
+        spectate: { ...prev, events, actions, lastActive: head?.createdAt ?? null, status: status ?? (head ? 'live' : 'empty') },
+        exploreIndex: null,
+      })
+      const s = get()
+      if (prev.actions.length === 0 && head && samePosition(s.cursor, spawn.position) && s.anchorPlane === spawn.plane) s.aimView(head.position, head.plane)
+      return
+    }
     set({
       spectate: {
         ...prev,
@@ -2061,7 +3839,51 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // Back to your own head, in the plane you have lined up there, looking
     // the way you were looking before.
     const { position, plane, spectate } = get()
+    // Under a driven view (BUILD mode) the view, its cursor and its angle
+    // stay where they are: ending spectation is not leaving the build.
+    if (get().focus?.drive) { set({ spectate: null, exploreIndex: null }); return }
     set({ spectate: null, exploreIndex: null, anchor: position, anchorPlane: plane, ...(spectate ? { view: spectate.returnView } : {}) })
+  },
+
+  aimView: (position, plane) => {
+    const focus = get().focus
+    if (!focus?.drive) return
+    const next = { ...position }
+    set({ cursor: next, ...(plane !== get().anchorPlane ? { anchorPlane: plane, focus: { ...focus, plane } } : {}) })
+    rideView(next)
+  },
+
+  viewHere: () => { if (get().atHead()) get().driveHere(VIEW_FOCUS_LABEL) },
+
+  viewing: () => get().focus?.drive === true && get().focus?.label === VIEW_FOCUS_LABEL && get().exploreIndex === null,
+
+  driveHere: (label) => {
+    const { anchor, anchorPlane, focus, scaleExp, focusReturnScale } = get()
+    set({
+      focus: { position: { ...anchor }, plane: anchorPlane, label, drive: true },
+      cursor: { ...anchor },
+      exploreIndex: null,
+      focusReturnScale: focus === null ? scaleExp : focusReturnScale,
+    })
+  },
+
+  pin: null,
+
+  dropPin: (position, label, scaleExp) => set({
+    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label },
+  }),
+
+  clearPin: () => set({ pin: null }),
+
+  viewPin: () => {
+    const { pin } = get()
+    if (!pin) return
+    // Driven, like a VIEW and unlike a block: the cursor comes with you, so a
+    // deploy started from there lands at the pin rather than at your head:
+    // BUILD mode starts its build cursor where you are looking (useBuilder,
+    // ruling A, 2026-10-07). Standing at the venue is not required to hide
+    // something in it.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
   },
 
   focusOn: (position, plane, label, scaleExp, drive = false) => {
@@ -2081,43 +3903,79 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     set(next)
   },
 
-  clearFocus: () => {
+  focusItem: (position, plane, label, scaleExp) => {
+    get().focusOn(position, plane, label, scaleExp)
+    const focus = get().focus
+    if (focus) set({ focus: { ...focus, item: true } })
+  },
+
+  clearFocus: (keepScale = false) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
-    const { position, plane, focusReturnScale, scaleExp, focus } = get()
+    const { position, plane, focusReturnScale, scaleExp, focus, spectate } = get()
+    // A driven view kept through a spectation (BUILD mode) that ends while
+    // the spectation stands goes back to watching them, on their head.
+    const watched = spectate ? (spectate.actions[spectate.actions.length - 1] ?? spawnOf(spectate.pubkey)) : null
     set({
       focus: null,
-      anchor: position,
-      anchorPlane: plane,
+      // RETURN ends the look, and the pin was the look's subject.
+      pin: null,
+      anchor: watched ? { ...watched.position } : position,
+      anchorPlane: watched ? watched.plane : plane,
       // A cursor that went out with the view comes home with it.
       ...(focus?.drive ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
-      scaleExp: focusReturnScale ?? scaleExp,
+      scaleExp: keepScale ? scaleExp : focusReturnScale ?? scaleExp,
       focusReturnScale: null,
     })
   },
 
   boardHyperspace: async () => {
-    const { events, genesisId, prevEventId, position, plane, proof, transit } = get()
+    const { events, genesisId, prevEventId, position, proof, transit } = get()
     if (transit !== null || proof.status === 'computing') return
-    if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
+    // Your own chain, at its head: never from history or a spectation. A view
+    // (a block, EARTH, a /C/ link, VIEW) does not stand in the way: boarding
+    // acts on the chain head, never on the place on screen, and its coordinate
+    // below comes from the chain (arkinox, 2026-10-15: "the board button
+    // should always be available if I have a destination set").
+    if (get().exploreIndex !== null || get().spectate !== null) return
     // A provisional identity has no chain to board from; move once first.
     if (events.length === 0 || !genesisId || !prevEventId) return
+    // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.
+    // The Hyperspace panel withholds BOARD and says why; this is the backstop.
+    if (whyNoMove(get().actions())) return
+    // The head is confirmed before the boarding is signed (confirmHead).
+    const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return
+    if (refusal) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } }); return }
+    if (get().prevEventId !== prevEventId) { set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: headMovedWords(get().events, 'Board again from where you are now.') } }); return }
+    if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
     const head = events[events.length - 1]
-    const coord = xyzToCoord(position.x, position.y, position.z, plane)
-    const proofHash = computeEnterProof(coord, prevEventId)
+    // Where the chain says you stand, plane bit included: the last recognized
+    // action's C. Not `position` with `plane`: `plane` is the plane lined up
+    // for the next move (viewing EARTH lines up dataspace), and a boarding
+    // built from it at a port in ideaspace named the right x, y and z in the
+    // wrong plane, so its c no longer matched the C before it and the chain
+    // was invalid from there (2026-10-06, a published chain on the relay).
+    const here = chainHead(parsedChain(events))?.coordHex
+    if (!here) return
+    const proofHash = computeEnterProof(hexToCoord(here), prevEventId)
     const template = enterHyperspaceTemplate({
       createdAt: nextCreatedAt(head),
       genesisId,
       previousId: prevEventId,
-      at: position,
-      plane,
+      coordHex: here,
       proofHash,
     })
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
-    } catch {
+    } catch (err) {
+      // The signer refused, or answered with a signature that does not
+      // verify: no boarding, said where a hop's refusal is said. Unless the
+      // chain moved on meanwhile, when this refusal is about nothing current.
+      if (get().prevEventId !== prevEventId) return
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
       return
     }
     // The chain may have advanced while a remote signer thought about it.
@@ -2129,21 +3987,52 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       prevEventId: event.id,
       published,
       positionHistory: [...get().positionHistory, { ...position }],
-      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: positionHex(position, plane) },
+      transit: { stage: 'boarded', enterEventId: event.id, enterCoordHex: here },
     })
     saveChain(nextEvents, published, get().chain)
   },
 
+  confirmHeadNow: async () => {
+    const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return refusal
+    if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
+    return refusal
+  },
+
   completeRide: async (ride) => {
+    if (!get().genesisId || !get().prevEventId) return
+    // The head is confirmed before the ride is signed (confirmHead). The
+    // ride's proof is bound to the head it started from, so a head that the
+    // confirmation moved is refused below like any other.
+    const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+    if (refusal === STALE_CONFIRMATION) return
+    if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
+    if (refusal) throw new Error(refusal)
     const { events, genesisId, prevEventId, transit } = get()
     if (!genesisId || !prevEventId) return
     const head = events[events.length - 1]
     if (!head) return
+    // A game holds the avatar, or the chain is broken (whyNoMove): a ride is a base action.
+    const noRide = whyNoMove(parsedChain(events))
+    if (noRide) throw new Error(noRide)
     // From a boarding, or chained from the stop the last ride reached (§4.3):
     // either way the head is on the line, and `c` is its coordinate.
-    const line = lineStateOf(buildChain(events))
+    const line = lineStateOf(parsedChain(events))
     if (!transit && !line) return
-    const prevCoordHex = head.tags.find((t) => t[0] === 'C')?.[1] ?? transit?.enterCoordHex ?? line?.coordHex
+    // Never a zero-length ride (arkinox, 2026-10-07): the backstop behind
+    // startRide, which refuses one before any work is done.
+    const zero = zeroLengthRideRefusal(ride.fromHeight, ride.toHeight, line?.fromHeight != null)
+    if (zero) throw new Error(zero)
+    // Every leaf was seeded by the head the ride started from (§5.3). Signed
+    // under any other `previous` it would be a ride whose every leaf is wrong,
+    // so a head that moved while the proof ran (a fork adopted from another
+    // device) refuses the ride instead of publishing it.
+    if (ride.previousId !== prevEventId) {
+      throw new Error('Your chain moved while the ride was computing, and the proof is bound to where it started. Ride again from here.')
+    }
+    // Where the identity stands: the last recognized action's C, so a skipped
+    // action between the boarding and the ride does not move `c` (spec §8.9).
+    const prevCoordHex = chainHead(parsedChain(events))?.coordHex ?? transit?.enterCoordHex ?? line?.coordHex
     if (!prevCoordHex) return
     const template = hyperjumpTemplate({
       createdAt: nextCreatedAt(head),
@@ -2156,12 +4045,17 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       asOf: ride.asOf,
       rootHex: ride.rootHex,
       mp: ride.mp,
+      mnHex: ride.mnHex,
     })
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
-    } catch {
-      return
+    } catch (err) {
+      // The signer refused, or answered with a signature that does not
+      // verify: no ride. Thrown with the words a hop's refusal uses, so the
+      // Hyperspace panel shows it where the ride ran and keeps the
+      // destination, instead of clearing it as if the ride had gone.
+      throw new Error(`Signing failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     if (get().prevEventId !== prevEventId) return
     const dest = coordToXyz(hexToCoord(ride.toCoordHex))
@@ -2219,23 +4113,81 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   adoptChain: (incoming) => {
     const cur = get()
-    // A local commit owns the head while it computes; a relay echo must not race it.
-    if (cur.proof.status === 'computing') return
     const me = cur.identity.pubkey
     const mine = incoming.filter((e) => e.pubkey === me)
     if (mine.length === 0) return
+    // The relay pool checked these signatures on receipt (relay.ts); remember
+    // them, so the chain they are saved into is not checked again when it is
+    // read back this session.
+    for (const e of mine) if ((e as unknown as VerifiedEvent)[verifiedSymbol] === true) verifiedSigs.add(`${e.id}:${e.sig}`)
+    // A HELD chain never adopts. It was started before the relays could say
+    // whether this identity had a chain, so a chain arriving now is exactly
+    // the one it may rival, and "newest spawn wins" would pick the local one
+    // (signed just now) without asking. The choice goes to the person
+    // instead (arkinox, 2026-10-01). Ahead of the computing guard below,
+    // because folding into the prompt never touches the head, and an event
+    // the live subscription delivers during a proof is not delivered twice.
+    if (cur.held) {
+      const prev = cur.chainConflict?.kind === 'held' ? cur.chainConflict : null
+      const conflict = foldHeldConflict(prev, mine, cur.events, Date.now())
+      if (conflict !== prev) set({ chainConflict: conflict })
+      return
+    }
+    // A diverged-branch choice is pending: what arrives now joins the relays'
+    // side of it, and nothing is folded into the chain until it is answered.
+    if (cur.chainConflict?.kind === 'branch') {
+      const conflict = foldBranchConflict(cur.chainConflict, mine, cur.events, cur.published, Date.now())
+      if (conflict && conflict !== cur.chainConflict) set({ chainConflict: conflict })
+      return
+    }
+    // A local commit owns the head while it computes; a relay echo must not
+    // race it. What arrives is held back, not dropped (foldDeferred). But a
+    // move another device made from this head dooms the proof, which is bound
+    // to the head it started from: it is stopped now, not finished and then
+    // refused (arkinox, 2026-10-08: the live feed is the early warning).
+    if (cur.proof.status === 'computing' && !folding) {
+      deferred = deferred.concat(mine)
+      const have = new Set(cur.events.map((e) => e.id))
+      const fresh = mine.filter((e) => !have.has(e.id))
+      // A HOSAKA job has its own flow and its own cancel (cancelCloud); its
+      // result is refused at signing like any other (finishProof).
+      if (fresh.length === 0 || cur.cloud.status !== 'idle') return
+      const order = buildChain(cur.events.concat(fresh), me)
+      const head = order[order.length - 1]
+      if (order.length > 0 && head.id === cur.prevEventId && order[0].fork === undefined) return
+      stopForNewHead(cur.prevEventId)
+      return
+    }
+    // This device's unpublished moves fork against moves the relays already
+    // hold (another device of yours moved on while this one was LOCAL or
+    // offline). Folding now would decide in silence, and publishing this
+    // device's side would fork the chain on the relays, which ends it for
+    // every reader (arkinox, 2026-10-08); nothing happens until the person
+    // keeps the relays' version (lib/branchConflict.ts; arkinox, 2026-10-01).
+    const div = findDivergence(cur.events, cur.published, mine)
+    if (div) {
+      set({ chainConflict: { kind: 'branch', forkId: div.forkId, relayEvents: mine, at: Date.now() } })
+      useChainUi.getState().setPromptAside(false)
+      return
+    }
     const seen = new Set(cur.events.map((e) => e.id))
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
-    // buildChain is §3.2: the newest spawn wins, then follow the links. So a
+    // buildChain is §8.7.3: the newest spawn wins, then follow the links. So a
     // newer chain from another machine supersedes ours; our own echoed events
     // fold in as a no-op. It returns parsed actions in order; map back to the
     // raw events the store actually holds.
-    const order = buildChain(merged)
+    const order = buildChain(merged, me)
     if (order.length === 0) return
+    // A fork on the relays ends the whole chain (arkinox, 2026-10-08): both
+    // branches are kept, so the chain shows dead at the spawn coordinate with
+    // the branches named, nothing of either is dropped, and no move can be
+    // signed onto it (whyNoMove) until a respawn.
+    const forked = order[0].fork !== undefined
+    if (forked && merged.length === cur.events.length) return
     const head = order[order.length - 1]
-    if (head.id === cur.prevEventId && order.length === cur.events.length) return
+    if (!forked && head.id === cur.prevEventId && order.length === cur.events.length) return
     const byId = new Map(merged.map((e) => [e.id, e]))
-    const chainEvents = order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
+    const chainEvents = forked ? merged : order.map((a) => byId.get(a.id)).filter((e): e is NostrEvent => !!e)
     // Relay events are on the wire; keep whatever of ours was already published.
     const okIds = new Set<string>([
       ...mine.map((e) => e.id),
@@ -2249,6 +4201,30 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     }
     const d = derive(saved)
     const following = cur.atHead()
+    // What this fold cost and what it brought. Dropped actions are this
+    // device's own work the fold left out of the chain (a newer spawn took
+    // over); adopted ones are another device's, and are why the avatar just
+    // moved on its own.
+    const kept = new Set(chainEvents.map((e) => e.id))
+    const lost = cur.events.filter((e) => !kept.has(e.id))
+    const dropped = lost.length
+    const adopted = chainEvents.filter((e) => !seen.has(e.id)).length
+    // A different genesis is a newer spawn taking over.
+    const replaced = cur.events.length > 0 && d.genesisId !== cur.genesisId
+    // A loss stays reported until it is read. The other device's events
+    // arrive one fold at a time, so the fold that replaced your chain is
+    // usually followed at once by one that only brings the rest of it; that
+    // one must add to the unread notice, not replace it. A notice that only
+    // explained an adoption is replaced as before.
+    const prior = cur.forkNotice
+    const unreadLoss = prior !== null && (prior.dropped > 0 || prior.replaced)
+    const notice = forked
+      ? null
+      : dropped > 0 || adopted > 0
+      ? unreadLoss
+        ? { adopted: prior.adopted + adopted, dropped: prior.dropped + dropped, replaced: prior.replaced || replaced, at: Date.now() }
+        : { adopted, dropped, replaced, at: Date.now() }
+      : null
     set({
       events: d.events,
       genesisId: d.genesisId,
@@ -2261,7 +4237,14 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       positionHistory: d.positionHistory,
       // Follow to the new head only if you were living at it; browsing history
       // or spectating keeps its view while the chain updates underneath.
-      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, cursor: d.position, exploreIndex: null } : {}),
+      // In WALK the cursor is the walk's predicted head (store/useWalk.ts),
+      // which a fold must not pull back to the proven one: the eye would
+      // glide back a step. A fold that moves the head stops the walk itself.
+      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, ...(cur.walking ? {} : { cursor: d.position }), exploreIndex: null } : {}),
+      // A drop is kept until it is read; an adoption is just an explanation
+      // for the movement and fades on its own. A fold that changed nothing
+      // says nothing.
+      ...(notice ? { forkNotice: notice } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
   },
@@ -2270,7 +4253,8 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     const { targets } = get()
     const t = targets[pubkey]
     if (!t) return
-    const head = buildChain(events)[buildChain(events).length - 1]
+    const targetChain = buildChain(events, pubkey)
+    const head = targetChain[targetChain.length - 1]
     const spawn = spawnOf(pubkey)
     set({
       targets: {
@@ -2280,7 +4264,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
           position: head?.position ?? spawn.position,
           plane: head?.plane ?? spawn.plane,
           lastActive: head?.createdAt ?? null,
-          status: head ? 'live' : status ?? 'spawn',
+          status: head ? (status === 'partial' ? 'partial' : 'live') : status ?? 'spawn',
         },
       },
     })
@@ -2301,32 +4285,56 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // only deferred. Force its reconnection now, so the first move never waits.
     const pref = loadSignerPref()
     if (!pref || pref.kind === 'local') return
-    try {
-      if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
-        await currentSigner.reconnect()
-      } else {
-        await switchTo(await signerFromPref(pref))
-      }
-    } catch (err) {
-      set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` })
+    if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
+      // The stand-in: its own onReady decides whether it is still wanted. Its
+      // failure is only news while it is still the identity in use.
+      const switches = switchCount
+      try { await currentSigner.reconnect() }
+      catch (err) { if (switches === switchCount) set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` }) }
+    } else {
+      await login(() => signerFromPref(pref), `Could not reconnect ${pref.kind}: `)
     }
   },
   useNewKey: async () => { await switchTo(randomSigner()) },
-  useNsec: async (nsec) => {
-    try { await switchTo(signerFromNsec(nsec)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
+  decryptSealed: async (senderPubkey, payload) => {
+    const signer = currentSigner
+    const open = signer.nip44Decrypt
+    if (!open) throw new Error(NIP44_UNAVAILABLE)
+    let plain: string
+    try { plain = await open(senderPubkey, payload) }
+    catch (err) { throw await decryptRefusal(signer, err) }
+    if (signer.kind !== 'local') signerHome(signer)
+    return plain
   },
-  useNcryptsec: async (ncryptsec, password) => {
-    try { await switchTo(signerFromNcryptsec(ncryptsec, password)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  encryptSealed: (recipientPubkey, plaintext) => {
+    const seal = currentSigner.nip44Encrypt
+    return seal ? seal(recipientPubkey, plaintext) : Promise.reject(new Error(NIP44_ENCRYPT_UNAVAILABLE))
   },
-  useExtension: async () => {
-    try { await switchTo(await nip07Signer()) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  useNsec: async (nsec) => { await login(() => signerFromNsec(nsec)) },
+  useNcryptsec: async (ncryptsec, password) => { await login(() => signerFromNcryptsec(ncryptsec, password)) },
+  useLogin: async (credential, password = '') => {
+    const kind = loginCredentialKind(credential)
+    await login(async () => {
+      if (kind === 'nsec') return signerFromNsec(credential)
+      if (kind === 'ncryptsec') {
+        if (!password) throw new Error('Enter the password for this ncryptsec.')
+        return signerFromNcryptsec(credential, password)
+      }
+      if (kind === 'bunker') return nip46Signer(credential)
+      throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
+    })
   },
-  useBunker: async (uri) => {
-    try { await switchTo(await nip46Signer(uri)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
+  useExtension: async () => { await login(() => nip07Signer()) },
+  useBunker: async (uri) => { await login(() => nip46Signer(uri)) },
+  useNostrConnect: async (session, signal, onConnected) => {
+    // Left the QR screen while the signer was answering: no switch, and no
+    // error for a screen that is no longer there.
+    await login(async () => {
+      const signer = await session.connect(signal, onConnected)
+      if (signal?.aborted) { await signer.close?.(); throw new Error('left the QR screen') }
+      return signer
+    }, '', () => signal?.aborted === true)
   },
   clearLoginError: () => set({ loginError: null }),
 
@@ -2334,6 +4342,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
   cloudPrefs: loadCloudPrefs(),
   moveMode: loadMoveMode(),
   showSecrets: loadShowSecrets(),
+  showTrail: loadShowTrail(),
 
   approveCloud: () => {
     const { cloud } = get()
@@ -2451,13 +4460,16 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         set({ cloud: { ...get().cloud, ...idle } })
         return { ok: false, error: `HOSAKA wants ${Math.ceil((job.amount_due_msats ?? job.cost_msats) / 1000)} sats more than your balance holds and issued no invoice.` }
       }
-      // Not persisted: a reload mid-purchase loses the job, not the money, since
-      // a paid invoice lands on the balance and the next attempt is covered.
+      // Not persisted: a reload mid-purchase loses the job, not the money. A
+      // paid invoice lands on the balance, and the next attempt for the same
+      // cube and height carries the same idempotency key (lib/hosaka.ts), so a
+      // provider that honors keys hands back this job instead of selling it twice.
       const record: PendingCloudJob = {
         version: 1, jobId: job.id, pollToken: job.poll_token, action: 'region_key', pubkey: get().identity.pubkey,
         from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',
         costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0, createdAt: Date.now(),
         stage: paying ? 'awaiting_payment' : 'computing', deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+        estSeconds: cloudSeconds(height, get().cloud.provider?.pricing?.hop ?? null) ?? undefined,
       }
       set({ cloud: { ...get().cloud, job: record, message: null } })
       const outcome = await driveCloudJob(client, record, {
@@ -2475,6 +4487,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       if (typeof done.new_balance_msats === 'number') get().noteBalance(done.new_balance_msats)
       set({ cloud: { ...get().cloud, ...idle } })
       if (done.status !== 'completed' || !done.result) return { ok: false, error: done.error ? `HOSAKA could not compute it: ${done.error}` : 'HOSAKA could not compute it.' }
+      recordJobExperience(outcome.record, height)
       const r = done.result as HosakaRegionKeyResult
       if (!r.secret_key || !r.lookup_id) return { ok: false, error: 'HOSAKA returned no key.' }
       return { ok: true, result: r }
@@ -2485,6 +4498,98 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     } finally {
       if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
     }
+  },
+
+  rideViaHosaka: async (ask) => {
+    const { cloud, cloudPrefs, plan, proof, prevEventId, identity } = get()
+    const refuse = (message: string): false => {
+      set({ cloud: { ...get().cloud, rideError: message } })
+      return false
+    }
+    if (cloudPrefs.mode === 'off') return refuse('Cloud compute is off in the Cloud compute panel.')
+    // One cloud flow and one computing move at a time: the invoice modal and
+    // the persisted job are single, and the head is held by one move.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+      return refuse('Finish or cancel the move in progress first.')
+    }
+    // A kept job is paid work; a new record would overwrite it.
+    if (cloud.job !== null) return refuse('A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.')
+    if (ask.previousId !== prevEventId) return refuse('Your chain moved since this ride was planned. Ride again from here.')
+    if (whyNoMove(get().actions())) return refuse(whyNoMove(get().actions())!)
+
+    const client = cloudClient(cloudPrefs.apiUrl)
+    stopCloud()
+    const id = ++requestId
+    const abort = new AbortController()
+    cloudAbort = abort
+    // The head is held from here until the hyperjump is signed or the ride
+    // ends: a computing move blocks every commit, BOARD and local ride, and
+    // the relays' copies of this chain fold only when it ends (foldDeferred).
+    set({
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'computing', source: 'cloud', message: 'HOSAKA is computing your ride.' },
+      cloud: {
+        ...get().cloud,
+        status: 'quoting',
+        quote: null,
+        invoice: null,
+        invoiceOpen: false,
+        job: null,
+        progress: null,
+        rideError: null,
+        message: currentSigner.kind === 'local' ? 'Submitting the ride to HOSAKA.' : 'Waiting for your signer to approve the HOSAKA request.',
+        startedAt: Date.now(),
+      },
+    })
+    let job: HosakaJob
+    try {
+      // Keyed by the ride itself (lib/hosaka.ts rideBody): a lost answer is
+      // asked again with the same key, and so is a second tap on the same
+      // ride from the same head, so HOSAKA hands back the job it already
+      // made instead of charging twice.
+      job = await client.submitRide(ask.previousId, ask.fromHeight, ask.toHeight, abort.signal)
+    } catch (err) {
+      if (id !== requestId || abort.signal.aborted) return false
+      rideFail(describeCloudError(err), false)
+      return false
+    } finally {
+      if (cloudAbort === abort) cloudAbort = null
+    }
+    if (id !== requestId || abort.signal.aborted) return false
+    const balanceNow = job.new_balance_msats ?? job.current_balance_msats
+    if (typeof balanceNow === 'number') get().noteBalance(balanceNow)
+    if (!job.poll_token) {
+      rideFail('HOSAKA took the ride but gave no way to follow it. Ride again: the same ride names the same job.', false)
+      return false
+    }
+    const paying = job.payment_required === true && job.deposit !== undefined
+    if (job.payment_required === true && !paying) {
+      rideFail(`HOSAKA wants ${satsOf(job.amount_due_msats ?? job.cost_msats)} sats more than your balance holds and issued no invoice.`, false)
+      return false
+    }
+    const dest = coordToXyz(hexToCoord(ask.toCoordHex))
+    const record: PendingCloudJob = {
+      version: 1,
+      jobId: job.id,
+      pollToken: job.poll_token,
+      action: 'ride',
+      pubkey: identity.pubkey,
+      from: wirePosition(get().position),
+      to: wirePosition({ x: dest.x, y: dest.y, z: dest.z }),
+      plane: dest.plane,
+      prevEventId: ask.previousId,
+      costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0,
+      createdAt: Date.now(),
+      stage: paying ? 'awaiting_payment' : 'computing',
+      deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
+      ...(ask.estSeconds !== null ? { estSeconds: ask.estSeconds } : {}),
+      ride: { fromHeight: ask.fromHeight, toHeight: ask.toHeight, toCoordHex: ask.toCoordHex, ...(ask.asOf !== undefined ? { asOf: ask.asOf } : {}) },
+    }
+    // On disk before the invoice is on screen: a reload after paying, or
+    // while HOSAKA computes, picks the same job up (resumeCloudJob).
+    saveCloudJob(record)
+    set({ cloud: { ...get().cloud, job: record, message: null } })
+    return cloudRideRunner ? cloudRideRunner(record, id) : false
   },
 
   refreshBalance: async () => {
@@ -2523,6 +4628,7 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       cloud: {
         ...IDLE_CLOUD,
         limits: cloud.limits,
+        provider: cloud.provider,
         balance: cloud.balance,
         last: cloud.last,
         job: keep ? cloud.job : null,
@@ -2533,6 +4639,39 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
             : null,
       },
     })
+  },
+
+  collectCloudKeys: async () => {
+    const ticket = loadKeysTicket()
+    if (!ticket || collectingKeys) return
+    collectingKeys = true
+    try {
+      const job = await cloudClient(get().cloudPrefs.apiUrl).waitForJob(ticket.jobId, ticket.pollToken)
+      const r = job.result as CloudHopResult | null
+      if (job.status === 'completed' && r?.destination_keys && r.destination_keys.length > 0) {
+        const n = holdCloudDestinationKeys(r.destination_keys, positionFromWire(ticket.to), ticket.plane)
+        clearKeysTicket()
+        if (n > 0) useToast.getState().show({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
+      } else if (r?.keys_error) {
+        // The hop stands and is already signed: only the extra work failed,
+        // and HOSAKA credited its surcharge back.
+        clearKeysTicket()
+        const back = Math.round((r.keys_credit_msats ?? 0) / 1000)
+        useToast.getState().show({
+          label: 'CUBES NOT COMPUTED',
+          meta: back > 0 ? `Your hop stands. ${back} sats came back to your HOSAKA balance.` : 'Your hop stands. Nothing extra was charged.',
+          mark: 'hosaka',
+        })
+      } else if (job.status === 'completed' || job.status === 'failed') {
+        // Nothing is coming on this job.
+        clearKeysTicket()
+      }
+    } catch {
+      // A dropped socket or a tab put away: the ticket keeps, and the next
+      // load picks it up again.
+    } finally {
+      collectingKeys = false
+    }
   },
 
   resumeCloudJob: async () => {
@@ -2575,6 +4714,28 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
       return
     }
     const id = ++requestId
+    if (record.action === 'ride') {
+      // A ride bought before a reload: the head is held again at once, and
+      // the same job is followed to its end by its id and poll token.
+      set({
+        pendingTarget: null,
+        proof: { ...IDLE_PROOF, status: 'computing', source: 'cloud', message: 'HOSAKA is computing your ride.' },
+        cloud: {
+          ...get().cloud,
+          status: record.stage,
+          quote: null,
+          invoice: record.deposit,
+          invoiceOpen: record.stage === 'awaiting_payment',
+          job: record,
+          progress: null,
+          message: null,
+          rideError: null,
+          startedAt: record.createdAt,
+        },
+      })
+      if (cloudRideRunner) await cloudRideRunner(record, id)
+      return
+    }
     set({
       pendingTarget: positionFromWire(record.to),
       proof: { ...IDLE_PROOF, status: 'computing', mode: moveAction(record.action), source: 'cloud' },
@@ -2655,9 +4816,12 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   coordHex: () => {
     const { events, position, plane } = get()
-    const head = events[events.length - 1]
+    // Where the chain puts you, which is not always the last event's own C:
+    // after an action this client does not recognize, or inside a game, it
+    // is the position carried or held (events.ts buildChain).
+    const head = chainHead(parsedChain(events))
     // Provisional identity: no head event yet, so read the spawn coordinate.
-    return head ? head.tags.find((t) => t[0] === 'C')?.[1] ?? '' : positionHex(position, plane)
+    return head ? head.coordHex : positionHex(position, plane)
   },
 
   sector: () => {
@@ -2667,7 +4831,10 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
 
   actions: () => parsedChain(get().events),
 
-  canDrive: () => get().atHead() || (get().focus?.drive === true && get().spectate === null && get().exploreIndex === null),
+  // A driven view drives while spectating too: the two stand together only in
+  // BUILD mode (beginSpectate `keepView`), where the pad moves the build
+  // cursor near the avatar being watched. Never your head: that is atHead.
+  canDrive: () => get().atHead() || (get().focus?.drive === true && get().exploreIndex === null),
   atHead: () =>
     get().exploreIndex === null &&
     get().spectate === null &&
@@ -2718,6 +4885,11 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
     // A driven focus (the free view) frames its cursor like your head does,
     // so the camera follows the pad; a plain focus frames the viewed point.
     if (focus !== null && !focus.drive) {
+      // A hidden item is drawn at its true place at every zoom, so that is
+      // what is framed; on the stop markers' policy below, the camera framed
+      // the item's cell centre at and below 2^33 while the item sat up to half
+      // a cell away, wandering on screen as you zoomed (arkinox, 2026-10-01).
+      if (focus.item) return itemCentre(anchor, alignedOrigin(anchor, scaleExp), scaleExp, focusAxes)
       // Same policy as markerCentre: at occupancy zooms the marker snaps to
       // its cell, whose cube centre is the aligned origin itself.
       if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
@@ -2726,25 +4898,43 @@ export const useCyberspace = create<CyberspaceState>((set, get) => {
         (a) => (cellDelta(anchor[a.axis], focusOrigin[a.axis], scaleExp) - 0.5) * a.dir,
       ) as [number, number, number]
     }
-    // With no cursor to drive (spectating, history, a plain focus) the camera sits on the anchor.
-    if (!get().canDrive()) return [0, 0, 0]
     const axes = viewAxes(view)
-    const origin = alignedOrigin(anchor, scaleExp)
-    // Cell CENTRES, the same convention the cursor cube, the avatar and the path
-    // trail draw with. This used to mix cellOffset on two axes with cellDelta on
-    // the third, so the point field's focus, the camera target and the cursor
-    // cube could sit up to half a cell apart above scaleExp 0: the terrain
-    // magnified around a spot the cursor was not quite on.
-    return [axes.right, axes.up, axes.out].map((a) =>
-      cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp) * a.dir,
-    ) as [number, number, number]
+    // With no cursor to drive (spectating, history, a plain focus) the camera
+    // sits on the anchor: its cell centre, [0, 0, 0], below the continuous
+    // range, and its true position inside that cell in it, where the avatar
+    // is drawn (anchorCentre).
+    if (!get().canDrive()) return anchorCentre(anchor, scaleExp, axes)
+    // placeCentre, the same placement the cursor cube, the avatar and the
+    // path trail draw with: cell CENTRES below CONTINUOUS_SCALE_MIN, the true
+    // point from there up. This used to mix cellOffset on two axes with
+    // cellDelta on the third, so the point field's focus, the camera target
+    // and the cursor cube could sit up to half a cell apart above scaleExp 0:
+    // the terrain magnified around a spot the cursor was not quite on.
+    return placeCentre(cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   },
   }
+})
+
+// The saved chain loaded at boot is drawn already; its signatures are
+// checked now, off the main thread.
+startSignatureCheck(pubkeyHex, saved?.unchecked ?? [])
+
+// The build STEP never exceeds the zoom. Zooming in to it or past it, by any
+// path (the pad and the keys, a focus, a hyperspace view), puts it back on
+// the zoom, so it cannot come back when the zoom is restored.
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp < prev.scaleExp && s.buildStep !== null && s.buildStep >= s.scaleExp) s.setBuildStep(null)
 })
 
 // DEV is also true under vitest, which runs in node, and importing this module
 // for alignedOrigin must not blow up on a missing window. Same reason the
 // localStorage calls above are wrapped.
+// A proof that ends any way but signing (cancelled, refused, failed) folds
+// what arrived while it computed; signing folds it itself (finishProof).
+useCyberspace.subscribe((s, prev) => {
+  if (prev.proof.status === 'computing' && s.proof.status !== 'computing') foldDeferred()
+})
+
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   // Lets the browser harness read and drive real state instead of inferring it
   // from the HUD, the same way __terrain and __screenAxes work.
@@ -2767,6 +4957,16 @@ function startPlanStep(): void {
   const s = useCyberspace.getState()
   const plan = s.plan
   if (!plan || plan.status !== 'running') return
+  // A game's entry arrived between steps: the route stops where it is.
+  const noMove = whyNoMove(s.actions())
+  if (noMove) {
+    useCyberspace.setState({
+      plan: { ...plan, status: 'failed', message: noMove, awaiting: null },
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
+    })
+    return
+  }
   const id = ++requestId
   if (plan.step.source === 'cloud') {
     void cloudStepStarter?.(plan.step, id)
@@ -2808,6 +5008,11 @@ export function sidestepTarget(position: Position, cursor: Position, ceiling: nu
 /**
  * The aligned origin of the cell the avatar occupies at the current scale.
  */
+/** What to ask a HOSAKA hop for: the destination's cubes under LOOT, nothing extra otherwise. Sidesteps never carry them. */
+function hopWants(kind: HosakaAction): HopWants | undefined {
+  return kind === 'hop' && useCyberspace.getState().cloudPrefs.profile === 'loot' ? { destinationKeys: true } : undefined
+}
+
 export function alignedOrigin(position: Position, scaleExp: number): Position {
   return {
     x: alignTo(position.x, scaleExp),

@@ -17,9 +17,16 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { HIDDEN_KIND } from '../lib/hidden'
-import { mergeLoot, summarizeBag, type LootItem } from '../lib/loot'
+import { afterBackfill, mergeLoot, summarizeBag, type LootItem } from '../lib/loot'
 import { query, subscribe } from '../lib/relay'
 import { useRelays } from '../store/useRelays'
+import { useShards } from '../store/useShards'
+
+/** Bags taken down from this device, which no relay's answer can bring back. */
+function standing(items: LootItem[]): LootItem[] {
+  const gone = useShards.getState().deletedBags
+  return items.some((it) => gone[it.key]) ? items.filter((it) => !gone[it.key]) : items
+}
 
 export interface Loot {
   items: LootItem[]
@@ -62,7 +69,9 @@ function writeCache(items: LootItem[]): void {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(items.slice(0, CACHE_MAX))) } catch { /* private mode */ }
 }
 
-const cached = readCache()
+// Filtered on the way in: a bag taken down here must not come back from
+// this device's own cache either.
+const cached = standing(readCache())
 
 export const useLootStore = create<LootState>(() => ({
   items: cached,
@@ -89,7 +98,7 @@ export function ensureLoot(relays: string[]): void {
     const item = summarizeBag(ev)
     if (item && useLootStore.getState().source === source) {
       useLootStore.setState((s) => {
-        const items = mergeLoot(s.items, [item])
+        const items = standing(mergeLoot(s.items, [item]))
         writeCache(items)
         return { items }
       })
@@ -101,7 +110,7 @@ export function ensureLoot(relays: string[]): void {
       if (useLootStore.getState().source !== source) return
       const found = events.map(summarizeBag).filter((x): x is LootItem => x !== null)
       useLootStore.setState((s) => {
-        const items = mergeLoot(s.items, found)
+        const items = standing(afterBackfill(s.items, found, LOOT_BACKFILL))
         writeCache(items)
         return { items, status: 'ready' }
       })

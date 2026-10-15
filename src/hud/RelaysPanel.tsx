@@ -1,7 +1,7 @@
 /**
  * RelaysPanel.tsx — the relays this client fans out across.
  *
- * cyberspace.nostr1.com is the shared default and is pinned: everyone meets
+ * The canonical relay (useRelays DEFAULT_RELAY) is the shared default and is pinned: everyone meets
  * there, so it cannot be removed. Add your own below it, and movement, hidden
  * content, discovery and everyone else's chains all ride the whole set. A dot
  * per relay shows whether the socket is open right now.
@@ -18,9 +18,15 @@ export function RelaysPanel(): JSX.Element {
   const [input, setInput] = useState('')
   const [error, setError] = useState(false)
   // Connection dots update on their own clock; the pool is not reactive.
-  const [, tick] = useState(0)
+  // The panel re-renders only when a dot changes, and not at all while the
+  // tab is hidden (2026-10-15): it re-rendered every 2 s regardless.
+  const [, tick] = useState('')
   useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 2000)
+    const t = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      const st = getPool().listConnectionStatus?.() ?? new Map<string, boolean>()
+      tick([...st.entries()].map(([u, up]) => `${u}=${up ? 1 : 0}`).join(' '))
+    }, 2000)
     return () => window.clearInterval(t)
   }, [])
   void connected

@@ -15,7 +15,8 @@
 
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { formatCellSize } from '../lib/scale'
+import { formatDistance } from 'sno-core/scale'
+import { axisDistance } from '../lib/nearby'
 import { WorldLabel } from './WorldLabel'
 import {
   BufferGeometry,
@@ -31,10 +32,12 @@ import {
 import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
-import { ACCENT, DANGER, SIDESTEP, WARN } from '../lib/palette'
+import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
+import { useBuilder } from '../store/useBuilder'
+import { cubeAt } from '../lib/buildCursor'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
-import { cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import {
   alignedOrigin,
   samePosition,
@@ -153,13 +156,19 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const atHead = useCyberspace((s) => s.canDrive())
   const home = useCyberspace((s) => s.atHead())
+  const walking = useCyberspace((s) => s.walking)
   // Looking at a focus the cursor cannot be used, so its size label would
   // just hang in the middle of the view.
   const focused = useCyberspace((s) => s.focus !== null)
+  // BUILD mode rides the free view: the same cube, white and labeled, as
+  // the build cursor (store/useBuilder.ts).
+  const building = useBuilder((s) => s.active)
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
-  const target = atHead ? (pendingTarget ?? cursor) : anchor
+  // In BUILD mode the cube is the build cursor, never a pending move's target
+  // (lib/buildCursor.ts cubeAt).
+  const target = cubeAt({ cursor, anchor, pendingTarget, canDrive: () => atHead }, building)
   // A plan, and its legs, only from your own head: in a free view the avatar
   // is astronomically far from the anchor and a leg to it would be nonsense.
   const active = home && !samePosition(position, target)
@@ -183,7 +192,11 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     [active, position, target, plane, hopCeil, sidestepCeil, limits, from],
   )
 
-  // Screen-space endpoints, at cell CENTRES.
+  // Screen-space endpoints, at cell CENTRES below the continuous range and at
+  // true positions in it (placeCentre), where the avatar and the trail are.
+  // The cell outline is the exception: it is the grid cell being aimed at,
+  // always (aimCentres), so it fits the covering box and every other grid
+  // box exactly.
   //
   // These used to come from which carries a half-cell bias: it was
   // written when a cell was drawn as a square anchored at its corner. Now the
@@ -193,9 +206,10 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // 0 and grows to nearly half a cell by scaleExp 14.
   const points = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
-    const centre = (p: Position) => cellCentre(p, origin, scaleExp, axes)
+    const centre = (p: Position) => placeCentre(p, origin, scaleExp, axes)
     const a = centre(position)
-    const b = centre(target)
+    const aim = aimCentres(target, origin, scaleExp, axes)
+    const b = aim.point
     const action = next?.action ?? null
     // Where this commit lands: the step's end, or the cursor itself when the
     // step is not known (HOSAKA's caps not answered yet) or the move is too
@@ -221,7 +235,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
       lastIsCloud: cloud && onCursor,
       ghost: action !== null && action !== 'too-far' && next?.step ? landing : null,
       ghostOnCursor: onCursor,
-      targetCell: b,
+      targetCell: aim.cell,
     }
   }, [position, target, next, scaleExp, axes, anchor])
 
@@ -270,9 +284,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const ghost = useRef<LineSegments>(null)
   useFrame(() => {
     const s = useCyberspace.getState()
-    const live = s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor
-    const b = cellCentre(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
-    if (outline.current) outline.current.position.set(b[0], b[1], b[2])
+    const live = cubeAt(s, useBuilder.getState().active)
+    const { cell, point: b } = aimCentres(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+    if (outline.current) outline.current.position.set(cell[0], cell[1], cell[2])
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
@@ -280,23 +294,35 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     else if (points.lastIsCloud) setLastVertex(cloudLegs, cloudGeometry, b)
   })
 
+  // No lift. The group used to sit 0.04 of a cell out of the screen, a relic
+  // of the flat grid this cursor was first drawn over, where it kept the square
+  // above the plane. In a volume it only put the cube 0.04 of a cell off the
+  // grid it stands on, against the covering box drawn on that same grid, and
+  // it is not needed against z-fighting: everything here draws without a
+  // depth test (arkinox, 2026-10-01: "it should fit exactly").
+  // In WALK the cursor is the eye itself (store/useWalk.ts): a cube drawn
+  // round the camera would only be lines across the view.
+  if (walking) return null
   return (
-    <group position={[0, 0, 0.04]}>
+    <group>
       {/*
-        The scale reading rides the cursor, and shows once the cursor has left
-        the avatar's cell: parked on the avatar it read as a label on you, and
-        the SCALE panel already answers "how big is a gibson here" at rest.
-        Off your own head it stays up, since nothing else there names the size.
+        How far the cursor is from your avatar, riding the cursor itself, and
+        shown once it has left the avatar's cell: parked on the avatar the
+        answer is zero. It reads as the largest of the three axis distances,
+        the same measure the presence chip and the Nearby Loot list use, so
+        "12 km away" means the same thing everywhere. In history there is no
+        cursor and the label rides the anchor, saying how far that link is
+        from your head. The SCALE panel answers how big a cell is.
       */}
       {!focused && (!home || active) && <WorldLabel
-        text={formatCellSize(scaleExp)}
+        text={formatDistance(axisDistance(target, position))}
         color={active ? targetColor : ACCENT}
         offset={[1.5, 0.7, 0]}
         opacity={active ? 1 : 0.75}
         follow={() => {
           const s = useCyberspace.getState()
-          return cellCentre(
-            s.canDrive() ? (s.pendingTarget ?? s.cursor) : s.anchor,
+          return placeCentre(
+            cubeAt(s, useBuilder.getState().active),
             alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes,
           )
         }}
@@ -323,11 +349,25 @@ export function Cursor({ axes }: Props): JSX.Element | null {
         </>
       )}
       {/* The free view's own marker: the yellow cube on the cell you are
-          looking at, which the pad moves with the view. */}
+          looking at, which the pad moves with the view. In BUILD mode it is
+          the build cursor: white, and labeled with the cell size it places
+          at, which is the zoom. */}
       {!home && atHead && !active && (
         <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
-          <lineBasicMaterial color={WARN} toneMapped={false} transparent opacity={0.85} depthTest={false} />
+          <lineBasicMaterial color={building ? BUILD : WARN} toneMapped={false} transparent opacity={building ? 0.95 : 0.85} depthTest={false} />
         </lineSegments>
+      )}
+      {building && atHead && (
+        <WorldLabel
+          text={`BUILD · 2^${scaleExp}`}
+          color={BUILD}
+          offset={[1.5, 0.7, 0]}
+          opacity={0.9}
+          follow={() => {
+            const s = useCyberspace.getState()
+            return placeCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
+          }}
+        />
       )}
     </group>
   )

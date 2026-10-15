@@ -1,39 +1,61 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
+import { CrashNote } from './hud/CrashNote'
 import { ChainExplorer } from './hud/ChainExplorer'
-import { HyperspaceBar } from './hud/HyperspaceBar'
+import { HyperspaceBar, HyperspaceViewBar } from './hud/HyperspaceBar'
+import { InstrumentStack } from './hud/InstrumentStack'
 import { LineScrubber } from './hud/LineScrubber'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { DeploymentDetail } from './hud/DeploymentDetail'
+import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
+import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
+import { ActionModal } from './hud/ActionModal'
+import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
+import { AgentTalkHost } from './hud/AgentTalk'
+import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
+import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
+import { startCoordRoute } from './store/useCoordRoute'
+import { DemoCoach } from './hud/DemoCoach'
+import { parseDemoRoute } from './lib/demoRoute'
+import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
+import { StarNickname } from './hud/StarNickname'
+import { StarredPlaceCard } from './hud/StarredPlaceCard'
 import { LootDetail } from './hud/LootDetail'
 import { NearbyLootModal } from './hud/NearbyLootModal'
 import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/InvoiceModal'
 import { HosakaOffer } from './hud/HosakaOffer'
+import { ChainConflictPrompt } from './hud/ChainConflict'
+import { ChainStatusModal } from './hud/ChainStatus'
+import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
+import { PersonModal } from './hud/PersonModal'
 import { TouchControls } from './hud/TouchControls'
+import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
 import { Compass3D } from './scene/Compass3D'
 import { PresenceChip } from './hud/PresenceChip'
 import { startPresence } from './store/usePresence'
+import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
 import { watchConnectivity } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
-import { useKeyboard } from './hooks/useKeyboard'
+import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
+import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useTargets } from './hooks/useTargets'
@@ -44,14 +66,23 @@ import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
 import { useSecrets, watchFocus } from './store/useSecrets'
+import { useInventory } from './store/useInventory'
+import { useFound } from './store/useFound'
 import { useAvatars } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
 
 /** How long after the panels open the anchor sync goes full tilt. */
 const SYNC_PRIORITY_DELAY_MS = 1500
 import { useShards } from './store/useShards'
+import { useBuilder } from './store/useBuilder'
+import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 export default function App(): JSX.Element {
+  // Reactions and comments that tag you: the first page per identity, then a poll.
+  useNotificationsLoop()
+  // New private messages from your agents, for the dot on AGENTS and the
+  // toast; only while you have an agent (arkinox, 2026-10-11).
+  useAgentDmWatch()
   // The keyboard is unconditional. The on-screen controls are a second way in,
   // not a replacement: both call the same store actions, so WASD and the pad
   // cannot drift apart, and nothing about having a pointer takes the keys away.
@@ -61,14 +92,28 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); useSecrets.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
+  useEffect(() => startCoordRoute(), [])
+  // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
+  useEffect(() => {
+    const step = parseDemoRoute(window.location.pathname)
+    if (step !== null) useDemo.getState().start(step || undefined)
+    else restoreAfterUnfinishedTour()
+  }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
   useEffect(() => watchConnectivity(), [])
+  // The Avatars list kept on this device is read now, so the menu opens on
+  // it; the relays are asked when the panel first mounts (useRoster).
+  useEffect(() => { void hydrateRoster() }, [])
   // A cloud job paid or computing when the tab last closed is picked up here,
   // if the chain head is still the one it was bound to. Also fetches the caps.
   useEffect(() => { void useCyberspace.getState().resumeCloudJob() }, [])
+  // Cubes from a staged hop whose move landed before they finished: the
+  // ticket outlives the tab, so a phone put away mid job collects on return.
+  useEffect(() => { void useCyberspace.getState().collectCloudKeys() }, [])
   // Back from the wallet: a phone suspends the tab while another app is up,
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.
@@ -130,16 +175,38 @@ export default function App(): JSX.Element {
   // spectating ends the spectation, and the panels hidden behind it would
   // come straight back over the thing just asked for.
   const viewing = useCyberspace((s) => s.focus !== null)
-  useEffect(() => { if ((driving || stationView || viewingSecret || viewing) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, isMobile])
+  // BUILD from the Stash panel, even from a view already driven: the scene is
+  // where building happens, so on a phone the panels fold away.
+  const building = useBuilder((s) => s.active)
+  const touring = useDemo((s) => s.active)
+  useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
+  // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
+  // where VIEW is how the build cursor jumps: none of the flags above change,
+  // so the fold above does not fire again and the menu stayed over the place
+  // just asked for. A driven view's focus is replaced on every VIEW; with the
+  // menu covering the scene nothing else can replace it (the pad and the keys
+  // stand down), so a new one is always a VIEW from the panels.
+  const drivenFocus = useCyberspace((s) => (s.focus?.drive ? s.focus : null))
+  useEffect(() => { if (drivenFocus && isMobile) setPanelsOpen(false) }, [drivenFocus, isMobile])
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
   const crowded = isMobile && showPanels
+  // The keys stand down with the pad while the menu covers the scene.
+  useEffect(() => { setMenuCovering(crowded) }, [crowded])
 
   // While the HOSAKA offer card is up it has the screen to itself: the panels,
   // instruments, compass and pad step aside until the cursor comes back
   // within reach, NOT NOW, or the menu opens.
   const offerUp = useOfferView(crowded || secretOpen) !== null
+
+  // Escape closes the menu after any modal and before any chip (arkinox,
+  // 2026-10-01: "ESC should exit modals, then exit menu, then close ui
+  // overlay chips"). On a desktop too, where the panels start open beside
+  // the scene: one order everywhere, and the hamburger puts them back. Only
+  // while they are on screen, so the HOSAKA card standing them aside, or
+  // spectating locking them, leaves Escape for what is showing instead.
+  useEscape('menu', showPanels && !offerUp, () => setPanelsOpen(false))
 
   // The anchor backfill runs full tilt while the panels are open (the sync
   // numbers are being watched) and breathes between batches while they are
@@ -153,22 +220,31 @@ export default function App(): JSX.Element {
     return () => window.clearTimeout(t)
   }, [showPanels])
 
-  const [padOpen, setPadOpen] = useState(true)
+  const padOpen = usePad((s) => s.open)
+  // On a phone the open chat dock runs through the controls' column, so the
+  // two take turns there: whichever was opened last wins (usePad).
+  useEffect(() => linkChatAndPad(() => window.matchMedia(CHAT_COVERS_PAD).matches), [])
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
   // The pad no longer depends on being at your own head. Off-head it empties
   // its movement cells and keeps its scale ones (TouchControls), because scale
   // is the one axis that still means something while viewing or spectating.
+  // Hidden, not unmounted, while a modal is up: the pad hovered over every
+  // modal (arkinox, 2026-10-10), but it also owns the SWITCH TO LIVE
+  // confirmation, which is a modal itself. Unmounting the pad when that card
+  // opened took the card with it, and LIVE could not be reached (arkinox,
+  // the same evening: "the local button is stuck"). The card portals to the
+  // body, so a hidden pad still shows it; the pad's open state is kept, so
+  // it is back the moment the last modal closes.
+  const modalUp = useModalUp()
   const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
-    setViewMenuOpen((menu) => {
-      if (menu) return false
-      setPadOpen((open) => !open)
-      return false
-    })
-  }, [])
+    if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // With the chat open over the controls, this folds the chat (usePad).
+    tapScene()
+  }, [viewMenuOpen])
   useCanvasTap(onSceneTap, !crowded)
 
   return (
@@ -177,49 +253,94 @@ export default function App(): JSX.Element {
       {!crowded && !offerUp && <Targets targets={targets} />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
-          {/* Ordered by how often each is reached for right now: hyperspace
-              on top with its status bar, the chain under it, the XOR readout
-              last. */}
-          <LineScrubber />
-          <HyperspaceBar />
-          <FocusBar />
-          <ToastChip />
-          <ChainExplorer />
-          <BitReadout />
-          {/* Under XOR BITS, spaced as the rest are: what was just found, what
-              is open to you here, then the scan. */}
-          <KeyFoundChip />
-          <NearbyChip />
-          <PresenceChip />
+          {/* Grouped, not ordered by hand (InstrumentStack.tsx): chips with a
+              RETURN on top, what is true right now in the middle, toasts at
+              the bottom (arkinox, 2026-10-14). */}
+          <InstrumentStack groups={{
+            return: <>
+              <HyperspaceViewBar />
+              <FocusBar />
+              {/* BUILD mode, where the free view's bar would be: it rides that view. */}
+              <BuildBar />
+            </>,
+            status: <>
+              {/* A broken chain first: nothing else moves you until you respawn.
+                  It stays in BUILD mode too; building is not moving. */}
+              <BrokenChainChip />
+              {/* The trip GOAL planned, until it is cleared (useGoal.ts). */}
+              <GoalChip />
+              {/* BUILD mode keeps the stack to what building needs (arkinox,
+                  2026-10-08): the line and XOR BITS step aside and come back
+                  on exit. */}
+              {/* Not during the /demo tour (arkinox, 2026-10-15). */}
+              {!building && !touring && <LineScrubber />}
+              <HyperspaceBar />
+              {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
+                  yours or a spectated avatar's, aims the build cursor at the
+                  action instead of going into history (useBuilder walkChain). */}
+              <ChainExplorer />
+              {!building && <BitReadout />}
+              {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
+              <NotificationsToast />
+              {/* What was just found, what is open to you here, then the scan. */}
+              <KeyFoundChip />
+              <NearbyChip />
+              <PresenceChip />
+            </>,
+            toast: <ToastChip />,
+          }} />
         </div>
       )}
-      {showPanels && !offerUp && <Hud menuOpen={crowded} />}
+      {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
       {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}
       {!crowded && !offerUp && !deploying && !secretOpen && !spectating && <ChatDock />}
+      {/* The nickname field for a place just starred, over the star (StarNickname.tsx). */}
+      <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
-      {showPad && !offerUp && <TouchControls />}
-      {showPad && !offerUp && <RouteOverlay />}
+      <div hidden={modalUp}>
+        {showPad && !offerUp && <TouchControls />}
+        {/* Not while placing: the deploy bar docks in this same corner
+            (arkinox, 2026-10-12), and placing moves no avatar, so there is
+            no route to show. */}
+        {showPad && !offerUp && !deploying && <RouteOverlay />}
+      </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
-      {!crowded && !padOpen && !offerUp && (
+      {!crowded && !padOpen && !offerUp && !modalUp && (
         <button
           className="chip touchhint"
           onContextMenu={(e) => e.preventDefault()}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPadOpen(true) }}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); usePad.getState().setOpen(true) }}
           aria-label="Show controls"
         >CONTROLS</button>
       )}
+      {/* The /demo tour's caption panel, only while the tour runs. */}
+      <DemoCoach />
+      {/* WALK's lag, centered over everything and touching nothing. */}
+      <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
-      <DeployBar />
-      <DeploymentDetail />
-      <SecretModal />
-      <LootDetail />
-      <NearbyLootModal />
+      {/* Docked in the lower left, a gap short of the pad while the pad is on
+          screen (arkinox, 2026-10-12). */}
+      <DeployBar pad={showPad && !offerUp && !modalUp} />
+      {/* One boundary for the record and its neighbors: a crash in one modal
+          shows its error where the modal was, and the scene stays up. */}
+      <CrashNote where="a modal">
+        <DeploymentDetail />
+        <StashModals />
+        <SecretModal />
+        <ActionModal />
+        <NotificationsModal />
+        <AgentTalkHost />
+        <LootDetail />
+        <NearbyLootModal />
+        <StarredPlaceCard />
+        <PersonModal />
+      </CrashNote>
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
       {!showPanels && <HosakaPulse />}
@@ -227,6 +348,12 @@ export default function App(): JSX.Element {
       <InvoiceModal />
       <PaidModal />
       <CreditedModal />
+      {/* A held chain that met a chain on the relays: up until answered, over everything. */}
+      <ChainConflictPrompt />
+      {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
+      <ChainStatusModal />
+      {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
+      <BrokenChainModal />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}

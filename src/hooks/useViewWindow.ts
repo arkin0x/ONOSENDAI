@@ -11,8 +11,9 @@
  * so sub-cell drift does not rebuild geometry every frame.
  */
 
-import { useEffect, useState } from 'react'
-import { useCyberspace } from '../store/useCyberspace'
+import { useEffect, useMemo, useState } from 'react'
+import { originShift, type Position } from '../lib/space'
+import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 export interface ViewWindow {
   right: number
@@ -38,14 +39,63 @@ export interface ViewWindow {
  */
 export const CURSOR_SETTLE_MS = 250
 
+/**
+ * A window as read: its offsets, and the render origin, zoom and view they
+ * were read against. The offsets are only meaningful in that frame.
+ */
+interface ReadWindow extends ViewWindow {
+  origin: Position
+  scaleExp: number
+  view: unknown
+}
+
 /** The window the cursor is in right now, read straight off the store. */
-function read(): ViewWindow {
-  const [right, up, out] = useCyberspace.getState().cursorOffset()
-  return { right: Math.round(right), up: Math.round(up), out: Math.round(out) }
+function read(): ReadWindow {
+  const s = useCyberspace.getState()
+  const [right, up, out] = s.cursorOffset()
+  return { right: Math.round(right), up: Math.round(up), out: Math.round(out), origin: alignedOrigin(s.anchor, s.scaleExp), scaleExp: s.scaleExp, view: s.view }
+}
+
+const sameOrigin = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y && a.z === b.z
+
+/** The largest origin shift carried, in cells: far more than any landing, far less than a double's exact range. */
+export const MAX_CARRY_CELLS = 1 << 20
+
+/** A shift the window may be carried by: a whole number of cells, and a small one. */
+export function carriable(d: number): boolean {
+  return Number.isInteger(d) && Math.abs(d) <= MAX_CARRY_CELLS
 }
 
 export function useViewWindow(): ViewWindow {
-  const [win, setWin] = useState<ViewWindow>(read)
+  const [win, setWin] = useState<ReadWindow>(read)
+  // The window stays where it is in cyberspace when the anchor moves under
+  // it. A landing re-anchors render space by whole cells, so the offsets are
+  // carried by exactly that shift, worked out here in the same render that
+  // sees the new anchor rather than in a later update: what the window covers
+  // does not change, so nothing downstream rescans it (the terrain volume
+  // keys on its world centre). Before, a landing moved the window one cell in
+  // the world, the volume rescanned there, and the settled window moved it
+  // back and rescanned again: two full rescans and two point-field rebuilds
+  // per step of a walk, at the moment it landed (2026-10-13).
+  const anchor = useCyberspace((s) => s.anchor)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const view = useCyberspace((s) => s.view)
+  const origin = alignedOrigin(anchor, scaleExp)
+  const carried = useMemo<ViewWindow>(() => {
+    if (win.scaleExp !== scaleExp || win.view !== view || sameOrigin(win.origin, origin)) return win
+    const [dr, du, dz] = originShift(win.origin, origin, scaleExp, useCyberspace.getState().axes())
+    // Only a landing's shift is carried: a few whole cells. A jump across the
+    // cube (stepping the hyperspace scrubber between two ports, which sit at
+    // random coordinates) shifts the origin by more cells than a double holds
+    // exactly, the carried offsets came out fractional, and the terrain
+    // volume's BigInt threw, which took the scene and its GL context down
+    // (Android's GPU process crashed stepping block 6 to 7, 2026-10-15).
+    // Such a jump starts the window afresh, where the cursor is now.
+    if (!carriable(dr) || !carriable(du) || !carriable(dz)) return read()
+    return { right: win.right + dr, up: win.up + du, out: win.out + dz }
+    // origin.x/y/z stand in for origin, whose identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win, scaleExp, view, origin.x, origin.y, origin.z])
 
   useEffect(() => {
     let handle: number | null = null
@@ -54,7 +104,8 @@ export function useViewWindow(): ViewWindow {
       handle = null
       const next = read()
       setWin((prev) =>
-        prev.right === next.right && prev.up === next.up && prev.out === next.out ? prev : next,
+        prev.right === next.right && prev.up === next.up && prev.out === next.out &&
+        prev.scaleExp === next.scaleExp && prev.view === next.view && sameOrigin(prev.origin, next.origin) ? prev : next,
       )
     }
     const schedule = (): void => {
@@ -87,5 +138,5 @@ export function useViewWindow(): ViewWindow {
     }
   }, [])
 
-  return win
+  return carried
 }

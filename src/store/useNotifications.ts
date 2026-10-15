@@ -1,0 +1,205 @@
+/**
+ * useNotifications: reactions and comments that tag you, newest first
+ * (arkinox, 2026-09-28).
+ *
+ * Read from this app's relays and your own NIP-65 read relays, where other
+ * clients deliver them (lib/inbox.ts). The first page loads when an identity
+ * becomes active, new ones are polled for, and older ones load a page at a
+ * time as the history is scrolled. "Seen" is the newest time you have looked,
+ * kept per identity on this device; everything after it is unread, which is
+ * what lights the dot on NOTIFICATIONS and raises the toast under XOR BITS.
+ *
+ * A comment sealed to one of your own bags is opened with that bag's region
+ * key, which this device can derive because it hid the bag.
+ *
+ * Only ONOSENDAI's own traffic is kept (lib/notifications.ts classify): a
+ * like on an ordinary note is not a notification here (arkinox, 2026-09-30).
+ * What cannot be told apart from the event alone is settled by looking its
+ * target up, once per page, and kept when the target cannot be found.
+ */
+
+import { create } from 'zustand'
+import { COMMENT_KIND } from '../lib/comments'
+import { relaysFor } from '../lib/inbox'
+import { classify, fromRelays, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
+import { GENERAL_RELAYS } from '../lib/contacts'
+import { queryAny } from '../lib/relay'
+import { decryptForRegion, regionKeyAt } from '../lib/shardCrypto'
+import { REACTION_KIND } from '../lib/social'
+import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
+import { positionOf, useShards } from './useShards'
+
+/** Notifications per page, first and older. */
+export const PAGE = 30
+/** How often new ones are asked for while the app is open. */
+export const POLL_MS = 60_000
+
+const SEEN_KEY = (me: string): string => `onosendai:notif-seen:${me}`
+
+function loadSeen(me: string): number {
+  try { return Number(localStorage.getItem(SEEN_KEY(me))) || 0 } catch { return 0 }
+}
+
+/**
+ * Chat lines that tagged you (arkinox, 2026-10-13). Chat is ephemeral and no
+ * relay keeps it, so these are the one kind of notification made on this
+ * device, and kept here per identity, newest MENTIONS_KEPT.
+ */
+const MENTIONS_KEY = (me: string): string => `onosendai:notif-mentions:${me}`
+export const MENTIONS_KEPT = 100
+
+function loadMentions(me: string): Notification[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(MENTIONS_KEY(me)) ?? '[]') as unknown
+    return Array.isArray(list) ? (list as Notification[]).filter((n) => n && n.what === 'mention' && typeof n.id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function saveMentions(me: string, items: readonly Notification[]): void {
+  const kept = items.filter((n) => n.what === 'mention').slice(0, MENTIONS_KEPT)
+  try { localStorage.setItem(MENTIONS_KEY(me), JSON.stringify(kept)) } catch { /* private mode: kept for this session */ }
+}
+
+interface NotificationsState {
+  me: string | null
+  items: Notification[]
+  /** Opened sealed words, by notification id. */
+  opened: Record<string, string>
+  lastSeen: number
+  loading: boolean
+  /** No older page left. */
+  done: boolean
+  open: boolean
+  unread: () => number
+  start: (me: string) => Promise<void>
+  poll: () => Promise<void>
+  loadMore: () => Promise<void>
+  setOpen: (open: boolean) => void
+  markSeen: () => void
+  /** A chat line that tagged `me`, made on this device and kept with the rest. */
+  addMention: (me: string, n: Notification) => void
+}
+
+/** Your moves and your hidden items, as this device knows them. */
+function knownHere(): Known {
+  return {
+    actions: new Set(useCyberspace.getState().events.map((e) => e.id)),
+    items: new Map(useShards.getState().mine.map((d) => [d.eventId, d.lookupId])),
+  }
+}
+
+async function fetchPage(me: string, bounds: { until?: number; since?: number }): Promise<Notification[]> {
+  const relays = await relaysFor([me])
+  const found = await queryAny(relays, { kinds: [REACTION_KIND, COMMENT_KIND], '#p': [me], limit: PAGE, ...bounds })
+  const known = knownHere()
+  const candidates = found.map((ev) => classify(ev, me, known)).filter((c): c is Candidate => c !== null)
+  // The targets that decide whether a notification is ONOSENDAI's, looked up
+  // together where your notes live as well as where this app reads.
+  const ids = [...new Set(candidates.flatMap((c) => (c.lookup ? [c.lookup.id] : [])))]
+  const targets = new Map<string, Target>()
+  if (ids.length) {
+    const events = await queryAny([...new Set([...relays, ...GENERAL_RELAYS])], { ids, limit: ids.length }).catch(() => [])
+    for (const ev of events) targets.set(ev.id, { kind: ev.kind, tags: ev.tags })
+  }
+  return candidates.map((c) => resolve(c, targets)).filter((n): n is Notification => n !== null)
+}
+
+/** The words of sealed comments on your own bags, by notification id. */
+async function openSealed(list: Notification[], me: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  const mine = useShards.getState().mine
+  await Promise.all(list.map(async (n) => {
+    if (!n.ciphertext || !n.bag) return
+    const [, author, lookupId] = n.bag.split(':')
+    if (author !== me) return
+    const dep = mine.find((d) => d.lookupId === lookupId)
+    if (!dep) return
+    const words = await decryptForRegion(regionKeyAt(positionOf(dep), dep.height, MAX_COMPUTE_HEIGHT).key, n.ciphertext)
+    if (words?.trim()) out[n.id] = words.trim()
+  }))
+  return out
+}
+
+export const useNotifications = create<NotificationsState>((set, get) => {
+  /** Merge a page in, unless the identity changed while it was in flight. */
+  const take = async (me: string, page: Notification[]): Promise<number> => {
+    const opened = await openSealed(page, me)
+    if (get().me !== me) return 0
+    const before = get().items.length
+    set((s) => ({ items: mergeNotifications(s.items, page), opened: { ...s.opened, ...opened } }))
+    return get().items.length - before
+  }
+
+  return {
+    me: null,
+    items: [],
+    opened: {},
+    lastSeen: 0,
+    loading: false,
+    done: false,
+    open: false,
+    unread: () => unreadCount(get().items, get().lastSeen),
+
+    start: async (me) => {
+      if (get().me === me) return
+      set({ me, items: mergeNotifications([], loadMentions(me)), opened: {}, lastSeen: loadSeen(me), loading: true, done: false })
+      try {
+        const page = await fetchPage(me, {})
+        await take(me, page)
+        if (get().me === me) set({ done: page.length === 0 })
+      } catch { /* offline: the next poll tries again */ } finally {
+        if (get().me === me) set({ loading: false })
+      }
+    },
+
+    poll: async () => {
+      const { me } = get()
+      if (!me) return
+      // Paged by what the relays hold: a chat mention newer than every
+      // reaction would otherwise move `since` past ones not fetched yet.
+      const items = fromRelays(get().items)
+      try { await take(me, await fetchPage(me, items.length ? { since: items[0].createdAt } : {})) } catch { /* next time */ }
+    },
+
+    loadMore: async () => {
+      const { me, loading, done } = get()
+      if (!me || loading || done) return
+      const items = fromRelays(get().items)
+      set({ loading: true })
+      try {
+        // Inclusive, so events sharing the oldest second are not skipped; the
+        // merge drops the ones already held, and a page that adds nothing is the end.
+        const until = items.length ? items[items.length - 1].createdAt : undefined
+        const added = await take(me, await fetchPage(me, until === undefined ? {} : { until }))
+        if (get().me === me && added === 0) set({ done: true })
+      } catch { /* leave `done` alone: scrolling again retries */ } finally {
+        if (get().me === me) set({ loading: false })
+      }
+    },
+
+    setOpen: (open) => {
+      set({ open })
+      if (open) get().markSeen()
+    },
+
+    markSeen: () => {
+      const { me, items } = get()
+      if (!me || items.length === 0) return
+      const lastSeen = Math.max(get().lastSeen, items[0].createdAt)
+      set({ lastSeen })
+      try { localStorage.setItem(SEEN_KEY(me), String(lastSeen)) } catch { /* private mode */ }
+    },
+
+    addMention: (me, n) => {
+      // Not the identity on show (it switched while the line was opened): kept
+      // for when that identity's list next loads.
+      if (get().me !== me) { saveMentions(me, mergeNotifications(loadMentions(me), [n])); return }
+      if (get().items.some((x) => x.id === n.id)) return
+      const items = mergeNotifications(get().items, [n])
+      set({ items })
+      saveMentions(me, items)
+    },
+  }
+})

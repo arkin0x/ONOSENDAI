@@ -19,6 +19,7 @@ import { getStopByHeight } from '../store/useHyperspace'
 import { rideVisualHeight } from '../lib/hyperspace/ride'
 import { stopPlane, stopPosition, useRideRun } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
+import { avatarTurn } from '../lib/facing'
 
 /** The avatar's own red; the ghost is you, so it wears your color. */
 const YOU = '#ff2323'
@@ -36,6 +37,8 @@ export function TransitAvatar({ axes }: { axes: ViewAxes }): JSX.Element | null 
     [],
   )
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
+  // You, so turned with the view as your avatar is (lib/facing.ts avatarTurn).
+  const turn = useMemo(() => avatarTurn(axes, null), [axes])
 
   // A ghost breathes: computation is happening right now, and a steady mesh
   // would read as a thing standing still instead of a thing in flight.
@@ -55,7 +58,7 @@ export function TransitAvatar({ axes }: { axes: ViewAxes }): JSX.Element | null 
 
   return (
     <group position={centre}>
-      <group scale={[k, k, k]}>
+      <group scale={[k, k, k]} quaternion={turn}>
         <lineSegments geometry={geometry} material={material} frustumCulled={false} renderOrder={6} />
       </group>
       <WorldLabel

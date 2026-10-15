@@ -11,11 +11,14 @@
 import { useEffect, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { usePresence, type Person } from '../store/usePresence'
+import { sectorKey, usePresence, type Person } from '../store/usePresence'
 import { useChat } from '../store/useChat'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
-import { formatDistance } from '../lib/scale'
+import { formatDistance } from 'sno-core/scale'
+import type { Position } from '../lib/space'
+import type { Plane } from 'cyberspace-core'
+import { useEscape } from '../hooks/useEscape'
 
 function ageLabel(at: number, now: number): string {
   const s = Math.max(0, now - at)
@@ -43,6 +46,36 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   )
 }
 
+/** What decides whether the place on screen is your own sector. */
+export interface SectorView {
+  spectate: unknown
+  /** Where you stand, and in which plane. */
+  position: Position
+  headPlane: Plane
+  /** The scene's origin: what every view (VIEW, /C/, a hyperspace stop, an item, history, a pin) moves. */
+  anchor: Position
+  anchorPlane: Plane
+  /** The cursor and the plane it is lined up in. */
+  cursor: Position
+  plane: Plane
+}
+
+/**
+ * Whether the place on screen is somewhere other than your own sector (one
+ * rule for every way of looking elsewhere, arkinox, 2026-10-15): spectating
+ * someone; the scene anchored in another sector or plane, which is what VIEW,
+ * a /C/ link, a hyperspace stop, a focused item, a pin and history all do;
+ * or the cursor lined up in another sector or plane. A hyperspace stop view
+ * moves the anchor and leaves the cursor at your head, which is how the chip
+ * stayed up over a port in ideaspace.
+ */
+export function awayFromOwnSector(s: SectorView): boolean {
+  if (s.spectate !== null) return true
+  const home = sectorKey(s.position)
+  if (s.anchorPlane !== s.headPlane || sectorKey(s.anchor) !== home) return true
+  return s.plane !== s.headPlane || sectorKey(s.cursor) !== home
+}
+
 /** How long the chip stays lit after someone arrives. */
 const ARRIVAL_MS = 4000
 
@@ -53,7 +86,15 @@ export function PresenceChip(): JSX.Element | null {
   const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity.pubkey)
   const muted = useChat((s) => s.muted)
+  // "In this sector" means yours, where you stand and are looking (arkinox,
+  // 2026-10-11): while spectating someone else, or with the cursor in another
+  // sector than your own position, the count is about somewhere you are not,
+  // so the chip steps aside.
+  const away = useCyberspace(awayFromOwnSector)
   const [open, setOpen] = useState(false)
+  useEffect(() => { if (away) setOpen(false) }, [away])
+  // The open list is a chip on the Escape stack (arkinox, 2026-10-01).
+  useEscape('chip', open, () => setOpen(false))
   // Lit for a few seconds after an arrival, then back to plain.
   const [lit, setLit] = useState(false)
   useEffect(() => {
@@ -65,6 +106,7 @@ export function PresenceChip(): JSX.Element | null {
   const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey]).sort((a, b) => b.lastActive - a.lastActive)
   // Gone when there is nothing to say and nobody is reading it. Open, it
   // stays until closed, whatever the scan does meanwhile.
+  if (away) return null
   if (others.length === 0 && !loading && !open) return null
   const now = Math.floor(Date.now() / 1000)
   const label = others.length > 0 ? `${others.length} IN THIS SECTOR` : loading ? 'SCANNING' : 'NOBODY IN THIS SECTOR'

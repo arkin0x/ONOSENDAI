@@ -24,16 +24,22 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
-import { useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { carryOrbit } from '../lib/zoomOrbit'
+import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
+import { walkEye } from '../lib/walkEye'
+import { WalkProbe } from './WalkProbe'
+import { commitAnchor, committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
+import { useLayers } from '../store/useLayers'
 import { useViewWindow } from '../hooks/useViewWindow'
 import { useTargets } from '../hooks/useTargets'
 import { Avatar } from './Avatar'
@@ -42,15 +48,21 @@ import { CoveringBox } from './CoveringBox'
 import { CrossingFlash } from './CrossingFlash'
 import { Earth } from './Earth'
 import { EarthPatch } from './EarthPatch'
+import { SphereOfInterest } from './SphereOfInterest'
+import { EarthPin } from './EarthPin'
+import { interestSphere, sphereFrameDistance } from '../lib/hyperspace/interest'
 import { Cursor } from './Cursor'
 import { HyperspaceCone } from './HyperspaceCone'
 import { CyberspaceLattice } from './CyberspaceLattice'
 import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
+import { TourLine } from './TourLine'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
+import { GameRegionBox } from './GameRegionBox'
+import { PrefixRegionBox } from './PrefixRegionBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
@@ -60,14 +72,33 @@ import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
+import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
+import { CAMERA_NEAR, FOV } from './camera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
+
+
+/**
+ * Where a reframe puts the camera: the usual 26 cells, or far enough out for
+ * the whole sphere of interest to be in shot when there is one
+ * (interest.sphereFrameDistance, about 69 cells). Without this the ring was
+ * drawn 32 cells from the centre while the camera framed 13.5, so the
+ * boundary of the lit region was always outside the picture and the cut
+ * looked like missing data, which is the thing the ring exists to prevent.
+ * Clamped to the orbit's own limit so the camera never starts somewhere it
+ * cannot be dollied back to.
+ */
+function startDistance(hasSphere: boolean): number {
+  if (!hasSphere) return START_DISTANCE
+  return Math.min(GRID_RADIUS * 4, sphereFrameDistance(FOV))
+}
 
 /**
  * Time constant for the camera's follow, in seconds.
@@ -89,6 +120,17 @@ const GLIDE_TAU = 0.45
 const GLIDE_SECONDS = 1.6
 const GLIDE_MAX_CELLS = 300
 
+/**
+ * Records the anchor the scene is being drawn against, in the commit that
+ * draws it (lib/renderFrame.ts). First in World, so its layout effect runs
+ * in the same commit as every mesh placed against the anchor.
+ */
+function FrameCommit(): null {
+  const anchor = useCyberspace((s) => s.anchor)
+  useLayoutEffect(() => { commitAnchor(anchor) }, [anchor])
+  return null
+}
+
 function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -99,43 +141,58 @@ function World(): JSX.Element {
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
   const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
-  const volume = useTerrainVolume(win, axes, hyperView)
+  // The two layers the View panel can turn off (store/useLayers).
+  // The dots switched off suspend exactly as a hyperspace view does: no scans,
+  // no terrain runs queued, no per-frame uniforms. Only drawing changes.
+  const dotsOn = useLayers((s) => s.dots)
+  const boxesOn = useLayers((s) => s.boxes)
+  const dotsIdle = hyperView || !dotsOn
+  const volume = useTerrainVolume(win, axes, dotsIdle)
   const targets = useTargets()
 
   return (
     <group>
+      <FrameCommit />
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
       <TargetProjector axes={axes} targets={targets} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      {!hyperView && <ShaderPointField volume={volume} win={win} />}
-      <Rooms axes={axes} />
+      {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+      {boxesOn && <Rooms axes={axes} />}
       <SectorBox axes={axes} />
       <Earth axes={axes} />
       <CyberspaceLattice axes={axes} />
       <EarthPatch axes={axes} />
+      <SphereOfInterest axes={axes} />
+      <EarthPin axes={axes} />
       {/* The hyperspace line's stops, placed true-size like the cage and the
           planet: ports in ideaspace, landfalls on Earth's surface. */}
       <StopField axes={axes} />
       <StopCubes axes={axes} />
       <StopBurst axes={axes} />
+      <TourLine axes={axes} />
       <TransitAvatar axes={axes} />
       <RidePath axes={axes} />
       <CoveringBox axes={axes} />
       <CrossingFlash axes={axes} />
       <PathTrail axes={axes} scaleExp={scaleExp} />
+      <GameRegionBox axes={axes} />
+      <PrefixRegionBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
+      <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />
       <Cursor axes={axes} />
       <Avatar />
+      {import.meta.env.DEV && <WalkProbe axes={axes} />}
     </group>
   )
 }
@@ -201,8 +258,10 @@ function CellMetric(): null {
     if (import.meta.env.DEV) {
       // R3F 8 keeps no handle on the canvas node, so the browser harness has no
       // other way to inspect what is actually in the scene.
-      const w = window as unknown as { __scene?: unknown; __camera?: unknown }
+      const w = window as unknown as { __scene?: unknown; __camera?: unknown; __gl?: unknown }
       w.__scene = state.scene
+      // The renderer, for renderer.info: what a memory soak counts.
+      w.__gl = state.gl
       // The camera is not a child of the scene in R3F, so traversal cannot find
       // it and the harness has no other route to the view basis.
       w.__camera = state.camera
@@ -232,6 +291,17 @@ function CellMetric(): null {
  * axis-aligned view once you have finished looking. So changing `view` does not
  * merely remap the axes, it also returns the camera to straight-on.
  */
+/** The orbit's closest approach outside WALK, in render cells. */
+const ORBIT_MIN_DISTANCE = 2
+/**
+ * The WALK eye's distance from the avatar's centre, in render cells: as good
+ * as at it, and far enough off it that the orbit still has a direction to
+ * turn about.
+ */
+const WALK_EYE = 0.001
+/** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
+const walkDir = new Vector3()
+
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
@@ -244,6 +314,15 @@ function Rig(): JSX.Element {
   // was looking from, which is what made scrubbing a spectated chain snap.
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
   const prevDeps = useRef<{ view: unknown; genesisId: unknown; focusPubkey: unknown; focusPoint: string; exploreIndex: number | null } | null>(null)
+  // Whether the last change of focus also moved the anchor, read off the
+  // store change itself (the subscription below), which is the one place
+  // that can tell "VIEW began where you stand" from "VIEW began somewhere
+  // else and a frame has already rendered it".
+  const focusMovedAnchor = useRef(true)
+  useEffect(() => useCyberspace.subscribe((st, prev) => {
+    if (st.focus === prev.focus) return
+    focusMovedAnchor.current = !(st.anchor.x === prev.anchor.x && st.anchor.y === prev.anchor.y && st.anchor.z === prev.anchor.z && st.anchorPlane === prev.anchorPlane)
+  }), [])
   // What the last rendered frame was anchored on. A chain step is judged
   // against this, not against the last effect run: a spectated chain arriving
   // moves the anchor (and can change plane) without any effect firing.
@@ -256,7 +335,19 @@ function Rig(): JSX.Element {
     object: { position: Vector3 }
     target: Vector3
     update: () => void
+    minDistance: number
+    enableZoom: boolean
   } | null>(null)
+  // WALK's first person (store/useWalk.ts): whether the last frame was
+  // walking, and the eye's glide into the avatar or back out of it, as
+  // distances from the target. `outTo` is the orbit distance WALK was
+  // entered from, which is where leaving it puts the camera back.
+  const walkWas = useRef(false)
+  // WALK's look direction, from the eye outward to the camera: kept between
+  // frames so only the walker's own turning changes it.
+  const walkLook = useRef<Vector3 | null>(null)
+  const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
+  const outTo = useRef(START_DISTANCE)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -356,6 +447,17 @@ function Rig(): JSX.Element {
     // SPECTATE and RETURN re-frame straight on, as boot does.
     const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
       before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
+    // A focus that begins or ends where the scene already stands: VIEW
+    // turned on or off at your head, which anchors the view exactly where you
+    // are. Nothing moved, so the camera stays exactly as it was, orbit and
+    // all; a zoom VIEW's end restores is carried by the frame loop below
+    // like any other zoom. It used to fall through to the re-frame whenever
+    // no move had been seen yet, snapping the camera straight on (arkinox,
+    // 2026-10-13: "when I activate the View button, it switches my camera").
+    if (focusOnly && !focusMovedAnchor.current) {
+      trace('focus-in-place')
+      return
+    }
     if (focusOnly && seen !== null && seen.scaleExp === s.scaleExp) {
       const cells = Math.max(
         Math.abs(cellDelta(s.anchor.x, seen.anchor.x, s.scaleExp)),
@@ -385,7 +487,7 @@ function Rig(): JSX.Element {
     const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
-    c.object.position.set(x, y, z + START_DISTANCE)
+    c.object.position.set(x, y, z + startDistance(interestSphere(s.focus, s.scaleExp) !== null))
     locked.current = true
     prevOrigin.current = null
     c.update()
@@ -408,7 +510,11 @@ function Rig(): JSX.Element {
     // The anchor, not the position: in history the scene is drawn from the
     // action being looked at, and the camera has to ride that the same way it
     // rides a commit.
-    const origin = alignedOrigin(s.anchor, s.scaleExp)
+    // The anchor the meshes on screen were placed against, which a landing
+    // moves a commit after the store (lib/renderFrame.ts). The frame change
+    // is absorbed when the scene makes it, not before.
+    const drawnAnchor = committedAnchor() ?? s.anchor
+    const origin = alignedOrigin(drawnAnchor, s.scaleExp)
     const cur = { anchor: s.anchor, plane: s.anchorPlane, scaleExp: s.scaleExp }
     const was = lastSeen.current
     if (was !== null && (was.anchor.x !== cur.anchor.x || was.anchor.y !== cur.anchor.y || was.anchor.z !== cur.anchor.z || was.plane !== cur.plane || was.scaleExp !== cur.scaleExp)) {
@@ -425,7 +531,13 @@ function Rig(): JSX.Element {
     //
     // It also must not be eased. Easing a frame change would slide the world
     // under a camera that is looking at something stationary.
-    const [tx, ty, tz] = s.cursorOffset()
+    // The target in the drawn frame: cursorOffset works against the store's
+    // anchor, so it is carried back by however far that is ahead.
+    const live = s.cursorOffset()
+    const lag = drawnAnchor === s.anchor ? null : originShift(alignedOrigin(s.anchor, s.scaleExp), origin, s.scaleExp, s.axes())
+    const tx = live[0] + (lag ? lag[0] : 0)
+    const ty = live[1] + (lag ? lag[1] : 0)
+    const tz = live[2] + (lag ? lag[2] : 0)
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
       if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
@@ -458,7 +570,23 @@ function Rig(): JSX.Element {
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
-    if (prevScale.current !== s.scaleExp) smooth.current.set(tx, ty, tz)
+    if (prevScale.current !== s.scaleExp) {
+      // The target can land somewhere new in the rescaled frame: your true
+      // position from CONTINUOUS_SCALE_MIN up, the cursor's rescaled offset
+      // when it is away from you. The camera carries by exactly that jump,
+      // locked or not, so the orbit's distance and angle survive every zoom
+      // (lib/zoomOrbit.ts; arkinox, 2026-10-01). On the first frame there is
+      // no previous framing to keep.
+      if (prevScale.current >= 0) {
+        const [x, y, z] = carryOrbit(
+          [c.object.position.x, c.object.position.y, c.object.position.z],
+          [smooth.current.x, smooth.current.y, smooth.current.z],
+          [tx, ty, tz],
+        )
+        c.object.position.set(x, y, z)
+      }
+      smooth.current.set(tx, ty, tz)
+    }
 
     prevOrigin.current = origin
     prevScale.current = s.scaleExp
@@ -484,8 +612,41 @@ function Rig(): JSX.Element {
     smooth.current.y += dy
     smooth.current.z += dz
 
+    // WALK: the eye glides into the avatar on the way in and back out to the
+    // orbit it came from on the way out, along the line it is looking down,
+    // so the view never turns. While walking it is held there every frame: a
+    // drag turns the camera about its own eye (an orbit this small IS turning
+    // your head), and a re-frame above is undone on the next frame.
+    if (s.walking !== walkWas.current) {
+      walkWas.current = s.walking
+      const from = c.object.position.distanceTo(smooth.current)
+      if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
+      eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
+      c.enableZoom = !s.walking
+      walkLook.current = null
+    }
+    if (eye.current) {
+      const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS
+      const d = eye.current.to + (eye.current.from - eye.current.to) * lerpRemaining(t)
+      // In WALK the direction you look is yours alone: the one the last frame
+      // ended on, which only your own turning (the controls' update below)
+      // changes. Read off the camera instead, anything that moved the camera
+      // between frames turned your head with it: a reframe or a cut puts the
+      // camera straight on at an orbit distance, and from inside the avatar
+      // that read as the view snapping to the chain's frame as a step landed
+      // (arkinox, 2026-10-13).
+      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current)
+      if (along.lengthSq() === 0) along.set(0, 0, 1)
+      c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
+      c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
+      locked.current = true
+      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE }
+    }
+    walkEye.copy(smooth.current)
+
     c.target.copy(smooth.current)
     c.update()
+    if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
 
   return (
@@ -493,7 +654,7 @@ function Rig(): JSX.Element {
       ref={controls as never}
       makeDefault
       enablePan={false}
-      minDistance={2}
+      minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
       onStart={() => { locked.current = false }}
@@ -579,18 +740,36 @@ function WorldBloom(): JSX.Element {
   )
 }
 
-export function Scene(): JSX.Element {
+/**
+ * The canvas, rendered only when what it reads changes (memo): it takes no
+ * props, so a render of App, which happens on every store change it reads,
+ * has nothing to say to it.
+ */
+export const Scene = memo(function Scene(): JSX.Element {
   // The workshop is an opaque, full-screen bench with its own canvas. Drawing
   // the world under it is pure cost, and on a phone it was most of the frame:
   // the bench measured 3 fps with the world running behind it.
   const covered = useWorkshop((s) => s.open)
+  if (import.meta.env.DEV) { const w = window as unknown as { __sceneRenders?: number }; w.__sceneRenders = (w.__sceneRenders ?? 0) + 1 }
+  // The composer's children, made once. EffectComposer rebuilds its passes
+  // whenever its `children` prop is a new element, and it only removes the
+  // old ones, never disposes them: each EffectPass listens to its effects,
+  // which live for the session, so every old pass stayed reachable, two per
+  // render of this component, with their scenes, cameras and materials
+  // (measured 2026-10-13: 406 EffectMaterials kept over 200 hops).
+  const bloom = useMemo(() => <WorldBloom />, [])
   return (
     <Canvas
-      camera={{ fov: 55, position: [0, 0, START_DISTANCE], near: 0.05, far: 6000 }}
+      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
       dpr={[1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      // No antialias on the canvas itself: every frame is drawn by the
+      // EffectComposer into its own multisampled target, and the canvas only
+      // ever receives the final full-screen pass, so a multisampled default
+      // framebuffer was GPU memory and resolve work spent on nothing
+      // (2026-10-15; screenshots identical with and without).
+      gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop={covered ? 'never' : 'always'}
     >
@@ -612,12 +791,15 @@ export function Scene(): JSX.Element {
         at full resolution against 49fps with the pass removed entirely. Halving
         its resolution and cutting the mip levels buys nearly all of that back,
         and is invisible because the effect is a blur to begin with.
+
+        A stencil on the composer's buffers carries the shard faces' tag past
+        translucent overlays (ShardMesh FACE_TAG_STENCIL) (arkinox, 2026-10-12).
       */}
-      <EffectComposer resolutionScale={0.25}>
-        <WorldBloom />
+      <EffectComposer resolutionScale={0.25} stencilBuffer>
+        {bloom}
       </EffectComposer>
     </Canvas>
   )
-}
+})
 
 export { GRID_RADIUS }

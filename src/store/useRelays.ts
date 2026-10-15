@@ -1,8 +1,8 @@
 /**
  * useRelays.ts — which relays this client talks to.
  *
- * cyberspace.nostr1.com is the default for everyone and is always present: it
- * is where the shared world lives, so it cannot be removed. On top of it you
+ * The canonical relay (DEFAULT_RELAY) is the default for everyone and is
+ * always present: it is where the shared world lives, so it cannot be removed. On top of it you
  * add your own, and everything the client does — publishing movement and
  * hidden content, discovering it, reading other chains — fans out across the
  * whole set. Persisted locally, so your relays survive a reload.
@@ -10,7 +10,15 @@
 
 import { create } from 'zustand'
 
-/** The default for everyone; always in the list, never removed. */
+/**
+ * The canonical relay: the default for everyone, always in the list, never
+ * removed, where every chain is published and confirmed. Its URL is defined
+ * here and nowhere else; everything that needs it (confirming a head,
+ * publishing and the publish retry, the live subscriptions, the chain fetch,
+ * the self-check, NIP-42 auth, the panels) reads it from this constant or
+ * from relay.ts CYBERSPACE_RELAY, which is this constant. Moving cyberspace
+ * to another relay is a change to this line alone.
+ */
 export const DEFAULT_RELAY = 'wss://cyberspace.nostr1.com'
 
 const STORAGE = 'onosendai:relays'

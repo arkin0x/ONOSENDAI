@@ -13,8 +13,9 @@
  * operator trust: it is deterministic, so a wrong one is detectable later by
  * anyone willing to redo the work (the spec's Level 2 argument, 6.11).
  *
- * Sidestep results are checked completely at Level 1 (6.11): the destination
- * leaf's inclusion path on every crossing axis, and the proof hash rebuilt
+ * Sidestep results are checked completely at Level 1 (6.11, 8.7.2): the
+ * re-roll price of the `mn` nonce, the destination leaf's path and the eight
+ * paths sampled from G on every crossing axis, and the proof hash rebuilt
  * from the roots, the terrain and the temporal root.
  *
  * Every function returns the list of failed checks; empty means pass. Pure,
@@ -30,12 +31,16 @@ import {
   cantorPair,
   computeAxisCantor,
   computeSubtreeCantor,
+  decodeNonce,
   findLcaHeight,
   hexToBytes,
   intToBytesBE,
+  meetsPrice,
   seedPrefix,
   sha256,
   sha256Hex,
+  sidestepAttempts,
+  sidestepGrindHash,
   sidestepLanding,
   terrainK,
   type Plane,
@@ -132,41 +137,67 @@ export function verifyCloudHop(result: CloudHopResult, move: CloudMove, localCei
 }
 
 /**
- * Level 1 sidestep verification (6.11), all of it: geometry, inclusion paths
- * for the destination leaf, and the proof hash rebuilt from the roots.
+ * Level 1 sidestep verification (6.11, 8.7.2), all of it: geometry, the
+ * re-roll price, the paths at the positions G draws, and the proof hash
+ * rebuilt from the roots. What this client signs is always version 3, so a
+ * result without a valid `mn` is refused; the exemption of 6.16 is for events
+ * already published, never for a new one.
  */
 export function verifyCloudSidestep(result: CloudSidestepResult, move: CloudMove): string[] {
   const failed: string[] = []
   if (!result || typeof result !== 'object') return ['result']
   const { from, to, plane, prevEventId } = move
+  const prevId = hexToBytes(prevEventId)
 
+  const heights: number[] = []
   const roots: bigint[] = []
+  const rootBytes: Array<Uint8Array | null> = []
   AXES.forEach((axis, i) => {
     const h = findLcaHeight(from[axis], to[axis])
+    heights.push(h)
     if (!Array.isArray(result.lca_heights) || result.lca_heights[i] !== h) failed.push(`lca_heights:${axis}`)
 
     const rootHex = result[`merkle_${axis}` as const]
     if (typeof rootHex !== 'string' || !HEX64.test(rootHex)) {
       failed.push(`merkle_${axis}`)
       roots.push(0n)
+      rootBytes.push(null)
       return
     }
     roots.push(BigInt('0x' + rootHex))
+    rootBytes.push(hexToBytes(rootHex))
 
     // 6.3: a crossing lands exactly 1 gibson past the boundary.
     if (h > 0 && sidestepLanding(from[axis], to[axis]) !== to[axis]) failed.push(`geometry:${axis}`)
+  })
 
-    // 6.10 and 6.11: the destination's path and the eight sampled paths,
-    // each sampled leaf recomputed from our own seed (the previous event id
-    // and the axis) and carried to the root. The base is recomputed from our
-    // own coordinate, never read from the result.
+  // 6.10: G from our own previous event id, the three claimed roots and the
+  // nonce, and the price in attempts from our own heights. The samples below
+  // come from this G, so a nonce that misses the price fails here and nowhere
+  // else.
+  const nonce = typeof result.mn === 'string' ? decodeNonce(result.mn) : null
+  let G: Uint8Array | null = null
+  if (nonce === null) failed.push('mn')
+  else if (rootBytes.every((r) => r !== null)) {
+    G = sidestepGrindHash(prevId, rootBytes as Uint8Array[], nonce)
+    if (!meetsPrice(G, sidestepAttempts(heights))) failed.push('price')
+  }
+
+  // 6.10 and 6.11: the destination's path and the eight paths sampled from G,
+  // each sampled leaf recomputed from our own seed (the previous event id and
+  // the axis) and carried to the root. The base is recomputed from our own
+  // coordinate, never read from the result.
+  AXES.forEach((axis, i) => {
+    const root = rootBytes[i]
+    if (root === null) return
     const paths = result.openings?.[axis]
     if (!Array.isArray(paths) || !paths.every((p) => Array.isArray(p) && p.every((s) => typeof s === 'string' && HEX64.test(s)))) {
       failed.push(`openings:${axis}`)
       return
     }
-    const prefix = seedPrefix(hexToBytes(prevEventId), AXIS_BYTE[axis])
-    if (!verifyAxisOpenings(prefix, AXIS_BYTE[axis], from[axis], to[axis], hexToBytes(rootHex), paths.map((p) => p.map(hexToBytes)))) failed.push(`openings:${axis}`)
+    if (G === null) return
+    const prefix = seedPrefix(prevId, AXIS_BYTE[axis])
+    if (!verifyAxisOpenings(prefix, AXIS_BYTE[axis], from[axis], to[axis], root, paths.map((p) => p.map(hexToBytes)), G)) failed.push(`openings:${axis}`)
   })
 
   const K = terrainK(to.x, to.y, to.z, plane)

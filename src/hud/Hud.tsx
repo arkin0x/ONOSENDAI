@@ -3,19 +3,28 @@
  * would cost, and what the chain has cost so far.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
-import { formatCellSizeLong } from '../lib/scale'
-import { canonicalViewAt, parseViewAt, rememberView, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { formatCellSizeLong } from 'sno-core/scale'
+import { geocode } from '../lib/geocode'
+import { onEarthSurface } from '../lib/hyperspace/interest'
+import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { coordLink, placeHex } from '../lib/coordRoute'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
+import { NotificationsButton } from './Notifications'
+import { ProfileModal } from './ProfileModal'
 import { AvatarsPanel } from './AvatarsPanel'
-import { LootPanel } from './LootPanel'
+import { AgentsPanel } from './AgentsPanel'
+import { DiscoveredPanel, HiddenPanel } from './DiscoveredPanel'
+import { InventoryPanel } from './InventoryPanel'
 import { ChainPanel } from './ChainPanel'
 import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
@@ -24,10 +33,14 @@ import { RelaysPanel } from './RelaysPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
+import { ViewPanel } from './ViewPanel'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
+import { StarredPlaces } from './StarredPlaces'
+import { PanelSlot } from './PanelSlot'
+import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayout'
 import { jobInProgress } from '../lib/cloud'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
@@ -75,6 +88,7 @@ function IdentityPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const profile = useProfile(identity.pubkey)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
 
   const name = profileLabel(profile, identity.npub)
 
@@ -92,7 +106,13 @@ function IdentityPanel(): JSX.Element {
           <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>
           <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
         </div>
-        <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+        <div className="identity__acts">
+          <button className="identity__change" onClick={() => setProfileOpen(true)}>PROFILE</button>
+          <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+        </div>
+      </div>
+      <div className="identity__row">
+        <NotificationsButton />
       </div>
 
       <Explanation>
@@ -103,38 +123,94 @@ function IdentityPanel(): JSX.Element {
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </section>
   )
 }
 
-const RECENT_KEY = 'onosendai:view-recent'
-function loadRecent(): RecentView[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1)).slice(0, 3) : []
-  } catch { return [] }
-}
+const RECENT_KEY = RECENT_VIEWS_KEY
+// Every pinned place (an End of Chain) and three others (viewAt readRecentViews).
+const loadRecent = readRecentViews
 function saveRecent(list: RecentView[]): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
 }
 
-function PositionPanel(): JSX.Element {
+/**
+ * What is typed into the Position panel's VIEW field, kept outside the panel:
+ * BUILD mode moves the panel to the top of the menu and back (Hud below),
+ * which mounts it afresh, and a coordinate half typed when DEPLOY turned
+ * BUILD on was lost with it (review of #235).
+ */
+export const useViewDraft = create<{ text: string; setText: (text: string) => void }>((set) => ({
+  text: '',
+  setText: (text) => set({ text }),
+}))
+
+export function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
   // Decimals go to the plane on show: yours at your head, the view's in a view.
   const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const coordHex = useCyberspace((s) => s.coordHex())
+  // The place a /C/ link shares (lib/coordRoute.ts): yours at your head;
+  // in a view, the view's cursor when it drives, else what it looks at.
+  const linkHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(s.focus?.drive ? s.cursor : s.anchor, s.anchorPlane)))
   const sector = useCyberspace((s) => s.sector())
   const [copied, copy] = useCopied()
-  const [viewText, setViewText] = useState('')
+  const viewText = useViewDraft((s) => s.text)
+  const setViewText = useViewDraft((s) => s.setText)
   const [viewBad, setViewBad] = useState(false)
   const [recent, setRecent] = useState<RecentView[]>(() => loadRecent())
   const [recentOpen, setRecentOpen] = useState(false)
+  // A place added from elsewhere (the End of Chain a respawn leaves, viewAt
+  // addRecentView): shown at once, with the list open so it is seen.
+  useEffect(() => {
+    const reload = (): void => { setRecent(loadRecent()); setRecentOpen(true) }
+    window.addEventListener(RECENT_VIEWS_EVENT, reload)
+    return () => window.removeEventListener(RECENT_VIEWS_EVENT, reload)
+  }, [])
+  const [finding, setFinding] = useState(false)
+  const [viewNote, setViewNote] = useState<string | null>(null)
   const look = (typed: string, target: ViewTarget): void => {
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, undefined, true)
+    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
+    // A place on Earth gets the pin: marking the focal point is the whole
+    // purpose of typing a latitude and longitude or a place name. A
+    // coordinate or a triple of axes that is not on the ground gets none,
+    // and leaves any standing pin alone.
+    if (target.plane === 0 && onEarthSurface(target.position)) {
+      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp)
+    }
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
+  }
+  // What is typed is read as it stands: axes, a coordinate, or a latitude and
+  // longitude. Anything else is taken as a place by name and looked up once
+  // (geocode.ts); what comes back is a latitude and longitude, remembered as
+  // such under the place's own name, so the recent entry never needs the
+  // lookup again.
+  const view = async (): Promise<void> => {
+    const typed = viewText.trim()
+    const target = parseViewAt(typed, lookedPlane)
+    if (target) { setViewBad(false); look(typed, target); return }
+    if (!/[a-z]/i.test(typed)) { setViewBad(true); return }
+    setFinding(true)
+    setViewNote(null)
+    try {
+      const place = await geocode(typed)
+      if (!place) { setViewBad(true); setViewNote(`No place found for "${typed}".`); return }
+      const input = `${place.lat}, ${place.lon}`
+      const found = parseViewAt(input, 0)
+      if (!found) { setViewBad(true); return }
+      setViewBad(false)
+      setViewText(input)
+      look(input, { ...found, label: place.name.toUpperCase() })
+    } catch (err) {
+      setViewBad(true)
+      setViewNote(`Could not look that up: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setFinding(false)
+    }
   }
 
   // Every figure copies on a tap, raw: the grouping commas are for reading,
@@ -166,6 +242,10 @@ function PositionPanel(): JSX.Element {
         <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
         <code>{coordHex}</code>
       </button>
+      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
+        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
+        <code>/C/{linkHex}</code>
+      </button>
 
       {/* The free view: look at any place without walking there. Three axis
           values, or a coordinate as the tags carry it; the cursor comes along,
@@ -175,40 +255,51 @@ function PositionPanel(): JSX.Element {
         <span className="legend__label">View a coordinate</span>
         <form
           className="avatars__find"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const target = parseViewAt(viewText, lookedPlane)
-            if (!target) { setViewBad(true); return }
-            setViewBad(false)
-            look(viewText, target)
-          }}
+          onSubmit={(e) => { e.preventDefault(); void view() }}
         >
           <input
             className={`avatars__input ${viewBad ? 'is-bad' : ''}`}
             value={viewText}
-            onChange={(e) => { setViewText(e.target.value); setViewBad(false) }}
-            placeholder="x, y, z or a coordinate"
+            onChange={(e) => { setViewText(e.target.value); setViewBad(false); setViewNote(null) }}
+            placeholder="x, y, z · a coordinate · a place on Earth"
             spellCheck={false}
             autoComplete="off"
             aria-label="A place to view"
             aria-invalid={viewBad}
           />
-          <button className="avatars__go" type="submit" disabled={!viewText.trim()} title="Look at this place without moving">VIEW</button>
+          <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
         </form>
+        {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
           <div className="viewat__recent">
-            <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>RECENT {recentOpen ? '▴' : '▾'}</button>
+            <button className="viewat__toggle" onClick={() => setRecentOpen((o) => !o)} aria-expanded={recentOpen}>
+              RECENT <span className="viewat__caret" aria-hidden="true">{recentOpen ? '▴' : '▾'}</span>
+            </button>
             {recentOpen && (
               <ul className="viewat__list">
                 {recent.map((r) => (
-                  <li key={r.input}>
-                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, target) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}</button>
+                  <li key={`${r.plane}:${r.input}`}>
+                    <button className="viewat__item" onClick={() => { const target = parseViewAt(r.input, r.plane); if (target) { setViewText(r.input); look(r.input, { ...target, label: r.label }) } }} title={r.input}><span className={`plane plane--${r.plane} viewat__plane`}>{r.plane === 0 ? 'D' : 'I'}</span>{r.label}{r.pinned && <span className="viewat__kept" title="Kept in RECENT until you remove it with the × beside it, however many places you look at after it">KEPT</span>}</button>
+                    {/* The shard list's delete, in the same place and the same
+                        shape: the mark on the right of the row it removes. No
+                        confirmation, unlike a shard, because a place is one
+                        line of text that typing it again brings straight back. */}
+                    <button
+                      className="viewat__forget"
+                      title={`Forget ${r.label}`}
+                      aria-label={`Forget ${r.label}`}
+                      onClick={() => { const next = forgetView(recent, r); setRecent(next); saveRecent(next) }}
+                    >×</button>
                   </li>
                 ))}
               </ul>
             )}
           </div>
         )}
+        {/* Starred Places, under RECENT: a tap goes there the way a recent
+            place does, under its nickname or the name it was starred with,
+            and at the zoom it was starred at. */}
+        <StarredPlaces onGo={(p, target) => { setViewText(p.input); look(p.input, { ...target, scaleExp: p.scaleExp ?? target.scaleExp }) }} />
       </div>
     </section>
   )
@@ -284,6 +375,7 @@ const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
   { href: 'https://straylight.cafe', name: 'straylight.cafe', what: 'cyberspace enthusiast community hub' },
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
+  { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
   { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
 ]
 
@@ -299,6 +391,16 @@ function LinksPanel(): JSX.Element {
           <span className="links__what"> - {l.what}</span>
         </p>
       ))}
+      <Explanation>
+        These are the official places to read about and build on Cyberspace, and
+        each one opens in a new tab. The Cyberspace v2 Specification is the
+        protocol itself: coordinates, movement and its proofs, region keys,
+        hyperspace and every event kind. straylight.cafe is the community hub for
+        people exploring cyberspace. cyberspace.international is for teaching
+        Cyberspace and bringing more people and apps to it. SnoCrash builds 3D
+        models in the SNO format that Cyberspace objects use. The ONOSENDAI v2
+        Codebase is the source code of this client on GitHub.
+      </Explanation>
     </section>
   )
 }
@@ -307,17 +409,18 @@ function Controls(): JSX.Element {
   const rows: Array<[string, string]> = [
     ['W A S D', 'move cursor one step'],
     ['Space', 'commit hop or sidestep (compute proof)'],
-    ['X', 'cancel proof / recall cursor'],
+    ['X', 'cancel proof / recall cursor (building: stop a move or route from before, else build cursor to your avatar)'],
+    ['B', 'build mode in / out: the movement keys and zoom then move the build cursor, never your avatar'],
     ['Shift + W A S D', 'rotate view 90°'],
     ['Tab', 'previous view'],
-    ['Esc', 'reset to top-down map'],
+    ['Esc', 'close: dialog, then menu, then the latest chip'],
     ['C', 'canonical view (facing the black sun)'],
     ['Q / E', 'scale step up / down (zoom out / in)'],
     ['R / F', 'cursor along depth axis'],
     ['P', 'toggle plane'],
     ['H', 'hyperspace line scrubber'],
-    ['[ / ]', 'chain explorer: back / forward one action'],
-    ['Home / End', 'chain explorer: spawn / live head'],
+    ['[ / ]', 'chain explorer: back / forward one action (building: the build cursor goes to it)'],
+    ['Home / End', 'chain explorer: spawn / live head (building: the same)'],
   ]
 
   return (
@@ -335,8 +438,85 @@ function Controls(): JSX.Element {
           </div>
         ))}
       </dl>
+      <Explanation>
+        These are the keyboard keys; on a touch screen the pad and its buttons do
+        the moving, zooming and committing. W A S D move the cursor one step at
+        the current zoom, R and F move it along the depth axis, and Space commits
+        the move the cursor lines up, which computes its proof and signs it. X
+        cancels a proof in progress or brings the cursor back to your avatar. Q
+        and E zoom out and in by one power of two. Shift with W A S D turns the
+        view 90 degrees, Tab goes back to the view before, and C faces the black
+        sun. P switches the plane between dataspace and ideaspace, and H opens the
+        hyperspace line scrubber. [ and ] step through your chain one action at a
+        time, and Home and End jump to its spawn and its live head. B goes in and
+        out of build mode, where the movement keys and zoom move the build cursor
+        instead of your avatar. Esc closes the topmost thing: a dialog first, then
+        the menu, then the latest chip.
+      </Explanation>
     </section>
   )
+}
+
+/**
+ * Every panel under its layout id (usePanelLayout). The default order there
+ * is the menu as it was before the order could change: the left column held
+ * Identity, then Agents (added 2026-10-10, ruling 4 of the agents track:
+ * beside IDENTITY and LINKS), then the three bag panels (Keys and Chests B1,
+ * ruling 14) in a bag's order of life (HIDDEN BAGS, on the relay and not yet
+ * opened by your keys; DISCOVERED BAGS, opened where it stands; ITEMS, what
+ * you hold), then Create, Avatars, Targets and the Official links; the right
+ * column Scale, Position, Movement proof, Cloud compute, Proof chain,
+ * Hyperspace, View (what the scene draws, just above the Legend that decodes
+ * it), Legend, Controls, Derezz and Relays.
+ */
+const PANELS: Record<PanelId, () => JSX.Element> = {
+  identity: IdentityPanel,
+  agents: AgentsPanel,
+  hidden: HiddenPanel,
+  discovered: DiscoveredPanel,
+  items: InventoryPanel,
+  create: ShardsPanel,
+  avatars: AvatarsPanel,
+  targets: TargetsPanel,
+  links: LinksPanel,
+  scale: ScalePanel,
+  position: PositionPanel,
+  proof: ProofPanel,
+  cloud: CloudPanel,
+  chain: ChainPanel,
+  hyperspace: HyperspacePanel,
+  view: ViewPanel,
+  legend: Legend,
+  controls: Controls,
+  derezz: DerezzPanel,
+  relays: RelaysPanel,
+}
+
+/**
+ * Where a lifted panel lands for a pointer at (x, y): in the column under
+ * the point (or nearest it, when the point is in the gap between the
+ * columns), before the first panel there whose middle is below the point,
+ * last when none is. The lifted panel is skipped, and so is a leading
+ * panel: it is drawn at the top of the left column, not at its saved place,
+ * and the saved order is what a drag edits.
+ */
+function dropTarget(hud: HTMLElement, lifting: PanelId, leads: readonly PanelId[], x: number, y: number): { column: Column; before: PanelId | null } | null {
+  let column: HTMLElement | null = null
+  let nearest = Infinity
+  for (const col of hud.querySelectorAll<HTMLElement>('.hud__col')) {
+    const r = col.getBoundingClientRect()
+    const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom))
+    if (d < nearest) { nearest = d; column = col }
+  }
+  if (!column) return null
+  const name = column.dataset.column as Column
+  for (const slot of column.querySelectorAll<HTMLElement>(':scope > [data-panel-id]')) {
+    const id = slot.dataset.panelId as PanelId
+    if (id === lifting || leads.includes(id)) continue
+    const r = slot.getBoundingClientRect()
+    if (y < r.top + r.height / 2) return { column: name, before: id }
+  }
+  return { column: name, before: null }
 }
 
 export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
@@ -346,31 +526,94 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // HOSAKA outranks even that: while a payment is awaited or a job is under
   // way the cloud panel takes the first panel position, under the brand.
   const cloudLeads = useCyberspace((s) => s.cloud.status === 'awaiting_payment' || jobInProgress(s.cloud.status))
+  // A move being computed outranks everything: wherever the work is happening,
+  // the proof panel is the thing you are watching, so it takes the first
+  // position and HOSAKA falls in behind it rather than above it.
+  const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
+  // BUILD mode puts the Position panel first, above even a move under way
+  // (arkinox, 2026-10-08): its VIEW, RECENT and starred places are how the
+  // build cursor jumps. The left column comes first on a phone too, where
+  // the columns stack, so it is the first panel on both. Back in its own
+  // place on exit.
+  const building = useBuilder((s) => s.active)
+  // The saved layout (arkinox, 2026-10-10): read before the first render, so
+  // a refresh shows the menu as it was left, and written on every fold and
+  // move. A priority state above only rearranges what is drawn; it writes
+  // nothing here, so when it ends the saved order applies again untouched.
+  const order = usePanelLayout((s) => s.order)
+  const [lifting, setLifting] = useState<PanelId | null>(null)
+  const drag = useRef<{ id: PanelId; pointerId: number } | null>(null)
+  const hudRef = useRef<HTMLDivElement>(null)
+  const grabRef = useRef<HTMLDivElement>(null)
+
+  const leads: PanelId[] = []
+  if (building) leads.push('position')
+  if (proofLeads) leads.push('proof')
+  if (cloudLeads) leads.push('cloud')
+  if (rideSet) leads.push('hyperspace')
+  // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it
+  // so that we can make the agent panel public"). From 2026-10-10 it was
+  // drawn only for someone a bot profile named as operator, while TALK and
+  // the follow rule were missing; both have shipped. It sits in its saved
+  // place, which the hidden days kept.
+  const hidden = (id: PanelId): boolean => leads.includes(id)
+  const left = [...leads, ...order.left.filter((id) => !hidden(id))]
+  const right = order.right.filter((id) => !hidden(id))
+
+  // The drag. The pointer is captured by the drag surface (the .hud__grab
+  // div), not by the grip it started on: a lifted panel moves in the DOM as
+  // the pointer passes other panels, and a column change mounts it afresh,
+  // and either would end a capture held by the grip (a removed element
+  // loses its capture, and a touch's events then go to the node it began
+  // on). The surface never moves, so the gesture outlives every reorder.
+  const grab = (id: PanelId, e: ReactPointerEvent<HTMLButtonElement>): void => {
+    const surface = grabRef.current
+    if (!surface || drag.current || e.button !== 0) return
+    try { surface.setPointerCapture(e.pointerId) } catch { return }
+    e.preventDefault()
+    drag.current = { id, pointerId: e.pointerId }
+    setLifting(id)
+  }
+  const over = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.pointerId || !hudRef.current) return
+    const target = dropTarget(hudRef.current, d.id, leads, e.clientX, e.clientY)
+    if (target) usePanelLayout.getState().move(d.id, target.before, target.column)
+  }
+  // Up, cancel and a lost capture all end it; the order is already saved.
+  const drop = (): void => {
+    if (!drag.current) return
+    drag.current = null
+    setLifting(null)
+  }
+
+  const slot = (id: PanelId): JSX.Element => {
+    const Panel = PANELS[id]
+    return (
+      <PanelSlot key={id} id={id} lead={leads.includes(id)} lifting={lifting === id} onGrab={grab}>
+        <Panel />
+      </PanelSlot>
+    )
+  }
+
+  const cls = ['hud', menuOpen && 'hud--menu', lifting && 'hud--dragging'].filter(Boolean).join(' ')
   return (
-    <div className={menuOpen ? 'hud hud--menu' : 'hud'}>
-      <div className="hud__col hud__col--left">
+    <div ref={hudRef} className={cls}>
+      <div className="hud__col hud__col--left" data-column="left">
         <Brand />
-        {cloudLeads && <CloudPanel />}
-        {rideSet && <HyperspacePanel />}
-        <IdentityPanel />
-        <LootPanel />
-        <ShardsPanel />
-        <AvatarsPanel />
-        <TargetsPanel />
-        <LinksPanel />
+        {left.map(slot)}
       </div>
-      <div className="hud__col hud__col--right">
-        <ScalePanel />
-        <PositionPanel />
-        <ProofPanel />
-        {!cloudLeads && <CloudPanel />}
-        <ChainPanel />
-        {!rideSet && <HyperspacePanel />}
-        <Legend />
-        <Controls />
-        <DerezzPanel />
-        <RelaysPanel />
+      <div className="hud__col hud__col--right" data-column="right">
+        {right.map(slot)}
+        {/* The license, just above the build. */}
+        <div className="hud__license">
+          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a>
+        </div>
+        {/* The build, last thing in the menu: 2, the day it was merged, how
+            many PRs had merged that day, and which PR this is. */}
+        <div className="hud__version" title="2 . day merged . PRs merged that day . this PR">{__ONOSENDAI_VERSION__}</div>
       </div>
+      <div ref={grabRef} className="hud__grab" onPointerMove={over} onPointerUp={drop} onPointerCancel={drop} onLostPointerCapture={drop} aria-hidden="true" />
     </div>
   )
 }

@@ -22,14 +22,40 @@
  * Both are measured from the scale floor: at scaleExp s the cheapest possible
  * crossing is already height s+1, so anything below that is sub-cell and cannot
  * be drawn.
+ *
+ * In WALK the boxes are walls as well as edges (arkinox, 2026-10-13): you are
+ * inside them in first person, so the six faces of one box carry a grid in
+ * its own ramp color, as dense as the wall is hard, in the look of the h84
+ * cyberspace lattice. A box of height h has h lines in every 10 cells along
+ * each direction of each face (10 gibsons at 2^0), evenly spaced, so an h5
+ * wall is visibly five times as busy as an h1 wall. Faint, never above 20%
+ * opacity. The grid sits still: diagonal stripes that scrolled down the
+ * walls came first, and they did not hold a place on the floor or ceiling,
+ * which a grid on all six faces does (arkinox, 2026-10-13).
+ *
+ * Only one box is drawn at a time, the one most relevant to where you are
+ * walking (lib/walkWall.ts pickWall): you are inside every box of the nest at
+ * once, and three sets of walls on top of each other said nothing. The wall
+ * breathes, fading to nothing and back to its ceiling on a slow cycle, so it
+ * never settles into a fixed screen in front of the room; WALL_BREATHES turns
+ * that off.
+ *
+ * Drawn after the shards (WALL_RENDER_ORDER): shard faces are transparent
+ * too, so both are sorted in the same list, and a wall drawn before them,
+ * writing no depth, was painted over by every shard whatever its depth. Every
+ * shard looked in front of every wall, which is the opposite of what a wall
+ * is for.
  */
 
-import { useEffect, useMemo } from 'react'
-import { BufferGeometry, Float32BufferAttribute } from 'three'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Mesh, ShaderMaterial, Vector3 } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
 import { subtreeCantorOps } from 'cyberspace-core'
 import { AXIS_BITS } from 'cyberspace-core'
 import { latticeShade } from '../lib/palette'
+import { pickWall } from '../lib/walkWall'
+import { walkEye } from '../lib/walkEye'
 
 import { WorldLabel } from './WorldLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -64,11 +90,152 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
  * avatar visibly travels, so a box changing is explained by three other things
  * on screen rather than being an unexplained jump.
  */
-const LEVELS: Array<{ d: number; span: number; opacity: number }> = [
-  { d: 3, span: 0, opacity: 0.22 },
-  { d: 4, span: 0, opacity: 0.28 },
-  { d: 5, span: 0, opacity: 0.36 },
+const LEVELS: Array<{ d: number; span: number; opacity: number; wall: number }> = [
+  { d: 3, span: 0, opacity: 0.22, wall: 0.08 },
+  { d: 4, span: 0, opacity: 0.28, wall: 0.1 },
+  { d: 5, span: 0, opacity: 0.36, wall: 0.12 },
 ]
+
+/** How many cells the line count is given per: h lines in every this many. */
+export const GRID_SPAN_CELLS = 10
+
+/**
+ * The grid pitch for a wall of height `height`, in cells along a face:
+ * `height` lines in every GRID_SPAN_CELLS, evenly spaced.
+ */
+export function gridPeriod(height: number): number {
+  return GRID_SPAN_CELLS / Math.max(1, height)
+}
+
+/** Closer than this many pixels, a wall's lines thin out instead of filling in. */
+export const GRID_MIN_PX = 3
+
+/**
+ * How a grid of `spacingPx` pixels between lines is drawn: lines every
+ * `every` pitches at full strength, and the lines halfway between those at
+ * `between`. At GRID_MIN_PX or wider every line is drawn. Closer, every other
+ * line fades out as the spacing halves, then every other of the rest, so a
+ * hard wall seen from far off stays a grid rather than a solid sheet. The
+ * fragment shader computes exactly this.
+ */
+export function gridLod(spacingPx: number): { every: number; between: number } {
+  if (!(spacingPx > 0)) return { every: Infinity, between: 0 }
+  const level = Math.log2(GRID_MIN_PX / spacingPx)
+  if (level <= 0) return { every: 1, between: 1 }
+  const k = 2 ** Math.floor(level)
+  return { every: 2 * k, between: 1 - (level - Math.floor(level)) }
+}
+
+/** Whether a wall breathes (fades to nothing and back). False holds it at its ceiling. */
+export const WALL_BREATHES = true
+/** Seconds for one breath of a wall: from nothing up to its ceiling and back. */
+export const WALL_BREATH_SECONDS = 7
+
+/**
+ * Walls draw after everything at the default order, the shards included,
+ * which are transparent and so sorted in the same list. Depth-tested and
+ * writing no depth: a shard in front of a wall hides it, a wall in front of
+ * a shard tints over it, and walls never hide each other.
+ */
+export const WALL_RENDER_ORDER = 10
+
+/**
+ * One shader for every wall. On each face the two coordinates in its plane
+ * are measured from the box's own corner, so a wall's lines sit still on it
+ * and meet at its edges. Lines are about a pixel wide whatever the distance
+ * (the derivative sizes them) and thin out by gridLod's rule where they
+ * crowd. `time` drives only the breath, a raised cosine: 0 at the start of a
+ * cycle and the full ceiling at its middle.
+ */
+const GRID_VERTEX = `
+varying vec3 vLocal;
+varying vec3 vNormal;
+uniform vec3 corner;
+void main() {
+  // The box is one unit cube scaled and placed by its mesh, so the lines
+  // are measured in the render frame, from the box's own corner.
+  vLocal = (modelMatrix * vec4(position, 1.0)).xyz - corner;
+  vNormal = normal;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+const GRID_FRAGMENT = `
+varying vec3 vLocal;
+varying vec3 vNormal;
+uniform vec3 color;
+uniform float opacity;
+uniform float period;
+uniform float time;
+// One pixel-wide line at every multiple of p along u, or 0.
+float lineAt(float u, float p, float px) {
+  float f = fract(u / p);
+  float d = min(f, 1.0 - f) * p / px;
+  return 1.0 - smoothstep(0.5, 1.5, d);
+}
+// The lines along one in-plane coordinate, thinned as gridLod says.
+float axisLines(float u) {
+  float px = max(fwidth(u), 1e-6);
+  float level = log2(${GRID_MIN_PX.toFixed(1)} * px / period);
+  if (level <= 0.0) return lineAt(u, period, px);
+  float k = exp2(floor(level));
+  float between = 1.0 - fract(level);
+  return max(lineAt(u, period * 2.0 * k, px), between * lineAt(u, period * k, px));
+}
+void main() {
+  vec3 n = abs(vNormal);
+  vec2 uv = n.x > 0.5 ? vLocal.yz : (n.y > 0.5 ? vLocal.xz : vLocal.xy);
+  float a = max(axisLines(uv.x), axisLines(uv.y));
+  if (a <= 0.0) discard;
+  float breath = ${WALL_BREATHES ? `0.5 - 0.5 * cos(6.2831853 * time / ${WALL_BREATH_SECONDS.toFixed(4)})` : '1.0'};
+  gl_FragColor = vec4(color, opacity * breath * a);
+}`
+
+/**
+ * The walls' clock, in seconds, written once a frame while walking. It wraps
+ * at a whole number of breaths, so the breath stays continuous across the
+ * wrap and the float never grows past what a phone's shader holds precisely.
+ */
+const WALL_CLOCK_WRAP = WALL_BREATH_SECONDS * 5
+const WALL_TIME = { value: 0 }
+
+/**
+ * One wall's material, made once per walk and kept: a landing moves the box
+ * and changes its numbers, and both are written in place (setGrid). Built
+ * fresh on every landing, the old one's disposal released the program and
+ * the new one compiled it again, a shader link on the main thread at every
+ * step of a walk, which is what the walk's hitch at each landing measured
+ * as (2026-10-13).
+ */
+function gridMaterial(): ShaderMaterial {
+  return new ShaderMaterial({
+    vertexShader: GRID_VERTEX,
+    fragmentShader: GRID_FRAGMENT,
+    uniforms: {
+      color: { value: new Color() },
+      opacity: { value: 0 },
+      period: { value: 1 },
+      corner: { value: new Vector3() },
+      // Shared by every wall, so one write a frame moves them all.
+      time: WALL_TIME,
+    },
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    // One pass, not three's back-then-front pair (see ShardMesh).
+    forceSinglePass: true,
+    toneMapped: false,
+  })
+}
+
+/** A wall's numbers for its box: its ramp color, ceiling and grid pitch. */
+function setGrid(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
+  ;(m.uniforms.color.value as Color).set(color)
+  m.uniforms.opacity.value = Math.min(0.2, opacity)
+  m.uniforms.period.value = gridPeriod(height)
+  ;(m.uniforms.corner.value as Vector3).set(corner[0], corner[1], corner[2])
+}
+
+/** The one box every wall is drawn from, scaled and placed by its mesh. */
+const UNIT_BOX = new BoxGeometry(1, 1, 1)
 
 interface Props {
   axes: ViewAxes
@@ -147,19 +314,32 @@ function gridGeometry(
 export function Rooms({ axes }: Props): JSX.Element {
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const walking = useCyberspace((s) => s.walking)
 
   const levels = useMemo(() => {
     const origin = alignedOrigin(position, scaleExp)
     // Nothing above the axis width exists to be drawn. At scaleExp 84 the three
     // levels would be h87, h88 and h89, which are not boundaries of an 85-bit
     // axis; the whole space is one cell by then and the nest has run out.
-    return LEVELS.filter(({ d }) => scaleExp + d <= AXIS_BITS).map(({ d, span, opacity }, i) => {
+    return LEVELS.filter(({ d }) => scaleExp + d <= AXIS_BITS).map(({ d, span, opacity, wall }, i) => {
       const height = scaleExp + d
       const offs = (a: AxisDirection): number[] =>
         latticeOffsets(position[a.axis], origin[a.axis], scaleExp, height, span)
+      const [right, up, out] = [offs(axes.right), offs(axes.up), offs(axes.out)]
       return {
         height,
-        geometry: gridGeometry(offs(axes.right), offs(axes.up), offs(axes.out), axes),
+        geometry: gridGeometry(right, up, out, axes),
+        wall,
+        // The same box as a solid, for WALK's walls: its extent on
+        // each render axis, signs applied the way gridGeometry applies them.
+        walls: (() => {
+          const ext = (arr: number[], a: AxisDirection): [number, number] => {
+            const p = arr[0] * a.dir, q = arr[arr.length - 1] * a.dir
+            return [Math.min(p, q), Math.max(p, q)]
+          }
+          const [x, y, z] = [ext(right, axes.right), ext(up, axes.up), ext(out, axes.out)]
+          return { min: [x[0], y[0], z[0]] as [number, number, number], size: [x[1] - x[0], y[1] - y[0], z[1] - z[0]] as [number, number, number] }
+        })(),
         // Hue from the crossing height, lightness from the level. The walls of
         // this grid ARE crossings, so the grid climbs the same ramp the legend
         // documents as you zoom out.
@@ -208,9 +388,45 @@ export function Rooms({ axes }: Props): JSX.Element {
   // loss. Every anchor change and zoom leaked three of them.
   useEffect(() => () => { for (const l of levels) l.geometry.dispose() }, [levels])
 
+  // WALK's walls: one material per level slot, made when the walk starts and
+  // disposed when it ends. A landing re-anchors the boxes and rewrites their
+  // numbers in place below; nothing is built or compiled per step.
+  const materials = useMemo(() => (walking ? LEVELS.map(() => gridMaterial()) : []), [walking])
+  useEffect(() => () => { for (const m of materials) m.dispose() }, [materials])
+  const wallMeshes = useRef<Array<Mesh | null>>([])
+  useLayoutEffect(() => {
+    levels.forEach((l, i) => {
+      const m = materials[i]
+      const mesh = wallMeshes.current[i]
+      if (!m || !mesh) return
+      const { min, size } = l.walls
+      mesh.scale.set(size[0], size[1], size[2])
+      mesh.position.set(min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2)
+      setGrid(m, l.color, l.wall, l.height, min)
+    })
+  }, [levels, materials])
+
+  // One wall at a time (lib/walkWall.ts), chosen against the eye every frame
+  // and shown by visibility alone, so walking re-renders nothing.
+  const shownWall = useRef<number | null>(null)
+  useFrame(() => {
+    if (materials.length === 0) { shownWall.current = null; return }
+    WALL_TIME.value = (performance.now() / 1000) % WALL_CLOCK_WRAP
+    const pick = pickWall(levels.map((l) => ({ height: l.height, ...l.walls })), [walkEye.x, walkEye.y, walkEye.z], shownWall.current)
+    shownWall.current = pick
+    levels.forEach((l, i) => { const m = wallMeshes.current[i]; if (m) m.visible = l.height === pick })
+  })
+
   return (
-    <group>
-      {levels.map((l) => (
+    // Named so the browser harness can tell the boxes are mounted.
+    <group name="rooms">
+      {materials.length > 0 && levels.map((_, i) => (
+        <mesh key={`wall-${i}`} ref={(m) => { wallMeshes.current[i] = m }} visible={false} geometry={UNIT_BOX} material={materials[i]} frustumCulled={false} renderOrder={WALL_RENDER_ORDER} />
+      ))}
+      {/* The nest's outlines and captions stand down in WALK, where the one
+          walled box is the one on show and the outlines around it clashed
+          with it (arkinox, 2026-10-13). HOP and VIEW keep them. */}
+      {!walking && levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>
             <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />

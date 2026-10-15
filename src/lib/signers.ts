@@ -12,11 +12,16 @@
  */
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { schnorr } from '@noble/curves/secp256k1.js'
 import { nip19 } from 'nostr-tools'
+import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
 import type { EventTemplate, NostrEvent } from './events'
+import { attributed } from './client'
+import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
+export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
 export { SIGN_PATIENCE_MS, SignerTimeout, signWithin } from './signWithin'
@@ -25,11 +30,39 @@ export interface Signer {
   kind: SignerKind
   pubkey: string
   signEvent: (template: EventTemplate) => Promise<NostrEvent>
+  /**
+   * NIP-44 v2 decrypt of a payload sealed to this identity by `senderPubkey`,
+   * as NIP-07 and NIP-46 both phrase it: what opens a chest sealed to a
+   * person (lib/chests.ts). A local key does it directly; an extension offers
+   * it through `window.nostr.nip44`, when it has one; a bunker through its
+   * `nip44_decrypt` request. Absent only when the signer truly lacks it, and
+   * NIP44_UNAVAILABLE says so.
+   */
+  nip44Decrypt?: (senderPubkey: string, payload: string) => Promise<string>
+  /**
+   * NIP-44 v2 encrypt of `plaintext` from this identity to `recipientPubkey`:
+   * what seals a private message (NIP-17) to an agent (lib/dm.ts; arkinox,
+   * 2026-10-10, operator and agent DMs). Offered the same way as decrypt and
+   * absent only when the signer truly lacks it; NIP44_ENCRYPT_UNAVAILABLE
+   * says so.
+   */
+  nip44Encrypt?: (recipientPubkey: string, plaintext: string) => Promise<string>
+  /**
+   * Asks the signer, now, which account it holds: never an answer cached at
+   * login. An extension or a bunker can switch accounts mid-visit, and a
+   * restored Nostr Connect session is never asked at all, so this is what
+   * tells a payload that does not open apart from a signer holding someone
+   * else. Asked only after a decrypt failed (SignerAccountMismatch). Absent
+   * for a local key, which is always its own.
+   */
+  heldPubkey?: () => Promise<string>
   /** Present only for local signers, so the key can be persisted. */
   secretKey?: Uint8Array
   /** For a bunker: what to persist to reconnect it. */
   bunkerUri?: string
   clientSecretKey?: Uint8Array
+  /** A client-initiated Nostr Connect session does not repeat the bunker connect handshake. */
+  nostrConnectSession?: boolean
   close?: () => Promise<void>
   /** For a deferred signer: force the reconnection and return the real one. */
   reconnect?: () => Promise<Signer>
@@ -39,12 +72,56 @@ export interface Signer {
 interface WindowNostr {
   getPublicKey(): Promise<string>
   signEvent(event: EventTemplate): Promise<NostrEvent>
+  /** NIP-07's optional NIP-44 pair; decrypt is what opens a chest sealed to this identity. */
+  nip44?: { decrypt(pubkey: string, ciphertext: string): Promise<string>; encrypt?(pubkey: string, plaintext: string): Promise<string> }
 }
 function windowNostr(): WindowNostr | null {
   return (window as unknown as { nostr?: WindowNostr }).nostr ?? null
 }
 export function hasNip07(): boolean {
   return typeof window !== 'undefined' && !!windowNostr()
+}
+
+/** Why a chest sealed to this identity will not open: the signer offers no NIP-44 decrypt. */
+export const NIP44_UNAVAILABLE = 'Your signer offers no NIP-44 decrypt, so a chest sealed to you cannot be opened with it.'
+
+/** Why a private message cannot be sent: the signer offers no NIP-44 encrypt to seal it with. */
+export const NIP44_ENCRYPT_UNAVAILABLE = 'Your signer offers no NIP-44 encrypt, so a private message cannot be sealed with it.'
+
+/**
+ * Why a remote signer's answer was refused: it is signed in as another
+ * account than the identity that asked. A signer signs as whichever account
+ * it holds now, so this is checked on every signature (the store's signEvent)
+ * and after a decrypt that failed (decryptSealed).
+ */
+export const SIGNER_OTHER_ACCOUNT = 'Your signer is now on a different account than the one logged in here. Switch it back, or log in again.'
+
+/** The signer holds another account than the identity that asked it (SIGNER_OTHER_ACCOUNT). */
+export class SignerAccountMismatch extends Error {
+  constructor(message = SIGNER_OTHER_ACCOUNT) {
+    super(message)
+    this.name = 'SignerAccountMismatch'
+  }
+}
+
+/**
+ * A decrypt through a remote signer failed, and the signer did not say which
+ * account it holds, so whether the payload truly does not open is unknown.
+ */
+export class SignerUnconfirmed extends Error {
+  constructor() {
+    super('Your signer could not open this and did not say which account it holds. Try again.')
+    this.name = 'SignerUnconfirmed'
+  }
+}
+
+/**
+ * Whether a decrypt failed because of the signer, not the payload: it holds
+ * another account, or it could not say. Such a failure is for now, so
+ * nothing may be kept as unopenable for it.
+ */
+export function signerCannotJudge(err: unknown): boolean {
+  return err instanceof SignerAccountMismatch || err instanceof SignerUnconfirmed
 }
 
 /** A local key: the default random one, or one you brought. */
@@ -54,7 +131,9 @@ export function localSigner(secretKey: Uint8Array): Signer {
     kind: 'local',
     pubkey,
     secretKey,
-    signEvent: (template) => Promise.resolve(finalizeEvent(template, secretKey) as unknown as NostrEvent),
+    signEvent: (template) => Promise.resolve(finalizeEvent(attributed(template), secretKey) as unknown as NostrEvent),
+    nip44Decrypt: async (senderPubkey, payload) => nip44.decrypt(payload, nip44.utils.getConversationKey(secretKey, senderPubkey)),
+    nip44Encrypt: async (recipientPubkey, plaintext) => nip44.encrypt(plaintext, nip44.utils.getConversationKey(secretKey, recipientPubkey)),
   }
 }
 
@@ -86,15 +165,40 @@ export function signerFromNcryptsec(ncryptsec: string, password: string): Signer
   return localSigner(sk)
 }
 
-/** The browser extension. Throws if none is present or it refuses. */
-export async function nip07Signer(): Promise<Signer> {
-  const ext = windowNostr()
+/**
+ * How long a reconnect waits for an extension to appear. Extensions inject
+ * `window.nostr` from a content script some time after the page starts, and
+ * a reload asks for a signature at once (the relay's NIP-42 AUTH challenge
+ * arrives with the first socket), so asking only once found no extension
+ * and the whole session signed nothing (arkinox, 2026-10-13).
+ */
+export const NIP07_WAIT_MS = 4000
+
+/** `window.nostr`, once it appears, or null after `waitMs`. */
+async function waitForWindowNostr(waitMs: number): Promise<WindowNostr | null> {
+  const start = Date.now()
+  for (;;) {
+    const ext = windowNostr()
+    if (ext || Date.now() - start >= waitMs) return ext
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
+/** The browser extension. Throws if none appears within `waitMs` or it refuses. */
+export async function nip07Signer(waitMs = 0): Promise<Signer> {
+  const ext = await waitForWindowNostr(waitMs)
   if (!ext) throw new Error('No NIP-07 extension found')
   const pubkey = await ext.getPublicKey()
+  // NIP-44 is optional in NIP-07: offered only when the extension has it.
+  const nip44Ext = ext.nip44
   return {
     kind: 'nip07',
     pubkey,
-    signEvent: (template) => ext.signEvent(template),
+    signEvent: (template) => ext.signEvent(attributed(template)),
+    heldPubkey: () => ext.getPublicKey(),
+    ...(nip44Ext ? { nip44Decrypt: (pk: string, ct: string) => nip44Ext.decrypt(pk, ct) } : {}),
+    // Encrypt is checked on its own: an extension could offer one half.
+    ...(nip44Ext?.encrypt ? { nip44Encrypt: (pk: string, pt: string) => nip44Ext.encrypt!(pk, pt) } : {}),
   }
 }
 
@@ -115,7 +219,11 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
-    signEvent: (template) => bunker.signEvent(template) as unknown as Promise<NostrEvent>,
+    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
+    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
+    heldPubkey: () => bunker.sendRequest('get_public_key', []),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -132,6 +240,122 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   return signer
 }
 
+function randomHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const PUBLIC_KEY_WAIT_MS = 30_000
+
+async function waitForPublicKey(bunker: nip46.BunkerSigner, signal?: AbortSignal): Promise<string> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  let abort: (() => void) | undefined
+  const stopped = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error('Signer connected but did not return its public key. Try the QR flow again.')), PUBLIC_KEY_WAIT_MS)
+    if (signal) {
+      abort = (): void => reject(new DOMException('Nostr Connect login cancelled.', 'AbortError'))
+      signal.addEventListener('abort', abort, { once: true })
+    }
+  })
+  try {
+    return await Promise.race([bunker.getPublicKey(), stopped])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    if (signal && abort) signal.removeEventListener('abort', abort)
+  }
+}
+
+function wrapBunkerSigner(
+  bunker: nip46.BunkerSigner,
+  clientSecretKey: Uint8Array,
+  pubkey: string,
+  bunkerUri: string,
+  nostrConnectSession = false,
+): Signer {
+  const signer: Signer = {
+    kind: 'nip46',
+    pubkey,
+    bunkerUri,
+    clientSecretKey,
+    nostrConnectSession,
+    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
+    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
+    heldPubkey: () => bunker.sendRequest('get_public_key', []),
+    close: () => bunker.close(),
+    reconnect: async () => {
+      const bp = await nip46.parseBunkerInput(bunkerUri)
+      if (bp) getPool().close([...bp.relays])
+      return signer
+    },
+  }
+  return signer
+}
+
+/** A QR login is created synchronously so its URI can be painted while connection waits. */
+export interface NostrConnectSession {
+  uri: string
+  relay: string
+  connect: (signal?: AbortSignal, onConnected?: () => void) => Promise<Signer>
+}
+
+export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): NostrConnectSession {
+  const relay = normalizeSignerRelay(relayInput)
+  const clientSecretKey = generateSecretKey()
+  const uri = nip46.createNostrConnectURI({
+    clientPubkey: getPublicKey(clientSecretKey),
+    relays: signerRelays(relay),
+    secret: randomHex(generateSecretKey()),
+    // nip44_encrypt seals a private message to an agent (arkinox, 2026-10-10).
+    perms: ['get_public_key', 'sign_event', 'nip44_decrypt', 'nip44_encrypt'],
+    name: 'ONOSENDAI',
+    ...(typeof location !== 'undefined' ? { url: location.origin } : {}),
+  })
+
+  return {
+    uri,
+    relay,
+    connect: async (signal, onConnected) => {
+      const bunker = await nip46.BunkerSigner.fromURI(
+        clientSecretKey,
+        uri,
+        // Keep the whole login handshake on the relays encoded in the QR.
+        // Automatic switch_relays interoperability varies between signers and
+        // can strand the get_public_key response on a relay we never selected;
+        // the QR names two relays by default so neither is a single point.
+        { pool: getPool() as never, skipSwitchRelays: true },
+        signal ?? 300_000,
+      )
+      onConnected?.()
+      let pubkey: string
+      try { pubkey = await waitForPublicKey(bunker, signal) }
+      catch (err) {
+        await bunker.close()
+        throw err
+      }
+      // The approved client key is the durable session identity. Rebuild from
+      // the remote key and relay on reload; do not replay the one-time QR secret.
+      const sessionUri = nip46.toBunkerURL({ ...bunker.bp, secret: null })
+      return wrapBunkerSigner(bunker, clientSecretKey, pubkey, sessionUri, true)
+    },
+  }
+}
+
+/**
+ * Restore a previously approved client-initiated Nostr Connect session.
+ *
+ * The pubkey is the one saved at login, not asked for again: asking on every
+ * reload needs the signer app awake before anything can sign, with no bound on
+ * the wait, and an answer naming another account (the app switched accounts)
+ * would put a different key behind the chain on screen.
+ */
+async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array, pubkey: string): Promise<Signer> {
+  const bp = await nip46.parseBunkerInput(bunkerUri)
+  if (!bp) throw new Error('The saved Nostr Connect session is invalid.')
+  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: getPool() as never })
+  return wrapBunkerSigner(bunker, clientSecretKey, pubkey, bunkerUri, true)
+}
+
 /** What we persist to bring a signer back on reload. */
 export interface SignerPref {
   kind: SignerKind
@@ -141,6 +365,7 @@ export interface SignerPref {
   /** nip46 only. */
   bunkerUri?: string
   clientNsec?: string
+  nostrConnectSession?: boolean
 }
 
 export function prefOf(signer: Signer): SignerPref {
@@ -149,6 +374,7 @@ export function prefOf(signer: Signer): SignerPref {
   if (signer.kind === 'nip46') {
     base.bunkerUri = signer.bunkerUri
     if (signer.clientSecretKey) base.clientNsec = nip19.nsecEncode(signer.clientSecretKey)
+    if (signer.nostrConnectSession) base.nostrConnectSession = true
   }
   return base
 }
@@ -156,10 +382,25 @@ export function prefOf(signer: Signer): SignerPref {
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
 export async function signerFromPref(pref: SignerPref): Promise<Signer> {
   if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
-  if (pref.kind === 'nip07') return nip07Signer()
+  if (pref.kind === 'nip07') {
+    const signer = await nip07Signer(NIP07_WAIT_MS)
+    // Same guard as a bunker's: an extension switched to another account
+    // must not sign this pubkey's chain.
+    if (signer.pubkey !== pref.pubkey) throw new SignerAccountMismatch('Your extension is now on a different account than the one logged in here. Switch it back, or log in again.')
+    return signer
+  }
   if (pref.kind === 'nip46' && pref.bunkerUri) {
     const clientSk = pref.clientNsec ? (nip19.decode(pref.clientNsec).data as Uint8Array) : undefined
-    return nip46Signer(pref.bunkerUri, clientSk)
+    if (pref.nostrConnectSession && clientSk) return nostrConnectSessionSigner(pref.bunkerUri, clientSk, pref.pubkey)
+    // A bunker still does its handshake, and answers with the account it holds
+    // now. Refuse one that is not the account saved here: signing as it would
+    // continue this pubkey's chain under another key.
+    const signer = await nip46Signer(pref.bunkerUri, clientSk)
+    if (signer.pubkey !== pref.pubkey) {
+      await signer.close?.()
+      throw new SignerAccountMismatch()
+    }
+    return signer
   }
   throw new Error('Unusable signer preference')
 }
@@ -193,13 +434,42 @@ export function saveSignerPref(pref: SignerPref): void {
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
   let pending: Promise<Signer> | null = null
   const ensure = (): Promise<Signer> => {
-    if (!pending) pending = signerFromPref(pref).then((s) => { onReady(s); return s })
+    // A failed reconnect is not kept: the next signature tries again. Kept,
+    // one early failure (an extension not injected yet, a bunker relay
+    // down) refused every signature until the page was reloaded.
+    if (!pending) {
+      const attempt = signerFromPref(pref).then((s) => { onReady(s); return s })
+      pending = attempt
+      attempt.catch(() => { if (pending === attempt) pending = null })
+    }
     return pending
   }
   return {
     kind: pref.kind,
     pubkey: pref.pubkey,
     signEvent: (template) => ensure().then((s) => s.signEvent(template)),
+    // Whether the live signer offers NIP-44 is known only once it is up.
+    nip44Decrypt: (pk, ct) => ensure().then((s) => {
+      if (!s.nip44Decrypt) throw new Error(NIP44_UNAVAILABLE)
+      return s.nip44Decrypt(pk, ct)
+    }),
+    nip44Encrypt: (pk, pt) => ensure().then((s) => {
+      if (!s.nip44Encrypt) throw new Error(NIP44_ENCRYPT_UNAVAILABLE)
+      return s.nip44Encrypt(pk, pt)
+    }),
+    heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
     reconnect: ensure,
   }
+}
+
+/**
+ * A BIP-340 signature over a 32-byte message hash with a raw key: never an
+ * event, so there is no client tag to carry. The one use is an item
+ * listing's proof (lib/itemListing.ts), signed by the item's own key to show
+ * the lister holds it. Kept here so this file stays the only place a raw
+ * key signs anything (clientTagGuard.test.ts).
+ */
+export function signHashWithKey(hash: Uint8Array, secretKey: Uint8Array): Uint8Array {
+  if (hash.length !== 32) throw new Error('signHashWithKey signs a 32-byte hash')
+  return schnorr.sign(hash, secretKey)
 }

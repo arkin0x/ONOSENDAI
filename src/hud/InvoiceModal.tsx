@@ -13,11 +13,11 @@
 import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import QRCode from 'qrcode'
-import { depositSettled, formatClock, satsLabel } from '../lib/cloud'
+import { depositSettled, formatClock, formatWait, satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
+import { useEscape } from '../hooks/useEscape'
 
 /** The quote, waiting for a PAY. */
 export function CloudApproval(): JSX.Element | null {
@@ -27,6 +27,14 @@ export function CloudApproval(): JSX.Element | null {
   const price = satsLabel(q.costMsats)
   const funding = cloud.status === 'funding'
   const steps = q.route ?? { steps: 1, cloudSteps: 1 }
+  // Work HOSAKA already has: a Cantor subtree root is a pure function of its
+  // base and height, so a block crossed lately is already on its disk. The
+  // price above has the saving in it; this says where it came from, since a
+  // number that drops with no explanation is a number nobody trusts.
+  const reuse = q.reuse && q.reuse.axes > 0 ? q.reuse : null
+  const saved = reuse
+    ? [reuse.savedMsats > 0 ? `${satsLabel(reuse.savedMsats)} less` : null, reuse.savedSeconds > 0 ? `${formatWait(reuse.savedSeconds)} sooner` : null].filter(Boolean).join(' and ')
+    : ''
   const body = q.route
     ? (
       <>
@@ -42,12 +50,26 @@ export function CloudApproval(): JSX.Element | null {
         Your payment will apply to your HOSAKA balance and leftover funds may be used for future jobs.
       </>
     )
+  const withReuse = (
+    <>
+      {body}
+      {reuse && (
+        <>
+          <br />
+          <span className="modal__reuse">
+            {reuse.axes === 1 ? 'One axis of this' : `${reuse.axes} axes of this`} {reuse.axes === 1 ? 'is' : 'are'} already computed and held by HOSAKA
+            {saved ? `: ${saved}` : ''}.
+          </span>
+        </>
+      )}
+    </>
+  )
   return (
     <ConfirmModal
       banner={<HosakaBanner />}
       title="Offload Estimate"
       figure={<span className="modal__price">{price}</span>}
-      body={body}
+      body={withReuse}
       confirmLabel={`PAY ${price.toUpperCase()}`}
       busy={funding}
       danger={false}
@@ -66,21 +88,32 @@ export function InvoiceModal(): JSX.Element | null {
   const bolt11 = invoice?.bolt11 ?? null
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const [copied, setCopied] = useState(false)
-  const now = useNow(1000)
+  // The countdown ticks only while there is an invoice to count down: this
+  // modal is always mounted, and an unconditional tick re-rendered it every
+  // second, background tabs included (2026-10-15).
+  const now = useNow(invoice ? 1000 : 0)
 
   // Rendered into a canvas the wallet's camera can read: dark modules on a
   // light field, whatever the HUD's palette says.
   useEffect(() => {
     if (!bolt11 || !canvas.current) return
-    void QRCode.toCanvas(canvas.current, `lightning:${bolt11}`, {
-      errorCorrectionLevel: 'L',
-      margin: 2,
-      width: 264,
-      color: { dark: '#05070d', light: '#f4fbff' },
+    // The QR library loads with the first invoice, not with the app
+    // (2026-10-15): most visits never show one.
+    void import('qrcode').then(({ default: QRCode }) => {
+      if (!canvas.current) return
+      return QRCode.toCanvas(canvas.current, `lightning:${bolt11}`, {
+        errorCorrectionLevel: 'L',
+        margin: 2,
+        width: 264,
+        color: { dark: '#05070d', light: '#f4fbff' },
+      })
     }).catch(() => { /* the raw string below still works */ })
   }, [bolt11])
 
   useEffect(() => { setCopied(false) }, [bolt11])
+  // Escape hides it as a tap outside does: the invoice stays good and SHOW
+  // INVOICE brings it back (arkinox, 2026-10-01).
+  useEscape('modal', invoice !== null && bolt11 !== null, () => useCyberspace.getState().setInvoiceOpen(false))
 
   if (!invoice || !bolt11) return null
 

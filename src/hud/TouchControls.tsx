@@ -13,25 +13,70 @@
  * Directions resolve through `moveDirection` against the axes currently on
  * screen, exactly as the keyboard does, so the pad obeys a free orbit the same
  * way WASD does and the two can never disagree about which way is up.
+ *
+ * The LOCAL/LIVE switch under COMMIT is the identity's only publishing
+ * control, and going LIVE asks first. Only that direction: LOCAL takes
+ * something back off the wire's path and needs no ceremony, while LIVE is the
+ * decision that the next thing you do is seen, and it carries everything
+ * already signed out with it (see lib/release.ts). Cancelling leaves the
+ * switch exactly where it was, on LOCAL.
+ *
+ * The commit slot is also the pad's mode switch, three states in a ring
+ * (arkinox, 2026-10-13): HOP, the resting state, where the pad lines up a
+ * move and COMMIT sends it; VIEW, a free look from your head; WALK, first
+ * person, where every press is a step (store/useWalk.ts). HOP turns VIEW
+ * on, VIEW turns WALK on, WALK goes back to HOP, and RECALL goes back to HOP
+ * from either. Each mode tints the pad's keys its own color, blue, yellow,
+ * red, so the hand knows what a press will do before it presses.
  */
 
-import { Box } from 'lucide-react'
+import { useState } from 'react'
+import { Box, Globe, MapPinOff } from 'lucide-react'
+import { ConfirmModal } from './ConfirmModal'
 import { useCyberspace } from '../store/useCyberspace'
+import { DEFAULT_RELAY } from '../store/useRelays'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
+import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { useShards } from '../store/useShards'
 import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { ChainStatusStrip, useChainStatus } from './ChainStatus'
+import { useWalk } from '../store/useWalk'
+
+/**
+ * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
+ * lines included: `.modal__pre` is `white-space: pre-wrap` so the line
+ * breaks and the leading space on the first bullet survive to the screen.
+ */
+export const GO_LIVE_BODY = [
+  'LIVE means actions you take and things you hide in cyberspace are published to relays so others can see them. LOCAL holds all the data on this device privately.',
+  '',
+  'If you switch to LIVE,',
+  ' - your next movement action will be published as well as your entire chain history',
+  '- hidden objects stay LOCAL until each one is published by clicking the LIVE button next to it',
+  '',
+  'Switch to LIVE now?',
+].join('\n')
 
 export function TouchControls(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const pin = useCyberspace((s) => s.pin)
   const live = useCyberspace((s) => s.live)
+  // What the chain's publishing is doing when the switch alone cannot say:
+  // held, a conflict waiting for a choice, or LIVE with nothing reachable.
+  // Null, and not drawn, when there is nothing to report.
+  const chainStatus = useChainStatus()
   const deploying = useShards((s) => s.pending !== null)
   const bind = useRepeatable()
+  // Open only while going LOCAL to LIVE. The switch itself is not moved until
+  // the confirm, so a cancel, a tap on the backdrop, or the component going
+  // away all leave the identity on LOCAL.
+  const [goLive, setGoLive] = useState(false)
   // The scene's covering box reports when the region it draws is a clipped
   // stand-in; the zoom-out key is the remedy, so it echoes that (useUiHints).
   const coveringClipped = useUiHints((s) => s.coveringClipped)
@@ -42,8 +87,15 @@ export function TouchControls(): JSX.Element {
   // stays, at its own size and in its own place, with those cells emptied.
   // Hiding the whole pad instead left EARTH opening at 2^52 with no way down.
   const atHead = useCyberspace((s) => s.canDrive())
-  // The commit row is for a move of your own: only at your head.
+  // The commit row is for a move of your own: only at your head, and while
+  // the pad's VIEW is on, where it holds RECALL and the lit VIEW.
   const home = useCyberspace((s) => s.atHead())
+  const viewing = useCyberspace((s) => s.viewing())
+  const walking = useCyberspace((s) => s.walking)
+  // Steps pressed in WALK and not yet proven, queued or still being walked:
+  // STOP has something to stop.
+  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0))
+  const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -58,6 +110,8 @@ export function TouchControls(): JSX.Element {
 
   const move = (name: MoveName) => () => {
     const s = useCyberspace.getState()
+    // In WALK a press is a step, committed now (store/useWalk.ts).
+    if (s.walking) { useWalk.getState().press(name); return }
     s.moveCursor(moveDirection(s.screenAxes ?? s.axes(), name))
   }
   const scale = (delta: number) => () => useCyberspace.getState().adjustScale(delta)
@@ -73,9 +127,12 @@ export function TouchControls(): JSX.Element {
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away') },
-    { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
+    //
+    // The keys in the titles are the mode's own: WALK's are first person
+    // (lib/walkKeys.ts).
+    { cell: 'away', glyph: '⊗', sub: 'FAR', title: walking ? 'Forward (W)' : 'Away from camera (R)', act: move('away') },
+    { cell: 'up', glyph: '▲', title: walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
+    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: walking ? 'Back (S)' : 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.
@@ -91,19 +148,42 @@ export function TouchControls(): JSX.Element {
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
+    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down') },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
   return (
     <>
-      <div className={`touchpad${atHead ? '' : ' touchpad--scale'}`} role="group" aria-label="Move cursor and change scale">
+      <div className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
             ladder. Viewing cyberspace itself is the CYBERSPACE button in the
             view menu, which is a different thing and stays where it is.
             On every pad, at your head or off it. */}
+        {/* REMOVE PIN: only while there is a pin to remove, so the cell is
+            empty the rest of the time and nothing moves when it appears.
+            The pin itself is dropped by a click on the globe or a POSITION
+            panel VIEW, and RETURN already clears it; this is the way to put
+            a look down without leaving the place you are looking at. */}
+        {pin && (
+          <button className="touchpad__key touchpad__key--pin" title={`Remove the pin at ${pin.label}`} aria-label="Remove the pin" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().clearPin() }}>
+            <MapPinOff size={16} strokeWidth={2.25} aria-hidden />
+          </button>
+        )}
+        {/* The planet at 2^52, the scale the view menu's EARTH
+            button means, through the same function so the two can never
+            drift: dataspace lined up, no viewed stop, the planet's centre.
+            Beside the cube, which is the other one-press view. */}
+        {/* Zoom only, like the cube beside it: it takes you to the scale the
+            planet is legible at and leaves what you are looking at alone.
+            It used to call viewEarth, which also re-targets the planet's
+            centre, so pressing it while looking at a place threw the place
+            away (arkinox, 2026-09-14). adjustScale takes a delta, so the
+            delta is whatever gets this view to EARTH_SCALE_EXP. */}
+        <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
+          <Globe size={16} strokeWidth={2.25} aria-hidden />
+        </button>
         <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
           <Box size={16} strokeWidth={2.25} aria-hidden />
         </button>
@@ -142,18 +222,54 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {home && <div className="touchops">
+      {(home || viewing) && <div className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
-          title={computing ? 'Cancel proof (X)' : 'Recall cursor (X)'}
+          title={walking
+            ? (computing || behind > 0 ? 'Stop the walk where the chain is now (X)' : 'End WALK and go back to HOP (X)')
+            : computing ? 'Cancel proof (X)' : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
+            if (walking) {
+              if (computing || behind > 0) useWalk.getState().stop()
+              else useWalk.getState().exit()
+              return
+            }
             useCyberspace.getState().cancel()
           }}
         >
-          {computing ? 'STOP' : 'RECALL'}
+          {computing || (walking && behind > 0) ? 'STOP' : 'RECALL'}
         </button>
+        {/* The mode switch, in the commit slot while there is nothing to
+            commit: HOP to VIEW to WALK and back to HOP. VIEW (arkinox,
+            2026-10-10) is a free view from your head, the pad moving the
+            cursor to look around without planning a hop; WALK (2026-10-13)
+            is first person, every press a step. */}
+        {walking ? (
+          <button
+            className="touchops__commit is-walk is-on"
+            aria-pressed
+            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R up, C or F down. Press to go back to HOP"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().exit() }}
+          >WALK</button>
+        ) : viewing ? (
+          <button
+            className="touchops__commit is-view is-on"
+            aria-pressed
+            title="Viewing: the pad moves the cursor without planning a hop. Press for WALK, or RECALL to end it"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}
+          >VIEW</button>
+        ) : (!armed && !deploying && !computing) ? (
+          <button
+            className="touchops__commit is-hop"
+            title="Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}
+          >HOP</button>
+        ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
           disabled={(!deploying && !armed && !computing) || tooFar}
@@ -168,6 +284,7 @@ export function TouchControls(): JSX.Element {
         >
           {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
+        )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the
             only control whose meaning it changes, and a switch rather than a
             toggle so the current mode is always spelled out, not implied. */}
@@ -182,12 +299,30 @@ export function TouchControls(): JSX.Element {
           <button
             className={`touchmode__opt ${live ? 'is-on' : ''}`}
             aria-pressed={live}
-            title="Live: publish every action to cyberspace.nostr1.com"
+            title={`Live: your next action publishes it and the whole chain behind it to ${DEFAULT_RELAY.replace(/^wss:\/\//, '')}`}
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(true) }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!live) setGoLive(true) }}
           >LIVE</button>
         </div>
+        {/* Directly under the switch, which itself never changes: it says
+            what was chosen, this says what is happening (ChainStatus.tsx). */}
+        {chainStatus && <ChainStatusStrip status={chainStatus} />}
       </div>}
+
+      {/* Outside the commit block: once it is up it stays up until it is
+          answered, even if the avatar stops being somewhere you can act. */}
+      {goLive && (
+        <ConfirmModal
+          title="Publishing"
+          body={<span className="modal__pre">{GO_LIVE_BODY}</span>}
+          confirmLabel="SWITCH TO LIVE"
+          cancelLabel="CANCEL"
+          danger={false}
+          cardClassName="golive"
+          onConfirm={() => { setGoLive(false); useCyberspace.getState().setLive(true) }}
+          onCancel={() => setGoLive(false)}
+        />
+      )}
     </>
   )
 }

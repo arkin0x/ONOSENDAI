@@ -103,6 +103,7 @@ export function BlackSun({ axes }: Props): JSX.Element {
             transparent
             opacity={0.9}
             side={DoubleSide}
+            forceSinglePass
           />
         </mesh>
       </Billboard>

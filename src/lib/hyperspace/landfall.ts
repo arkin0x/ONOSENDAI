@@ -15,6 +15,7 @@
  */
 import Decimal from 'decimal.js'
 import { sha256, hexToBytes, xyzToCoord, coordToXyz, PLANE_DATASPACE } from 'cyberspace-core'
+import { csMetresToLatLon } from '../earthSurface'
 
 export const LANDFALL_DOMAIN = new TextEncoder().encode('CYBERSPACE_LANDFALL_V1')
 
@@ -84,6 +85,50 @@ export function sinCos(xIn: Decimal): { sin: Decimal; cos: Decimal } {
   }
   if (!converged) throw new Error('cos() Taylor series did not converge')
   return { sin: sinSum, cos: cosSum.times(cosSign) }
+}
+
+/** First eccentricity squared, f(2 - f), in the same Decimal as the rest. */
+const WGS84_E2 = WGS84_F.times(new D(2).minus(WGS84_F))
+
+/** Latitude held to [-90, 90] and longitude wrapped to [-180, 180), as the CLI does before converting. */
+function clampLat(lat: Decimal): Decimal {
+  return lat.gt(90) ? new D(90) : lat.lt(-90) ? new D(-90) : lat
+}
+function wrapLon(lon: Decimal): Decimal {
+  let l = lon
+  while (l.gte(180)) l = l.minus(360)
+  while (l.lt(-180)) l = l.plus(360)
+  return l
+}
+
+/**
+ * A GPS coordinate as dataspace axis values, exactly as the CLI's canonical
+ * gps_to_dataspace_xyz produces them (spec version 2026-03-16-h34-corrected).
+ *
+ * The mapping is consensus-critical for a landfall, so a place typed by hand
+ * goes through the very same arithmetic rather than a float cousin of it:
+ * Decimal at precision 96 with ROUND_HALF_EVEN, the exact PI, the same
+ * Taylor sin and cos, latitude clamped to [-90, 90], longitude wrapped to
+ * [-180, 180), altitude forced to the ellipsoid surface, geodetic to ECEF
+ * through the prime vertical radius, metres to kilometres, the §9.4
+ * permutation (X_cs = X_ecef, Y_cs = Z_ecef, Z_cs = Y_ecef), and
+ * kmToAxisU's rounding and clamp. The reference values in the test were
+ * produced by that Python code, and they match to the gibson.
+ */
+export function gpsToDataspaceXyz(latDeg: number | string, lonDeg: number | string): { x: bigint; y: bigint; z: bigint } {
+  const lat = clampLat(new D(String(latDeg)))
+  const lon = wrapLon(new D(String(lonDeg)))
+  const latR = lat.times(PI).div(180)
+  const lonR = lon.times(PI).div(180)
+  const { sin: sinLat, cos: cosLat } = sinCos(latR)
+  const { sin: sinLon, cos: cosLon } = sinCos(lonR)
+  const one = new D(1)
+  const n = WGS84_A_M.div(one.minus(WGS84_E2.times(sinLat).times(sinLat)).sqrt())
+  const xM = n.times(cosLat).times(cosLon)
+  const yM = n.times(cosLat).times(sinLon)
+  const zM = n.times(one.minus(WGS84_E2)).times(sinLat)
+  const km = new D(1000)
+  return { x: kmToAxisU(xM.div(km)), y: kmToAxisU(zM.div(km)), z: kmToAxisU(yM.div(km)) }
 }
 
 /** km from the centre to a u85 axis value, ROUND_HALF_EVEN, clamped (§9.7 step 9). */
@@ -181,26 +226,11 @@ export function landfallCoordApprox(blockHashHex: string): bigint {
 
 /** Float64 inverse for labels: dataspace axis values to WGS84 lat/lon/alt (meters). */
 export function axesToLatLon(x: bigint, y: bigint, z: bigint): { lat: number; lon: number; altM: number } {
-  const xm = Number(x - AXIS_CENTER) / G_PER_M
-  const ym = Number(y - AXIS_CENTER) / G_PER_M
-  const zm = Number(z - AXIS_CENTER) / G_PER_M
-  // Undo the permutation: X_ecef = X_cs, Z_ecef = Y_cs, Y_ecef = Z_cs.
-  const X = xm
-  const Y = zm
-  const Z = ym
-  const e2 = F_F * (2 - F_F)
-  const p = Math.hypot(X, Y)
-  const lon = Math.atan2(Y, X)
-  let lat = Math.atan2(Z, p * (1 - e2))
-  let N = A_F
-  let alt = 0
-  for (let i = 0; i < 6; i++) {
-    const s = Math.sin(lat)
-    N = A_F / Math.sqrt(1 - e2 * s * s)
-    alt = p / Math.cos(lat) - N
-    lat = Math.atan2(Z, p * (1 - (e2 * N) / (N + alt)))
-  }
-  return { lat: (lat * 180) / Math.PI, lon: (lon * 180) / Math.PI, altM: alt }
+  return csMetresToLatLon({
+    x: Number(x - AXIS_CENTER) / G_PER_M,
+    y: Number(y - AXIS_CENTER) / G_PER_M,
+    z: Number(z - AXIS_CENTER) / G_PER_M,
+  })
 }
 
 export function coordToLatLon(coord: bigint): { lat: number; lon: number; altM: number } {

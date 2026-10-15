@@ -22,7 +22,7 @@
  */
 
 import { buildMovePlan, localOnly, type RouteProfile } from './movePlan'
-import { projectCantorMs } from './calibration'
+import { projectCantorMs, sidestepHashes } from './calibration'
 import type { SignerKind } from './signers'
 
 /**
@@ -55,6 +55,8 @@ export interface CrossoverInputs {
   /** The provider's published hop ladder. */
   ladder: Array<{ max_height: number; est_seconds?: number; est_time?: string }> | null
   signerKind: SignerKind
+  /** Actual over estimated across this identity's finished jobs (lib/experience); 1 when unknown. */
+  experience?: number
 }
 
 /** "about 5 min", "under 10 sec", "about 1.5 hr" as seconds; null when it is none of those. */
@@ -86,7 +88,7 @@ export function stepSeconds(
   const event = EVENT_SECONDS[inputs.signerKind] ?? EVENT_SECONDS.local
   if (kind === 'sidestep') {
     const rate = inputs.sha256PerSec && inputs.sha256PerSec > 0 ? inputs.sha256PerSec : 500_000
-    return (2 ** (height + 1)) / rate + event
+    return sidestepHashes(height) / rate + event
   }
   const ms = inputs.cantorMsByHeight ? projectCantorMs(inputs.cantorMsByHeight, height) : NaN
   // Three axes may move in one hop, and the worker runs them one after another.
@@ -127,7 +129,8 @@ export function crossoverHeight(inputs: CrossoverInputs): number {
   for (let h = inputs.hopCeiling + 1; h <= inputs.cloudHop; h++) {
     const cloud = cloudSeconds(h, inputs.ladder)
     if (cloud === null) return Infinity
-    if (walkSeconds(h, inputs) > cloud + PAYMENT_SECONDS) return h
+    // The provider's estimate, corrected by what its jobs have actually taken here.
+    if (walkSeconds(h, inputs) > cloud * (inputs.experience ?? 1) + PAYMENT_SECONDS) return h
   }
   return Infinity
 }
@@ -145,6 +148,7 @@ export function crossoverFor(profile: RouteProfile, inputs: CrossoverInputs): nu
     Math.round(inputs.sha256PerSec ?? 0),
     inputs.ladder ? inputs.ladder.map((b) => `${b.max_height}:${b.est_seconds ?? b.est_time ?? ''}`).join(',') : '',
     inputs.cantorMsByHeight ? Object.keys(inputs.cantorMsByHeight).length : 0,
+    (inputs.experience ?? 1).toFixed(3),
   ].join('|')
   if (cached && cached.key === key) return cached.value
   const value = crossoverHeight(inputs)
@@ -167,6 +171,7 @@ export function offloadFrom(
     signerKind: SignerKind
     cantorMsByHeight?: Record<number, number> | null
     sha256PerSec?: number | null
+    experience?: number
   },
 ): number {
   return crossoverFor(profile, {
@@ -177,5 +182,6 @@ export function offloadFrom(
     sha256PerSec: opts.sha256PerSec ?? null,
     ladder: opts.provider?.pricing?.hop ?? null,
     signerKind: opts.signerKind,
+    experience: opts.experience,
   })
 }

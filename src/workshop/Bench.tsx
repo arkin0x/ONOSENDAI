@@ -5,9 +5,20 @@
  * every point, and a ghost of what the next tap would make. Taps do the work:
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
- * so DELETE can take it. Dragging orbits. R3F
- * reports how far the pointer travelled between down and up, which is what
- * separates a tap from an orbit, so a thumb that wobbles still taps.
+ * and its corners, so the pad moves and turns it and DELETE can take it.
+ * Dragging orbits on every tool but SELECT, and the orbit ball at the bottom
+ * right orbits on every tool. In SELECT a drag is the box instead (arkinox,
+ * 2026-10-10): each box adds the points inside it, so several little boxes
+ * build a selection, and INVERT makes taps and boxes take away. (FACE had the
+ * box for an evening and got its orbit back: the box was not needed there.)
+ * In SELECT and FACE nothing on the bench deselects by itself: a tap on
+ * empty space is nothing, and DESELECT, the pad's hub and Esc let go. In
+ * VIEW a tap on empty space lets go, since VIEW has none of those rows. R3F
+ * reports how far the pointer travelled between down and up, and the bench
+ * compares that with a dead zone that depends on what pressed (deadZone.ts):
+ * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
+ * is held still and a lift is a tap, so a thumb that rolls still picks the
+ * point it pressed; past it, the drag is an orbit from there.
  *
  * The ghost is the aim. A mouse hovers it into place; a finger presses and
  * slides it; either way you see where the thing will land before it lands,
@@ -18,17 +29,20 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3 } from 'three'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
-import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from '../lib/shards'
-import { benchAxes, benchPose, nudgeFor, planeAfter, sameAxes, useBenchView, type NudgeName } from './benchAxes'
-import { landing, preview, type WorkPlane } from '../lib/stamps'
-import { ShardMesh } from '../scene/ShardMesh'
-import { useWorkshop, type Tool } from '../store/useWorkshop'
+import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
+import { drawnDivision } from './divisions'
+import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
+import { landing, preview, type WorkPlane } from 'sno-core/stamps'
+import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { ShardLights } from '../scene/shardLight'
+import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { partMatrix } from 'sno-core/parts'
+import { useCyberspace } from '../store/useCyberspace'
+import { Hold, noteGesture, tapSlop } from './deadZone'
 
-/** A press that travels further than this is an orbit, not a tap. */
-const TAP_SLOP = 8
 /** The unit grid's line colour when a unit is not divided. */
 const UNIT_LINE = '#1d3547'
 /**
@@ -103,19 +117,22 @@ function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
   const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
+  const drawn = drawnDivision(division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     // Read the store at tap time rather than from the render closure: a level
     // changed a moment ago must apply to this tap even if the bench has not
     // re-rendered yet.
     const w = useWorkshop.getState()
     const at = snap(e.point, w.level, w.step(), w.plane)
-    if (w.tool === 'stamp') w.placeStamp(at)
+    if (w.tool === 'stamp' && w.stampMode === 'object') {
+      w.placeObject(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
+    } else if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
@@ -139,13 +156,15 @@ function Grid(): JSX.Element {
       {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
       <gridHelper key={`u${extent}-${division > 1 ? 1 : 0}`} args={[extent * 2, extent * 2, ACCENT, division > 1 ? UNIT_LINE_DIVIDED : UNIT_LINE]} />
       {/* The snap grid between the unit lines when a unit is divided, in the unit lines' plain colour. */}
-      {division > 1 && <gridHelper key={`d${extent}-${division}`} args={[extent * 2, extent * 2 * division, UNIT_LINE, UNIT_LINE]} position={[0, -0.002, 0]} />}
+      {/* Past twelve lines a unit the snap is drawn at a divisor of itself (divisions.ts). */}
+      {drawn > 1 && <gridHelper key={`d${extent}-${drawn}`} args={[extent * 2, extent * 2 * drawn, UNIT_LINE, UNIT_LINE]} position={[0, -0.002, 0]} />}
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
         grid plane must not sit in front of the vertex handles and swallow the
-        taps meant for them, and an empty-space tap should reach onPointerMissed
-        to deselect rather than being caught here.
+        taps meant for them. A tap on empty space there is nothing at all
+        (arkinox, 2026-10-10: it used to deselect, and on a phone it kept doing
+        so by accident).
       */}
       {places && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} onClick={onClick} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => useWorkshop.getState().setAim(null)}>
@@ -166,11 +185,25 @@ function Ghost(): JSX.Element | null {
   const facing = useWorkshop((s) => s.stampFacing)
   const color = useWorkshop((s) => s.color)
   const plane = useWorkshop((s) => s.plane)
+  const mode = useWorkshop((s) => s.stampMode)
+  const object = useWorkshop((s) => s.stampObject)
+  const unit = useWorkshop((s) => s.current()?.unit ?? 0)
   // Built once per shape, color and plane; the aim only moves it. Built per cell, the
   // ghost cost a fresh geometry every time the pointer crossed a grid line.
-  const model = useMemo(() => (tool === 'stamp' ? preview(kind, size, facing, color, plane) : null), [tool, kind, size, facing, color, plane])
+  const model = useMemo(() => (tool === 'stamp' && mode === 'shape' ? preview(kind, size, facing, color, plane) : null), [tool, mode, kind, size, facing, color, plane])
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   if (!aim) return null
+  if (tool === 'stamp' && mode === 'object') {
+    if (!object) return null
+    // Through the same placement a tap makes (store placeObject), so the ghost
+    // stands exactly where and how the object will.
+    const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
+    return (
+      <group matrix={m} matrixAutoUpdate={false}>
+        <ShardMesh shard={object.shard} ghost />
+      </group>
+    )
+  }
   if (tool === 'add') {
     return (
       <mesh position={UP(aim)}>
@@ -257,7 +290,7 @@ function Handles(): JSX.Element | null {
   const hitRadius = hitRadiusFor(tool)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP) return
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
     const w = useWorkshop.getState()
     if (tool === 'face') {
@@ -265,11 +298,16 @@ function Handles(): JSX.Element | null {
       // the tap was on a face beside the corner. If a face is under the tap and
       // the ray passes farther from the corner than its drawn dot, the face wins.
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
-      const face = e.intersections.find((i) => i.object.name === 'shard-faces')
+      // Either side of a face, the nearer first (ShardMesh faceOfHit).
+      const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
       // The dot's drawn radius in world units: its pixels times the group's own scale.
       const drawn = DOT_ON_R * (e.object.parent?.scale.x ?? 1)
-      if (face && face.faceIndex !== undefined && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face.faceIndex); return }
-      w.pickForFace(first)
+      if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
+      // Under INVERT a corner tap takes the point out of the selection, as the
+      // key promises of every tap; it picks no corner for a face. Off INVERT
+      // and the tap is the pick it always was.
+      if (w.invert) w.toggleVertex(first)
+      else w.pickForFace(first)
     }
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
@@ -352,11 +390,57 @@ function FaceHighlight(): JSX.Element | null {
   return (
     <>
       <mesh geometry={lit.g} frustumCulled={false}>
-        <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
+        <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
       <primitive object={lit.edge} />
     </>
   )
+}
+
+/**
+ * The orbit's dead zone. OrbitControls starts turning on the first pixel of a
+ * drag, so a thumb pressing a dot moved the view under itself. From the press
+ * until it has travelled past the slop for its pointer type, the controls'
+ * rotate speed is zero: the view holds still and a lift is a tap. Once past,
+ * the speed comes back and the drag orbits from there with no jump, because
+ * the controls measure each move from the last one. The press's pointer type
+ * is noted here, in capture, before any tap handler runs, so tapSlop() is
+ * right for the taps of this very press. A second finger means a pan, which
+ * has its own speed and is never held.
+ */
+function OrbitHold(): null {
+  const gl = useThree((s) => s.gl)
+  const controls = useThree((s) => s.controls) as unknown as { rotateSpeed: number } | null
+  useEffect(() => {
+    if (!controls) return
+    const canvas = gl.domElement
+    const speed = controls.rotateSpeed
+    const hold = new Hold(tapSlop)
+    const release = (): void => { if (hold.holding) controls.rotateSpeed = speed; hold.up() }
+    const down = (e: PointerEvent): void => {
+      if (!e.isPrimary) { release(); return }
+      noteGesture(e.pointerType)
+      if (e.button !== 0) return
+      hold.down(e.clientX, e.clientY)
+      controls.rotateSpeed = 0
+    }
+    const move = (e: PointerEvent): void => {
+      if (!hold.holding) return
+      if (!hold.move(e.clientX, e.clientY)) controls.rotateSpeed = speed
+    }
+    canvas.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    return () => {
+      canvas.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      controls.rotateSpeed = speed
+    }
+  }, [gl, controls])
+  return null
 }
 
 /**
@@ -387,14 +471,19 @@ function Aim(): null {
   return null
 }
 
-/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
 /**
- * A box dragged on the bench in SELECT: every point whose projection falls
- * inside is selected, live as the box grows; shift keeps what was selected.
- * The box is a plain element over the canvas, drawn here without React. A
- * tap (no drag) is left to the handles and to onPointerMissed; orbit is off
- * in SELECT (Bench), so a one-finger drag is the box's alone. A second
- * finger means a pan: the box cancels and the selection is put back.
+ * A box dragged on the bench in SELECT and in FACE: every point whose
+ * projection falls inside is added to the selection, live as the box grows,
+ * and the box's own additions shrink back as it does. Each box adds to what
+ * was in hand when the finger touched, so several little boxes build a
+ * selection (arkinox, 2026-10-10, decision A); under INVERT a box takes
+ * away instead. Shift does nothing any more, and is harmless. The box is a
+ * plain element over the canvas, drawn here without React. A tap (no drag)
+ * is left to the handles; orbit is off in SELECT (Bench), so a one-finger
+ * drag is the box's alone, and the orbit ball turns the view meanwhile. SELECT
+ * only: FACE had the box for an evening and did not need it (arkinox,
+ * 2026-10-10), so a drag there orbits as it always did. A second finger
+ * means a pan: the box cancels and the selection is put back.
  */
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
@@ -411,8 +500,13 @@ function Marquee(): null {
     host.appendChild(box)
     let start: { x: number; y: number } | null = null
     let base: number[] = []
-    let shift = false
+    let baseParts: number[] = []
+    let partsIn: number[] = []
+    let invert = false
     let active = false
+    // Written only when the box changes something: the store re-renders every
+    // handle on each write, and a box over empty space wrote on every move.
+    const same = (a: number[], b: number[]): boolean => a.length === b.length && a.every((n, i) => n === b[i])
     const local = (e: PointerEvent): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect()
       return { x: e.clientX - r.left, y: e.clientY - r.top }
@@ -430,12 +524,22 @@ function Marquee(): null {
         const py = ((1 - v.y) / 2) * r.height
         if (px >= x0 && px <= x1 && py >= y0 && py <= y1) out.push(i)
       })
+      // A placed object is in the box when where it stands is: it is taken
+      // whole, never by its own points, which are not this object's.
+      partsIn = []
+      ;(shard.parts ?? []).forEach((q, i) => {
+        v.set(...UP(q.at)).project(camera)
+        if (v.z > 1) return
+        const px = ((v.x + 1) / 2) * r.width
+        const py = ((1 - v.y) / 2) * r.height
+        if (px >= x0 && px <= x1 && py >= y0 && py <= y1) partsIn.push(i)
+      })
       return out
     }
     const cancel = (): void => {
       // A second finger has landed: this is a pan, not a box. Put the
       // selection back as it was when the first finger touched.
-      if (start && active) useWorkshop.getState().setSelection(base)
+      if (start && active) { useWorkshop.getState().setSelection(base); useWorkshop.getState().setPartSelection(baseParts) }
       start = null
       active = false
       box.hidden = true
@@ -444,19 +548,26 @@ function Marquee(): null {
       if (!e.isPrimary) { cancel(); return }
       if (e.button !== 0) return
       start = local(e)
-      base = useWorkshop.getState().selection
-      shift = e.shiftKey
+      const w = useWorkshop.getState()
+      base = w.selection
+      baseParts = w.partSel
+      // Read at the press: INVERT toggled mid-drag applies to the next box.
+      invert = w.invert
       active = false
     }
     const move = (e: PointerEvent): void => {
       if (!start) return
       const { x, y } = local(e)
-      if (!active && Math.hypot(x - start.x, y - start.y) < TAP_SLOP) return
+      if (!active && Math.hypot(x - start.x, y - start.y) < tapSlop()) return
       active = true
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
       box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
-      useWorkshop.getState().setSelection([...(shift ? base : []), ...inside(x0, y0, x1, y1)])
+      const points = nextSelection(base, inside(x0, y0, x1, y1), invert)
+      const parts = nextSelection(baseParts, partsIn, invert)
+      const w = useWorkshop.getState()
+      if (!same(points, w.selection)) w.setSelection(points)
+      if (!same(parts, w.partSel)) w.setPartSelection(parts)
     }
     const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
     canvas.addEventListener('pointerdown', down)
@@ -474,6 +585,7 @@ function Marquee(): null {
   return null
 }
 
+/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
 function Keys(): null {
   const camera = useThree((s) => s.camera)
   useEffect(() => {
@@ -505,7 +617,9 @@ function Keys(): null {
       if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
-      if (e.code === 'Escape') { e.preventDefault(); if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() } else w.closeWorkshop(); return }
+      // Escape is not here: it goes through the Escape stack (useEscape), so
+      // the palette sheet and the confirmations over the bench close before
+      // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { w.selectConnected(); return }
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')
@@ -513,8 +627,8 @@ function Keys(): null {
       if (e.code === 'Digit4') w.setTool('select')
       if (e.code === 'Digit5') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
-      if (e.code === 'KeyQ') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(-1); else w.turnStamp() }
-      if (e.code === 'KeyE') { if (w.tool === 'select' && w.selection.length) w.rotateSelected(1) }
+      if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
+      if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }
@@ -539,6 +653,20 @@ function ViewDriver(): null {
     camera.position.copy(controls.target).add(new Vector3(HOME[0], HOME[1], HOME[2]))
     controls.update()
   }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The orbit ball (Workshop OrbitSphere) turns the camera about the controls'
+  // target through this sink, outside React: a drag arrives at pointer rate.
+  // OrbitControls rebuilds its own angles from the camera's position on every
+  // update, so moving the camera and calling update keeps the two agreed.
+  useEffect(() => {
+    if (!controls) return
+    setOrbitSink((dx, dy) => {
+      const offset = camera.position.clone().sub(controls.target)
+      camera.position.copy(controls.target).add(orbitOffset(offset, dx, dy))
+      camera.lookAt(controls.target)
+      controls.update()
+    })
+    return () => setOrbitSink(null)
+  }, [camera, controls])
   return null
 }
 
@@ -556,43 +684,64 @@ export function Bench(): JSX.Element {
   const tool = useWorkshop((s) => s.tool)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
+  const partSel = useWorkshop((s) => s.partSel)
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  const onFace = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > TAP_SLOP || e.faceIndex === undefined) return
+  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT and in
+  // VIEW a tap puts it in or out of the selection, so the pad can move, turn
+  // and delete a stamped object with the tool put down (arkinox, 2026-10-10);
+  // in FACE it is caught here, so a tap on it never selects a face of this
+  // object hidden behind it. In the placing tools it lets the tap through, to
+  // the grid it stands on.
+  const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
+    if (e.delta > tapSlop()) return
     e.stopPropagation()
-    useWorkshop.getState().selectFace(e.faceIndex)
+    const t = useWorkshop.getState().tool
+    // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
+    // stamped object picks it, and the pad moves, turns and deletes it.
+    if (t === 'select' || t === 'view') useWorkshop.getState().togglePart(part)
   }
 
+  const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
+    if (e.delta > tapSlop()) return
+    e.stopPropagation()
+    useWorkshop.getState().selectFace(face)
+  }
+
+  // A tap that hits nothing lets go only in VIEW (arkinox, 2026-10-10): there
+  // a tap on a stamped object or a point selects it and VIEW has no DESELECT
+  // row, so empty space is the way out. In SELECT and FACE empty space is
+  // nothing, because a thumb that missed a point by a hair used to lose the
+  // whole selection; DESELECT, the pad's hub and Esc let go there.
   return (
     <Canvas
       camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
-      style={{ background: BG }}
-      // A click that hits nothing deselects and drops a half-built face. In the
-      // placing tools the grid plane catches the click first, so this fires only
-      // on true empty space; in select and face mode there is no plane, so a tap
-      // off any handle lands here.
       onPointerMissed={(e) => {
         if ((e as PointerEvent).button !== 0) return
         const w = useWorkshop.getState()
-        if (w.selection.length || w.selectedFace !== null || w.facePick.length) { w.selectVertex(null); w.clearFacePick() }
+        if (w.tool === 'view' && (w.selection.length || w.partSel.length)) w.selectVertex(null)
       }}
+      style={{ background: BG }}
     >
-      {/* A key light high and to one side, a dim fill from behind: faces read by
-          their tilt, and the dark backs (ShardMesh lit) show through any hole. */}
-      <ambientLight intensity={0.4} />
-      <directionalLight position={[8, 12, 6]} intensity={0.9} />
-      <directionalLight position={[-9, 2, -3]} intensity={0.6} />
-      {/* One finger or left drag orbits, except in SELECT where that drag is the
-          marquee's. Two fingers, or the right button, pan the view in the screen
-          plane; pinch or the wheel dollies, in to 0.6 of a gibson so a fifth-gibson
-          step fills a good share of a phone's screen. These are the controls' own bindings. */}
+      {/* A key light high and to one side, a fill from behind, over a strong
+          ambient: faces read by their tilt yet stay near the world's full
+          color, and the darker backs (ShardMesh lit) show through any hole.
+          One rig for the bench, the avatar preview and the thumbnails
+          (shardLight.tsx; arkinox, 2026-10-12). */}
+      <ShardLights />
+      {/* One finger or left drag orbits, except in SELECT where that drag is
+          the marquee's and the orbit ball turns the view (arkinox,
+          2026-10-10). Two fingers, or the right button, pan
+          the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
+          gibson so a fifth-gibson step fills a good share of a phone's screen.
+          These are the controls' own bindings. */}
       <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+      <OrbitHold />
       <Marquee />
       <Aim />
       <Keys />
@@ -602,7 +751,7 @@ export function Bench(): JSX.Element {
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} />}
+      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
       <Ghost />
       <PickLoop />
       <FaceHighlight />

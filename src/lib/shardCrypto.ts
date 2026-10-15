@@ -25,7 +25,7 @@ export const ALGO = 'aes-256-gcm'
 
 /** What actually gets encrypted: the shard, where it sits, and in which plane. */
 export interface DeployedPayload {
-  shard: import('./shards').ShardPayload
+  shard: import('sno-core/shards').ShardPayload
   at: { x: string; y: string; z: string }
   plane: 0 | 1
 }

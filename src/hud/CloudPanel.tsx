@@ -17,6 +17,7 @@ import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import type { RouteProfile } from '../lib/movePlan'
+import { RATIO_MIN_SAMPLES, ratioOf, useExperience } from '../lib/experience'
 import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
@@ -93,6 +94,8 @@ export function CloudPanel(): JSX.Element {
 
   // Where the paid hop starts winning, measured (lib/crossover): the setting
   // explains itself with the number rather than a promise.
+  const samples = useExperience((st) => st.samples)
+  const experience = ratioOf(samples)
   const crossover = offloadFrom('time', {
     hopCeiling: hopCeil,
     sidestepCeiling: sidestepCeil,
@@ -101,6 +104,7 @@ export function CloudPanel(): JSX.Element {
     signerKind,
     cantorMsByHeight,
     sha256PerSec,
+    experience,
   })
 
   const tag = prefs.mode === 'off' ? 'OFF' : active || cloud.status === 'error' ? STATUS_LABEL[cloud.status] : prefs.mode.toUpperCase()
@@ -181,6 +185,9 @@ export function CloudPanel(): JSX.Element {
               Number.isFinite(crossover)
                 ? ` On this machine, paying is faster from 2^${crossover} up.`
                 : ' On this machine, walking is faster everywhere it can reach, so TIME buys only where it cannot cross at all.'
+            )}
+            {prefs.profile === 'time' && samples.length >= RATIO_MIN_SAMPLES && (
+              ` HOSAKA's estimates are corrected by experience: over your last ${samples.length} jobs it ran at ${experience.toFixed(2)}× what it estimated.`
             )}
           </span>
           <hr className="cloud__rule" />

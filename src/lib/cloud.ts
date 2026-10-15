@@ -32,7 +32,7 @@ import {
   type HosakaJob,
   type HosakaLimits,
   type Waker,
-} from './hosaka'
+  keysPending } from './hosaka'
 import type { Position } from './space'
 
 export type CloudMode = 'auto' | 'ask' | 'off'
@@ -63,6 +63,7 @@ export function defaultCloudPrefs(): CloudPrefs {
 const PREFS_KEY = 'onosendai:cloud'
 const JOB_KEY = 'onosendai:cloudJob'
 const REGION_KEYS_KEY = 'onosendai:cloudRegionKeys'
+const KEYS_TICKET_KEY = 'onosendai:cloudKeys'
 
 export function loadCloudPrefs(): CloudPrefs {
   const d = defaultCloudPrefs()
@@ -151,6 +152,36 @@ export interface PendingCloudJob {
   createdAt: number
   stage: CloudStage
   deposit: CloudInvoice | null
+  /** Seconds the provider's ladder estimated for this job's height, at submit. */
+  estSeconds?: number
+  /** Date.now() when the job began computing, the payment wait behind it. */
+  computingAt?: number
+  /**
+   * Present on a ride bought from HOSAKA (action 'ride'; arkinox,
+   * 2026-10-11): the two blocks, the station set bound the event declares
+   * (as_of, absent on a ride chained from a stop), and the exact stop
+   * coordinate the hyperjump lands on. With prevEventId, everything the
+   * hyperjump needs besides HOSAKA's proof, so a reload signs the same ride.
+   */
+  ride?: PendingRide
+}
+
+export interface PendingRide {
+  fromHeight: number
+  toHeight: number
+  asOf?: number
+  /** 64 hex, the destination stop's exact coordinate. */
+  toCoordHex: string
+}
+
+function rideOfRecord(raw: unknown): PendingRide | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Partial<PendingRide>
+  const height = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0
+  if (!height(r.fromHeight) || !height(r.toHeight) || r.fromHeight === r.toHeight) return null
+  if (typeof r.toCoordHex !== 'string' || !/^[0-9a-f]{64}$/.test(r.toCoordHex)) return null
+  if (r.asOf !== undefined && !height(r.asOf)) return null
+  return { fromHeight: r.fromHeight, toHeight: r.toHeight, toCoordHex: r.toCoordHex, ...(r.asOf !== undefined ? { asOf: r.asOf } : {}) }
 }
 
 export function loadCloudJob(): PendingCloudJob | null {
@@ -159,7 +190,10 @@ export function loadCloudJob(): PendingCloudJob | null {
     if (!raw) return null
     const r = JSON.parse(raw) as Partial<PendingCloudJob>
     if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
-    if (r.action !== 'hop' && r.action !== 'sidestep') return null
+    if (r.action !== 'hop' && r.action !== 'sidestep' && r.action !== 'ride') return null
+    // A ride's record is worthless without the ride it was bought for.
+    const ride = r.action === 'ride' ? rideOfRecord(r.ride) : null
+    if (r.action === 'ride' && ride === null) return null
     if (r.stage !== 'awaiting_payment' && r.stage !== 'paid' && r.stage !== 'computing') return null
     if (typeof r.pubkey !== 'string' || typeof r.prevEventId !== 'string') return null
     if (!r.from || !r.to || (r.plane !== 0 && r.plane !== 1)) return null
@@ -179,6 +213,11 @@ export function loadCloudJob(): PendingCloudJob | null {
       createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
       stage: r.stage,
       deposit: r.deposit ?? null,
+      // Kept across a reload: the patience a long job is polled with, and
+      // when it began computing (arkinox, 2026-10-11; a ride is ten minutes).
+      ...(typeof r.estSeconds === 'number' && Number.isFinite(r.estSeconds) ? { estSeconds: r.estSeconds } : {}),
+      ...(typeof r.computingAt === 'number' && Number.isFinite(r.computingAt) ? { computingAt: r.computingAt } : {}),
+      ...(ride ? { ride } : {}),
     }
   } catch {
     return null
@@ -191,6 +230,50 @@ export function saveCloudJob(record: PendingCloudJob): void {
 
 export function clearCloudJob(): void {
   try { localStorage.removeItem(JOB_KEY) } catch { /* private mode */ }
+}
+
+/**
+ * The ticket for cubes still being computed after their hop has landed.
+ *
+ * A hop with destination cubes is delivered in two stages: the hop's own
+ * proof first, which is what the avatar needs to move, and the cubes after.
+ * Once the move is signed the pending job record is gone, so this small
+ * ticket is what remains to collect the second stage: the job it belongs to,
+ * the token that reads it, and where the hop landed, which is what the cubes
+ * are held against. It survives a reload, so a phone put away mid job still
+ * collects its cubes when it comes back.
+ */
+export interface PendingKeys {
+  version: 1
+  jobId: string
+  pollToken: string
+  /** Where the hop landed: the cubes are around this point. */
+  to: WirePosition
+  plane: Plane
+  /** Date.now() when the hop landed and the wait for cubes began. */
+  at: number
+}
+
+export function loadKeysTicket(): PendingKeys | null {
+  try {
+    const raw = localStorage.getItem(KEYS_TICKET_KEY)
+    if (!raw) return null
+    const r = JSON.parse(raw) as Partial<PendingKeys>
+    if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
+    if (!r.to || (r.plane !== 0 && r.plane !== 1)) return null
+    positionFromWire(r.to)
+    return { version: 1, jobId: r.jobId, pollToken: r.pollToken, to: r.to, plane: r.plane, at: typeof r.at === 'number' ? r.at : Date.now() }
+  } catch {
+    return null
+  }
+}
+
+export function saveKeysTicket(t: PendingKeys): void {
+  try { localStorage.setItem(KEYS_TICKET_KEY, JSON.stringify(t)) } catch { /* private mode */ }
+}
+
+export function clearKeysTicket(): void {
+  try { localStorage.removeItem(KEYS_TICKET_KEY) } catch { /* private mode */ }
 }
 
 /**
@@ -355,6 +438,31 @@ export interface CloudDriverHooks {
 /** Rounds of "pay, start" tolerated: a short payment can ask once more. */
 const PAYMENT_ROUNDS = 3
 
+const MINUTE = 60_000
+
+/**
+ * How long to keep polling one job before handing it back for RESUME.
+ *
+ * It used to be a flat hour for every job, which is two wrong answers at
+ * once: a two minute hop that dies in its first second held the screen for
+ * an hour, and an h30 hop sold at about 4.2 hours was abandoned long before
+ * it could possibly land. Patience is the job's own quote times three, plus
+ * ten minutes for the queue and the cold starts, floored at twenty minutes
+ * so a tiny job still gets a fair wait, and capped at six hours, past which
+ * HOSAKA's own reaper has long since marked the job failed and refunded it.
+ *
+ *   a 103 s hop     the floor, 20 minutes
+ *   a 565 s hop     3 x 565 s + 10 min, about 38 minutes
+ *   an h30 at 4.2 h the cap, 6 hours
+ *
+ * Handing it back is not losing it: the record stays on disk and RESUME
+ * picks the same job up by its id and token.
+ */
+export function jobPatienceMs(estSeconds?: number): number {
+  const est = typeof estSeconds === 'number' && Number.isFinite(estSeconds) && estSeconds > 0 ? estSeconds : 0
+  return Math.min(6 * 60 * MINUTE, Math.max(20 * MINUTE, est * 3_000 + 10 * MINUTE))
+}
+
 function progressOf(job: HosakaJob): number | null {
   const r = job.result as { progress_percent?: unknown } | null
   return r && typeof r.progress_percent === 'number' ? Math.min(1, Math.max(0, r.progress_percent / 100)) : null
@@ -406,10 +514,18 @@ export async function driveCloudJob(
       hooks.onRecord(record)
     }
 
+    // The clock for the experience record starts here, after any payment wait.
+    if (record.computingAt === undefined) { record = { ...record, computingAt: Date.now() }; hooks.onRecord(record) }
     hooks.onStage('computing', { invoice: null, progress: null, message: null })
+    // A staged hop ends the wait here: its own proof is whole, so the move is
+    // signed now rather than after the destination cubes finish, which is
+    // work the avatar does not need in order to move. The caller collects the
+    // cubes from the same job afterwards (loadKeysTicket).
     const job = await client.waitForJob(record.jobId, record.pollToken, {
       signal,
       onPoll: (j) => hooks.onStage('computing', { progress: progressOf(j) }),
+      stopWhen: keysPending,
+      maxWaitMs: jobPatienceMs(record.estSeconds),
     })
     return { job, record }
   }
@@ -439,7 +555,8 @@ export function verifyCloudResult(action: HosakaAction, result: unknown, move: C
       const msg = event.data
       if (msg.id !== request.id) return
       if ('error' in msg) reject(new Error(msg.error))
-      else resolve(msg.failed)
+      else if ('failed' in msg) resolve(msg.failed)
+      else reject(new Error('the verifier answered for something else'))
     }
     worker.onerror = () => {
       worker.terminate()
@@ -465,6 +582,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       type: 'done',
       id,
       mode: 'hop',
+      prevEventId: record.prevEventId,
       elapsedMs,
       proofHash: r.hop_n.public_proof,
       // The region integer never left the cloud; its lookup id did.
@@ -482,6 +600,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     type: 'done',
     id,
     mode: 'sidestep',
+    prevEventId: record.prevEventId,
     elapsedMs,
     proofHash: r.proof_hash,
     terrainK: r.terrain_k,
@@ -491,6 +610,8 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       merkleRoots: [r.merkle_x, r.merkle_y, r.merkle_z],
       // 8.5: every opening's siblings leaf first per axis, empty where the axis did not move.
       openings: [r.openings.x.map((p) => p.join('')).join(''), r.openings.y.map((p) => p.join('')).join(''), r.openings.z.map((p) => p.join('')).join('')],
+      // 6.10: read from the result, never recomputed; verifyCloudSidestep checked its price.
+      mnHex: r.mn,
       lcaHeights: r.lca_heights,
     },
     source: 'cloud',
@@ -582,6 +703,20 @@ export function depositSettled(prev: CloudStatus, next: CloudStatus): boolean {
  * or the result is being verified here. Drives the pulsing mark. */
 export function jobInProgress(status: CloudStatus): boolean {
   return status === 'paid' || status === 'computing' || status === 'verifying'
+}
+
+/**
+ * HOSAKA is doing the work right now.
+ *
+ * Narrower than `jobInProgress`, which also counts `paid`: a route is marked
+ * paid the moment it is funded and stays that way between its steps, so a
+ * mixed route computing a local step on this machine reads as in progress
+ * while HOSAKA is idle. `verifying` is this machine checking the result that
+ * came back, which is also not HOSAKA working. Only `computing` is, which is
+ * what the breathing mark over the menu button says.
+ */
+export function hosakaComputing(status: CloudStatus): boolean {
+  return status === 'computing'
 }
 
 // ---------------------------------------------------------------------------

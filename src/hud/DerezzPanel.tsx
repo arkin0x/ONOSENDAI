@@ -14,16 +14,43 @@
 
 import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
+import { firstBreak } from '../lib/events'
+import { confirmRespawn, respawnFailed } from './BrokenChain'
 import { Explanation } from './Explanation'
+
+/**
+ * DEREZZ NOW: a respawn. On a broken chain it is the broken-chain notice's
+ * respawn (BrokenChain confirmRespawn), so the End of Chain entry goes into
+ * RECENT first (review of #227). Either way it waits for the respawn and
+ * resolves to what to say if it failed, null when it did not.
+ */
+export async function derezzNow(): Promise<string | null> {
+  const s = useCyberspace.getState()
+  const broken = firstBreak(s.actions())
+  if (broken) return confirmRespawn(s.identity.pubkey, (broken.lastValid ?? broken.action).id)
+  try {
+    await s.respawn()
+    return null
+  } catch (err) {
+    return respawnFailed(err)
+  }
+}
 
 export function DerezzPanel(): JSX.Element {
   const [armed, setArmed] = useState(false)
-  const chain = useCyberspace((s) => s.chain)
+  const [failed, setFailed] = useState<string | null>(null)
   const live = useCyberspace((s) => s.live)
-  const actions = chain.hops + chain.sidesteps
+  // The chain a derezz retires: its events, the same count the Chain panel
+  // wears. It used to add the lifetime hop and sidestep statistics (every
+  // chain this device ever moved), which is not what a derezz discards
+  // (arkinox, 2026-10-10: "derezz shows the wrong count of actions").
+  const actions = useCyberspace((s) => s.events.length)
 
+  // A broken chain respawns the way the broken-chain notice does, so the
+  // End of Chain entry goes into RECENT first (store respawnFromBrokenChain).
   const derezz = (): void => {
-    useCyberspace.getState().respawn()
+    setFailed(null)
+    void derezzNow().then(setFailed)
     setArmed(false)
   }
 
@@ -58,6 +85,7 @@ export function DerezzPanel(): JSX.Element {
             chain are untouched.
           </Explanation>
           <button className="derezz__arm" onClick={() => setArmed(true)}>DEREZZ</button>
+          {failed && <p className="notice" role="alert">{failed}</p>}
         </>
       )}
     </section>

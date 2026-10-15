@@ -90,7 +90,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const show = useCyberspace((s) => s.showSecrets)
-  const focused = useSecrets((s) => s.focused)
+  // The list's focus dims the rest only when it is a key drawn here. A
+  // scanned place is focused too, so RETURN brings the list back, but it is
+  // no cage, and dimming every cage for it hid the ones around the spot.
+  const focused = useSecrets((s) => (s.focused !== null && s.keys[s.focused] ? s.focused : null))
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 

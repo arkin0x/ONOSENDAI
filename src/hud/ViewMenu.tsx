@@ -2,10 +2,11 @@
  * ViewMenu.tsx — the view controls, summoned by tapping the compass.
  *
  * These are the keys that change how you are looking rather than where you are:
- * Shift+WASD to snap the axes ninety degrees, Tab for the previous view, Esc for
- * top-down, C for the canonical orientation facing the black sun, P for the
- * plane. On a phone they have no home, and they do not deserve permanent screen
- * space either, because you reach for them once and then navigate for a while.
+ * Shift+WASD to snap the axes ninety degrees, Tab for the previous view, TOP for
+ * top-down (a button only since Escape stopped doing it, arkinox 2026-10-01), C
+ * for the canonical orientation facing the black sun, P for the plane. On a
+ * phone they have no home, and they do not deserve permanent screen space
+ * either, because you reach for them once and then navigate for a while.
  *
  * The compass is the right handle for them: it is already the thing that tells
  * you which way you are facing, so it is where you look when that is the
@@ -17,6 +18,7 @@ import { Box, Earth } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { viewCyberspace, viewEarth } from './HyperspacePanel'
 import type { RotateDirection } from '../lib/space'
+import { useEscape } from '../hooks/useEscape'
 
 interface Props {
   onClose: () => void
@@ -26,6 +28,9 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
   // The plane on show: yours at your head, the view's in a view (D-SPACE flips that one).
   const plane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const canGoBack = useCyberspace((s) => s.viewHistory.length > 0)
+  // Mounted only while open, so it is a chip on the Escape stack for as long
+  // as it lives (arkinox, 2026-10-01).
+  useEscape('chip', true, onClose)
 
   const press = (fn: () => void) => (e: React.PointerEvent) => {
     e.preventDefault()

@@ -8,16 +8,24 @@
  * and a subscription has to outlive any component.
  */
 
-import { fetchChainEvents, mergeEvents, watchAuthor } from './chains'
+import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './chains'
 import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
 import type { NostrEvent } from './events'
 
 let current: { pubkey: string; close: () => void } | null = null
 
 export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise<void> {
-  stopSpectating()
+  // From one avatar to the next, only the old watch closes: the spectation
+  // itself is replaced by beginSpectate, which carries the first one's
+  // return view over. Ending it here first dropped that view in BUILD mode,
+  // where ending a spectation puts no angle back, so the camera came home
+  // to the angle of the switch (review of #235).
+  closeWatch()
   const store = useCyberspace.getState()
-  store.beginSpectate(pubkey)
+  // In BUILD mode the build cursor's view stays up and is aimed at them, so
+  // the mode carries on beside the spectation (store/useBuilder.ts).
+  store.beginSpectate(pubkey, useBuilder.getState().active)
 
   // Anything published while the fetch is in flight is caught by the watch,
   // which starts from a minute ago so nothing falls between the two.
@@ -26,10 +34,13 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
   // the explored link survives the refetch: the ids match and the store keeps it.
   let events: ReturnType<typeof mergeEvents> = mergeEvents([], seed)
   if (events.length > 0) store.setSpectateChain(pubkey, events)
+  // Set when the relays hold the chain with a stretch missing; kept for every
+  // later update, since a new action does not fill an old hole.
+  let partial = false
   const close = watchAuthor(pubkey, since, (ev) => {
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(events, [ev])
-    useCyberspace.getState().setSpectateChain(pubkey, events)
+    useCyberspace.getState().setSpectateChain(pubkey, events, partial ? 'partial' : undefined)
   })
   current = { pubkey, close }
 
@@ -38,14 +49,35 @@ export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise
     if (current?.pubkey !== pubkey) return
     events = mergeEvents(fetched, events)
     useCyberspace.getState().setSpectateChain(pubkey, events)
-  } catch {
+  } catch (err) {
     if (current?.pubkey !== pubkey) return
+    // A stretch of the chain is on no relay: show it up to the hole and say
+    // so, because for a viewer the hole may never fill. Your own chain holds
+    // on the same answer instead (chainHold.ts).
+    if (err instanceof ChainGapError) {
+      partial = true
+      events = mergeEvents(err.events, events)
+      useCyberspace.getState().setSpectateChain(pubkey, events, 'partial')
+      return
+    }
     useCyberspace.getState().setSpectateChain(pubkey, events, 'error')
   }
 }
 
-export function stopSpectating(): void {
+function closeWatch(): void {
   current?.close()
   current = null
+}
+
+export function stopSpectating(): void {
+  closeWatch()
   if (useCyberspace.getState().spectate) useCyberspace.getState().endSpectate()
 }
+
+// However a spectation ends (END SPECTATION, a view that replaces it, an
+// identity switch), the relay watch on that pubkey goes with it. focusOn
+// clears the spectation in the store and could not reach the socket here,
+// so the subscription used to stay open (review of #235).
+useCyberspace.subscribe((s) => {
+  if (current && s.spectate?.pubkey !== current.pubkey) closeWatch()
+})

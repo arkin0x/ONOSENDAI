@@ -12,23 +12,22 @@
  *
  * Scrubbing history and changing whose chain is shown are not moves, and snap.
  *
- * Duration scales mildly with distance so a one gibson step is a flick and a
- * long haul reads as a haul, but it is clamped: this is punctuation on a commit,
- * not a cutscene, and it must never make the interface feel slow.
+ * The glide itself is lib/avatarLerp.ts AvatarLerp, the one every avatar
+ * uses, over AVATAR_LERP_MS whatever the distance (arkinox, 2026-10-12). It
+ * used to scale with distance here (220 ms plus 45 ms per cell, capped at
+ * 900 ms); one constant for every avatar replaced that.
+ *
+ * The move is registered in a layout effect, before the browser can paint:
+ * a passive effect could let one frame draw the avatar at its new place with
+ * no offset yet, a flash at the destination before the glide began.
  */
 
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Vector3 } from 'three'
-import { cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
+import { anchorCentre, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { travelOffset } from '../lib/travel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-
-/** Seconds, before the per-distance term. */
-const BASE = 0.22
-/** Extra seconds per render cell travelled. */
-const PER_CELL = 0.045
-const MAX = 0.9
 
 interface Props {
   axes: ViewAxes
@@ -44,11 +43,10 @@ export function Travel({ axes }: Props): null {
 
   const previous = useRef<Position>(anchor)
   const previousKey = useRef(focusKey)
-  const from = useRef(new Vector3())
-  const duration = useRef(0)
-  const startedAt = useRef<number | null>(null)
+  const lerp = useRef(new AvatarLerp())
+  const out = useRef<Vec3>([0, 0, 0])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const old = previous.current
     previous.current = anchor
     if (old.x === anchor.x && old.y === anchor.y && old.z === anchor.z) return
@@ -56,45 +54,31 @@ export function Travel({ axes }: Props): null {
     const cut = previousKey.current !== focusKey || exploring
     previousKey.current = focusKey
     if (cut) {
+      lerp.current.clear()
       travelOffset.set(0, 0, 0)
-      startedAt.current = null
       return
     }
 
-    // Where the avatar was, expressed against the origin it now uses.
-    const [x, y, z] = cellCentre(old, alignedOrigin(anchor, scaleExp), scaleExp, axes)
-    from.current.set(x, y, z)
-
-    // A hop far enough to leave the drawn world would animate a mesh nobody can
-    // see; snap those instead of pretending to fly there.
-    if (from.current.length() > 400) {
-      travelOffset.set(0, 0, 0)
-      startedAt.current = null
-      return
-    }
-
-    duration.current = Math.min(MAX, BASE + PER_CELL * from.current.length())
-    startedAt.current = null
-    travelOffset.copy(from.current)
+    // Where the avatar was, expressed against the origin it now uses, as an
+    // offset from where it now stands. Below the continuous range it stands
+    // on the origin and the subtraction is of zero; in it the avatar stands
+    // at its sub-cell position (anchorCentre), and travelOffset has to be
+    // measured from there for the hop to end where the avatar is drawn.
+    const [x, y, z] = placeCentre(old, alignedOrigin(anchor, scaleExp), scaleExp, axes)
+    const [sx, sy, sz] = anchorCentre(anchor, scaleExp, axes)
+    // A hop far enough to leave the drawn world snaps (AVATAR_SNAP_CELLS);
+    // one that lands mid-glide continues from where the avatar is drawn.
+    const now = performance.now()
+    lerp.current.move([x - sx, y - sy, z - sz], now)
+    travelOffset.set(...lerp.current.offset(now, out.current))
     // scaleExp and axes are read at commit time on purpose: a zoom or a rotation
     // mid-flight must not restart or re-aim a journey already under way.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, focusKey])
 
-  useFrame((state) => {
+  useFrame(() => {
     if (travelOffset.lengthSq() === 0) return
-    if (startedAt.current === null) startedAt.current = state.clock.elapsedTime
-
-    const t = (state.clock.elapsedTime - startedAt.current) / duration.current
-    if (t >= 1) {
-      travelOffset.set(0, 0, 0)
-      startedAt.current = null
-      return
-    }
-    // Ease out: leaves quickly, settles onto the destination rather than
-    // stopping dead on it.
-    const k = 1 - t
-    travelOffset.copy(from.current).multiplyScalar(k * k * k)
+    travelOffset.set(...lerp.current.offset(performance.now(), out.current))
   })
 
   return null

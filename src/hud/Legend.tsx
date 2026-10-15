@@ -4,6 +4,7 @@
 
 import { boundaryColor, terrainColor } from '../lib/palette'
 import { Explanation } from './Explanation'
+import { Wrench } from 'lucide-react'
 
 const TERRAIN_SAMPLES = [0, 4, 6, 8, 10, 12, 14, 16]
 const HEIGHT_SAMPLES = [5, 20, 40, 60, 80]
@@ -23,6 +24,15 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
   { what: 'Red dodecahedron: your avatar', glyph: ball('#ff2323') },
   { what: "White dodecahedron: another identity's avatar", glyph: ball('#ffffff') },
   {
+    what: 'Small glowing yellow star: one of your Starred Places (POSITION panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="8.5" fill="rgba(255, 216, 77, 0.16)" />
+        <path d="M10 2.5 L11.9 7.6 L17.1 7.7 L13 11 L14.4 16.3 L10 13.2 L5.6 16.3 L7 11 L2.9 7.7 L8.1 7.6 Z" fill="#ffd84d" stroke="#fff3c0" strokeWidth="0.6" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     what: 'Yellow rotating cube: hyperjump station',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -40,6 +50,44 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
         <circle cx="10" cy="10" r="6.5" fill="rgba(146, 88, 209, 0.22)" stroke="#9258d1" strokeWidth="2.2" />
       </svg>
     ),
+  },
+  {
+    what: 'Solid red line: your movement path, published to the relays',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff0000" strokeWidth="2" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    what: 'Dashed red line: moves made on this device and not published yet (LOCAL, or waiting for a relay)',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#d94848" strokeOpacity="0.85" strokeWidth="2" strokeDasharray="3 2.4" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    what: "Pink line: moves inside a game, joining each of the game's actions that names a place in the game (one that names none is passed over). They are play inside the game, not travel through cyberspace, so your position stays exactly where you entered the game, and the red line holds still there",
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 16 L8 8 L13 12 L18 4" fill="none" stroke="#ff7ad9" strokeWidth="2" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    what: 'Pink box: the region a game is played in, drawn while the avatar is inside that game',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <g fill="none" stroke="#ff7ad9" strokeWidth="1.2" strokeLinejoin="round">
+          <path d="M4 7 L11 7 L11 16 L4 16 Z M4 7 L9 3 L16 3 L11 7 M16 3 L16 12 L11 16" />
+        </g>
+      </svg>
+    ),
+  },
+  {
+    what: 'Wrench, and a white cube marked BUILD: build mode and its build cursor. The next object or message you place lands in the cube\'s cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
+    glyph: <Wrench size={16} strokeWidth={2} color="#f2f7ff" aria-hidden />,
   },
   {
     what: 'Spawn point mesh: spawn point',
@@ -64,7 +112,7 @@ export function Legend(): JSX.Element {
       </header>
 
       <div className="legend__row">
-        <span className="legend__label">Terrain K</span>
+        <span className="legend__label">Terrain dots - terrain difficulty (K)</span>
         <div className="swatches">
           {TERRAIN_SAMPLES.map((k) => (
             <span
@@ -111,12 +159,14 @@ export function Legend(): JSX.Element {
       <Explanation>
         Cyberspace is not flat. A terrain function required for movement proofs
         imposes hills and valleys on the geography of cyberspace, represented by
-        the colorful point cloud surrounding your avatar. The terrain K value is
-        the difficulty to move to each point. The cubic grids represent the
-        power-of-2 regions you are currently within. Leaving a region is when the
-        cost of movement jumps the most; depending on the alignment of the region,
-        the cost may be impossibly high, requiring either cloud compute or a trip
-        through hyperspace.
+        the terrain dots, the colorful point cloud surrounding your avatar. Each
+        dot shows terrain difficulty: its terrain K value is the difficulty to
+        move to that point, and the warmer its color, the more work a hop there
+        takes. The cubic grids represent the power-of-2 regions you are
+        currently within. Leaving a region is when the cost of movement jumps
+        the most; depending on the alignment of the region, the cost may be
+        impossibly high, requiring either cloud compute or a trip through
+        hyperspace.
       </Explanation>
     </section>
   )

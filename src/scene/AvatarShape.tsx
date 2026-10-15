@@ -5,12 +5,21 @@
  * asks useAvatars for the pubkey's shard and draws it in the dodecahedron's
  * cell, unlit under the bloom as deployed shards are; without one, the
  * wireframe icosahedron in the colour the caller gives.
+ *
+ * A shard scales with the zoom like everything else, and once it is smaller
+ * than the icosahedron it is drawn as the icosahedron, the marker (lib/avatar
+ * avatarDraw). The marker is shrunk at the top of the scale ladder (lib/avatar
+ * spectatorScale), so an avatar at full zoom out is a mark inside cyberspace
+ * rather than an eighth of it. Applied here rather than at the three call
+ * sites so you, a target and a spectated avatar cannot disagree about how big
+ * anybody is.
  */
 
 import { useMemo } from 'react'
 import { EdgesGeometry, IcosahedronGeometry } from 'three'
-import { avatarScale } from '../lib/avatar'
+import { avatarDraw, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
+import { useCyberspace } from '../store/useCyberspace'
 import { ShardMesh } from './ShardMesh'
 
 interface Props {
@@ -18,22 +27,37 @@ interface Props {
   color: string
   renderOrder?: number
   depthTest?: boolean
+  /**
+   * Seen from inside, in WALK: a shard's faces have their backs culled, and
+   * the plain icosahedron, a cage of edges with nothing sticking out of it,
+   * is not drawn at all, since from its centre it is only lines across the
+   * view.
+   */
+  firstPerson?: boolean
+  /** A faint outline of the icosahedron whatever the avatar is: where you really stand while WALK runs ahead. */
+  outline?: boolean
 }
 
-export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true }: Props): JSX.Element {
+export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false }: Props): JSX.Element | null {
   const shard = useAvatarShard(pubkey)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
+  const spectator = spectatorScale(scaleExp)
   const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
-  if (shard && shard.vertices.length > 0) {
-    const k = avatarScale(shard)
+  const draw = !outline && shard && shard.vertices.length > 0 ? avatarDraw(shard, scaleExp) : 'marker'
+  if (shard && draw !== 'marker') {
+    const k = draw.mesh
     return (
       <group scale={[k, k, k]}>
-        <ShardMesh shard={shard} world />
+        <ShardMesh shard={shard} world cull={firstPerson} />
       </group>
     )
   }
+  if (firstPerson) return null
   return (
-    <lineSegments geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-      <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} />
-    </lineSegments>
+    <group scale={[spectator, spectator, spectator]}>
+      <lineSegments geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
+        <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} {...(outline ? { transparent: true, opacity: 0.3 } : {})} />
+      </lineSegments>
+    </group>
   )
 }

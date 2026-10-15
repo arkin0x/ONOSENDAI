@@ -8,15 +8,18 @@
  * the real computation.
  */
 
-import { CloudUpload, Footprints, KeyRound, OctagonAlert } from 'lucide-react'
+import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
+import { ItemIcon } from './ItemIcon'
 import { SecretsModal } from './SecretsModal'
 import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { MAX_COMPUTE_HEIGHT, useCyberspace, type CloudState, type MovePlan, type MoveMode } from '../store/useCyberspace'
+import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
+import { useBrokenChain } from './BrokenChain'
+import { useChainUi } from '../store/useChainUi'
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
   ['single', 'SINGLE ACTION', 'One action per press'],
@@ -47,6 +50,19 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
   return <span className={`status status--${status}`}>{label[status] ?? status}</span>
 }
 
+/**
+ * What a move said while the cursor is still aimed: refused, retrying, or
+ * waiting on the saved chain's signatures. The preview of the next move
+ * takes the panel then, so the reason gets one line above it, or nobody
+ * would see why the move did not go (review of #236). Null when nothing is
+ * to be said there, or when the broken-chain line above already says it.
+ */
+export function noticeWhileAimed(previewing: boolean, proof: Pick<ProofState, 'message'>, broken: boolean): string | null {
+  if (!previewing || proof.message === null) return null
+  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE)) return null
+  return proof.message
+}
+
 export function ProofPanel(): JSX.Element {
   const proof = useCyberspace((s) => s.proof)
   // What calibration measured this machine finishing in budget: conservative
@@ -72,8 +88,16 @@ export function ProofPanel(): JSX.Element {
   // Live preview of the action the cursor is lining up: the same data the
   // route overlay above the controls shows (routePreview.ts).
   const preview = useRoutePreview()
+  // A broken chain refuses every move (store whyNoMove). Said here whatever
+  // the panel is showing, since a preview of a move that cannot be signed
+  // would otherwise stand in for the reason, with the way to the notice.
+  const brokenAt = useBrokenChain()
+  const broken = brokenAt !== null
+  const brokenLine = brokenAt ? brokenChainMessage(brokenAt) : null
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
+  const aimedNotice = noticeWhileAimed(previewing, proof, broken)
+  const refusedWhileAimed = aimedNotice !== null && proof.status === 'infeasible'
   const status =
     plan
       ? plan.status === 'paused' ? (plan.awaiting ? 'signing' : 'paused')
@@ -84,7 +108,8 @@ export function ProofPanel(): JSX.Element {
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
+          ? refusedWhileAimed ? 'infeasible'
+            : preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
   return (
@@ -94,12 +119,21 @@ export function ProofPanel(): JSX.Element {
         <StatusLabel status={status} />
       </header>
 
+      {broken && (
+        <p className="notice">
+          {brokenLine}
+          <button className="tag tag--tap" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY, AND RESPAWN</button>
+        </p>
+      )}
+
       <div className="bar">
         <div
           className={`bar__fill bar__fill--${proof.status}`}
           style={{ width: `${Math.round(proof.progress * 100)}%` }}
         />
       </div>
+
+      {aimedNotice && <p className="notice" role="status">{aimedNotice}</p>}
 
       {plan ? (
         <RouteView plan={plan} proof={proof} cloud={cloud} onResume={resumePlan} onCancel={cancelPlan} />
@@ -226,14 +260,14 @@ export function ProofPanel(): JSX.Element {
             </div>
           )}
 
-          {proof.message && <p className="notice">{proof.message}</p>}
+          {proof.message && !(broken && proof.message === brokenLine) && <p className="notice">{proof.message}</p>}
         </>
       )}
 
       {/* Every region you hold the key to, and what it cost to get there. */}
       <div className="proof__secrets">
         <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
-          <KeyRound size={12} strokeWidth={2.25} aria-hidden /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
+          <ItemIcon type="key" size={12} /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
       {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}

@@ -1,0 +1,1205 @@
+/**
+ * space.test.ts — covers the coordinate and view maths that the renderer
+ * depends on. These are the parts that fail silently: a wrong axis mapping or a
+ * float-truncated offset still draws a plausible-looking grid.
+ */
+
+import { describe, it, expect } from 'vitest'
+import { Matrix4, Quaternion, Vector3 } from 'three'
+import { AXIS_MAX, findLcaHeight } from 'cyberspace-core'
+import {
+  MAX_SCALE_EXP,
+  alignTo,
+  boundaryCoord,
+  boundaryHeight,
+  canonicalQuaternion,
+  OCCUPANCY_SCALE_MAX,
+  cellCentre,
+  cellDelta,
+  cellOffset,
+  claimScreenAxes,
+  clampAxis,
+  flipHandedness,
+  formatStep,
+  originShift,
+  renderDirection,
+  rotateView,
+  snapToAxis,
+  stepFor,
+  subCellFraction,
+  topDownQuaternion,
+  trailingZeros,
+  markerCentre,
+  viewAxes,
+  type Position,
+  type ViewAxes, pointCentre,
+  CONTINUOUS_SCALE_MIN, aimCentres, anchorCentre, deployPoint, itemCentre, placeCentre, type AxisDirection } from '../space'
+import { alignedOrigin } from '../../store/useCyberspace'
+import { coveringBox } from '../covering'
+
+describe('scale helpers', () => {
+  it('computes step sizes as powers of two', () => {
+    expect(stepFor(0)).toBe(1n)
+    expect(stepFor(10)).toBe(1024n)
+    expect(stepFor(84)).toBe(1n << 84n)
+  })
+
+  it('aligns down to the containing cell', () => {
+    expect(alignTo(1000n, 0)).toBe(1000n)
+    expect(alignTo(1000n, 10)).toBe(0n)
+    expect(alignTo(1025n, 10)).toBe(1024n)
+  })
+
+  it('counts trailing zeros', () => {
+    expect(trailingZeros(0n)).toBe(0)
+    expect(trailingZeros(1n)).toBe(0)
+    expect(trailingZeros(8n)).toBe(3)
+    expect(trailingZeros(1n << 40n)).toBe(40)
+  })
+
+  it('clamps to the axis bounds', () => {
+    expect(clampAxis(-5n)).toBe(0n)
+    expect(clampAxis(AXIS_MAX + 10n)).toBe(AXIS_MAX)
+    expect(clampAxis(42n)).toBe(42n)
+  })
+})
+
+describe('boundary cost', () => {
+  // Spec 4.4: cost depends on which boundary is crossed, not distance travelled.
+  it('charges more to cross into 8 than into 9', () => {
+    expect(boundaryHeight(8n, 0)).toBe(4)
+    expect(boundaryHeight(9n, 0)).toBe(1)
+  })
+
+  it('charges the full height at a large power-of-two boundary', () => {
+    // Crossing into 2^k costs k + 1, following h = bit_length(v1 XOR v2):
+    // (2^34 - 1) XOR 2^34 = 2^35 - 1, whose bit length is 35.
+    //
+    // CYBERSPACE_V2.md section 4.4 says this step has "LCA height 34" and needs
+    // "over 17 billion leaves". That prose is off by one against the spec's own
+    // formula and its own worked 7 -> 8 example (7 XOR 8 = 15, bit_length 4,
+    // h = 4, i.e. crossing into 2^3 costs 4). The formula is authoritative and
+    // is what both the Python and TypeScript implementations do.
+    expect(boundaryHeight(1n << 34n, 0)).toBe(35)
+    expect(boundaryHeight(8n, 0)).toBe(4) // the spec's own example, same rule
+  })
+
+  it('never reports below the floor for the scale', () => {
+    for (let scaleExp = 0; scaleExp <= 20; scaleExp++) {
+      const step = stepFor(scaleExp)
+      // A boundary two cells up is aligned but otherwise unremarkable.
+      const c = step * 2n
+      expect(boundaryHeight(c, scaleExp)).toBeGreaterThanOrEqual(scaleExp + 1)
+    }
+  })
+
+  it('agrees with the protocol LCA function', () => {
+    const step = stepFor(6)
+    const c = step * 5n
+    expect(boundaryHeight(c, 6)).toBe(findLcaHeight(c - step, c))
+  })
+
+  it('returns 0 at the axis origin, where there is nothing to cross', () => {
+    expect(boundaryHeight(0n, 0)).toBe(0)
+  })
+})
+
+describe('boundaryCoord', () => {
+  const origin = 1000n
+  const step = 8n
+
+  it('resolves the boundary below cell i when the axis points right', () => {
+    // Cell 0 starts at 1000, cell -1 starts at 992, so the boundary is 1000.
+    expect(boundaryCoord(origin, 0, step, 1)).toBe(1000n)
+    expect(boundaryCoord(origin, 1, step, 1)).toBe(1008n)
+    expect(boundaryCoord(origin, -1, step, 1)).toBe(992n)
+  })
+
+  it('resolves the same physical boundaries when the axis is flipped', () => {
+    // With dir = -1 the cells march the other way, but each returned value must
+    // still be a real cell start, never a midpoint.
+    for (let i = -4; i <= 4; i++) {
+      const c = boundaryCoord(origin, i, step, -1)
+      expect(c % step).toBe(0n)
+    }
+    expect(boundaryCoord(origin, 0, step, -1)).toBe(1008n)
+    expect(boundaryCoord(origin, 1, step, -1)).toBe(1000n)
+  })
+
+  it('always returns the larger of the two adjacent cell starts', () => {
+    for (const dir of [1, -1]) {
+      for (let i = -3; i <= 3; i++) {
+        const here = origin + BigInt(i) * step * BigInt(dir)
+        const before = origin + BigInt(i - 1) * step * BigInt(dir)
+        expect(boundaryCoord(origin, i, step, dir)).toBe(here > before ? here : before)
+      }
+    }
+  })
+})
+
+describe('subCellFraction', () => {
+  it('is always zero at gibson scale', () => {
+    expect(subCellFraction(12345n, 0)).toBe(0)
+  })
+
+  it('locates a position inside its cell', () => {
+    expect(subCellFraction(1024n + 512n, 10)).toBeCloseTo(0.5, 3)
+    expect(subCellFraction(1024n, 10)).toBe(0)
+  })
+
+  it('survives steps larger than 2^53, where float division would collapse', () => {
+    const scaleExp = 80
+    const step = stepFor(scaleExp)
+    const value = step * 3n + step / 4n
+    expect(subCellFraction(value, scaleExp)).toBeCloseTo(0.25, 3)
+    // The naive implementation loses this entirely.
+    expect(Number(step / 4n) / Number(step)).not.toBeNaN()
+  })
+
+  it('stays within [0, 1) across scales', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp += 7) {
+      const f = subCellFraction((1n << 84n) + 12345n, scaleExp)
+      expect(f).toBeGreaterThanOrEqual(0)
+      expect(f).toBeLessThan(1)
+    }
+  })
+})
+
+describe('cellDelta / cellOffset', () => {
+  it('measures signed distance from an origin, in cells', () => {
+    expect(cellDelta(1034n, 1024n, 0)).toBe(10)
+    expect(cellDelta(512n, 1024n, 10)).toBeCloseTo(-0.5, 3)
+  })
+
+  it('survives steps larger than 2^53, where float division would collapse', () => {
+    const origin = 1n << 84n
+    expect(cellDelta(origin + (1n << 83n), origin, 84)).toBeCloseTo(0.5, 3)
+  })
+
+  it('centres the marker on the occupied gibson at gibson scale', () => {
+    // A coordinate names a whole unit gibson; at 2^0 the cell IS the gibson,
+    // so the marker sits dead centre, not at the lattice corner.
+    expect(cellOffset(12345n, 12345n, 0, 1)).toBe(0)
+    expect(cellOffset(12345n, 12345n, 0, -1)).toBe(0)
+    expect(cellOffset(12346n, 12345n, 0, 1)).toBe(1)
+  })
+
+  it('mirrors screen offsets when the axis points left or down', () => {
+    // A point 1/4 into the avatar's cell renders 1/4 from the low edge (plus
+    // the half-gibson centring nudge), and the low edge swaps sides when the
+    // axis is flipped.
+    const nudge = 0.5 / 1024
+    expect(cellOffset(1024n + 256n, 1024n, 10, 1)).toBeCloseTo(-0.25 + nudge, 6)
+    expect(cellOffset(1024n + 256n, 1024n, 10, -1)).toBeCloseTo(0.25 - nudge, 6)
+  })
+
+  it('reaches into neighbouring cells for cursor endpoints', () => {
+    // Three cells to the right of the aligned origin, dead centre.
+    expect(cellOffset(1024n * 4n + 512n, 1024n, 10, 1)).toBeCloseTo(3, 2)
+  })
+})
+
+describe('canonical view (CYBERSPACE_V2.md section 11.3)', () => {
+  it('faces the black sun: +X right, +Y up, looking toward +Z', () => {
+    const axes = viewAxes(canonicalQuaternion())
+    expect(axes.right).toEqual({ axis: 'x', dir: 1 })
+    expect(axes.up).toEqual({ axis: 'y', dir: 1 })
+    // "out" points at the viewer, so looking toward +Z means out is -Z.
+    expect(axes.out).toEqual({ axis: 'z', dir: -1 })
+  })
+
+  it('is reachable from the top-down view by rotation alone', () => {
+    // Section 11.4 forbids mirroring or re-labelling axes, so the canonical
+    // view must sit in the same rotation group as every other view.
+    const dirs = ['left', 'right', 'up', 'down'] as const
+    const target = canonicalQuaternion()
+    const seen = new Set<string>()
+    const frontier = [topDownQuaternion()]
+    let reached = false
+
+    while (frontier.length > 0) {
+      const q = frontier.pop()!
+      if (q.angleTo(target) < 1e-6) {
+        reached = true
+        break
+      }
+      const a = viewAxes(q)
+      const k = `${a.right.axis}${a.right.dir}|${a.up.axis}${a.up.dir}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      for (const dir of dirs) frontier.push(rotateView(q, dir))
+    }
+
+    expect(reached).toBe(true)
+  })
+
+  it('is right-handed in render space, so the image is not mirrored', () => {
+    const q = canonicalQuaternion()
+    const right = new Vector3(1, 0, 0).applyQuaternion(q)
+    const up = new Vector3(0, 1, 0).applyQuaternion(q)
+    const back = new Vector3(0, 0, 1).applyQuaternion(q)
+    // right x up must equal back for a right-handed basis.
+    expect(right.clone().cross(up).angleTo(back)).toBeLessThan(1e-6)
+  })
+})
+
+describe('handedness (CYBERSPACE_V2.md sections 9.4 and 11.4)', () => {
+  it('is its own inverse', () => {
+    const v = new Vector3(3, -5, 7)
+    expect(flipHandedness(flipHandedness(v)).equals(v)).toBe(true)
+  })
+
+  it('inverts handedness, which is what makes cyberspace left-handed', () => {
+    // X_cs = X_ecef, Y_cs = Z_ecef, Z_cs = Y_ecef is a two-axis swap of a
+    // right-handed frame, so the cyberspace basis has determinant -1.
+    const m = new Matrix4().makeBasis(
+      new Vector3(1, 0, 0), // X_cs = X_ecef
+      new Vector3(0, 0, 1), // Y_cs = Z_ecef
+      new Vector3(0, 1, 0), // Z_cs = Y_ecef
+    )
+    expect(m.determinant()).toBeCloseTo(-1, 10)
+  })
+
+  it('renders every view without mirroring', () => {
+    // A mirrored basis would still draw a plausible grid, so assert the
+    // property directly across the whole reachable view set.
+    const dirs = ['left', 'right', 'up', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[(i * 5 + 1) % 4])
+      const right = new Vector3(1, 0, 0).applyQuaternion(q)
+      const up = new Vector3(0, 1, 0).applyQuaternion(q)
+      const back = new Vector3(0, 0, 1).applyQuaternion(q)
+      expect(right.clone().cross(up).angleTo(back)).toBeLessThan(1e-6)
+    }
+  })
+
+  it('keeps screen axes a valid cyberspace frame in every view', () => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[i % 4])
+      const a = viewAxes(q)
+      expect(new Set([a.right.axis, a.up.axis, a.out.axis]).size).toBe(3)
+    }
+  })
+})
+
+describe('view orientation', () => {
+  it('starts top-down with +X right, +Z up, +Y toward the viewer', () => {
+    // With handedness converted, forward (+Z, the black sun direction) points
+    // up the screen, which is the conventional map orientation.
+    const axes = viewAxes(topDownQuaternion())
+    expect(axes.right).toEqual({ axis: 'x', dir: 1 })
+    expect(axes.up).toEqual({ axis: 'z', dir: 1 })
+    expect(axes.out).toEqual({ axis: 'y', dir: 1 })
+  })
+
+  it('snaps arbitrary directions to the dominant world axis', () => {
+    expect(snapToAxis(new Vector3(0.9, 0.1, 0))).toEqual({ axis: 'x', dir: 1 })
+    expect(snapToAxis(new Vector3(0, -0.8, 0.2))).toEqual({ axis: 'y', dir: -1 })
+  })
+
+  it('returns to the original orientation after four rotations', () => {
+    for (const dir of ['left', 'right', 'up', 'down'] as const) {
+      let q = topDownQuaternion()
+      for (let i = 0; i < 4; i++) q = rotateView(q, dir)
+      expect(q.angleTo(topDownQuaternion())).toBeLessThan(1e-6)
+    }
+  })
+
+  it('keeps every reachable view axis-aligned', () => {
+    // Walk a pseudo-random rotation sequence and assert the basis never drifts
+    // off-axis, which is what would break the screen-to-world move mapping.
+    const dirs = ['left', 'right', 'up', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 40; i++) {
+      q = rotateView(q, dirs[(i * 7 + 3) % 4])
+      for (const basis of [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)]) {
+        const v = basis.clone().applyQuaternion(q)
+        const dominant = Math.max(Math.abs(v.x), Math.abs(v.y), Math.abs(v.z))
+        expect(dominant).toBeGreaterThan(0.999)
+      }
+    }
+  })
+
+  it('yields three mutually distinct screen axes in every view', () => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[i % 4])
+      const axes = viewAxes(q)
+      const used = new Set([axes.right.axis, axes.up.axis, axes.out.axis])
+      expect(used.size).toBe(3)
+    }
+  })
+
+  it('rotates left and right in opposite directions', () => {
+    const base = topDownQuaternion()
+    const left = viewAxes(rotateView(base, 'left'))
+    const right = viewAxes(rotateView(base, 'right'))
+    expect(left.right.axis).toBe(right.right.axis)
+    expect(left.right.dir).toBe(-right.right.dir)
+  })
+
+  it('preserves the up axis when yawing and the right axis when pitching', () => {
+    const base = topDownQuaternion()
+    // Yaw keeps screen-up pinned to the same world axis it already had.
+    expect(viewAxes(rotateView(base, 'right')).up).toEqual(viewAxes(base).up)
+    // Pitch keeps screen-right pinned.
+    expect(viewAxes(rotateView(base, 'up')).right).toEqual(viewAxes(base).right)
+  })
+
+  it('does not mutate the quaternion it is given', () => {
+    const base = topDownQuaternion()
+    const snapshot = base.clone()
+    rotateView(base, 'left')
+    expect(base.equals(snapshot)).toBe(true)
+  })
+})
+
+describe('view history invariants', () => {
+  it('treats rotation as reversible, which is what Tab relies on', () => {
+    const base = topDownQuaternion()
+    const rotated = rotateView(base, 'right')
+    const back = rotateView(rotated, 'left')
+    expect(back.angleTo(base)).toBeLessThan(1e-6)
+  })
+
+  it('produces exactly 24 distinct axis-aligned orientations', () => {
+    const seen = new Set<string>()
+    const frontier: Quaternion[] = [topDownQuaternion()]
+    const key = (q: Quaternion) => {
+      const a = viewAxes(q)
+      return `${a.right.axis}${a.right.dir}|${a.up.axis}${a.up.dir}|${a.out.axis}${a.out.dir}`
+    }
+
+    while (frontier.length > 0) {
+      const q = frontier.pop()!
+      const k = key(q)
+      if (seen.has(k)) continue
+      seen.add(k)
+      for (const dir of ['left', 'right', 'up', 'down'] as const) {
+        frontier.push(rotateView(q, dir))
+      }
+    }
+
+    expect(seen.size).toBe(24)
+  })
+})
+
+describe('renderDirection: where an absolute axis has gone on screen', () => {
+  const ALL = ['x', 'y', 'z'] as const
+
+  it('puts the black sun dead ahead in the canonical view', () => {
+    // Section 11.3's canonical view faces the black sun, so +Z_cs must come out
+    // as straight into the screen. Render -Z is the direction the camera looks.
+    const axes = viewAxes(canonicalQuaternion())
+    expect(renderDirection(axes, 'z')).toEqual([0, 0, -1])
+  })
+
+  it('is a signed unit vector on exactly one render axis, for every view', () => {
+    // Every orientation reachable by 90 degree rotations, which is every view
+    // the app can be in.
+    const seen = quarterTurnViews()
+    for (const axes of seen) {
+      for (const axis of ALL) {
+        const v = renderDirection(axes, axis)
+        const nonZero = v.filter((c) => c !== 0)
+        expect(nonZero).toHaveLength(1)
+        expect(Math.abs(nonZero[0])).toBe(1)
+      }
+    }
+  })
+
+  it('sends the three axes to three different render axes', () => {
+    // viewAxes returns a permutation, so the inverse must be one too. If two
+    // cyberspace axes landed on the same render axis, a direction-anchored
+    // object would sit on top of another one and never separate.
+    for (const axes of quarterTurnViews()) {
+      const slots = ALL.map((a) => renderDirection(axes, a).findIndex((c) => c !== 0))
+      expect(new Set(slots).size).toBe(3)
+    }
+  })
+
+  it('agrees with viewAxes about which axis is where', () => {
+    for (const axes of quarterTurnViews()) {
+      const basis = [axes.right, axes.up, axes.out]
+      for (let i = 0; i < 3; i++) {
+        const v = renderDirection(axes, basis[i].axis)
+        expect(v[i]).toBe(basis[i].dir)
+      }
+    }
+  })
+})
+
+/** Every view reachable by 90 degree rotations from top-down. */
+function quarterTurnViews(): ViewAxes[] {
+  const out: ViewAxes[] = []
+  const dirs = ['left', 'right', 'up', 'down'] as const
+  for (const a of dirs) {
+    for (const b of dirs) {
+      let q = topDownQuaternion()
+      q = rotateView(q, a)
+      q = rotateView(q, b)
+      out.push(viewAxes(q))
+    }
+  }
+  out.push(viewAxes(topDownQuaternion()))
+  out.push(viewAxes(canonicalQuaternion()))
+  return out
+}
+/**
+ * Deterministic [0, 1) stream, so a failing rotation is reproducible rather
+ * than a one-off that vanishes on the next run.
+ */
+function rng(seed: number): () => number {
+  let s = seed >>> 0
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0
+    let t = Math.imul(s ^ (s >>> 15), 1 | s)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+describe('screen axis permutation', () => {
+  // Regression guard for the unreachable-axis bug. Snapping the camera's three
+  // basis vectors to cyberspace axes INDEPENDENTLY does not have to yield three
+  // different axes: near 45 degrees two of them round to the same one, and the
+  // axis nobody claimed then has no key bound to it, so R/F aliases onto W/S and
+  // the cursor cannot leave the screen plane. Nothing about the picture looks
+  // wrong when that happens, which is why it needs an assertion rather than an
+  // eye.
+  const LOCAL = viewAxes(topDownQuaternion())
+
+  /** The camera's basis, in the scene's local frame, for a given orientation. */
+  const basisOf = (q: Quaternion): [Vector3, Vector3, Vector3] => [
+    new Vector3(1, 0, 0).applyQuaternion(q),
+    new Vector3(0, 1, 0).applyQuaternion(q),
+    new Vector3(0, 0, 1).applyQuaternion(q),
+  ]
+
+  /** Index of the largest component: what independent snapping picks. */
+  const dominant = (v: Vector3): number => {
+    const c = [v.x, v.y, v.z]
+    let i = 0
+    for (let k = 1; k < 3; k++) if (Math.abs(c[k]) > Math.abs(c[i])) i = k
+    return i
+  }
+
+  const expectPermutation = (a: ViewAxes): void => {
+    expect(new Set([a.right.axis, a.up.axis, a.out.axis]).size).toBe(3)
+    for (const d of [a.right, a.up, a.out]) {
+      expect(Math.abs(d.dir)).toBe(1)
+      expect(['x', 'y', 'z']).toContain(d.axis)
+    }
+  }
+
+  it('leaves an axis-aligned camera exactly as it found it', () => {
+    const [r, u, o] = basisOf(new Quaternion())
+    expect(claimScreenAxes(r, u, o, LOCAL)).toEqual(LOCAL)
+  })
+
+  it('is a permutation at the 45 degree angles that broke it', () => {
+    // Built by hand rather than by rotating a quaternion, because at exactly 45
+    // degrees the two competing components are equal and the tie is the whole
+    // point: routed through sin and cos they come out a bit apart, and which of
+    // them wins is then an accident of rounding rather than the case under test.
+    const s = Math.SQRT1_2
+    const bases: Array<[Vector3, Vector3, Vector3]> = []
+    for (const k of [1, -1]) {
+      // Yaw, pitch and roll, each half-way between two axes.
+      bases.push([new Vector3(s, 0, -k * s), new Vector3(0, 1, 0), new Vector3(k * s, 0, s)])
+      bases.push([new Vector3(1, 0, 0), new Vector3(0, s, k * s), new Vector3(0, -k * s, s)])
+      bases.push([new Vector3(s, k * s, 0), new Vector3(-k * s, s, 0), new Vector3(0, 0, 1)])
+    }
+
+    for (const [r, u, o] of bases) {
+      // Assert the fixture really is adversarial before asserting the fix
+      // survives it. A test built on a case that was never degenerate under the
+      // old code protects nothing.
+      expect(new Set([dominant(r), dominant(u), dominant(o)]).size).toBeLessThan(3)
+      expectPermutation(claimScreenAxes(r, u, o, LOCAL))
+    }
+  })
+
+  it('is a permutation on either side of 45 degrees, where the tie breaks', () => {
+    // Just off the tie the old code is sometimes fine and sometimes not, which
+    // is what made the bug intermittent: an orbit sweep measured 4 frames in 24
+    // degenerate. Sweep the neighbourhood rather than only the exact angle.
+    let degenerate = 0
+    const axes = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)]
+    for (const axis of axes) {
+      for (const turns of [1, 3, 5, 7]) {
+        for (const nudge of [-1e-3, 0, 1e-3]) {
+          const q = new Quaternion().setFromAxisAngle(axis, (turns * Math.PI) / 4 + nudge)
+          const [r, u, o] = basisOf(q)
+          if (new Set([dominant(r), dominant(u), dominant(o)]).size < 3) degenerate++
+          expectPermutation(claimScreenAxes(r, u, o, LOCAL))
+        }
+      }
+    }
+    expect(degenerate).toBeGreaterThan(0)
+  })
+
+  it('is a permutation under a diagonal orbit, where all three vectors tie', () => {
+    // Yaw and pitch both at 45 degrees puts the camera down a cube diagonal,
+    // which is the worst case: no basis vector has a clear winner.
+    const q = new Quaternion()
+      .setFromAxisAngle(new Vector3(0, 1, 0), Math.PI / 4)
+      .multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Math.PI / 4))
+    const [r, u, o] = basisOf(q)
+    expectPermutation(claimScreenAxes(r, u, o, LOCAL))
+  })
+
+  it('is a permutation for a thousand random orbits', () => {
+    const next = rng(0x5eed)
+    for (let i = 0; i < 1000; i++) {
+      // Uniform over the rotation group, so no region of the orbit is skipped.
+      const [u1, u2, u3] = [next(), next(), next()]
+      const q = new Quaternion(
+        Math.sqrt(1 - u1) * Math.sin(2 * Math.PI * u2),
+        Math.sqrt(1 - u1) * Math.cos(2 * Math.PI * u2),
+        Math.sqrt(u1) * Math.sin(2 * Math.PI * u3),
+        Math.sqrt(u1) * Math.cos(2 * Math.PI * u3),
+      )
+      const [r, u, o] = basisOf(q)
+      expectPermutation(claimScreenAxes(r, u, o, LOCAL))
+    }
+  })
+
+  it('is a permutation in every one of the 24 axis-aligned views', () => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    let q = topDownQuaternion()
+    for (let i = 0; i < 24; i++) {
+      q = rotateView(q, dirs[i % 4])
+      const [r, u, o] = basisOf(q)
+      expectPermutation(claimScreenAxes(r, u, o, viewAxes(q)))
+    }
+  })
+
+  it('is a permutation even for inputs that are not a basis at all', () => {
+    // Nothing downstream re-checks this, so it must hold by construction rather
+    // than because the camera happens to hand over something well formed.
+    const same = new Vector3(1, 1, 1).normalize()
+    expectPermutation(claimScreenAxes(same, same.clone(), same.clone(), LOCAL))
+    const zero = new Vector3()
+    expectPermutation(claimScreenAxes(zero, zero.clone(), zero.clone(), LOCAL))
+  })
+})
+
+describe('origin re-anchor', () => {
+  // A commit re-anchors render space to the avatar's new aligned cell, so every
+  // coordinate in the scene changes at once. That is a change of frame, not
+  // motion, and the camera absorbs it by adding originShift to both its position
+  // and its orbit target in the same frame. If the two do not cancel exactly,
+  // the world lurches by the difference and back.
+  //
+  // Coordinates are deep in the 85-bit axis, which is the whole point of the
+  // bigint path, but the CELL separations stay well inside the fixed-point
+  // headroom of cellDelta. That is not a convenience: a real move's coordinate
+  // delta is small even when its cost is ruinous, because a sidestep across a
+  // height-60 wall still lands one gibson past it.
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) {
+      out.push(viewAxes(q))
+      q = rotateView(q, dirs[i % 4])
+    }
+    return out
+  })()
+
+  /**
+   * What a fixed world point does, relative to the camera, when the avatar moves
+   * from `from` to `to`. Zero on every axis means the re-anchor was invisible.
+   */
+  const settle = (
+    from: Position, to: Position, world: Position, scaleExp: number, axes: ViewAxes,
+  ): { net: number[]; shift: number[] } => {
+    const before = alignedOrigin(from, scaleExp)
+    const after = alignedOrigin(to, scaleExp)
+    const wasAt = cellCentre(world, before, scaleExp, axes)
+    const nowAt = cellCentre(world, after, scaleExp, axes)
+    const shift = originShift(before, after, scaleExp, axes)
+    // Adding zero folds -0 onto 0. A flipped axis multiplies a zero delta by -1
+    // and toEqual separates the two, which says nothing about the frame.
+    return { net: [0, 1, 2].map((s) => nowAt[s] - wasAt[s] - shift[s] + 0), shift }
+  }
+
+  const AVATAR: Position = { x: (1n << 70n) + 12345n, y: (1n << 45n) + 777n, z: 9_000_000n }
+
+  /** A handful of fixed world points: the mover, its neighbours, and far off. */
+  const witnesses = (p: Position): Position[] => [
+    p,
+    { ...p, x: p.x + 1n },
+    { x: p.x + 3n, y: p.y - 5n, z: p.z + 11n },
+    { x: p.x + 4096n, y: p.y + 65536n, z: p.z - 1024n },
+    { x: p.x - 1_000_000n, y: p.y + 1_000_000n, z: p.z + 500_000n },
+  ]
+
+  it('leaves a fixed point exactly where it was, across scales and moves', () => {
+    let moved = 0
+    for (const scaleExp of [0, 1, 7, 20, 40, 84]) {
+      for (const d of [1n, 2n, 7n, 1024n, 1n << 20n]) {
+        const to: Position = { x: AVATAR.x + d, y: AVATAR.y - d, z: AVATAR.z + d * 3n }
+        for (const axes of VIEWS) {
+          for (const w of witnesses(AVATAR)) {
+            const { net, shift } = settle(AVATAR, to, w, scaleExp, axes)
+            if (shift.some((v) => v !== 0)) moved++
+            expect(net).toEqual([0, 0, 0])
+          }
+        }
+      }
+    }
+    // The frame really did change in most of those, so the zeros above are the
+    // shift cancelling rather than there being nothing to cancel.
+    expect(moved).toBeGreaterThan(0)
+  })
+
+  it('cancels a move that crosses a large power-of-two boundary', () => {
+    // The expensive case in the protocol, and the one where the aligned origin
+    // jumps furthest: every bit below the boundary flips at once.
+    for (const bit of [20n, 40n, 60n, 84n]) {
+      const from: Position = { x: (1n << bit) - 1n, y: (1n << bit) - 1n, z: (1n << bit) - 1n }
+      const to: Position = { x: 1n << bit, y: 1n << bit, z: 1n << bit }
+      for (const scaleExp of [0, 1, 8, 19]) {
+        for (const axes of VIEWS) {
+          const { net, shift } = settle(from, to, from, scaleExp, axes)
+          expect(net).toEqual([0, 0, 0])
+          expect(shift.some((v) => v !== 0)).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('does nothing when the move stays inside the avatar cell', () => {
+    // Sub-cell moves leave the aligned origin alone, so the camera must not be
+    // nudged: the only thing that moved is the avatar within its own cell.
+    const to: Position = { x: AVATAR.x + 1n, y: AVATAR.y + 1n, z: AVATAR.z + 1n }
+    for (const axes of VIEWS) {
+      const shift = originShift(alignedOrigin(AVATAR, 20), alignedOrigin(to, 20), 20, axes)
+      expect(shift.map((v) => v + 0)).toEqual([0, 0, 0])
+    }
+  })
+})
+
+
+describe('pointCentre', () => {
+  const AX = {
+    right: { axis: 'x', dir: 1 },
+    up: { axis: 'y', dir: 1 },
+    out: { axis: 'z', dir: 1 },
+  } as never
+
+  it('draws a mid-cell point at its cell cube centre', () => {
+    // Cell cubes are centred on their integer index, so the continuous
+    // family shifts by half a cell: mid-cell lands ON the integer.
+    const origin = { x: 0n, y: 0n, z: 0n }
+    expect(pointCentre({ x: 8n, y: 8n, z: 8n }, origin, 4, AX)).toEqual([0, 0, 0])
+  })
+
+  it('draws a corner point on its cell cube face, never the next cube', () => {
+    const origin = { x: 0n, y: 0n, z: 0n }
+    expect(pointCentre({ x: 0n, y: 16n, z: 31n }, origin, 4, AX)).toEqual([-0.5, 0.5, 1.4375])
+  })
+
+  it('keeps sub-cell offsets exact at scale 0', () => {
+    const origin = { x: 100n, y: 200n, z: 300n }
+    expect(pointCentre({ x: 101n, y: 202n, z: 303n }, origin, 0, AX)).toEqual([0.5, 1.5, 2.5])
+  })
+})
+
+// Moved here when scale.ts went to sno-core: a step is measured in gibsons and
+// gibsons are cyberspace's, so this test never belonged beside the cell-size
+// formatting it was filed with.
+describe('step', () => {
+  it('reads in gibsons, singular at 2^0', () => {
+    expect(formatStep(0)).toBe('1 gibson')
+    expect(formatStep(10)).toBe('1,024 gibsons')
+    expect(formatStep(40)).toBe('2^40 gibsons')
+  })
+})
+
+/**
+ * The camera and the thing it was sent to look at must agree on where that
+ * thing is. GO TO IT sets the anchor to the item, and a plain focus frames the
+ * continuous point (useCyberspace cursorOffset): [0, 0, 0] at or below
+ * OCCUPANCY_SCALE_MAX, and the sub-cell fraction minus a half above it.
+ *
+ * WorldMessages and WorldShards drew their items with cellCentre, which snaps
+ * to the aligned cell and is therefore always [0, 0, 0] when the anchor IS the
+ * item. Above 33 the camera looked at the point and the item was drawn at its
+ * cell, up to half a cell apart, on a different slice of the coordinate's bits
+ * at every zoom: the item flicked to a new spot near the middle on every step
+ * out and only came right at 33 (arkinox, 2026-09-16).
+ */
+describe('a focused item sits where the camera looks', () => {
+  // What useCyberspace.cursorOffset returns for a plain focus. Kept in the
+  // same shape as the store's so a change there fails here.
+  const cameraTarget = (anchor: Position, scaleExp: number, axes: ViewAxes): [number, number, number] => {
+    if (scaleExp <= OCCUPANCY_SCALE_MAX) return [0, 0, 0]
+    const origin = alignedOrigin(anchor, scaleExp)
+    return [axes.right, axes.up, axes.out].map(
+      (a) => (cellDelta(anchor[a.axis], origin[a.axis], scaleExp) - 0.5) * a.dir,
+    ) as [number, number, number]
+  }
+
+  // A coordinate with bits set all the way down, so the sub-cell fraction is
+  // different at every scale rather than accidentally zero.
+  const item: Position = {
+    x: 0b1011010011100101110100111n * 1000003n + 7n,
+    y: 0b1101001110010111010011101n * 1000033n + 11n,
+    z: 0b1110010111010011101001011n * 1000037n + 13n,
+  }
+
+  const axes = viewAxes(canonicalQuaternion())
+
+  // Multiplying a zero delta by an axis direction of -1 yields -0, which is
+  // equal to 0 by every arithmetic rule and unequal to it by toEqual. The
+  // renderer cannot tell them apart either.
+  const flat = (v: [number, number, number]): number[] => v.map((n) => (n === 0 ? 0 : n))
+
+  it('agrees at every zoom when the item is placed with markerCentre', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const origin = alignedOrigin(item, scaleExp)
+      const drawn = markerCentre(item, origin, scaleExp, axes)
+      const looked = cameraTarget(item, scaleExp, axes)
+      expect(flat(drawn), `scaleExp ${scaleExp}`).toEqual(flat(looked))
+    }
+  })
+
+  it('is exactly what cellCentre got wrong above the occupancy scale', () => {
+    // Below and at 33 the old code was right, which is why the bug only showed
+    // when zoomed out past it.
+    for (let scaleExp = 0; scaleExp <= OCCUPANCY_SCALE_MAX; scaleExp++) {
+      expect(flat(cellCentre(item, alignedOrigin(item, scaleExp), scaleExp, axes))).toEqual(flat(cameraTarget(item, scaleExp, axes)))
+    }
+    // Above it, the snap parts company with the camera, and by a different
+    // amount on every step: that is the jolting.
+    const gaps = new Set<string>()
+    for (let scaleExp = OCCUPANCY_SCALE_MAX + 1; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const snapped = cellCentre(item, alignedOrigin(item, scaleExp), scaleExp, axes)
+      const looked = cameraTarget(item, scaleExp, axes)
+      expect(flat(snapped)).not.toEqual(flat(looked))
+      gaps.add(looked.map((n) => n.toFixed(6)).join(','))
+    }
+    // Many distinct offsets, not one steady one: the item moved every step.
+    expect(gaps.size).toBeGreaterThan(10)
+  })
+})
+
+
+/**
+ * From 2^80 to 2^84 the whole of cyberspace is at most 32 cells to an axis,
+ * and down at 2^84 it is two: snapped to cells, everything in it lands on one
+ * of eight places. So in that range every layer that places a position does
+ * it continuously, the way markerCentre already placed shards, messages and
+ * stops, and the camera follows you to where you are drawn. Below it nothing
+ * changes (arkinox, 2026-10-01).
+ */
+describe('continuous placement from 2^80 up', () => {
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) {
+      out.push(viewAxes(q))
+      q = rotateView(q, dirs[i % 4])
+    }
+    return out
+  })()
+  const flat = (v: number[]): number[] => v.map((n) => (n === 0 ? 0 : n))
+
+  // Coordinates with bits set all the way down and spread over the whole
+  // axis, so every scale sees a different, nonzero sub-cell fraction.
+  const POINTS: Position[] = [
+    { x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn, y: 0x0fedcba9876543210abcn, z: (3n << 82n) + 0x123456789abcdef0123n },
+    { x: 0x2468ace13579bdf02468n, y: (1n << 84n) + (1n << 83n) + 0x13579bdf2468ace1n, z: 0x1ffffffffffffffffffffn },
+    { x: AXIS_MAX, y: 0n, z: (1n << 80n) * 17n + 12345n },
+    { x: (1n << 80n) * 9n, y: (1n << 80n) * 31n + (1n << 79n), z: 7n },
+  ]
+  const ORIGIN_OF = (p: Position, s: number): Position => alignedOrigin(p, s)
+
+  it('names 2^80 as the threshold and reaches the top of the ladder', () => {
+    expect(CONTINUOUS_SCALE_MIN).toBe(80)
+    expect(MAX_SCALE_EXP).toBe(84)
+  })
+
+  it('still snaps to the cell at 2^79 and every scale below it', () => {
+    for (let scaleExp = 0; scaleExp < CONTINUOUS_SCALE_MIN; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes), `scaleExp ${scaleExp}`).toEqual(cellCentre(p, origin, scaleExp, axes))
+          }
+        }
+        // Where the avatar stands: its cell centre, the render origin itself.
+        expect(flat(anchorCentre(anchor, scaleExp, VIEWS[0]))).toEqual([0, 0, 0])
+      }
+    }
+  })
+
+  it('places continuously from 2^80 through 2^84', () => {
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes)).toEqual(pointCentre(p, origin, scaleExp, axes))
+          }
+        }
+      }
+    }
+  })
+
+  it('separates things that share a cell at 2^84 instead of stacking them', () => {
+    // Two coordinates in the same 2^84 octant, far apart inside it. Snapped,
+    // they are one place; placed, they are as far apart as they really are.
+    const a: Position = { x: 1n << 81n, y: 1n << 81n, z: 1n << 81n }
+    const b: Position = { x: 3n << 82n, y: 1n << 83n, z: (1n << 84n) - 1n }
+    const origin = ORIGIN_OF(a, 84)
+    const axes = viewAxes(canonicalQuaternion())
+    expect(cellCentre(a, origin, 84, axes)).toEqual(cellCentre(b, origin, 84, axes))
+    const pa = placeCentre(a, origin, 84, axes)
+    const pb = placeCentre(b, origin, 84, axes)
+    expect(pb[0] - pa[0]).toBeCloseTo(0.75 - 0.125, 4)
+    expect(pb[1] - pa[1]).toBeCloseTo(0.5 - 0.125, 4)
+    // Cyberspace +Z is out of the screen's negative: the canonical view looks along it.
+    expect(Math.abs(pb[2] - pa[2])).toBeCloseTo(1 - 0.125, 3)
+  })
+
+  it('agrees with markerCentre in the range, so avatars, trails and shards cannot part', () => {
+    // markerCentre is what places shards, messages, coins and stops;
+    // placeCentre is what places the avatars, the trail, the cursor and the
+    // ghost. In the range the two must be the same function.
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        const origin = ORIGIN_OF(anchor, scaleExp)
+        for (const p of POINTS) {
+          for (const axes of VIEWS) {
+            expect(placeCentre(p, origin, scaleExp, axes)).toEqual(markerCentre(p, origin, scaleExp, axes))
+          }
+        }
+      }
+    }
+  })
+
+  it('draws you where every other layer would draw your coordinate', () => {
+    // The avatar is drawn at anchorCentre; a trail vertex, a shard you stand
+    // on or the cursor parked on you are drawn at placeCentre of the same
+    // coordinate. One place, at every scale.
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        for (const axes of VIEWS) {
+          expect(flat(anchorCentre(anchor, scaleExp, axes))).toEqual(flat(placeCentre(anchor, ORIGIN_OF(anchor, scaleExp), scaleExp, axes)))
+        }
+      }
+    }
+  })
+
+  it('puts you inside your own cell, never across its walls', () => {
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const anchor of POINTS) {
+        for (const v of anchorCentre(anchor, scaleExp, VIEWS[0])) {
+          expect(v).toBeGreaterThanOrEqual(-0.5)
+          expect(v).toBeLessThan(0.5)
+        }
+      }
+    }
+  })
+
+  it('a re-anchor in the range moves a fixed point by exactly the origin shift', () => {
+    // The camera absorbs a commit by adding originShift to its position and
+    // its target; anything it is not looking at must then stay put on screen.
+    // Continuous placement moves a fixed point by the same whole number of
+    // cells, up to cellDelta's ten-thousandth of a cell when the point's
+    // delta changes sign (see originShift), so the residual is held to that.
+    let moved = 0
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      for (const from of POINTS) {
+        for (const d of [1n, 2n, 5n]) {
+          const to: Position = {
+            x: clampAxis(from.x + d * step + 3n),
+            y: clampAxis(from.y - d * step),
+            z: clampAxis(from.z + (d % 2n === 0n ? step : -step)),
+          }
+          const before = alignedOrigin(from, scaleExp)
+          const after = alignedOrigin(to, scaleExp)
+          for (const axes of VIEWS) {
+            const shift = originShift(before, after, scaleExp, axes)
+            if (shift.some((v) => v !== 0)) moved++
+            // The shift between aligned origins is a whole number of cells.
+            for (const v of shift) expect(Number.isInteger(v)).toBe(true)
+            for (const w of [...POINTS, from, to]) {
+              const wasAt = placeCentre(w, before, scaleExp, axes)
+              const nowAt = placeCentre(w, after, scaleExp, axes)
+              for (let i = 0; i < 3; i++) expect(Math.abs(nowAt[i] - wasAt[i] - shift[i])).toBeLessThanOrEqual(1e-4 + 1e-12)
+            }
+          }
+        }
+      }
+    }
+    expect(moved).toBeGreaterThan(0)
+  })
+
+  it('keeps the covering box around both ends of a move in the range', () => {
+    // The covering box is the protocol's aligned region and stays on the
+    // grid; the ends of the move are now drawn at their true positions, and
+    // they must still be inside it.
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      for (const from of POINTS) {
+        for (const d of [0n, 1n, 3n]) {
+          const to: Position = { x: clampAxis(from.x + d * step), y: clampAxis(from.y - d * step + 99n), z: from.z }
+          const origin = alignedOrigin(from, scaleExp)
+          for (const axes of VIEWS) {
+            const c = coveringBox(from, to, origin, scaleExp, axes, 1000)
+            for (const p of [from, to]) {
+              const at = placeCentre(p, origin, scaleExp, axes)
+              for (let i = 0; i < 3; i++) {
+                expect(at[i]).toBeGreaterThanOrEqual(c.centre[i] - c.size[i] / 2 - 1e-9)
+                expect(at[i]).toBeLessThanOrEqual(c.centre[i] + c.size[i] / 2 + 1e-9)
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+
+  it('keeps an aligned region cage around what is in it, at any height', () => {
+    // The sector cage, the deploy region, the chat room and the secret
+    // regions all centre a 2^h region the same way: its low corner in cells,
+    // plus (side - 1) / 2. Kept in that shape here so the property is pinned:
+    // a region at least a cell wide sits on the grid, a smaller one sits at
+    // its true place inside its cell, and either way every point in it is
+    // drawn inside the cage.
+    const cage = (base: bigint, h: number, origin: bigint, scaleExp: number): { lo: number; hi: number } => {
+      const exp = h - scaleExp
+      const side = exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
+      const centre = cellDelta(base, origin, scaleExp) + (side - 1) / 2
+      return { lo: centre - side / 2, hi: centre + side / 2 }
+    }
+    const axes: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } }
+    for (let scaleExp = CONTINUOUS_SCALE_MIN; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      for (const h of [60, 76, 79, 80, 82, 84]) {
+        for (const anchor of POINTS) {
+          const origin = alignedOrigin(anchor, scaleExp)
+          for (const p of POINTS) {
+            const base = (p.x >> BigInt(h)) << BigInt(h)
+            const { lo, hi } = cage(base, h, origin.x, scaleExp)
+            const at = placeCentre(p, origin, scaleExp, axes)[0]
+            expect(at).toBeGreaterThanOrEqual(lo - 1e-4)
+            expect(at).toBeLessThanOrEqual(hi + 1e-4)
+            // At or above the cell, the cage's walls fall on the grid's.
+            if (h >= scaleExp) expect(Number.isInteger(lo + 0.5)).toBe(true)
+          }
+        }
+      }
+    }
+  })
+})
+
+/**
+ * The shard ghost is drawn with markerCentre, the rule the landed shard is
+ * drawn with, at the cursor's coordinate, which is exactly where a deploy
+ * hides it. So the ghost IS where the shard will appear. These pin what that
+ * does to the ghost against the cursor cube it rides (arkinox, 2026-10-01).
+ */
+describe('the shard ghost against the cursor cube', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+
+  it('sits on the cube centre, exactly as before, at 2^33 and below', () => {
+    for (let scaleExp = 0; scaleExp <= OCCUPANCY_SCALE_MAX; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: HERE.x + 3n * step, y: HERE.y - step, z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      expect(markerCentre(cursor, origin, scaleExp, axes)).toEqual(aimCentres(cursor, origin, scaleExp, axes).cell)
+    }
+  })
+
+  it('stays inside the cursor cube, the grid cell, at every zoom', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const cursor: Position = { x: clampAxis(HERE.x + 3n * step), y: clampAxis(HERE.y - step), z: HERE.z }
+      const origin = alignedOrigin(HERE, scaleExp)
+      const ghost = markerCentre(cursor, origin, scaleExp, axes)
+      const { cell } = aimCentres(cursor, origin, scaleExp, axes)
+      expect(cell).toEqual(cellCentre(cursor, origin, scaleExp, axes))
+      for (let i = 0; i < 3; i++) expect(Math.abs(ghost[i] - cell[i])).toBeLessThanOrEqual(0.5)
+    }
+  })
+})
+
+/**
+ * The cursor's outline is the grid cell it aims at, at every zoom; only what
+ * marks the coordinate itself sits at the continuous point. From 2^80 up the
+ * outline used to float around the point and drew as a second box offset
+ * from the covering box by part of a cell (arkinox, 2026-10-01).
+ */
+describe('the cursor outline fits the grid', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const HERE: Position = {
+    x: (1n << 84n) + 0x1d3c5a7f9e1b2c3d4e5fn,
+    y: 0x0fedcba9876543210abcn,
+    z: (3n << 82n) + 0x123456789abcdef0123n,
+  }
+  const onGrid = (v: number): boolean => Math.abs(v + 0.5 - Math.round(v + 0.5)) <= 1e-9
+  const MOVES: Array<[AxisDirection['axis'], number]> = [['x', 1], ['x', 2], ['y', -1], ['z', 1], ['x', -1], ['y', -3], ['z', -2]]
+
+  it('is the grid cell, inside the covering box, with its point inside it, at every zoom', () => {
+    let checked = 0
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const step = 1n << BigInt(scaleExp)
+      const origin = alignedOrigin(HERE, scaleExp)
+      for (const [axis, cells] of MOVES) {
+        const cursor: Position = { ...HERE, [axis]: clampAxis(HERE[axis] + BigInt(cells) * step) }
+        const { cell, point } = aimCentres(cursor, origin, scaleExp, axes)
+        expect(cell).toEqual(cellCentre(cursor, origin, scaleExp, axes))
+        expect(point).toEqual(placeCentre(cursor, origin, scaleExp, axes))
+        if (scaleExp < CONTINUOUS_SCALE_MIN) expect(point).toEqual(cell)
+        const cover = coveringBox(HERE, cursor, origin, scaleExp, axes, 1000)
+        for (let i = 0; i < 3; i++) {
+          // Its faces are grid planes, the covering box's are too, and the
+          // one sits inside the other: they can only meet face to face.
+          const lo = cell[i] - 0.5, hi = cell[i] + 0.5
+          expect(onGrid(lo) && onGrid(hi)).toBe(true)
+          const clo = cover.centre[i] - cover.size[i] / 2, chi = cover.centre[i] + cover.size[i] / 2
+          expect(onGrid(clo) && onGrid(chi)).toBe(true)
+          expect(lo).toBeGreaterThanOrEqual(clo - 1e-9)
+          expect(hi).toBeLessThanOrEqual(chi + 1e-9)
+          expect(point[i]).toBeGreaterThanOrEqual(lo - 1e-9)
+          expect(point[i]).toBeLessThan(hi + 1e-9)
+          checked++
+        }
+      }
+    }
+    expect(checked).toBe((MAX_SCALE_EXP + 1) * MOVES.length * 3)
+  })
+})
+
+
+/**
+ * A hidden item is drawn at its true coordinate plus half a gibson at every
+ * zoom (itemCentre), so a scene built from many shards keeps its layout as
+ * you zoom out, instead of each piece re-pegging to a cell centre of its own
+ * (arkinox, 2026-10-01: the vaporwave oasis, the roman columns poking through
+ * their roof at 2^2 and every piece stacked on one point at 2^5).
+ */
+describe('hidden items keep their layout at every zoom', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const VIEWS: ViewAxes[] = (() => {
+    const dirs = ['left', 'up', 'right', 'down'] as const
+    const out: ViewAxes[] = []
+    let q = topDownQuaternion()
+    for (let i = 0; i < 8; i++) { out.push(viewAxes(q)); q = rotateView(q, dirs[i % 4]) }
+    return out
+  })()
+  // A little scene: a column, a roof above it, a floor off centre, gibsons apart.
+  const BASE: Position = { x: (1n << 70n) + 1234567n, y: (1n << 60n) + 89n, z: (1n << 75n) + 4321n }
+  const SCENE: Position[] = [
+    BASE,
+    { x: BASE.x + 4n, y: BASE.y, z: BASE.z },
+    { x: BASE.x + 8n, y: BASE.y + 10n, z: BASE.z + 15n },
+    { x: BASE.x + 8n, y: BASE.y - 1n, z: BASE.z + 15n },
+    { x: BASE.x - 7n, y: BASE.y + 3n, z: BASE.z - 22n },
+  ]
+
+  it('is the cell centre at 2^0, exactly as items were always drawn there', () => {
+    for (const p of SCENE) {
+      for (const ax of VIEWS) {
+        const origin = alignedOrigin(BASE, 0)
+        expect(itemCentre(p, origin, 0, ax)).toEqual(cellCentre(p, origin, 0, ax).map((v) => v + 0))
+      }
+    }
+  })
+
+  it('keeps every pair at its true offset, scaled by 2^-zoom, from 2^0 to 2^84', () => {
+    for (let scaleExp = 0; scaleExp <= MAX_SCALE_EXP; scaleExp++) {
+      const origin = alignedOrigin(BASE, scaleExp)
+      for (const ax of VIEWS) {
+        const drawn = SCENE.map((p) => itemCentre(p, origin, scaleExp, ax))
+        for (let i = 0; i < SCENE.length; i++) {
+          for (let j = 0; j < SCENE.length; j++) {
+            ;[ax.right, ax.up, ax.out].forEach((a, k) => {
+              const want = (Number(SCENE[i][a.axis] - SCENE[j][a.axis]) / 2 ** scaleExp) * a.dir
+              // cellDelta's fixed point, once per item.
+              expect(Math.abs(drawn[i][k] - drawn[j][k] - want), `scaleExp ${scaleExp}`).toBeLessThanOrEqual(2e-4)
+            })
+          }
+        }
+      }
+    }
+  })
+
+  it('is what the cell snap broke: at 2^2 the gap from floor to roof changed', () => {
+    // The roof sits 11 gibsons above the floor: 2.75 cells at 2^2. Snapped to
+    // cell centres the two moved by different amounts and the gap was wrong.
+    const origin = alignedOrigin(BASE, 2)
+    const floor = SCENE[3], roof = SCENE[2]
+    const y = (p: Position, f: typeof cellCentre): number => f(p, origin, 2, axes)[1]
+    expect(y(roof, itemCentre) - y(floor, itemCentre)).toBeCloseTo(11 / 4, 4)
+    expect(y(roof, cellCentre) - y(floor, cellCentre)).not.toBeCloseTo(11 / 4, 2)
+  })
+})
+
+/**
+ * Where a deploy hides its item: the centre of the cursor's cell at the zoom
+ * you build in, or of the region when the bag is smaller than a cell; the
+ * cursor itself at 2^0 (arkinox's option A, 2026-10-01).
+ */
+describe('deployPoint', () => {
+  const axes = viewAxes(canonicalQuaternion())
+  const C: Position = { x: (1n << 70n) + 0x123456789n, y: (1n << 50n) + 0x2n, z: 0x1fffn }
+  const inBlock = (p: Position, q: Position, k: number): boolean =>
+    (['x', 'y', 'z'] as const).every((a) => alignTo(p[a], k) === alignTo(q[a], k))
+
+  it('is the cursor itself at 2^0, at any height', () => {
+    for (const h of [0, 1, 8, 40]) expect(deployPoint(C, 0, h)).toEqual(C)
+  })
+
+  it('is the centre of the cursor cell when the bag is at least a cell', () => {
+    for (const s of [1, 2, 5, 13, 33, 60, 84]) {
+      for (const h of [s, s + 1, Math.min(85, s + 20)]) {
+        const p = deployPoint(C, s, h)
+        for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], s) + (1n << BigInt(s - 1)))
+        expect(inBlock(p, C, s)).toBe(true)
+        expect(inBlock(p, C, h)).toBe(true)
+      }
+    }
+  })
+
+  it('is the centre of the region, inside the cursor cell, when the bag is smaller than a cell', () => {
+    for (const s of [3, 9, 40]) {
+      for (const h of [0, 1, 2, s - 1]) {
+        const p = deployPoint(C, s, h)
+        if (h === 0) expect(p).toEqual(C)
+        else for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(C[a], h) + (1n << BigInt(h - 1)))
+        // In the region the key comes from, and in the cell the cursor aims at.
+        expect(inBlock(p, C, h)).toBe(true)
+        expect(inBlock(p, C, s)).toBe(true)
+      }
+    }
+  })
+
+  it('lands inside the cursor cube, within half a gibson of its centre', () => {
+    for (let s = 0; s <= MAX_SCALE_EXP; s++) {
+      const origin = alignedOrigin(C, s)
+      const landed = itemCentre(deployPoint(C, s, MAX_SCALE_EXP), origin, s, axes)
+      const cube = aimCentres(C, origin, s, axes).cell
+      for (let i = 0; i < 3; i++) {
+        expect(Math.abs(landed[i] - cube[i])).toBeLessThanOrEqual(0.5 / 2 ** s + 2e-4)
+      }
+    }
+  })
+})

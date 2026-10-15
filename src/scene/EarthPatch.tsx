@@ -16,9 +16,10 @@
  * by 2^49, so the band where Earth visibly curves is exactly the band the
  * globe could never reach.
  *
- * Below human scale (2^34) the patch fades, gone at 2^31: a graticule is a
- * map of places, and meter scale is where the view stops being about
- * places. The fade is deliberate teaching, zooming past the shoreline is
+ * Below 2^32 the patch fades, gone at 2^30: a graticule is a map of places,
+ * and half a metre a cell is the last height the planet is drawn at. Down to
+ * there the ground stays under your feet, so a venue is a place to stand;
+ * past it the fade is deliberate teaching, zooming past the floor is
  * supposed to feel like leaving geography for the microscopic.
  *
  * Graticule lines sit on 1/2/5-decade degree rulings anchored to the
@@ -26,9 +27,13 @@
  * one along. The equator and prime meridian draw in v1's green with v1's
  * labels, and the shorelines draw over the rulings from whichever Natural
  * Earth tier the zoom deserves (coastline.ts), brighter than the grid:
- * the graticule is reference, the coast is content. A depth-only ground
- * mesh sits a couple of cells beneath the lines, so the far side of the
- * horizon hides what is beyond it.
+ * the graticule is reference, the coast is content. From 2^40 up, where
+ * the planet curves enough to have a horizon, a depth-only ground mesh sits
+ * a couple of cells beneath the lines, so the far side of the horizon hides
+ * what is beyond it. Below 2^40 there is no ground mesh at all
+ * (earthSurface.earthOccluderOn): the surface in view is flat there, and a
+ * solid floor only blacked out what was under it, or the whole view from
+ * beneath.
  */
 
 import { useEffect, useMemo } from 'react'
@@ -38,6 +43,7 @@ import { GRID_RADIUS, type ViewAxes } from '../lib/space'
 import { axesToLatLon } from '../lib/hyperspace/landfall'
 import {
   EARTH_RADIUS_KM,
+  earthOccluderOn,
   earthRadiusCells,
   graticuleStep,
   originCsMetres,
@@ -61,7 +67,8 @@ interface BuiltPatch {
   grid: BufferGeometry
   green: BufferGeometry | null
   coast: BufferGeometry | null
-  ground: BufferGeometry
+  /** Null below 2^40, where there is no horizon for it to hide things past. */
+  ground: BufferGeometry | null
   equatorAt: [number, number, number] | null
   meridianAt: [number, number, number] | null
   opacity: number
@@ -184,16 +191,22 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     // would bury the interior of every large continent while leaving its
     // coast drawn. Depth is all this plane does, so a few more kilometers of
     // it costs nothing to look at.
+    //
+    // Only from 2^40 (earthOccluderOn). Finer than that the surface across
+    // the view is flat to under a cell, so it has no far side to hide, and a
+    // solid floor there was a black cutoff under the graticule from above
+    // and a black screen from below.
+    const solid = earthOccluderOn(scaleExp)
     const ground: number[] = []
     const idx: number[] = []
-    for (let r = 0; r <= GROUND_N; r++) {
+    for (let r = 0; solid && r <= GROUND_N; r++) {
       const lat = latLo + ((latHi - latLo) * r) / GROUND_N
       for (let c = 0; c <= GROUND_N; c++) {
         const lon = lonFrom + ((lonTo - lonFrom) * c) / GROUND_N
         ground.push(...at(lat, lon, -2 * cellM))
       }
     }
-    for (let r = 0; r < GROUND_N; r++) {
+    for (let r = 0; solid && r < GROUND_N; r++) {
       for (let c = 0; c < GROUND_N; c++) {
         const a = r * (GROUND_N + 1) + c
         const b = a + 1
@@ -207,8 +220,8 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
       g.setAttribute('position', new Float32BufferAttribute(v, 3))
       return g
     }
-    const groundGeom = make(ground)
-    groundGeom.setIndex(idx)
+    const groundGeom = solid ? make(ground) : null
+    groundGeom?.setIndex(idx)
     return {
       grid: make(blue),
       green: greenArr.length > 0 ? make(greenArr) : null,
@@ -226,16 +239,18 @@ export function EarthPatch({ axes }: { axes: ViewAxes }): JSX.Element | null {
     built.grid.dispose()
     built.green?.dispose()
     built.coast?.dispose()
-    built.ground.dispose()
+    built.ground?.dispose()
   }, [built])
 
   if (!built) return null
 
   return (
     <group>
-      <mesh geometry={built.ground} frustumCulled={false} renderOrder={-2}>
-        <meshBasicMaterial colorWrite={false} side={DoubleSide} />
-      </mesh>
+      {built.ground && (
+        <mesh geometry={built.ground} frustumCulled={false} renderOrder={-2}>
+          <meshBasicMaterial colorWrite={false} side={DoubleSide} />
+        </mesh>
+      )}
       <lineSegments geometry={built.grid} frustumCulled={false}>
         <lineBasicMaterial color={EARTH} transparent opacity={0.32 * built.opacity} toneMapped={false} />
       </lineSegments>

@@ -12,13 +12,20 @@
  */
 
 import { useEffect, useState } from 'react'
-import { formatCellSize } from '../lib/scale'
-import { messagePreview } from '../lib/hidden'
+import { formatCellSize } from 'sno-core/scale'
+import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
+import { Reactions } from './Reactions'
+import { itemKind, itemTargetOf } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import { positionOf, useShards } from '../store/useShards'
+import { PublishSwitch } from './PublishSwitch'
+import { useEscape } from '../hooks/useEscape'
+import { cashuLabel, readCashuToken } from '../lib/cashu'
+import { MessageText } from './CashuCard'
+import { ItemIcon } from './ItemIcon'
 
 function Field({ label, value, full }: { label: string; value: string; full?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -38,34 +45,50 @@ export function DeploymentDetail(): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const dep = useShards((s) => s.mine.find((d) => d.eventId === s.inspecting) ?? null)
   const [confirm, setConfirm] = useState(false)
-  const [test, setTest] = useState<'idle' | 'testing' | 'found' | 'missing'>('idle')
+  const [test, setTest] = useState<'idle' | 'testing' | 'found' | 'missing' | 'refused'>('idle')
 
   useEffect(() => { if (inspecting && !dep) useShards.getState().inspect(null) }, [inspecting, dep])
   useEffect(() => { setTest('idle') }, [inspecting])
+  const exit = (): void => { useShards.getState().inspect(null); useCyberspace.getState().clearFocus() }
+  // The record is an overlay chip with EXIT; Escape is EXIT (arkinox,
+  // 2026-10-01). Its DELETE confirmation is a modal and closes first.
+  useEscape('chip', dep !== null, exit)
 
   if (!dep) return null
 
   const isMessage = dep.type === 'message'
-  const name = isMessage ? messagePreview(dep.text ?? '', 22) : dep.shard?.name ?? 'shard'
-  const exit = (): void => { useShards.getState().inspect(null); useCyberspace.getState().clearFocus() }
+  // A message with a Cashu token is titled by what it holds, as its STASH row
+  // is, never by the first characters of the token.
+  const cashu = isMessage ? readCashuToken(dep.text) : { raw: null, token: null }
+  const coin = cashu.raw !== null
+  // Named and kinded by what it is: a key item or a chest is not a shard
+  // (arkinox, 2026-10-10: the record called the Vapor Key a shard, kind 3330).
+  const name = coin
+    ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token')
+    : isMessage ? messagePreview(dep.text ?? '', 22) : dep.type === 'key' ? dep.key?.name ?? 'item' : dep.type === 'chest' ? dep.chest?.name ?? 'chest' : dep.shard?.name ?? 'shard'
+  const kindLabel = isMessage
+    ? `message (kind ${MESSAGE_KIND})`
+    : dep.type === 'key' ? `item (kind ${KEY_KIND})` : dep.type === 'chest' ? `chest (kind ${CHEST_KIND})` : dep.ref ? 'shard (kind 33331, by reference)' : `shard (kind ${SHARD_KIND})`
   const runTest = async (): Promise<void> => {
     setTest('testing')
-    const ok = await useShards.getState().testDiscovery(dep.eventId)
-    setTest(ok ? 'found' : 'missing')
+    setTest(await useShards.getState().testDiscovery(dep.eventId))
   }
+  // Why the format refuses it, when it does: the same words the deploy bar
+  // would have used, so the fix is named here too.
+  const refusal = test === 'refused' && dep.shard ? shardRefusal(dep.shard) : null
 
   return (
     <div className="detail" role="dialog" aria-label={`Deployment ${name}`}>
       <div className="detail__head">
-        <span className="detail__eye" aria-hidden="true">{isMessage ? '✎' : '◇'}</span>
+        <ItemIcon className={`detail__eye ${coin ? 'detail__eye--cashu' : ''}`} type={dep.type} coin={coin} />
         <span className="detail__title">VIEWING <strong>{name}</strong></span>
         <button className="detail__exit" onClick={exit}>EXIT</button>
       </div>
 
-      {isMessage && <div className="detail__message">“{dep.text}”</div>}
+      {isMessage && <MessageText text={dep.text ?? ''} words={(t) => <div className="detail__message">“{t}”</div>} />}
 
       <div className="detail__grid">
-        <Field label="kind" value={isMessage ? 'message (kind 1)' : 'shard (kind 3330)'} />
+        <Field label="kind" value={kindLabel} />
         <Field label="event" value={shortHex(dep.eventId, 10, 8)} full={dep.eventId} />
         <Field label="lookup" value={shortHex(dep.lookupId, 10, 8)} full={dep.lookupId} />
         <Field label="coord" value={`${shortHex(dep.at.x, 6, 4)} / ${shortHex(dep.at.y, 6, 4)} / ${shortHex(dep.at.z, 6, 4)}`} full={`${dep.at.x}\n${dep.at.y}\n${dep.at.z}`} />
@@ -75,7 +98,11 @@ export function DeploymentDetail(): JSX.Element | null {
         </div>
         <div className="detail__field detail__field--relays">
           <span className="detail__key">relays</span>
-          <span className="detail__plain">{dep.published ? dep.relays.map((r) => r.replace('wss://', '')).join(', ') : 'local only — never published'}</span>
+          <span className="detail__plain">{dep.published ? dep.relays.map((r) => r.replace('wss://', '')).join(', ') : 'nowhere yet: signed and kept on this device'}</span>
+        </div>
+        <div className="detail__field detail__field--relays">
+          <span className="detail__key">published</span>
+          <PublishSwitch lookupId={dep.lookupId} published={dep.published} />
         </div>
 
       </div>
@@ -86,10 +113,26 @@ export function DeploymentDetail(): JSX.Element | null {
           {test === 'testing' && 'DERIVING REGION KEY…'}
           {test === 'found' && '✓ FOUND & OPENED FROM THE RELAY'}
           {test === 'missing' && '✗ NOT FOUND — TAP TO RETRY'}
+          {test === 'refused' && '✗ ON THE RELAY, BUT NO CLIENT CAN OPEN IT'}
         </button>
       )}
+      {test === 'refused' && (
+        <p className="detail__refusal">
+          The bag is there and this item is in it, signed, but the format refuses it, so every client drops it and only this device shows it.
+          {refusal ? ` ${refusal}` : ''} Fix it in the workshop and hide it again; DELETE removes this copy.
+        </p>
+      )}
 
-      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, at: positionOf(dep), height: dep.height }} />
+      {/* A LIVE LINK (a public object, yours or another author's) is reacted to as that object
+          alone, telling its author and not naming you or the bag (isForeignItem). */}
+      {itemTargetOf(dep.inner, dep.ref)?.public
+        ? <Reactions target={{ id: dep.inner.id, pubkey: dep.inner.pubkey, kind: dep.inner.kind, address: itemTargetOf(dep.inner, dep.ref)?.address }} />
+        : <Reactions
+            target={{ id: dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type) }}
+            alsoTell={[me]}
+          />}
+
+      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
 
       <button className="detail__delete" onClick={() => setConfirm(true)}>DELETE FROM CYBERSPACE</button>
 

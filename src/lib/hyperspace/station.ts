@@ -175,6 +175,46 @@ export function findStation(index: StopIndex, coord: bigint, maxHeight: number):
   return null
 }
 
+/**
+ * The stop nearest `coord` in one plane, with no height bound: the stop a
+ * trip to `coord` should leave the line at (GOAL, arkinox 2026-10-14). Ports
+ * are ideaspace and landfalls dataspace, so a destination in dataspace exits
+ * at a landfall and one in ideaspace at a port. Same metric, ties and exact
+ * re-derivation as findStation; the index key carries no plane, so stops of
+ * the other plane are skipped while the cube widens.
+ */
+export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1, exclude?: bigint): StationResult | null {
+  if (index.permCount === 0) return null
+  const key = bigToBytes32(coord >> 1n)
+  const p = lowerBound(index, key)
+  let dGuess = 86
+  for (const i of [p - 1, p]) {
+    if (i >= 0 && i < index.permCount) {
+      const d = lcaAtSorted(index, key, i)
+      if (d < dGuess) dGuess = d
+    }
+  }
+  if (dGuess > 85) dGuess = 85
+  for (let d = dGuess; d <= 85; d++) {
+    const [start, end] = prefixRange(index, key, d)
+    let best: StationResult | null = null
+    for (let i = start; i < end; i++) {
+      const stop = stopAt(index, index.perm[i])
+      if ((stop.kind === 'port' ? 1 : 0) !== plane) continue
+      const at = stopCoordExact(stop)
+      // The place being looked at may be a stop itself (a port view); the
+      // nearest is then its neighbour, never itself at distance 0.
+      if (exclude !== undefined && at === exclude) continue
+      const exact = maxAxisLca(coord, at)
+      if (best === null || exact < best.distance || (exact === best.distance && stop.height < best.stop.height)) {
+        best = { stop, distance: exact }
+      }
+    }
+    if (best !== null) return best
+  }
+  return null
+}
+
 /** The k nearest stops to a coordinate (no height bound), for the UI. */
 export function nearestStops(index: StopIndex, coord: bigint, k: number): StationResult[] {
   if (index.permCount === 0) return []
@@ -253,6 +293,11 @@ export function coverageRuns(
       }
     }
   }
+  return mergeRuns(runs)
+}
+
+/** Sorted, disjoint runs from any set of runs: overlapping and touching ones fused. */
+function mergeRuns(runs: Array<[number, number]>): Array<[number, number]> {
   runs.sort((a, b) => a[0] - b[0] || a[1] - b[1])
   const merged: Array<[number, number]> = []
   for (const [start, end] of runs) {
@@ -264,4 +309,69 @@ export function coverageRuns(
     }
   }
   return merged
+}
+
+/**
+ * Sorted-view runs covering every stop within `radius` gibsons of a
+ * centre: the cover for the sphere of interest (interest.ts).
+ *
+ * coverageRuns would do it, with the sphere's bounding box as the reach,
+ * but its cover is eight cubes at the first level whose side exceeds the
+ * box, and for a sphere that is eight cubes of side FOUR radii: at 2^49
+ * the sphere is 2097 km across and each cube is 8389 km, wider than the
+ * planet, so the cover was the whole landfall shell and every one of the
+ * half million rows had to be decoded to keep the twelve thousand inside.
+ * This walks the aligned cubes of side a quarter of the radius instead,
+ * keeping only those the ball actually touches (the cube's nearest point
+ * to the centre is within the radius, in fixed point) and taking each
+ * cube's prefix run. A few hundred binary searches, and the rows they
+ * cover reach at most about a cube's diagonal past the sphere, which on
+ * the ground is roughly twice the area inside it rather than forty times.
+ *
+ * A superset by construction: callers still test every row exactly.
+ */
+export function ballCoverageRuns(
+  index: StopIndex,
+  centre: { x: bigint; y: bigint; z: bigint },
+  radius: bigint,
+): Array<[number, number]> {
+  if (index.permCount === 0 || radius <= 0n) return []
+  const d = Math.max(0, Math.min(85, radius.toString(2).length - 3))
+  const side = 1n << BigInt(d)
+  const r2 = radius * radius
+  const clamp = (v: bigint): bigint => (v < 0n ? 0n : v > AXIS_MAX ? AXIS_MAX : v)
+  const alignDown = (v: bigint): bigint => (v >> BigInt(d)) << BigInt(d)
+  const lo = { x: alignDown(clamp(centre.x - radius)), y: alignDown(clamp(centre.y - radius)), z: alignDown(clamp(centre.z - radius)) }
+  const hi = { x: clamp(centre.x + radius), y: clamp(centre.y + radius), z: clamp(centre.z + radius) }
+  // Signed distance from the centre to the nearest point of [c, c + side) along one axis.
+  const gapAlong = (c: bigint, v: bigint): bigint => (v < c ? c - v : v >= c + side ? v - (c + side - 1n) : 0n)
+  const runs: Array<[number, number]> = []
+  for (let cx = lo.x; cx <= hi.x; cx += side) {
+    const gx = gapAlong(cx, centre.x)
+    if (gx * gx > r2) continue
+    for (let cy = lo.y; cy <= hi.y; cy += side) {
+      const gy = gapAlong(cy, centre.y)
+      if (gx * gx + gy * gy > r2) continue
+      for (let cz = lo.z; cz <= hi.z; cz += side) {
+        const gz = gapAlong(cz, centre.z)
+        if (gx * gx + gy * gy + gz * gz > r2) continue
+        const key = bigToBytes32(xyzToCoord(cx, cy, cz, 0) >> 1n)
+        const run = prefixRange(index, key, d)
+        if (run[1] > run[0]) runs.push(run)
+      }
+    }
+  }
+  return mergeRuns(runs)
+}
+
+/**
+ * The sorted-view run of every stop inside the aligned cube of `height`
+ * that contains a position: one exact prefix range, both planes (the key
+ * carries no plane bit), found by two binary searches. The cover for the
+ * port cube of interest (interest.ts portCube), and exact rather than a
+ * superset: a row is in the run if and only if its key is in the cube.
+ */
+export function cubeRun(index: StopIndex, x: bigint, y: bigint, z: bigint, height: number): [number, number] {
+  if (index.permCount === 0) return [0, 0]
+  return prefixRange(index, bigToBytes32(xyzToCoord(x, y, z, 0) >> 1n), Math.max(0, Math.min(85, height)))
 }

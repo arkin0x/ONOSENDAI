@@ -22,7 +22,7 @@ import { Suspense, useMemo } from 'react'
 import { useGLTF } from '@react-three/drei'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import type { Material, Mesh, MeshStandardMaterial } from 'three'
-import { GRID_RADIUS, cellCentre, type Position, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
 
@@ -99,7 +99,7 @@ function Model({ pubkey, axes }: Props): JSX.Element | null {
     const scale = SCALE / Number(1n << BigInt(scaleExp))
     if (scale < MIN_SCALE) return null
     const origin = alignedOrigin(position, scaleExp)
-    const centre = cellCentre(spawn, origin, scaleExp, axes)
+    const centre = placeCentre(spawn, origin, scaleExp, axes)
     return Math.hypot(...centre) > REACH ? null : { centre, scale }
   }, [pubkey, position, scaleExp, axes])
 

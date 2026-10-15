@@ -11,90 +11,42 @@
  */
 
 import { useState } from 'react'
-import { formatCellSize } from '../lib/scale'
-import { cashuLabel } from '../lib/cashu'
-import { cashuStateLabel, useCashu } from './useCashu'
-import { messagePreview, MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards, type MyDeployment } from '../store/useShards'
+import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
+import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
+import { MessageCompose } from './MessageCompose'
+import { Rss, Wrench } from 'lucide-react'
+import { ItemIcon } from './ItemIcon'
+import { bagsOf, useStash } from './stash'
+import { BagRow } from './StashModals'
 
-function positionOf(d: MyDeployment): { x: bigint; y: bigint; z: bigint } {
-  return { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }
-}
-
-function depName(d: MyDeployment): string {
-  return d.type === 'message' ? messagePreview(d.text ?? '', 24) : d.shard?.name ?? 'shard'
-}
-
-/**
- * One hidden thing in the STASH. A message carrying a Cashu token shows the
- * coin instead of the pen, what it holds, and whether anyone has taken it:
- * the mint says which proofs are spent (useCashu), so REDEEMED means found.
- */
-function DeployedRow({ d, viewing, onGo }: { d: MyDeployment; viewing: boolean; onGo: () => void }): JSX.Element {
-  const cashu = useCashu(d.type === 'message' ? d.text : null)
-  const coin = cashu.token !== null
-  const live = useCyberspace((s) => s.live)
-  const broadcasting = useShards((s) => s.broadcasting) === d.lookupId
-  return (
-    <li className={`shards__row shards__row--deployed ${viewing ? 'is-viewing' : ''}`}>
-      <button className="shards__goto" onClick={onGo} title="Fly to it and see its wire record">
-        <span className="avatars__who">
-          <span className={`shards__type shards__type--${coin ? 'cashu' : d.type}`}>{coin ? '₿' : d.type === 'message' ? '✎' : '◇'}</span>
-          {coin && cashu.token ? cashuLabel(cashu.token) : depName(d)}
-        </span>
-        <span className="shards__meta">
-          {d.height === 0 ? 'exact gibson' : formatCellSize(d.height)} · {d.published ? 'LIVE' : 'LOCAL'}{d.plane === 1 ? ' · ideaspace' : ''}
-          {coin && <> · <span className={`shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span></>}
-        </span>
-      </button>
-      {/* Deployed while LOCAL: signed and kept, never sent. This sends it. */}
-      {!d.published && live && (
-        <button
-          className="shards__broadcast"
-          disabled={broadcasting}
-          onClick={() => { void useShards.getState().broadcast(d.lookupId) }}
-          title="Send this region's bag to the relays now"
-        >{broadcasting ? 'SENDING' : 'BROADCAST'}</button>
-      )}
-      <span className="shards__goto-hint" aria-hidden="true">▸</span>
-    </li>
-  )
-}
+/** How many bags the panel shows before VIEW ALL. */
+const RECENT_BAGS = 3
 
 export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
-  const inspecting = useShards((s) => s.inspecting)
   const scanning = useShards((s) => s.scanning)
   const [composing, setComposing] = useState(false)
-  const [message, setMessage] = useState('')
+  const building = useBuilder((s) => s.active)
+  // EXIT BUILD waits for a lined-up deploy to be hidden or canceled, as B
+  // and the bar's EXIT do (useBuilder `exit`).
+  const deploying = useShards((s) => s.pending !== null)
 
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)
   const broadcastError = useShards((s) => s.broadcastError)
   const localCount = mine.filter((d) => !d.published).length
-
-  const goTo = (d: MyDeployment): void => {
-    useShards.getState().inspect(d.eventId)
-    const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
-    useCyberspace.getState().focusOn(positionOf(d), d.plane, depName(d), unit)
-  }
-
-  const placeMessage = (): void => {
-    const t = message.trim()
-    if (!t) return
-    useShards.getState().startDeployMessage(t)
-    setComposing(false)
-    setMessage('')
-  }
+  const bags = bagsOf(mine)
 
   return (
     <section className="panel panel--shards">
       <header className="panel__head">
-        <h2>Stash</h2>
-        <span className={`tag ${scanning ? 'tag--scan' : ''}`}>{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING HIDDEN' : `${hiddenCount} HIDDEN`}</span>
+        {/* CREATE (arkinox, 2026-10-10): the panel is where things are made and
+            placed; the bags themselves are listed under VIEW ALL STASHED BAGS. */}
+        <h2>Create</h2>
+        <span className={`tag ${scanning ? 'tag--scan' : ''}`} title="What you have placed in cyberspace from this stash">{scanning ? 'SCANNING' : hiddenCount === 0 ? 'NOTHING PLACED' : `${hiddenCount} PLACED`}</span>
       </header>
 
       {/* The models themselves live in the workshop, which is where they are
@@ -102,32 +54,51 @@ export function ShardsPanel(): JSX.Element {
           box inside a scrolling panel, and the panel could not be scrolled
           past it. What the stash is for is what is hidden. */}
       <div className="shards__section">
-        <div className="shards__actions">
-          <button className="avatars__go" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
-          <button className="avatars__go" onClick={() => { useWorkshop.getState().create(); useWorkshop.getState().openWorkshop() }}>NEW MODEL</button>
+        <div className="shards__modes">
+          <button className="avatars__go shards__compose-open" onClick={() => useWorkshop.getState().openWorkshop()}>OPEN WORKSHOP</button>
+          {/* Everyone's published objects, beside the workshop where yours are made (the Shard Feed). */}
+          <button className="avatars__go shards__compose-open shards__feed" onClick={() => useStash.getState().openFeed()} title="Browse everyone's published objects: place one, or remix it as your own">
+            <Rss className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SHARD FEED
+          </button>
+          {/* BUILD mode, beside the workshop it is the other half of: the
+              workshop makes objects, the Builder places them (useBuilder). */}
+          <button
+            className={`avatars__go shards__compose-open shards__build ${building ? 'is-on' : ''}`}
+            aria-pressed={building}
+            disabled={building && deploying}
+            onClick={() => useBuilder.getState().toggle()}
+            title={building && deploying ? 'Hide or cancel the deploy first; leaving build mode would cancel it' : building ? 'Leave build mode; the view stays where it is (B)' : 'Place objects and messages anywhere, without moving your avatar (B)'}
+          >{building ? 'EXIT BUILD' : <><Wrench className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> BUILD</>}</button>
         </div>
       </div>
 
       <div className="shards__section">
-        <span className="legend__label">Leave a hidden message</span>
+        <span className="legend__label">Place a hidden object</span>
+        <div>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openModels()}><ItemIcon type="shard" className="shards__build-icon" size={13} strokeWidth={2.5} /> DEPLOY AN OBJECT</button>
+        </div>
+      </div>
+
+      <div className="shards__section">
+        <span className="legend__label">Place a hidden message</span>
         {composing ? (
-          <div className="shards__compose">
-            <textarea
-              className="shards__textarea"
-              value={message}
-              onChange={(e) => setMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
-              placeholder="A message left in cyberspace, readable only from where you place it…"
-              rows={3}
-              autoFocus
-            />
-            <div className="shards__actions">
-              <button className="avatars__go" onClick={() => { setComposing(false); setMessage('') }}>CANCEL</button>
-              <button className="avatars__go" disabled={!message.trim()} onClick={placeMessage}>PLACE MESSAGE ▸</button>
-            </div>
-          </div>
+          <MessageCompose onDone={() => setComposing(false)} />
         ) : (
-          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}>✎ WRITE A MESSAGE</button>
+          <button className="avatars__go shards__compose-open" onClick={() => setComposing(true)}><ItemIcon type="message" className="shards__build-icon" size={13} strokeWidth={2.5} /> WRITE A MESSAGE</button>
         )}
+      </div>
+
+      {/* Items and chests (B1 §3.1): an item is a keypair hidden in a bag, and
+          a chest is contents sealed to an item or a person (arkinox,
+          2026-10-10: "keys ARE items"; key is the role an item plays when a
+          chest is sealed to it). Both compose in a modal (StashModals), since
+          a chest's composer is taller than a panel row. */}
+      <div className="shards__section">
+        <span className="legend__label">Place an item or a chest</span>
+        <div className="shards__modes">
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever reads it holds it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or an item to an item or a person, and hide it"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
+        </div>
       </div>
 
       {mine.length > 0 && (
@@ -143,16 +114,18 @@ export function ShardsPanel(): JSX.Element {
           )}
           {broadcastError && <span className="shards__note shards__note--warn">{broadcastError}</span>}
           <ul className="avatars__list">
-            {mine.map((d) => (
-              <DeployedRow key={d.eventId} d={d} viewing={inspecting === d.eventId} onGo={() => goTo(d)} />
+            {bags.slice(0, RECENT_BAGS).map((b) => (
+              <BagRow key={b.lookupId} bag={b} onOpen={() => useStash.getState().openBag(b.lookupId)} />
             ))}
           </ul>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openBags()}>VIEW ALL STASHED BAGS ({bags.length})</button>
         </div>
       )}
 
       <Explanation>
-        Build 3D objects (shards), messages, and encrypt them at a location in
-        cyberspace for others to find.
+        Build 3D objects and messages, and encrypt them at a location in
+        cyberspace for others to find. Everything you hide at one place travels
+        together as one bag.
       </Explanation>
     </section>
   )

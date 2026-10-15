@@ -49,6 +49,10 @@ export interface TerrainVolume {
   /** VOLUME_SIZE^3 values, indexed ((d+R)*N + (r+R))*N + (c+R). */
   values: Uint8Array
   radius: number
+  /** The cell at the volume's centre, in cyberspace, and the frame its offsets run along. */
+  centre: Position
+  axes: ViewAxes
+  scaleExp: number
 }
 
 /** World coordinate at a screen-space offset from the origin cell. */
@@ -57,8 +61,10 @@ function cellAt(
   col: number, row: number, depth: number,
 ): Position {
   const p: Position = { ...origin }
+  // Offsets are whole cells; one that is not (a float past 2^53 from far
+  // upstream) is rounded rather than allowed to throw and take the scene down.
   const put = (a: AxisName, n: number, dir: number): void => {
-    p[a] = origin[a] + BigInt(n) * step * BigInt(dir)
+    p[a] = origin[a] + BigInt(Number.isFinite(n) ? Math.round(n) : 0) * step * BigInt(dir)
   }
   put(axes.right.axis, col, axes.right.dir)
   put(axes.up.axis, row, axes.up.dir)
@@ -110,7 +116,12 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
     }
   }, [])
 
-  const originKey = `${position.x},${position.y},${position.z}`
+  // The window's centre in cyberspace. The volume is a function of where it
+  // is in the world, not of the render frame it is drawn in, so a landing
+  // that re-anchors the frame (and carries the window with it, useViewWindow)
+  // keeps this key and rescans nothing.
+  const centre = cellAt(alignedOrigin(position, scaleExp), axes, stepFor(scaleExp), win.right, win.up, win.out)
+  const centreKey = `${centre.x},${centre.y},${centre.z}`
 
   // Suspended (an Earth or hyperspace view): drop any queued terrain work so
   // the pool goes quiet, and hand back an empty volume. The memo below keys
@@ -121,13 +132,12 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
 
   return useMemo(() => {
     if (suspend) {
-      return { values: new Uint8Array(VOLUME_SIZE ** 3).fill(UNKNOWN), radius: VOLUME_RADIUS }
+      return { values: new Uint8Array(VOLUME_SIZE ** 3).fill(UNKNOWN), radius: VOLUME_RADIUS, centre, axes, scaleExp }
     }
     const t0 = performance.now()
     const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
     const step = stepFor(scaleExp)
-    const origin = alignedOrigin(position, scaleExp)
     const values = new Uint8Array(N * N * N).fill(UNKNOWN)
 
     // Below the block size consecutive cells share a block, so step by the
@@ -146,7 +156,7 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
         let rowCell: Position | null = null
 
         for (let col = -R; col <= R; col++) {
-          const p = cellAt(origin, axes, step, win.right + col, win.up + row, win.out + depth)
+          const p = cellAt(centre, axes, step, col, row, depth)
 
           const known = readK(p.x, p.y, p.z, plane)
           if (known !== undefined) {
@@ -198,8 +208,8 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
       }
     }
 
-    return { values, radius: R }
-    // originKey stands in for position, whose identity changes on every move.
+    return { values, radius: R, centre, axes, scaleExp }
+    // centreKey stands in for centre, whose identity changes on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originKey, scaleExp, plane, axes, win.right, win.up, win.out, dataVersion, suspend])
+  }, [centreKey, scaleExp, plane, axes, dataVersion, suspend])
 }

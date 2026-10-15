@@ -24,6 +24,7 @@ import {
   type ChainState,
 } from '../lib/hyperspace/headers'
 import { shouldSkipBlob, type HeadersManifest } from '../lib/hyperspace/headerSync'
+import { fetchBytes, type DownloadLimits } from '../lib/hyperspace/download'
 
 export interface HeadersRequest {
   type: 'sync'
@@ -50,6 +51,15 @@ const CACHE_NAME = 'onosendai:headers-v1'
 
 /** Throttle progress posts; per-record reporting would flood the channel. */
 const PROGRESS_INTERVAL_MS = 120
+
+/**
+ * A blob is 50,000 records of 48 bytes, 2.4 MB: about 50 s on a slow 3G link
+ * and two minutes on EDGE. The deadline allows five (an 8 KB/s floor); the
+ * stall timer is what catches a dead transfer, after 30 s with no bytes. A
+ * blob that trips either is discarded like any other failed blob, and its
+ * heights go to the relay.
+ */
+export const BLOB_LIMITS: DownloadLimits = { deadlineMs: 5 * 60_000, stallMs: 30_000 }
 
 /** Digest bytes with the platform's native hash when present (the blobs are
  * megabytes); the pure-JS fallback keeps node imports working. */
@@ -90,9 +100,9 @@ async function loadBlobBytes(url: string, expectedSha256: string): Promise<Uint8
       }
     } catch { /* a broken cache read is just a cache miss */ }
   }
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`)
-  const bytes = new Uint8Array(await res.arrayBuffer())
+  // Whole or nothing: a timed-out or failed transfer throws before a byte of
+  // it can be verified or cached.
+  const bytes = await fetchBytes(url, BLOB_LIMITS)
   if ((await digestHex(bytes)) !== expectedSha256) {
     throw new Error('blob bytes do not match the manifest sha256')
   }

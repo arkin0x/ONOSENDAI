@@ -2590,21 +2590,33 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * newer choice (review of #353, 2026-10-15).
    */
   let loginTicket = 0
+  let switchCount = 0
   const login = async (make: () => Signer | Promise<Signer>, errorPrefix = '', quiet: () => boolean = () => false): Promise<void> => {
     const ticket = ++loginTicket
-    const before = currentSigner
+    // Real switches of identity, counted by switchTo. Not the signer object:
+    // the store replaces that in the background for the SAME identity (the
+    // stand-in going live, a retry rebuilding a dead channel), and that must
+    // not drop a login the user is making (review of #353).
+    const switches = switchCount
+    const current = (): boolean => ticket === loginTicket && switches === switchCount
+    const fail = (err: unknown): void => {
+      if (current() && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
     let signer: Signer
     try {
       signer = await make()
     } catch (err) {
-      if (ticket === loginTicket && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+      fail(err)
       return
     }
-    if (ticket !== loginTicket || currentSigner !== before) { void signer.close?.(); return }
-    await switchTo(signer)
+    if (!current()) { void signer.close?.(); return }
+    // A signer must name a real key before it becomes the identity.
+    if (!/^[0-9a-f]{64}$/.test(signer.pubkey)) { void signer.close?.(); fail(new Error('The signer gave a key that is not a valid public key.')); return }
+    try { await switchTo(signer) } catch (err) { fail(err) }
   }
 
   const switchTo = async (signer: Signer): Promise<void> => {
+    switchCount++
     // Whatever was waiting to sign as the old identity ends without a word.
     chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.
@@ -4095,9 +4107,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const pref = loadSignerPref()
     if (!pref || pref.kind === 'local') return
     if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
-      // The stand-in: its own onReady decides whether it is still wanted.
+      // The stand-in: its own onReady decides whether it is still wanted. Its
+      // failure is only news while it is still the identity in use.
+      const switches = switchCount
       try { await currentSigner.reconnect() }
-      catch (err) { set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` }) }
+      catch (err) { if (switches === switchCount) set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` }) }
     } else {
       await login(() => signerFromPref(pref), `Could not reconnect ${pref.kind}: `)
     }

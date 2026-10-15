@@ -210,11 +210,21 @@ export function DemoCoach(): JSX.Element | null {
     if (!active) { root.style.removeProperty('--demo-coach-h'); return }
     const el = ref.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const put = (): void => root.style.setProperty('--demo-coach-h', `${Math.ceil(el.getBoundingClientRect().height)}px`)
+    // Only when the two share columns: on a desktop the coach sits top centre
+    // and the stack beside the panel column, and pushing the stack down there
+    // only made it jump on every step (rehearsal, 2026-10-15).
+    const put = (): void => {
+      const coach = el.getBoundingClientRect()
+      const stack = document.querySelector('.instruments')?.getBoundingClientRect()
+      const shares = !stack || stack.width === 0 || (coach.left < stack.right && stack.left < coach.right)
+      if (shares) root.style.setProperty('--demo-coach-h', `${Math.ceil(coach.height)}px`)
+      else root.style.removeProperty('--demo-coach-h')
+    }
     put()
     const ro = new ResizeObserver(put)
     ro.observe(el)
-    return () => { ro.disconnect(); root.style.removeProperty('--demo-coach-h') }
+    window.addEventListener('resize', put)
+    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h') }
   }, [active, minimized])
 
   if (!active || !step) return null

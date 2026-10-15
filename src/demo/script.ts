@@ -23,8 +23,14 @@ export const DEMO_DISTRICT = {
   label: 'DEMO DISTRICT',
 }
 
-/** A port: block 971,270's merkle root as an explorer shows it (DECK-0001 §1). */
-const PORT_ROOT = '6edfc6badd201e338a5003ac86485f273838406c7825caae704e71824c985e93'
+/**
+ * A port: block 900,001's merkle root as an explorer shows it (DECK-0001 §1).
+ * Inside the header blobs (blocks 0 to 949,999), so the tour names it at
+ * once with no relay; block 971,270 waited on its anchor from the AUTH-gated
+ * canonical relay and stayed a raw coordinate on a slow network (rehearsal,
+ * 2026-10-15).
+ */
+const PORT_ROOT = '529d6e345c8038cc946df1da49c07e0e3cd242b88ed5576cb35fd763fd9f1c37'
 /** A landfall: block 900,000's merkle root; its stop is on Earth, placed by the block hash. */
 const LANDFALL_ROOT = '0cfb54e522b07bd1a381adc774ec1851590ef4c3add83958135106534569f970'
 
@@ -208,13 +214,13 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
-      caption: 'When a block\'s merkle root ends in a 1 bit, its stop is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 971,270.',
+      caption: 'When a block\'s merkle root ends in a 1 bit, its stop is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 900,001.',
       scene: { target: { block: PORT_ROOT }, scale: 12 },
     },
     {
       id: 'landfall', chapter: 'hyperspace', title: 'A landfall',
       caption: 'Otherwise the stop is a landfall on Earth, at a point derived from the block hash. This is block 900,000.',
-      scene: { target: { block: LANDFALL_ROOT }, scale: 40 },
+      scene: { target: { block: LANDFALL_ROOT }, scale: 52 },
     },
     {
       id: 'ride', chapter: 'hyperspace', title: 'Riding the line',

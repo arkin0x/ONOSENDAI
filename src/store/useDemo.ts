@@ -22,6 +22,8 @@ import { stopSpeaking } from '../demo/voice'
 import { coordPlace } from '../lib/coordRoute'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { startCoordRoute } from './useCoordRoute'
+import { exitHyperspaceView, useHyperspace } from './useHyperspace'
+import { useToast } from './useToast'
 import { useChat } from './useChat'
 import { useCyberspace } from './useCyberspace'
 import { useLayers, type SceneLayer } from './useLayers'
@@ -67,15 +69,40 @@ function placeOf(target: DemoScene['target'], pubkey: string): { hex: string; la
 /** History for the /C/ machinery when the tour drives it: the address stays /demo. */
 const tourHistory: Pick<History, 'replaceState'> = { replaceState: () => {} }
 
+/** The cursor back on your own position, unless a proof is running from it. */
+function homeCursor(): void {
+  const now = useCyberspace.getState()
+  if (now.proof.status === 'computing' || now.walking) return
+  const { position, cursor, headPlane } = now
+  if (cursor.x !== position.x || cursor.y !== position.y || cursor.z !== position.z || now.plane !== headPlane) {
+    useCyberspace.setState({ cursor: { ...position }, plane: headPlane })
+  }
+}
+
+/** Take down a block step's sticky toast ("Block N · port/landfall"), and only that. */
+function dismissBlockToast(): void {
+  const t = useToast.getState().toast
+  if (t && t.sticky && /^Block [\d,]+ · (port|landfall)$/.test(t.label)) useToast.getState().dismiss()
+}
+
 /** Put the scene where a step says. Returns nothing; watchers go in stepCleanups. */
-export function applyScene(scene: DemoScene): void {
+export function applyScene(scene: DemoScene, walkStep = false): void {
   const cs = useCyberspace.getState()
   const target = scene.target
-  // WALK is a first-person mode at your own head; a step that looks elsewhere ends it.
-  if (target !== 'keep' && target !== 'self' && cs.walking) useWalk.getState().exit()
+  // WALK is the walk step's alone: any later step that sets a scene ends it,
+  // its own position included, or chapter 5 opened in first person on the
+  // black sun alone (rehearsal, 2026-10-15). `walkStep` keeps it for the
+  // step that asks for it.
+  if (target !== 'keep' && cs.walking && !walkStep) useWalk.getState().exit()
+  // A block step leaves the scene in the hyperspace stop view, which is its
+  // own state beside the focus: clearing the focus alone left VIEWING
+  // HYPERSPACE and its RETURN on screen for the rest of the tour, with the
+  // cursor still out at the stop (rehearsal, 2026-10-15).
+  if (target !== 'keep' && useHyperspace.getState().viewOwned) exitHyperspaceView()
   if (target === 'self') {
     if (cs.spectate) cs.endSpectate()
     if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
+    homeCursor()
   } else if (target !== 'keep') {
     const place = placeOf(target, cs.identity.pubkey)
     if (place) {
@@ -85,6 +112,8 @@ export function applyScene(scene: DemoScene): void {
       // The /C/ route's own machinery: a merkle root or block hash lands on
       // its hyperspace stop, with the block's toast (useCoordRoute.ts).
       stepCleanups.push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory))
+      // The block's toast waits for a tap; the tour takes its own toast with it.
+      stepCleanups.push(dismissBlockToast)
     }
   }
   if (scene.scale !== undefined) {
@@ -143,7 +172,7 @@ export const useDemo = create<DemoState>((set, get) => {
     const step = stepAt(get(), index)
     if (!step) return
     set({ index, done: !step.wait })
-    applyScene(step.scene)
+    applyScene(step.scene, step.wait === 'walk')
     if (step.wait) stepCleanups.push(watchAction(step.wait, () => { if (get().index === index && get().active) set({ done: true }) }))
   }
 
@@ -188,7 +217,10 @@ export const useDemo = create<DemoState>((set, get) => {
       stopSpeaking()
       const cs = useCyberspace.getState()
       if (cs.walking) useWalk.getState().exit()
+      if (useHyperspace.getState().viewOwned) exitHyperspaceView()
       if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus()
+      homeCursor()
+      dismissBlockToast()
       if (useCyberspace.getState().live !== get().prevLive) useCyberspace.getState().setLive(get().prevLive)
       set({ active: false, minimized: false })
       try { if (/^\/demo(\/|$)/i.test(window.location.pathname)) window.history.replaceState(null, '', '/') } catch { /* no history here */ }

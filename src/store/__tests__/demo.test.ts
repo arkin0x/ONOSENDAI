@@ -27,6 +27,8 @@ import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
 import { parseDemoRoute } from '../../lib/demoRoute'
 import { captionFor } from '../../hud/DemoCoach'
 import { coordPlace } from '../../lib/coordRoute'
+import { useHyperspace } from '../useHyperspace'
+import { useToast } from '../useToast'
 
 beforeEach(() => {
   if (useDemo.getState().active) useDemo.getState().exit()
@@ -127,6 +129,43 @@ describe('the engine', () => {
     useDemo.getState().start('district')
     expect(useCyberspace.getState().focus?.label).toBe(DEMO_DISTRICT.label)
     expect(useCyberspace.getState().focus?.position).toEqual(coordPlace(DEMO_DISTRICT.coord).position)
+  })
+})
+
+describe('leaving a step cleanly (rehearsal, 2026-10-15)', () => {
+  it('ends the hyperspace stop view and brings the cursor home on a step at your own position', () => {
+    useDemo.getState().start('ride')
+    const cs = useCyberspace.getState()
+    const far = { x: cs.position.x + 1000n, y: cs.position.y, z: cs.position.z }
+    // As a block step leaves it: the stop view owned, the focus on the stop, the cursor out there.
+    useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: null })
+    useCyberspace.getState().focusOn(far, cs.headPlane, 'BLOCK 900000 · LANDFALL')
+    useCyberspace.setState({ cursor: far })
+    useDemo.getState().next() // avatars: your own position
+    expect(useHyperspace.getState().viewOwned).toBe(false)
+    const after = useCyberspace.getState()
+    expect(after.focus).toBeNull()
+    expect(after.cursor).toEqual(after.position)
+  })
+
+  it("takes down a block step's own toast when the step ends, and no other", () => {
+    useDemo.getState().start('port')
+    useToast.getState().show({ label: 'Block 900,001 · port', meta: 'm', mark: 'place', sticky: true })
+    useDemo.getState().next()
+    expect(useToast.getState().toast).toBeNull()
+    useToast.getState().show({ label: 'Something else', meta: 'm', mark: 'place', sticky: true })
+    useDemo.getState().next()
+    expect(useToast.getState().toast?.label).toBe('Something else')
+    useToast.getState().dismiss()
+  })
+
+  it('keeps WALK on the walk step only', () => {
+    useDemo.getState().start('walk')
+    useCyberspace.setState({ walking: true })
+    useDemo.getState().goTo(useDemo.getState().index) // the walk step again: stays walking
+    expect(useCyberspace.getState().walking).toBe(true)
+    useDemo.getState().next() // region-keys: your own position, out of first person
+    expect(useCyberspace.getState().walking).toBe(false)
   })
 })
 

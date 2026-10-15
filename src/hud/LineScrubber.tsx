@@ -34,7 +34,10 @@ import { useEscape } from '../hooks/useEscape'
 const JUMP = 100
 
 export function LineScrubber(): JSX.Element {
-  const sync = useHyperspace((s) => s.sync)
+  // Only what is shown: the status and a whole percent, so a progress
+  // report that moves neither does not re-render the scrubber.
+  const syncStatus = useHyperspace((s) => s.sync.status)
+  const syncPercent = useHyperspace((s) => (s.sync.total > 0 ? Math.round((s.sync.loaded / s.sync.total) * 100) : 0))
   const tipHeight = useHyperspace((s) => s.tipHeight)
   const scrubHeight = useHyperspace((s) => s.scrubHeight)
   const destination = useHyperspace((s) => s.destination)
@@ -78,7 +81,7 @@ export function LineScrubber(): JSX.Element {
     )
   }
 
-  const ready = sync.status === 'ready' && tipHeight !== null
+  const ready = syncStatus === 'ready' && tipHeight !== null
   const open = scrubHeight !== null
   // Open, the scrubber is a chip on the Escape stack, closed the way H and
   // the chip close it (arkinox, 2026-10-01). The # box's own Escape, in the
@@ -157,7 +160,6 @@ export function LineScrubber(): JSX.Element {
   }
   const fraction = tip <= 0 ? 0 : (scrubHeight ?? tip) / tip
   const stop = scrubHeight !== null ? getStopByHeight(scrubHeight) : undefined
-  const syncPercent = sync.total > 0 ? Math.round((sync.loaded / sync.total) * 100) : 0
 
   return (
     <div className="explorer linescrub">
@@ -173,7 +175,7 @@ export function LineScrubber(): JSX.Element {
           ? destination !== null
             ? `HYPERSPACE ${destination}`
             : 'HYPERSPACE READY'
-          : sync.status === 'loading-cache'
+          : syncStatus === 'loading-cache'
             ? `HYPERSPACE LOADING ${syncPercent}%`
             : `HYPERSPACE SYNCING ${syncPercent}%`}
       </button>

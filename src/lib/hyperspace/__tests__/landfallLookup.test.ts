@@ -5,7 +5,10 @@
  * index keeps only its approximation, so the exact one is checked.
  */
 import { describe, expect, it } from 'vitest'
-import { appendStops, createStopIndex, rowByLandfallCoord, rowByRootOrHash } from '../compactIndex'
+import { appendStops, createStopIndex, landfallPrefixes, rowByLandfallCoord, rowByRootOrHash } from '../compactIndex'
+import { xyzToCoord } from 'cyberspace-core'
+import { bytesToHex } from '../../events'
+import { bigToBytes32 } from '../headers'
 import { landfallCoord, landfallCoordApprox } from '../landfall'
 import { hexToBytes } from '../../events'
 import type { Stop } from '../stops'
@@ -54,5 +57,29 @@ describe('finding a stop from a /C/ argument', () => {
     const nothing = hexToBytes('a'.repeat(63) + '0')
     expect(rowByRootOrHash(idx, nothing)).toBe(-1)
     expect(rowByLandfallCoord(idx, nothing)).toBe(-1)
+  })
+})
+
+describe('a landfall filed across a cell edge (arkinox, 2026-10-14)', () => {
+  // 14 bytes fix 112 of the 255 interleaved bits, so the axes' cells are 2^47
+  // or 2^48 G wide; a multiple of 2^48 is an edge on every axis, and a quarter
+  // of 2^48 is far from every edge.
+  const prefix = (x: bigint, y: bigint, z: bigint): string => bytesToHex(bigToBytes32(xyzToCoord(x, y, z, 0)).subarray(0, 14))
+  const CELL = 1n << 48n
+  const SLACK = 1n << 34n
+  it('also searches the neighbor cell on an axis where the exact point is near an edge', () => {
+    const x = 7n * CELL + 5n
+    const y = 3n * CELL + CELL / 4n
+    const z = 9n * CELL - 3n
+    const got = landfallPrefixes(xyzToCoord(x, y, z, 0)).map((p) => bytesToHex(p))
+    expect(got).toContain(prefix(x, y, z))
+    expect(got).toContain(prefix(x - SLACK, y, z))
+    expect(got).toContain(prefix(x, y, z + SLACK))
+    expect(got).toContain(prefix(x - SLACK, y, z + SLACK))
+    expect(got).toHaveLength(4)
+  })
+  it('searches one cell for a point far from every edge', () => {
+    const c = xyzToCoord(5n * CELL + CELL / 4n, 6n * CELL + CELL / 4n, 7n * CELL + CELL / 4n, 0)
+    expect(landfallPrefixes(c)).toHaveLength(1)
   })
 })

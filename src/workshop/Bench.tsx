@@ -387,7 +387,7 @@ function FaceHighlight(): JSX.Element | null {
   return (
     <>
       <mesh geometry={lit.g} frustumCulled={false}>
-        <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
+        <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
       <primitive object={lit.edge} />
     </>

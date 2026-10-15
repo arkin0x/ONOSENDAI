@@ -37,6 +37,7 @@ import { shortHex } from '../lib/time'
 import { ShardSpin } from '../scene/ShardSpin'
 import { sendKey, useChat } from '../store/useChat'
 import { useSecrets } from '../store/useSecrets'
+import { setTalking } from '../store/useAgentDms'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -130,6 +131,13 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
               <span className="secret__label">Operator</span>
               <ProfilePic pubkey={operator} size={16} />
               <span className="person__operator-name" title={nip19.npubEncode(operator)}>{profileLabel(operatorProfile, nip19.npubEncode(operator))}{operator === me ? ' (you)' : ''}</span>
+              {/* Your own agent: straight to its private conversation, as the
+                  AGENTS panel's TALK does (arkinox, 2026-10-14). */}
+              {operator === me && (
+                <button className="avatars__spectate agents__talk person__talk" onClick={() => { onClose(); setTalking(pubkey) }} title="Talk privately with your agent">
+                  <MessageSquare size={10} aria-hidden /> TALK
+                </button>
+              )}
             </div>
           )}
         </div>

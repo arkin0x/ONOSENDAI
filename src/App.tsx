@@ -19,6 +19,7 @@ import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './
 import { AgentTalkHost } from './hud/AgentTalk'
 import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
+import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
@@ -264,6 +265,8 @@ export default function App(): JSX.Element {
               {/* A broken chain first: nothing else moves you until you respawn.
                   It stays in BUILD mode too; building is not moving. */}
               <BrokenChainChip />
+              {/* The trip GOAL planned, until it is cleared (useGoal.ts). */}
+              <GoalChip />
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
                   on exit. */}

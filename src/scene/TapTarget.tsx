@@ -65,6 +65,8 @@ export const MAX_SCREENS = 2
 export const MAX_VIEWPORT_PX = 2160
 
 const noRaycast = (): void => {}
+/** Scratch for the frame loop, which runs per shard per frame: nothing is allocated there. */
+const scratch = new Vector3()
 
 const corner = new Vector3()
 /**
@@ -167,10 +169,10 @@ export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JS
     const fov = cam.fov ?? 50
 
     if (px !== undefined) {
-      centre.current.set(...(at ?? [0, 0, 0]))
+      if (at) centre.current.set(at[0], at[1], at[2]); else centre.current.set(0, 0, 0)
       m.parent.localToWorld(centre.current)
       const perPx = 1 / pxPerUnit(fov, state.size.height, cam.position.distanceTo(centre.current))
-      m.position.set(...(at ?? [0, 0, 0]))
+      if (at) m.position.set(at[0], at[1], at[2]); else m.position.set(0, 0, 0)
       m.scale.setScalar(px * perPx)
       m.raycast = Mesh.prototype.raycast
       // A mark (a message or a coin) is a deliberate, fixed-size target, and
@@ -202,12 +204,16 @@ export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JS
     const perWorld = pxPerUnit(fov, state.size.height, cam.position.distanceTo(centre.current))
     across.current = wide
     perPxWorld.current = 1 / perWorld
-    const span = wide > MAX_SCREENS * viewport ? null : targetSpan([size.current.x, size.current.y, size.current.z], perWorld)
-    if (!span) { m.raycast = noRaycast; return }
+    // targetSpan's rule, worked in place: this runs per shard per frame, and
+    // the arrays it returns were a steady stream of garbage (2026-10-14).
+    const s = size.current
+    const largest = Math.max(s.x, s.y, s.z) * perWorld
+    if (wide > MAX_SCREENS * viewport || !(largest >= MIN_VISIBLE_PX)) { m.raycast = noRaycast; return }
+    const floor = MIN_TARGET_PX / perWorld
     m.raycast = Mesh.prototype.raycast
     // The box is measured in world space; the target lives in its parent's.
-    m.position.copy(m.parent.worldToLocal(centre.current.clone()))
-    m.scale.set(span[0], span[1], span[2])
+    m.position.copy(m.parent.worldToLocal(scratch.copy(centre.current)))
+    m.scale.set(Math.max(s.x, floor), Math.max(s.y, floor), Math.max(s.z, floor))
   })
 
   const tap = (e: ThreeEvent<MouseEvent>): void => {
@@ -237,7 +243,11 @@ export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JS
   }
 
   return (
-    <mesh ref={hit} onClick={tap} raycast={noRaycast}>
+    // Not drawn: a target is only ever raycast, and three and R3F both
+    // raycast an object whatever its `visible`. Drawn, at opacity 0, every
+    // shard paid a transparent draw call and a place in the per-frame
+    // transparent sort for nothing (2026-10-14).
+    <mesh ref={hit} onClick={tap} raycast={noRaycast} visible={false}>
       <boxGeometry args={[1, 1, 1]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>

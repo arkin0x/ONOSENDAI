@@ -3,6 +3,7 @@
  * avatar is a shard, and the copy credits its author (arkinox, 2026-10-11).
  */
 import { beforeEach, describe, expect, it } from 'vitest'
+import { getPublicKey, nip19 as nip19Keys } from 'nostr-tools'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -17,10 +18,17 @@ if (typeof localStorage === 'undefined') {
 const xor = 'a'.repeat(64)
 const operator = 'c'.repeat(64)
 const plain = 'b'.repeat(64)
+// This device's identity, seeded before the store loads, so a card can be for
+// an agent whose operator is you (server rendering reads the initial state).
+const mySecret = new Uint8Array(32).fill(7)
+const mine = getPublicKey(mySecret)
+const myAgent = 'd'.repeat(64)
+localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: mine, nsec: nip19Keys.nsecEncode(mySecret) }))
 localStorage.setItem('onosendai:profiles', JSON.stringify({
   [xor]: { pubkey: xor, name: 'XOR', picture: null, about: null, nip05: null, at: 1, bot: true, operator },
   [operator]: { pubkey: operator, name: 'arkinox', picture: null, about: null, nip05: null, at: 1 },
   [plain]: { pubkey: plain, name: 'Case', picture: null, about: null, nip05: null, at: 1 },
+  [myAgent]: { pubkey: myAgent, name: 'MINE', picture: null, about: null, nip05: null, at: 1, bot: true, operator: mine },
 }))
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -64,6 +72,14 @@ describe('the card a tap on an avatar opens', () => {
     expect(html).not.toContain('stub-preview')
     expect(html).not.toContain('AGENT')
     expect(html).toContain('TARGET')
+  })
+})
+
+describe('TALK on your own agent\'s card (arkinox, 2026-10-14)', () => {
+  it('shows TALK in the operator row only when you are the operator', () => {
+    expect(renderToStaticMarkup(<PersonCard pubkey={myAgent} shard={null} onClose={close} Preview={Stub} />)).toContain('person__talk')
+    expect(renderToStaticMarkup(<PersonCard pubkey={xor} shard={octangula()} onClose={close} Preview={Stub} />)).not.toContain('person__talk')
+    expect(renderToStaticMarkup(<PersonCard pubkey={plain} shard={null} onClose={close} Preview={Stub} />)).not.toContain('person__talk')
   })
 })
 

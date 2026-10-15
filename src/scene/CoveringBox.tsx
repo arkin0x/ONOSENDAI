@@ -245,6 +245,8 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
     transparent: true,
     opacity: WALL_OPACITY,
     side: DoubleSide,
+    // One pass, not three's back-then-front pair (see ShardMesh).
+    forceSinglePass: true,
     depthWrite: false,
     toneMapped: false,
     ...split,

@@ -220,6 +220,8 @@ function gridMaterial(): ShaderMaterial {
     transparent: true,
     depthWrite: false,
     side: DoubleSide,
+    // One pass, not three's back-then-front pair (see ShardMesh).
+    forceSinglePass: true,
     toneMapped: false,
   })
 }

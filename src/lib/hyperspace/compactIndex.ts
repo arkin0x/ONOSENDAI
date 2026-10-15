@@ -25,7 +25,7 @@
  * bigint constructions.
  */
 
-import { coordToXyz, type Xyz } from 'cyberspace-core'
+import { coordToXyz, xyzToCoord, type Xyz } from 'cyberspace-core'
 import { bytesToHex, hexToBytes } from '../events'
 import { bigToBytes32, bytesToBigAt, type BlobColumns } from './headers'
 import { landfallCoord } from './landfall'
@@ -158,10 +158,30 @@ export function rowByRootOrHash(index: StopIndex, bytes: Uint8Array): number {
  * coordinate interleaves the axes from the top, so the approximation and the
  * exact point share their leading bytes unless they straddle a boundary.
  * 14 bytes is 112 bits, about 37 per axis: a cell some 2^48 G (about 30 km)
- * across, which holds a handful of landfalls at most, and a straddle chance
- * near 2^-14 per axis. The candidates are then checked exactly.
+ * across, which holds a handful of landfalls at most. The candidates are then
+ * checked exactly.
+ *
+ * A landfall within the approximation's error of a cell's edge can be filed
+ * in the neighboring cell (a straddle, about 1 in 5,000 per axis), so the
+ * search also looks in the neighbor on each axis where the exact point is
+ * that close to an edge: at most 8 cells (arkinox, 2026-10-14).
  */
 const LANDFALL_PREFIX_BYTES = 14
+/** More than the approximation's error per axis (2^33 G), so a straddle always reaches the neighbor. */
+const LANDFALL_SLACK = 1n << 34n
+const AXIS_MAX = (1n << 85n) - 1n
+
+/** The leading bytes of every cell a landfall with exact coordinate `want` may be filed under. */
+export function landfallPrefixes(want: bigint): Uint8Array[] {
+  const { x, y, z } = coordToXyz(want)
+  const near = (v: bigint): bigint[] => [...new Set([v - LANDFALL_SLACK, v, v + LANDFALL_SLACK].map((n) => (n < 0n ? 0n : n > AXIS_MAX ? AXIS_MAX : n)))]
+  const seen = new Map<string, Uint8Array>()
+  for (const nx of near(x)) for (const ny of near(y)) for (const nz of near(z)) {
+    const p = bigToBytes32(xyzToCoord(nx, ny, nz, 0)).subarray(0, LANDFALL_PREFIX_BYTES)
+    seen.set(bytesToHex(p), p)
+  }
+  return [...seen.values()]
+}
 
 /**
  * The row of the landfall whose exact stop coordinate (the C tag of a plane 0
@@ -176,11 +196,16 @@ export function rowByLandfallCoord(index: StopIndex, bytes: Uint8Array): number 
   // A landfall is in dataspace: the plane bit (the lowest bit) is 0.
   if ((bytes[31] & 1) !== 0) return -1
   const want = bytesToBigAt(bytes, 0)
-  outer: for (let row = 0; row < index.size; row++) {
+  const prefixes = landfallPrefixes(want)
+  const filedUnder = (off: number): boolean => prefixes.some((p) => {
+    for (let i = 0; i < LANDFALL_PREFIX_BYTES; i++) if (coords[off + i] !== p[i]) return false
+    return true
+  })
+  for (let row = 0; row < index.size; row++) {
     const k = kinds[row]
     if ((k & KIND_PORT) !== 0 || (k & HAS_HASH) === 0) continue
     const off = row * 32
-    for (let i = 0; i < LANDFALL_PREFIX_BYTES; i++) if (coords[off + i] !== bytes[i]) continue outer
+    if (!filedUnder(off)) continue
     if (landfallCoord(bytesToHex(hashes.subarray(off, off + 32))) === want) return row
   }
   return -1

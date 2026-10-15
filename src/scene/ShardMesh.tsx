@@ -322,9 +322,19 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
+            {/* forceSinglePass: three draws a transparent DoubleSide material
+                in two passes, back then front, and to do it flips the side
+                and sets needsUpdate twice per object per frame. Each flip is
+                a shader program lookup that allocates (getParameters, a
+                cache key join): ~106 KB of garbage a frame with 150 shards
+                around, which a 144 Hz desktop turns into about a gigabyte a
+                minute, and twice the draw calls. These faces write depth at
+                opacity 1, so one pass draws the same picture. Ghosts (0.45)
+                keep the two passes for cleaner self-overlap: there are few
+                (arkinox's 10 GB Windows tabs, 2026-10-14). */}
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} {...pick}>

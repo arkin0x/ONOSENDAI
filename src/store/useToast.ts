@@ -12,8 +12,8 @@ export interface Toast {
   id: string
   label: string
   meta: string
-  /** What stands as the chip's glyph: the cloud provider's mark, a yellow star, the Builder's wrench, WALK's footprints, or a pin for a /C/ link. */
-  mark: 'hosaka' | 'star' | 'build' | 'walk' | 'place'
+  /** What stands as the chip's glyph: the cloud provider's mark, a yellow star, the Builder's wrench, WALK's footprints, or a pin for a /C/ link, a goal flag for GOAL. */
+  mark: 'hosaka' | 'star' | 'build' | 'walk' | 'place' | 'goal'
   /** How long it stays up once on screen; TOAST_MS when not given. */
   ms?: number
   /**

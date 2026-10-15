@@ -175,6 +175,42 @@ export function findStation(index: StopIndex, coord: bigint, maxHeight: number):
   return null
 }
 
+/**
+ * The stop nearest `coord` in one plane, with no height bound: the stop a
+ * trip to `coord` should leave the line at (GOAL, arkinox 2026-10-14). Ports
+ * are ideaspace and landfalls dataspace, so a destination in dataspace exits
+ * at a landfall and one in ideaspace at a port. Same metric, ties and exact
+ * re-derivation as findStation; the index key carries no plane, so stops of
+ * the other plane are skipped while the cube widens.
+ */
+export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1): StationResult | null {
+  if (index.permCount === 0) return null
+  const key = bigToBytes32(coord >> 1n)
+  const p = lowerBound(index, key)
+  let dGuess = 86
+  for (const i of [p - 1, p]) {
+    if (i >= 0 && i < index.permCount) {
+      const d = lcaAtSorted(index, key, i)
+      if (d < dGuess) dGuess = d
+    }
+  }
+  if (dGuess > 85) dGuess = 85
+  for (let d = dGuess; d <= 85; d++) {
+    const [start, end] = prefixRange(index, key, d)
+    let best: StationResult | null = null
+    for (let i = start; i < end; i++) {
+      const stop = stopAt(index, index.perm[i])
+      if ((stop.kind === 'port' ? 1 : 0) !== plane) continue
+      const exact = maxAxisLca(coord, stopCoordExact(stop))
+      if (best === null || exact < best.distance || (exact === best.distance && stop.height < best.stop.height)) {
+        best = { stop, distance: exact }
+      }
+    }
+    if (best !== null) return best
+  }
+  return null
+}
+
 /** The k nearest stops to a coordinate (no height bound), for the UI. */
 export function nearestStops(index: StopIndex, coord: bigint, k: number): StationResult[] {
   if (index.permCount === 0) return []

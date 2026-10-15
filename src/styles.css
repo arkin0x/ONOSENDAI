@@ -6797,6 +6797,39 @@ kbd {
  * 29px so it stays level with CONTROLS, but it takes a tap across 45px each
  * way through the ::after below. Accent while empty (a live control, so not
  * the dim a folded chip gets under aria-pressed=false); yellow once starred. */
+/* The star and GOAL as one group where the folded CHAT chip sits, centered
+ * together (arkinox, 2026-10-14). The group takes the chip's fixed place;
+ * the two chips inside sit in it like ordinary buttons. */
+.chatdock__chip.goalgroup {
+  padding: 0;
+  gap: 8px;
+  background: none;
+  border: 0;
+}
+.goalgroup > .chatdock__chip {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+}
+.chip.goalchip {
+  color: var(--accent, #00e5ff);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.chip.goalchip.is-set {
+  color: #7dffb0;
+  border-color: rgba(125, 255, 176, 0.6);
+  box-shadow: 0 0 10px rgba(125, 255, 176, 0.22);
+}
+.goalchip::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.goalbar { gap: 8px; }
+.goalbar .hyperbar__meta { white-space: normal; }
+.goalbar__clear { display: inline-flex; align-items: center; }
+
 .chip.starchip,
 .chip.starchip[aria-pressed='false'] {
   color: var(--accent, #00e5ff);

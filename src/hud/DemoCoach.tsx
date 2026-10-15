@@ -18,7 +18,8 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, Volume2, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, X, type LucideIcon } from 'lucide-react'
+import { splitCaption } from '../demo/captionTokens'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { gateHeld, tourKeyNeedsSpawn, useDemo } from '../store/useDemo'
@@ -43,6 +44,22 @@ const KINDS: Array<[number, string]> = [
   [321, 'A Bitcoin block anchor: a hyperspace stop'],
   [0, 'A profile: name and picture'],
 ]
+
+/** The icons a caption may draw ({icon:name}, demo/captionTokens.ts): this list and no other. */
+const CAPTION_ICONS: Record<string, LucideIcon> = { plus: SquarePlus, minus: SquareMinus }
+
+/** A caption with its icons drawn inline at text size; everything else is text, never HTML. */
+export function CaptionText({ caption }: { caption: string }): JSX.Element {
+  return (
+    <>
+      {splitCaption(caption).map((p, i) => {
+        if ('text' in p) return <span key={i}>{p.text}</span>
+        const Icon = Object.hasOwn(CAPTION_ICONS, p.icon) ? CAPTION_ICONS[p.icon] : undefined
+        return Icon ? <Icon key={i} className="demo__icon-inline" size="1em" strokeWidth={2.25} aria-label={`${p.icon} button`} role="img" /> : null
+      })}
+    </>
+  )
+}
 
 /** The caption a step shows to this identity, while its action waits (`done` false) or after. */
 export function captionFor(step: DemoStep, hasChain: boolean, done = true, ownAvatar = false): string {
@@ -325,7 +342,7 @@ export function DemoCoach(): JSX.Element | null {
           <h2 className="demo__title">{step.title}</h2>
           <span className="demo__progress">{progress}</span>
         </div>
-        <p className="demo__caption">{caption}</p>
+        <p className="demo__caption"><CaptionText caption={caption} /></p>
         {step.panel && <Panel panel={step.panel} waiting={held} />}
       </div>
       {step.wait && (

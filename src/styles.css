@@ -9139,6 +9139,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .demo__bar-track { height: 2px; background: rgba(0, 229, 255, 0.12); border-radius: 1px; overflow: hidden; }
 .demo__bar-fill { height: 100%; background: var(--accent); transition: width 0.25s ease; }
 .demo__title { margin: 0; font-size: 15px; font-weight: 600; color: var(--fg); }
+.demo__icon-inline { display: inline-block; vertical-align: -0.125em; margin: 0 0.1em; color: var(--accent); }
 .demo__caption { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg); }
 .demo__wait { font-size: 11px; color: #ffd84d; letter-spacing: 0.04em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .demo__btn.demo__btn--spawn { flex: 0 0 auto; padding: 0 16px; color: var(--bg); background: #ff2323; border-color: #ff5470; }

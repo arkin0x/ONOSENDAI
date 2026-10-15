@@ -338,3 +338,68 @@ describe('nearest stop, derivation count', () => {
     }
   })
 })
+
+describe('nearest stop, the edges the random targets miss', () => {
+  it('excludes a port being looked at and names its true neighbor, among clustered ports', () => {
+    // StopField asks for the port nearest a port view, excluding the port
+    // itself. Random ports sit far apart, and a query of q | 1 is almost
+    // never a port, so the brute force above never really excludes one.
+    // Here ports come in tight clusters, some sharing a coordinate, and
+    // every port is queried with itself excluded.
+    const rng = mulberry32(31)
+    const stops: Stop[] = []
+    const exact: bigint[] = []
+    let h = 0
+    for (let c = 0; c < 30; c++) {
+      const center = [0, 1, 2].map(() => randBits(rng, 85))
+      const spread = 2 + Math.floor(rng() * 30)
+      let last: bigint | null = null
+      for (let m = 0; m < 12; m++) {
+        const at: bigint = last !== null && rng() < 0.15
+          ? last
+          : xyzToCoord(...(center.map((v) => clampAxis(v + randBits(rng, spread) - (1n << BigInt(spread - 1)))) as [bigint, bigint, bigint]), 1)
+        last = at
+        stops.push({ height: h, kind: 'port', merkleRoot: at.toString(16).padStart(64, '0'), blockHash: randHex(rng), coordExact: at, coordApprox: at })
+        exact.push(at)
+        h++
+      }
+      // Landfalls in the same cubes, which the port search must step over.
+      for (let m = 0; m < 6; m++) {
+        const at = xyzToCoord(...(center.map((v) => clampAxis(v + randBits(rng, spread))) as [bigint, bigint, bigint]), 0)
+        stops.push({ height: h, kind: 'landfall', merkleRoot: randHex(rng), blockHash: randHex(rng), coordExact: at, coordApprox: at })
+        exact.push(at)
+        h++
+      }
+    }
+    const f: Fixture = { stops, exact }
+    const index = indexOf(f)
+    for (const stop of stops) {
+      if (stop.kind !== 'port') continue
+      const q = exact[stop.height]
+      const got = findNearestInPlane(index, q, 1, q)
+      const want = brute(f, q, stops.length, q).port
+      expect({ height: got?.stop.height, distance: got?.distance }).toEqual({ height: want?.height, distance: want?.distance })
+      expect(got?.stop.coordExact).not.toBe(q)
+    }
+  })
+
+  it('matches the brute force with stops filed at the very edges of the axes, where the 3x3x3 block is clipped', () => {
+    // No landfall is really near an axis end, but a relay anchor's C tag can
+    // put one anywhere, and the clipped neighborhood is code that otherwise
+    // never runs. Clusters sit at each corner of the space and filing is as
+    // far off as the slack allows, so stops straddle the faces next to the
+    // clipped ones.
+    const rng = mulberry32(91)
+    const place: Array<(hash: string) => bigint> = []
+    for (let c = 0; c < 16; c++) {
+      const spread = LANDFALL_SLACK_BITS + 1 + Math.floor(rng() * 6)
+      const corner = [0, 1, 2].map(() => (rng() < 0.5 ? 0n : AXIS_MAX))
+      for (let m = 0; m < 20; m++) {
+        const at = xyzToCoord(...(corner.map((v) => (v === 0n ? randBits(rng, spread) : AXIS_MAX - randBits(rng, spread)))) as [bigint, bigint, bigint], 0)
+        place.push(() => at)
+      }
+    }
+    const f = fixture(5150, [...place, ...derived(50)], 100, fileAdversarial)
+    checkAgainstBrute(f, 3, 800)
+  }, 60_000)
+})

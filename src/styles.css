@@ -5262,7 +5262,15 @@ kbd {
   box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
   font-size: 9px;
   letter-spacing: 0.1em;
-  max-width: calc(100vw - 24px);
+  /* Stops short of the 3D compass, top right (84px at 12px in, plus an 8px
+     gap, from the stack's 8px left edge): a long VIEWING label ran under it
+     and covered its tap target (smoke test, 2026-10-16). */
+  max-width: calc(100vw - 112px);
+}
+@media (min-width: 1101px) {
+  /* Desktop: the stack starts 352px in, the 120px compass sits 332px in
+     from the right. */
+  .hyperbar { max-width: calc(100vw - 812px); }
 }
 
 .hyperbar__glyph {

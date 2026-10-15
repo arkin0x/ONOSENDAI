@@ -79,7 +79,7 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'identity', chapter: 'key', title: 'Identity is location',
-      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different private key, which is a whole new identity. However, your spawn point is only the beginning of your story. Soon we\'ll move around.',
+      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different private key, which is a whole new identity. However, your spawn point is only the beginning of your journey. Soon we\'ll move around.',
       scene: { target: 'spawn', scale: 0 },
     },
 
@@ -145,8 +145,10 @@ export const DEMO_SCRIPT: DemoScript = {
       scene: { target: 'self', scale: 34 },
     },
     {
-      id: 'cube', chapter: 'scale', title: 'The whole cube',
-      caption: 'This is all of it: 2^85 gibsons on a side. Zoom yourself with the + and − keys on the pad, or Q and E.',
+      id: 'cube', chapter: 'scale', title: 'Scaling up and down',
+      // {icon:plus} and {icon:minus} draw lucide's SquarePlus and SquareMinus
+      // inline (demo/captionTokens.ts); SPEAK reads them as words.
+      caption: 'The {icon:plus} and {icon:minus} buttons change your zoom by powers of 2. The 2^X button shows your zoom and resets it to 2^0, where 1 cell is 1 gibson. Each zoom out increases the gibsons per cell: 2, 4, 8, 16, etc. The globe button zooms to Earth scale and the cube button zooms all the way out to cyberspace scale.',
       scene: { target: 'self', scale: 84, plane: 1 },
     },
     {

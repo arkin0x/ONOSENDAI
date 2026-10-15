@@ -5,6 +5,8 @@
  * device.
  */
 
+import { spokenText } from './captionTokens'
+
 /** Whether this browser can speak; SPEAK is left out where it cannot (as AgentTalk's). */
 export function canSpeak(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined'
@@ -125,7 +127,8 @@ export async function speak(text: string, onEnd: () => void): Promise<void> {
   const voices = await voicesNow()
   // Stopped while the voices loaded: whoever stopped it has already said so.
   if (turn !== speechTurn) return
-  const u = new SpeechSynthesisUtterance(text)
+  // Icons as their words, 2^X as "two to the X" (demo/captionTokens.ts).
+  const u = new SpeechSynthesisUtterance(spokenText(text))
   const voice = pickVoice(voices)
   if (voice) { u.voice = voice; u.lang = voice.lang }
   u.rate = VOICE_RATE

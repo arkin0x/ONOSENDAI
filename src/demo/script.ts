@@ -79,7 +79,7 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'identity', chapter: 'key', title: 'Identity is location',
-      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different private key, which is a whole new identity. However, your spawn point is only the beginning of your story. Soon we\'ll move around.',
+      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different private key, which is a whole new identity. However, your spawn point is only the beginning of your journey. Soon we\'ll move around.',
       scene: { target: 'spawn', scale: 0 },
     },
 

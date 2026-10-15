@@ -1,5 +1,5 @@
 /**
- * AskBubble.tsx — the question everyone asks, under the wordmark.
+ * AskBubble.tsx: the question everyone asks, under the wordmark.
  *
  * "ONOSENDAI looks amazing but I have no idea what I'm looking at." So the
  * menu says it first: a small face and a speech bubble that cycles through

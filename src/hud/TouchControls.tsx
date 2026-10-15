@@ -50,7 +50,7 @@ import { useWalk } from '../store/useWalk'
  * lines included: `.modal__pre` is `white-space: pre-wrap` so the line
  * breaks and the leading space on the first bullet survive to the screen.
  */
-const GO_LIVE_BODY = [
+export const GO_LIVE_BODY = [
   'LIVE means actions you take and things you hide in cyberspace are published to relays so others can see them. LOCAL holds all the data on this device privately.',
   '',
   'If you switch to LIVE,',

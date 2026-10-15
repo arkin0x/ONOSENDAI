@@ -3,7 +3,9 @@
  * finished elsewhere, the way KEY FOUND announces a find: a cloud job done,
  * a place starred, BUILD mode ended by something other than EXIT
  * (store/useBuilder.ts), a WALK stopped short (store/useWalk.ts), or what a
- * /C/ link named (store/useCoordRoute.ts). One at a time; a new one replaces the last.
+ * /C/ link named (store/useCoordRoute.ts), or that the signer is on another
+ * account than the identity on screen (store/useCyberspace.ts). One at a
+ * time; a new one replaces the last.
  */
 
 import { create } from 'zustand'
@@ -12,8 +14,8 @@ export interface Toast {
   id: string
   label: string
   meta: string
-  /** What stands as the chip's glyph: the cloud provider's mark, a yellow star, the Builder's wrench, WALK's footprints, or a pin for a /C/ link, a goal flag for GOAL. */
-  mark: 'hosaka' | 'star' | 'build' | 'walk' | 'place' | 'goal'
+  /** What stands as the chip's glyph: the cloud provider's mark, a yellow star, the Builder's wrench, WALK's footprints, or a pin for a /C/ link, a goal flag for GOAL, a crossed-out person for a signer on another account. */
+  mark: 'hosaka' | 'star' | 'build' | 'walk' | 'place' | 'goal' | 'signer'
   /** How long it stays up once on screen; TOAST_MS when not given. */
   ms?: number
   /**

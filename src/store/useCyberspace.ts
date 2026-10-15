@@ -37,6 +37,8 @@ import {
   nip46Signer,
   NIP44_UNAVAILABLE,
   NIP44_ENCRYPT_UNAVAILABLE,
+  SignerAccountMismatch,
+  SignerUnconfirmed,
   prefOf,
   loadSignerPref,
   saveSignerPref,
@@ -924,8 +926,11 @@ export interface CyberspaceState {
   exportKey: (password: string, again: string) => string
   /**
    * Open a NIP-44 payload sealed to this identity by `senderPubkey`: a chest
-   * sealed to a person (lib/chests.ts). Rejects, in words, only when the
-   * signer truly offers no NIP-44 decrypt (lib/signers.ts).
+   * sealed to a person (lib/chests.ts), a private message (lib/dm.ts).
+   * Rejects, in words, when the signer truly offers no NIP-44 decrypt
+   * (lib/signers.ts), or when a remote signer failed it and holds another
+   * account (SignerAccountMismatch) or would not say (SignerUnconfirmed):
+   * those two are about the signer, not the payload (signerCannotJudge).
    */
   decryptSealed: (senderPubkey: string, payload: string) => Promise<string>
   /**
@@ -1335,6 +1340,27 @@ function pickInitialSigner(): Signer {
 /** Remote signatures in flight: while one waits, a wake must not drop the sockets its answer arrives on. */
 let pendingSigns = 0
 
+/**
+ * The identity whose signer was last found on another account, so that is
+ * said once (otherAccount) and not on every refused signature, of which a
+ * relay's AUTH alone brings one per socket. Cleared when the signer signs as
+ * that identity again, so a later switch away is said again.
+ */
+let otherAccountNoticed: string | null = null
+
+/**
+ * Say, once, that the signer is on another account than `pubkey`, the
+ * identity that asked it: each refusal also says so where it happened, but
+ * a relay's AUTH or a background read has nowhere to say it. Not for an
+ * identity no longer on screen: its late answer is nobody's business now.
+ */
+function otherAccount(pubkey: string): void {
+  if (otherAccountNoticed === pubkey) return
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  otherAccountNoticed = pubkey
+  useToast.getState().show({ label: 'SIGNER ON ANOTHER ACCOUNT', meta: 'Switch your signer back, or log in again.', mark: 'signer', sticky: true })
+}
+
 async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events
@@ -1346,24 +1372,103 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
   pendingSigns++
   let signed: NostrEvent
   try {
-    signed = await signWithin(signer, template, patienceMs)
+    try {
+      signed = await signWithin(signer, template, patienceMs)
+    } catch (err) {
+      // A timeout, or a publish that gave up ("All promises were rejected"):
+      // either way the signer's sockets are presumed dead. Drop them and ask
+      // once more over fresh ones. Not a signer on another account (a
+      // stand-in whose reconnect found one): asking again only asks it again.
+      if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
+      const fresh = await signer.reconnect()
+      if (currentSigner === signer) currentSigner = fresh
+      signed = await signWithin(fresh, template, patienceMs)
+    }
   } catch (err) {
-    // A timeout, or a publish that gave up ("All promises were rejected"):
-    // either way the signer's sockets are presumed dead. Drop them and ask
-    // once more over fresh ones.
-    if (!signer.reconnect) throw err
-    const fresh = await signer.reconnect()
-    if (currentSigner === signer) currentSigner = fresh
-    signed = await signWithin(fresh, template, patienceMs)
+    if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
+    throw err
   } finally {
     pendingSigns--
   }
-  // A remote signer's answer is checked before anything holds it (spec
-  // §8.2, §8.7.3, Q4): an event whose id or signature does not verify is
-  // not authentic, so it never goes onto a chain, here or on a relay. The
-  // local signer computes both itself; an extension or bunker is trusted to.
+  return checkedAnswer(signed, signer)
+}
+
+/**
+ * A remote signer's answer is checked before anything holds it (spec §8.2,
+ * §8.7.3, Q4): an event whose id or signature does not verify is not
+ * authentic, so it never goes onto a chain, here or on a relay. The local
+ * signer computes both itself; an extension or bunker is trusted to.
+ *
+ * And it must be signed by the identity that asked. A remote signer signs as
+ * whichever account it holds now: an extension or a bunker can be switched
+ * mid-visit, and a Nostr Connect session restored on reload is never asked
+ * which account it holds. Its signature checks out against its own pubkey,
+ * so without this a hop, a relay's AUTH, a HOSAKA request or a profile went
+ * out as somebody else, under this identity's name on screen (found porting
+ * this to snocrash, review of snocrash #37).
+ */
+function checkedAnswer(signed: NostrEvent, signer: Signer): NostrEvent {
   if (!authentic(signed)) throw new Error('the signer returned an event whose signature does not verify, so it was not used')
+  if (signed.pubkey !== signer.pubkey) {
+    otherAccount(signer.pubkey)
+    throw new SignerAccountMismatch()
+  }
+  // Back on this identity's account: the notice is done with.
+  if (otherAccountNoticed === signer.pubkey) {
+    otherAccountNoticed = null
+    if (useToast.getState().toast?.mark === 'signer') useToast.getState().dismiss()
+  }
   return signed
+}
+
+/** How long a decrypt that failed waits for the signer to say which account it holds. */
+const HELD_PATIENCE_MS = 10_000
+/**
+ * How long a "not this identity" answer stands, so a page of wraps that will
+ * not open asks once, not once each. Only that answer is kept: "this
+ * identity" is asked afresh each time, since a signer switched away within
+ * the window would otherwise have its failures kept as unopenable.
+ */
+const HELD_ANSWER_MS = 30_000
+
+/** The last answer to "which account do you hold", per signer object. */
+let heldAsked: { signer: Signer; at: number; answer: Promise<string | null> } | null = null
+
+/** The account `signer` holds now, or null when it could not say in time. */
+function heldBy(signer: Signer): Promise<string | null> {
+  if (heldAsked && heldAsked.signer === signer && Date.now() - heldAsked.at < HELD_ANSWER_MS) return heldAsked.answer
+  const ask = signer.heldPubkey
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const answer = ask
+    ? Promise.race([
+      ask().then((pk) => (typeof pk === 'string' ? pk : null), () => null),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HELD_PATIENCE_MS) }),
+    ]).finally(() => clearTimeout(timer))
+    : Promise.resolve(null)
+  const asked = { signer, at: Date.now(), answer }
+  heldAsked = asked
+  void answer.then((pk) => { if (pk === signer.pubkey && heldAsked === asked) heldAsked = null })
+  return answer
+}
+
+/**
+ * Why a decrypt through `signer` failed, as the error to reject with. A
+ * remote signer on another account cannot open what is sealed to this
+ * identity, and the failure looks exactly like a payload that does not open,
+ * which is kept as such (a private message is never decrypted again). So the
+ * signer is asked which account it holds: this identity's, and the payload
+ * truly does not open; another, and that is said (SignerAccountMismatch);
+ * no answer, and it is left undecided (SignerUnconfirmed).
+ */
+async function decryptRefusal(signer: Signer, err: unknown): Promise<unknown> {
+  if (signer.kind === 'local') return err
+  if (err instanceof SignerAccountMismatch) { otherAccount(signer.pubkey); return err }
+  if (err instanceof Error && err.message === NIP44_UNAVAILABLE) return err
+  const held = await heldBy(signer)
+  if (held === signer.pubkey) return err
+  if (held === null) return new SignerUnconfirmed()
+  otherAccount(signer.pubkey)
+  return new SignerAccountMismatch()
 }
 
 /**
@@ -2627,6 +2732,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     stopCloud()
     requestId++
     currentSigner = signer
+    // A new signer: whether the old one was on another account is old news.
+    otherAccountNoticed = null
+    heldAsked = null
+    if (useToast.getState().toast?.mark === 'signer') useToast.getState().dismiss()
     saveSignerPref(prefOf(signer))
     // No spawn is signed here. A returning identity loads from local storage now
     // and from the relay a moment later (self-sync), and a brand-new one sits at
@@ -4122,9 +4231,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
   useNewKey: async () => { await switchTo(randomSigner()) },
   exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
-  decryptSealed: (senderPubkey, payload) => {
-    const open = currentSigner.nip44Decrypt
-    return open ? open(senderPubkey, payload) : Promise.reject(new Error(NIP44_UNAVAILABLE))
+  decryptSealed: async (senderPubkey, payload) => {
+    const signer = currentSigner
+    const open = signer.nip44Decrypt
+    if (!open) throw new Error(NIP44_UNAVAILABLE)
+    try { return await open(senderPubkey, payload) }
+    catch (err) { throw await decryptRefusal(signer, err) }
   },
   encryptSealed: (recipientPubkey, plaintext) => {
     const seal = currentSigner.nip44Encrypt

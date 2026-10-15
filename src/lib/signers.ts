@@ -47,6 +47,15 @@ export interface Signer {
    * says so.
    */
   nip44Encrypt?: (recipientPubkey: string, plaintext: string) => Promise<string>
+  /**
+   * Asks the signer, now, which account it holds: never an answer cached at
+   * login. An extension or a bunker can switch accounts mid-visit, and a
+   * restored Nostr Connect session is never asked at all, so this is what
+   * tells a payload that does not open apart from a signer holding someone
+   * else. Asked only after a decrypt failed (SignerAccountMismatch). Absent
+   * for a local key, which is always its own.
+   */
+  heldPubkey?: () => Promise<string>
   /** Present only for local signers, so the key can be persisted. */
   secretKey?: Uint8Array
   /** For a bunker: what to persist to reconnect it. */
@@ -78,6 +87,42 @@ export const NIP44_UNAVAILABLE = 'Your signer offers no NIP-44 decrypt, so a che
 
 /** Why a private message cannot be sent: the signer offers no NIP-44 encrypt to seal it with. */
 export const NIP44_ENCRYPT_UNAVAILABLE = 'Your signer offers no NIP-44 encrypt, so a private message cannot be sealed with it.'
+
+/**
+ * Why a remote signer's answer was refused: it is signed in as another
+ * account than the identity that asked. A signer signs as whichever account
+ * it holds now, so this is checked on every signature (the store's signEvent)
+ * and after a decrypt that failed (decryptSealed).
+ */
+export const SIGNER_OTHER_ACCOUNT = 'Your signer is now on a different account than the one logged in here. Switch it back, or log in again.'
+
+/** The signer holds another account than the identity that asked it (SIGNER_OTHER_ACCOUNT). */
+export class SignerAccountMismatch extends Error {
+  constructor(message = SIGNER_OTHER_ACCOUNT) {
+    super(message)
+    this.name = 'SignerAccountMismatch'
+  }
+}
+
+/**
+ * A decrypt through a remote signer failed, and the signer did not say which
+ * account it holds, so whether the payload truly does not open is unknown.
+ */
+export class SignerUnconfirmed extends Error {
+  constructor() {
+    super('Your signer could not open this and did not say which account it holds. Try again.')
+    this.name = 'SignerUnconfirmed'
+  }
+}
+
+/**
+ * Whether a decrypt failed because of the signer, not the payload: it holds
+ * another account, or it could not say. Such a failure is for now, so
+ * nothing may be kept as unopenable for it.
+ */
+export function signerCannotJudge(err: unknown): boolean {
+  return err instanceof SignerAccountMismatch || err instanceof SignerUnconfirmed
+}
 
 /** A local key: the default random one, or one you brought. */
 export function localSigner(secretKey: Uint8Array): Signer {
@@ -150,6 +195,7 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
     kind: 'nip07',
     pubkey,
     signEvent: (template) => ext.signEvent(attributed(template)),
+    heldPubkey: () => ext.getPublicKey(),
     ...(nip44Ext ? { nip44Decrypt: (pk: string, ct: string) => nip44Ext.decrypt(pk, ct) } : {}),
     // Encrypt is checked on its own: an extension could offer one half.
     ...(nip44Ext?.encrypt ? { nip44Encrypt: (pk: string, pt: string) => nip44Ext.encrypt!(pk, pt) } : {}),
@@ -176,6 +222,8 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
+    heldPubkey: () => bunker.sendRequest('get_public_key', []),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -232,6 +280,8 @@ function wrapBunkerSigner(
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
+    heldPubkey: () => bunker.sendRequest('get_public_key', []),
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)
@@ -336,7 +386,7 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
     const signer = await nip07Signer(NIP07_WAIT_MS)
     // Same guard as a bunker's: an extension switched to another account
     // must not sign this pubkey's chain.
-    if (signer.pubkey !== pref.pubkey) throw new Error('Your extension is now on a different account than the one logged in here. Switch it back, or log in again.')
+    if (signer.pubkey !== pref.pubkey) throw new SignerAccountMismatch('Your extension is now on a different account than the one logged in here. Switch it back, or log in again.')
     return signer
   }
   if (pref.kind === 'nip46' && pref.bunkerUri) {
@@ -348,7 +398,7 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
     const signer = await nip46Signer(pref.bunkerUri, clientSk)
     if (signer.pubkey !== pref.pubkey) {
       await signer.close?.()
-      throw new Error('Your signer is now on a different account than the one logged in here. Switch it back, or log in again.')
+      throw new SignerAccountMismatch()
     }
     return signer
   }
@@ -407,6 +457,7 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
       if (!s.nip44Encrypt) throw new Error(NIP44_ENCRYPT_UNAVAILABLE)
       return s.nip44Encrypt(pk, pt)
     }),
+    heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
     reconnect: ensure,
   }
 }

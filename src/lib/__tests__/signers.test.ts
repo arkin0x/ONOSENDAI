@@ -1,4 +1,32 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+/**
+ * The bunker a restored session talks to, as a fake: what it was asked is
+ * recorded, and it opens no socket, so no unit test touches the network
+ * (this test used to open one to 127.0.0.1:9).
+ */
+const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '' }))
+
+vi.mock('nostr-tools/nip46', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('nostr-tools/nip46')>()
+  const fake = {
+    connect: async () => { bunker.asked.push('connect') },
+    getPublicKey: async () => { bunker.asked.push('getPublicKey'); return bunker.holds },
+    sendRequest: async (method: string) => { bunker.asked.push(method); return method === 'get_public_key' ? bunker.holds : '' },
+    signEvent: async () => { bunker.asked.push('sign_event'); throw new Error('not in this test') },
+    nip44Decrypt: async () => { bunker.asked.push('nip44_decrypt'); return '' },
+    nip44Encrypt: async () => { bunker.asked.push('nip44_encrypt'); return '' },
+    close: async () => undefined,
+  }
+  return {
+    ...actual,
+    BunkerSigner: {
+      ...actual.BunkerSigner,
+      fromBunker: () => { bunker.built++; return fake },
+      fromURI: actual.BunkerSigner.fromURI,
+    },
+  }
+})
 
 // signers imports the relay layer, which imports the store, which reads
 // localStorage as it loads; the test runs where there is none.
@@ -71,15 +99,39 @@ describe('restoring a Nostr Connect session', () => {
   it('uses the pubkey saved at login and asks the signer nothing', async () => {
     const saved = getPublicKey(generateSecretKey())
     const remote = getPublicKey(generateSecretKey())
+    bunker.built = 0
+    bunker.asked = []
     const { signerFromPref } = await signers()
     const signer = await signerFromPref({
       kind: 'nip46',
       pubkey: saved,
-      bunkerUri: `bunker://${remote}?relay=wss://127.0.0.1:9`,
+      bunkerUri: `bunker://${remote}?relay=wss://relay.example`,
       clientNsec: nip19.nsecEncode(generateSecretKey()),
       nostrConnectSession: true,
     })
     expect(signer.pubkey).toBe(saved)
+    expect(bunker.built).toBe(1)
+    expect(bunker.asked).toEqual([])
     await signer.close?.()
+  })
+
+  it('asks which account the signer holds only when asked, and afresh each time', async () => {
+    const saved = getPublicKey(generateSecretKey())
+    const other = getPublicKey(generateSecretKey())
+    bunker.asked = []
+    bunker.holds = saved
+    const { signerFromPref } = await signers()
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: saved,
+      bunkerUri: `bunker://${getPublicKey(generateSecretKey())}?relay=wss://relay.example`,
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    expect(await signer.heldPubkey?.()).toBe(saved)
+    // Switched in the signer app: the answer follows, never a cached one.
+    bunker.holds = other
+    expect(await signer.heldPubkey?.()).toBe(other)
+    expect(bunker.asked).toEqual(['get_public_key', 'get_public_key'])
   })
 })

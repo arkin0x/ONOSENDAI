@@ -5230,6 +5230,11 @@ kbd {
 
 .login__backup-details[open] summary { margin-bottom: 4px; }
 
+/* In a column, .secret__act's flex: 1 took its height away (USE THIS RELAY,
+   ENCRYPT BACKUP); snocrash #37 fixed the same rule. */
+.login__qr-flow .secret__act,
+.login__backup-details > .secret__act { flex: none; width: 100%; }
+
 /* ---------- Hyperspace ---------- */
 
 /* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,
@@ -8305,6 +8310,11 @@ kbd {
 .hyperbar--walktoast .hyperbar__label,
 .toast__walk {
   color: var(--danger);
+}
+/* The signer on another account: a warning, on the Builder's chip. */
+.hyperbar--signertoast .hyperbar__label,
+.toast__signer {
+  color: var(--warn);
 }
 .hyperbar--buildtoast .hyperbar__meta {
   white-space: normal;

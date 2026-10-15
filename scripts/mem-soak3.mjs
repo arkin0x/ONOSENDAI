@@ -330,7 +330,9 @@ while (Date.now() < until) {
     console.log(tag, r.t, 'heap', Math.round(r.used / 1e6), '/', Math.round(r.total / 1e6), 'backing', Math.round((r.backing ?? 0) / 1e6), 'MB rss r/g/o', Math.round(r.rss.renderer / 1e6), Math.round(r.rss.gpu / 1e6), Math.round(r.rss.other / 1e6), 'MB nodes', r.nodes, 'gl', JSON.stringify(r.gl), 'soak', JSON.stringify(r.soak), 'vis', r.visibility, 'leaked', leaked)
     next = Date.now() + SAMPLE
   }
-  await act()
+  // A page that reloaded mid-call (the dev server reloads on a file change)
+  // fails that one call; the run carries on.
+  try { await act() } catch (e) { console.log('act failed:', e.message); await sleep(2000) }
 }
 await snapshot('end')
 console.log('done', tag, 'leaked', leaked, 'dropped in page', (await ev('window.__soak?.().dropped')))

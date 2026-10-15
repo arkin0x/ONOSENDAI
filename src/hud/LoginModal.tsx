@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import QRCode from 'qrcode'
 import {
   createNostrConnectSession,
   DEFAULT_SIGNER_RELAY,
@@ -59,11 +58,15 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
 
   useEffect(() => {
     if (!qrUri || !qrCanvas.current) return
-    void QRCode.toCanvas(qrCanvas.current, qrUri, {
-      errorCorrectionLevel: 'L',
-      margin: 2,
-      width: 264,
-      color: { dark: '#05070d', light: '#f4fbff' },
+    // Loaded with the first QR it draws, not with the app (2026-10-15).
+    void import('qrcode').then(({ default: QRCode }) => {
+      if (!qrCanvas.current) return
+      return QRCode.toCanvas(qrCanvas.current, qrUri, {
+        errorCorrectionLevel: 'L',
+        margin: 2,
+        width: 264,
+        color: { dark: '#05070d', light: '#f4fbff' },
+      })
     }).catch(() => setQrError('Could not draw the QR code. Use the link below instead.'))
   }, [qrUri])
 

@@ -19,7 +19,7 @@
  * The decision is lib/chainHold.ts chainStatusOf; this file only draws it.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { connected } from '../lib/relay'
 import { recheckNow } from '../lib/selfSync'
@@ -31,28 +31,61 @@ import { DEFAULT_RELAY, useRelays } from '../store/useRelays'
 /** How often the pool is asked whether a relay is connected; it has no event to listen to. */
 const POLL_MS = 2000
 
-/** navigator.onLine and the pool's own view of the relays, kept current. */
-export function useConnectivity(): { online: boolean; relayUp: boolean } {
-  const read = (): { online: boolean; relayUp: boolean } => ({
-    online: typeof navigator === 'undefined' || navigator.onLine !== false,
-    relayUp: connected(),
-  })
-  const [state, setState] = useState(read)
-  useEffect(() => {
-    const tick = (): void => {
-      const next = read()
-      setState((cur) => (cur.online === next.online && cur.relayUp === next.relayUp ? cur : next))
-    }
-    const interval = window.setInterval(tick, POLL_MS)
-    window.addEventListener('online', tick)
-    window.addEventListener('offline', tick)
-    return () => {
+/**
+ * navigator.onLine and the pool's own view of the relays, kept current.
+ *
+ * One poll for the whole app, shared by every caller (useChainStatus runs in
+ * several components, and each used to keep its own interval), and none
+ * while the tab is hidden: nothing is drawn then, and the state is read
+ * again the moment the tab is visible (2026-10-15).
+ */
+type Connectivity = { online: boolean; relayUp: boolean }
+const readConnectivity = (): Connectivity => ({
+  online: typeof navigator === 'undefined' || navigator.onLine !== false,
+  relayUp: connected(),
+})
+let connectivity: Connectivity | null = null
+const connectivityListeners = new Set<() => void>()
+let stopConnectivity: (() => void) | null = null
+function tickConnectivity(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  const next = readConnectivity()
+  if (connectivity && connectivity.online === next.online && connectivity.relayUp === next.relayUp) return
+  connectivity = next
+  for (const l of connectivityListeners) l()
+}
+function subscribeConnectivity(listener: () => void): () => void {
+  connectivityListeners.add(listener)
+  if (!stopConnectivity) {
+    const interval = window.setInterval(tickConnectivity, POLL_MS)
+    window.addEventListener('online', tickConnectivity)
+    window.addEventListener('offline', tickConnectivity)
+    document.addEventListener('visibilitychange', tickConnectivity)
+    stopConnectivity = () => {
       window.clearInterval(interval)
-      window.removeEventListener('online', tick)
-      window.removeEventListener('offline', tick)
+      window.removeEventListener('online', tickConnectivity)
+      window.removeEventListener('offline', tickConnectivity)
+      document.removeEventListener('visibilitychange', tickConnectivity)
     }
-  }, [])
-  return state
+  }
+  return () => {
+    connectivityListeners.delete(listener)
+    if (connectivityListeners.size === 0 && stopConnectivity) { stopConnectivity(); stopConnectivity = null }
+  }
+}
+// Fresh when nothing is polling yet (a component mounting reads the state
+// as it is, as useState(read) did), and the same object until a value
+// changes, as useSyncExternalStore requires.
+function connectivitySnapshot(): Connectivity {
+  if (!connectivity || connectivityListeners.size === 0) {
+    const next = readConnectivity()
+    if (!connectivity || connectivity.online !== next.online || connectivity.relayUp !== next.relayUp) connectivity = next
+  }
+  return connectivity
+}
+
+export function useConnectivity(): Connectivity {
+  return useSyncExternalStore(subscribeConnectivity, connectivitySnapshot, connectivitySnapshot)
 }
 
 /** The chain status now, or null when there is nothing to report. */

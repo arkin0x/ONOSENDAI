@@ -762,7 +762,12 @@ export const Scene = memo(function Scene(): JSX.Element {
       dpr={[1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      // No antialias on the canvas itself: every frame is drawn by the
+      // EffectComposer into its own multisampled target, and the canvas only
+      // ever receives the final full-screen pass, so a multisampled default
+      // framebuffer was GPU memory and resolve work spent on nothing
+      // (2026-10-15; screenshots identical with and without).
+      gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop={covered ? 'never' : 'always'}
     >

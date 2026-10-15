@@ -111,6 +111,7 @@ afterEach(() => {
   dmDeps.transport = saved.transport
   dmDeps.keys = saved.keys
   dmDeps.storage = saved.storage
+  dmDeps.openDb = saved.openDb
 })
 
 describe('private reactions', () => {
@@ -225,13 +226,23 @@ describe('the conversation kept in IndexedDB', () => {
     close()
 
     newSession()
+    // The kept history is held back until the relay has answered, so
+    // "before the history is read" is a fact of the test, not a race
+    // between a timer tick and IndexedDB (flaky under load, 2026-10-14).
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    const openDb = dmDeps.openDb
+    dmDeps.openDb = () => held.then(() => openDb())
     close = openConversation(agent.pubkey)
-    // Delivered at once, before the kept history has been read.
-    await new Promise((r) => setTimeout(r, 0))
+    for (let i = 0; i < 100 && !subs.some((s) => !s.closed && s.filter.since === undefined); i++) await new Promise((r) => setTimeout(r, 5))
     expect(useAgentDms.getState().historyLoaded).toBe(false)
     reading().deliver(reply)
     reading().deliver(selfCopy)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(useAgentDms.getState().historyLoaded).toBe(false)
+    release()
     await settle()
+    expect(useAgentDms.getState().historyLoaded).toBe(true)
     reading().deliver(reply)
     reading().deliver(selfCopy)
     await settle()

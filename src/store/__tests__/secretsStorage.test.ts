@@ -21,7 +21,7 @@
 
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mem = new Map<string, string>()
 ;(globalThis as { localStorage?: unknown }).localStorage = {
@@ -78,6 +78,16 @@ async function onDisk(lookupId: string): Promise<HeldKey | undefined> {
 
 const backstop = (): string[] => Object.keys(JSON.parse(mem.get(BOUGHT_KEY) ?? '{}'))
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 30))
+
+// The first import of the store's module graph is the slow part of a boot
+// (about 1.5 s alone, a cold transform), and boot() re-imports it fresh for
+// every page load. Warmed here, once, the transform is cached and no test
+// pays it on its own clock: under a parallel suite the first test in this
+// file passed its 5 s limit on the import alone (2026-10-15).
+beforeAll(async () => {
+  await import('../useSecrets')
+  await import('../../lib/secrets/vault')
+}, 60_000)
 
 beforeEach(() => {
   ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()

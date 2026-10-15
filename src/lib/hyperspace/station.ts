@@ -16,21 +16,23 @@
  * than bigint maths over boxed keys. The prefix arithmetic (mask, +2^shift)
  * is done on byte arrays for the same reason.
  *
- * Landfalls enter the index with float64-approximate coordinates (about a
- * nanometer of error, which is still tens of gibsons). That cannot change
- * a distance decided at h47 and above,
- * but to be safe against ties the finalists are re-derived exactly before
- * the winner is chosen.
+ * Landfalls enter the index with float64-approximate coordinates (within
+ * 2^LANDFALL_SLACK_BITS G of the exact point per axis). Near a cube's face
+ * that can move a stop across it, so the search bounds which stops could be
+ * on either side and derives exactly only those, never the whole cube
+ * (nearestExact).
  */
 import { findLcaHeight, coordToXyz, xyzToCoord } from 'cyberspace-core'
 import { stepFor } from '../space'
 import { type Stop, stopCoordExact } from './stops'
 import { bigToBytes32 } from './headers'
 import {
+  LANDFALL_SLACK_BITS,
   appendStops,
+  coordApproxAt,
   createStopIndex,
-  heightAt,
   insertRow,
+  kindIsPort,
   mergeAll,
   stopAt,
   type StopIndex,
@@ -136,81 +138,398 @@ export interface StationResult {
 
 /**
  * The station per §4.2: nearest stop by max-axis LCA with height <= maxHeight,
- * ties to the lowest height. Exact: finalists are re-derived before deciding.
+ * ties to the lowest height. Exact (see nearestExact).
  */
 export function findStation(index: StopIndex, coord: bigint, maxHeight: number): StationResult | null {
-  if (index.permCount === 0) return null
-  const key = bigToBytes32(coord >> 1n)
-
-  // Approximate best distance from the sort neighbours.
-  const p = lowerBound(index, key)
-  let dGuess = 86
-  for (const i of [p - 1, p]) {
-    if (i >= 0 && i < index.permCount) {
-      const d = lcaAtSorted(index, key, i)
-      if (d < dGuess) dGuess = d
-    }
-  }
-  if (dGuess > 85) dGuess = 85
-
-  // Widen the cube until it holds a qualifying stop, then decide exactly.
-  for (let d = dGuess; d <= 85; d++) {
-    const [start, end] = prefixRange(index, key, d)
-    let best: StationResult | null = null
-    for (let i = start; i < end; i++) {
-      const row = index.perm[i]
-      if (heightAt(index, row) > maxHeight) continue
-      const stop = stopAt(index, row)
-      const exact = maxAxisLca(coord, stopCoordExact(stop))
-      if (
-        best === null ||
-        exact < best.distance ||
-        (exact === best.distance && stop.height < best.stop.height)
-      ) {
-        best = { stop, distance: exact }
-      }
-    }
-    if (best !== null) return best
-  }
-  return null
+  return nearestExact(index, coord, null, maxHeight)
 }
 
 /**
  * The stop nearest `coord` in one plane, with no height bound: the stop a
  * trip to `coord` should leave the line at (GOAL, arkinox 2026-10-14). Ports
  * are ideaspace and landfalls dataspace, so a destination in dataspace exits
- * at a landfall and one in ideaspace at a port. Same metric, ties and exact
- * re-derivation as findStation; the index key carries no plane, so stops of
- * the other plane are skipped while the cube widens.
+ * at a landfall and one in ideaspace at a port. Same metric, ties and
+ * exactness as findStation; the index key carries no plane, so stops of the
+ * other plane are skipped while the cube widens.
+ *
+ * The place being looked at may be a stop itself (a port view); `exclude`
+ * names it, so the nearest is then its neighbor, never itself at distance 0.
  */
 export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1, exclude?: bigint): StationResult | null {
+  if (plane === 1) return nearestPort(index, coord, Number.POSITIVE_INFINITY, exclude)
+  return nearestExact(index, coord, 0, Number.POSITIVE_INFINITY, exclude)
+}
+
+/**
+ * The nearest port. Ports are filed at their exact coordinate, so nearest is
+ * the longest shared key prefix, and the port sharing the longest one sits
+ * beside the query in sorted order (the shared prefix only grows toward the
+ * query's position). The first qualifying port on each side fixes the
+ * distance; the lowest height in that cube takes the tie. Two short walks and
+ * one run, with nothing derived.
+ */
+function nearestPort(index: StopIndex, coord: bigint, maxHeight: number, exclude?: bigint): StationResult | null {
   if (index.permCount === 0) return null
   const key = bigToBytes32(coord >> 1n)
+  const { perm, heights } = index
+  const qualifies = (row: number): boolean =>
+    kindIsPort(index, row) && heights[row] <= maxHeight && (exclude === undefined || coordApproxAt(index, row) !== exclude)
   const p = lowerBound(index, key)
-  let dGuess = 86
-  for (const i of [p - 1, p]) {
-    if (i >= 0 && i < index.permCount) {
-      const d = lcaAtSorted(index, key, i)
-      if (d < dGuess) dGuess = d
+  let distance = 86
+  for (let i = p - 1; i >= 0; i--) {
+    if (qualifies(perm[i])) {
+      distance = lcaAtSorted(index, key, i)
+      break
     }
   }
-  if (dGuess > 85) dGuess = 85
-  for (let d = dGuess; d <= 85; d++) {
-    const [start, end] = prefixRange(index, key, d)
-    let best: StationResult | null = null
-    for (let i = start; i < end; i++) {
-      const stop = stopAt(index, index.perm[i])
-      if ((stop.kind === 'port' ? 1 : 0) !== plane) continue
-      const at = stopCoordExact(stop)
-      // The place being looked at may be a stop itself (a port view); the
-      // nearest is then its neighbour, never itself at distance 0.
-      if (exclude !== undefined && at === exclude) continue
-      const exact = maxAxisLca(coord, at)
-      if (best === null || exact < best.distance || (exact === best.distance && stop.height < best.stop.height)) {
-        best = { stop, distance: exact }
+  for (let i = p; i < index.permCount; i++) {
+    if (qualifies(perm[i])) {
+      distance = Math.min(distance, lcaAtSorted(index, key, i))
+      break
+    }
+  }
+  if (distance > 85) return null
+  const [start, end] = prefixRange(index, key, distance)
+  let best = -1
+  for (let i = start; i < end; i++) {
+    const row = perm[i]
+    if ((best < 0 || heights[row] < heights[best]) && qualifies(row)) best = row
+  }
+  return best < 0 ? null : { stop: stopAt(index, best), distance }
+}
+
+/**
+ * Where axis bit i of x, y and z sits in the 255-bit key: cyberspace-core
+ * interleaves z, y, x at coord bits 3i + 1, 3i + 2, 3i + 3, and the key drops
+ * the plane bit, so x, y, z land at key bits 3i + 2, 3i + 1, 3i.
+ */
+const AXIS_LANE = [2, 1, 0] as const
+const KEY_BITS_ALL = (1n << 255n) - 1n
+const LANE_MASK = AXIS_LANE.map((lane) => {
+  let m = 0n
+  for (let i = 0; i < 85; i++) m |= 1n << BigInt(3 * i + lane)
+  return m
+})
+
+/**
+ * The level at and below which the query's neighborhood is searched by
+ * deriving every stop in it: the cube there is no wider than four times the
+ * landfall slack, so the slack can carry a stop across more than one face.
+ * It is a few meters of ground, which holds a landfall about once in a planet.
+ */
+const NEAR_LEVEL = LANDFALL_SLACK_BITS + 2
+
+interface CellRun {
+  start: number
+  end: number
+  /** The cell's offset from the query's own cell on x, y, z: -1, 0 or 1. */
+  off: readonly [number, number, number]
+  /** A key inside the cell (bits below the cell's level are don't-care). */
+  key: Uint8Array
+}
+
+function isOwnCell(run: CellRun): boolean {
+  return run.off[0] === 0 && run.off[1] === 0 && run.off[2] === 0
+}
+
+/**
+ * Sorted-view runs of the 3x3x3 aligned cells of side 2^d around the query's
+ * own (that one first), skipping cells off the edge of the axis and cells
+ * holding no stop. Each cell is one prefix run; its key is the query's with
+ * each axis's lane moved one cell down or up, a masked add on the interleaved
+ * key (borrows and carries pass through the other lanes' bits). The blocks
+ * nest as d grows: the block at d + 1 contains the block at d.
+ */
+function neighborhood(index: StopIndex, key: bigint, axes: readonly bigint[], d: number): CellRun[] {
+  if (d >= 85) return index.permCount > 0 ? [{ start: 0, end: index.permCount, off: [0, 0, 0], key: bigToBytes32(key) }] : []
+  const step = 1n << BigInt(d)
+  const lanes = AXIS_LANE.map((lane, a) => {
+    const mask = LANE_MASK[a]
+    const inc = 1n << BigInt(3 * d + lane)
+    const own = key & mask
+    return [
+      axes[a] >= step ? (own - inc) & mask : null,
+      own,
+      axes[a] + step <= AXIS_MAX ? ((key | (KEY_BITS_ALL ^ mask)) + inc) & mask : null,
+    ]
+  })
+  const runs: CellRun[] = []
+  for (let ox = 0; ox < 3; ox++) {
+    const lx = lanes[0][ox]
+    if (lx === null) continue
+    for (let oy = 0; oy < 3; oy++) {
+      const ly = lanes[1][oy]
+      if (ly === null) continue
+      for (let oz = 0; oz < 3; oz++) {
+        const lz = lanes[2][oz]
+        if (lz === null) continue
+        const cellKey = bigToBytes32(lx | ly | lz)
+        const [start, end] = prefixRange(index, cellKey, d)
+        if (end <= start) continue
+        const run: CellRun = { start, end, off: [ox - 1, oy - 1, oz - 1], key: cellKey }
+        // The query's own cell first: its best height prunes the rest.
+        if (ox === 1 && oy === 1 && oz === 1) runs.unshift(run)
+        else runs.push(run)
       }
     }
-    if (best !== null) return best
+  }
+  return runs
+}
+
+/** Axis bits [LANDFALL_SLACK_BITS, d) of one axis in the key, as (byte, mask) pairs, most significant first. */
+interface AxisBand {
+  idx: number[]
+  mask: number[]
+}
+
+const bandCache: Array<AxisBand[] | undefined> = []
+
+function bandsAt(d: number): AxisBand[] {
+  let bands = bandCache[d]
+  if (!bands) {
+    bands = AXIS_LANE.map((lane) => {
+      const bytes = new Uint8Array(32)
+      for (let i = LANDFALL_SLACK_BITS; i < d; i++) {
+        const j = 3 * i + lane
+        bytes[31 - (j >> 3)] |= 1 << (j & 7)
+      }
+      const band: AxisBand = { idx: [], mask: [] }
+      for (let b = 0; b < 32; b++) {
+        if (bytes[b] !== 0) {
+          band.idx.push(b)
+          band.mask.push(bytes[b])
+        }
+      }
+      return band
+    })
+    bandCache[d] = bands
+  }
+  return bands
+}
+
+const BAND_MIXED = 0
+const BAND_ZEROS = 1
+const BAND_ONES = 2
+
+/** Whether a row's band bits on one axis are mixed, all 0 or all 1. */
+function bandOf(keys: Uint8Array, off: number, band: AxisBand): number {
+  let ones = false
+  let zeros = false
+  for (let k = 0; k < band.idx.length; k++) {
+    const m = band.mask[k]
+    const v = keys[off + band.idx[k]] & m
+    if (v !== 0) ones = true
+    if (v !== m) zeros = true
+    if (ones && zeros) return BAND_MIXED
+  }
+  return ones ? BAND_ONES : BAND_ZEROS
+}
+
+/** A row of a neighbor cell whose filed point is within the slack of the face it shares with the query's cell. */
+function inNeighborBand(keys: Uint8Array, row: number, bands: AxisBand[], off: readonly number[]): boolean {
+  for (let a = 0; a < 3; a++) {
+    if (off[a] !== 0 && bandOf(keys, row * 32, bands[a]) !== (off[a] < 0 ? BAND_ONES : BAND_ZEROS)) return false
+  }
+  return true
+}
+
+/** Below this many rows a band sub-run is scanned rather than split again. */
+const BAND_SCAN_ROWS = 32
+
+/**
+ * The sub-runs of a neighbor cell that can hold a row of its band: on each
+ * axis where the cell is below the query's, the band bits all 1, on each
+ * where it is above, all 0. A neighbor can hold a quarter of the planet, and
+ * testing every row of it is a random read per row, so this descends instead,
+ * one level at a time into the sub-cells whose next band bit already agrees,
+ * until a run is short enough to scan. Empty sub-cells end their branch on
+ * two binary searches. Rows in the result still get the full band test.
+ */
+function bandRuns(index: StopIndex, cell: CellRun, d: number, out: CellRun[]): void {
+  const choices = cell.off.map((o) => (o < 0 ? [1] : o > 0 ? [0] : [0, 1]))
+  const visit = (key: Uint8Array, level: number, start: number, end: number): void => {
+    if (end - start <= BAND_SCAN_ROWS || level <= LANDFALL_SLACK_BITS) {
+      out.push({ start, end, off: cell.off, key })
+      return
+    }
+    const bit = level - 1
+    for (const bx of choices[0]) {
+      for (const by of choices[1]) {
+        for (const bz of choices[2]) {
+          const child = key.slice()
+          const values = [bx, by, bz]
+          for (let a = 0; a < 3; a++) {
+            const j = 3 * bit + AXIS_LANE[a]
+            const byte = 31 - (j >> 3)
+            child[byte] = values[a] ? child[byte] | (1 << (j & 7)) : child[byte] & ~(1 << (j & 7))
+          }
+          const [s, e] = prefixRange(index, child, bit)
+          if (e > s) visit(child, bit, s, e)
+        }
+      }
+    }
+  }
+  visit(cell.key, d, cell.start, cell.end)
+}
+
+/**
+ * The exact nearest stop, deriving as few landfalls exactly as it can.
+ *
+ * The decimal landfall derivation costs about 0.6 ms, and the old search ran
+ * it for every stop in the first cube holding one: with the query off the
+ * surface that cube held up to an octant of the planet, tens of thousands of
+ * landfalls, and GOAL froze the tab for half a minute or more.
+ *
+ * The index files a landfall under its float64 coordinate, which is within
+ * E = 2^LANDFALL_SLACK_BITS - 1 G of the exact one on every axis: the float
+ * path's worst case is about 2^31 G, near the poles where sqrt(1 - z^2)
+ * loses half its digits, and measured over 90,000 axis samples it is 202 G.
+ * Ports are filed exactly.
+ *
+ * Distance <= d means "inside the aligned cube of side 2^d holding the
+ * query". A stop whose exact point is inside has its filed point inside the
+ * cube grown by E on every side, and above NEAR_LEVEL that lies in the 3x3x3
+ * block of same-level cells around it, one prefix run each. Per landfall,
+ * the key bits [LANDFALL_SLACK_BITS, d) of each axis settle it without
+ * decoding anything:
+ *
+ * | Filed in | Band bits | Exact point |
+ * |---|---|---|
+ * | the query's cell | mixed on every axis | inside, for sure: at least E from every face |
+ * | the query's cell | all 0 or all 1 on some axis | maybe: within E of a face |
+ * | a neighbor cell | all 1 on each axis it is below, all 0 on each it is above | maybe: within E of the shared face |
+ * | a neighbor cell | anything else | outside |
+ *
+ * Levels are walked up from the first whose block holds any stop (the
+ * blocks nest, so a binary search finds it). At the first level where some
+ * stop is inside, the answer is the lowest height inside, so a row at or
+ * above the best sure height is skipped on one u32 read, and the "maybe"
+ * rows are derived in height order only while they could still win: a
+ * handful of derivations, not tens of thousands. At and below NEAR_LEVEL the
+ * few meters around the query are searched by deriving every stop there.
+ *
+ * The winner is always derived before it is returned, so a stop filed away
+ * from its true point (a relay anchor with a wrong C tag) is never reported
+ * at a distance it does not have. Whenever the E bound holds the result is
+ * identical to an exhaustive exact search, which the brute-force test pins.
+ */
+function nearestExact(
+  index: StopIndex,
+  coord: bigint,
+  plane: 0 | null,
+  maxHeight: number,
+  exclude?: bigint,
+): StationResult | null {
+  if (index.permCount === 0) return null
+  const key = coord >> 1n
+  const t = coordToXyz(coord)
+  const axes = [t.x, t.y, t.z]
+  const { perm, heights, keys } = index
+  const exactAt = (row: number): bigint => (kindIsPort(index, row) ? coordApproxAt(index, row) : stopCoordExact(stopAt(index, row)))
+  const result = (row: number, distance: number): StationResult => ({ stop: stopAt(index, row), distance })
+
+  // The first level whose block holds any stop at all; nothing is nearer.
+  let lo = NEAR_LEVEL
+  let hi = 85
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (neighborhood(index, key, axes, mid).length > 0) hi = mid
+    else lo = mid + 1
+  }
+
+  if (lo === NEAR_LEVEL) {
+    // Every stop within NEAR_LEVEL of the query is filed in this block.
+    let bestRow = -1
+    let bestDistance = 86
+    for (const run of neighborhood(index, key, axes, NEAR_LEVEL)) {
+      for (let pos = run.start; pos < run.end; pos++) {
+        const row = perm[pos]
+        if (heights[row] > maxHeight || (plane === 0 && kindIsPort(index, row))) continue
+        const at = exactAt(row)
+        if (exclude !== undefined && at === exclude) continue
+        const distance = maxAxisLca(coord, at)
+        if (distance > NEAR_LEVEL) continue
+        if (distance < bestDistance || (distance === bestDistance && heights[row] < heights[bestRow])) {
+          bestRow = row
+          bestDistance = distance
+        }
+      }
+    }
+    if (bestRow >= 0) return result(bestRow, bestDistance)
+    lo = NEAR_LEVEL + 1
+  }
+
+  // Stops found to be the excluded place; skipped at every level.
+  const excluded = new Set<number>()
+  for (let d = lo; d <= 85; d++) {
+    const bands = bandsAt(d)
+    const cells = neighborhood(index, key, axes, d)
+    const own = cells.length > 0 && isOwnCell(cells[0]) ? cells[0] : null
+    const near: CellRun[] = []
+    for (const cell of cells) if (cell !== own) bandRuns(index, cell, d, near)
+    // Stops derived at this level and found outside its cube.
+    const outside = new Set<number>()
+    for (;;) {
+      let bestRow = -1
+      let bestHeight = Number.POSITIVE_INFINITY
+      const maybe: number[] = []
+      if (own) {
+        for (let pos = own.start; pos < own.end; pos++) {
+          const row = perm[pos]
+          const h = heights[row]
+          if (h >= bestHeight || h > maxHeight) continue
+          if (kindIsPort(index, row)) {
+            // Filed exactly, and filed in the query's cell: inside.
+            if (plane === 0) continue
+            if (exclude !== undefined && coordApproxAt(index, row) === exclude) continue
+          } else if (
+            bandOf(keys, row * 32, bands[0]) !== BAND_MIXED ||
+            bandOf(keys, row * 32, bands[1]) !== BAND_MIXED ||
+            bandOf(keys, row * 32, bands[2]) !== BAND_MIXED
+          ) {
+            maybe.push(row)
+            continue
+          }
+          if (outside.has(row) || excluded.has(row)) continue
+          bestRow = row
+          bestHeight = h
+        }
+      }
+      // A port filed in a neighbor cell is outside; only landfalls can straddle.
+      for (const run of near) {
+        for (let pos = run.start; pos < run.end; pos++) {
+          const row = perm[pos]
+          const h = heights[row]
+          if (h >= bestHeight || h > maxHeight || kindIsPort(index, row)) continue
+          if (inNeighborBand(keys, row, bands, run.off)) maybe.push(row)
+        }
+      }
+      // The maybes that could still beat the sure best, lowest height first:
+      // the first one inside wins outright.
+      const contenders = maybe.filter((row) => heights[row] < bestHeight && !outside.has(row) && !excluded.has(row))
+      contenders.sort((a, b) => heights[a] - heights[b])
+      for (const row of contenders) {
+        const at = exactAt(row)
+        if (exclude !== undefined && at === exclude) {
+          excluded.add(row)
+          continue
+        }
+        const distance = maxAxisLca(coord, at)
+        if (distance <= d) return result(row, distance)
+        outside.add(row)
+      }
+      if (bestRow < 0) break
+      // Confirm the sure winner exactly; a stop filed away from its true
+      // point fails here, and the level is rescanned without it.
+      const at = exactAt(bestRow)
+      if (exclude !== undefined && at === exclude) {
+        excluded.add(bestRow)
+        continue
+      }
+      const distance = maxAxisLca(coord, at)
+      if (distance <= d) return result(bestRow, distance)
+      outside.add(bestRow)
+    }
   }
   return null
 }

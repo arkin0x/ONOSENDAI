@@ -167,8 +167,14 @@ export function rowByRootOrHash(index: StopIndex, bytes: Uint8Array): number {
  * that close to an edge: at most 8 cells (arkinox, 2026-10-14).
  */
 const LANDFALL_PREFIX_BYTES = 14
-/** More than the approximation's error per axis (2^33 G), so a straddle always reaches the neighbor. */
-const LANDFALL_SLACK = 1n << 34n
+/**
+ * More than the approximation's error per axis (2^33 G), so a straddle always
+ * reaches the neighbor. The nearest-stop search (station.ts) leans on the same
+ * bound: every indexed landfall is within 2^LANDFALL_SLACK_BITS - 1 G of its
+ * exact coordinate on each axis.
+ */
+export const LANDFALL_SLACK_BITS = 34
+const LANDFALL_SLACK = 1n << BigInt(LANDFALL_SLACK_BITS)
 const AXIS_MAX = (1n << 85n) - 1n
 
 /** The leading bytes of every cell a landfall with exact coordinate `want` may be filed under. */

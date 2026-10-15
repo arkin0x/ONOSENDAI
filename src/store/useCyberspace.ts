@@ -1310,7 +1310,17 @@ function pickInitialSigner(): Signer {
   // A stored extension/bunker identity whose chain we already hold: reconnect
   // lazily, keeping its pubkey so the chain loads now.
   if (pref && pref.kind !== 'local' && loadChain(pref.pubkey, true)) {
-    return deferredReconnect(pref, (s) => { currentSigner = s })
+    // The live signer replaces this stand-in only while the stand-in is still
+    // the one in use. A bunker can answer minutes after the first signature
+    // asked for it, and by then the identity may have been switched: its late
+    // answer must not put the old identity back behind a screen that shows
+    // the new one (found in review of snocrash #35, 2026-10-15). A late
+    // answer nobody wants is closed rather than left holding sockets.
+    const standIn: Signer = deferredReconnect(pref, (s) => {
+      if (currentSigner === standIn) currentSigner = s
+      else void s.close?.()
+    })
+    return standIn
   }
   if (pref?.nsec) { try { return signerFromNsec(pref.nsec) } catch { /* corrupt */ } }
   return localSigner(loadOrGenerateKey())
@@ -1368,7 +1378,10 @@ function wakeSigner(): void {
   // again, which is the second prompt for the same event. If they really are
   // dead, the pending request's timeout reconnects and asks again itself.
   if (pendingSigns > 0) return
-  void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
+  // The fresh signer is taken only if the one that reconnected is still in
+  // use: a switch of identity while it reconnected wins.
+  const asked = currentSigner
+  void asked.reconnect?.().then((fresh) => { if (currentSigner === asked && fresh !== asked) currentSigner = fresh }).catch(() => { /* the next signature reconnects and says why */ })
 }
 
 /** Said while a move asks the relays again for your latest move. */
@@ -2568,7 +2581,46 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   }
   cloudRideRunner = runCloudRide
 
+  /**
+   * Every login and every reconnect that ends in a switch goes through here.
+   * Each takes a ticket when it starts; a slow one (a bunker on a sleeping
+   * phone, an extension prompt left open) that finishes after a newer one
+   * started, or after the identity changed some other way, is closed instead
+   * of switched to, and its error is dropped: a late answer never undoes a
+   * newer choice (review of #353, 2026-10-15).
+   */
+  let loginTicket = 0
+  let switchCount = 0
+  const login = async (make: () => Signer | Promise<Signer>, errorPrefix = '', quiet: () => boolean = () => false): Promise<void> => {
+    const ticket = ++loginTicket
+    // Real switches of identity, counted by switchTo. Not the signer object:
+    // the store replaces that in the background for the SAME identity (the
+    // stand-in going live, a retry rebuilding a dead channel), and that must
+    // not drop a login the user is making (review of #353).
+    const switches = switchCount
+    const current = (): boolean => ticket === loginTicket && switches === switchCount
+    const fail = (err: unknown): void => {
+      if (current() && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
+    let signer: Signer
+    try {
+      signer = await make()
+    } catch (err) {
+      fail(err)
+      return
+    }
+    if (!current()) { void signer.close?.(); return }
+    // A signer must name a real key before it becomes the identity.
+    if (!/^[0-9a-f]{64}$/.test(signer.pubkey)) { void signer.close?.(); fail(new Error('The signer gave a key that is not a valid public key.')); return }
+    // switchTo counts the switch before anything in it can throw, so its own
+    // failure is this attempt's to report: judged by the ticket alone.
+    try { await switchTo(signer) } catch (err) {
+      if (ticket === loginTicket && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+
   const switchTo = async (signer: Signer): Promise<void> => {
+    switchCount++
     // Whatever was waiting to sign as the old identity ends without a word.
     chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.
@@ -4058,14 +4110,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // only deferred. Force its reconnection now, so the first move never waits.
     const pref = loadSignerPref()
     if (!pref || pref.kind === 'local') return
-    try {
-      if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
-        await currentSigner.reconnect()
-      } else {
-        await switchTo(await signerFromPref(pref))
-      }
-    } catch (err) {
-      set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` })
+    if (currentSigner.pubkey === pref.pubkey && currentSigner.reconnect) {
+      // The stand-in: its own onReady decides whether it is still wanted. Its
+      // failure is only news while it is still the identity in use.
+      const switches = switchCount
+      try { await currentSigner.reconnect() }
+      catch (err) { if (switches === switchCount) set({ loginError: `Could not reconnect ${pref.kind}: ${err instanceof Error ? err.message : String(err)}` }) }
+    } else {
+      await login(() => signerFromPref(pref), `Could not reconnect ${pref.kind}: `)
     }
   },
   useNewKey: async () => { await switchTo(randomSigner()) },
@@ -4078,45 +4130,30 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const seal = currentSigner.nip44Encrypt
     return seal ? seal(recipientPubkey, plaintext) : Promise.reject(new Error(NIP44_ENCRYPT_UNAVAILABLE))
   },
-  useNsec: async (nsec) => {
-    try { await switchTo(signerFromNsec(nsec)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
-  },
-  useNcryptsec: async (ncryptsec, password) => {
-    try { await switchTo(signerFromNcryptsec(ncryptsec, password)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
-  },
+  useNsec: async (nsec) => { await login(() => signerFromNsec(nsec)) },
+  useNcryptsec: async (ncryptsec, password) => { await login(() => signerFromNcryptsec(ncryptsec, password)) },
   useLogin: async (credential, password = '') => {
     const kind = loginCredentialKind(credential)
-    try {
-      if (kind === 'nsec') await switchTo(signerFromNsec(credential))
-      else if (kind === 'ncryptsec') {
+    await login(async () => {
+      if (kind === 'nsec') return signerFromNsec(credential)
+      if (kind === 'ncryptsec') {
         if (!password) throw new Error('Enter the password for this ncryptsec.')
-        await switchTo(signerFromNcryptsec(credential, password))
-      } else if (kind === 'bunker') await switchTo(await nip46Signer(credential))
-      else throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
-    } catch (err) {
-      set({ loginError: err instanceof Error ? err.message : String(err) })
-    }
+        return signerFromNcryptsec(credential, password)
+      }
+      if (kind === 'bunker') return nip46Signer(credential)
+      throw new Error('Paste an nsec, ncryptsec, or bunker:// URI.')
+    })
   },
-  useExtension: async () => {
-    try { await switchTo(await nip07Signer()) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
-  },
-  useBunker: async (uri) => {
-    try { await switchTo(await nip46Signer(uri)) }
-    catch (err) { set({ loginError: err instanceof Error ? err.message : String(err) }) }
-  },
+  useExtension: async () => { await login(() => nip07Signer()) },
+  useBunker: async (uri) => { await login(() => nip46Signer(uri)) },
   useNostrConnect: async (session, signal, onConnected) => {
-    try {
+    // Left the QR screen while the signer was answering: no switch, and no
+    // error for a screen that is no longer there.
+    await login(async () => {
       const signer = await session.connect(signal, onConnected)
-      // Left the QR screen while the signer was answering: do not switch.
-      if (signal?.aborted) { await signer.close?.(); return }
-      await switchTo(signer)
-    }
-    catch (err) {
-      if (!signal?.aborted) set({ loginError: err instanceof Error ? err.message : String(err) })
-    }
+      if (signal?.aborted) { await signer.close?.(); throw new Error('left the QR screen') }
+      return signer
+    }, '', () => signal?.aborted === true)
   },
   clearLoginError: () => set({ loginError: null }),
 

@@ -145,8 +145,10 @@ export const DEMO_SCRIPT: DemoScript = {
       scene: { target: 'self', scale: 34 },
     },
     {
-      id: 'cube', chapter: 'scale', title: 'The whole cube',
-      caption: 'This is all of it: 2^85 gibsons on a side. Zoom yourself with the + and − keys on the pad, or Q and E.',
+      id: 'cube', chapter: 'scale', title: 'Scaling up and down',
+      // {icon:plus} and {icon:minus} draw lucide's SquarePlus and SquareMinus
+      // inline (demo/captionTokens.ts); SPEAK reads them as words.
+      caption: 'The {icon:plus} and {icon:minus} buttons change your zoom by powers of 2. The 2^X button shows your zoom and resets it to 2^0, where 1 cell is 1 gibson. Each zoom out increases the gibsons per cell: 2, 4, 8, 16, etc. The globe button zooms to Earth scale and the cube button zooms all the way out to cyberspace scale.',
       scene: { target: 'self', scale: 84, plane: 1 },
     },
     {

@@ -198,6 +198,12 @@ describe('RETRACT', () => {
     expect(notice()).toContain('another key')
   })
 
+  it('refuses to retract an object never published from here (review of snocrash #36)', async () => {
+    expect(await usePublished.getState().retract(step())).toBe(false)
+    expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
+    expect(notice()).toContain('nothing to retract')
+  })
+
   it('keeps the record when no relay took the deletion, and says what the relay said', async () => {
     const s = step()
     await usePublished.getState().publish(s)

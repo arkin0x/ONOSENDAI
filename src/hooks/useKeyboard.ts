@@ -53,9 +53,31 @@ export function setMenuCovering(covering: boolean): void {
   menuCovering = covering
 }
 
+/**
+ * Escape closes one thing: the topmost modal, else the menu, else the most
+ * recent chip (useEscape; arkinox, 2026-10-01). It no longer resets the view
+ * to top down when nothing is open: that mapping predated the menu and the
+ * chips, and was not useful (arkinox, 2026-10-01). TOP in the view menu still
+ * does it. An Escape something else already handled (preventDefault) is left
+ * alone. True when the key was Escape.
+ */
+export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented' | 'metaKey' | 'ctrlKey' | 'altKey' | 'preventDefault'>): boolean {
+  if (event.code !== 'Escape') return false
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return true
+  event.preventDefault()
+  escapeTop()
+  return true
+}
+
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Escape closes the top layer even from a field: a modal that focuses
+      // its own input (ITEM FEED's search, a chest's name, the login box)
+      // otherwise could not be closed from the keyboard at all (pre-class
+      // smoke test, 2026-10-16). A field that uses Escape itself (the chat
+      // line's mention list) says so with preventDefault, and keeps it.
+      if (escapeKey(event)) return
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
@@ -74,17 +96,6 @@ export function useKeyboard(): void {
       }
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      // Escape closes one thing: the topmost modal, else the menu, else the
-      // most recent chip (useEscape; arkinox, 2026-10-01). It comes before
-      // the menu and workshop checks below because both of those are things
-      // it closes. It no longer resets the view to top down when nothing is
-      // open: that mapping predated the menu and the chips, and was not
-      // useful (arkinox, 2026-10-01). TOP in the view menu still does it.
-      if (event.code === 'Escape') {
-        event.preventDefault()
-        escapeTop()
-        return
-      }
       if (menuCovering) return
       // Space and Enter on a focused control press that control. Space is
       // COMMIT here, a proof and possibly a paid one, so a Space meant for a

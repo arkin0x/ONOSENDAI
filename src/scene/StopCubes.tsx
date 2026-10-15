@@ -4,14 +4,15 @@
  *
  * The StopField's points say "there are stops over there"; a cube says "you
  * are AT a stop". One gibson is 2^-scaleExp render cells, so the cube is only
- * honestly visible near gibson scale; below a floor it is clamped so a stop
- * you have flown to never vanishes into a subpixel while still reading as a
- * small landmark rather than a billboard.
+ * honestly visible near gibson scale; smaller than that it is held at a fixed
+ * size ON SCREEN (lib/markerSize.ts), so a stop you have flown to never
+ * vanishes into a subpixel and never swells into a billboard at 2^84, where a
+ * floor in cells used to fill the view (arkinox, 2026-10-15).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { useFrame } from '@react-three/fiber'
-import { Group, Mesh, type MeshBasicMaterial } from 'three'
+import { Group, Mesh, Vector3, type MeshBasicMaterial, type PerspectiveCamera } from 'three'
 import { xyzToCoord } from 'cyberspace-core'
 import { GRID_RADIUS, markerCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -20,6 +21,8 @@ import { nearestStops } from '../lib/hyperspace/station'
 import { LANDFALL_DETAIL_SCALE_MAX, stopsDrawn, type Stop } from '../lib/hyperspace/stops'
 import { selectStopInScene, stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { WorldLabel } from './WorldLabel'
+import { DEST_CUBE_PX, FLEET_CUBE_PX, markerSide, projScaleOf } from '../lib/markerSize'
+import { useStopMarks } from '../store/useStopMarks'
 
 /** The fleet: toned-down bitcoin orange. Only the chosen destination gets
  * v1's bright HYPERJUMP yellow, glowing and spinning, so one cube in the
@@ -28,7 +31,7 @@ const CUBE_COLOR = '#f7931a'
 const DEST_COLOR = '#ffff00'
 /** At most this many cubes; the point field carries the rest. */
 const MAX_CUBES = 24
-/** A cube never renders smaller than this many cells (visibility floor). */
+/** The anti-clump filter's floor on a cube's footprint, in cells (only the filter; drawn size is in pixels). */
 const MIN_CELLS = 0.15
 /** How long a fleet cube takes to fade in, in seconds. They used to pop:
  * the anti-clump filter releases them as you zoom, and a cube appearing
@@ -38,6 +41,15 @@ const FADE_SECONDS = 0.3
 const FLEET_OPACITY = 0.75
 const REACH = GRID_RADIUS * 8
 
+/** Hold a cube at its size on screen from its own depth (lib/markerSize.ts); allocation-free, for useFrame. */
+function fitCube(
+  child: { getWorldPosition: (v: Vector3) => Vector3; scale: Vector3 },
+  eye: Vector3, scratch: Vector3, trueSide: number, px: number, projScale: number,
+): void {
+  const depth = eye.distanceTo(child.getWorldPosition(scratch))
+  child.scale.setScalar(markerSide(trueSide, px, depth, projScale))
+}
+
 export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -45,6 +57,8 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const indexVersion = useHyperspace((s) => s.indexVersion)
   const scrubHeight = useHyperspace((s) => s.scrubHeight)
   const destination = useHyperspace((s) => s.destination)
+  // StopField's NEAREST cube stands where that stop is; the fleet leaves it be.
+  const nearestMarked = useStopMarks((s) => s.nearest)
 
   const cubes = useMemo(() => {
     void indexVersion
@@ -91,6 +105,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
     for (const stop of candidates) {
       if (out.length >= MAX_CUBES) break
       if (stopPlane(stop) !== anchorPlane) continue
+      if (stop.height === nearestMarked && stop.height !== destination && stop.height !== scrubHeight) continue
       const centre = markerCentre(stopPosition(stop), origin, scaleExp, axes)
       if (Math.abs(centre[0]) > REACH || Math.abs(centre[1]) > REACH || Math.abs(centre[2]) > REACH) continue
       let crowded = false
@@ -107,7 +122,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
       out.push({ stop, centre })
     }
     return out
-  }, [indexVersion, anchor, anchorPlane, scaleExp, axes, scrubHeight, destination])
+  }, [indexVersion, anchor, anchorPlane, scaleExp, axes, scrubHeight, destination, nearestMarked])
 
   const spin = useRef<Group>(null)
   const fleet = useRef<Group>(null)
@@ -115,16 +130,22 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   // outside React state: it changes every frame while a cube fades and
   // nothing but the material needs to know.
   const born = useRef(new Map<number, number>())
-  useFrame(({ clock }, dt) => {
+  const scratch = useMemo(() => new Vector3(), [])
+  // The gibson, in cells: the true edge of a stop cube at this zoom.
+  const gibson = 2 ** -scaleExp
+  useFrame(({ clock, camera, size }, dt) => {
+    const projScale = projScaleOf(size.height, (camera as PerspectiveCamera).fov ?? 55)
     const g = spin.current
     if (g) {
       for (const child of g.children) {
         child.rotation.y += dt * 0.9
         child.rotation.x += dt * 0.45
+        fitCube(child, camera.position, scratch, gibson, DEST_CUBE_PX, projScale)
       }
     }
     const f = fleet.current
     if (!f) return
+    for (const child of f.children) fitCube(child, camera.position, scratch, gibson * 0.5, FLEET_CUBE_PX, projScale)
     const now = clock.elapsedTime
     const present = new Set<number>()
     for (const child of f.children) {
@@ -152,10 +173,9 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const labelledSet = useMemo(() => new Set(labelled.split(',').filter(Boolean).map(Number)), [labelled])
 
   if (cubes.length === 0) return null
-  const side = Math.max(2 ** -scaleExp, MIN_CELLS)
-  // The fleet reads at half the selected block's size: present, but never
+  // Unit cubes, scaled every frame to their size on screen (useFrame above).
+  // The fleet reads smaller than the selected block: present, but never
   // competing with the one cube that means "this is where you are going".
-  const inertSide = side * 0.5
 
   return (
     <>
@@ -176,7 +196,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
                 selectStopInScene(stop.height)
               }}
             >
-              <boxGeometry args={[inertSide, inertSide, inertSide]} />
+              <boxGeometry args={[1, 1, 1]} />
               <meshBasicMaterial color={CUBE_COLOR} transparent opacity={0} />
             </mesh>
           ),
@@ -193,7 +213,8 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
             key={`f${stop.height}`}
             text={String(stop.height)}
             color={CUBE_COLOR}
-            at={[centre[0], centre[1] + inertSide * 0.5 + 0.22, centre[2]]}
+            at={centre}
+            clear={{ trueSide: gibson * 0.5, minPx: FLEET_CUBE_PX }}
             align="center"
             px={9}
             opacity={0.8}
@@ -216,7 +237,7 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
                 selectStopInScene(stop.height)
               }}
             >
-              <boxGeometry args={[side, side, side]} />
+              <boxGeometry args={[1, 1, 1]} />
               <meshBasicMaterial color={DEST_COLOR} toneMapped={false} />
             </mesh>
           ) : null,
@@ -229,7 +250,9 @@ export function StopCubes({ axes }: { axes: ViewAxes }): JSX.Element | null {
             key={`l${stop.height}`}
             text={`BLOCK ${stop.height}`}
             color={DEST_COLOR}
-            at={[centre[0], centre[1] + side * 0.9 + 0.3, centre[2]]}
+            at={centre}
+            clear={{ trueSide: gibson, minPx: DEST_CUBE_PX }}
+            align="center"
             px={11}
             opacity={0.95}
           />

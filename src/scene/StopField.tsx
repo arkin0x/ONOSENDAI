@@ -31,25 +31,35 @@
  * coordinate the placement uses; the cover that bounds the scan is
  * ballCoverageRuns. The density label under the ring says how many of the
  * stops inside made the cut.
+ *
+ * In ideaspace the same idea is a cube (interest.ts portCube): every port
+ * inside the aligned cube of height scaleExp + 3 around the view is a
+ * candidate, the same thousand-point identity sample is spent among them,
+ * the port nearest the view is always drawn, and a label under the cube
+ * says how many of its ports are shown. The cover is one exact prefix range
+ * of the sorted view (cubeRun). The open view's sample keeps drawing the
+ * ports outside the cube as before (arkinox, 2026-10-15).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
-import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { BufferGeometry, Color, Float32BufferAttribute, Vector3, type Mesh, type PerspectiveCamera } from 'three'
 import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
-import { ballCoverageRuns, coverageRuns } from '../lib/hyperspace/station'
-import { interestSphere, isqrt, sphereDistance2, sphereDotScale, sphereSelection } from '../lib/hyperspace/interest'
+import { ballCoverageRuns, coverageRuns, cubeRun, findNearestInPlane } from '../lib/hyperspace/station'
+import { cubeSelection, interestSphere, isqrt, portCube, portCubeLabel, sphereDistance2, sphereDotScale, sphereSelection } from '../lib/hyperspace/interest'
 import { formatDistance } from 'sno-core/scale'
 import { WorldLabel } from './WorldLabel'
+import { FLEET_CUBE_PX, markerSide, projScaleOf } from '../lib/markerSize'
+import { useStopMarks } from '../store/useStopMarks'
 import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
 import { LANDFALL_DETAIL_SCALE_MAX, stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
-import { coordToXyz } from 'cyberspace-core'
+import { coordToXyz, xyzToCoord } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
 const TAP_SLOP = 8
@@ -154,7 +164,7 @@ const HARD_CAP_SLACK = 1.1
 export const ADMIT_ALL = 0x1_0000_0000
 
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
-let lastDrawn: { frameKey: string; set: Set<number> } | null = null
+let lastDrawn: { frameKey: string; set: Set<number>; extra: number | null } | null = null
 
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
@@ -192,6 +202,8 @@ interface Built {
   /** Inside the sphere, the landfall nearest its centre, with the exact
    * distance in gibsons; always drawn (interest.ts). */
   nearest: { height: number; distance: bigint } | null
+  /** In ideaspace, the port cube's density label and where it sits (interest.ts portCube). */
+  cubeLabel: { text: string; at: [number, number, number] } | null
 }
 
 /** The render position of a drawn stop, by height, or null when it is not in this build. */
@@ -215,6 +227,31 @@ function usePointGeometry(at: [number, number, number] | null): BufferGeometry |
   }, [at])
   useEffect(() => () => { geometry?.dispose() }, [geometry])
   return geometry
+}
+
+/**
+ * The NEAREST stop, called out as a cube the size of the fleet's (StopCubes:
+ * FLEET_CUBE_PX on screen, a half gibson when that is larger) in its own
+ * colour, instead of a flat square of pixels (arkinox, 2026-10-15). No click
+ * handler: the dot beneath is the stop, and clicking it selects it like any
+ * other.
+ */
+function NearestCube({ at, gibson }: { at: [number, number, number]; gibson: number }): JSX.Element {
+  const mesh = useRef<Mesh>(null)
+  const scratch = useMemo(() => new Vector3(), [])
+  useFrame(({ camera, size }) => {
+    const m = mesh.current
+    if (!m) return
+    const projScale = projScaleOf(size.height, (camera as PerspectiveCamera).fov ?? 55)
+    const depth = camera.position.distanceTo(m.getWorldPosition(scratch))
+    m.scale.setScalar(markerSide(gibson * 0.5, FLEET_CUBE_PX, depth, projScale))
+  })
+  return (
+    <mesh ref={mesh} position={at} raycast={() => null}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial color={ACCENT} transparent opacity={0.85} toneMapped={false} fog={false} />
+    </mesh>
+  )
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
@@ -260,7 +297,12 @@ export function StopField({ axes }: Props): JSX.Element | null {
   // The sphere of interest, when the zoom and the focus give one: landfalls
   // only, so it is never consulted for the port cloud.
   const sphere = anchorPlane === 0 ? interestSphere(focus, scaleExp) : null
-  const sphereKey = sphere ? `${sphere.height} ${sphere.centre.x} ${sphere.centre.y} ${sphere.centre.z}` : ''
+  // Its ideaspace counterpart, the port cube: a different cube is a
+  // different field, so it rides in the same key.
+  const cube = portCube(anchor, anchorPlane, scaleExp)
+  const sphereKey = sphere
+    ? `${sphere.height} ${sphere.centre.x} ${sphere.centre.y} ${sphere.centre.z}`
+    : cube ? `cube ${cube.height} ${cube.base.x} ${cube.base.y} ${cube.base.z}` : ''
 
   useEffect(() => {
     const job = { cancelled: false }
@@ -389,12 +431,23 @@ export function StopField({ axes }: Props): JSX.Element | null {
     //
     // Counting the plane costs one byte read per row and no coordinate
     // decode, which is why it can afford to run before the hash filter.
+    // The port cube's own run, exact (cubeRun), and how many ports it holds.
+    // Its rows are the cube's candidates and are left out of the open
+    // sample below, which goes on drawing the ports around the cube.
+    const cubeSpan: [number, number] = cube ? cubeRun(index, anchor.x, anchor.y, anchor.z, cube.height) : [0, 0]
+    const inCube = (pos: number): boolean => pos >= cubeSpan[0] && pos < cubeSpan[1]
+    let cubeTotal = 0
+    for (let pos = cubeSpan[0]; pos < cubeSpan[1]; pos++) {
+      if (kindIsPort(index, index.perm[pos])) cubeTotal++
+    }
     let planeTotal = 0
     for (const [runStart, runEnd] of runs) {
       for (let pos = runStart; pos < runEnd; pos++) {
+        if (inCube(pos)) continue
         if (kindIsPort(index, index.perm[pos]) === wantPort) planeTotal++
       }
     }
+    planeTotal += cubeTotal
     if (planeTotal === 0) {
       reportEmpty()
       commit(null, sphere ? 0 : null)
@@ -402,10 +455,11 @@ export function StopField({ axes }: Props): JSX.Element | null {
     }
     const total = useHyperspace.getState().sync.total
     const projected = projectedPopulation(planeTotal, index.permCount, total)
-    const threshold = sphere ? ADMIT_ALL : sampleThreshold(projected, budget)
+    const threshold = sphere ? ADMIT_ALL : sampleThreshold(projected - (cube ? projectedPopulation(cubeTotal, index.permCount, total) : 0), budget)
     const rows: number[] = []
     for (const [runStart, runEnd] of runs) {
       for (let pos = runStart; pos < runEnd; pos++) {
+        if (inCube(pos)) continue
         const row = index.perm[pos]
         // The kind byte IS the plane bit. Matching it here shows one cloud
         // instead of superimposing two unrelated ones, and keeps the sample
@@ -414,6 +468,25 @@ export function StopField({ axes }: Props): JSX.Element | null {
         if (hashHeight(heightAt(index, row)) < threshold) rows.push(row)
       }
     }
+    // The cube's candidates after the open sample's, so `rows` from
+    // `outside` on are the cube's. All of them when the cube holds no more
+    // than the budget; otherwise the identity prefilter sized to the cube,
+    // exactly as the open view sizes it, and drawnSet lands the budget.
+    const outside = rows.length
+    if (cube) {
+      const cubeThreshold = cubeTotal <= SPHERE_MAX_POINTS
+        ? ADMIT_ALL
+        : sampleThreshold(projectedPopulation(cubeTotal, index.permCount, total), SPHERE_MAX_POINTS)
+      for (let pos = cubeSpan[0]; pos < cubeSpan[1]; pos++) {
+        const row = index.perm[pos]
+        if (!kindIsPort(index, row)) continue
+        if (hashHeight(heightAt(index, row)) < cubeThreshold) rows.push(row)
+      }
+    }
+    // The port nearest the view, by the protocol's own distance, never the
+    // stop being looked at: always drawn when it is on the grid.
+    const viewCoord = xyzToCoord(anchor.x, anchor.y, anchor.z, 1)
+    const nearPort = cube ? findNearestInPlane(index, viewCoord, 1, viewCoord) : null
     const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
@@ -428,6 +501,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
     const centres: number[] = []
     /** Parallel to kept inside the sphere: exact squared distance from its centre. */
     const d2s: bigint[] = []
+    /** Parallel to kept: whether the row is one of the port cube's candidates. */
+    const keptInCube: boolean[] = []
     const sphereR2 = sphere ? sphere.radius * sphere.radius : 0n
     let i = 0
 
@@ -451,11 +526,45 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // at the port budget is the whole decimation, exact and nested
       // (interest.ts), with the nearest stop riding on top of it.
       let draw: Set<number>
+      // The nearest port when it joined the drawn set on its own, outside the
+      // sample: not churn when it changes, so the diagnostic leaves it out.
+      let extra: number | null = null
       let nearest: Built['nearest'] = null
+      let cubeDrawn = 0
       if (sphere) {
         const sel = sphereSelection(keptHeights, d2s, SPHERE_MAX_POINTS)
         draw = sel.drawn
         if (sel.nearest) nearest = { height: sel.nearest.height, distance: isqrt(sel.nearest.d2) }
+      } else if (cube) {
+        // Two samples, each nested in its own candidates: the open view's
+        // around the cube, and the cube's own at the sphere's budget.
+        const outsideHeights: number[] = []
+        const cubeHeights: number[] = []
+        for (let k = 0; k < kept.length; k++) (keptInCube[k] ? cubeHeights : outsideHeights).push(keptHeights[k])
+        const sel = cubeSelection(outsideHeights, cubeHeights, Math.ceil(budget * HARD_CAP_SLACK), SPHERE_MAX_POINTS)
+        draw = sel.drawn
+        cubeDrawn = sel.cubeDrawn
+        // The nearest port, added as its own point when the samples left it out.
+        if (nearPort) {
+          const exact = coordToXyz(stopCoordExact(nearPort.stop))
+          const dx = exact.x - anchor.x
+          const dy = exact.y - anchor.y
+          const dz = exact.z - anchor.z
+          nearest = { height: nearPort.stop.height, distance: isqrt(dx * dx + dy * dy + dz * dz) }
+          if (!draw.has(nearPort.stop.height)) {
+            const c = occupancy ? cellCentre(exact, origin, scaleExp, axes) : pointCentre(exact, origin, scaleExp, axes)
+            if (Math.abs(c[0]) <= REACH && Math.abs(c[1]) <= REACH && Math.abs(c[2]) <= REACH) {
+              kept.push(-1)
+              keptHeights.push(nearPort.stop.height)
+              keptInCube.push(false)
+              centres.push(c[0], c[1], c[2])
+              draw.add(nearPort.stop.height)
+              extra = nearPort.stop.height
+            } else {
+              nearest = null
+            }
+          }
+        }
       } else {
         draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
       }
@@ -469,7 +578,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
         positions[v * 3] = centres[k * 3]
         positions[v * 3 + 1] = centres[k * 3 + 1]
         positions[v * 3 + 2] = centres[k * 3 + 2]
-        const col = kindIsPort(index, kept[k]) ? PORT_COLOR : LANDFALL_COLOR
+        // One plane per build, so the plane says the colour (a row of -1 is the nearest port added on its own).
+        const col = wantPort ? PORT_COLOR : LANDFALL_COLOR
         colors[v * 3] = col.r
         colors[v * 3 + 1] = col.g
         colors[v * 3 + 2] = col.b
@@ -485,11 +595,16 @@ export function StopField({ axes }: Props): JSX.Element | null {
         // Churn is the whole point of the sampler, so measure it rather than
         // eyeball it: a stable field evicts nothing, and any non-zero
         // `removed` here is a dot that was drawn and then taken away.
+        // Only the sample's own churn counts: the same frame over the same
+        // line. A line still syncing grows between rebuilds and rightly adds
+        // and swaps stops, and the nearest port added on its own changes
+        // whenever a nearer one arrives; counting either reported "evicted
+        // 1 of 1" on every view while the line synced (2026-10-15).
         const prev = lastDrawn
         let removed = 0
-        const drawKey = `${frameKey} | ${sphereKey}`
-        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (!draw.has(h)) removed++
-        lastDrawn = { frameKey: drawKey, set: draw }
+        const drawKey = `${frameKey} | ${sphereKey} | ${index.size}`
+        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (h !== prev.extra && !draw.has(h)) removed++
+        lastDrawn = { frameKey: drawKey, set: draw, extra }
         const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
         const entry = {
           rendered: count, inRange: kept.length, threshold, runTotal,
@@ -498,11 +613,23 @@ export function StopField({ axes }: Props): JSX.Element | null {
           sphere: sphere
             ? { height: sphere.height, inside: kept.length, nearest: nearest?.height ?? null, nearestGibsons: nearest?.distance.toString() ?? null }
             : null,
+          cube: cube
+            ? { height: cube.height, inside: cubeTotal, drawn: cubeDrawn, nearest: nearest?.height ?? null, nearestGibsons: nearest?.distance.toString() ?? null }
+            : null,
         }
         w.__stopField = entry
         const log = (w.__stopFieldLog ??= []) as unknown[]
         log.push(entry)
-        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${prev?.set.size} dots`, entry)
+        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${(prev?.set.size ?? 0) - (prev?.extra != null ? 1 : 0)} sampled dots`, entry)
+      }
+      // The cube's label, centred under it: the cube's middle, half a side down the screen.
+      let cubeLabel: Built['cubeLabel'] = null
+      if (cube) {
+        const half = cube.height >= 85 ? 1n << 84n : 1n << BigInt(cube.height - 1)
+        const mid = pointCentre({ x: cube.base.x + half, y: cube.base.y + half, z: cube.base.z + half }, origin, scaleExp, axes)
+        const halfCells = 2 ** (Math.min(85, cube.height) - 1 - scaleExp)
+        const text = portCubeLabel(cubeDrawn, cubeTotal, cube.height)
+        if (text) cubeLabel = { text, at: [mid[0], mid[1] - halfCells - 0.6, mid[2]] }
       }
       commit({
         geometry,
@@ -513,6 +640,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         version: rebuildVersion,
         sphereKey,
         nearest,
+        cubeLabel,
       }, sphere ? kept.length : null)
     }
 
@@ -542,6 +670,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
           kept.push(row)
           centres.push(c[0], c[1], c[2])
           if (sphere) d2s.push(d2)
+          keptInCube.push(i >= outside)
         }
         if (performance.now() - t0 >= SLICE_MS) {
           setTimeout(slice, 0)
@@ -594,7 +723,10 @@ export function StopField({ axes }: Props): JSX.Element | null {
     () => (built && built.nearest ? vertexOf(built, built.nearest.height) : null),
     [built],
   )
-  const nearestGeometry = usePointGeometry(nearestAt)
+  // Published for StopCubes, which leaves this stop to the NEAREST cube.
+  const nearestHeight = built && built.frameKey === frameKey && stopsDrawn(anchorPlane, scaleExp) ? built.nearest?.height ?? null : null
+  useEffect(() => { useStopMarks.getState().setNearest(nearestHeight) }, [nearestHeight])
+  useEffect(() => () => useStopMarks.getState().setNearest(null), [])
 
   if (!built || built.frameKey !== frameKey) return null
   if (!stopsDrawn(anchorPlane, scaleExp)) return null
@@ -689,27 +821,18 @@ export function StopField({ axes }: Props): JSX.Element | null {
           />
         </points>
       )}
-      {nearestGeometry && nearestAt && built.nearest && (
+      {built.cubeLabel && (
+        <WorldLabel text={built.cubeLabel.text} color={ACCENT} at={built.cubeLabel.at} px={11} opacity={0.9} align="center" />
+      )}
+      {nearestAt && built.nearest && (
         <>
-          <points geometry={nearestGeometry} frustumCulled={false}>
-            {/* No click handler here either: the dot beneath is the stop,
-                and clicking it selects it like any other landfall. */}
-            <pointsMaterial
-              color={ACCENT}
-              size={7 * dpr}
-              sizeAttenuation={false}
-              transparent
-              opacity={0.95}
-              depthWrite={false}
-              toneMapped={false}
-              fog={false}
-            />
-          </points>
+          <NearestCube at={nearestAt} gibson={2 ** -scaleExp} />
           <WorldLabel
             text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(built.nearest.distance)}`}
             color={ACCENT}
             at={nearestAt}
-            offset={[0.6, 0.6, 0]}
+            clear={{ trueSide: 2 ** -scaleExp * 0.5, minPx: FLEET_CUBE_PX }}
+            align="center"
             px={10}
             opacity={0.95}
           />

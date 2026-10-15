@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useCyberspace } from '../useCyberspace'
-import { exitHyperspaceView, ownHyperspaceView, useHyperspace } from '../useHyperspace'
+import { closeScrubber, exitHyperspaceView, ownHyperspaceView, useHyperspace } from '../useHyperspace'
 
 const PK = 'ab'.repeat(32)
 
@@ -112,5 +112,21 @@ describe('closing the overlay gives the camera back', () => {
     exitHyperspaceView()
     expect(useCyberspace.getState().focus?.label).toBe('A PLACE')
     expect(useCyberspace.getState().scaleExp).toBe(44)
+  })
+})
+
+describe('closing the hyperspace chip (arkinox, 2026-10-15)', () => {
+  it('closes only the chip: the block on screen stays until RETURN', () => {
+    useHyperspace.setState({ scrubHeight: 42 })
+    ownHyperspaceView()
+    useCyberspace.getState().focusOn({ x: 5n, y: 6n, z: 7n }, 1, 'BLOCK 42 · PORT', 34)
+    closeScrubber()
+    expect(useHyperspace.getState().scrubHeight).toBeNull()
+    expect(useHyperspace.getState().viewOwned).toBe(true)
+    expect(useCyberspace.getState().focus?.label).toBe('BLOCK 42 · PORT')
+    // RETURN on the viewing bar still ends it.
+    exitHyperspaceView()
+    expect(useCyberspace.getState().focus).toBeNull()
+    expect(useHyperspace.getState().viewOwned).toBe(false)
   })
 })

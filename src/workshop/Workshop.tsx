@@ -22,11 +22,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
+import { stepDivision } from './divisions'
 import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
@@ -502,7 +503,11 @@ export function Workshop(): JSX.Element | null {
   const ledger = usePublished((s) => s.ledger)
   const publishing = usePublished((s) => s.publishing)
   const retracting = usePublished((s) => s.retracting)
-  const [retractAsk, setRetractAsk] = useState(false)
+  // The object RETRACT was asked about, by id, never a bare yes: the
+  // confirmation shows only while that same object is on the bench in the
+  // open menu, and is dropped the moment either changes, so it can never
+  // come back over a different object (review of snocrash #36, 2026-10-15).
+  const [retractAsk, setRetractAsk] = useState<string | null>(null)
   const pubState = useMemo(
     () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
     [shard, ledger, me],
@@ -536,6 +541,8 @@ export function Workshop(): JSX.Element | null {
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
+  // A RETRACT question belongs to one object in one open menu.
+  useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
@@ -836,21 +843,21 @@ export function Workshop(): JSX.Element | null {
                 <button
                   className="workshop__btn workshop__btn--danger"
                   disabled={publishing || retracting}
-                  onClick={() => setRetractAsk(true)}
+                  onClick={() => setRetractAsk(shard.id)}
                   title="Ask your relays to drop the published object (NIP-09). Copies others made stay theirs. The shard stays here."
                 >{retracting ? 'RETRACTING' : 'RETRACT'}</button>
               )}
             </div>
             <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
           </div>
-          {retractAsk && (
+          {retractAsk === shard.id && (
             <ConfirmModal
               title={`Retract "${shard.name}"?`}
               body={<>A deletion goes to your relays, naming the object&apos;s address (NIP-09). Relays that honor it drop the object and the Shard Feed stops listing it; a relay that does not may keep handing it out. Copies and LIVE LINKs others placed stay theirs. The shard stays in your workshop, and PUBLISH puts it back.</>}
               confirmLabel="RETRACT"
               busy={retracting}
-              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(false)) }}
-              onCancel={() => setRetractAsk(false)}
+              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(null)) }}
+              onCancel={() => setRetractAsk(null)}
             />
           )}
           <div className="ws__panel-title">SHARDS ({shards.length})</div>
@@ -886,9 +893,10 @@ export function Workshop(): JSX.Element | null {
                 <button
                   className="workshop__mini"
                   title="Copy it into your objects, where you can edit it"
+                  aria-label="Copy your avatar into your objects"
                   onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your objects.`) }}
-                >⧉</button>
-                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}>COPY</button>
+                ><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                <button className="workshop__mini" title="Copy to the clipboard" aria-label="Copy your avatar to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
               </li>
             )}
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26). */}
@@ -898,8 +906,8 @@ export function Workshop(): JSX.Element | null {
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>
-                <button className="workshop__mini" title="Duplicate" onClick={() => w().duplicate(s.id)}>⧉</button>
-                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copy(s.id)}>COPY</button>
+                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
                 <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
               </li>
             ))}
@@ -949,13 +957,13 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= MAX_UNIT} aria-label="Larger unit">+</button>
             <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the object at this size.">one unit = {formatCellSize(shard.unit)}</span>
           </div>
+          {/* A stepper like the rows around it (arkinox, 2026-10-15): fifteen
+              divisions down to a single tick no longer fit as a row of buttons. */}
           <div className="workshop__row" role="group" aria-label="Grid division">
             <span className="workshop__label">DIVISION</span>
-            <div className="workshop__modes workshop__modes--divisions">
-              {DIVISIONS.map((d) => (
-                <button key={d} className={`workshop__mode ${division === d ? 'is-on' : ''}`} aria-pressed={division === d} onClick={() => w().setDivision(d)} title={d === 1 ? 'Snap to whole units' : `Snap to 1/${d} of a unit`}>{d === 1 ? '1' : `1/${d}`}</button>
-              ))}
-            </div>
+            <button className="workshop__btn" onClick={() => w().setDivision(stepDivision(division, -1))} disabled={division === DIVISIONS[0]} aria-label="Coarser division" title="Coarser snap">−</button>
+            <span className="workshop__value" title={division === 1 ? 'Snap to whole units' : `Snap to 1/${division} of a unit`}>{division === 1 ? '1' : `1/${division}`}</span>
+            <button className="workshop__btn" onClick={() => w().setDivision(stepDivision(division, 1))} disabled={division === DIVISIONS[DIVISIONS.length - 1]} aria-label="Finer division" title="Finer snap">+</button>
             <span className="workshop__unit-size" title="Where taps, the box, nudges and the level land. Positions already placed keep their exact spots.">the snap for placing and nudging</span>
           </div>
           <div className="workshop__row">

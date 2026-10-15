@@ -6,3 +6,4 @@ dist-ssr/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+scripts/smoke-seed/seed.json

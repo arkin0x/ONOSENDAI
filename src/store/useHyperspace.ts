@@ -200,6 +200,16 @@ export function markViewedStop(height: number | null): void {
 }
 
 /**
+ * Close the scrubber chip and nothing else (arkinox, 2026-10-15: "I should be
+ * able to close the hyperspace chip without affecting my current view at
+ * all"). A block it was showing stays on screen, owned by hyperspace, until
+ * RETURN on the viewing bar (exitHyperspaceView).
+ */
+export function closeScrubber(): void {
+  if (useHyperspace.getState().scrubHeight !== null) useHyperspace.setState({ scrubHeight: null })
+}
+
+/**
  * Leave the hyperspace view: close the scrubber, and clear the focus only if
  * hyperspace set it (never a shard's focus, never a running spectate).
  */

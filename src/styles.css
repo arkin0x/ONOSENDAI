@@ -2928,17 +2928,6 @@ kbd {
   gap: 3px;
 }
 
-/* The eight divisions do not fit one line beside their label, and a flex row
-   that could not wrap ran off the panel. Five to a line, on one column
-   rhythm, so 1/6 begins the second line under 1 and the two lines read as
-   one block. */
-.workshop__modes--divisions {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  flex: 1 1 200px;
-  max-width: 260px;
-}
-
 .workshop__list {
   list-style: none;
   margin: 0;
@@ -2995,6 +2984,9 @@ kbd {
   width: 30px;
   padding: 0;
   color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .workshop__mini--danger:hover {
@@ -5238,6 +5230,11 @@ kbd {
 
 .login__backup-details[open] summary { margin-bottom: 4px; }
 
+/* In a column, .secret__act's flex: 1 took its height away (USE THIS RELAY,
+   ENCRYPT BACKUP); snocrash #37 fixed the same rule. */
+.login__qr-flow .secret__act,
+.login__backup-details > .secret__act { flex: none; width: 100%; }
+
 /* ---------- Hyperspace ---------- */
 
 /* The transit mode bar: SpectateBar's shape in the line's Bitcoin orange,
@@ -5262,7 +5259,15 @@ kbd {
   box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
   font-size: 9px;
   letter-spacing: 0.1em;
-  max-width: calc(100vw - 24px);
+  /* Stops short of the 3D compass, top right (84px at 12px in, plus an 8px
+     gap, from the stack's 8px left edge): a long VIEWING label ran under it
+     and covered its tap target (smoke test, 2026-10-16). */
+  max-width: calc(100vw - 112px);
+}
+@media (min-width: 1101px) {
+  /* Desktop: the stack starts 352px in, the 120px compass sits 332px in
+     from the right. */
+  .hyperbar { max-width: calc(100vw - 812px); }
 }
 
 .hyperbar__glyph {
@@ -5365,25 +5370,39 @@ kbd {
   white-space: nowrap;
 }
 
-/* The clear X docks onto SET DESTINATION's right edge as an attachment, so
-   the pair reads as one control and the X never floats on its own line. */
+/* A set destination (arkinox, 2026-10-15): the dead label naming the block,
+   and CLEAR DESTINATION as its own button beside it, wrapping under it when
+   the row is narrow. */
+.linescrub__dest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .linescrub__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
   line-height: 1;
   padding: 3px 7px;
-  border-radius: 0 5px 5px 0;
+  border-radius: 5px;
   color: var(--danger);
   background: transparent;
   border: 1px solid var(--danger);
-  border-left: 0;
   cursor: pointer;
   touch-action: none;
 }
 
-.linescrub__set--attached {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+/* Inactive, but a reading, not a faded button. */
+.linescrub__set.linescrub__set--attached:disabled {
+  opacity: 1;
+  color: #f7931a;
+  background: transparent;
 }
 
 /* The overlay reads as a ticket: FROM your station at the top, TO the block
@@ -8291,6 +8310,11 @@ kbd {
 .hyperbar--walktoast .hyperbar__label,
 .toast__walk {
   color: var(--danger);
+}
+/* The signer on another account: a warning, on the Builder's chip. */
+.hyperbar--signertoast .hyperbar__label,
+.toast__signer {
+  color: var(--warn);
 }
 .hyperbar--buildtoast .hyperbar__meta {
   white-space: normal;

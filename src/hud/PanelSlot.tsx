@@ -12,7 +12,7 @@
  * tap target is still the whole line.
  */
 
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { GripVertical } from 'lucide-react'
 import { usePanelLayout, type PanelId } from '../store/usePanelLayout'
 
@@ -67,7 +67,15 @@ interface Props {
 
 export function PanelSlot({ id, lead, lifting, onGrab, children }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const collapsed = usePanelLayout((s) => s.collapsed[id] === true)
+  const saved = usePanelLayout((s) => s.collapsed[id] === true)
+  // A panel a priority state pins to the top (a ride destination, a proof,
+  // BUILD) opens there, whatever its saved fold (arkinox, 2026-10-14: pinned
+  // but still folded hid the very thing it was pinned for). A fold made while
+  // it is pinned lasts only as long as the pin, and the saved fold is never
+  // written: when the pin ends the panel is exactly as it was left.
+  const [leadFolded, setLeadFolded] = useState(false)
+  useEffect(() => { if (lead) setLeadFolded(false) }, [lead])
+  const collapsed = lead ? leadFolded : saved
 
   // The title's role, tab stop and state, set on the DOM after each render
   // rather than in the panel's markup: the panels are not edited for this.
@@ -81,7 +89,7 @@ export function PanelSlot({ id, lead, lifting, onGrab, children }: Props): JSX.E
     title.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
   })
 
-  const toggle = (): void => usePanelLayout.getState().toggle(id)
+  const toggle = (): void => { if (lead) setLeadFolded((f) => !f); else usePanelLayout.getState().toggle(id) }
 
   const onClick = (e: ReactMouseEvent<HTMLDivElement>): void => {
     if (foldsAt(e.target instanceof Element ? e.target : null, headOf(ref.current), titleOf(ref.current))) toggle()

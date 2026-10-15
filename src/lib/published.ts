@@ -56,7 +56,7 @@
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { refTags } from 'sno-core/parts'
-import { SNO_KIND, creditOf, creditTags, objectAddress } from 'sno-core/feed'
+import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 
 const STORAGE = 'onosendai:published'
@@ -247,4 +247,15 @@ export const STATE_HELP: Record<PublishState, string> = {
  */
 export function shardFingerprint(shard: ShardModel): string {
   return fingerprint(JSON.stringify(toPayload(shard)))
+}
+
+/**
+ * The credit your own published object carries back into the workshop: the
+ * `q` it was published with, so republishing a remix of yours keeps naming
+ * the original author; never a credit to yourself (review of snocrash #35,
+ * 2026-10-15).
+ */
+export function ownObjectCredit(tags: readonly string[][], me: string): Credit | undefined {
+  const upstream = readCredit(tags)
+  return upstream && creditAuthor(upstream) !== me ? upstream : undefined
 }

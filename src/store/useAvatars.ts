@@ -23,6 +23,7 @@ import { nonceTagged } from '../lib/avatarMine'
 import { MineCancelled, mineInWorker, type AvatarMiner } from '../lib/avatarWorker'
 import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
+import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 
@@ -191,8 +192,9 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     let event
     try {
       event = await cs.signEvent(template, AVATAR_SIGN_PATIENCE_MS)
-    } catch {
-      set({ phase: null, adoptError: 'The signer did not sign the avatar.' })
+    } catch (err) {
+      // Signed as another account, the work would not cover it: say that.
+      set({ phase: null, adoptError: err instanceof SignerAccountMismatch ? err.message : 'The signer did not sign the avatar.' })
       return false
     }
     // The signer must return the event as mined: a changed created_at or tag

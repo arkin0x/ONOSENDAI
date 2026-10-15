@@ -1,4 +1,4 @@
-/** LoginModal.tsx — one clear door for every supported Nostr identity. */
+/** LoginModal.tsx: one clear door for every supported Nostr identity. */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -139,6 +139,12 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
   const extension = hasNip07()
   const disabled = busy !== null
   const credentialReady = !!credential.trim() && (!encrypted || !!password)
+  // A stopped QR (its relay dropped it) is tried again on the same relay, as
+  // a fresh session with a new secret: the button used to stay disabled for
+  // that relay, leaving only the way back (snocrash #37 offers the same).
+  const sameRelay = ((): boolean => {
+    try { return normalizeSignerRelay(relay) === activeRelay } catch { return false }
+  })()
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', true, close)
 
@@ -174,7 +180,7 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
             <p className="login__waiting" role="status">
               {busy === 'qr' && <span className="spin" aria-hidden="true" />}
               {busy === 'qr'
-                ? qrConnected ? 'SIGNER CONNECTED — FETCHING PUBLIC KEY…' : 'WAITING FOR SIGNER…'
+                ? qrConnected ? 'SIGNER CONNECTED, FETCHING PUBLIC KEY…' : 'WAITING FOR SIGNER…'
                 : 'CONNECTION STOPPED'}
             </p>
 
@@ -196,11 +202,9 @@ export function LoginModal({ onClose }: { onClose: () => void }): JSX.Element {
               />
               <button
                 className="secret__act login__act"
-                disabled={!relay.trim() || (() => {
-                  try { return normalizeSignerRelay(relay) === activeRelay } catch { return false }
-                })()}
+                disabled={!relay.trim() || (busy === 'qr' && sameRelay)}
                 onClick={() => startQr(relay)}
-              >USE THIS RELAY</button>
+              >{busy !== 'qr' && sameRelay ? 'TRY AGAIN' : 'USE THIS RELAY'}</button>
             </div>
 
             <button className="login__back" onClick={backToLogin}>← OTHER LOGIN OPTIONS</button>

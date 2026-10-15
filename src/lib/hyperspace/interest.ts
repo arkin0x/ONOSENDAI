@@ -268,3 +268,68 @@ export function sphereSelection(
   if (nearest !== null) drawn.add(nearest.height)
   return { drawn, nearest }
 }
+
+/**
+ * The port cube of interest: ideaspace's counterpart to the sphere
+ * (arkinox, 2026-10-15: "In Ideaspace, we should be able to see all the
+ * blocks inside the hX+3 up to the same cap").
+ *
+ * Ports fill the whole volume at random, so where the open view's thousand
+ * dots are spent across a reach box hundreds of cells wide, most of them sit
+ * far outside the frame and the box on screen holds a handful. The cube is
+ * the aligned cube of height scaleExp + 3 that contains the view: eight
+ * cells on a side, the smallest of the h boxes the scene draws around you.
+ * Every port inside it is a candidate, the same identity sample spends the
+ * same thousand-point budget among them, and the port nearest the view is
+ * always drawn. Zooming in one step makes the cube an eighth of the volume,
+ * so by the zoom where the cube holds fewer ports than the budget, every
+ * port in it is on screen and the label says so ("412 of 412").
+ *
+ * Active wherever the view is in ideaspace; the open view's sample keeps
+ * drawing the ports outside the cube exactly as before, so nothing that was
+ * on screen disappears.
+ */
+export const PORT_CUBE_OFFSET = 3
+
+export interface PortCube {
+  /** The cube's aligned height: scaleExp + PORT_CUBE_OFFSET, at most 85. */
+  height: number
+  /** Its aligned corner. */
+  base: Position
+}
+
+/** The port cube of interest around a view anchor, or null outside ideaspace. */
+export function portCube(anchor: Position, plane: Plane, scaleExp: number): PortCube | null {
+  if (plane !== 1) return null
+  const height = Math.min(85, scaleExp + PORT_CUBE_OFFSET)
+  const b = BigInt(height)
+  const align = (v: bigint): bigint => (height >= 85 ? 0n : (v >> b) << b)
+  return { height, base: { x: align(anchor.x), y: align(anchor.y), z: align(anchor.z) } }
+}
+
+/** What the cube says about itself: "1,000 of 8,214 hyperjumps in this h80 box". */
+export function portCubeLabel(drawn: number, inside: number, height: number): string | null {
+  // A count only says something once there is a choice: with one port or
+  // none, the box itself is the whole story (arkinox, 2026-10-15).
+  if (inside < 2) return null
+  const n = (v: number): string => v.toLocaleString('en-US')
+  return `${n(drawn)} of ${n(inside)} hyperjumps in this h${height} box`
+}
+
+/**
+ * What the field draws in ideaspace: the open view's sample around the cube
+ * and the cube's own sample at the sphere's budget, each nested in its own
+ * candidates (drawnSet), so the cube is filled to the budget however crowded
+ * the view around it is. `cubeDrawn` is what the label counts.
+ */
+export function cubeSelection(
+  outsideHeights: ArrayLike<number>,
+  cubeHeights: ArrayLike<number>,
+  outsideBudget: number,
+  cubeBudget: number,
+): { drawn: Set<number>; cubeDrawn: number } {
+  const drawn = drawnSet(outsideHeights, outsideBudget)
+  const cube = drawnSet(cubeHeights, cubeBudget)
+  for (const h of cube) drawn.add(h)
+  return { drawn, cubeDrawn: cube.size }
+}

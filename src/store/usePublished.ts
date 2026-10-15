@@ -62,6 +62,35 @@ interface PublishedState {
  * the ledger's record of the last send.
  */
 const clock = new Map<string, number>()
+/**
+ * When each object was last retracted, kept a day across reloads. A deletion
+ * by address covers every version up to its own second, and RETRACT forgets
+ * the publish record, so without this a PUBLISH right after a retract and a
+ * reload could land in the deletion's second and be dropped by relays that
+ * honor it (review of snocrash #36, 2026-10-15). It only covers this browser:
+ * another device with a slow clock can still publish older than a deletion.
+ */
+const RETRACTED_KEY = 'onosendai:retracted'
+const RETRACTED_KEEP_S = 24 * 60 * 60
+function loadRetracted(): Record<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RETRACTED_KEY) ?? '{}') as Record<string, unknown>
+    const out: Record<string, number> = {}
+    for (const [id, at] of Object.entries(raw)) if (typeof at === 'number') out[id] = at
+    return out
+  } catch { return {} }
+}
+/** The second this object was last retracted here, or 0. */
+export function retractedAt(id: string): number {
+  return loadRetracted()[id] ?? 0
+}
+function noteRetracted(id: string, at: number): void {
+  const now = Math.floor(Date.now() / 1000)
+  const kept = Object.fromEntries(Object.entries(loadRetracted()).filter(([, t]) => now - t < RETRACTED_KEEP_S))
+  kept[id] = at
+  try { localStorage.setItem(RETRACTED_KEY, JSON.stringify(kept)) } catch { /* private mode: this session's clock still holds */ }
+}
+
 function nextAt(id: string, floor: number): number {
   const now = Math.floor(Date.now() / 1000)
   const at = Math.max(now, floor + 1, (clock.get(id) ?? 0) + 1)
@@ -95,7 +124,7 @@ export const usePublished = create<PublishedState>((set, get) => ({
     const relays = relaySet()
     set({ publishing: true })
     try {
-      const template = publicObjectTemplate(shard, nextAt(shard.id, get().ledger[shard.id]?.at ?? 0))
+      const template = publicObjectTemplate(shard, nextAt(shard.id, Math.max(get().ledger[shard.id]?.at ?? 0, retractedAt(shard.id))))
       const signed = await cs.signEvent(template)
       const result = await publishMany(relays, signed)
       if (!result.ok) {
@@ -130,16 +159,19 @@ export const usePublished = create<PublishedState>((set, get) => ({
     const rec = get().ledger[shard.id]
     // Only the author's deletion deletes (NIP-09): an object published under
     // another key is not this key's to take down.
-    if (rec && rec.pubkey !== me) { say('This object was published under another key; only that key can retract it.'); return false }
+    // Never published from here: there is nothing of ours to take down.
+    if (!rec) { say('Nothing is known to be published for this object yet, so there is nothing to retract. Open the Shard Feed and try again.'); return false }
+    if (rec.pubkey !== me) { say('This object was published under another key; only that key can retract it.'); return false }
     const relays = relaySet()
     set({ retracting: true })
     try {
-      const del = await cs.signEvent(retractionTemplate(me, shard.id, rec?.id, nextAt(shard.id, rec?.at ?? 0), 'object retracted'))
+      const del = await cs.signEvent(retractionTemplate(me, shard.id, rec.id, nextAt(shard.id, rec.at ?? 0), 'object retracted'))
       const result = await publishMany(relays, del)
       if (!result.ok) {
         say(`No relay took the retraction of "${shard.name}": ${result.reason}`)
         return false
       }
+      noteRetracted(shard.id, del.created_at)
       const ledger = forget(get().ledger, shard.id)
       saveLedger(ledger)
       set({ ledger })

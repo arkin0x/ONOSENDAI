@@ -9097,8 +9097,11 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   left: 50%;
   transform: translateX(-50%);
   width: min(460px, calc(100vw - 16px));
-  max-height: min(62vh, 560px);
-  overflow-y: auto;
+  /* About a third of the screen (arkinox, 2026-10-15): the body scrolls
+     inside, and the instruction, SPAWN and BACK / NEXT stay pinned below it. */
+  max-height: 35vh;
+  max-height: 35dvh;
+  overflow: hidden;
   z-index: 150;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -9112,6 +9115,10 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   flex-direction: column;
   gap: 8px;
 }
+.demo__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
+.demo__head, .demo__bar-track, .demo__wait, .demo__foot { flex: 0 0 auto; }
+.demo__mode { color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-size: 9px; letter-spacing: 0.12em; }
+.demo__mode.is-live { color: #ff5470; border-color: #ff5470; }
 .demo--min { flex-direction: row; align-items: center; padding: 6px 8px; gap: 6px; overflow: hidden; }
 .demo__head { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.08em; }
 .demo__tag { color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: 0.12em; font-size: 9px; }
@@ -9123,10 +9130,11 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .demo__bar-fill { height: 100%; background: var(--accent); transition: width 0.25s ease; }
 .demo__title { margin: 0; font-size: 15px; font-weight: 600; color: var(--fg); }
 .demo__caption { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg); }
-.demo__wait { font-size: 11px; color: #ffd84d; letter-spacing: 0.04em; }
+.demo__wait { font-size: 11px; color: #ffd84d; letter-spacing: 0.04em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.demo__btn.demo__btn--spawn { flex: 0 0 auto; padding: 0 16px; color: var(--bg); background: #ff2323; border-color: #ff5470; }
 .demo__wait.is-done { color: #5ef0a0; }
 .demo__panel { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 11px; }
-.demo__json { margin: 0; max-height: 220px; overflow: auto; font-size: 10px; line-height: 1.45; color: var(--fg); white-space: pre; }
+.demo__json { margin: 0; overflow-x: auto; font-size: 10px; line-height: 1.45; color: var(--fg); white-space: pre; }
 .demo__note { color: #ffd84d; margin-bottom: 6px; }
 .demo__checks { display: flex; flex-direction: column; gap: 4px; }
 .demo__checks code, .demo__list code, .demo__kinds code { color: var(--accent); }

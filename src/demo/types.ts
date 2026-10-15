@@ -28,12 +28,26 @@ export interface DemoScene {
   layers?: Partial<Record<SceneLayer, boolean>>
   /** Open the local chat dock. */
   chat?: boolean
+  /**
+   * Show this plane where you stand (0 dataspace, 1 ideaspace), as the
+   * plane switch does (setPlane); only with target 'self'. The next step at
+   * 'self' brings your own plane back (homeCursor).
+   */
+  plane?: 0 | 1
 }
 
 /** Something the visitor does that a step waits for, detected from the stores. */
 export type DemoAction =
   /** A new movement event on your own chain (a hop or a sidestep). */
   | 'hop'
+  /**
+   * Your spawn, signed with the coach's SPAWN button. Asked only of a key
+   * the tour generated that has no chain yet; for any other identity it
+   * counts at once, and the tour never offers SPAWN or signs a spawn.
+   */
+  | 'spawn'
+  /** A hop or sidestep anywhere on your chain; one already there counts at once. */
+  | 'own-hop'
   /** A discovery scan that started and finished after the step began. */
   | 'scan'
   /** A hidden thing opened (its modal shown). */
@@ -69,8 +83,22 @@ export interface DemoStep {
   scene: DemoScene
   /** What the visitor is asked to do; omitted for a step that only shows. */
   wait?: DemoAction
+  /** Shown instead of `caption` while the step's `wait` has not happened. */
+  captionWaiting?: string
   /** The one-line instruction shown while waiting. */
   hint?: string
+  /**
+   * NEXT (and the keys that present the tour) stay off until the `wait` has
+   * happened; without it, waiting is an invitation and NEXT reads SKIP.
+   */
+  gate?: boolean
+  /**
+   * Where to put the cursor on entering the step, in gibsons from where you
+   * stand along the pad's own up, right and forward (into the screen): as a
+   * preview on a step with no `wait`, else while the `wait` has not happened, with the zoom set to `scale` so the
+   * cursor shows where it went (2^0: one cell is one gibson).
+   */
+  aim?: { up: number; right: number; forward: number; scale?: number }
   panel?: DemoPanel
 }
 

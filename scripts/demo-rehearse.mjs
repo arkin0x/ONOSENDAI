@@ -13,7 +13,8 @@
  *
  * Runs, in one browser context (one throwaway identity):
  *   A. a brand-new identity: keys, SPEAK, then every step in order, doing
- *      each step's action (hop, WALK, scan, open an item);
+ *      each step's action (SPAWN, the aimed first hop, a hop on the chain
+ *      step, WALK, scan, open an item);
  *   B. the same identity, now with a short LOCAL chain, entered with the
  *      switch on LIVE, to check the tour forces LOCAL and EXIT restores LIVE;
  *   C. every deep link /demo/<id>.
@@ -182,6 +183,18 @@ async function waitDone(ms) {
 }
 
 async function doAction(step) {
+  // SPAWN, offered only to the key the tour generated (a gated step).
+  if (step.wait === 'spawn') {
+    const b = page.locator('.demo__btn--spawn')
+    if (await b.count()) await b.click({ timeout: 10_000 }).catch(() => {})
+    return waitDone(30_000)
+  }
+  // The verify step has aimed the cursor already: COMMIT it.
+  if (step.wait === 'own-hop') {
+    const commit = page.locator('.touchops__commit', { hasText: 'COMMIT' }).first()
+    if (await commit.waitFor({ timeout: 20_000 }).then(() => true, () => false)) await commit.click({ timeout: 10_000 }).catch(() => {})
+    return waitDone(90_000)
+  }
   if (step.wait === 'hop') {
     // Line up one cell to the right, then COMMIT from the pad.
     await page.keyboard.press('KeyD')
@@ -298,16 +311,16 @@ const startState = await state()
 report.runs.A = { pubkey: startState.pubkey.slice(0, 12) }
 report.runs.A.rows = await runTour('A')
 saveReport()
-// Space on the hop step must not advance (it is a movement key there).
+// Space on the walk step must not advance (it is a movement key there).
 {
-  stepTag = 'space-on-hop'
-  await page.goto(`${base}/demo/hop`, { waitUntil: 'load' })
+  stepTag = 'space-on-walk'
+  await page.goto(`${base}/demo/walk`, { waitUntil: 'load' })
   await page.waitForFunction(() => !!document.querySelector('.demo__title'), null, { timeout: 60_000 })
   await sleep(2500)
   const before = (await dom()).title
   await page.keyboard.press('Space'); await sleep(1200)
   const after = (await dom()).title
-  report.keys.spaceOnHopStays = before === after
+  report.keys.spaceOnWalkStays = before === after
 }
 // EXIT from the last step: FINISH ends the tour, LOCAL stays (it was LOCAL), view cleared, address back to /.
 {

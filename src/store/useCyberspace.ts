@@ -752,6 +752,14 @@ export interface CyberspaceState {
   setCursorAtCell: (row: number, col: number) => void
   commit: () => Promise<void>
   /**
+   * The /demo tour's SPAWN (arkinox, 2026-10-15): sign this identity's spawn
+   * where it stands, before any move, through the same self-check a first
+   * move waits on. Only for an identity with no chain; true when the spawn
+   * was signed. The tour offers it only for a key it generated itself, and
+   * nothing else calls it: no login, switch or page load signs a spawn.
+   */
+  signSpawn: () => Promise<boolean>
+  /**
    * WALK's commit (store/useWalk.ts): one step to `target` from where you
    * stand, aimed at `target` rather than at the cursor, which in WALK is
    * already out ahead at the last queued step. `stillAimed` replaces the
@@ -1114,8 +1122,12 @@ function loadOrGenerateKey(): Uint8Array {
   const fresh = generateSecretKey()
   const nsec = nip19.nsecEncode(fresh)
   try { localStorage.setItem(STORAGE_KEY, nsec) } catch { /* private mode */ }
+  mintedOnLoad = true
   return fresh
 }
+
+/** Whether this page load generated the local key (no key was stored). */
+let mintedOnLoad = false
 
 /**
  * Signatures already checked this session, as `id:sig`. A Schnorr check
@@ -1737,6 +1749,15 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
 }
 
 const pubkeyHex = currentSigner.pubkey
+
+/**
+ * The pubkey this page load generated, or null when the key was already on
+ * the device (or came from a login). The /demo tour reads it to tell a key
+ * it generated from one the visitor brought (store/useDemo.ts).
+ */
+export function keyMintedOnLoad(): string | null {
+  return mintedOnLoad ? pubkeyHex : null
+}
 const SPAWN_XYZ = coordToXyz(hexToCoord(pubkeyHex))
 const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
 
@@ -1966,6 +1987,62 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (st) { clearTimeout(timer); unsub(); resolve(st) }
     })
   })
+
+  /**
+   * Sign the spawn of an identity with no chain yet, after the self-check
+   * has had its short say (lib/chainHold.ts firstMove). True when the spawn
+   * was signed and the chain now holds it; false when nothing was signed
+   * (the relays placed you, the signer refused, `lost` said the reason to
+   * sign has gone, or another first move is already in flight). Only a
+   * deliberate act reaches this: a first move (commit) or the /demo tour's
+   * SPAWN (signSpawn), never a login, a switch or a page load.
+   */
+  const signFirstSpawn = async (lost: () => boolean): Promise<boolean> => {
+    if (firstMoveInFlight) return false
+    firstMoveInFlight = true
+    try {
+      const pubkey = get().identity.pubkey
+      const adoptedMessage = 'This identity already has a chain on the relays, and you are at its head now. Re-aim from here.'
+      if (get().selfCheck.status === 'checking') {
+        set({ proof: { ...IDLE_PROOF, message: 'Asking the relays whether this identity already has a chain.' } })
+      }
+      const status = await waitForCheck(pubkey, FIRST_MOVE_WAIT_MS)
+      if (get().identity.pubkey !== pubkey) return false
+      if (firstMove(status, get().events.length > 0) === 'adopted') {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+        return false
+      }
+      if (lost()) return false
+      set({ proof: IDLE_PROOF })
+      let spawn: NostrEvent
+      try {
+        spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
+      } catch (err) {
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+        return false
+      }
+      if (get().identity.pubkey !== pubkey) return false
+      // The relay chain may have landed while the signer was thinking; if so
+      // it already placed us and this spawn is never used.
+      if (get().events.length > 0) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
+        return false
+      }
+      // Left your head while the signer was thinking: the spawn is dropped
+      // unused, never saved or sent, and nothing moves.
+      if (lost()) return false
+      // Decided on the check as it stands now, which the signer's wait may
+      // have settled.
+      const now = get().selfCheck
+      const held = firstMove(now.pubkey === pubkey ? now.status : 'checking', false) === 'spawn-held'
+      const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS, held })
+      set({ ...d })
+      saveChain(d.events, d.published, d.chain, held)
+      return true
+    } finally {
+      firstMoveInFlight = false
+    }
+  }
 
   /**
    * Replace the active identity. A known pubkey keeps its stored chain; a new
@@ -2907,49 +2984,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().events.length === 0) {
       // Nothing lined up is no reason to sign a spawn.
       if (samePosition(get().position, aimedCursor) && get().plane === get().headPlane) return
-      if (firstMoveInFlight) return
-      firstMoveInFlight = true
-      try {
-        const pubkey = get().identity.pubkey
-        const adoptedMessage = 'This identity already has a chain on the relays, and you are at its head now. Re-aim from here.'
-        if (get().selfCheck.status === 'checking') {
-          set({ proof: { ...IDLE_PROOF, message: 'Asking the relays whether this identity already has a chain.' } })
-        }
-        const status = await waitForCheck(pubkey, FIRST_MOVE_WAIT_MS)
-        if (get().identity.pubkey !== pubkey) return
-        if (firstMove(status, get().events.length > 0) === 'adopted') {
-          set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
-          return
-        }
-        if (lostAim()) return
-        set({ proof: IDLE_PROOF })
-        let spawn: NostrEvent
-        try {
-          spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
-        } catch (err) {
-          set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
-          return
-        }
-        if (get().identity.pubkey !== pubkey) return
-        // The relay chain may have landed while the signer was thinking; if so
-        // it already placed us and this spawn is never used.
-        if (get().events.length > 0) {
-          set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: adoptedMessage } })
-          return
-        }
-        // Left your head while the signer was thinking: the spawn is dropped
-        // unused, never saved or sent, and nothing moves.
-        if (lostAim()) return
-        // Decided on the check as it stands now, which the signer's wait may
-        // have settled.
-        const now = get().selfCheck
-        const held = firstMove(now.pubkey === pubkey ? now.status : 'checking', false) === 'spawn-held'
-        const d = derive({ version: 2, events: [spawn], published: [], stats: EMPTY_STATS, held })
-        set({ ...d })
-        saveChain(d.events, d.published, d.chain, held)
-      } finally {
-        firstMoveInFlight = false
-      }
+      if (!(await signFirstSpawn(lostAim))) return
     }
 
     const { position, plane, headPlane, prevEventId, proof } = get()
@@ -3091,6 +3126,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   publishRequest: 0,
   signerKind: currentSigner.kind,
   loginError: null,
+
+  signSpawn: async () => {
+    if (get().events.length > 0 || get().chainConflict) return false
+    if (whyNoMove(get().actions())) return false
+    return signFirstSpawn(() => false)
+  },
 
   moveCursor: (dir) => {
     const { cursor, scaleExp } = get()

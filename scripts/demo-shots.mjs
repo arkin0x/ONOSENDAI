@@ -9,7 +9,7 @@
  * is not a GET is refused. The canonical relay now asks for NIP-42 AUTH on
  * reads, so a real-relay run with AUTH dropped can never confirm a head and
  * the hop step could not be shown. The run makes one LOCAL hop on the
- * tour's hop step so the event panels have something real to show, then
+ * tour's chain step so the event panels have something real to show, then
  * photographs the steps.
  */
 import { chromium } from 'playwright'
@@ -53,8 +53,8 @@ for (const [label, viewport] of [['phone', { width: 412, height: 900 }], ['deskt
   const page = await ctx.newPage()
   page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`))
   await shoot(page, '', `${label}-01-welcome`)
-  // One LOCAL hop from the hop step: a cursor step, then Space (COMMIT).
-  await shoot(page, 'hop', `${label}-05-hop`)
+  // One LOCAL hop from the chain step: a cursor step, then Space (COMMIT; the step is gated, so Space is the scene's).
+  await shoot(page, 'chain', `${label}-05-hop`)
   await page.keyboard.press('KeyD')
   await page.keyboard.press('Space')
   await page.waitForFunction(() => window.__store.getState().events.length >= 2, null, { timeout: 120_000 })

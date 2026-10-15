@@ -2,13 +2,15 @@
  * script.ts: the words and scenes of the /demo tour (arkinox, 2026-10-14).
  *
  * Edit freely: this file is data. Each caption is plain text, one to three
- * short sentences, read aloud by SPEAK. A step's `scene` says where to look
- * and at what zoom, `wait` names something the visitor is asked to do (the
- * tour never forces it: NEXT always works), and `panel` shows a live panel
- * under the caption. Claims are checked against the spec (CYBERSPACE_V2.md)
+ * short sentences (a few run longer, in arkinox's words), read aloud by
+ * SPEAK. A step's `scene` says where to look and at what zoom, `wait` names
+ * something the visitor is asked to do (an invitation, with NEXT reading
+ * SKIP, unless the step has `gate`: then NEXT waits for it), and `panel`
+ * shows a live panel under the caption. Claims are checked against the spec (CYBERSPACE_V2.md)
  * and the DECKs; keep them that way when editing.
  */
 
+import { coordToHex, xyzToCoord } from 'cyberspace-core'
 import type { DemoScript } from './types'
 
 /**
@@ -34,9 +36,16 @@ const PORT_ROOT = '529d6e345c8038cc946df1da49c07e0e3cd242b88ed5576cb35fd763fd9f1
 /** A landfall: block 900,000's merkle root; its stop is on Earth, placed by the block hash. */
 const LANDFALL_ROOT = '0cfb54e522b07bd1a381adc774ec1851590ef4c3add83958135106534569f970'
 
+/**
+ * Earth's center: dataspace's half-axis point, where §9.7 centers the WGS84
+ * mapping (lib/earthSurface.ts CENTRE). The planes step looks at Earth from
+ * here; Earth's radius is about 2^55.6 gibsons.
+ */
+const EARTH_CENTER = coordToHex(xyzToCoord(1n << 84n, 1n << 84n, 1n << 84n, 0)).padStart(64, '0')
+
 export const DEMO_SCRIPT: DemoScript = {
   chapters: [
-    { id: 'key', title: 'You are a key' },
+    { id: 'key', title: 'Identity is location' },
     { id: 'nostr', title: 'Built on Nostr' },
     { id: 'scale', title: 'Scale' },
     { id: 'work', title: 'Distance costs work' },
@@ -48,66 +57,81 @@ export const DEMO_SCRIPT: DemoScript = {
     { id: 'yours', title: 'Your turn' },
   ],
   steps: [
-    // 1. You are a key
+    // 1. Identity is location
     {
       id: 'welcome', chapter: 'key', title: 'Welcome to Cyberspace',
-      caption: 'This is a guided tour of Cyberspace. It runs in LOCAL mode: nothing you do here leaves this device unless you choose to go LIVE at the end.',
+      caption: 'This is a guided tour of Cyberspace. The red dodecahedron is your avatar, located at your spawn point. You can customize your avatar later. Let\'s talk about how you got here.',
       scene: { target: 'self', scale: 6 },
     },
     {
+      id: 'everything', chapter: 'key', title: 'All of Cyberspace',
+      caption: 'This cubic area is all of cyberspace. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera.',
+      scene: { target: 'self', scale: 84 },
+    },
+    {
       id: 'spawn', chapter: 'key', title: 'Your key is a place',
-      caption: 'Your Nostr public key is a 256-bit number, and that number is also a coordinate. This is your spawn point. No one assigned it; the math did.',
+      caption: 'Your Nostr public key is a 256-bit number, and that number is also a coordinate. This is your spawn point. No one assigned it; a random private key is generated using CSPRNG and becomes a public key deterministically.',
       scene: { target: 'spawn', scale: 6 },
     },
     {
       id: 'identity', chapter: 'key', title: 'Identity is location',
-      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different key.',
+      caption: 'Know someone\'s public key and you know where they spawn. Want a different spawn point? You need a different private key, which is a whole new identity. However, your spawn point is only the beginning of your story. Soon we\'ll move around.',
       scene: { target: 'spawn', scale: 20 },
     },
 
     // 2. Built on Nostr
     {
       id: 'event', chapter: 'nostr', title: 'Everything is an event',
-      caption: 'Everything here is a Nostr event: a small JSON object signed by a key. This is your newest movement event, kind 3333.',
-      captionNew: 'Everything here is a Nostr event: a small JSON object signed by a key. You have not moved yet, so this is the spawn event your first move will sign.',
+      caption: 'Everything in cyberspace is a Nostr event: a small JSON object signed by a key. This is your newest movement event, kind 3333.',
+      captionNew: 'Everything in cyberspace is a Nostr event: a small JSON object signed by a key. You have no movement events yet, so this is the spawn event that will start your chain, kind 3333.',
       scene: { target: 'self', scale: 6 },
       panel: 'event-json',
+      wait: 'spawn',
+      gate: true,
+      hint: 'Press SPAWN to sign your spawn event.',
     },
     {
       id: 'verify', chapter: 'nostr', title: 'Checked, not trusted',
-      caption: 'An event\'s id is the SHA-256 hash of its fields, and its signature is a Schnorr signature over that id. Your browser just checked both: only your key could have made this event.',
-      captionNew: 'An event\'s id is the SHA-256 hash of its fields, and its signature is a Schnorr signature over that id. Make your first move and the tour will check yours.',
+      caption: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your browser just checked both: only your key could have made this event.',
+      captionWaiting: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT to sign a hop, and the tour will check it.',
       scene: { target: 'keep' },
       panel: 'verify',
+      wait: 'own-hop',
+      gate: true,
+      aim: { up: 3, right: 3, forward: 3, scale: 0 },
+      hint: 'Press COMMIT to make the hop.',
     },
     {
       id: 'relays', chapter: 'nostr', title: 'Relays',
-      caption: 'Relays are simple servers that store and forward events. Anyone can run one, and no relay can forge your moves, because it cannot sign as you.',
+      caption: 'Relays are simple servers that store and forward events. Anyone can run one. The state of Cyberspace is the Union of all Cyberspace events you can access, which may be across multiple relays.',
       scene: { target: 'keep' },
       panel: 'relays',
     },
     {
       id: 'kinds', chapter: 'nostr', title: 'Kinds',
-      caption: 'The kind number says what an event means. Cyberspace defines a few: movement, hidden bags, objects, avatars, and Bitcoin block anchors.',
+      caption: 'The kind number says what an event means. Cyberspace defines a few: movement, hidden bags, objects, avatars, and hyperspace block anchors.',
       scene: { target: 'keep' },
       panel: 'kinds',
     },
     {
       id: 'chain', chapter: 'nostr', title: 'A hash-linked chain',
-      caption: 'Every movement event names the one before it by id. Your history is a hash-linked chain that anyone can fetch and verify, with no server to trust.',
+      caption: 'Every movement event names the one before it by ID. Your history is a hash-linked chain that anyone can fetch and verify, with no server to trust. Use the Controls panel in the bottom right to choose a new coordinate to move to and COMMIT.',
       scene: { target: 'keep' },
       panel: 'chain',
+      wait: 'hop',
+      gate: true,
+      hint: 'Choose a new coordinate, then press COMMIT.',
     },
     {
       id: 'portable', chapter: 'nostr', title: 'Yours, not ours',
-      caption: 'Your key and your events belong to you, not to ONOSENDAI. Other apps can read them too: Ditto already shows Cyberspace objects as furniture.',
+      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto already shows Cyberspace objects as furniture in the virtual pet minigame.',
       scene: { target: 'keep' },
     },
 
     // 3. Scale
     {
       id: 'gibson', chapter: 'scale', title: 'The gibson',
-      caption: 'Space is three axes of 85 bits each. One step along an axis is a gibson, the smallest distance there is.',
+      caption: 'Space is three axes of 85 bits each. One step along an axis is a gibson, the smallest unit in Cyberspace, which is roughly the size of a hydrogen atom.',
       scene: { target: 'self', scale: 0 },
     },
     {
@@ -118,19 +142,22 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'cube', chapter: 'scale', title: 'The whole cube',
       caption: 'This is all of it: 2^85 gibsons on a side. Zoom yourself with the + and − keys on the pad, or Q and E.',
-      scene: { target: 'self', scale: 84 },
+      scene: { target: 'self', scale: 84, plane: 1 },
     },
     {
       id: 'planes', chapter: 'scale', title: 'Two planes',
       caption: 'The last bit of a coordinate picks the plane. Dataspace maps onto Earth and the space around it. Ideaspace is the same space with no physical meaning.',
-      scene: { target: 'self', scale: 52 },
+      scene: { target: { coord: EARTH_CENTER, label: 'EARTH' }, scale: 54 },
     },
 
     // 4. Distance costs work
     {
       id: 'cantor', chapter: 'work', title: 'Moving is work',
-      caption: 'Moving is not free. To hop, you compute a Cantor pairing tree over the region you cross, and that computation is the proof.',
-      scene: { target: 'self', scale: 4, layers: { boxes: true } },
+      caption: 'Moving is not free. To hop, you compute a Cantor pairing tree over the region you cross, and that computation is the proof. The blue area is the region you\'ll compute when you press COMMIT.',
+      scene: { target: 'self', layers: { boxes: true } },
+      // A preview only: the cursor 5 gibsons up shows the region a hop there
+      // would cover (CoveringBox), and the next step brings it home.
+      aim: { up: 5, right: 0, forward: 0, scale: 0 },
     },
     {
       id: 'lca', chapter: 'work', title: 'Boundaries',
@@ -138,21 +165,8 @@ export const DEMO_SCRIPT: DemoScript = {
       scene: { target: 'self', scale: 4, layers: { boxes: true } },
     },
     {
-      id: 'hop', chapter: 'work', title: 'Make a hop',
-      caption: 'Your turn. Move the cursor with the pad or WASD, then press COMMIT. The hop is proved and signed right here on this device.',
-      scene: { target: 'self', scale: 2 },
-      wait: 'hop',
-      hint: 'Move the cursor, then press COMMIT.',
-    },
-    {
-      id: 'hop-event', chapter: 'work', title: 'What you just made',
-      caption: 'This is the event your hop created. The proof is in its tags, and its previous tag names the move before it.',
-      scene: { target: 'self' },
-      panel: 'event-json',
-    },
-    {
       id: 'no-cheat', chapter: 'work', title: 'No shortcuts',
-      caption: 'Many small steps cost no less than one big one: any path across a boundary must cross it. Each hop also does a small piece of work seeded by the previous event, so a chain cannot be computed ahead of time or replayed.',
+      caption: 'The proof travels in each hop event\'s tags. Many small steps cost no less than one big one: any path across a boundary must cross it. Each hop also does a small piece of work seeded by the previous event, so a chain cannot be computed ahead of time or replayed.',
       scene: { target: 'self' },
     },
     {
@@ -166,8 +180,9 @@ export const DEMO_SCRIPT: DemoScript = {
     // 5. Hidden in place
     {
       id: 'region-keys', chapter: 'hidden', title: 'Places have keys',
-      caption: 'Every aligned region has a key derived from its Cantor root. You get it by doing the work of being there. Looking costs about the same as walking in, and a little less.',
-      scene: { target: 'self' },
+      caption: 'Every aligned region has a key derived from its Cantor root. The green boxes represent regions you have the keys for.',
+      // 2^0, where the regions of the tour's own small hops are drawn (SecretRegions).
+      scene: { target: 'self', scale: 0 },
     },
     {
       id: 'district', chapter: 'hidden', title: 'The demo district',
@@ -209,7 +224,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 7. Hyperspace
     {
       id: 'line', chapter: 'hyperspace', title: 'A line through space',
-      caption: 'Hyperspace is a transit line threaded through Cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a stop on it.',
+      caption: 'Hyperspace is a transit line threaded through Cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a station you can board or disembark.',
       scene: { target: 'self', scale: 84 },
     },
     {

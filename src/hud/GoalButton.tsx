@@ -4,6 +4,8 @@
  * trip there, the nearest port or landfall to leave the line at included
  * (store/useGoal.ts, lib/goalRoute.ts). The two stand as one centered group
  * where the folded CHAT chip sits. Lit while the spot on screen is the goal.
+ * Hidden while the /demo tour runs (arkinox, 2026-10-15: planning a route
+ * there froze the tab).
  */
 
 import type { ComponentType } from 'react'
@@ -11,6 +13,7 @@ import { Goal } from 'lucide-react'
 import { starSpot, type StarSource } from '../lib/starred'
 import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useGoal, type Goal as GoalT } from '../store/useGoal'
+import { useDemo } from '../store/useDemo'
 import { StarChip } from './StarChip'
 
 /** What GOAL shows for the state on screen: nothing at your avatar, else the spot and whether it is already the goal. */
@@ -28,7 +31,8 @@ export function StarGoalGroup({ Star = StarChip, GoalB = GoalButton }: { Star?: 
 export function GoalButton(): JSX.Element | null {
   const spotKey = useCyberspace((s) => { const sp = starSpot(s); return sp ? `${sp.plane}|${sp.input}` : '' })
   const goal = useGoal((s) => s.goal)
-  if (!spotKey) return null
+  const touring = useDemo((s) => s.active)
+  if (!spotKey || touring) return null
   const state = goalButtonState(useCyberspace.getState(), goal)
   if (!state) return null
   const { set } = state

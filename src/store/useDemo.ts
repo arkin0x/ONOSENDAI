@@ -5,13 +5,17 @@
  * scene through the machinery the app already has (a free view for a place,
  * the /C/ route for a block, the zoom, the scene layers, the chat dock), and
  * a step that asks the visitor to do something watches the stores for it.
- * NEXT always works: waiting is an invitation, never a gate.
+ * Waiting is an invitation (NEXT reads SKIP), except on a step with `gate`,
+ * where NEXT waits for it (arkinox, 2026-10-15: the spawn, a first hop, and
+ * a move on the chain step).
  *
  * The tour runs LOCAL. Entering it remembers the publishing switch and sets
  * LOCAL; leaving puts the switch back, unless the visitor chose GO LIVE in
- * the last step, which is then their setting. The tour itself never signs or
- * publishes anything: a hop the visitor makes is theirs, proved and signed
- * on this device like any hop, and stays on it while LOCAL.
+ * the last step, which is then their setting. The tour signs one thing, and
+ * only when pressed: SPAWN, offered only to a key the tour generated itself
+ * that has no chain yet. A login, a switch or a page load never signs a
+ * spawn. A hop the visitor makes is theirs, proved and signed on this
+ * device like any hop, and stays on it while LOCAL.
  */
 
 import { create } from 'zustand'
@@ -20,12 +24,13 @@ import { DEMO_DISTRICT, DEMO_SCRIPT } from '../demo/script'
 import type { DemoAction, DemoScene, DemoScript, DemoStep } from '../demo/types'
 import { stopSpeaking } from '../demo/voice'
 import { coordPlace } from '../lib/coordRoute'
-import { MAX_SCALE_EXP } from '../lib/space'
+import { clampAxis, MAX_SCALE_EXP } from '../lib/space'
+import { moveDirection } from '../lib/moves'
 import { startCoordRoute } from './useCoordRoute'
 import { exitHyperspaceView, useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useChat } from './useChat'
-import { useCyberspace } from './useCyberspace'
+import { keyMintedOnLoad, useCyberspace } from './useCyberspace'
 import { useLayers, type SceneLayer } from './useLayers'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
@@ -51,6 +56,36 @@ interface DemoState {
   wentLive: () => void
 }
 
+/**
+ * The key the tour generated: a /demo visit that found no key on the device
+ * made one, and this remembers its pubkey so a reload mid-tour still knows
+ * it. Only this key, with no chain yet, is offered SPAWN.
+ */
+export const TOUR_KEY_KEY = 'onosendai:demo:tourKey'
+
+/** Remember the key this page load generated, if it did: called when the tour starts. */
+function noteTourKey(): void {
+  const minted = keyMintedOnLoad()
+  if (!minted || useCyberspace.getState().identity.pubkey !== minted) return
+  try { localStorage.setItem(TOUR_KEY_KEY, minted) } catch { /* private mode */ }
+}
+
+/**
+ * Whether the tour offers SPAWN now: the identity is the key the tour
+ * generated, signs locally, and has no chain yet. Any other identity is
+ * never offered it.
+ */
+export function tourKeyNeedsSpawn(): boolean {
+  const cs = useCyberspace.getState()
+  if (cs.events.length > 0 || cs.signerKind !== 'local') return false
+  try { return localStorage.getItem(TOUR_KEY_KEY) === cs.identity.pubkey } catch { return false }
+}
+
+/** Whether a chain holds a hop or a sidestep of its own. */
+function hasHop(events: ReadonlyArray<{ tags: string[][] }>): boolean {
+  return events.some((e) => { const a = e.tags.find((t) => t[0] === 'A')?.[1]; return a === 'hop' || a === 'sidestep' })
+}
+
 /** What undoes the current step's watchers (store subscriptions, the /C/ route). */
 let stepCleanups: Array<() => void> = []
 
@@ -69,14 +104,21 @@ function placeOf(target: DemoScene['target'], pubkey: string): { hex: string; la
 /** History for the /C/ machinery when the tour drives it: the address stays /demo. */
 const tourHistory: Pick<History, 'replaceState'> = { replaceState: () => {} }
 
-/** The cursor back on your own position, unless a proof is running from it. */
+/**
+ * The cursor back on your own position and the scene back in your own
+ * plane, unless a proof is running from it. The plane goes back through
+ * setPlane, which puts the shown plane back as well as the lined-up one:
+ * setting only the lined-up plane left the scene in ideaspace after the
+ * cube step until the next hop (2026-10-15).
+ */
 function homeCursor(): void {
   const now = useCyberspace.getState()
   if (now.proof.status === 'computing' || now.walking) return
   const { position, cursor, headPlane } = now
-  if (cursor.x !== position.x || cursor.y !== position.y || cursor.z !== position.z || now.plane !== headPlane) {
-    useCyberspace.setState({ cursor: { ...position }, plane: headPlane })
+  if (cursor.x !== position.x || cursor.y !== position.y || cursor.z !== position.z) {
+    useCyberspace.setState({ cursor: { ...position } })
   }
+  if (now.exploreIndex === null && (now.plane !== headPlane || now.anchorPlane !== headPlane)) now.setPlane(headPlane)
 }
 
 /** Take down a block step's sticky toast ("Block N · port/landfall"), and only that. */
@@ -116,6 +158,7 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
       stepCleanups.push(dismissBlockToast)
     }
   }
+  if (scene.plane !== undefined && target === 'self') useCyberspace.getState().setPlane(scene.plane)
   if (scene.scale !== undefined) {
     const now = useCyberspace.getState()
     const want = Math.max(0, Math.min(MAX_SCALE_EXP, scene.scale))
@@ -141,6 +184,16 @@ export function watchAction(action: DemoAction, onDone: () => void): () => void 
       if (a === 'hop' || a === 'sidestep') fire()
     })
   }
+  if (action === 'spawn') {
+    // Done once SPAWN is no longer the tour's to offer: signed, a chain
+    // arrived, or the identity is not the tour's key (then at once).
+    if (!tourKeyNeedsSpawn()) { fire(); return () => {} }
+    return useCyberspace.subscribe(() => { if (!tourKeyNeedsSpawn()) fire() })
+  }
+  if (action === 'own-hop') {
+    if (hasHop(useCyberspace.getState().events)) { fire(); return () => {} }
+    return useCyberspace.subscribe((s) => { if (hasHop(s.events)) fire() })
+  }
   if (action === 'walk') {
     if (useCyberspace.getState().walking) { fire(); return () => {} }
     return useCyberspace.subscribe((s) => { if (s.walking) fire() })
@@ -154,6 +207,25 @@ export function watchAction(action: DemoAction, onDone: () => void): () => void 
     if (s.scanning) started = true
     else if (started) fire()
   })
+}
+
+/**
+ * Put the cursor `aim` gibsons from where you stand, along the pad's own up,
+ * right and forward (into the screen), as the pad would move it; with
+ * `aim.scale`, at that zoom first. Only at your head, never mid-proof.
+ */
+export function aimCursor(aim: NonNullable<DemoStep['aim']>): void {
+  const cs = useCyberspace.getState()
+  if (!cs.atHead() || cs.walking || cs.proof.status === 'computing') return
+  if (aim.scale !== undefined && aim.scale !== cs.scaleExp) cs.adjustScale(aim.scale - cs.scaleExp)
+  const now = useCyberspace.getState()
+  const axes = now.screenAxes ?? now.axes()
+  const cursor = { ...now.position }
+  for (const [name, n] of [['up', aim.up], ['right', aim.right], ['away', aim.forward]] as const) {
+    const d = moveDirection(axes, name)
+    cursor[d.axis] = clampAxis(cursor[d.axis] + BigInt(n * d.dir))
+  }
+  useCyberspace.setState({ cursor, plane: now.headPlane })
 }
 
 /** The coordinate a pubkey spawns at (spec §3.1), for tests and panels. */
@@ -191,15 +263,33 @@ function stepAt(state: { script: DemoScript }, index: number): DemoStep | undefi
   return state.script.steps[index]
 }
 
+/**
+ * Steps that were removed, to the nearest step still there, so an old
+ * /demo/<id> link still lands somewhere sensible (arkinox, 2026-10-15:
+ * chapter 2 now makes the hops, and no-cheat carries the proof fact).
+ */
+export const STEP_ALIASES: Record<string, string> = { hop: 'no-cheat', 'hop-event': 'no-cheat' }
+
+/** Gated steps already done this tour: going BACK and on again does not ask twice. */
+const gatesPassed = new Set<string>()
+
 export const useDemo = create<DemoState>((set, get) => {
   const enter = (index: number): void => {
     cleanupStep()
     stopSpeaking()
     const step = stepAt(get(), index)
     if (!step) return
-    set({ index, done: !step.wait })
+    set({ index, done: !step.wait || (step.gate === true && gatesPassed.has(step.id)) })
     applyScene(step.scene, step.wait === 'walk')
-    if (step.wait) stepCleanups.push(watchAction(step.wait, () => { if (get().index === index && get().active) set({ done: true }) }))
+    if (step.wait && !get().done) {
+      stepCleanups.push(watchAction(step.wait, () => {
+        if (get().index !== index || !get().active) return
+        if (step.gate) gatesPassed.add(step.id)
+        set({ done: true })
+      }))
+    }
+    // A step with no wait aims as a preview; one with a wait, until it happens.
+    if (step.aim && (!step.wait || !get().done)) aimCursor(step.aim)
   }
 
   return {
@@ -212,6 +302,7 @@ export const useDemo = create<DemoState>((set, get) => {
 
     start: (stepId) => {
       const cs = useCyberspace.getState()
+      if (!get().active) { gatesPassed.clear(); noteTourKey() }
       // Remembered once: starting again while running keeps the first answer,
       // and so does a reload mid-tour (PREV_LIVE_KEY).
       if (!get().active) {
@@ -220,13 +311,16 @@ export const useDemo = create<DemoState>((set, get) => {
         set({ prevLive: prev })
       }
       if (cs.live) cs.setLive(false)
-      const at = stepId ? get().script.steps.findIndex((s) => s.id === stepId) : 0
+      const id = stepId ? STEP_ALIASES[stepId] ?? stepId : undefined
+      const at = id ? get().script.steps.findIndex((s) => s.id === id) : 0
       set({ active: true, minimized: false })
       enter(at >= 0 ? at : 0)
     },
 
     next: () => {
       if (!get().active) return
+      // A gated step waits for its action (DemoStep.gate).
+      if (stepAt(get(), get().index)?.gate && !get().done) return
       const i = get().index + 1
       if (i < get().script.steps.length) enter(i)
     },

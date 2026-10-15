@@ -8,14 +8,20 @@
  * the caption aloud, only when tapped.
  *
  * Space stays with the scene on a step that asks for a hop or a walk, where
- * Space is a movement key; everywhere else it advances the tour.
+ * Space is a movement key; everywhere else it advances the tour. On a gated
+ * step NEXT, the arrow and Space stay off until its action is done.
+ *
+ * At most about a third of the screen tall (arkinox, 2026-10-15): the title,
+ * caption and panel scroll inside it, while the instruction, SPAWN and the
+ * BACK / NEXT row stay pinned at its foot, so a gated step's way on is
+ * always in reach.
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, Volume2, X } from 'lucide-react'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
-import { useDemo } from '../store/useDemo'
+import { tourKeyNeedsSpawn, useDemo } from '../store/useDemo'
 import { useCyberspace } from '../store/useCyberspace'
 import { currentRelays } from '../store/useRelays'
 import { normalizeURL } from 'nostr-tools/utils'
@@ -36,8 +42,9 @@ const KINDS: Array<[number, string]> = [
   [0, 'A profile: name and picture'],
 ]
 
-/** The caption a step shows to this identity. */
-export function captionFor(step: DemoStep, hasChain: boolean): string {
+/** The caption a step shows to this identity, while its action waits (`done` false) or after. */
+export function captionFor(step: DemoStep, hasChain: boolean, done = true): string {
+  if (!done && step.captionWaiting) return step.captionWaiting
   return !hasChain && step.captionNew ? step.captionNew : step.caption
 }
 
@@ -55,16 +62,18 @@ function useNewestEvent(): { event: NostrEvent | Omit<NostrEvent, 'id' | 'sig'>;
 
 function EventJson(): JSX.Element {
   const { event, signed } = useNewestEvent()
+  // Read for the render; the chain (in useNewestEvent) changing re-renders this.
+  const spawnable = !signed && tourKeyNeedsSpawn()
   const json = JSON.stringify(event, null, 2)
   return (
     <div className="demo__panel">
-      {!signed && <div className="demo__note">Not signed yet: this is what your first move signs.</div>}
+      {!signed && <div className="demo__note">{spawnable ? 'Not signed yet. SPAWN signs it here; LOCAL keeps it on this device until GO LIVE.' : 'Not signed yet: this is what your first move signs.'}</div>}
       <pre className="demo__json">{json}</pre>
     </div>
   )
 }
 
-function Verify(): JSX.Element {
+function Verify({ waiting }: { waiting: boolean }): JSX.Element {
   const { event, signed } = useNewestEvent()
   const check = useMemo(() => {
     if (!signed) return null
@@ -73,10 +82,11 @@ function Verify(): JSX.Element {
     const copy = JSON.parse(JSON.stringify(event)) as NostrEvent
     return { idOk: getEventHash(copy) === copy.id, sigOk: verifyEvent(copy), id: copy.id, sig: copy.sig }
   }, [event, signed])
+  if (waiting) return <div className="demo__panel"><div className="demo__note">No hop yet: press COMMIT.</div></div>
   if (!check) return <div className="demo__panel"><div className="demo__note">No signed event yet.</div></div>
   return (
     <div className="demo__panel demo__checks">
-      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} id = sha256(fields) <code>{check.id.slice(0, 16)}…</code></div>
+      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} ID = sha256(fields) <code>{check.id.slice(0, 16)}…</code></div>
       <div className={check.sigOk ? 'is-ok' : 'is-bad'}>{check.sigOk ? '✓' : '✗'} Schnorr signature by your key <code>{check.sig.slice(0, 16)}…</code></div>
     </div>
   )
@@ -150,10 +160,10 @@ function Finish(): JSX.Element {
   )
 }
 
-function Panel({ panel }: { panel: DemoPanel }): JSX.Element {
+function Panel({ panel, waiting }: { panel: DemoPanel; waiting: boolean }): JSX.Element {
   switch (panel) {
     case 'event-json': return <EventJson />
-    case 'verify': return <Verify />
+    case 'verify': return <Verify waiting={waiting} />
     case 'relays': return <Relays />
     case 'kinds': return <Kinds />
     case 'chain': return <Chain />
@@ -168,7 +178,9 @@ export function DemoCoach(): JSX.Element | null {
   const minimized = useDemo((s) => s.minimized)
   const script = useDemo((s) => s.script)
   const hasChain = useCyberspace((s) => s.events.length > 0)
+  const live = useCyberspace((s) => s.live)
   const [speaking, setSpeaking] = useState(false)
+  const [spawning, setSpawning] = useState<'idle' | 'signing' | 'failed'>('idle')
   const ref = useRef<HTMLDivElement | null>(null)
 
   const step = script.steps[index]
@@ -179,7 +191,7 @@ export function DemoCoach(): JSX.Element | null {
   const last = index === script.steps.length - 1
 
   // A new step stops whatever was being read.
-  useEffect(() => { setSpeaking(false) }, [index])
+  useEffect(() => { setSpeaking(false); setSpawning('idle') }, [index])
   useEffect(() => () => stopSpeaking(), [])
 
   // Presenting from the keyboard: before the app's own keys (capture), so
@@ -192,8 +204,10 @@ export function DemoCoach(): JSX.Element | null {
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       const d = useDemo.getState()
       const cur = d.script.steps[d.index]
-      const movement = cur?.wait === 'hop' || cur?.wait === 'walk'
-      if (e.key === 'ArrowRight' || (e.code === 'Space' && !movement)) {
+      const movement = cur?.wait === 'hop' || cur?.wait === 'walk' || cur?.wait === 'own-hop'
+      // A gated step's keys are the scene's until its action is done.
+      const held = cur?.gate === true && !d.done
+      if (!held && (e.key === 'ArrowRight' || (e.code === 'Space' && !movement))) {
         e.preventDefault(); e.stopImmediatePropagation()
         if (d.index === d.script.steps.length - 1) d.exit(); else d.next()
       } else if (e.key === 'ArrowLeft') {
@@ -234,8 +248,14 @@ export function DemoCoach(): JSX.Element | null {
   }, [active, minimized])
 
   if (!active || !step) return null
-  const caption = captionFor(step, hasChain)
+  const caption = captionFor(step, hasChain, done)
   const d = useDemo.getState()
+  const held = step.gate === true && !done
+  const offerSpawn = step.wait === 'spawn' && !done
+  const onSpawn = (): void => {
+    setSpawning('signing')
+    void useCyberspace.getState().signSpawn().then((ok) => setSpawning(ok ? 'idle' : 'failed'), () => setSpawning('failed'))
+  }
   const onSpeak = (): void => {
     if (speaking) { stopSpeaking(); setSpeaking(false); return }
     setSpeaking(true)
@@ -252,7 +272,7 @@ export function DemoCoach(): JSX.Element | null {
           <ChevronDown size={14} aria-hidden />
         </button>
         <button className="demo__icon" onClick={d.back} disabled={index === 0} aria-label="Back"><ChevronLeft size={14} /></button>
-        <button className="demo__icon" onClick={last ? d.exit : d.next} aria-label={last ? 'Finish' : 'Next'}><ChevronRight size={14} /></button>
+        <button className="demo__icon" onClick={last ? d.exit : d.next} disabled={held} aria-label={last ? 'Finish' : 'Next'}><ChevronRight size={14} /></button>
       </div>
     )
   }
@@ -262,17 +282,27 @@ export function DemoCoach(): JSX.Element | null {
       <div className="demo__head">
         <span className="demo__tag">TOUR</span>
         <span className="demo__chapter">{chapter?.title}</span>
+        <span className={`demo__mode ${live ? 'is-live' : ''}`} title={live ? 'LIVE: your moves are published to relays' : 'LOCAL: nothing leaves this device until GO LIVE'}>{live ? 'LIVE' : 'LOCAL'}</span>
         <span className="demo__progress">{progress}</span>
         <button className="demo__icon" onClick={() => d.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
         <button className="demo__icon" onClick={d.exit} aria-label="Exit the tour" title="Exit the tour"><X size={14} /></button>
       </div>
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
-      <h2 className="demo__title">{step.title}</h2>
-      <p className="demo__caption">{caption}</p>
+      <div className="demo__body">
+        <h2 className="demo__title">{step.title}</h2>
+        <p className="demo__caption">{caption}</p>
+        {step.panel && <Panel panel={step.panel} waiting={held} />}
+      </div>
       {step.wait && (
-        <div className={`demo__wait ${done ? 'is-done' : ''}`}>{done ? '✓ Done' : step.hint ?? 'Your turn.'}</div>
+        <div className={`demo__wait ${done ? 'is-done' : ''}`}>
+          <span>{done ? '✓ Done' : spawning === 'failed' ? 'Not signed. Try SPAWN again.' : step.hint ?? 'Your turn.'}</span>
+          {offerSpawn && (
+            <button className="demo__btn demo__btn--spawn" onClick={onSpawn} disabled={spawning === 'signing'}>
+              {spawning === 'signing' ? 'SIGNING' : 'SPAWN'}
+            </button>
+          )}
+        </div>
       )}
-      {step.panel && <Panel panel={step.panel} />}
       <div className="demo__foot">
         <button className="demo__btn" onClick={d.back} disabled={index === 0}><ChevronLeft size={14} aria-hidden /> BACK</button>
         {canSpeak() && (
@@ -280,8 +310,8 @@ export function DemoCoach(): JSX.Element | null {
             {speaking ? <Square size={12} aria-hidden /> : <Volume2 size={12} aria-hidden />} {speaking ? 'STOP' : 'SPEAK'}
           </button>
         )}
-        <button className={`demo__btn demo__btn--next ${step.wait && !done ? 'is-skip' : ''}`} onClick={last ? d.exit : d.next}>
-          {last ? 'FINISH' : step.wait && !done ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
+        <button className={`demo__btn demo__btn--next ${step.wait && !done && !held ? 'is-skip' : ''}`} onClick={last ? d.exit : d.next} disabled={held} title={held ? step.hint : undefined}>
+          {last ? 'FINISH' : step.wait && !done && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>
     </div>

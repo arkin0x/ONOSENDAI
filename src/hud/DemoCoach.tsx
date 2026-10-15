@@ -54,7 +54,7 @@ export function CaptionText({ caption }: { caption: string }): JSX.Element {
     <>
       {splitCaption(caption).map((p, i) => {
         if ('text' in p) return <span key={i}>{p.text}</span>
-        const Icon = CAPTION_ICONS[p.icon]
+        const Icon = Object.hasOwn(CAPTION_ICONS, p.icon) ? CAPTION_ICONS[p.icon] : undefined
         return Icon ? <Icon key={i} className="demo__icon-inline" size="1em" strokeWidth={2.25} aria-label={`${p.icon} button`} role="img" /> : null
       })}
     </>

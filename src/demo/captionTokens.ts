@@ -19,6 +19,15 @@ export const CAPTION_ICON_WORDS: Readonly<Record<string, string>> = {
 
 const ICON_TOKEN = /\{icon:([a-z-]+)\}/g
 
+/**
+ * Whether `name` is a caption icon: an own key of CAPTION_ICON_WORDS only.
+ * `in` also matched Object.prototype, so `{icon:constructor}` drew Object
+ * as a component and SPEAK read out its source (review of #363).
+ */
+export function isCaptionIcon(name: string): boolean {
+  return Object.hasOwn(CAPTION_ICON_WORDS, name)
+}
+
 export type CaptionPart = { text: string } | { icon: string }
 
 /** A caption as text runs and whitelisted icons, in order. */
@@ -27,7 +36,7 @@ export function splitCaption(caption: string): CaptionPart[] {
   let at = 0
   for (const m of caption.matchAll(ICON_TOKEN)) {
     const name = m[1]
-    if (!(name in CAPTION_ICON_WORDS)) continue
+    if (!isCaptionIcon(name)) continue
     const i = m.index ?? 0
     if (i > at) parts.push({ text: caption.slice(at, i) })
     parts.push({ icon: name })
@@ -44,11 +53,11 @@ function exponentWords(text: string): string {
 
 /** What SPEAK reads for a caption (or a title): icons as their words, exponents as words. */
 export function spokenText(text: string): string {
-  const words = text.replace(ICON_TOKEN, (m, name: string) => CAPTION_ICON_WORDS[name] ?? m)
+  const words = text.replace(ICON_TOKEN, (m, name: string) => (isCaptionIcon(name) ? CAPTION_ICON_WORDS[name] : m))
   return exponentWords(words)
 }
 
 /** A caption as captions.md shows it: an icon as "[plus icon]". */
 export function markdownCaption(caption: string): string {
-  return caption.replace(ICON_TOKEN, (m, name: string) => (name in CAPTION_ICON_WORDS ? `[${CAPTION_ICON_WORDS[name]} icon]` : m))
+  return caption.replace(ICON_TOKEN, (m, name: string) => (isCaptionIcon(name) ? `[${CAPTION_ICON_WORDS[name]} icon]` : m))
 }

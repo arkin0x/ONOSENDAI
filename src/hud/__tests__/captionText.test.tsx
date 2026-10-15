@@ -35,6 +35,13 @@ describe('caption tokens', () => {
     expect(html).not.toContain('<svg')
   })
 
+  it('a name Object.prototype carries is not an icon: it stays text, drawn and spoken', () => {
+    expect(splitCaption('a {icon:constructor} b')).toEqual([{ text: 'a {icon:constructor} b' }])
+    expect(spokenText('{icon:constructor}')).toBe('{icon:constructor}')
+    expect(markdownCaption('{icon:constructor}')).toBe('{icon:constructor}')
+    expect(renderToStaticMarkup(<CaptionText caption="{icon:constructor}" />)).toBe('<span>{icon:constructor}</span>')
+  })
+
   it('every icon a caption may draw has a word for SPEAK and a mark for captions.md', () => {
     for (const [name, word] of Object.entries(CAPTION_ICON_WORDS)) {
       expect(spokenText(`{icon:${name}}`)).toBe(word)

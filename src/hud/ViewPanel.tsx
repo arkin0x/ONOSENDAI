@@ -18,6 +18,7 @@ import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { Field, Switch } from './ui/Switch'
+import { Explanation } from './Explanation'
 
 interface ViewRow {
   id: string
@@ -90,6 +91,20 @@ export function ViewPanel(): JSX.Element {
           <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
         </Field>
       ))}
+      <Explanation>
+        Each switch turns one thing in the scene on or off. It changes only what
+        this device draws, and the choice is kept on this device: nothing here
+        moves you or your cursor, or changes a proof or your chain. Terrain dots
+        color each cell by its terrain K, how much work a hop there has to
+        compute, from navy for the least through teal, green and amber to hot
+        pink for the most; turning them off also stops the terrain scan. hX boxes
+        are the nested power-of-two boundaries around you, named by their heights
+        (h3, h4, h5 and up); a move that crosses a higher one costs more work.
+        Hide avatar in WALK takes your own avatar out of the way while you walk in
+        first person, where the camera sits inside it. Chain trail draws your
+        movement history as a red line. Region keys draws a green cage around
+        each region you hold the key for.
+      </Explanation>
     </section>
   )
 }

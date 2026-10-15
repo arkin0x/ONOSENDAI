@@ -389,6 +389,16 @@ function LinksPanel(): JSX.Element {
           <span className="links__what"> - {l.what}</span>
         </p>
       ))}
+      <Explanation>
+        These are the official places to read about and build on Cyberspace, and
+        each one opens in a new tab. The Cyberspace v2 Specification is the
+        protocol itself: coordinates, movement and its proofs, region keys,
+        hyperspace and every event kind. straylight.cafe is the community hub for
+        people exploring cyberspace. cyberspace.international is for teaching
+        Cyberspace and bringing more people and apps to it. SnoCrash builds 3D
+        models in the SNO format that Cyberspace objects use. The ONOSENDAI v2
+        Codebase is the source code of this client on GitHub.
+      </Explanation>
     </section>
   )
 }
@@ -426,6 +436,21 @@ function Controls(): JSX.Element {
           </div>
         ))}
       </dl>
+      <Explanation>
+        These are the keyboard keys; on a touch screen the pad and its buttons do
+        the moving, zooming and committing. W A S D move the cursor one step at
+        the current zoom, R and F move it along the depth axis, and Space commits
+        the move the cursor lines up, which computes its proof and signs it. X
+        cancels a proof in progress or brings the cursor back to your avatar. Q
+        and E zoom out and in by one power of two. Shift with W A S D turns the
+        view 90 degrees, Tab goes back to the view before, and C faces the black
+        sun. P switches the plane between dataspace and ideaspace, and H opens the
+        hyperspace line scrubber. [ and ] step through your chain one action at a
+        time, and Home and End jump to its spawn and its live head. B goes in and
+        out of build mode, where the movement keys and zoom move the build cursor
+        instead of your avatar. Esc closes the topmost thing: a dialog first, then
+        the menu, then the latest chip.
+      </Explanation>
     </section>
   )
 }

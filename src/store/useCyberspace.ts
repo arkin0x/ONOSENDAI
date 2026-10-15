@@ -1310,7 +1310,17 @@ function pickInitialSigner(): Signer {
   // A stored extension/bunker identity whose chain we already hold: reconnect
   // lazily, keeping its pubkey so the chain loads now.
   if (pref && pref.kind !== 'local' && loadChain(pref.pubkey, true)) {
-    return deferredReconnect(pref, (s) => { currentSigner = s })
+    // The live signer replaces this stand-in only while the stand-in is still
+    // the one in use. A bunker can answer minutes after the first signature
+    // asked for it, and by then the identity may have been switched: its late
+    // answer must not put the old identity back behind a screen that shows
+    // the new one (found in review of snocrash #35, 2026-10-15). A late
+    // answer nobody wants is closed rather than left holding sockets.
+    const standIn: Signer = deferredReconnect(pref, (s) => {
+      if (currentSigner === standIn) currentSigner = s
+      else void s.close?.()
+    })
+    return standIn
   }
   if (pref?.nsec) { try { return signerFromNsec(pref.nsec) } catch { /* corrupt */ } }
   return localSigner(loadOrGenerateKey())
@@ -1368,7 +1378,10 @@ function wakeSigner(): void {
   // again, which is the second prompt for the same event. If they really are
   // dead, the pending request's timeout reconnects and asks again itself.
   if (pendingSigns > 0) return
-  void currentSigner.reconnect?.().then((fresh) => { if (currentSigner !== fresh && currentSigner.kind !== 'local') currentSigner = fresh })
+  // The fresh signer is taken only if the one that reconnected is still in
+  // use: a switch of identity while it reconnected wins.
+  const asked = currentSigner
+  void asked.reconnect?.().then((fresh) => { if (currentSigner === asked && fresh !== asked) currentSigner = fresh })
 }
 
 /** Said while a move asks the relays again for your latest move. */

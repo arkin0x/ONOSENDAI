@@ -230,17 +230,17 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
-      caption: 'When a block\'s merkle root ends in a 1 bit, its stop is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 900,001.',
+      caption: 'When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 900,001.',
       scene: { target: { block: PORT_ROOT }, scale: 12 },
     },
     {
       id: 'landfall', chapter: 'hyperspace', title: 'A landfall',
-      caption: 'Otherwise the stop is a landfall on Earth, at a point derived from the block hash. This is block 900,000.',
+      caption: 'Otherwise the station is a landfall on Earth, at a point derived from the block hash. This is block 900,000.',
       scene: { target: { block: LANDFALL_ROOT }, scale: 52 },
     },
     {
       id: 'ride', chapter: 'hyperspace', title: 'Riding the line',
-      caption: 'To ride, you board from where you stand and appear at your station, the nearest stop. A ride proves fresh work for every block it passes, and from the stop where you arrive, the last mile is ordinary movement.',
+      caption: 'To ride, you board from where you stand and appear at your station, the nearest one. A ride proves fresh work for every block it passes, and from the stop where you arrive, the last mile is ordinary movement.',
       scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
     },
 

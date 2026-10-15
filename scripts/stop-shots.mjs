@@ -165,6 +165,8 @@ if (process.env.SEED) {
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('onosendai:signer', ${JSON.stringify(JSON.stringify({ kind: 'local', pubkey: getPublicKey(sk), nsec: nip19.nsecEncode(sk) }))}) } catch {}` })
 }
 await cdp.send('Runtime.enable')
+let evictions = 0
+cdp.on('Runtime.consoleAPICalled', (p) => { const t = p.args.map((a) => a.value ?? '').join(' '); if (/\[stopField\] rebuild evicted/.test(t)) evictions++ })
 const ev = async (expression) => {
   const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text)
@@ -178,14 +180,22 @@ for (const root of roots) {
   await sleep(first ? 45_000 : 20_000)
   first = false
   if ((await ev('window.__store?.getState().live')) !== false) { console.log('ABORT: not LOCAL'); shutdown(2) }
+  // DEST=<height>: set it as the ride's destination (dev module import, the app's own store instance).
+  if (process.env.DEST) await ev(`import('/src/store/useHyperspace.ts').then((m) => m.useHyperspace.getState().setDestination(${Number(process.env.DEST)}))`)
   for (const s of scales) {
     await ev(`(() => { const st = window.__store.getState(); st.adjustScale(${s} - st.scaleExp) })()`)
-    await sleep(4000)
+    await sleep(3000)
+    // ZOOMIN=<n>: dolly the orbit camera in, as a pinch does on a phone.
+    for (let i = 0; i < Number(process.env.ZOOMIN ?? 0); i++) {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: W / 2, y: H / 2, deltaX: 0, deltaY: -240 })
+      await sleep(60)
+    }
+    await sleep(1500)
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
     const name = `${tag}-${root.slice(0, 8)}-2e${s}.png`
     fs.writeFileSync(path.join(out, name), Buffer.from(shot.data, 'base64'))
     console.log('shot', name, 'scale', await ev('window.__store.getState().scaleExp'))
   }
 }
-console.log('leaked', leaked, 'dropped', await ev('window.__soak().dropped'))
+console.log('leaked', leaked, 'dropped', await ev('window.__soak().dropped'), 'evictionWarnings', evictions)
 shutdown(0)

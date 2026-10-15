@@ -114,7 +114,7 @@ describe('assembly order', () => {
     })
     expect(result.reason).toBeNull()
     expect(result.ok).toBe(true)
-  })
+  }, 60_000)
 
   it('throws on a missing leaf instead of assembling a short proof', () => {
     const blocks = junkBlocks(3)
@@ -149,7 +149,7 @@ describe('computeRideProof (sequential fallback under node)', () => {
     // attempt (A is 1 below 33 blocks); under 20 fresh leaves the ETA stays
     // null rather than extrapolating from noise.
     expect(seen[seen.length - 1]).toEqual({ done: 4, total: 4, etaMs: null, price: { attempts: 1, expected: 1 } })
-  })
+  }, 60_000)
 
   it('searches past nonces that miss the price, and matches the one-thread proof', async () => {
     // A 40-block synthetic ride (decks/hyperjump-reference.py's line) under

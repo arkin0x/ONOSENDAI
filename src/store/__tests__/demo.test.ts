@@ -38,6 +38,7 @@ import { newShard } from 'sno-core/shards'
 import { coordPlace } from '../../lib/coordRoute'
 import { useHyperspace } from '../useHyperspace'
 import { useToast } from '../useToast'
+import { useCeremony } from '../useCeremony'
 
 beforeEach(() => {
   if (useDemo.getState().active) useDemo.getState().exit()
@@ -697,5 +698,41 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
     expect(useDemo.getState().done).toBe(false)
     useShards.setState({ scanning: false })
     expect(useDemo.getState().empty).toBe(true)
+  })
+
+  it('"found" that opened empty still counts the tap once something lands (review of #364)', () => {
+    useShards.setState({ discovered: {}, scanning: false, selectedSecret: null })
+    useDemo.getState().start('found')
+    expect(useDemo.getState().empty).toBe(true)
+    useShards.setState({ discovered: { a: thing(DEMO_CURATORS[0], 11) } as never })
+    expect(useDemo.getState().done).toBe(false)
+    useShards.setState({ selectedSecret: 'e8ed11' })
+    expect(useDemo.getState().done).toBe(true)
+    useShards.setState({ selectedSecret: null })
+  })
+
+  it('"found" stays empty while a later scan runs and finds nothing: no flicker (review of #364)', () => {
+    useShards.setState({ discovered: {}, scanning: false })
+    useDemo.getState().start('found')
+    expect(useDemo.getState().empty).toBe(true)
+    useShards.setState({ scanning: true })
+    expect(useDemo.getState().empty).toBe(true)
+    expect(useDemo.getState().done).toBe(true)
+    useShards.setState({ scanning: false })
+    expect(useDemo.getState().empty).toBe(true)
+  })
+
+  it('a stranger\'s find on the district raises no found chip; outside the tour it does (review of #364)', () => {
+    useCeremony.setState({ chip: null })
+    useDemo.getState().start('district')
+    useCeremony.getState().mark([thing(STRANGER, 20) as never])
+    expect(useCeremony.getState().chip).toBeNull()
+    useCeremony.getState().mark([thing(STRANGER, 21) as never, thing(DEMO_CURATORS[1], 22) as never])
+    expect(useCeremony.getState().chip?.count).toBe(1)
+    useDemo.getState().exit()
+    useCeremony.setState({ chip: null })
+    useCeremony.getState().mark([thing(STRANGER, 23) as never])
+    expect(useCeremony.getState().chip?.count).toBe(1)
+    useCeremony.setState({ chip: null })
   })
 })

@@ -411,27 +411,30 @@ export const useDemo = create<DemoState>((set, get) => {
     // The district's steps show only the curators' things; every other step the whole world.
     useShards.getState().setCurated(step.scene.curated ? DEMO_CURATORS : null)
     applyScene(step.scene, step.wait === 'walk')
-    // Nothing to open here (the place is empty, or nothing the curators
-    // placed): once the scan is done the step says so and counts as done,
-    // rather than waiting on a tap that cannot come. Something arriving
-    // later makes it a wait again.
-    if (step.wait === 'open-item' && step.emptyHint) {
-      const check = (): void => {
-        if (get().index !== index || !get().active) return
-        const sh = useShards.getState()
-        const nothing = !sh.scanning && sh.worldItems().length === 0
-        if (nothing && !get().done) set({ done: true, empty: true })
-        else if (!nothing && get().empty) set({ done: false, empty: false })
-      }
-      check()
-      stepCleanups.push(useShards.subscribe(check))
-    }
     if (step.wait && !get().done) {
       stepCleanups.push(watchAction(step.wait, () => {
         if (get().index !== index || !get().active) return
         if (step.gate) gatesPassed.add(step.id)
         set({ done: true })
       }))
+    }
+    // Nothing to open here (the place is empty, or nothing the curators
+    // placed): once the scan is done the step says so and counts as done,
+    // rather than waiting on a tap that cannot come. Something arriving
+    // later makes it a wait again. After the watcher above, so a step that
+    // opened empty still hears the tap once something lands; and only
+    // something arriving undoes "empty", not a later scan merely starting,
+    // so the line does not flicker on every rescan (review of #364).
+    if (step.wait === 'open-item' && step.emptyHint) {
+      const check = (): void => {
+        if (get().index !== index || !get().active) return
+        const sh = useShards.getState()
+        const any = sh.worldItems().length > 0
+        if (!any && !sh.scanning && !get().done) set({ done: true, empty: true })
+        else if (any && get().empty) set({ done: false, empty: false })
+      }
+      check()
+      stepCleanups.push(useShards.subscribe(check))
     }
     // A step with no wait aims as a preview; one with a wait, until it happens.
     if (step.aim && (!step.wait || !get().done)) aimCursor(step.aim)
@@ -498,6 +501,8 @@ export const useDemo = create<DemoState>((set, get) => {
     exit: () => {
       if (!get().active) return
       cleanupStep()
+      // First, before anything below can throw: the whole world is back.
+      useShards.getState().setCurated(null)
       stopSpeaking()
       const cs = useCyberspace.getState()
       if (cs.walking) useWalk.getState().exit()
@@ -505,7 +510,6 @@ export const useDemo = create<DemoState>((set, get) => {
       if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus()
       homeCursor()
       dismissBlockToast()
-      useShards.getState().setCurated(null)
       const session = readSession()
       if (session) restoreSession(session)
       writeSession(null)

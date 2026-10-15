@@ -8,8 +8,8 @@
  * (headers-018.bin, sha256 abe2064a...4f52 as its manifest says), chained
  * from the manifest's checkpoint at 899,999 with the app's own header
  * functions (lib/hyperspace/headers.ts: readRecord, wireHeader, sha256d,
- * reverse32); every block met its proof-of-work target, and 900,000 and
- * 900,001 match the merkle roots the tour's landfall and port steps name.
+ * reverse32); every block met its proof-of-work target. (The port and
+ * landfall steps name blocks 0 and 1 since 2026-10-15, from the stop index.)
  * Nothing here is fetched at run time.
  */
 

@@ -71,7 +71,12 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
   births: {},
   chip: null,
 
-  mark: (items) => {
+  mark: (found) => {
+    // The tour's district shows only its curators' things (useShards
+    // curated): a stranger's find there raises no chip, whose line is the
+    // find's own text, and gets no decode (review of #364).
+    const curated = useShards.getState().curated
+    const items = curated ? found.filter((h) => curated.includes(h.author)) : found
     if (items.length === 0) return
     const now = performance.now()
     const births = { ...get().births }

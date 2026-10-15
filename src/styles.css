@@ -5365,25 +5365,39 @@ kbd {
   white-space: nowrap;
 }
 
-/* The clear X docks onto SET DESTINATION's right edge as an attachment, so
-   the pair reads as one control and the X never floats on its own line. */
+/* A set destination (arkinox, 2026-10-15): the dead label naming the block,
+   and CLEAR DESTINATION as its own button beside it, wrapping under it when
+   the row is narrow. */
+.linescrub__dest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .linescrub__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
   line-height: 1;
   padding: 3px 7px;
-  border-radius: 0 5px 5px 0;
+  border-radius: 5px;
   color: var(--danger);
   background: transparent;
   border: 1px solid var(--danger);
-  border-left: 0;
   cursor: pointer;
   touch-action: none;
 }
 
-.linescrub__set--attached {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+/* Inactive, but a reading, not a faded button. */
+.linescrub__set.linescrub__set--attached:disabled {
+  opacity: 1;
+  color: #f7931a;
+  background: transparent;
 }
 
 /* The overlay reads as a ticket: FROM your station at the top, TO the block

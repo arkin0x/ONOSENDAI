@@ -171,7 +171,7 @@ export function TouchControls(): JSX.Element {
             <MapPinOff size={16} strokeWidth={2.25} aria-hidden />
           </button>
         )}
-        {/* The planet at 2^52, the same thing the Hyperspace panel's EARTH
+        {/* The planet at 2^52, the scale the view menu's EARTH
             button means, through the same function so the two can never
             drift: dataspace lined up, no viewed stop, the planet's centre.
             Beside the cube, which is the other one-press view. */}

@@ -14,7 +14,7 @@
 import { useEffect } from 'react'
 import { escapeTop } from './useEscape'
 import { useCyberspace } from '../store/useCyberspace'
-import { exitHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { closeScrubber, useHyperspace } from '../store/useHyperspace'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
@@ -204,7 +204,7 @@ export function useKeyboard(): void {
         event.preventDefault()
         const hs = useHyperspace.getState()
         if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
-        else exitHyperspaceView()
+        else closeScrubber()
         return
       }
 

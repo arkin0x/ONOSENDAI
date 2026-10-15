@@ -4,11 +4,12 @@
  * and keeps it, like a set cursor, until it is cleared; nothing is signed or
  * paid by planning.
  *
- * A ride plan also chooses the exit stop as the HYPERSPACE destination, so the
- * panel's estimate, HOSAKA's quote and RIDE all describe the same trip. AIM
- * (on the GOAL chip) lines up the walking leg where you stand: the goal itself
- * on a direct trip, or the goal once you stand on the exit stop. Before that
- * it points you at the panel to board and ride.
+ * SET (on the GOAL chip; AIM until 2026-10-15) makes a ride plan's exit stop
+ * the HYPERSPACE destination, so the panel's estimate, HOSAKA's quote and RIDE
+ * all describe the same trip, with the same confirmation as the panel's SET
+ * DESTINATION (store/destination.ts). It never replaces a destination already
+ * set: it says to clear it first. Once you stand on the exit stop, or on a
+ * direct trip, SET lines up the walking leg where you stand.
  *
  * A plan made while the line was still syncing is made again when the sync
  * finishes, so the exit stop it names is never one a later stop would beat.
@@ -22,6 +23,7 @@ import { starSpot } from '../lib/starred'
 import { samePosition, useCyberspace } from './useCyberspace'
 import { exitHyperspaceView, getStopIndex, useHyperspace } from './useHyperspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
+import { setRideDestination } from './destination'
 import { useWalk } from './useWalk'
 
 export interface Goal {
@@ -73,10 +75,9 @@ export const useGoal = create<GoalState>((set, get) => ({
     const spot = starSpot(useCyberspace.getState())
     if (!spot) return
     const plan = planFor(spot.position, spot.plane)
+    // GOAL only plans: SET makes the ride's exit the destination (arkinox,
+    // 2026-10-15), so a destination already set is never replaced unasked.
     set({ goal: { target: { ...spot.position }, plane: spot.plane, label: spot.label, plan } })
-    // The ride's exit is the panel's destination, so the panel, the quote and
-    // RIDE all describe this trip.
-    if (plan.kind === 'ride') useHyperspace.getState().setDestination(plan.exit.height)
   },
 
   aim: () => {
@@ -88,8 +89,9 @@ export const useGoal = create<GoalState>((set, get) => ({
       return
     }
     if (plan.kind === 'ride' && !atExit(plan)) {
-      useHyperspace.getState().setDestination(plan.exit.height)
-      useToast.getState().show({ label: `Destination: block ${plan.exit.height}`, meta: 'Board and RIDE in the HYPERSPACE panel; AIM again at the stop for the last mile.', mark: 'goal', ms: BRIEF_TOAST_MS })
+      // The same confirmation the HYPERSPACE panel's SET DESTINATION gives,
+      // or its refusal when another destination is set.
+      setRideDestination(plan.exit.height, { meta: 'Board and RIDE in the HYPERSPACE panel; SET again at the stop for the last mile.' })
       return
     }
     // The walking leg, from where you stand: leave whatever view is up, then
@@ -101,7 +103,7 @@ export const useGoal = create<GoalState>((set, get) => ({
     // WALK's cursor is its predicted head, never a plan's.
     if (useCyberspace.getState().walking) useWalk.getState().exit()
     if (!useCyberspace.getState().atHead()) {
-      useToast.getState().show({ label: 'Back to your avatar first', meta: 'AIM lines the walk up from where you stand.', mark: 'goal', ms: BRIEF_TOAST_MS })
+      useToast.getState().show({ label: 'Back to your avatar first', meta: 'SET lines the walk up from where you stand.', mark: 'goal', ms: BRIEF_TOAST_MS })
       return
     }
     useCyberspace.setState({ cursor: { ...goal.target }, plane: goal.plane, anchorPlane: goal.plane })
@@ -123,5 +125,4 @@ useHyperspace.subscribe((s, prev) => {
   if (!goal || goal.plan.kind !== 'loading' || s.sync.status !== 'ready') return
   const plan = planFor(goal.target, goal.plane)
   useGoal.setState({ goal: { ...goal, plan } })
-  if (plan.kind === 'ride') useHyperspace.getState().setDestination(plan.exit.height)
 })

@@ -61,8 +61,10 @@ function cellAt(
   col: number, row: number, depth: number,
 ): Position {
   const p: Position = { ...origin }
+  // Offsets are whole cells; one that is not (a float past 2^53 from far
+  // upstream) is rounded rather than allowed to throw and take the scene down.
   const put = (a: AxisName, n: number, dir: number): void => {
-    p[a] = origin[a] + BigInt(n) * step * BigInt(dir)
+    p[a] = origin[a] + BigInt(Number.isFinite(n) ? Math.round(n) : 0) * step * BigInt(dir)
   }
   put(axes.right.axis, col, axes.right.dir)
   put(axes.up.axis, row, axes.up.dir)

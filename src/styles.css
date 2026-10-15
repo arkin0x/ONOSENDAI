@@ -2995,6 +2995,9 @@ kbd {
   width: 30px;
   padding: 0;
   color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .workshop__mini--danger:hover {

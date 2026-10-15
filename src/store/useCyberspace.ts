@@ -3706,7 +3706,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   boardHyperspace: async () => {
     const { events, genesisId, prevEventId, position, proof, transit } = get()
     if (transit !== null || proof.status === 'computing') return
-    if (get().exploreIndex !== null || get().spectate !== null || get().focus !== null) return
+    // Your own chain, at its head: never from history or a spectation. A view
+    // (a block, EARTH, a /C/ link, VIEW) does not stand in the way: boarding
+    // acts on the chain head, never on the place on screen, and its coordinate
+    // below comes from the chain (arkinox, 2026-10-15: "the board button
+    // should always be available if I have a destination set").
+    if (get().exploreIndex !== null || get().spectate !== null) return
     // A provisional identity has no chain to board from; move once first.
     if (events.length === 0 || !genesisId || !prevEventId) return
     // A game holds the avatar (GAME_HOLDS_MESSAGE): boarding is a base action.

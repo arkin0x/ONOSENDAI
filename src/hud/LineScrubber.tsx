@@ -21,14 +21,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Hash } from 'lucide-react'
+import { Hash, X } from 'lucide-react'
 import { xyzToCoord } from 'cyberspace-core'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { useCyberspace } from '../store/useCyberspace'
-import { exitHyperspaceView, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
+import { closeScrubber, getStopByHeight, getStopIndex, markViewedStop, ownHyperspaceView, useHyperspace } from '../store/useHyperspace'
 import { findStation } from '../lib/hyperspace/station'
 import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 import { useEscape } from '../hooks/useEscape'
+import { clearRideDestination, setRideDestination } from '../store/destination'
 
 /** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
 const JUMP = 100
@@ -86,7 +87,7 @@ export function LineScrubber(): JSX.Element {
   // Open, the scrubber is a chip on the Escape stack, closed the way H and
   // the chip close it (arkinox, 2026-10-01). The # box's own Escape, in the
   // field, still only closes the box.
-  useEscape('chip', open, exitHyperspaceView)
+  useEscape('chip', open, closeScrubber)
 
   // The focus side effect lives here rather than in the keyboard hook, so the
   // chip, the rail, the buttons and the H key all pass through one place.
@@ -104,10 +105,9 @@ export function LineScrubber(): JSX.Element {
     const was = prev.current
     prev.current = scrubHeight
     if (scrubHeight === null) {
+      // Closing the chip leaves the view alone: a block on screen stays until
+      // RETURN on the viewing bar (closeScrubber, arkinox 2026-10-15).
       armed.current = false
-      // Closed by any path that skipped exitHyperspaceView: settle through it
-      // so an owned focus clears and a foreign one (a spectate) survives.
-      if (was !== null) exitHyperspaceView()
       return
     }
     if (was === null) return
@@ -130,7 +130,7 @@ export function LineScrubber(): JSX.Element {
   const toggle = (): void => {
     const hs = useHyperspace.getState()
     if (hs.scrubHeight === null) hs.setScrubHeight(hs.destination ?? hs.tipHeight ?? 0)
-    else exitHyperspaceView()
+    else closeScrubber()
   }
 
   const step = (d: number) => (): void => {
@@ -198,14 +198,7 @@ export function LineScrubber(): JSX.Element {
             >VIEW</button>
             {/* Ride to where the spectated avatar boards: their station as your destination. */}
             {spectating && station && (
-              <button
-                className={destination === station.height ? 'linescrub__set linescrub__set--attached' : 'linescrub__set'}
-                {...noCallout}
-                onPointerDown={(e) => {
-                  e.preventDefault(); e.stopPropagation()
-                  useHyperspace.getState().setDestination(station.height)
-                }}
-              >{destination === station.height ? 'DESTINATION SET' : 'SET DESTINATION'}</button>
+              <DestinationButton destination={destination} height={station.height} />
             )}
           </div>
 
@@ -285,32 +278,44 @@ export function LineScrubber(): JSX.Element {
               )}
             </div>
             <div className="linescrub__actions">
-            <button
-              className={destination !== null ? 'linescrub__set linescrub__set--attached' : 'linescrub__set'}
-              disabled={!stop}
-              {...noCallout}
-              onPointerDown={(e) => {
-                e.preventDefault(); e.stopPropagation()
-                if (scrubHeight !== null) useHyperspace.getState().setDestination(scrubHeight)
-              }}
-            >{destination !== null && destination === scrubHeight ? 'DESTINATION SET' : 'SET DESTINATION'}</button>
-            {destination !== null && (
-              <button
-                className="linescrub__clear"
-                title="Clear destination"
-                aria-label="Clear destination"
-                {...noCallout}
-                onPointerDown={(e) => {
-                  e.preventDefault(); e.stopPropagation()
-                  useHyperspace.getState().setDestination(null)
-                }}
-              >✕</button>
-            )}
+            <DestinationButton destination={destination} height={stop ? scrubHeight : null} />
             </div>
           </div>
           </>)}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * SET DESTINATION, or the destination that is set (arkinox, 2026-10-15). With
+ * none set, it sets `height`. With one set, it is a dead label naming that
+ * block, whatever block is scrubbed or viewed, and CLEAR DESTINATION stands
+ * beside it as its own button: a destination changes only by clearing it.
+ */
+export function DestinationButton({ destination, height }: { destination: number | null; height: number | null }): JSX.Element {
+  if (destination !== null) {
+    return (
+      <span className="linescrub__dest">
+        <button className="linescrub__set linescrub__set--attached" disabled title={`Your ride goes to block ${destination}. Clear it to choose another.`}>
+          DESTINATION: BLOCK {destination}
+        </button>
+        <button
+          className="linescrub__clear"
+          title="Clear the destination"
+          {...noCallout}
+          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); clearRideDestination() }}
+        ><X size={11} strokeWidth={2.5} aria-hidden /> CLEAR DESTINATION</button>
+      </span>
+    )
+  }
+  return (
+    <button
+      className="linescrub__set"
+      disabled={height === null}
+      {...noCallout}
+      onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (height !== null) setRideDestination(height) }}
+    >SET DESTINATION</button>
   )
 }

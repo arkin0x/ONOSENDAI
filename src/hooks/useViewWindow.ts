@@ -58,6 +58,14 @@ function read(): ReadWindow {
 
 const sameOrigin = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y && a.z === b.z
 
+/** The largest origin shift carried, in cells: far more than any landing, far less than a double's exact range. */
+export const MAX_CARRY_CELLS = 1 << 20
+
+/** A shift the window may be carried by: a whole number of cells, and a small one. */
+export function carriable(d: number): boolean {
+  return Number.isInteger(d) && Math.abs(d) <= MAX_CARRY_CELLS
+}
+
 export function useViewWindow(): ViewWindow {
   const [win, setWin] = useState<ReadWindow>(read)
   // The window stays where it is in cyberspace when the anchor moves under
@@ -76,6 +84,14 @@ export function useViewWindow(): ViewWindow {
   const carried = useMemo<ViewWindow>(() => {
     if (win.scaleExp !== scaleExp || win.view !== view || sameOrigin(win.origin, origin)) return win
     const [dr, du, dz] = originShift(win.origin, origin, scaleExp, useCyberspace.getState().axes())
+    // Only a landing's shift is carried: a few whole cells. A jump across the
+    // cube (stepping the hyperspace scrubber between two ports, which sit at
+    // random coordinates) shifts the origin by more cells than a double holds
+    // exactly, the carried offsets came out fractional, and the terrain
+    // volume's BigInt threw, which took the scene and its GL context down
+    // (Android's GPU process crashed stepping block 6 to 7, 2026-10-15).
+    // Such a jump starts the window afresh, where the cursor is now.
+    if (!carriable(dr) || !carriable(du) || !carriable(dz)) return read()
     return { right: win.right + dr, up: win.up + du, out: win.out + dz }
     // origin.x/y/z stand in for origin, whose identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -74,4 +74,23 @@ describe('boarding from ideaspace with dataspace lined up', () => {
     expect(s.transit?.enterCoordHex).toBe(pubkey)
     expect(buildChain(s.events).map((a) => a.type)).toEqual(['spawn', 'enter-hyperspace'])
   })
+
+  it('boards from the chain head while another place is on screen (arkinox, 2026-10-15)', async () => {
+    // Viewing a block elsewhere: the view never stands in the way, and the
+    // boarding still names the chain's own coordinate.
+    useCyberspace.setState({ focus: { position: { x: 5n, y: 5n, z: 5n }, plane: 0, label: 'BLOCK 7', drive: false } })
+    await useCyberspace.getState().boardHyperspace()
+    const s = useCyberspace.getState()
+    const enter = s.events[s.events.length - 1]
+    expect(tag(enter, 'A')).toBe('enter-hyperspace')
+    expect(tag(enter, 'c')).toBe(pubkey)
+    useCyberspace.setState({ focus: null })
+  })
+
+  it('does not board from history or a spectation', async () => {
+    useCyberspace.setState({ exploreIndex: 0 })
+    await useCyberspace.getState().boardHyperspace()
+    expect(useCyberspace.getState().events.length).toBe(1)
+    useCyberspace.setState({ exploreIndex: null })
+  })
 })

@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Cloud, Cpu, Earth } from 'lucide-react'
+import { Cloud, Cpu } from 'lucide-react'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
@@ -42,7 +42,8 @@ function formatDuration(ms: number): string {
   return `${(h / 24).toFixed(1)} d`
 }
 import { GAME_HOLDS_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
-import { exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { setRideDestination } from '../store/destination'
+import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
 
@@ -229,6 +230,26 @@ async function planRide(): Promise<PlannedRide | null> {
 }
 
 /**
+ * The view a press of BOARD or RIDE leaves (arkinox, 2026-10-15): a block,
+ * EARTH, a /C/ link or VIEW no longer has to be RETURNed from first. The press
+ * acts on your chain head, and the camera comes back to your avatar so the
+ * boarding is seen where it happens. A spectation or history is not a view
+ * and is never ended here: BOARD and RIDE stay dark in those.
+ */
+export function returnToAvatarForRide(): void {
+  const cs = useCyberspace.getState()
+  if (cs.spectate !== null || cs.exploreIndex !== null) return
+  if (useHyperspace.getState().viewOwned) exitHyperspaceView()
+  if (useCyberspace.getState().focus !== null) useCyberspace.getState().clearFocus()
+}
+
+/** BOARD: back to your avatar from any view, then board from your chain head. */
+export async function boardFromAnywhere(): Promise<void> {
+  returnToAvatarForRide()
+  await useCyberspace.getState().boardHyperspace()
+}
+
+/**
  * Build the job and run the proof. Module-level rather than a handler so the
  * guard against a second concurrent ride is global: two pools racing
  * completeRide against the same boarding would fork the chain.
@@ -351,7 +372,10 @@ export function HyperspacePanel(): JSX.Element {
   // The plane you stand in, not the one lined up for the next move: a
   // boarding and its station are where the chain head is (boardHyperspace).
   const plane = useCyberspace((s) => s.headPlane)
-  const atHead = useCyberspace((s) => s.atHead())
+  // Your own chain can act: not history, not someone else's chain. A view of
+  // a block or anywhere else does not hold BOARD or RIDE back (arkinox,
+  // 2026-10-15); pressing either comes back to your avatar first.
+  const ownChain = useCyberspace((s) => s.exploreIndex === null && s.spectate === null)
   // Where the chain head already puts you: boarded (an enter-hyperspace head)
   // or at a stop (a hyperjump head). Neither needs a BOARD.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -429,7 +453,7 @@ export function HyperspacePanel(): JSX.Element {
   const offer = quote.status === 'ready' ? quote.offer : null
   // The highlighted choice follows the cloud profile; it is only a highlight.
   const best = rideChoice(profile, localMs === null ? null : localMs / 1000, offer, PAYMENT_SECONDS)
-  const rideDisabled = inGame || !onLine || destination === null || zeroRide !== null || !ready || (transit === null && !atHead)
+  const rideDisabled = inGame || !onLine || destination === null || zeroRide !== null || !ready || !ownChain
   // Why RIDE VIA HOSAKA is dark although the price is shown.
   const hosakaHeld = cloudBusy || cloud.job !== null
     ? 'Another HOSAKA job is in progress or kept in the Cloud compute panel'
@@ -454,7 +478,7 @@ export function HyperspacePanel(): JSX.Element {
           <button
             className="tag tag--tap"
             title="Open the Hyperspace overlay (H)"
-            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else exitHyperspaceView() }}
+            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else closeScrubber() }}
           >{tag}</button>
         ) : (
           <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
@@ -611,8 +635,8 @@ export function HyperspacePanel(): JSX.Element {
           {!onLine && (
             <button
               className="hyper__btn"
-              disabled={inGame || !atHead || !ready || destination === null}
-              onClick={() => void useCyberspace.getState().boardHyperspace()}
+              disabled={inGame || !ownChain || !ready || destination === null}
+              onClick={() => void boardFromAnywhere()}
             >BOARD</button>
           )}
           {hosakaRiding ? (
@@ -681,17 +705,13 @@ export function HyperspacePanel(): JSX.Element {
       {!inGame && !onLine && progress === null && (
         !ready ? (
           <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
-        ) : destination === null ? null : !atHead ? (
-          <p className="hyper__why">BOARD STARTS FROM YOUR AVATAR: RETURN TO IT FIRST</p>
+        ) : destination === null ? null : !ownChain ? (
+          <p className="hyper__why">BOARD STARTS FROM YOUR OWN CHAIN: STOP SPECTATING OR LEAVE HISTORY FIRST</p>
         ) : null
       )}
       {atStop && progress === null && (
         <p className="hyper__why">ON THE LINE AT BLOCK {line!.fromHeight}: PICK A BLOCK AND RIDE, OR HOP TO LEAVE</p>
       )}
-      <button
-        className="hyper__btn hyper__btn--earth"
-        onClick={viewEarth}
-      ><Earth size={12} strokeWidth={2.25} aria-hidden /> EARTH</button>
       {sync.error && <p className="notice">{sync.error}</p>}
       {rideError && <p className="notice">{rideError}</p>}
       {!hosakaRiding && cloud.rideError && <p className="notice">{cloud.rideError}</p>}
@@ -721,7 +741,9 @@ export function HyperspacePanel(): JSX.Element {
  */
 export function selectStopInScene(height: number): void {
   const hs = useHyperspace.getState()
-  hs.setDestination(height)
+  // The stop becomes the destination only when none is set; with one set, a
+  // tap only flies to the stop (arkinox, 2026-10-15: clear before setting).
+  setRideDestination(height, { quiet: true })
   // With the scrubber open the height goes through it (its effect flies and
   // marks); a click on the very block it is parked on falls through to the
   // direct path, because a no-op set would fire no effect and no fly.
@@ -742,7 +764,7 @@ export function selectStopInScene(height: number): void {
 
 /**
  * Fly to Earth: always the planet's centre, at the zoom that frames the
- * whole globe. Shared by the panel's EARTH button and the view menu's.
+ * whole globe. Used by the view menu's EARTH button (the HYPERSPACE panel's was removed, 2026-10-15).
  *
  * It used to divert to the chosen landfall destination when there was one,
  * meaning to show you where your block comes down. But the focus IS the

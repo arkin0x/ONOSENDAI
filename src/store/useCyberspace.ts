@@ -1413,12 +1413,23 @@ function checkedAnswer(signed: NostrEvent, signer: Signer): NostrEvent {
     otherAccount(signer.pubkey)
     throw new SignerAccountMismatch()
   }
-  // Back on this identity's account: the notice is done with.
+  signerHome(signer)
+  return signed
+}
+
+/**
+ * `signer` just answered as its own identity (a signature by it, or a payload
+ * sealed to it that opened): it holds this account now. The notice is done
+ * with, and a "not this identity" answer kept by heldBy no longer stands,
+ * or a payload that truly does not open, failing within its window, would
+ * be called the signer's fault and raise the notice again.
+ */
+function signerHome(signer: Signer): void {
+  if (heldAsked?.signer === signer) heldAsked = null
   if (otherAccountNoticed === signer.pubkey) {
     otherAccountNoticed = null
     if (useToast.getState().toast?.mark === 'signer') useToast.getState().dismiss()
   }
-  return signed
 }
 
 /** How long a decrypt that failed waits for the signer to say which account it holds. */
@@ -4235,8 +4246,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const signer = currentSigner
     const open = signer.nip44Decrypt
     if (!open) throw new Error(NIP44_UNAVAILABLE)
-    try { return await open(senderPubkey, payload) }
+    let plain: string
+    try { plain = await open(senderPubkey, payload) }
     catch (err) { throw await decryptRefusal(signer, err) }
+    if (signer.kind !== 'local') signerHome(signer)
+    return plain
   },
   encryptSealed: (recipientPubkey, plaintext) => {
     const seal = currentSigner.nip44Encrypt

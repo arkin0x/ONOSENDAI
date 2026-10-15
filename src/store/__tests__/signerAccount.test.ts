@@ -216,6 +216,24 @@ describe('a decrypt under another account is not taken for a payload that does n
     expect(err).toBeInstanceOf(Error)
     expect(signerCannotJudge(err)).toBe(false)
   })
+
+  it('once the signer is back, a payload that truly does not open is not blamed on it, though "another account" was its answer moments ago', async () => {
+    const { S, toast } = await boot()
+    const { signerCannotJudge } = await import('../../lib/signers')
+    const { sender, payload } = sealedToA('inside')
+    ext.holding = 'b'
+    expect(signerCannotJudge(await S().decryptSealed(sender, payload).catch((e: unknown) => e))).toBe(true)
+    // Switched back within the window that answer is kept for: a payload
+    // sealed to A opens, which proves it, and the notice goes.
+    ext.holding = 'a'
+    expect(await S().decryptSealed(sender, payload)).toBe('inside')
+    expect(toast().toast).toBeNull()
+    const { payload: notForA } = sealedToA('other')
+    const err = await S().decryptSealed(sender, notForA).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(signerCannotJudge(err)).toBe(false)
+    expect(toast().toast).toBeNull()
+  })
 })
 
 describe('a private message that arrives while the signer is on another account', () => {

@@ -146,7 +146,7 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'no-cheat', chapter: 'work', title: 'No shortcuts',
-      caption: 'Many small steps cost no less than one big one: any path across a boundary must cross it. And each hop folds in the previous event, so the work cannot be done in advance or reused.',
+      caption: 'Many small steps cost no less than one big one: any path across a boundary must cross it. Each hop also does a small piece of work seeded by the previous event, so a chain cannot be computed ahead of time or replayed.',
       scene: { target: 'self' },
     },
     {
@@ -160,7 +160,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 5. Hidden in place
     {
       id: 'region-keys', chapter: 'hidden', title: 'Places have keys',
-      caption: 'Every aligned region has a key derived from its Cantor root. You get it by doing the work of being there, and looking costs the same as walking.',
+      caption: 'Every aligned region has a key derived from its Cantor root. You get it by doing the work of being there. Looking costs about the same as walking in, and a little less.',
       scene: { target: 'self' },
     },
     {

@@ -22,7 +22,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardPaste, Copy, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
@@ -886,9 +886,10 @@ export function Workshop(): JSX.Element | null {
                 <button
                   className="workshop__mini"
                   title="Copy it into your objects, where you can edit it"
+                  aria-label="Copy your avatar into your objects"
                   onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your objects.`) }}
-                >⧉</button>
-                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}>COPY</button>
+                ><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                <button className="workshop__mini" title="Copy to the clipboard" aria-label="Copy your avatar to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
               </li>
             )}
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26). */}
@@ -898,8 +899,8 @@ export function Workshop(): JSX.Element | null {
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>
-                <button className="workshop__mini" title="Duplicate" onClick={() => w().duplicate(s.id)}>⧉</button>
-                <button className="workshop__mini workshop__mini--wide" title="Copy to the clipboard" onClick={() => copy(s.id)}>COPY</button>
+                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
                 <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
               </li>
             ))}

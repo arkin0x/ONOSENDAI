@@ -39,7 +39,7 @@ import { formatCellSize } from 'sno-core/scale'
 import { MAX_CHAT_LENGTH } from '../lib/hidden'
 import { useEscape } from '../hooks/useEscape'
 import { bottomChip } from '../lib/starred'
-import { StarChip } from './StarChip'
+import { StarGoalGroup } from './GoalButton'
 import { useBuilder } from '../store/useBuilder'
 import { usePresence } from '../store/usePresence'
 import { useProfiles, profileLabel } from '../store/useProfiles'
@@ -203,7 +203,8 @@ export function ChatDock(): JSX.Element {
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
 
-  if (!open && chip === 'star' && !building) return <StarChip />
+  // The star and GOAL beside it, one centered group (arkinox, 2026-10-14).
+  if (!open && chip === 'star' && !building) return <StarGoalGroup />
   if (!open) {
     return (
       <button

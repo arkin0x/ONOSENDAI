@@ -12,7 +12,7 @@
 
 import { useCyberspace } from '../store/useCyberspace'
 import { useEffect } from 'react'
-import { Footprints, MapPin, Star, Wrench } from 'lucide-react'
+import { Footprints, Goal, MapPin, Star, Wrench } from 'lucide-react'
 import { toastClockMs, useToast } from '../store/useToast'
 
 export function ToastChip(): JSX.Element | null {
@@ -28,13 +28,15 @@ export function ToastChip(): JSX.Element | null {
 
   if (!toast) return null
   return (
-    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' ? ' hyperbar--buildtoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()} title="Tap to dismiss">
+    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' || toast.mark === 'goal' ? ' hyperbar--buildtoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()} title="Tap to dismiss">
       {toast.mark === 'build'
         ? <Wrench className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'walk'
         ? <Footprints className="toast__build toast__walk" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'place'
         ? <MapPin className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
+        : toast.mark === 'goal'
+        ? <Goal className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'star'
         ? <Star className="hyperbar__mark hyperbar__mark--star" size={18} strokeWidth={2} fill="currentColor" aria-hidden />
         : <img className="hyperbar__mark" src={provider?.logo ?? '/hosaka-mark.png'} alt={provider?.name ?? 'HOSAKA'} width={308} height={334} decoding="async" />}

@@ -96,18 +96,35 @@ function voicesNow(): Promise<SpeechSynthesisVoice[]> {
   const now = synth.getVoices()
   if (now.length > 0) return Promise.resolve(now)
   return new Promise((resolve) => {
-    const done = (): void => { synth.removeEventListener('voiceschanged', done); resolve(synth.getVoices()) }
-    synth.addEventListener('voiceschanged', done)
+    // An older WebKit's speechSynthesis is no EventTarget; the timeout alone answers there.
+    const listens = typeof synth.addEventListener === 'function'
+    const done = (): void => { if (listens) synth.removeEventListener('voiceschanged', done); resolve(synth.getVoices()) }
+    if (listens) synth.addEventListener('voiceschanged', done)
     window.setTimeout(done, 1500)
   })
 }
 
-/** Read `text` aloud; `onEnd` runs when it finishes, fails or is stopped. */
+/**
+ * Bumped by every speak and every stop. The voices can take up to 1.5 s to
+ * arrive, and a STOP, a new step or the tour's end in that wait cancelled
+ * nothing (nothing was queued yet), so the old caption began reading
+ * afterwards on its own (review, 2026-10-15). A speak that finds the count
+ * moved on drops its utterance unspoken.
+ */
+let speechTurn = 0
+
+/**
+ * Read `text` aloud; `onEnd` runs when it finishes, fails or is stopped once
+ * reading. Stopped while the voices are still loading, it never starts.
+ */
 export async function speak(text: string, onEnd: () => void): Promise<void> {
   if (!canSpeak()) { onEnd(); return }
   const synth = window.speechSynthesis
   synth.cancel()
+  const turn = ++speechTurn
   const voices = await voicesNow()
+  // Stopped while the voices loaded: whoever stopped it has already said so.
+  if (turn !== speechTurn) return
   const u = new SpeechSynthesisUtterance(text)
   const voice = pickVoice(voices)
   if (voice) { u.voice = voice; u.lang = voice.lang }
@@ -120,5 +137,6 @@ export async function speak(text: string, onEnd: () => void): Promise<void> {
 
 /** Stop whatever the tour is reading. */
 export function stopSpeaking(): void {
+  speechTurn++
   if (canSpeak()) window.speechSynthesis.cancel()
 }

@@ -270,6 +270,9 @@ export function DemoCoach(): JSX.Element | null {
   const held = step.gate === true && !done
   const offerSpawn = step.wait === 'spawn' && !done
   const onSpawn = (): void => {
+    // Asked again at the press, not only when the button was drawn: SPAWN
+    // signs for the tour's own key with no chain, and for nothing else.
+    if (!tourKeyNeedsSpawn()) return
     setSpawning('signing')
     void useCyberspace.getState().signSpawn().then((ok) => setSpawning(ok ? 'idle' : 'failed'), () => setSpawning('failed'))
   }

@@ -4,7 +4,7 @@
  * read SYNCING 100% for good on the /demo preview).
  */
 import { describe, expect, it } from 'vitest'
-import { syncChipLabel } from '../LineScrubber'
+import { syncChipLabel, syncPercentOf } from '../LineScrubber'
 
 describe('the hyperspace chip label', () => {
   it('holds at 99% until ready: 99.5% loaded used to round to 100%', () => {
@@ -21,6 +21,15 @@ describe('the hyperspace chip label', () => {
 
   it('says RETRYING while the pipeline waits out an error, not a frozen SYNCING n%', () => {
     expect(syncChipLabel('error', 971_000, 971_400, false, null)).toBe('HYPERSPACE RETRYING')
+  })
+
+  it('shows every whole percent as itself: (29 / 100) * 100 floored to 28 (review, 2026-10-15)', () => {
+    for (let p = 0; p <= 99; p++) {
+      expect(syncPercentOf(p, 100)).toBe(p)
+      // The scrubber hands the label a percent already taken, out of 100.
+      expect(syncChipLabel('syncing', syncPercentOf(p, 100), 100, false, null)).toBe(`HYPERSPACE SYNCING ${p}%`)
+    }
+    expect(syncPercentOf(281_706, 971_400)).toBe(29)
   })
 
   it('reads 0% with no total yet', () => {

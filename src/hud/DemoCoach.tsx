@@ -190,6 +190,23 @@ export function DemoCoach(): JSX.Element | null {
   const stepInChapter = step ? inChapter.findIndex((s) => s.id === step.id) : -1
   const last = index === script.steps.length - 1
 
+  // The control a step points at wears a pulsing ring while the step is up.
+  const highlight = active ? script.steps[index]?.scene.highlight : undefined
+  useEffect(() => {
+    if (!highlight) return
+    let marked: Element[] = []
+    const mark = (): void => {
+      for (const el of marked) el.classList.remove('demo-pulse')
+      marked = Array.from(document.querySelectorAll(highlight))
+      for (const el of marked) el.classList.add('demo-pulse')
+    }
+    mark()
+    // The control may be re-rendered (the menu opening swaps its icon).
+    const mo = new MutationObserver(() => { if (marked.some((el) => !el.isConnected)) mark() })
+    mo.observe(document.body, { childList: true, subtree: true })
+    return () => { mo.disconnect(); for (const el of marked) el.classList.remove('demo-pulse') }
+  }, [highlight])
+
   // A new step stops whatever was being read.
   useEffect(() => { setSpeaking(false); setSpawning('idle') }, [index])
   useEffect(() => () => stopSpeaking(), [])

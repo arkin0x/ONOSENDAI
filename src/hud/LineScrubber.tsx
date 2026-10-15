@@ -31,6 +31,21 @@ import { formatLatLon, stopPlane, stopPosition } from './HyperspacePanel'
 import { useEscape } from '../hooks/useEscape'
 import { clearRideDestination, setRideDestination } from '../store/destination'
 
+/**
+ * The chip's words for the sync (2026-10-15). A whole percent is floored
+ * and held at 99 until the line is ready: rounded, it read 100% from 99.5%
+ * on, so a sync with its last few hundred heights still to come (or one
+ * stalled there) looked finished and stuck. An error was also worded as
+ * SYNCING with its last percentage, frozen while the pipeline waits 30 s
+ * to retry; it says RETRYING now.
+ */
+export function syncChipLabel(status: string, loaded: number, total: number, ready: boolean, destination: number | null): string {
+  if (ready) return destination !== null ? `HYPERSPACE ${destination}` : 'HYPERSPACE READY'
+  if (status === 'error') return 'HYPERSPACE RETRYING'
+  const pct = total > 0 ? Math.min(99, Math.floor((loaded / total) * 100)) : 0
+  return status === 'loading-cache' ? `HYPERSPACE LOADING ${pct}%` : `HYPERSPACE SYNCING ${pct}%`
+}
+
 /** The coarse step (« and »): a hundred blocks, with # for going anywhere at once (arkinox, 2026-09-28). */
 const JUMP = 100
 
@@ -38,7 +53,7 @@ export function LineScrubber(): JSX.Element {
   // Only what is shown: the status and a whole percent, so a progress
   // report that moves neither does not re-render the scrubber.
   const syncStatus = useHyperspace((s) => s.sync.status)
-  const syncPercent = useHyperspace((s) => (s.sync.total > 0 ? Math.round((s.sync.loaded / s.sync.total) * 100) : 0))
+  const syncPercent = useHyperspace((s) => (s.sync.total > 0 ? Math.min(99, Math.floor((s.sync.loaded / s.sync.total) * 100)) : 0))
   const tipHeight = useHyperspace((s) => s.tipHeight)
   const scrubHeight = useHyperspace((s) => s.scrubHeight)
   const destination = useHyperspace((s) => s.destination)
@@ -171,13 +186,7 @@ export function LineScrubber(): JSX.Element {
         aria-label={open ? 'Hide line scrubber' : 'Show line scrubber'}
         aria-pressed={open}
       >
-        {ready
-          ? destination !== null
-            ? `HYPERSPACE ${destination}`
-            : 'HYPERSPACE READY'
-          : syncStatus === 'loading-cache'
-            ? `HYPERSPACE LOADING ${syncPercent}%`
-            : `HYPERSPACE SYNCING ${syncPercent}%`}
+        {syncChipLabel(syncStatus, syncPercent, 100, ready, destination)}
       </button>
 
       {open && ready && (

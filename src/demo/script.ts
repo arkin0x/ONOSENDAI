@@ -225,7 +225,8 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'line', chapter: 'hyperspace', title: 'A line through space',
       caption: 'Hyperspace is a transit line threaded through Cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a station you can board or disembark.',
-      scene: { target: 'self', scale: 84 },
+      // Ideaspace at 2^84, the line running station to station (TourLine).
+      scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
     },
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
@@ -240,7 +241,7 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'ride', chapter: 'hyperspace', title: 'Riding the line',
       caption: 'To ride, you board from where you stand and appear at your station, the nearest stop. A ride proves fresh work for every block it passes, and from the stop where you arrive, the last mile is ordinary movement.',
-      scene: { target: 'keep' },
+      scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
     },
 
     // 8. Others
@@ -278,6 +279,11 @@ export const DEMO_SCRIPT: DemoScript = {
     },
 
     // 10. Your turn
+    {
+      id: 'menu', chapter: 'yours', title: 'The menu',
+      caption: 'There are many useful panels in the menu. Each includes an EXPLAIN button to help you learn more.',
+      scene: { target: 'self', scale: 6, highlight: '.hamburger-menu' },
+    },
     {
       id: 'recap', chapter: 'yours', title: 'That is Cyberspace',
       caption: 'Identity is location, distance costs work, and places can hold secrets. There is no administrator who can move you or delete you.',

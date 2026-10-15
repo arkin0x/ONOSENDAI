@@ -34,6 +34,16 @@ export interface DemoScene {
    * 'self' brings your own plane back (homeCursor).
    */
   plane?: 0 | 1
+  /**
+   * Draw the hyperspace line running station to station (scene/TourLine.tsx);
+   * it stops and is freed on the first step without it.
+   */
+  hyperline?: boolean
+  /**
+   * A control to point at, as a CSS selector: it wears a pulsing ring
+   * (.demo-pulse) while the step is on screen. Nothing is clicked or opened.
+   */
+  highlight?: string
 }
 
 /** Something the visitor does that a step waits for, detected from the stores. */

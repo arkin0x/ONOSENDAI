@@ -57,6 +57,7 @@ import { CyberspaceLattice } from './CyberspaceLattice'
 import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
+import { TourLine } from './TourLine'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
@@ -170,6 +171,7 @@ function World(): JSX.Element {
       <StopField axes={axes} />
       <StopCubes axes={axes} />
       <StopBurst axes={axes} />
+      <TourLine axes={axes} />
       <TransitAvatar axes={axes} />
       <RidePath axes={axes} />
       <CoveringBox axes={axes} />

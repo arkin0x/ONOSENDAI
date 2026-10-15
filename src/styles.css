@@ -9119,6 +9119,15 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .demo__head, .demo__bar-track, .demo__wait, .demo__foot { flex: 0 0 auto; }
 .demo__mode { color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-size: 9px; letter-spacing: 0.12em; }
 .demo__mode.is-live { color: #ff5470; border-color: #ff5470; }
+/* A step's highlight (DemoScene.highlight): a ring pulsing out of the control. */
+.demo-pulse { animation: demo-pulse 1.4s ease-out infinite; }
+@keyframes demo-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.75); }
+  100% { box-shadow: 0 0 0 16px rgba(0, 229, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-pulse { animation: none; box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.85); }
+}
 .demo--min { flex-direction: row; align-items: center; padding: 6px 8px; gap: 6px; overflow: hidden; }
 .demo__head { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.08em; }
 .demo__tag { color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: 0.12em; font-size: 9px; }

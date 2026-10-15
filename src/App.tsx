@@ -178,6 +178,7 @@ export default function App(): JSX.Element {
   // BUILD from the Stash panel, even from a view already driven: the scene is
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
+  const touring = useDemo((s) => s.active)
   useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
   // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
   // where VIEW is how the build cursor jumps: none of the flags above change,
@@ -271,7 +272,8 @@ export default function App(): JSX.Element {
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
                   on exit. */}
-              {!building && <LineScrubber />}
+              {/* Not during the /demo tour (arkinox, 2026-10-15). */}
+              {!building && !touring && <LineScrubber />}
               <HyperspaceBar />
               {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
                   yours or a spectated avatar's, aims the build cursor at the

@@ -26,6 +26,8 @@ import { DEMO_DISTRICT, DEMO_SCRIPT } from '../../demo/script'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
 import { parseDemoRoute } from '../../lib/demoRoute'
 import { captionFor } from '../../hud/DemoCoach'
+import { lineSource, nextStation, stepLine, type LineWalk } from '../../demo/hyperLine'
+import { TOUR_BLOCKS } from '../../demo/tourBlocks'
 import { coordPlace } from '../../lib/coordRoute'
 import { useHyperspace } from '../useHyperspace'
 import { useToast } from '../useToast'
@@ -417,5 +419,58 @@ describe('the gates (arkinox, 2026-10-15)', () => {
     expect(cs.focus).toBeNull()
     expect(cs.plane).toBe(cs.headPlane)
     expect(cs.anchorPlane).toBe(cs.headPlane)
+  })
+})
+
+describe('the hyperspace line (arkinox, 2026-10-15)', () => {
+  it('steps one block at a time and turns around at either end', () => {
+    let w: LineWalk = { height: 3, dir: 1 }
+    const seen: number[] = []
+    for (let i = 0; i < 8; i++) { w = stepLine(w, 0, 4); seen.push(w.height) }
+    expect(seen).toEqual([4, 3, 2, 1, 0, 1, 2, 3])
+    expect(stepLine({ height: 0, dir: -1 }, 0, 10)).toEqual({ height: 1, dir: 1 })
+    expect(stepLine({ height: 10, dir: 1 }, 0, 10)).toEqual({ height: 9, dir: -1 })
+    expect(stepLine({ height: 7, dir: 1 }, 7, 7)).toEqual({ height: 7, dir: 1 })
+  })
+
+  it('skips blocks with no station in the plane on show, and gives up when there is none', () => {
+    const ports = new Set([2, 5])
+    let w: LineWalk | null = { height: 2, dir: 1 }
+    const seen: number[] = []
+    for (let i = 0; i < 4; i++) { w = nextStation(w!, 0, 6, (h) => ports.has(h)); seen.push(w!.height) }
+    expect(seen).toEqual([5, 2, 5, 2])
+    expect(nextStation({ height: 0, dir: 1 }, 0, 6, () => false)).toBeNull()
+  })
+
+  it('falls back to the 200 bundled real blocks when the line has not synced', () => {
+    const src = lineSource()
+    expect(src.bundled).toBe(true)
+    expect([src.lo, src.hi]).toEqual([900000, 900199])
+    expect(src.stop(900000)?.kind).toBe('landfall')
+    expect(src.stop(900001)?.kind).toBe('port')
+    expect(src.stop(900001)?.merkleRoot).toBe('529d6e345c8038cc946df1da49c07e0e3cd242b88ed5576cb35fd763fd9f1c37')
+    expect(TOUR_BLOCKS).toHaveLength(200)
+  })
+
+  it('draws the line in ideaspace at 2^84 on the line and ride steps only', () => {
+    const on = DEMO_SCRIPT.steps.filter((s) => s.scene.hyperline).map((s) => s.id)
+    expect(on).toEqual(['line', 'ride'])
+    for (const id of on) expect(DEMO_SCRIPT.steps.find((s) => s.id === id)!.scene).toMatchObject({ scale: 84, plane: 1 })
+  })
+})
+
+describe('the menu step (arkinox, 2026-10-15)', () => {
+  it('opens chapter 10, before recap, pointing at the menu button without opening it', () => {
+    const ids = DEMO_SCRIPT.steps.filter((s) => s.chapter === 'yours').map((s) => s.id)
+    expect(ids).toEqual(['menu', 'recap', 'live'])
+    const menu = DEMO_SCRIPT.steps.find((s) => s.id === 'menu')!
+    expect(menu.caption).toBe('There are many useful panels in the menu. Each includes an EXPLAIN button to help you learn more.')
+    expect(menu.scene.highlight).toBe('.hamburger-menu')
+    expect(menu.wait).toBeUndefined()
+    expect(menu.gate).toBeUndefined()
+    useDemo.getState().start('menu')
+    expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('menu')
+    useDemo.getState().next()
+    expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('recap')
   })
 })

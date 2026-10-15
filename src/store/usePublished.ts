@@ -131,7 +131,7 @@ export const usePublished = create<PublishedState>((set, get) => ({
     // Only the author's deletion deletes (NIP-09): an object published under
     // another key is not this key's to take down.
     // Never published from here: there is nothing of ours to take down.
-    if (!rec) { say('This object has not been published from here, so there is nothing to retract.'); return false }
+    if (!rec) { say('Nothing is known to be published for this object yet, so there is nothing to retract. Open the Shard Feed and try again.'); return false }
     if (rec.pubkey !== me) { say('This object was published under another key; only that key can retract it.'); return false }
     const relays = relaySet()
     set({ retracting: true })

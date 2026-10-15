@@ -542,7 +542,7 @@ export function Workshop(): JSX.Element | null {
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
-  useEffect(() => { setRetractAsk(null) }, [shard?.id, panel])
+  useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.

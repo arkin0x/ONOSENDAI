@@ -32,6 +32,31 @@ export const BUILD = '#f2f7ff'
  */
 export const GAME = '#ff7ad9'
 /**
+ * The trail's moves in the plane you are not looking at (scene/PathTrail.tsx).
+ * Both planes share x, y and z, so a move in the other plane would draw right
+ * over the moves in this one; instead it fades to that plane's own color,
+ * darkened (arkinox, 2026-10-15: "dark purple color for ideaspace actions
+ * while in dataspace ... dark green color for dataspace actions" in
+ * ideaspace).
+ *
+ * Ideaspace is SIDESTEP's purple (the HUD's ideaspace tag), and dataspace is
+ * MERIDIAN's green (v1's dataspace green), each taken down to under half the
+ * red trail's luminance: well under the trail of the plane on show, and still
+ * plain against the black on the unpublished tail, whose one-pixel dashes
+ * are drawn at 0.7 opacity (a quarter of the red's was lost there). The green
+ * sits lower in lightness than the purple because the eye reads green
+ * brighter at the same lightness; matched this way, neither plane's past
+ * looks more important than the other's.
+ */
+export const TRAIL_IDEASPACE_DIM = '#752bb6'
+export const TRAIL_DATASPACE_DIM = '#1c5f4d'
+/**
+ * A game's moves in the plane you are not looking at: GAME darkened the
+ * same way, and the same in both planes. Not the plane colors above, which
+ * are travel, and a game's moves never share a color with travel.
+ */
+export const GAME_DIM = '#8e2973'
+/**
  * A region named by a /C/ link's coordinate prefix (lib/coordRoute.ts):
  * yellow, as arkinox asked (2026-10-13). A clear lemon rather than WARN's
  * amber or SECTOR's orange, so a shared region never reads as a warning or

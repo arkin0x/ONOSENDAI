@@ -2612,7 +2612,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (!current()) { void signer.close?.(); return }
     // A signer must name a real key before it becomes the identity.
     if (!/^[0-9a-f]{64}$/.test(signer.pubkey)) { void signer.close?.(); fail(new Error('The signer gave a key that is not a valid public key.')); return }
-    try { await switchTo(signer) } catch (err) { fail(err) }
+    // switchTo counts the switch before anything in it can throw, so its own
+    // failure is this attempt's to report: judged by the ticket alone.
+    try { await switchTo(signer) } catch (err) {
+      if (ticket === loginTicket && !quiet()) set({ loginError: `${errorPrefix}${err instanceof Error ? err.message : String(err)}` })
+    }
   }
 
   const switchTo = async (signer: Signer): Promise<void> => {

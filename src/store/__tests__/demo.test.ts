@@ -87,7 +87,7 @@ describe('the script', () => {
     expect(at('everything').scene).toEqual({ target: 'self', scale: 84 })
     expect(at('welcome').caption).not.toMatch(/LOCAL/)
     expect(at('event').caption).toMatch(/^Everything in cyberspace is a Nostr event:/)
-    expect(at('relays').caption).toMatch(/the Union of all Cyberspace events/)
+    expect(at('relays').caption).toMatch(/the union of all cyberspace events/)
     expect(at('kinds').caption).toMatch(/hyperspace block anchors/)
     expect(at('chain').caption).toMatch(/Controls panel in the bottom right/)
   })

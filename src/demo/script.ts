@@ -59,12 +59,12 @@ export const DEMO_SCRIPT: DemoScript = {
   steps: [
     // 1. Identity is location
     {
-      id: 'welcome', chapter: 'key', title: 'Welcome to Cyberspace',
-      caption: 'This is a guided tour of Cyberspace. The red dodecahedron is your avatar, located at your spawn point. You can customize your avatar later. Let\'s talk about how you got here.',
+      id: 'welcome', chapter: 'key', title: 'Welcome to cyberspace',
+      caption: 'This is a guided tour of cyberspace. The red dodecahedron is your avatar, located at your spawn point. You can customize your avatar later. Let\'s talk about how you got here.',
       scene: { target: 'self', scale: 6 },
     },
     {
-      id: 'everything', chapter: 'key', title: 'All of Cyberspace',
+      id: 'everything', chapter: 'key', title: 'All of cyberspace',
       caption: 'This cubic area is all of cyberspace. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera.',
       scene: { target: 'self', scale: 84 },
     },
@@ -103,7 +103,7 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'relays', chapter: 'nostr', title: 'Relays',
-      caption: 'Relays are simple servers that store and forward events. Anyone can run one. The state of Cyberspace is the Union of all Cyberspace events you can access, which may be across multiple relays.',
+      caption: 'Relays are simple servers that store and forward events. Anyone can run one. The state of cyberspace is the union of all cyberspace events you can access, which may be across multiple relays.',
       scene: { target: 'keep' },
       panel: 'relays',
     },
@@ -124,14 +124,14 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'portable', chapter: 'nostr', title: 'Yours, not ours',
-      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto already shows Cyberspace objects as furniture in the virtual pet minigame.',
+      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto already shows cyberspace objects as furniture in the virtual pet minigame.',
       scene: { target: 'keep' },
     },
 
     // 3. Scale
     {
       id: 'gibson', chapter: 'scale', title: 'The gibson',
-      caption: 'Space is three axes of 85 bits each. One step along an axis is a gibson, the smallest unit in Cyberspace, which is roughly the size of a hydrogen atom.',
+      caption: 'Space is three axes of 85 bits each. One step along an axis is a gibson, the smallest unit in cyberspace, which is roughly the size of a hydrogen atom.',
       scene: { target: 'self', scale: 0 },
     },
     {
@@ -224,7 +224,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 7. Hyperspace
     {
       id: 'line', chapter: 'hyperspace', title: 'A line through space',
-      caption: 'Hyperspace is a transit line threaded through Cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a station you can board or disembark.',
+      caption: 'Hyperspace is a transit line threaded through cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a station you can board or disembark.',
       // Ideaspace at 2^84, the line running station to station (TourLine).
       scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
     },
@@ -264,7 +264,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 9. Agents
     {
       id: 'agents', chapter: 'agents', title: 'Agents live here too',
-      caption: 'AI agents live in Cyberspace too. An agent has its own key and its own movement chain, and it pays the same costs to move.',
+      caption: 'AI agents live in cyberspace too. An agent has its own key and its own movement chain, and it pays the same costs to move.',
       scene: { target: 'self' },
     },
     {
@@ -285,7 +285,7 @@ export const DEMO_SCRIPT: DemoScript = {
       scene: { target: 'self', scale: 6, highlight: '.hamburger-menu' },
     },
     {
-      id: 'recap', chapter: 'yours', title: 'That is Cyberspace',
+      id: 'recap', chapter: 'yours', title: 'That is cyberspace',
       caption: 'Identity is location, distance costs work, and places can hold secrets. There is no administrator who can move you or delete you.',
       scene: { target: 'self', scale: 6 },
     },

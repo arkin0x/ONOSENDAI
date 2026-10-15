@@ -27,6 +27,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
+import { stepDivision } from './divisions'
 import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
@@ -950,13 +951,13 @@ export function Workshop(): JSX.Element | null {
             <button className="workshop__btn" {...bind(() => w().setUnit((w().current()?.unit ?? 0) + 1))} disabled={shard.unit >= MAX_UNIT} aria-label="Larger unit">+</button>
             <span className="workshop__unit-size" title="What one grid unit is in the world. DEPLOY shows the object at this size.">one unit = {formatCellSize(shard.unit)}</span>
           </div>
+          {/* A stepper like the rows around it (arkinox, 2026-10-15): fifteen
+              divisions down to a single tick no longer fit as a row of buttons. */}
           <div className="workshop__row" role="group" aria-label="Grid division">
             <span className="workshop__label">DIVISION</span>
-            <div className="workshop__modes workshop__modes--divisions">
-              {DIVISIONS.map((d) => (
-                <button key={d} className={`workshop__mode ${division === d ? 'is-on' : ''}`} aria-pressed={division === d} onClick={() => w().setDivision(d)} title={d === 1 ? 'Snap to whole units' : `Snap to 1/${d} of a unit`}>{d === 1 ? '1' : `1/${d}`}</button>
-              ))}
-            </div>
+            <button className="workshop__btn" onClick={() => w().setDivision(stepDivision(division, -1))} disabled={division === DIVISIONS[0]} aria-label="Coarser division" title="Coarser snap">−</button>
+            <span className="workshop__value" title={division === 1 ? 'Snap to whole units' : `Snap to 1/${division} of a unit`}>{division === 1 ? '1' : `1/${division}`}</span>
+            <button className="workshop__btn" onClick={() => w().setDivision(stepDivision(division, 1))} disabled={division === DIVISIONS[DIVISIONS.length - 1]} aria-label="Finer division" title="Finer snap">+</button>
             <span className="workshop__unit-size" title="Where taps, the box, nudges and the level land. Positions already placed keep their exact spots.">the snap for placing and nudging</span>
           </div>
           <div className="workshop__row">

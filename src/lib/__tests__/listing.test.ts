@@ -1,27 +1,23 @@
 /**
- * fanfares.test.ts - where an object for sale is bought: the Fanfares page
- * for a listing (`https://fanfares.io/naddr/<naddr>`, fanfares-next's naddr
- * route), its price label, and the https-only rule for its pictures.
+ * listing.test.ts - an object for sale as a card shows it: its naddr (the
+ * address its seller's page is opened with), its price label, and the
+ * https-only rule for its pictures.
  */
 import { describe, expect, it } from 'vitest'
 import { nip19, verifyEvent } from 'nostr-tools'
 import { listingFromEvent } from 'sno-core/feed'
-import { FANFARES_WEB, fanfaresUrl, httpsImage, listingPictures, satsLabel } from '../fanfares'
+import { httpsImage, listingNaddr, listingPictures, satsLabel } from '../listing'
 import { LISTING, listingWith } from './listingFixture'
 
-describe('the Fanfares page for a listing', () => {
+describe('a listing as a card shows it', () => {
   it('the fixture is a real signed event (a throwaway key, never published)', () => {
     expect(verifyEvent({ ...LISTING })).toBe(true)
   })
 
-  it('is fanfares.io/naddr/<naddr>, the naddr naming kind 33331, the seller, the d and the relays it was seen on', () => {
-    const l = { ...listingFromEvent(LISTING)!, seen: ['wss://cyberspace.nostr1.com', 'wss://nos.lol'] }
-    const url = fanfaresUrl(l)
-    expect(FANFARES_WEB).toBe('https://fanfares.io')
-    expect(url.startsWith('https://fanfares.io/naddr/naddr1')).toBe(true)
-    const decoded = nip19.decode(url.slice('https://fanfares.io/naddr/'.length))
+  it('its naddr names kind 33331, the seller, the d and the relays it was seen on', () => {
+    const naddr = listingNaddr({ ...listingFromEvent(LISTING)!, seen: ['wss://cyberspace.nostr1.com', 'wss://nos.lol'] })!
+    const decoded = nip19.decode(naddr)
     expect(decoded.type).toBe('naddr')
-    if (decoded.type !== 'naddr') return
     expect(decoded.data).toEqual({ kind: 33331, pubkey: LISTING.pubkey, identifier: '6f1c2a8e-4b7d-4e0a-9c3f-2d5e8b1a7c40', relays: ['wss://cyberspace.nostr1.com', 'wss://nos.lol'] })
   })
 
@@ -36,7 +32,6 @@ describe('the Fanfares page for a listing', () => {
       'https://cdn.example.com/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.png',
     ])
     for (const bad of ['http://cdn.example.com/a.gif', 'javascript:alert(1)', 'data:image/gif;base64,R0lG', '//cdn.example.com/a.gif', '']) expect(httpsImage(bad), bad).toBeNull()
-    // Even a listing object handed over with an http picture shows none of it.
     expect(listingPictures({ preview: { url: 'http://cdn.example.com/a.gif', mime: 'image/gif' } })).toEqual([])
     const plain = listingWith((tags) => tags.map((t) => (t[0] === 'imeta' ? t.map((p) => p.replace('url https:', 'url http:')) : t)))
     expect(listingPictures(listingFromEvent(plain)!)).toEqual([])

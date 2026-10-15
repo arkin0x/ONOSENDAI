@@ -8696,7 +8696,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   white-space: nowrap;
 }
 .feed__act:hover { background: rgba(0, 229, 255, 0.14); }
-/* An object for sale on Fanfares (a listing): the price in the bitcoin
+/* An object for sale (a listing): the price in the bitcoin
    orange sats have elsewhere (the Cashu badges), and BUY as a link styled
    as the feed's buttons. */
 .feed__tile--sale { border-color: rgba(247, 147, 26, 0.32); }
@@ -8714,6 +8714,17 @@ a.feed__act { text-decoration: none; }
   border-color: rgba(247, 147, 26, 0.45);
 }
 .feed__act--buy:hover { background: rgba(247, 147, 26, 0.14); }
+/* BUY ON <seller>, then the domain the link opens, smaller and dimmer: the
+   seller's name is theirs to choose, the domain is not. */
+.feed__act--buy { min-width: 0; }
+.feed__buy-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.feed__buy-domain {
+  flex: none;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--dim);
+}
 .feed__end {
   padding: 8px 4px;
   font-size: 10px;

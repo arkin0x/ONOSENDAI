@@ -9,9 +9,9 @@
  * useFeed's (sno-core's read); the pictures are useThumbs', drawn by the one
  * ThumbStage mounted here.
  *
- * An object for sale on Fanfares (a listing) is a card of its own among
- * them, newest first with the rest: its preview picture, title, author,
- * price and BUY ON FANFARES. It has no shape until bought, so it is never
+ * An object for sale (a listing) is a card of its own among them, newest
+ * first with the rest: its preview picture, title, author, price, and
+ * BUY ON <seller> with the domain the button opens beside it. It has no shape until bought, so it is never
  * placed, deployed or remixed, and its picture is the seller's GIF, loaded
  * like a profile picture (https only, no referrer), not drawn here.
  */
@@ -20,7 +20,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ExternalLink, LockKeyhole, RefreshCw } from 'lucide-react'
 import { feedItems, isListing, type FeedListing, type FeedObject } from 'sno-core/feed'
-import { fanfaresUrl, listingPictures, satsLabel } from '../lib/fanfares'
+import { listingPictures, satsLabel } from '../lib/listing'
+import { useSellerLink } from '../hooks/useSellerLink'
 import { useFeed } from '../store/useFeed'
 import { useThumbs } from '../store/useThumbs'
 import { useProfile } from '../hooks/useProfile'
@@ -97,9 +98,10 @@ function ListingPic({ listing }: { listing: FeedListing }): JSX.Element {
   )
 }
 
-/** An object for sale: never placed (no shape until bought), bought on Fanfares. */
+/** An object for sale: never placed (no shape until bought), bought from its seller's page. */
 export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element {
   const title = listing.title || 'Untitled'
+  const link = useSellerLink(listing)
   return (
     <li className="feed__tile feed__tile--sale">
       <div className="feed__pick" title="For sale: its shape is sealed until bought">
@@ -110,11 +112,16 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
           <span className="feed__price">{satsLabel(listing.priceSats)}</span>
         </span>
       </div>
-      <div className="feed__acts">
-        <a className="feed__act feed__act--buy" href={fanfaresUrl(listing)} target="_blank" rel="noopener noreferrer" title="Open its Fanfares page in a new tab">
-          <ExternalLink size={12} strokeWidth={2.25} aria-hidden />BUY ON FANFARES
-        </a>
-      </div>
+      {link && (
+        <div className="feed__acts">
+          {/* The domain is the link's own, so a seller's chosen name cannot hide where it goes. */}
+          <a className="feed__act feed__act--buy" href={link.url} target="_blank" rel="noopener noreferrer" title={link.url}>
+            <ExternalLink size={12} strokeWidth={2.25} aria-hidden />
+            <span className="feed__buy-label">BUY ON {link.label}</span>
+            <span className="feed__buy-domain">{link.domain}</span>
+          </a>
+        </div>
+      )}
     </li>
   )
 }

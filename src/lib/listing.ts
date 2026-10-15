@@ -1,25 +1,28 @@
 /**
- * fanfares.ts - where an object for sale is bought.
+ * listing.ts - an object for sale, as a card shows it.
  *
  * A kind 33331 sealed with an `https:` key service (NIP-FF-1) is a listing
  * (sno-core/feed `listingFromEvent`): its shape is encrypted until someone
- * buys the key, so ONOSENDAI shows its title, price and preview picture and
- * sends the buyer to Fanfares. Fanfares opens any addressable event at
- * `/naddr/<naddr>` (fanfares-next `src/app/(routes)/naddr/[naddr]`, the same
- * link its own share and paywall text writes), so that is the page.
+ * buys the key, from whichever seller's key service sells it, so the card
+ * shows its title, price and preview picture, and a BUY button that opens the
+ * seller's page. Where that page is comes from sno-core's `sellerLink`: the
+ * seller's app through its NIP-89 handler (store/useHandlers.ts), a known key
+ * service's app, or njump.
  *
- * Unlocking a bought object here, with the key Fanfares sold, is a later step.
+ * Unlocking a bought object here, with the key the seller's service sold, is
+ * a later step.
  */
 
 import { nip19 } from 'nostr-tools'
 import { listingPointer, type FeedListing } from 'sno-core/feed'
 
-/** Fanfares on the web (fanfares-next `APP_URL`). */
-export const FANFARES_WEB = 'https://fanfares.io'
-
-/** The Fanfares page for a listing: `https://fanfares.io/naddr/<naddr>`, with the relays it was seen on as hints. */
-export function fanfaresUrl(listing: Pick<FeedListing, 'pubkey' | 'd' | 'seen'>): string {
-  return `${FANFARES_WEB}/naddr/${nip19.naddrEncode(listingPointer(listing))}`
+/** The listing's NIP-19 address, with the relays it was seen on as hints; null if it cannot be encoded. */
+export function listingNaddr(listing: Pick<FeedListing, 'pubkey' | 'd' | 'seen'>): string | null {
+  try {
+    return nip19.naddrEncode(listingPointer(listing))
+  } catch {
+    return null
+  }
 }
 
 /** A price as the card shows it: `2,100 sats`, `1 sat`. */

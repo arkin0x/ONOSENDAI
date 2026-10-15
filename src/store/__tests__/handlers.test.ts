@@ -16,7 +16,7 @@ const askEach = vi.fn(async (_relays: string[], _filter: unknown, onEvent: (ev: 
 vi.mock('../../lib/relay', () => ({ askEach: (...a: Parameters<typeof askEach>) => askEach(...a), relaySet: () => ['wss://mine.test'] }))
 
 import { listingApp, type ListingApp } from 'sno-core/feed'
-import { HANDLERS_KEPT, isHandlerOf, useHandlers } from '../useHandlers'
+import { HANDLERS_ASKING, HANDLERS_KEPT, HANDLER_MAX_CHARS, isHandlerOf, useHandlers } from '../useHandlers'
 
 const appKey = generateSecretKey()
 const APP_PK = getPublicKey(appKey)
@@ -60,6 +60,23 @@ describe('NIP-89 handlers for listings', () => {
     useHandlers.getState().request(app)
     await vi.waitFor(() => expect(app.address in useHandlers.getState().handlers).toBe(true))
     expect(useHandlers.getState().handlers[app.address]).toBeNull()
+  })
+
+  it('asks for at most HANDLERS_ASKING apps at once, and every one in turn', async () => {
+    const apps = Array.from({ length: 12 }, (_, i) => listingApp([['client', 'X', `31990:${APP_PK}:app${i}`]])!)
+    for (const a of apps) useHandlers.getState().request(a)
+    expect(askEach).toHaveBeenCalledTimes(HANDLERS_ASKING)
+    await vi.waitFor(() => expect(apps.every((a) => a.address in useHandlers.getState().handlers)).toBe(true))
+    expect(askEach).toHaveBeenCalledTimes(apps.length)
+  })
+
+  it('a handler too big to be one, or not shaped as NIP-01 says, is not read', () => {
+    const big = finalizeEvent({ kind: 31990, created_at: 1, content: JSON.stringify({ name: 'x'.repeat(HANDLER_MAX_CHARS) }), tags: [['d', 'snoshop'], ['k', '33331']] }, appKey)
+    expect(isHandlerOf(big, app)).toBe(false)
+    for (const bad of [{ ...handler(1), tags: [null] }, { ...handler(1), tags: 'x' }, { ...handler(1), content: 5 }, null]) {
+      expect(() => isHandlerOf(bad as never, app)).not.toThrow()
+      expect(isHandlerOf(bad as never, app)).toBe(false)
+    }
   })
 
   it('remembers at most HANDLERS_KEPT apps, the oldest going first', async () => {

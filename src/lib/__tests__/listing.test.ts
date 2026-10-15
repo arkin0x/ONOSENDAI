@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { nip19, verifyEvent } from 'nostr-tools'
 import { listingFromEvent } from 'sno-core/feed'
-import { httpsImage, listingNaddr, listingPictures, satsLabel } from '../listing'
+import { DOMAIN_SHOWN_MAX, domainShown, httpsImage, listingNaddr, listingPictures, satsLabel } from '../listing'
 import { LISTING, listingWith } from './listingFixture'
 
 describe('a listing as a card shows it', () => {
@@ -35,5 +35,14 @@ describe('a listing as a card shows it', () => {
     expect(listingPictures({ preview: { url: 'http://cdn.example.com/a.gif', mime: 'image/gif' } })).toEqual([])
     const plain = listingWith((tags) => tags.map((t) => (t[0] === 'imeta' ? t.map((p) => p.replace('url https:', 'url http:')) : t)))
     expect(listingPictures(listingFromEvent(plain)!)).toEqual([])
+  })
+
+  it('shows a long domain by its end, where the name it belongs to is', () => {
+    expect(domainShown('fanfares.io')).toBe('fanfares.io')
+    const long = `fanfares-io-official-${'x'.repeat(40)}-checkout.example`
+    const shown = domainShown(long)
+    expect(Array.from(shown)).toHaveLength(DOMAIN_SHOWN_MAX)
+    expect(shown.startsWith('…')).toBe(true)
+    expect(shown.endsWith('-checkout.example')).toBe(true)
   })
 })

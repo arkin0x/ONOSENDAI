@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ExternalLink, LockKeyhole, RefreshCw } from 'lucide-react'
 import { feedItems, isListing, type FeedListing, type FeedObject } from 'sno-core/feed'
-import { listingPictures, satsLabel } from '../lib/listing'
+import { domainShown, listingPictures, satsLabel } from '../lib/listing'
 import { useSellerLink } from '../hooks/useSellerLink'
 import { useFeed } from '../store/useFeed'
 import { useThumbs } from '../store/useThumbs'
@@ -118,7 +118,7 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
           <a className="feed__act feed__act--buy" href={link.url} target="_blank" rel="noopener noreferrer" title={link.url}>
             <ExternalLink size={12} strokeWidth={2.25} aria-hidden />
             <span className="feed__buy-label">BUY ON {link.label}</span>
-            <span className="feed__buy-domain">{link.domain}</span>
+            <span className="feed__buy-domain">{domainShown(link.domain)}</span>
           </a>
         </div>
       )}

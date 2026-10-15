@@ -25,6 +25,19 @@ export function listingNaddr(listing: Pick<FeedListing, 'pubkey' | 'd' | 'seen'>
   }
 }
 
+/** The most of a domain a card shows. */
+export const DOMAIN_SHOWN_MAX = 32
+
+/**
+ * A link's domain as a card shows it: whole when it fits, else its end, which
+ * is where the name it belongs to is. Cut from the front, never the back, so
+ * `fanfares-io-official-checkout.example` cannot be shown as `fanfares-io…`.
+ */
+export function domainShown(domain: string): string {
+  const chars = Array.from(domain)
+  return chars.length > DOMAIN_SHOWN_MAX ? `…${chars.slice(-(DOMAIN_SHOWN_MAX - 1)).join('')}` : domain
+}
+
 /** A price as the card shows it: `2,100 sats`, `1 sat`. */
 export function satsLabel(sats: number): string {
   return `${sats.toLocaleString('en-US')} ${sats === 1 ? 'sat' : 'sats'}`

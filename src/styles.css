@@ -9172,7 +9172,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .demo__bar { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; background: none; border: none; color: var(--fg); font-family: inherit; font-size: 11px; cursor: pointer; text-align: left; padding: 0; }
 .demo__bartitle { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* The question under the wordmark: a face, a bubble, a link to the answers.
+/* The question under the wordmark: a face, a bubble, a link to the tour.
  * Left-aligned in the panel, the face on the panel's left edge, where it
  * stays whatever the bubble says. The row's height is fixed at two lines, so
  * a phrase that wraps changes the bubble and not the panel. */

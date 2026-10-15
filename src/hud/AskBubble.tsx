@@ -5,22 +5,42 @@
  * menu says it first: a small face and a speech bubble that cycles through
  * the things people say, each phrase decoding out of glyph noise the way a
  * found key's chip does, then holding, then giving way to the next. The
- * whole row is a link to the channel where the one-minute videos answer it.
- * Under reduced motion the words simply change.
+ * whole row is a link to the /demo guided tour, which answers it, in the same
+ * tab: the tour starts from the address on page load (App.tsx). The row is
+ * gone while the tour is on, so it never invites you into the tour you are
+ * already taking. Under reduced motion the words simply change.
  */
 
 import { useEffect, useState } from 'react'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
+import { parseDemoRoute } from '../lib/demoRoute'
+import { useDemo } from '../store/useDemo'
 
 /** The one asking. */
 export const ASK_EMOJI = '🤔'
-export const CHANNEL_URL = 'https://youtube.com/channel/UC1f8lCTlq6WvQ9ucCe3Dpyw'
+/** Where the row goes: the guided tour (store/useDemo.ts). */
+export const TOUR_HREF = '/demo'
 /** In the words people use. */
 export const ASKS = ['what is all this?', 'what am i looking at?', "i'm confused", 'can someone explain this?', 'where am i?', 'i need an adult', 'cyberspace???', 'help, what is this?', 'is this for real?', "i'm lost"]
 /** How long each phrase holds once it has decoded. */
 const HOLD_MS = 2600
 
-export function AskBubble(): JSX.Element {
+/**
+ * Whether the row stays out of sight: while the tour runs, and on a /demo
+ * address, which covers the first frame before the tour has started.
+ */
+export function askHidden(touring: boolean, pathname: string): boolean {
+  return touring || parseDemoRoute(pathname) !== null
+}
+
+export function AskBubble(): JSX.Element | null {
+  const touring = useDemo((s) => s.active)
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
+  return askHidden(touring, pathname) ? null : <AskRow />
+}
+
+/** The face and the cycling bubble, as one link to the tour. */
+export function AskRow(): JSX.Element {
   const [index, setIndex] = useState(0)
   const [shown, setShown] = useState(ASKS[0])
 
@@ -46,7 +66,7 @@ export function AskBubble(): JSX.Element {
   }, [index])
 
   return (
-    <a className="ask" href={CHANNEL_URL} target="_blank" rel="noopener noreferrer" title="One-minute videos on what cyberspace is and what you are looking at">
+    <a className="ask" href={TOUR_HREF} title="A guided tour of what cyberspace is and what you are looking at">
       <span className="ask__emoji" aria-hidden="true">{ASK_EMOJI}</span>
       <span className="ask__bubble">{shown}</span>
     </a>

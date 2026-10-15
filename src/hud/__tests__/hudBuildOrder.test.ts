@@ -255,8 +255,10 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     expect(slot('hidden')).toContain('class="slot slot--collapsed"')
     expect(slot('hidden')).toContain('slot__grip')
     expect(slot('hidden')).toContain('lucide-grip-vertical')
-    expect(slot('hidden', true)).toContain('class="slot slot--collapsed"')
+    // Pinned to the top it opens, its saved fold untouched (arkinox, 2026-10-14).
+    expect(slot('hidden', true)).toContain('class="slot"')
     expect(slot('hidden', true)).not.toContain('slot__grip')
+    expect(usePanelLayout.getState().collapsed.hidden).toBe(true)
     expect(slot('position')).toContain('class="slot"')
     usePanelLayout.getState().toggle('hidden')
     expect(slot('hidden')).toContain('class="slot"')

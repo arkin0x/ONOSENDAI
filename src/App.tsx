@@ -22,6 +22,9 @@ import { NearbyChip } from './hud/NearbyChip'
 import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
+import { DemoCoach } from './hud/DemoCoach'
+import { parseDemoRoute } from './lib/demoRoute'
+import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
@@ -92,6 +95,12 @@ export default function App(): JSX.Element {
   useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
   useEffect(() => startCoordRoute(), [])
+  // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
+  useEffect(() => {
+    const step = parseDemoRoute(window.location.pathname)
+    if (step !== null) useDemo.getState().start(step || undefined)
+    else restoreAfterUnfinishedTour()
+  }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.
@@ -169,6 +178,7 @@ export default function App(): JSX.Element {
   // BUILD from the Stash panel, even from a view already driven: the scene is
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
+  const touring = useDemo((s) => s.active)
   useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
   // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
   // where VIEW is how the build cursor jumps: none of the flags above change,
@@ -262,7 +272,8 @@ export default function App(): JSX.Element {
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
                   on exit. */}
-              {!building && <LineScrubber />}
+              {/* Not during the /demo tour (arkinox, 2026-10-15). */}
+              {!building && !touring && <LineScrubber />}
               <HyperspaceBar />
               {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
                   yours or a spectated avatar's, aims the build cursor at the
@@ -307,6 +318,8 @@ export default function App(): JSX.Element {
           aria-label="Show controls"
         >CONTROLS</button>
       )}
+      {/* The /demo tour's caption panel, only while the tour runs. */}
+      <DemoCoach />
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}

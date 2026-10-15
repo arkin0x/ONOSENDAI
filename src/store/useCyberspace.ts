@@ -801,6 +801,15 @@ export interface CyberspaceState {
   setPlane: (plane: Plane) => void
   applyProofMessage: (msg: ProofResponse) => void
   setLive: (live: boolean) => void
+  /**
+   * A deliberate request to publish the waiting chain now, while LIVE: the
+   * same release the held-chain answer gives (release.ts `release`,
+   * `publishRequest`), so the publisher drains as for a new action, with its
+   * relay look first. A held chain or a pending choice still stops it
+   * (maySend), and shows as it always does. Nothing while LOCAL. Used by the
+   * /demo tour's GO LIVE (arkinox, 2026-10-15).
+   */
+  publishNow: () => void
   /** Put the fork notice away once it has been read. */
   clearForkNotice: () => void
   setPublishStatus: (id: string, status: PublishStatus, reason?: string) => void
@@ -3537,6 +3546,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       : Object.fromEntries(Object.entries(get().published)
         .map(([id, st]) => [id, st === 'ok' ? st : 'queued' as const]))
     set({ live, published, publishError: null })
+  },
+
+  publishNow: () => {
+    if (!get().live) return
+    set({ publishRequest: get().publishRequest + 1 })
   },
 
   respawn: async () => {

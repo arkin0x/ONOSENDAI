@@ -104,14 +104,29 @@ describe('the route', () => {
   })
 })
 
+/**
+ * An identity the tour did not generate: this test run made its own key on
+ * load, as a first /demo visit does, so the existing-identity rules are run
+ * under another pubkey.
+ */
+const OTHER_PUBKEY = 'ab'.repeat(32)
+function asExistingIdentity(fn: () => void): void {
+  const identity = useCyberspace.getState().identity
+  useCyberspace.setState({ identity: { ...identity, pubkey: OTHER_PUBKEY } })
+  try { fn() } finally {
+    if (useDemo.getState().active) useDemo.getState().exit()
+    useCyberspace.setState({ identity })
+  }
+}
+
 describe('the engine', () => {
-  it('forces LOCAL on entry and puts LIVE back on exit', () => {
+  it('forces LOCAL on entry and puts LIVE back on exit (an existing identity)', () => asExistingIdentity(() => {
     useCyberspace.getState().setLive(true)
     useDemo.getState().start()
     expect(useCyberspace.getState().live).toBe(false)
     useDemo.getState().exit()
     expect(useCyberspace.getState().live).toBe(true)
-  })
+  }))
 
   it('leaves LIVE on when the visitor went LIVE in the tour', () => {
     useDemo.getState().start()
@@ -215,7 +230,7 @@ describe('leaving a step cleanly (rehearsal, 2026-10-15)', () => {
 })
 
 describe('LIVE survives a reload mid-tour (rehearsal, 2026-10-15)', () => {
-  it('a reload during the tour still puts LIVE back on exit', () => {
+  it('a reload during the tour still puts LIVE back on exit (an existing identity)', () => asExistingIdentity(() => {
     useCyberspace.getState().setLive(true)
     useDemo.getState().start()
     expect(useCyberspace.getState().live).toBe(false)
@@ -225,9 +240,9 @@ describe('LIVE survives a reload mid-tour (rehearsal, 2026-10-15)', () => {
     useDemo.getState().exit()
     expect(useCyberspace.getState().live).toBe(true)
     expect(localStorage.getItem(PREV_LIVE_KEY)).toBeNull()
-  })
+  }))
 
-  it('a tour left without EXIT puts LIVE back on the next ordinary visit, once', () => {
+  it('a tour left without EXIT puts LIVE back on the next ordinary visit, once (an existing identity)', () => asExistingIdentity(() => {
     useCyberspace.getState().setLive(true)
     useDemo.getState().start()
     useDemo.setState({ active: false }) // the tab closed mid-tour
@@ -237,7 +252,7 @@ describe('LIVE survives a reload mid-tour (rehearsal, 2026-10-15)', () => {
     useCyberspace.getState().setLive(false)
     restoreAfterUnfinishedTour() // nothing left to restore
     expect(useCyberspace.getState().live).toBe(false)
-  })
+  }))
 })
 
 describe('waiting for the visitor', () => {

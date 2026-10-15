@@ -30,6 +30,7 @@ import { spawnTemplate } from '../lib/events'
 import { canSpeak, speak, stopSpeaking } from '../demo/voice'
 import type { DemoPanel, DemoStep } from '../demo/types'
 import { ConfirmModal } from './ConfirmModal'
+import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { GO_LIVE_BODY } from './TouchControls'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
@@ -138,10 +139,13 @@ function Chain(): JSX.Element {
 function Finish(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const [confirming, setConfirming] = useState(false)
+  // A held chain, a pending choice or a send with no relay is what the strip
+  // under the switch already says; GO LIVE shows it rather than LIVE alone.
+  const status = useChainStatus()
   return (
     <div className="demo__panel demo__finish">
       {live
-        ? <div className="is-ok">You are LIVE.</div>
+        ? status ? <ChainStatusStrip status={status} /> : <div className="is-ok">You are LIVE.</div>
         : <button className="demo__btn demo__btn--live" onClick={() => setConfirming(true)}>GO LIVE</button>}
       <a className="demo__link" href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noreferrer">Read the protocol</a>
       {confirming && (
@@ -152,7 +156,10 @@ function Finish(): JSX.Element {
           cancelLabel="CANCEL"
           danger={false}
           cardClassName="golive"
-          onConfirm={() => { setConfirming(false); useDemo.getState().wentLive(); useCyberspace.getState().setLive(true) }}
+          // The switch alone publishes nothing until the next action
+          // (release.ts); GO LIVE is a request to publish, so the waiting
+          // chain goes now, by the publisher's own rules (publishNow).
+          onConfirm={() => { setConfirming(false); useDemo.getState().wentLive(); useCyberspace.getState().setLive(true); useCyberspace.getState().publishNow() }}
           onCancel={() => setConfirming(false)}
         />
       )}

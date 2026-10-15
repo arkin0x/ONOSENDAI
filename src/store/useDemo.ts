@@ -70,15 +70,20 @@ function noteTourKey(): void {
   try { localStorage.setItem(TOUR_KEY_KEY, minted) } catch { /* private mode */ }
 }
 
+/** Whether the identity on screen is the key the tour generated (and signs locally). */
+export function isTourKey(): boolean {
+  const cs = useCyberspace.getState()
+  if (cs.signerKind !== 'local') return false
+  try { return localStorage.getItem(TOUR_KEY_KEY) === cs.identity.pubkey } catch { return false }
+}
+
 /**
  * Whether the tour offers SPAWN now: the identity is the key the tour
  * generated, signs locally, and has no chain yet. Any other identity is
  * never offered it.
  */
 export function tourKeyNeedsSpawn(): boolean {
-  const cs = useCyberspace.getState()
-  if (cs.events.length > 0 || cs.signerKind !== 'local') return false
-  try { return localStorage.getItem(TOUR_KEY_KEY) === cs.identity.pubkey } catch { return false }
+  return useCyberspace.getState().events.length === 0 && isTourKey()
 }
 
 /** Whether a chain holds a hop or a sidestep of its own. */
@@ -306,7 +311,13 @@ export const useDemo = create<DemoState>((set, get) => {
       // Remembered once: starting again while running keeps the first answer,
       // and so does a reload mid-tour (PREV_LIVE_KEY).
       if (!get().active) {
-        const prev = readPrevLive() ?? cs.live
+        // The switch to put back on EXIT. A key the tour generated had no
+        // switch of its own before the tour (a new visitor starts LIVE by
+        // default, which nobody chose), so it goes back to LOCAL unless GO
+        // LIVE is pressed (wentLive): FINISH used to flip a new visitor to
+        // LIVE, and their next hop published the whole tour chain (review of
+        // #337, 2026-10-15). Any other identity gets its own switch back.
+        const prev = readPrevLive() ?? (isTourKey() ? false : cs.live)
         writePrevLive(prev)
         set({ prevLive: prev })
       }

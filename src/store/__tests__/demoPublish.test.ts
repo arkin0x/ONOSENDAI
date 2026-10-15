@@ -194,6 +194,15 @@ describe('which keys are the tour\'s (arkinox\'s ruling, 2026-10-15)', () => {
     expect(sent).toEqual([])
   })
 
+  it('a key made on this page load is the tour\'s even when the marker names another (two tabs on a first visit, review of #362)', async () => {
+    localStorage.setItem(MINTED_KEY, OTHER) // the other tab wrote last
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start() // this test run's own key was made on its load
+    expect(isTourKey()).toBe(true)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
   it('a key from before the marker existed keeps the old rule: the tour\'s only if this page load made it', () => {
     localStorage.removeItem(MINTED_KEY)
     useDemo.getState().start() // this test run's own key was made on its load

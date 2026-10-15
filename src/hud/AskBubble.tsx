@@ -13,7 +13,7 @@
  * already taking. Under reduced motion the words simply change.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { parseDemoRoute } from '../lib/demoRoute'
 import { startTourInPlace, useDemo } from '../store/useDemo'
@@ -37,6 +37,15 @@ export function askHidden(touring: boolean, pathname: string): boolean {
 
 export function AskBubble(): JSX.Element | null {
   const touring = useDemo((s) => s.active)
+  // Read again when the address moves under it: EXIT of a tour started in
+  // place steps back off /demo with history.back(), which lands after the
+  // render that saw the tour end, so the row stayed hidden on / until
+  // something else redrew the menu (review of #362, 2026-10-15).
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    window.addEventListener('popstate', redraw)
+    return () => window.removeEventListener('popstate', redraw)
+  }, [])
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
   return askHidden(touring, pathname) ? null : <AskRow />
 }

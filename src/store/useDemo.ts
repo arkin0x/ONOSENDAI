@@ -26,7 +26,7 @@ import { stopSpeaking } from '../demo/voice'
 import { coordPlace } from '../lib/coordRoute'
 import { clampAxis, MAX_SCALE_EXP } from '../lib/space'
 import { moveDirection } from '../lib/moves'
-import { startCoordRoute } from './useCoordRoute'
+import { startCoordRoute, useCoordRoute } from './useCoordRoute'
 import { exitHyperspaceView, useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useChat } from './useChat'
@@ -77,8 +77,10 @@ export function tourKeyAtStart(): boolean {
   const cs = useCyberspace.getState()
   if (cs.signerKind !== 'local' || cs.events.length > 0) return false
   const pubkey = cs.identity.pubkey
-  const minted = appMinted(pubkey)
-  return minted === null ? keyMintedOnLoad() === pubkey : minted
+  // Made on this page load counts whatever the marker says: two tabs opened
+  // together on a first visit each make a key, and the marker names only
+  // the last one written (review of #362, 2026-10-15).
+  return appMinted(pubkey) === true || keyMintedOnLoad() === pubkey
 }
 
 /** Decide the tour's key for a tour starting now. */
@@ -374,6 +376,11 @@ export function restoreAfterUnfinishedTour(): void {
  * back off it rather than leaving a dead /demo entry behind.
  */
 export function startTourInPlace(): void {
+  // A /C/ link's view still on screen ends first, as the tour's first step
+  // would end it a moment later: its ending puts / in place of its own
+  // address (useCoordRoute.ts), and after the push that would be the /demo
+  // entry, leaving the tour running on / (review of #362, 2026-10-15).
+  if (useCoordRoute.getState().label !== null && useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
   try { window.history.pushState({ [PUSHED]: 1 }, '', '/demo') } catch { /* no history here */ }
   useDemo.getState().start()
 }

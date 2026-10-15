@@ -20,7 +20,8 @@ vi.hoisted(() => {
 
 import type { NostrEvent } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
-import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
+import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, startTourInPlace, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
+import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useShards } from '../useShards'
 import { DEMO_DISTRICT, DEMO_SCRIPT } from '../../demo/script'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
@@ -53,7 +54,7 @@ describe('the script', () => {
     for (const s of DEMO_SCRIPT.steps) {
       expect(chapters.has(s.chapter), s.id).toBe(true)
       expect(s.title.length, s.id).toBeGreaterThan(0)
-      for (const text of [s.caption, s.captionNew, s.captionWaiting].filter((t): t is string => !!t)) {
+      for (const text of [s.caption, s.captionNew, s.captionWaiting, s.captionReturning].filter((t): t is string => !!t)) {
         expect(text.length, s.id).toBeGreaterThan(20)
         expect(text.length, s.id).toBeLessThan(360)
         expect(text, s.id).not.toMatch(/—/) // no em dashes
@@ -609,5 +610,21 @@ describe('what the tour puts back (arkinox, 2026-10-15)', () => {
     const variant = 'This is a guided tour of cyberspace. The shape at the center is your avatar, at your current position. Let\'s talk about how you got here.'
     expect(captionFor(welcome, true, true, false)).toBe(variant)
     expect(captionFor(welcome, false, true, true)).toBe(variant)
+  })
+})
+
+describe('starting in place from a /C/ link view (review of #362, 2026-10-15)', () => {
+  it('ends the link view before pushing /demo, so its ending rewrites its own entry and not the tour\'s', () => {
+    const order: string[] = []
+    const stop = startCoordRoute({ pathname: '/C/abcd', search: '', hash: '' }, { replaceState: () => { order.push('replace') } })
+    expect(useCoordRoute.getState().label).not.toBeNull()
+    const g = globalThis as { window?: unknown }
+    const had = g.window
+    g.window = { history: { pushState: () => { order.push('push') }, state: null } }
+    try { startTourInPlace() } finally { g.window = had }
+    expect(order).toEqual(['replace', 'push'])
+    expect(useDemo.getState().active).toBe(true)
+    expect(useCoordRoute.getState().label).toBeNull()
+    stop()
   })
 })

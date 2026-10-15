@@ -97,6 +97,14 @@ interface HyperspaceState {
 // A module flag rather than store state, the publisher/tracker pattern:
 // React's dev double-mount must not start two sync pipelines.
 let started = false
+/** The sync state with `patch` applied, or `prev` itself when nothing in it changes (so no subscriber is told). */
+export function nextSync(prev: HyperspaceSync, patch: Partial<HyperspaceSync>): HyperspaceSync {
+  const keys = Object.keys(patch) as (keyof HyperspaceSync)[]
+  return keys.every((k) => patch[k] === prev[k]) ? prev : { ...prev, ...patch }
+}
+
+/** How often the anchor sync's loaded count reaches the store: it only feeds a progress readout. */
+const LOADED_EVERY_MS = 1000
 
 export const useHyperspace = create<HyperspaceState>((set) => ({
   sync: { status: 'idle', loaded: 0, total: 0, error: null, source: 'relay' },
@@ -119,11 +127,27 @@ export const useHyperspace = create<HyperspaceState>((set) => ({
       set((s) => ({ sync: { ...s.sync, status: 'error', error: 'IndexedDB or WebSocket is unavailable in this environment' } }))
       return
     }
+    // The sync reports progress several times a second while a fresh device
+    // loads about a million anchors, and every report re-rendered each panel
+    // that shows it (2026-10-15). A report that changes nothing is dropped,
+    // and the loaded count reaches the store at most once a second; any other
+    // change (status, source, total) carries the latest count with it.
+    let pendingLoaded: number | null = null
+    let loadedTimer: ReturnType<typeof setTimeout> | null = null
+    const patch = (next: Partial<HyperspaceSync>, extra: Partial<HyperspaceState> = {}): void => set((s) => {
+      const sync = nextSync(s.sync, pendingLoaded !== null ? { loaded: pendingLoaded, ...next } : next)
+      pendingLoaded = null
+      return sync === s.sync && Object.keys(extra).length === 0 ? s : { ...extra, sync }
+    })
     void runAnchorSync({
-      onStatus: (status, error) => set((s) => ({ sync: { ...s.sync, status, error: error ?? null } })),
-      onSource: (source) => set((s) => ({ sync: { ...s.sync, source } })),
-      onLoaded: (loaded) => set((s) => ({ sync: { ...s.sync, loaded } })),
-      onTip: (tip) => set((s) => ({ tipHeight: tip, sync: { ...s.sync, total: tip + 1 } })),
+      onStatus: (status, error) => patch({ status, error: error ?? null }),
+      onSource: (source) => patch({ source }),
+      onLoaded: (loaded) => {
+        pendingLoaded = loaded
+        if (loadedTimer !== null) return
+        loadedTimer = setTimeout(() => { loadedTimer = null; if (pendingLoaded !== null) patch({}) }, LOADED_EVERY_MS)
+      },
+      onTip: (tip) => patch({ total: tip + 1 }, useHyperspace.getState().tipHeight === tip ? {} : { tipHeight: tip }),
       onIndexChanged: () => set((s) => ({ indexVersion: s.indexVersion + 1 })),
     })
   },

@@ -13,7 +13,6 @@
 import { HosakaBanner } from './HosakaOffer'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import QRCode from 'qrcode'
 import { depositSettled, formatClock, formatWait, satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
@@ -89,17 +88,25 @@ export function InvoiceModal(): JSX.Element | null {
   const bolt11 = invoice?.bolt11 ?? null
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const [copied, setCopied] = useState(false)
-  const now = useNow(1000)
+  // The countdown ticks only while there is an invoice to count down: this
+  // modal is always mounted, and an unconditional tick re-rendered it every
+  // second, background tabs included (2026-10-15).
+  const now = useNow(invoice ? 1000 : 0)
 
   // Rendered into a canvas the wallet's camera can read: dark modules on a
   // light field, whatever the HUD's palette says.
   useEffect(() => {
     if (!bolt11 || !canvas.current) return
-    void QRCode.toCanvas(canvas.current, `lightning:${bolt11}`, {
-      errorCorrectionLevel: 'L',
-      margin: 2,
-      width: 264,
-      color: { dark: '#05070d', light: '#f4fbff' },
+    // The QR library loads with the first invoice, not with the app
+    // (2026-10-15): most visits never show one.
+    void import('qrcode').then(({ default: QRCode }) => {
+      if (!canvas.current) return
+      return QRCode.toCanvas(canvas.current, `lightning:${bolt11}`, {
+        errorCorrectionLevel: 'L',
+        margin: 2,
+        width: 264,
+        color: { dark: '#05070d', light: '#f4fbff' },
+      })
     }).catch(() => { /* the raw string below still works */ })
   }, [bolt11])
 

@@ -116,7 +116,8 @@ body {
   letter-spacing: 0.12em;
   color: var(--dim);
 }
-.hud__license a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.hud__license > div + div { margin-top: 4px; }
+.hud__license a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 .hud__license a:hover { color: var(--fg); }
 
 .hud__version {

@@ -20,7 +20,8 @@ vi.hoisted(() => {
 
 import type { NostrEvent } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
-import { PREV_LIVE_KEY, TOUR_KEY_KEY, restoreAfterUnfinishedTour, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
+import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, startTourInPlace, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
+import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useShards } from '../useShards'
 import { DEMO_DISTRICT, DEMO_SCRIPT } from '../../demo/script'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
@@ -28,6 +29,11 @@ import { parseDemoRoute } from '../../lib/demoRoute'
 import { captionFor } from '../../hud/DemoCoach'
 import { lineSource, nextStation, stepLine, type LineWalk } from '../../demo/hyperLine'
 import { TOUR_BLOCKS } from '../../demo/tourBlocks'
+import { useLayers } from '../useLayers'
+import { useChat } from '../useChat'
+import { useAvatars } from '../useAvatars'
+import { avatarDraw } from '../../lib/avatar'
+import { newShard } from 'sno-core/shards'
 import { coordPlace } from '../../lib/coordRoute'
 import { useHyperspace } from '../useHyperspace'
 import { useToast } from '../useToast'
@@ -48,7 +54,7 @@ describe('the script', () => {
     for (const s of DEMO_SCRIPT.steps) {
       expect(chapters.has(s.chapter), s.id).toBe(true)
       expect(s.title.length, s.id).toBeGreaterThan(0)
-      for (const text of [s.caption, s.captionNew, s.captionWaiting].filter((t): t is string => !!t)) {
+      for (const text of [s.caption, s.captionNew, s.captionWaiting, s.captionReturning].filter((t): t is string => !!t)) {
         expect(text.length, s.id).toBeGreaterThan(20)
         expect(text.length, s.id).toBeLessThan(360)
         expect(text, s.id).not.toMatch(/—/) // no em dashes
@@ -409,10 +415,14 @@ describe('the gates (arkinox, 2026-10-15)', () => {
     expect(cs.cursor).toEqual(cs.position)
   })
 
-  it('chain: holds NEXT until a new move is made on the step, and remembers it on the way back', () => {
+  it('chain: for a newcomer, holds NEXT until a new move is made on the step, and remembers it on the way back', () => {
+    // Came in with no hops: the verify step's hop is the first.
+    useCyberspace.setState({ events: [fake('spawn', 1)] })
+    useDemo.getState().start('verify')
     useCyberspace.setState({ events: [fake('spawn', 1), fake('hop', 2)] })
-    useDemo.getState().start('chain')
+    useDemo.getState().goTo(stepIndex('chain'))
     expect(useDemo.getState().done).toBe(false)
+    expect(gateHeld(DEMO_SCRIPT.steps[useDemo.getState().index], false)).toBe(true)
     useDemo.getState().next()
     expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('chain')
     useCyberspace.setState({ events: [fake('spawn', 1), fake('hop', 2), fake('hop', 3)] })
@@ -421,6 +431,21 @@ describe('the gates (arkinox, 2026-10-15)', () => {
     useDemo.getState().back()
     expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('chain')
     expect(useDemo.getState().done).toBe(true)
+  })
+
+  it('chain: an identity that came in with hops of its own may go on at once, and a reload mid-tour keeps that', () => {
+    useCyberspace.setState({ events: [fake('spawn', 1), fake('hop', 2)] })
+    useDemo.getState().start('chain')
+    expect(useDemo.getState().done).toBe(false) // still an invitation to move
+    expect(gateHeld(DEMO_SCRIPT.steps[useDemo.getState().index], false)).toBe(false)
+    useDemo.getState().next()
+    expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('portable')
+    // The reload: the page forgets the tour, the device keeps its answers.
+    useDemo.setState({ active: false })
+    useDemo.getState().start('chain')
+    expect(hadHopsAtStart()).toBe(true)
+    useDemo.getState().next()
+    expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('portable')
   })
 
   it('shows ideaspace on the cube step and puts your own plane back after', () => {
@@ -487,5 +512,119 @@ describe('the menu step (arkinox, 2026-10-15)', () => {
     expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('menu')
     useDemo.getState().next()
     expect(DEMO_SCRIPT.steps[useDemo.getState().index].id).toBe('recap')
+  })
+})
+
+/** Every step's zoom (arkinox, 2026-10-15: 2^0 unless the step exists to show something bigger). */
+const ZOOM: Record<string, number> = {
+  welcome: 0, everything: 84, spawn: 0, identity: 0,
+  event: 0, verify: 0, relays: 0, kinds: 0, chain: 0, portable: 0,
+  gibson: 0, human: 34, cube: 84, planes: 54,
+  cantor: 0, lca: 0, 'no-cheat': 0, walk: 0,
+  'region-keys': 0, district: 8, found: 8, chalk: 0,
+  'key-item': 0, chest: 0, 'item-feed': 0,
+  line: 84, port: 0, landfall: 52, ride: 84,
+  avatars: 0, presence: 0, chat: 0,
+  agents: 0, operator: 0, xor: 0,
+  menu: 0, recap: 0, live: 0,
+}
+
+describe('the zoom (arkinox, 2026-10-15)', () => {
+  it('every step sets its own zoom on entry, as the table says', () => {
+    expect(Object.keys(ZOOM).sort()).toEqual(DEMO_SCRIPT.steps.map((s) => s.id).sort())
+    useDemo.getState().start()
+    for (let i = 0; i < DEMO_SCRIPT.steps.length; i++) {
+      // From somewhere else each time, so nothing carries over.
+      useCyberspace.getState().adjustScale(17 - useCyberspace.getState().scaleExp)
+      useDemo.getState().goTo(i)
+      const id = DEMO_SCRIPT.steps[i].id
+      expect(DEMO_SCRIPT.steps[i].scene.scale, id).toBe(ZOOM[id])
+      expect(useCyberspace.getState().scaleExp, id).toBe(ZOOM[id])
+    }
+  })
+
+  for (const plane of [0, 1] as const) {
+    it(`starts at 2^0 in the plane the identity stands in (${plane ? 'ideaspace' : 'dataspace'}), from another plane and zoom`, () => asExistingIdentity(() => {
+      const cs = useCyberspace.getState()
+      // Before the tour: the head in `plane`, the other plane lined up and shown, zoomed out.
+      useCyberspace.setState({ headPlane: plane, plane: plane === 0 ? 1 : 0, anchorPlane: plane === 0 ? 1 : 0, scaleExp: 30, cursor: { ...cs.position, x: cs.position.x + 9n } })
+      useDemo.getState().start()
+      const now = useCyberspace.getState()
+      expect(now.scaleExp).toBe(0)
+      expect(now.plane).toBe(plane)
+      expect(now.anchorPlane).toBe(plane)
+      expect(now.cursor).toEqual(now.position)
+      expect(now.focus).toBeNull()
+      useDemo.getState().exit()
+      // EXIT puts the zoom back; the scene stays in the identity's own plane.
+      expect(useCyberspace.getState().scaleExp).toBe(30)
+      expect(useCyberspace.getState().anchorPlane).toBe(plane)
+    }))
+  }
+})
+
+describe('what the tour puts back (arkinox, 2026-10-15)', () => {
+  const stepIndex = (id: string) => DEMO_SCRIPT.steps.findIndex((s) => s.id === id)
+  it('EXIT puts back the zoom, the scene layers and the chat dock the tour changed', () => {
+    useLayers.getState().setLayer('boxes', false)
+    useChat.getState().setOpen(false)
+    useCyberspace.getState().adjustScale(20 - useCyberspace.getState().scaleExp)
+    useDemo.getState().start('cantor') // boxes on
+    expect(useLayers.getState().boxes).toBe(true)
+    useDemo.getState().goTo(stepIndex('chat')) // chat open
+    expect(useChat.getState().open).toBe(true)
+    useDemo.getState().exit()
+    expect(useCyberspace.getState().scaleExp).toBe(20)
+    expect(useLayers.getState().boxes).toBe(false)
+    expect(useChat.getState().open).toBe(false)
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull()
+    useLayers.getState().setLayer('boxes', true)
+  })
+
+  it('a custom avatar is never replaced: same shard at every step, drawn as itself at 2^0, and after EXIT', () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const shard = newShard('me')
+    shard.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
+    shard.faces = [[0, 1, 2]]
+    useAvatars.setState({ shards: { ...useAvatars.getState().shards, [me]: shard } })
+    useCyberspace.getState().adjustScale(-useCyberspace.getState().scaleExp)
+    useDemo.getState().start()
+    for (let i = 0; i < DEMO_SCRIPT.steps.length; i++) {
+      useDemo.getState().goTo(i)
+      const id = DEMO_SCRIPT.steps[i].id
+      expect(useAvatars.getState().shards[me], id).toBe(shard)
+      if (ZOOM[id] === 0) expect(avatarDraw(shard, useCyberspace.getState().scaleExp), id).not.toBe('marker')
+    }
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.length - 1)
+    useDemo.getState().exit()
+    expect(useAvatars.getState().shards[me]).toBe(shard)
+    expect(avatarDraw(shard, useCyberspace.getState().scaleExp)).not.toBe('marker')
+    const { [me]: _gone, ...rest } = useAvatars.getState().shards
+    useAvatars.setState({ shards: rest })
+  })
+
+  it('welcomes a new identity with arkinox\'s words, and anyone with a chain or an avatar of their own with the variant', () => {
+    const welcome = DEMO_SCRIPT.steps.find((s) => s.id === 'welcome')!
+    expect(captionFor(welcome, false, true, false)).toBe(welcome.caption)
+    expect(welcome.caption).toMatch(/The red dodecahedron is your avatar/)
+    const variant = 'This is a guided tour of cyberspace. The shape at the center is your avatar, at your current position. Let\'s talk about how you got here.'
+    expect(captionFor(welcome, true, true, false)).toBe(variant)
+    expect(captionFor(welcome, false, true, true)).toBe(variant)
+  })
+})
+
+describe('starting in place from a /C/ link view (review of #362, 2026-10-15)', () => {
+  it('ends the link view before pushing /demo, so its ending rewrites its own entry and not the tour\'s', () => {
+    const order: string[] = []
+    const stop = startCoordRoute({ pathname: '/C/abcd', search: '', hash: '' }, { replaceState: () => { order.push('replace') } })
+    expect(useCoordRoute.getState().label).not.toBeNull()
+    const g = globalThis as { window?: unknown }
+    const had = g.window
+    g.window = { history: { pushState: () => { order.push('push') }, state: null } }
+    try { startTourInPlace() } finally { g.window = had }
+    expect(order).toEqual(['replace', 'push'])
+    expect(useDemo.getState().active).toBe(true)
+    expect(useCoordRoute.getState().label).toBeNull()
+    stop()
   })
 })

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ASK_EMOJI, AskBubble, AskRow, askHidden, TOUR_HREF } from '../AskBubble'
+import { ASK_EMOJI, AskBubble, AskRow, askHidden, onAskClick, TOUR_HREF } from '../AskBubble'
 import { useDemo } from '../../store/useDemo'
 
 const SRC = readFileSync(join(__dirname, '..', 'AskBubble.tsx'), 'utf8')
@@ -69,5 +69,27 @@ describe('AskBubble', () => {
   it('renders nothing while the tour is active', () => {
     useDemo.setState({ active: true })
     expect(render()).toBe('')
+  })
+})
+
+describe('a click on the row (2026-10-15)', () => {
+  const click = (over: Partial<Record<'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'defaultPrevented', number | boolean>> = {}) => {
+    let prevented = false
+    const e = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false, ...over, preventDefault: () => { prevented = true } } as Parameters<typeof onAskClick>[0]
+    onAskClick(e)
+    return prevented
+  }
+  afterEach(() => { if (useDemo.getState().active) useDemo.getState().exit() })
+
+  it('a plain left click starts the tour in place, with no page load', () => {
+    expect(click()).toBe(true)
+    expect(useDemo.getState().active).toBe(true)
+  })
+
+  it('a middle click, a modified click or one already handled is left to the browser (new tab and the like)', () => {
+    for (const over of [{ button: 1 }, { metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { defaultPrevented: true }]) {
+      expect(click(over)).toBe(false)
+      expect(useDemo.getState().active).toBe(false)
+    }
   })
 })

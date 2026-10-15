@@ -93,6 +93,11 @@ export interface DemoStep {
   scene: DemoScene
   /** What the visitor is asked to do; omitted for a step that only shows. */
   wait?: DemoAction
+  /**
+   * Shown instead of `caption` to an identity that is not new: one with a
+   * chain, or with an avatar of its own rather than the default shape.
+   */
+  captionReturning?: string
   /** Shown instead of `caption` while the step's `wait` has not happened. */
   captionWaiting?: string
   /** The one-line instruction shown while waiting. */
@@ -102,6 +107,12 @@ export interface DemoStep {
    * happened; without it, waiting is an invitation and NEXT reads SKIP.
    */
   gate?: boolean
+  /**
+   * The gate is for newcomers only: an identity that came into the tour
+   * with hops of its own on its chain (TourSession.hadHops) may go on at
+   * once, and the wait is only an invitation for it (arkinox, 2026-10-15).
+   */
+  gateUnlessHadHops?: boolean
   /**
    * Where to put the cursor on entering the step, in gibsons from where you
    * stand along the pad's own up, right and forward (into the screen): as a

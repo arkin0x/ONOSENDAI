@@ -9118,8 +9118,6 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 }
 .demo__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
 .demo__head, .demo__bar-track, .demo__wait, .demo__foot { flex: 0 0 auto; }
-.demo__mode { color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-size: 9px; letter-spacing: 0.12em; }
-.demo__mode.is-live { color: #ff5470; border-color: #ff5470; }
 /* A step's highlight (DemoScene.highlight): a ring pulsing out of the control. */
 .demo-pulse { animation: demo-pulse 1.4s ease-out infinite; }
 @keyframes demo-pulse {
@@ -9132,8 +9130,10 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
 .demo--min { flex-direction: row; align-items: center; padding: 6px 8px; gap: 6px; overflow: hidden; }
 .demo__head { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.08em; }
 .demo__tag { color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: 0.12em; font-size: 9px; }
-.demo__chapter { color: var(--accent); text-transform: uppercase; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.demo__progress { color: var(--dim); font-variant-numeric: tabular-nums; }
+.demo__chapter { color: var(--accent); text-transform: uppercase; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+.demo__titlerow { display: flex; align-items: flex-start; gap: 10px; }
+.demo__titlerow .demo__title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.demo__progress { flex: 0 0 auto; color: var(--dim); font-size: 10px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; white-space: nowrap; padding-top: 3px; }
 .demo__icon { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 5px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
 .demo__icon:disabled { opacity: 0.35; cursor: default; }
 .demo__bar-track { height: 2px; background: rgba(0, 229, 255, 0.12); border-radius: 1px; overflow: hidden; }

@@ -5,16 +5,18 @@
  * menu says it first: a small face and a speech bubble that cycles through
  * the things people say, each phrase decoding out of glyph noise the way a
  * found key's chip does, then holding, then giving way to the next. The
- * whole row is a link to the /demo guided tour, which answers it, in the same
- * tab: the tour starts from the address on page load (App.tsx). The row is
+ * whole row is a link to the /demo guided tour, which answers it. A plain
+ * click starts the tour in place, with no page load (startTourInPlace); a
+ * middle click, a modified click or "open in new tab" follows the real
+ * href, and the tour starts from the address on that page's load. The row is
  * gone while the tour is on, so it never invites you into the tour you are
  * already taking. Under reduced motion the words simply change.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { parseDemoRoute } from '../lib/demoRoute'
-import { useDemo } from '../store/useDemo'
+import { startTourInPlace, useDemo } from '../store/useDemo'
 
 /** The one asking. */
 export const ASK_EMOJI = '🤔'
@@ -35,8 +37,27 @@ export function askHidden(touring: boolean, pathname: string): boolean {
 
 export function AskBubble(): JSX.Element | null {
   const touring = useDemo((s) => s.active)
+  // Read again when the address moves under it: EXIT of a tour started in
+  // place steps back off /demo with history.back(), which lands after the
+  // render that saw the tour end, so the row stayed hidden on / until
+  // something else redrew the menu (review of #362, 2026-10-15).
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    window.addEventListener('popstate', redraw)
+    return () => window.removeEventListener('popstate', redraw)
+  }, [])
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
   return askHidden(touring, pathname) ? null : <AskRow />
+}
+
+/**
+ * A plain left click starts the tour where you are; anything else (a
+ * modifier key, another button, a click already handled) is the browser's.
+ */
+export function onAskClick(e: Pick<MouseEvent, 'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'defaultPrevented' | 'preventDefault'>): void {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+  e.preventDefault()
+  startTourInPlace()
 }
 
 /** The face and the cycling bubble, as one link to the tour. */
@@ -66,7 +87,7 @@ export function AskRow(): JSX.Element {
   }, [index])
 
   return (
-    <a className="ask" href={TOUR_HREF} title="A guided tour of what cyberspace is and what you are looking at">
+    <a className="ask" href={TOUR_HREF} onClick={onAskClick} title="A guided tour of what cyberspace is and what you are looking at">
       <span className="ask__emoji" aria-hidden="true">{ASK_EMOJI}</span>
       <span className="ask__bubble">{shown}</span>
     </a>

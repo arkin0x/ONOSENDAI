@@ -1139,6 +1139,27 @@ function loadOrGenerateKey(): Uint8Array {
 let mintedOnLoad = false
 
 /**
+ * The pubkey of the last key this app generated on this device (a new
+ * visitor's key, or USE NEW KEY), never an imported nsec, ncryptsec,
+ * extension or bunker. The /demo tour reads it: a key the app made, with no
+ * chain yet, is the tour's to SPAWN and to leave LOCAL (store/useDemo.ts).
+ * Keys generated before this marker existed have none.
+ */
+export const MINTED_KEY = 'onosendai:mintedKey'
+
+function markMinted(pubkey: string): void {
+  try { localStorage.setItem(MINTED_KEY, pubkey) } catch { /* private mode */ }
+}
+
+/** Whether `pubkey` is the key this app last generated on this device; null when no marker exists. */
+export function appMinted(pubkey: string): boolean | null {
+  try {
+    const m = localStorage.getItem(MINTED_KEY)
+    return m === null ? null : m === pubkey
+  } catch { return null }
+}
+
+/**
  * Signatures already checked this session, as `id:sig`. A Schnorr check
  * costs about 2 ms on the main thread, and the same chain is read from
  * storage more than once in a session (at boot by the signer pick and again
@@ -1758,6 +1779,7 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
 }
 
 const pubkeyHex = currentSigner.pubkey
+if (mintedOnLoad) markMinted(pubkeyHex)
 
 /**
  * The pubkey this page load generated, or null when the key was already on
@@ -4295,7 +4317,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       await login(() => signerFromPref(pref), `Could not reconnect ${pref.kind}: `)
     }
   },
-  useNewKey: async () => { await switchTo(randomSigner()) },
+  useNewKey: async () => {
+    const signer = randomSigner()
+    markMinted(signer.pubkey)
+    await switchTo(signer)
+  },
   exportKey: (password, again) => exportNcryptsec(currentSigner.secretKey, password, again),
   decryptSealed: async (senderPubkey, payload) => {
     const signer = currentSigner

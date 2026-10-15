@@ -41,8 +41,8 @@ vi.mock('../../lib/relay', async (orig) => {
 vi.mock('../../lib/chains', async (orig) => ({ ...(await orig<typeof import('../../lib/chains')>()), confirmChainEvents: vi.fn(async () => []) }))
 
 import type { NostrEvent } from 'nostr-tools'
-import { useCyberspace } from '../useCyberspace'
-import { PREV_LIVE_KEY, TOUR_KEY_KEY, isTourKey, useDemo } from '../useDemo'
+import { MINTED_KEY, useCyberspace } from '../useCyberspace'
+import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, isTourKey, startTourInPlace, tourKeyNeedsSpawn, useDemo } from '../useDemo'
 import { startPublisher } from '../../lib/publisher'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
@@ -62,6 +62,7 @@ beforeEach(async () => {
   useCyberspace.setState({ events: [], prevEventId: '', genesisId: '', published: {}, held: false, chainConflict: null, selfCheck: { pubkey: pubkey(), status: 'none' } })
   localStorage.removeItem(PREV_LIVE_KEY)
   localStorage.removeItem(TOUR_KEY_KEY)
+  localStorage.removeItem(SESSION_KEY)
   startPublisher()
   sent.length = 0
 })
@@ -127,5 +128,88 @@ describe('GO LIVE publishes through the gate, never past it', () => {
     expect(useCyberspace.getState().publishRequest).toBe(before)
     await settle()
     expect(sent).toEqual([])
+  })
+})
+
+describe('which keys are the tour\'s (arkinox\'s ruling, 2026-10-15)', () => {
+  const OTHER = 'cd'.repeat(32)
+  const as = (pk: string): void => {
+    const id = useCyberspace.getState().identity
+    useCyberspace.setState({ identity: { ...id, pubkey: pk } })
+  }
+  let mine = ''
+  beforeEach(() => { mine = pubkey(); localStorage.setItem(MINTED_KEY, mine) })
+  afterEach(() => { as(mine); localStorage.setItem(MINTED_KEY, mine) })
+
+  /** FINISH without GO LIVE, then an ordinary hop: what is sent, and the switch left behind. */
+  async function finishThenHop(): Promise<boolean> {
+    useDemo.getState().exit()
+    const live = useCyberspace.getState().live
+    hop()
+    await settle()
+    return live
+  }
+
+  it('a key minted on / and a tour started in place: SPAWN offered, LOCAL after FINISH, nothing sent', async () => {
+    useCyberspace.getState().setLive(true) // a new visitor's default
+    startTourInPlace()
+    expect(tourKeyNeedsSpawn()).toBe(true)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('a key this app minted on an earlier visit, still with no chain: the tour\'s too', async () => {
+    as(OTHER)
+    localStorage.setItem(MINTED_KEY, OTHER)
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start()
+    expect(tourKeyNeedsSpawn()).toBe(true)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('an imported nsec with no chain is not the tour\'s: no SPAWN, its own switch back (LOCAL here, so nothing sent)', async () => {
+    as(OTHER) // the marker names the key this app minted, not this one
+    useDemo.getState().start()
+    expect(isTourKey()).toBe(false)
+    expect(tourKeyNeedsSpawn()).toBe(false)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('an imported key that was LIVE gets LIVE back: its own switch, the existing rule', () => {
+    as(OTHER)
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start()
+    useDemo.getState().exit()
+    expect(useCyberspace.getState().live).toBe(true)
+  })
+
+  it('a minted key that already has a chain is not the tour\'s: no SPAWN, its own switch back (LOCAL here, so nothing sent)', async () => {
+    hop() // a chain before the tour
+    useDemo.getState().start()
+    expect(isTourKey()).toBe(false)
+    expect(tourKeyNeedsSpawn()).toBe(false)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('a key made on this page load is the tour\'s even when the marker names another (two tabs on a first visit, review of #362)', async () => {
+    localStorage.setItem(MINTED_KEY, OTHER) // the other tab wrote last
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start() // this test run's own key was made on its load
+    expect(isTourKey()).toBe(true)
+    expect(await finishThenHop()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('a key from before the marker existed keeps the old rule: the tour\'s only if this page load made it', () => {
+    localStorage.removeItem(MINTED_KEY)
+    useDemo.getState().start() // this test run's own key was made on its load
+    expect(isTourKey()).toBe(true)
+    useDemo.getState().exit()
+    as(OTHER)
+    useDemo.getState().start()
+    expect(isTourKey()).toBe(false)
   })
 })

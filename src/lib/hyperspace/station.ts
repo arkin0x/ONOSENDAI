@@ -183,7 +183,7 @@ export function findStation(index: StopIndex, coord: bigint, maxHeight: number):
  * re-derivation as findStation; the index key carries no plane, so stops of
  * the other plane are skipped while the cube widens.
  */
-export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1): StationResult | null {
+export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1, exclude?: bigint): StationResult | null {
   if (index.permCount === 0) return null
   const key = bigToBytes32(coord >> 1n)
   const p = lowerBound(index, key)
@@ -201,7 +201,11 @@ export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1
     for (let i = start; i < end; i++) {
       const stop = stopAt(index, index.perm[i])
       if ((stop.kind === 'port' ? 1 : 0) !== plane) continue
-      const exact = maxAxisLca(coord, stopCoordExact(stop))
+      const at = stopCoordExact(stop)
+      // The place being looked at may be a stop itself (a port view); the
+      // nearest is then its neighbour, never itself at distance 0.
+      if (exclude !== undefined && at === exclude) continue
+      const exact = maxAxisLca(coord, at)
       if (best === null || exact < best.distance || (exact === best.distance && stop.height < best.stop.height)) {
         best = { stop, distance: exact }
       }
@@ -358,4 +362,16 @@ export function ballCoverageRuns(
     }
   }
   return mergeRuns(runs)
+}
+
+/**
+ * The sorted-view run of every stop inside the aligned cube of `height`
+ * that contains a position: one exact prefix range, both planes (the key
+ * carries no plane bit), found by two binary searches. The cover for the
+ * port cube of interest (interest.ts portCube), and exact rather than a
+ * superset: a row is in the run if and only if its key is in the cube.
+ */
+export function cubeRun(index: StopIndex, x: bigint, y: bigint, z: bigint, height: number): [number, number] {
+  if (index.permCount === 0) return [0, 0]
+  return prefixRange(index, bigToBytes32(xyzToCoord(x, y, z, 0) >> 1n), Math.max(0, Math.min(85, height)))
 }

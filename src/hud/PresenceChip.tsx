@@ -17,6 +17,7 @@ import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 import { formatDistance } from 'sno-core/scale'
 import type { Position } from '../lib/space'
+import type { Plane } from 'cyberspace-core'
 import { useEscape } from '../hooks/useEscape'
 
 function ageLabel(at: number, now: number): string {
@@ -45,9 +46,34 @@ function Row({ person, now }: { person: Person; now: number }): JSX.Element {
   )
 }
 
-/** Whether the view is somewhere other than your own sector: spectating someone, or the cursor in another sector than your position. */
-export function awayFromOwnSector(s: { spectate: unknown; cursor: Position; position: Position }): boolean {
-  return s.spectate !== null || sectorKey(s.cursor) !== sectorKey(s.position)
+/** What decides whether the place on screen is your own sector. */
+export interface SectorView {
+  spectate: unknown
+  /** Where you stand, and in which plane. */
+  position: Position
+  headPlane: Plane
+  /** The scene's origin: what every view (VIEW, /C/, a hyperspace stop, an item, history, a pin) moves. */
+  anchor: Position
+  anchorPlane: Plane
+  /** The cursor and the plane it is lined up in. */
+  cursor: Position
+  plane: Plane
+}
+
+/**
+ * Whether the place on screen is somewhere other than your own sector (one
+ * rule for every way of looking elsewhere, arkinox, 2026-10-15): spectating
+ * someone; the scene anchored in another sector or plane, which is what VIEW,
+ * a /C/ link, a hyperspace stop, a focused item, a pin and history all do;
+ * or the cursor lined up in another sector or plane. A hyperspace stop view
+ * moves the anchor and leaves the cursor at your head, which is how the chip
+ * stayed up over a port in ideaspace.
+ */
+export function awayFromOwnSector(s: SectorView): boolean {
+  if (s.spectate !== null) return true
+  const home = sectorKey(s.position)
+  if (s.anchorPlane !== s.headPlane || sectorKey(s.anchor) !== home) return true
+  return s.plane !== s.headPlane || sectorKey(s.cursor) !== home
 }
 
 /** How long the chip stays lit after someone arrives. */

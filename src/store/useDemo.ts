@@ -161,6 +161,32 @@ export function spawnPlace(pubkey: string): { x: bigint; y: bigint; z: bigint; p
   return coordToXyz(hexToCoord(pubkey))
 }
 
+/**
+ * The publishing switch from before the tour, kept on the device while the
+ * tour runs: the tour's LOCAL is saved like any switch change, so a reload
+ * mid-tour (or a closed tab) would otherwise forget that the visitor was
+ * LIVE and leave them LOCAL for good (rehearsal, 2026-10-15).
+ */
+export const PREV_LIVE_KEY = 'onosendai:demo:prevLive'
+
+function readPrevLive(): boolean | null {
+  try { const v = localStorage.getItem(PREV_LIVE_KEY); return v === null ? null : v === '1' } catch { return null }
+}
+function writePrevLive(v: boolean | null): void {
+  try { if (v === null) localStorage.removeItem(PREV_LIVE_KEY); else localStorage.setItem(PREV_LIVE_KEY, v ? '1' : '0') } catch { /* private mode */ }
+}
+
+/**
+ * Outside /demo: a tour left without EXIT (the tab closed, the address
+ * changed) puts the switch back as the visitor had it, once.
+ */
+export function restoreAfterUnfinishedTour(): void {
+  const prev = readPrevLive()
+  if (prev === null) return
+  writePrevLive(null)
+  if (useCyberspace.getState().live !== prev) useCyberspace.getState().setLive(prev)
+}
+
 function stepAt(state: { script: DemoScript }, index: number): DemoStep | undefined {
   return state.script.steps[index]
 }
@@ -186,8 +212,13 @@ export const useDemo = create<DemoState>((set, get) => {
 
     start: (stepId) => {
       const cs = useCyberspace.getState()
-      // Remembered once: starting again while running keeps the first answer.
-      if (!get().active) set({ prevLive: cs.live })
+      // Remembered once: starting again while running keeps the first answer,
+      // and so does a reload mid-tour (PREV_LIVE_KEY).
+      if (!get().active) {
+        const prev = readPrevLive() ?? cs.live
+        writePrevLive(prev)
+        set({ prevLive: prev })
+      }
       if (cs.live) cs.setLive(false)
       const at = stepId ? get().script.steps.findIndex((s) => s.id === stepId) : 0
       set({ active: true, minimized: false })
@@ -222,12 +253,13 @@ export const useDemo = create<DemoState>((set, get) => {
       homeCursor()
       dismissBlockToast()
       if (useCyberspace.getState().live !== get().prevLive) useCyberspace.getState().setLive(get().prevLive)
+      writePrevLive(null)
       set({ active: false, minimized: false })
       try { if (/^\/demo(\/|$)/i.test(window.location.pathname)) window.history.replaceState(null, '', '/') } catch { /* no history here */ }
     },
 
     setMinimized: (minimized) => set({ minimized }),
 
-    wentLive: () => set({ prevLive: true }),
+    wentLive: () => { writePrevLive(true); set({ prevLive: true }) },
   }
 })

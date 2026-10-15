@@ -207,7 +207,7 @@ export function DemoCoach(): JSX.Element | null {
   // The instrument stack starts below the panel (styles.css .instruments).
   useLayoutEffect(() => {
     const root = document.documentElement
-    if (!active) { root.style.removeProperty('--demo-coach-h'); return }
+    if (!active) { root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c'); return }
     const el = ref.current
     if (!el || typeof ResizeObserver === 'undefined') return
     // Only when the two share columns: on a desktop the coach sits top centre
@@ -215,16 +215,22 @@ export function DemoCoach(): JSX.Element | null {
     // only made it jump on every step (rehearsal, 2026-10-15).
     const put = (): void => {
       const coach = el.getBoundingClientRect()
-      const stack = document.querySelector('.instruments')?.getBoundingClientRect()
-      const shares = !stack || stack.width === 0 || (coach.left < stack.right && stack.left < coach.right)
-      if (shares) root.style.setProperty('--demo-coach-h', `${Math.ceil(coach.height)}px`)
-      else root.style.removeProperty('--demo-coach-h')
+      const below = (sel: string, prop: string): void => {
+        const r = document.querySelector(sel)?.getBoundingClientRect()
+        const shares = !r || r.width === 0 || (coach.left < r.right && r.left < coach.right)
+        if (shares) root.style.setProperty(prop, `${Math.ceil(coach.height)}px`)
+        else root.style.removeProperty(prop)
+      }
+      below('.instruments', '--demo-coach-h')
+      // The compass too: on a phone the coach spans the screen and covered
+      // the view controls for the whole tour (rehearsal, 2026-10-15).
+      below('.compass-3d', '--demo-coach-c')
     }
     put()
     const ro = new ResizeObserver(put)
     ro.observe(el)
     window.addEventListener('resize', put)
-    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h') }
+    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c') }
   }, [active, minimized])
 
   if (!active || !step) return null

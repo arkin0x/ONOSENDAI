@@ -185,10 +185,13 @@ async function doAction(step) {
   if (step.wait === 'hop') {
     // Line up one cell to the right, then COMMIT from the pad.
     await page.keyboard.press('KeyD')
-    await sleep(600)
-    const commit = page.locator('.touchops__commit').first()
-    if (await commit.count()) await commit.click({ timeout: 5000 }).catch(() => {})
-    return waitDone(180_000)
+    // Click what a visitor sees: the slot reads COMMIT once the cursor is lined up.
+    const commit = page.locator('.touchops__commit', { hasText: 'COMMIT' }).first()
+    const ready = await commit.waitFor({ timeout: 20_000 }).then(() => true, () => false)
+    if (ready) await commit.click({ timeout: 10_000 }).catch(() => {})
+    if (await waitDone(90_000)) return true
+    await page.keyboard.press('Space') // the keyboard's COMMIT
+    return waitDone(90_000)
   }
   if (step.wait === 'walk') {
     for (let i = 0; i < 3; i++) {

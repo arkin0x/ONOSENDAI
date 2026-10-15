@@ -24,7 +24,7 @@ import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { parseDemoRoute } from './lib/demoRoute'
-import { useDemo } from './store/useDemo'
+import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
@@ -99,6 +99,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const step = parseDemoRoute(window.location.pathname)
     if (step !== null) useDemo.getState().start(step || undefined)
+    else restoreAfterUnfinishedTour()
   }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a

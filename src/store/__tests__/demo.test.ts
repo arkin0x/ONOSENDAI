@@ -20,7 +20,7 @@ vi.hoisted(() => {
 
 import type { NostrEvent } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
-import { useDemo, watchAction } from '../useDemo'
+import { PREV_LIVE_KEY, restoreAfterUnfinishedTour, useDemo, watchAction } from '../useDemo'
 import { useShards } from '../useShards'
 import { DEMO_DISTRICT, DEMO_SCRIPT } from '../../demo/script'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
@@ -32,6 +32,7 @@ import { useToast } from '../useToast'
 
 beforeEach(() => {
   if (useDemo.getState().active) useDemo.getState().exit()
+  localStorage.removeItem(PREV_LIVE_KEY)
   useCyberspace.getState().clearFocus()
   useCyberspace.getState().setLive(false)
 })
@@ -166,6 +167,32 @@ describe('leaving a step cleanly (rehearsal, 2026-10-15)', () => {
     expect(useCyberspace.getState().walking).toBe(true)
     useDemo.getState().next() // region-keys: your own position, out of first person
     expect(useCyberspace.getState().walking).toBe(false)
+  })
+})
+
+describe('LIVE survives a reload mid-tour (rehearsal, 2026-10-15)', () => {
+  it('a reload during the tour still puts LIVE back on exit', () => {
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start()
+    expect(useCyberspace.getState().live).toBe(false)
+    // The reload: the page forgets the tour, the device keeps LOCAL and the key.
+    useDemo.setState({ active: false, prevLive: false })
+    useDemo.getState().start('spawn')
+    useDemo.getState().exit()
+    expect(useCyberspace.getState().live).toBe(true)
+    expect(localStorage.getItem(PREV_LIVE_KEY)).toBeNull()
+  })
+
+  it('a tour left without EXIT puts LIVE back on the next ordinary visit, once', () => {
+    useCyberspace.getState().setLive(true)
+    useDemo.getState().start()
+    useDemo.setState({ active: false }) // the tab closed mid-tour
+    expect(useCyberspace.getState().live).toBe(false)
+    restoreAfterUnfinishedTour()
+    expect(useCyberspace.getState().live).toBe(true)
+    useCyberspace.getState().setLive(false)
+    restoreAfterUnfinishedTour() // nothing left to restore
+    expect(useCyberspace.getState().live).toBe(false)
   })
 })
 

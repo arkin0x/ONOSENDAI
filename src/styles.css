@@ -9066,6 +9066,7 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
    center, above the instrument stack (102) and below modals (300); the
    stack moves down by the panel's height while the tour runs. */
 :root[style*="--demo-coach-h"] .instruments { top: calc(20px + var(--demo-coach-h)); }
+:root[style*="--demo-coach-c"] .compass-3d { top: calc(20px + var(--demo-coach-c)); }
 .demo {
   position: fixed;
   top: calc(8px + env(safe-area-inset-top, 0px));

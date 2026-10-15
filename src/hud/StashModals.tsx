@@ -169,7 +169,7 @@ export function StashModals(): JSX.Element | null {
       <Shell title="Shard Feed" onClose={close}>
         <FeedList actions={(o) => <FeedActions object={o} />} />
         <Explanation>
-          Everyone&apos;s published objects, newest first. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited.
+          Everyone&apos;s published objects, newest first. DEPLOY AN INSTANCE puts one at the build cursor as a copy that credits its author (LIVE LINK on the deploy bar follows their edits instead). REMIX copies it into your workshop as your own, still credited. A tile with a price is an object for sale on Fanfares: its shape stays sealed until someone buys it, so it cannot be deployed or remixed here, and BUY ON FANFARES opens its page there in a new tab.
         </Explanation>
       </Shell>
     )

@@ -9,17 +9,23 @@
  * relays (yours plus the general relays objects are published to) and how to
  * subscribe to one (lib/relay.ts, with NIP-42 auth).
  *
+ * Objects for sale on Fanfares (a 33331 sealed with a key service, NIP-FF-1)
+ * come back as `listings`, apart from `objects`: they have no shape until
+ * bought, so nothing that draws or places objects is handed one.
+ *
  * One feed for the app, read when it is first shown and kept while the app
  * runs, so moving between the PLACE OBJECT picker and the SHARD FEED window
  * does not read the relays again. REFRESH starts it over.
  */
 
 import { create } from 'zustand'
-import { FEED_RELAYS, createFeed, type Feed, type FeedObject } from 'sno-core/feed'
+import { FEED_RELAYS, createFeed, type Feed, type FeedListing, type FeedObject } from 'sno-core/feed'
 import { authForRead, connectRelay, relaySet, subscribeOne } from '../lib/relay'
 
 export interface FeedStore {
   objects: FeedObject[]
+  /** Objects for sale on Fanfares: a title, a price and a picture, no shape. */
+  listings: FeedListing[]
   loading: boolean
   /** Every relay has been read to its end. */
   exhausted: boolean
@@ -42,6 +48,7 @@ let feed: Feed | null = null
 
 export const useFeed = create<FeedStore>((set, get) => ({
   objects: [],
+  listings: [],
   loading: false,
   exhausted: false,
   started: false,
@@ -55,7 +62,7 @@ export const useFeed = create<FeedStore>((set, get) => ({
       subscribe: (url, filter, handlers) => subscribeOne(url, { ...filter }, handlers),
       // The connect bounded on its own, the auth on its own allowance.
       read: { connect: connectRelay, auth: authForRead },
-      onChange: (s) => set({ objects: s.objects, loading: s.loading, exhausted: s.exhausted }),
+      onChange: (s) => set({ objects: s.objects, listings: s.listings, loading: s.loading, exhausted: s.exhausted }),
     })
     void feed.more()
   },
@@ -65,7 +72,7 @@ export const useFeed = create<FeedStore>((set, get) => ({
   refresh: () => {
     feed?.close()
     feed = null
-    set({ objects: [], loading: false, exhausted: false, started: false })
+    set({ objects: [], listings: [], loading: false, exhausted: false, started: false })
     get().start()
   },
 }))

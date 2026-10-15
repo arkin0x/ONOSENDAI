@@ -26,7 +26,12 @@ vi.mock('../../lib/relay', () => ({
   subscribeOne: vi.fn((url: string, filter: Record<string, unknown>, h: { onevent: (e: unknown) => void; oneose: () => void }) => {
     ;(asked[url] ??= []).push(filter)
     setTimeout(() => {
-      if (url === 'wss://mine.test') h.onevent({ id: '1'.repeat(64), pubkey: PK, created_at: 10, kind: 33331, tags: [['d', 'lamp']], content: payload('Lamp'), sig: '' })
+      if (url === 'wss://mine.test' && (filter.kinds as number[]).includes(33331)) {
+        h.onevent({ id: '1'.repeat(64), pubkey: PK, created_at: 10, kind: 33331, tags: [['d', 'lamp']], content: payload('Lamp'), sig: '' })
+        // An object for sale on Fanfares, and one hidden at a place: the first is a listing, the second is not shown.
+        h.onevent(LISTING)
+        h.onevent({ ...LISTING, id: '2'.repeat(64), tags: [['d', 'hid'], ['encrypted', 'aes-256-gcm', 'x', 'cyberspace:region']] })
+      }
       h.oneose()
     }, 0)
     return { close: () => {} }
@@ -36,6 +41,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { FEED_RELAYS } from 'sno-core/feed'
+import { LISTING } from '../../lib/__tests__/listingFixture'
 import { newShard } from 'sno-core/shards'
 import { feedRelays, useFeed } from '../useFeed'
 import { MAX_THUMBS, useThumbs } from '../useThumbs'
@@ -53,6 +59,9 @@ describe('the Shard Feed store', () => {
     useFeed.getState().start()
     await vi.waitFor(() => expect(useFeed.getState().objects.map((o) => o.shard.name)).toEqual(['Lamp']))
     await vi.waitFor(() => expect(useFeed.getState().loading).toBe(false))
+    // The listing comes back as a listing, never as an object; the hidden one not at all.
+    expect(useFeed.getState().objects).toHaveLength(1)
+    expect(useFeed.getState().listings.map((l) => [l.title, l.priceSats])).toEqual([['Brass Orrery', 2100]])
     const filters = Object.values(asked).flat()
     expect(filters.length).toBeGreaterThan(0)
     const pages = filters.filter((f) => (f.kinds as number[]).includes(33331))

@@ -130,11 +130,13 @@ export const usePublished = create<PublishedState>((set, get) => ({
     const rec = get().ledger[shard.id]
     // Only the author's deletion deletes (NIP-09): an object published under
     // another key is not this key's to take down.
-    if (rec && rec.pubkey !== me) { say('This object was published under another key; only that key can retract it.'); return false }
+    // Never published from here: there is nothing of ours to take down.
+    if (!rec) { say('Nothing is known to be published for this object yet, so there is nothing to retract. Open the Shard Feed and try again.'); return false }
+    if (rec.pubkey !== me) { say('This object was published under another key; only that key can retract it.'); return false }
     const relays = relaySet()
     set({ retracting: true })
     try {
-      const del = await cs.signEvent(retractionTemplate(me, shard.id, rec?.id, nextAt(shard.id, rec?.at ?? 0), 'object retracted'))
+      const del = await cs.signEvent(retractionTemplate(me, shard.id, rec.id, nextAt(shard.id, rec.at ?? 0), 'object retracted'))
       const result = await publishMany(relays, del)
       if (!result.ok) {
         say(`No relay took the retraction of "${shard.name}": ${result.reason}`)

@@ -503,7 +503,11 @@ export function Workshop(): JSX.Element | null {
   const ledger = usePublished((s) => s.ledger)
   const publishing = usePublished((s) => s.publishing)
   const retracting = usePublished((s) => s.retracting)
-  const [retractAsk, setRetractAsk] = useState(false)
+  // The object RETRACT was asked about, by id, never a bare yes: the
+  // confirmation shows only while that same object is on the bench in the
+  // open menu, and is dropped the moment either changes, so it can never
+  // come back over a different object (review of snocrash #36, 2026-10-15).
+  const [retractAsk, setRetractAsk] = useState<string | null>(null)
   const pubState = useMemo(
     () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
     [shard, ledger, me],
@@ -537,6 +541,8 @@ export function Workshop(): JSX.Element | null {
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
+  // A RETRACT question belongs to one object in one open menu.
+  useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
@@ -837,21 +843,21 @@ export function Workshop(): JSX.Element | null {
                 <button
                   className="workshop__btn workshop__btn--danger"
                   disabled={publishing || retracting}
-                  onClick={() => setRetractAsk(true)}
+                  onClick={() => setRetractAsk(shard.id)}
                   title="Ask your relays to drop the published object (NIP-09). Copies others made stay theirs. The shard stays here."
                 >{retracting ? 'RETRACTING' : 'RETRACT'}</button>
               )}
             </div>
             <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
           </div>
-          {retractAsk && (
+          {retractAsk === shard.id && (
             <ConfirmModal
               title={`Retract "${shard.name}"?`}
               body={<>A deletion goes to your relays, naming the object&apos;s address (NIP-09). Relays that honor it drop the object and the Shard Feed stops listing it; a relay that does not may keep handing it out. Copies and LIVE LINKs others placed stay theirs. The shard stays in your workshop, and PUBLISH puts it back.</>}
               confirmLabel="RETRACT"
               busy={retracting}
-              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(false)) }}
-              onCancel={() => setRetractAsk(false)}
+              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(null)) }}
+              onCancel={() => setRetractAsk(null)}
             />
           )}
           <div className="ws__panel-title">SHARDS ({shards.length})</div>

@@ -24,6 +24,7 @@ import { GitFork, Pencil, Sparkles } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { useWorkshop } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
+import { ownObjectCredit } from '../lib/published'
 import { useCyberspace } from '../store/useCyberspace'
 
 export const BAG_EXPLAINER =
@@ -110,8 +111,11 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
       // Your own object comes back under its `d`, as snocrash's adopt brings
       // one back, so PUBLISH edits it in place rather than publishing a second
       // copy beside it. The model already here is the one to edit: the relay's
-      // copy may be older than it. No credit: you do not credit yourself.
-      id = ws.shards.some((s) => s.id === object.d) ? object.d : ws.importShard(object.shard, undefined, object.d)
+      // copy may be older than it. A remix of yours keeps the credit it was
+      // published with, so republishing it does not drop the original author
+      // (review of snocrash #35, 2026-10-15); a credit to yourself is not one.
+      const credit = ownObjectCredit(object.event.tags, me)
+      id = ws.shards.some((s) => s.id === object.d) ? object.d : ws.importShard(object.shard, credit, object.d)
       usePublished.getState().learn([object.event])
     } else {
       id = ws.importShard(object.shard, { address: object.address, relay: object.seen?.[0] })

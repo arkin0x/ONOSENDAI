@@ -100,6 +100,16 @@ export default function App(): JSX.Element {
     const step = parseDemoRoute(window.location.pathname)
     if (step !== null) useDemo.getState().start(step || undefined)
     else restoreAfterUnfinishedTour()
+    // Back off /demo while the tour runs leaves it, as EXIT does; Forward
+    // onto a /demo entry starts it again, as loading that address would.
+    const onPop = (): void => {
+      const at = parseDemoRoute(window.location.pathname)
+      const d = useDemo.getState()
+      if (at === null && d.active) d.exit()
+      else if (at !== null && !d.active) d.start(at || undefined)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
   }, [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
@@ -179,6 +189,10 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   const touring = useDemo((s) => s.active)
+  // The question bubble lives in the menu; on a phone the menu covers the
+  // scene, so starting the tour from it closes it. Only on the start:
+  // opening the menu during the tour (its menu step) leaves it open.
+  useEffect(() => { if (touring && isMobile) setPanelsOpen(false) }, [touring, isMobile])
   useEffect(() => { if ((driving || stationView || viewingSecret || viewing || building) && isMobile) setPanelsOpen(false) }, [driving, stationView, viewingSecret, viewing, building, isMobile])
   // A second VIEW (or RECENT) into a view already driven, as in BUILD mode
   // where VIEW is how the build cursor jumps: none of the flags above change,

@@ -21,8 +21,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, Volume2, X } from 'lucide-react'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
-import { tourKeyNeedsSpawn, useDemo } from '../store/useDemo'
+import { gateHeld, tourKeyNeedsSpawn, useDemo } from '../store/useDemo'
 import { useCyberspace } from '../store/useCyberspace'
+import { useAvatars } from '../store/useAvatars'
 import { currentRelays } from '../store/useRelays'
 import { normalizeURL } from 'nostr-tools/utils'
 import { chainHolders } from '../lib/chainHolders'
@@ -44,8 +45,9 @@ const KINDS: Array<[number, string]> = [
 ]
 
 /** The caption a step shows to this identity, while its action waits (`done` false) or after. */
-export function captionFor(step: DemoStep, hasChain: boolean, done = true): string {
+export function captionFor(step: DemoStep, hasChain: boolean, done = true, ownAvatar = false): string {
   if (!done && step.captionWaiting) return step.captionWaiting
+  if (step.captionReturning && (hasChain || ownAvatar)) return step.captionReturning
   return !hasChain && step.captionNew ? step.captionNew : step.caption
 }
 
@@ -185,7 +187,8 @@ export function DemoCoach(): JSX.Element | null {
   const minimized = useDemo((s) => s.minimized)
   const script = useDemo((s) => s.script)
   const hasChain = useCyberspace((s) => s.events.length > 0)
-  const live = useCyberspace((s) => s.live)
+  // An avatar of your own rather than the default shape (useAvatars).
+  const ownAvatar = useAvatars((s) => !!s.shards[useCyberspace.getState().identity.pubkey]?.vertices.length)
   const [speaking, setSpeaking] = useState(false)
   const [spawning, setSpawning] = useState<'idle' | 'signing' | 'failed'>('idle')
   const ref = useRef<HTMLDivElement | null>(null)
@@ -230,7 +233,7 @@ export function DemoCoach(): JSX.Element | null {
       const cur = d.script.steps[d.index]
       const movement = cur?.wait === 'hop' || cur?.wait === 'walk' || cur?.wait === 'own-hop'
       // A gated step's keys are the scene's until its action is done.
-      const held = cur?.gate === true && !d.done
+      const held = gateHeld(cur, d.done)
       if (!held && (e.key === 'ArrowRight' || (e.code === 'Space' && !movement))) {
         e.preventDefault(); e.stopImmediatePropagation()
         if (d.index === d.script.steps.length - 1) d.exit(); else d.next()
@@ -272,9 +275,9 @@ export function DemoCoach(): JSX.Element | null {
   }, [active, minimized])
 
   if (!active || !step) return null
-  const caption = captionFor(step, hasChain, done)
+  const caption = captionFor(step, hasChain, done, ownAvatar)
   const d = useDemo.getState()
-  const held = step.gate === true && !done
+  const held = gateHeld(step, done)
   const offerSpawn = step.wait === 'spawn' && !done
   const onSpawn = (): void => {
     // Asked again at the press, not only when the button was drawn: SPAWN
@@ -309,14 +312,18 @@ export function DemoCoach(): JSX.Element | null {
       <div className="demo__head">
         <span className="demo__tag">TOUR</span>
         <span className="demo__chapter">{chapter?.title}</span>
-        <span className={`demo__mode ${live ? 'is-live' : ''}`} title={live ? 'LIVE: your moves are published to relays' : 'LOCAL: nothing leaves this device until GO LIVE'}>{live ? 'LIVE' : 'LOCAL'}</span>
-        <span className="demo__progress">{progress}</span>
         <button className="demo__icon" onClick={() => d.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
         <button className="demo__icon" onClick={d.exit} aria-label="Exit the tour" title="Exit the tour"><X size={14} /></button>
       </div>
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
       <div className="demo__body">
-        <h2 className="demo__title">{step.title}</h2>
+        {/* The headline wraps rather than being cut, and the counter stands
+            across from it at the top right (arkinox, 2026-10-15: the header
+            on a phone read "IDENTITY IS LO..." beside LOCAL and the counter). */}
+        <div className="demo__titlerow">
+          <h2 className="demo__title">{step.title}</h2>
+          <span className="demo__progress">{progress}</span>
+        </div>
         <p className="demo__caption">{caption}</p>
         {step.panel && <Panel panel={step.panel} waiting={held} />}
       </div>

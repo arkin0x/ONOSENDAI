@@ -30,7 +30,7 @@ import { startCoordRoute } from './useCoordRoute'
 import { exitHyperspaceView, useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useChat } from './useChat'
-import { keyMintedOnLoad, useCyberspace } from './useCyberspace'
+import { appMinted, keyMintedOnLoad, useCyberspace } from './useCyberspace'
 import { useLayers, type SceneLayer } from './useLayers'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
@@ -57,18 +57,105 @@ interface DemoState {
 }
 
 /**
- * The key the tour generated: a /demo visit that found no key on the device
- * made one, and this remembers its pubkey so a reload mid-tour still knows
- * it. Only this key, with no chain yet, is offered SPAWN.
+ * The tour's key: decided when a tour starts (not when it resumes after a
+ * reload) and remembered here, so a reload mid-tour keeps the answer.
  */
 export const TOUR_KEY_KEY = 'onosendai:demo:tourKey'
 
-/** Remember the key this page load generated, if it did: called when the tour starts. */
-function noteTourKey(): void {
-  const minted = keyMintedOnLoad()
-  if (!minted || useCyberspace.getState().identity.pubkey !== minted) return
-  try { localStorage.setItem(TOUR_KEY_KEY, minted) } catch { /* private mode */ }
+/**
+ * Whether the identity on screen counts as the tour's key at a tour's
+ * start: a key this app generated on this device (not an imported nsec,
+ * ncryptsec, extension or bunker) with no chain yet (arkinox's ruling,
+ * 2026-10-15). A new visitor who lands on / gets a key there and then taps
+ * the question bubble is the common case; the old rule only counted a key
+ * made on the same page load as the tour, so that visitor was treated as an
+ * existing identity, got their default LIVE back on FINISH, and their next
+ * hop published the tour chain. A key generated before the marker existed
+ * (appMinted null) keeps the old rule: made on this page load.
+ */
+export function tourKeyAtStart(): boolean {
+  const cs = useCyberspace.getState()
+  if (cs.signerKind !== 'local' || cs.events.length > 0) return false
+  const pubkey = cs.identity.pubkey
+  const minted = appMinted(pubkey)
+  return minted === null ? keyMintedOnLoad() === pubkey : minted
 }
+
+/** Decide the tour's key for a tour starting now. */
+function noteTourKey(): void {
+  const pubkey = useCyberspace.getState().identity.pubkey
+  try {
+    if (tourKeyAtStart()) localStorage.setItem(TOUR_KEY_KEY, pubkey)
+    else localStorage.removeItem(TOUR_KEY_KEY)
+  } catch { /* private mode */ }
+}
+
+/**
+ * What a tour changes in the view and puts back on EXIT or FINISH, taken
+ * when the tour starts and kept on the device so a reload mid-tour still
+ * puts it back: the zoom (a custom avatar is drawn as the plain marker above
+ * 2^0, so a tour that left the zoom out left the avatar looking reset until
+ * a reload, arkinox 2026-10-15), the scene layers the boundary steps turn
+ * on, whether the chat dock was open, and whom you were spectating. Also whether the identity came in with
+ * hops of its own (the chain step's gate, DemoStep.gateUnlessHadHops). The
+ * avatar's position is never put back: a tour hop is a real move.
+ */
+export const SESSION_KEY = 'onosendai:demo:session'
+
+export interface TourSession {
+  scaleExp: number
+  layers: Record<SceneLayer, boolean>
+  chatOpen: boolean
+  hadHops: boolean
+  /** The pubkey being spectated when the tour started; the tour's first step ends it. */
+  spectate?: string | null
+}
+
+function readSession(): TourSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw) as Partial<TourSession>
+    if (typeof v.scaleExp !== 'number' || typeof v.hadHops !== 'boolean' || typeof v.chatOpen !== 'boolean' || typeof v.layers !== 'object' || v.layers === null) return null
+    return v as TourSession
+  } catch { return null }
+}
+function writeSession(v: TourSession | null): void {
+  try { if (v === null) localStorage.removeItem(SESSION_KEY); else localStorage.setItem(SESSION_KEY, JSON.stringify(v)) } catch { /* private mode */ }
+}
+
+function takeSession(): TourSession {
+  const cs = useCyberspace.getState()
+  const l = useLayers.getState()
+  return {
+    scaleExp: cs.scaleExp,
+    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden },
+    chatOpen: useChat.getState().open,
+    hadHops: hasHop(cs.events),
+    spectate: cs.spectate?.pubkey ?? null,
+  }
+}
+
+/** Put back what the tour changed in the view (TourSession), zoom last. */
+function restoreSession(v: TourSession): void {
+  for (const [layer, on] of Object.entries(v.layers) as Array<[SceneLayer, boolean]>) {
+    if (useLayers.getState()[layer] !== on) useLayers.getState().setLayer(layer, on)
+  }
+  if (useChat.getState().open !== v.chatOpen) useChat.getState().setOpen(v.chatOpen)
+  const now = useCyberspace.getState()
+  const want = Math.max(0, Math.min(MAX_SCALE_EXP, v.scaleExp))
+  if (now.scaleExp !== want) now.adjustScale(want - now.scaleExp)
+  // Watching someone again, unless something since already put you on someone.
+  if (v.spectate && useCyberspace.getState().spectate === null) useCyberspace.getState().beginSpectate(v.spectate)
+}
+
+/** Whether the identity came into this tour with hops of its own. */
+export function hadHopsAtStart(): boolean {
+  return readSession()?.hadHops ?? false
+}
+
+/** A history entry the tour pushed itself (startTourInPlace), so EXIT can step back off it. */
+const PUSHED = 'onosendaiDemo'
 
 /** Whether the identity on screen is the key the tour generated (and signs locally). */
 export function isTourKey(): boolean {
@@ -89,6 +176,12 @@ export function tourKeyNeedsSpawn(): boolean {
 /** Whether a chain holds a hop or a sidestep of its own. */
 function hasHop(events: ReadonlyArray<{ tags: string[][] }>): boolean {
   return events.some((e) => { const a = e.tags.find((t) => t[0] === 'A')?.[1]; return a === 'hop' || a === 'sidestep' })
+}
+
+/** Whether a step's gate is open now: done, or a hop gate the identity came in past. */
+export function gateHeld(step: DemoStep | undefined, done: boolean): boolean {
+  if (!step?.gate || done) return false
+  return !(step.gateUnlessHadHops && hadHopsAtStart())
 }
 
 /** What undoes the current step's watchers (store subscriptions, the /C/ route). */
@@ -148,6 +241,9 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
   if (target !== 'keep' && useHyperspace.getState().viewOwned) exitHyperspaceView()
   if (target === 'self') {
     if (cs.spectate) cs.endSpectate()
+    // Your own head: out of the chain's history if it was being browsed,
+    // where the scene stands on an older action and in its plane.
+    if (useCyberspace.getState().exploreIndex !== null) useCyberspace.getState().explore(null)
     if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
     homeCursor()
   } else if (target !== 'keep') {
@@ -258,10 +354,28 @@ function writePrevLive(v: boolean | null): void {
  * changed) puts the switch back as the visitor had it, once.
  */
 export function restoreAfterUnfinishedTour(): void {
+  // The layers and the chat are kept on the device too; the zoom is not, and
+  // a fresh page starts at its own.
+  const session = readSession()
+  if (session) {
+    writeSession(null)
+    restoreSession({ ...session, scaleExp: useCyberspace.getState().scaleExp, spectate: null })
+  }
   const prev = readPrevLive()
   if (prev === null) return
   writePrevLive(null)
   if (useCyberspace.getState().live !== prev) useCyberspace.getState().setLive(prev)
+}
+
+/**
+ * Start the tour where you are, without a page load (the question bubble,
+ * AskBubble.tsx): the address becomes /demo on a new history entry the tour
+ * marks as its own, so Back leaves the tour (App's popstate) and EXIT steps
+ * back off it rather than leaving a dead /demo entry behind.
+ */
+export function startTourInPlace(): void {
+  try { window.history.pushState({ [PUSHED]: 1 }, '', '/demo') } catch { /* no history here */ }
+  useDemo.getState().start()
 }
 
 function stepAt(state: { script: DemoScript }, index: number): DemoStep | undefined {
@@ -307,7 +421,14 @@ export const useDemo = create<DemoState>((set, get) => {
 
     start: (stepId) => {
       const cs = useCyberspace.getState()
-      if (!get().active) { gatesPassed.clear(); noteTourKey() }
+      if (!get().active) {
+        gatesPassed.clear()
+        // A tour starting, not one resuming after a reload (which finds its
+        // own answers kept on the device): decide the tour's key and take
+        // what the view is, to put back on EXIT.
+        if (readPrevLive() === null) { noteTourKey(); writeSession(takeSession()) }
+        else if (!readSession()) writeSession(takeSession())
+      }
       // Remembered once: starting again while running keeps the first answer,
       // and so does a reload mid-tour (PREV_LIVE_KEY).
       if (!get().active) {
@@ -331,7 +452,7 @@ export const useDemo = create<DemoState>((set, get) => {
     next: () => {
       if (!get().active) return
       // A gated step waits for its action (DemoStep.gate).
-      if (stepAt(get(), get().index)?.gate && !get().done) return
+      if (gateHeld(stepAt(get(), get().index), get().done)) return
       const i = get().index + 1
       if (i < get().script.steps.length) enter(i)
     },
@@ -357,10 +478,22 @@ export const useDemo = create<DemoState>((set, get) => {
       if (useCyberspace.getState().focus) useCyberspace.getState().clearFocus()
       homeCursor()
       dismissBlockToast()
+      const session = readSession()
+      if (session) restoreSession(session)
+      writeSession(null)
       if (useCyberspace.getState().live !== get().prevLive) useCyberspace.getState().setLive(get().prevLive)
       writePrevLive(null)
       set({ active: false, minimized: false })
-      try { if (/^\/demo(\/|$)/i.test(window.location.pathname)) window.history.replaceState(null, '', '/') } catch { /* no history here */ }
+      // Off the /demo address. An entry the tour pushed itself is stepped
+      // back off, so Back from the page you return to does not land on a
+      // /demo entry that no longer starts anything; a /demo the visitor
+      // loaded is replaced by / as before.
+      try {
+        if (/^\/demo(\/|$)/i.test(window.location.pathname)) {
+          if ((window.history.state as Record<string, unknown> | null)?.[PUSHED]) window.history.back()
+          else window.history.replaceState(null, '', '/')
+        }
+      } catch { /* no history here */ }
     },
 
     setMinimized: (minimized) => set({ minimized }),

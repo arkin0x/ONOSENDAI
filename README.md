@@ -312,4 +312,6 @@ vectors shared with the Python implementation.
 
 ## License
 
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The full legal code is in `LICENSE`.
+The code is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The full legal code is in `LICENSE`.
+
+The ONOSENDAI logo is © 2023-2026 arkinox, licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). The ONOSENDAI name is not covered by the code license: a fork must not present itself as ONOSENDAI, and monetized code must not use the name or logo. See `NOTICE.md`.

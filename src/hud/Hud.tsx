@@ -603,9 +603,12 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
       </div>
       <div className="hud__col hud__col--right" data-column="right">
         {right.map(slot)}
-        {/* The license, just above the build. */}
+        {/* The licenses, just above the build: the code is CC BY-SA, the
+            logo is arkinox's under CC BY-NC-ND, and the name is covered by
+            neither (NOTICE.md). */}
         <div className="hud__license">
-          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a>
+          <div>CODE <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a></div>
+          <div>LOGO © 2023-2026 ARKINOX <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-NC-ND 4.0</a></div>
         </div>
         {/* The build, last thing in the menu: 2, the day it was merged, how
             many PRs had merged that day, and which PR this is. */}

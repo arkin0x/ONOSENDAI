@@ -43,8 +43,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
-import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { BufferGeometry, Color, Float32BufferAttribute } from 'three'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { BufferGeometry, Color, Float32BufferAttribute, Vector3, type Mesh, type PerspectiveCamera } from 'three'
 import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
@@ -52,6 +52,8 @@ import { ballCoverageRuns, coverageRuns, cubeRun, findNearestInPlane } from '../
 import { cubeSelection, interestSphere, isqrt, portCube, portCubeLabel, sphereDistance2, sphereDotScale, sphereSelection } from '../lib/hyperspace/interest'
 import { formatDistance } from 'sno-core/scale'
 import { WorldLabel } from './WorldLabel'
+import { FLEET_CUBE_PX, markerSide, projScaleOf } from '../lib/markerSize'
+import { useStopMarks } from '../store/useStopMarks'
 import { drawnSet, hashHeight, projectedPopulation, sampleThreshold } from '../lib/hyperspace/sample'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
@@ -162,7 +164,7 @@ const HARD_CAP_SLACK = 1.1
 export const ADMIT_ALL = 0x1_0000_0000
 
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
-let lastDrawn: { frameKey: string; set: Set<number> } | null = null
+let lastDrawn: { frameKey: string; set: Set<number>; extra: number | null } | null = null
 
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
@@ -225,6 +227,31 @@ function usePointGeometry(at: [number, number, number] | null): BufferGeometry |
   }, [at])
   useEffect(() => () => { geometry?.dispose() }, [geometry])
   return geometry
+}
+
+/**
+ * The NEAREST stop, called out as a cube the size of the fleet's (StopCubes:
+ * FLEET_CUBE_PX on screen, a half gibson when that is larger) in its own
+ * colour, instead of a flat square of pixels (arkinox, 2026-10-15). No click
+ * handler: the dot beneath is the stop, and clicking it selects it like any
+ * other.
+ */
+function NearestCube({ at, gibson }: { at: [number, number, number]; gibson: number }): JSX.Element {
+  const mesh = useRef<Mesh>(null)
+  const scratch = useMemo(() => new Vector3(), [])
+  useFrame(({ camera, size }) => {
+    const m = mesh.current
+    if (!m) return
+    const projScale = projScaleOf(size.height, (camera as PerspectiveCamera).fov ?? 55)
+    const depth = camera.position.distanceTo(m.getWorldPosition(scratch))
+    m.scale.setScalar(markerSide(gibson * 0.5, FLEET_CUBE_PX, depth, projScale))
+  })
+  return (
+    <mesh ref={mesh} position={at} raycast={() => null}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial color={ACCENT} transparent opacity={0.85} toneMapped={false} fog={false} />
+    </mesh>
+  )
 }
 
 export function StopField({ axes }: Props): JSX.Element | null {
@@ -499,6 +526,9 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // at the port budget is the whole decimation, exact and nested
       // (interest.ts), with the nearest stop riding on top of it.
       let draw: Set<number>
+      // The nearest port when it joined the drawn set on its own, outside the
+      // sample: not churn when it changes, so the diagnostic leaves it out.
+      let extra: number | null = null
       let nearest: Built['nearest'] = null
       let cubeDrawn = 0
       if (sphere) {
@@ -529,6 +559,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
               keptInCube.push(false)
               centres.push(c[0], c[1], c[2])
               draw.add(nearPort.stop.height)
+              extra = nearPort.stop.height
             } else {
               nearest = null
             }
@@ -564,11 +595,16 @@ export function StopField({ axes }: Props): JSX.Element | null {
         // Churn is the whole point of the sampler, so measure it rather than
         // eyeball it: a stable field evicts nothing, and any non-zero
         // `removed` here is a dot that was drawn and then taken away.
+        // Only the sample's own churn counts: the same frame over the same
+        // line. A line still syncing grows between rebuilds and rightly adds
+        // and swaps stops, and the nearest port added on its own changes
+        // whenever a nearer one arrives; counting either reported "evicted
+        // 1 of 1" on every view while the line synced (2026-10-15).
         const prev = lastDrawn
         let removed = 0
-        const drawKey = `${frameKey} | ${sphereKey}`
-        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (!draw.has(h)) removed++
-        lastDrawn = { frameKey: drawKey, set: draw }
+        const drawKey = `${frameKey} | ${sphereKey} | ${index.size}`
+        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (h !== prev.extra && !draw.has(h)) removed++
+        lastDrawn = { frameKey: drawKey, set: draw, extra }
         const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
         const entry = {
           rendered: count, inRange: kept.length, threshold, runTotal,
@@ -584,7 +620,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         w.__stopField = entry
         const log = (w.__stopFieldLog ??= []) as unknown[]
         log.push(entry)
-        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${prev?.set.size} dots`, entry)
+        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${(prev?.set.size ?? 0) - (prev?.extra != null ? 1 : 0)} sampled dots`, entry)
       }
       // The cube's label, centred under it: the cube's middle, half a side down the screen.
       let cubeLabel: Built['cubeLabel'] = null
@@ -687,7 +723,10 @@ export function StopField({ axes }: Props): JSX.Element | null {
     () => (built && built.nearest ? vertexOf(built, built.nearest.height) : null),
     [built],
   )
-  const nearestGeometry = usePointGeometry(nearestAt)
+  // Published for StopCubes, which leaves this stop to the NEAREST cube.
+  const nearestHeight = built && built.frameKey === frameKey && stopsDrawn(anchorPlane, scaleExp) ? built.nearest?.height ?? null : null
+  useEffect(() => { useStopMarks.getState().setNearest(nearestHeight) }, [nearestHeight])
+  useEffect(() => () => useStopMarks.getState().setNearest(null), [])
 
   if (!built || built.frameKey !== frameKey) return null
   if (!stopsDrawn(anchorPlane, scaleExp)) return null
@@ -785,27 +824,15 @@ export function StopField({ axes }: Props): JSX.Element | null {
       {built.cubeLabel && (
         <WorldLabel text={built.cubeLabel.text} color={ACCENT} at={built.cubeLabel.at} px={11} opacity={0.9} align="center" />
       )}
-      {nearestGeometry && nearestAt && built.nearest && (
+      {nearestAt && built.nearest && (
         <>
-          <points geometry={nearestGeometry} frustumCulled={false}>
-            {/* No click handler here either: the dot beneath is the stop,
-                and clicking it selects it like any other landfall. */}
-            <pointsMaterial
-              color={ACCENT}
-              size={7 * dpr}
-              sizeAttenuation={false}
-              transparent
-              opacity={0.95}
-              depthWrite={false}
-              toneMapped={false}
-              fog={false}
-            />
-          </points>
+          <NearestCube at={nearestAt} gibson={2 ** -scaleExp} />
           <WorldLabel
             text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(built.nearest.distance)}`}
             color={ACCENT}
             at={nearestAt}
-            offset={[0.6, 0.6, 0]}
+            clear={{ trueSide: 2 ** -scaleExp * 0.5, minPx: FLEET_CUBE_PX }}
+            align="center"
             px={10}
             opacity={0.95}
           />
